@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
+    "dotenv": "^16.4.7",
     "mysql2": "^3.15.3"
   }
 }

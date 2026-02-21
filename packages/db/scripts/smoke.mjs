@@ -1,3 +1,4 @@
+import "./load-env.mjs";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
 
@@ -23,6 +24,22 @@ function smokeConfigFromEnv() {
     ownerEmail: process.env.JP_OWNER_EMAIL ?? "owner@local",
     ownerPassword: process.env.JP_OWNER_PASSWORD ?? "ChangeMe123!"
   };
+}
+
+function parseConfigJson(rawValue, flagKey) {
+  if (rawValue == null) {
+    return {};
+  }
+
+  if (typeof rawValue === "object") {
+    return rawValue;
+  }
+
+  try {
+    return JSON.parse(rawValue);
+  } catch {
+    throw new Error(`feature flag ${flagKey} has invalid config_json`);
+  }
 }
 
 async function main() {
@@ -75,6 +92,44 @@ async function main() {
     );
     if (ownerOutletRows.length === 0) {
       throw new Error("user_outlets relation missing default outlet membership");
+    }
+
+    const [featureFlagRows] = await connection.execute(
+      `SELECT \`key\` AS flag_key, enabled, config_json
+       FROM feature_flags
+       WHERE company_id = ?`,
+      [owner.company_id]
+    );
+
+    const flagsByKey = new Map(
+      featureFlagRows.map((row) => [row.flag_key, row])
+    );
+    const requiredFlags = [
+      ["pos.enabled", true],
+      ["sales.enabled", true],
+      ["inventory.enabled", true],
+      ["purchasing.enabled", false]
+    ];
+
+    for (const [flagKey, expectedEnabled] of requiredFlags) {
+      const row = flagsByKey.get(flagKey);
+      if (!row) {
+        throw new Error(`required feature flag missing: ${flagKey}`);
+      }
+
+      if (Boolean(row.enabled) !== expectedEnabled) {
+        throw new Error(`feature flag ${flagKey} must be ${expectedEnabled}`);
+      }
+    }
+
+    const inventoryFlag = flagsByKey.get("inventory.enabled");
+    const inventoryConfig = parseConfigJson(
+      inventoryFlag.config_json,
+      "inventory.enabled"
+    );
+
+    if (inventoryConfig.level !== 0) {
+      throw new Error("feature flag inventory.enabled config_json.level must be 0");
     }
 
     console.log("smoke checks passed");

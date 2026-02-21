@@ -1,3 +1,4 @@
+import "./load-env.mjs";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
 

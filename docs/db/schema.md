@@ -11,6 +11,7 @@ This milestone uses one SQL migration file with BIGINT internal IDs and UUID onl
   - `DB_USER`
   - `DB_PASSWORD`
   - `DB_NAME`
+- DB scripts auto-load repo-root `.env` (if present) and keep already-exported env values (`override: false`).
 
 ## Apply migration
 
@@ -76,5 +77,11 @@ Checks:
 - bcrypt password compare succeeds for configured owner password.
 - `user_roles` contains `OWNER` role relation.
 - `user_outlets` contains default outlet relation.
+- Required seeded feature flags exist with expected values:
+  - `pos.enabled` = true
+  - `sales.enabled` = true
+  - `inventory.enabled` = true and `config_json.level = 0`
+  - `purchasing.enabled` = false
+- Additional feature flags are allowed.
 
 On failure, script exits non-zero.
