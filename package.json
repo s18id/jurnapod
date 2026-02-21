@@ -1,0 +1,26 @@
+{
+  "name": "jurnapod",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/modules/*"
+  ],
+  "scripts": {
+    "clean": "npx rimraf dist \"apps/*/dist\" \"packages/*/dist\" \"packages/modules/*/dist\" \"packages/**/src/**/*.js\" \"packages/**/src/**/*.d.ts\" \"packages/**/src/**/*.map\" \"**/*.tsbuildinfo\"",
+    "build": "npm run clean && npm run build -ws --if-present",
+    "dev": "npm run dev -ws --if-present",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "lint": "npm run lint -ws --if-present",
+    "dev:pos": "npm run dev -w @jurnapod/pos",
+    "dev:api": "npm run dev -w @jurnapod/api",
+    "dev:backoffice": "npm run dev -w @jurnapod/backoffice",
+    "build:pos": "npm run build -w @jurnapod/pos",
+    "build:api": "npm run build -w @jurnapod/api",
+    "build:backoffice": "npm run build -w @jurnapod/backoffice"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.10"
+  }
+}

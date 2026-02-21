@@ -1,0 +1,9 @@
+{
+  "name": "@jurnapod/db",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "lint": "echo 'lint not configured yet for @jurnapod/db'",
+    "typecheck": "echo 'no TypeScript in @jurnapod/db'"
+  }
+}
