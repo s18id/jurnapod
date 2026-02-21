@@ -16,11 +16,15 @@ permission:
   edit: ask
   bash:
     "*": ask
-    "git status": allow
+    "npm run typecheck*": allow
+    "npm run lint*": allow
+    "git status*": allow
     "git diff*": allow
     "git log*": allow
     "grep*": allow
     "find*": allow
+    "rg*": allow
+    "ls*": allow
 maxSteps: 24
 ---
 
