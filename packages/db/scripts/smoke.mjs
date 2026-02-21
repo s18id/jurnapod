@@ -1,6 +1,10 @@
 import "./load-env.mjs";
+import argon2 from "argon2";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
+
+const REQUIRED_TRANSACTIONAL_TABLES = ["companies", "outlets", "items", "item_prices"];
+const MYSQL_WRITE_PERMISSION_ERRNOS = new Set([1044, 1045, 1142]);
 
 function dbConfigFromEnv() {
   const port = Number(process.env.DB_PORT ?? "3306");
@@ -42,12 +46,243 @@ function parseConfigJson(rawValue, flagKey) {
   }
 }
 
+function buildRunId() {
+  return `${Date.now().toString(36)}${Math.floor(Math.random() * 0xffff)
+    .toString(36)
+    .padStart(3, "0")}`;
+}
+
+async function verifyOwnerPassword(plainPassword, passwordHash) {
+  if (typeof passwordHash !== "string" || passwordHash.length === 0) {
+    return false;
+  }
+
+  if (passwordHash.startsWith("$argon2")) {
+    try {
+      return await argon2.verify(passwordHash, plainPassword);
+    } catch {
+      return false;
+    }
+  }
+
+  try {
+    return await bcrypt.compare(plainPassword, passwordHash);
+  } catch {
+    return false;
+  }
+}
+
+function isWritePermissionError(error) {
+  return MYSQL_WRITE_PERMISSION_ERRNOS.has(Number(error?.errno));
+}
+
+async function assertTransactionalTableEngines(connection) {
+  const placeholders = REQUIRED_TRANSACTIONAL_TABLES.map(() => "?").join(", ");
+  const [tableRows] = await connection.execute(
+    `SELECT table_name, engine
+     FROM information_schema.tables
+     WHERE table_schema = DATABASE() AND table_name IN (${placeholders})`,
+    REQUIRED_TRANSACTIONAL_TABLES
+  );
+
+  const tableEngineByName = new Map(
+    tableRows.map((row) => [row.table_name, row.engine == null ? null : String(row.engine)])
+  );
+
+  const missingTables = REQUIRED_TRANSACTIONAL_TABLES.filter(
+    (tableName) => !tableEngineByName.has(tableName)
+  );
+  if (missingTables.length > 0) {
+    throw new Error(
+      `smoke prerequisites failed: required tables missing (${missingTables.join(", ")}). run db:migrate first`
+    );
+  }
+
+  const nonTransactionalTables = REQUIRED_TRANSACTIONAL_TABLES.filter(
+    (tableName) => tableEngineByName.get(tableName)?.toUpperCase() !== "INNODB"
+  );
+  if (nonTransactionalTables.length > 0) {
+    throw new Error(
+      `smoke prerequisites failed: required InnoDB tables (${nonTransactionalTables.join(", ")})`
+    );
+  }
+}
+
+async function assertWritePermissionAndRollback(connection) {
+  const runId = buildRunId();
+  const companyCode = `SMKP${runId}`.slice(0, 32).toUpperCase();
+  let transactionStarted = false;
+
+  try {
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    await connection.execute(
+      `INSERT INTO companies (code, name)
+       VALUES (?, ?)`,
+      [companyCode, `Smoke prerequisite write probe ${runId}`]
+    );
+  } catch (error) {
+    if (isWritePermissionError(error)) {
+      throw new Error(
+        "smoke prerequisites failed: DB user requires INSERT permission on companies (transactional write probe)"
+      );
+    }
+
+    throw error;
+  } finally {
+    if (transactionStarted) {
+      await connection.rollback();
+    }
+  }
+
+  const [rows] = await connection.execute(
+    `SELECT COUNT(*) AS total
+     FROM companies
+     WHERE code = ?`,
+    [companyCode]
+  );
+
+  if (Number(rows[0].total) !== 0) {
+    throw new Error(
+      "smoke prerequisites failed: transaction rollback did not revert write probe; confirm InnoDB and transactional support"
+    );
+  }
+}
+
+async function assertPasswordVerifierPaths() {
+  const plainPassword = "SmokeHashPath-2026!";
+  const wrongPassword = "SmokeHashPath-2026?-wrong";
+
+  const bcryptHash = await bcrypt.hash(plainPassword, 4);
+  const argon2Hash = await argon2.hash(plainPassword, {
+    type: argon2.argon2id,
+    memoryCost: 19456,
+    timeCost: 2,
+    parallelism: 1
+  });
+
+  if (!(await verifyOwnerPassword(plainPassword, bcryptHash))) {
+    throw new Error("password verification self-check failed for bcrypt hash path");
+  }
+
+  if (!(await verifyOwnerPassword(plainPassword, argon2Hash))) {
+    throw new Error("password verification self-check failed for argon2 hash path");
+  }
+
+  if (await verifyOwnerPassword(wrongPassword, bcryptHash)) {
+    throw new Error("password verification self-check accepted invalid bcrypt password");
+  }
+
+  if (await verifyOwnerPassword(wrongPassword, argon2Hash)) {
+    throw new Error("password verification self-check accepted invalid argon2 password");
+  }
+}
+
+function isForeignKeyViolation(error) {
+  return Number(error?.errno) === 1452;
+}
+
+async function assertItemPricesCompanyScopedForeignKeys(connection) {
+  const runId = buildRunId();
+
+  await connection.beginTransaction();
+
+  try {
+    const [companyAResult] = await connection.execute(
+      `INSERT INTO companies (code, name)
+       VALUES (?, ?)`,
+      [`SMK${runId}A`.slice(0, 32).toUpperCase(), `Smoke FK Company A ${runId}`]
+    );
+    const companyAId = Number(companyAResult.insertId);
+
+    const [companyBResult] = await connection.execute(
+      `INSERT INTO companies (code, name)
+       VALUES (?, ?)`,
+      [`SMK${runId}B`.slice(0, 32).toUpperCase(), `Smoke FK Company B ${runId}`]
+    );
+    const companyBId = Number(companyBResult.insertId);
+
+    const [outletAResult] = await connection.execute(
+      `INSERT INTO outlets (company_id, code, name)
+       VALUES (?, ?, ?)`,
+      [companyAId, `SMK${runId}A`.slice(0, 32).toUpperCase(), `Smoke FK Outlet A ${runId}`]
+    );
+    const outletAId = Number(outletAResult.insertId);
+
+    const [outletBResult] = await connection.execute(
+      `INSERT INTO outlets (company_id, code, name)
+       VALUES (?, ?, ?)`,
+      [companyBId, `SMK${runId}B`.slice(0, 32).toUpperCase(), `Smoke FK Outlet B ${runId}`]
+    );
+    const outletBId = Number(outletBResult.insertId);
+
+    const [itemAResult] = await connection.execute(
+      `INSERT INTO items (company_id, sku, name, item_type, is_active)
+       VALUES (?, ?, ?, 'PRODUCT', 1)`,
+      [companyAId, `SMK-ITEM-A-${runId}`.slice(0, 64), `Smoke FK Item A ${runId}`]
+    );
+    const itemAId = Number(itemAResult.insertId);
+
+    const [itemBResult] = await connection.execute(
+      `INSERT INTO items (company_id, sku, name, item_type, is_active)
+       VALUES (?, ?, ?, 'PRODUCT', 1)`,
+      [companyBId, `SMK-ITEM-B-${runId}`.slice(0, 64), `Smoke FK Item B ${runId}`]
+    );
+    const itemBId = Number(itemBResult.insertId);
+
+    let crossCompanyItemRejected = false;
+    try {
+      await connection.execute(
+        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active)
+         VALUES (?, ?, ?, 1000, 1)`,
+        [companyAId, outletAId, itemBId]
+      );
+    } catch (error) {
+      if (isForeignKeyViolation(error)) {
+        crossCompanyItemRejected = true;
+      } else {
+        throw error;
+      }
+    }
+
+    if (!crossCompanyItemRejected) {
+      throw new Error("item_prices allows cross-company item reference");
+    }
+
+    let crossCompanyOutletRejected = false;
+    try {
+      await connection.execute(
+        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active)
+         VALUES (?, ?, ?, 1000, 1)`,
+        [companyAId, outletBId, itemAId]
+      );
+    } catch (error) {
+      if (isForeignKeyViolation(error)) {
+        crossCompanyOutletRejected = true;
+      } else {
+        throw error;
+      }
+    }
+
+    if (!crossCompanyOutletRejected) {
+      throw new Error("item_prices allows cross-company outlet reference");
+    }
+  } finally {
+    await connection.rollback();
+  }
+}
+
 async function main() {
   const dbConfig = dbConfigFromEnv();
   const smokeConfig = smokeConfigFromEnv();
   const connection = await mysql.createConnection(dbConfig);
 
   try {
+    await assertPasswordVerifierPaths();
+    await assertTransactionalTableEngines(connection);
+    await assertWritePermissionAndRollback(connection);
+
     const [ownerRows] = await connection.execute(
       `SELECT u.id, u.password_hash, c.id AS company_id
        FROM users u
@@ -62,10 +297,7 @@ async function main() {
       throw new Error("owner row not found for configured company/email");
     }
 
-    const passwordMatches = await bcrypt.compare(
-      smokeConfig.ownerPassword,
-      owner.password_hash
-    );
+    const passwordMatches = await verifyOwnerPassword(smokeConfig.ownerPassword, owner.password_hash);
     if (!passwordMatches) {
       throw new Error("owner password hash does not match configured password");
     }
@@ -131,6 +363,8 @@ async function main() {
     if (inventoryConfig.level !== 0) {
       throw new Error("feature flag inventory.enabled config_json.level must be 0");
     }
+
+    await assertItemPricesCompanyScopedForeignKeys(connection);
 
     console.log("smoke checks passed");
     console.log(`owner=${smokeConfig.ownerEmail} company=${smokeConfig.companyCode}`);
