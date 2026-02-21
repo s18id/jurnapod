@@ -370,3 +370,8 @@ export async function userHasOutletAccess(
 
   return rows.length > 0;
 }
+
+export async function listUserOutletIds(userId: number, companyId: number): Promise<number[]> {
+  const outlets = await findUserOutlets(userId, companyId);
+  return outlets.map((outlet) => Number(outlet.id));
+}

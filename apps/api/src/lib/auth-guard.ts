@@ -21,6 +21,14 @@ const forbiddenResponseBody = {
   }
 };
 
+const invalidRequestResponseBody = {
+  ok: false,
+  error: {
+    code: "INVALID_REQUEST",
+    message: "Invalid request"
+  }
+};
+
 const accessTokenClaimsSchema = z.object({
   sub: z.string().trim().min(1),
   company_id: z.coerce.number().int().positive(),
@@ -65,6 +73,10 @@ function createUnauthorizedResponse(): Response {
 
 function createForbiddenResponse(): Response {
   return Response.json(forbiddenResponseBody, { status: 403 });
+}
+
+function createInvalidRequestResponse(): Response {
+  return Response.json(invalidRequestResponseBody, { status: 400 });
 }
 
 function parseBearerToken(headerValue: string | null): string | null {
@@ -132,7 +144,17 @@ export function withAuth(
     }
 
     for (const guard of guards) {
-      const guardResponse = await guard(request, authResult.auth);
+      let guardResponse: Response | null;
+      try {
+        guardResponse = await guard(request, authResult.auth);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return createInvalidRequestResponse();
+        }
+
+        throw error;
+      }
+
       if (guardResponse) {
         return guardResponse;
       }
