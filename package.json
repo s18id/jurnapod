@@ -18,7 +18,10 @@
     "dev:backoffice": "npm run dev -w @jurnapod/backoffice",
     "build:pos": "npm run build -w @jurnapod/pos",
     "build:api": "npm run build -w @jurnapod/api",
-    "build:backoffice": "npm run build -w @jurnapod/backoffice"
+    "build:backoffice": "npm run build -w @jurnapod/backoffice",
+    "db:migrate": "npm run db:migrate -w @jurnapod/db",
+    "db:seed": "npm run db:seed -w @jurnapod/db",
+    "db:smoke": "npm run db:smoke -w @jurnapod/db"
   },
   "devDependencies": {
     "rimraf": "^5.0.10"

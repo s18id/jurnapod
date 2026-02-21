@@ -6,4 +6,5 @@ coverage
 .DS_Store
 pnpm-lock.yaml
 *.tsbuildinfo
-.env*
+.env
+.opencode
