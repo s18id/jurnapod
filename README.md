@@ -22,6 +22,26 @@ npm install
 npm run typecheck
 ```
 
+## Auth Secret Utilities
+
+```bash
+# Print a new random JWT secret
+npm run auth:secret:generate
+
+# Regenerate AUTH_JWT_ACCESS_SECRET in .env
+npm run auth:secret:regenerate
+```
+
+Optional target file:
+
+```bash
+npm run auth:secret:regenerate -- .env.local
+```
+
+Both commands append audit entries (without secret values) to `logs/security-events.log`.
+
+Warning: `npm run auth:secret:generate` prints the raw secret to stdout. Do not run it in environments where command output is persisted or shared (for example CI logs, terminal recording tools, or shared shell sessions).
+
 ## Catatan Arsitektur
 
 - Semua dokumen final diposting ke `journal_batches` + `journal_lines`.

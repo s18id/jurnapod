@@ -21,7 +21,10 @@
     "build:backoffice": "npm run build -w @jurnapod/backoffice",
     "db:migrate": "npm run db:migrate -w @jurnapod/db",
     "db:seed": "npm run db:seed -w @jurnapod/db",
-    "db:smoke": "npm run db:smoke -w @jurnapod/db"
+    "db:smoke": "npm run db:smoke -w @jurnapod/db",
+    "test:scripts": "node --test \"scripts/tests/**/*.test.mjs\"",
+    "auth:secret:generate": "node ./scripts/auth-secret-generate.mjs",
+    "auth:secret:regenerate": "node ./scripts/auth-secret-regenerate.mjs"
   },
   "devDependencies": {
     "rimraf": "^5.0.10"
