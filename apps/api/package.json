@@ -8,9 +8,13 @@
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:integration": "node --test --test-concurrency=1 \"tests/integration/**/*.test.mjs\""
   },
   "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "jose": "^6.1.2",
+    "mysql2": "^3.15.3",
     "next": "^15.5.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
