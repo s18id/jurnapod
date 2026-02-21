@@ -173,7 +173,8 @@ async function findUserRoleCodes(userId: number, companyId: number): Promise<Rol
      INNER JOIN users u ON u.id = ur.user_id
      WHERE u.id = ?
        AND u.company_id = ?
-       AND u.is_active = 1`,
+       AND u.is_active = 1
+     ORDER BY r.code ASC`,
     [userId, companyId]
   );
 

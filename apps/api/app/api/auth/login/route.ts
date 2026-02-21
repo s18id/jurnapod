@@ -43,7 +43,7 @@ function readUserAgent(request: Request): string | null {
   return userAgent && userAgent.length > 0 ? userAgent : null;
 }
 
-async function writeLoginAuditOrWarn(params: {
+async function writeLoginAuditRequired(params: {
   result: "SUCCESS" | "FAIL";
   companyId: number | null;
   userId: number | null;
@@ -52,11 +52,13 @@ async function writeLoginAuditOrWarn(params: {
   ipAddress: string | null;
   userAgent: string | null;
   reason: "success" | "invalid_credentials" | "invalid_request" | "internal_error";
-}): Promise<void> {
+}): Promise<boolean> {
   try {
     await recordLoginAudit(params);
+    return true;
   } catch (error) {
     console.error("POST /auth/login audit write failed", error);
+    return false;
   }
 }
 
@@ -70,7 +72,7 @@ export async function POST(request: Request) {
     const authResult = await authenticateLogin(credentials);
 
     if (!authResult.ok) {
-      await writeLoginAuditOrWarn({
+      const auditWritten = await writeLoginAuditRequired({
         result: "FAIL",
         companyId: authResult.companyId,
         userId: authResult.userId,
@@ -80,10 +82,15 @@ export async function POST(request: Request) {
         userAgent,
         reason: "invalid_credentials"
       });
+
+      if (!auditWritten) {
+        return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      }
+
       return Response.json(INVALID_CREDENTIALS_RESPONSE, { status: 401 });
     }
 
-    await writeLoginAuditOrWarn({
+    const auditWritten = await writeLoginAuditRequired({
       result: "SUCCESS",
       companyId: authResult.companyId,
       userId: authResult.userId,
@@ -93,6 +100,10 @@ export async function POST(request: Request) {
       userAgent,
       reason: "success"
     });
+
+    if (!auditWritten) {
+      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+    }
 
     return Response.json(
       {
@@ -105,7 +116,7 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     if (error instanceof SyntaxError || error instanceof ZodError) {
-      await writeLoginAuditOrWarn({
+      const auditWritten = await writeLoginAuditRequired({
         result: "FAIL",
         companyId: null,
         userId: null,
@@ -115,10 +126,15 @@ export async function POST(request: Request) {
         userAgent,
         reason: "invalid_request"
       });
+
+      if (!auditWritten) {
+        return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      }
+
       return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
     }
 
-    await writeLoginAuditOrWarn({
+    await writeLoginAuditRequired({
       result: "FAIL",
       companyId: null,
       userId: null,

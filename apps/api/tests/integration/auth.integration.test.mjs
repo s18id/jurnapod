@@ -98,14 +98,23 @@ async function waitForHealthcheck(baseUrl, childProcess, serverLogs) {
   throw new Error(`API server did not become healthy in time\n${serverLogs.join("")}`);
 }
 
-function startApiServer(port) {
+function startApiServer(port, options = {}) {
+  const envOverrides = options.envOverrides ?? {};
+  const envWithoutKeys = options.envWithoutKeys ?? [];
+  const childEnv = {
+    ...process.env,
+    ...envOverrides,
+    NODE_ENV: "test"
+  };
+
+  for (const key of envWithoutKeys) {
+    delete childEnv[key];
+  }
+
   const serverLogs = [];
   const childProcess = spawn(process.execPath, [nextCliPath, "dev", "-p", String(port)], {
     cwd: apiRoot,
-    env: {
-      ...process.env,
-      NODE_ENV: "test"
-    },
+    env: childEnv,
     stdio: ["ignore", "pipe", "pipe"]
   });
 
@@ -198,6 +207,38 @@ test(
       const ownerUserId = Number(owner.id);
       const companyId = Number(owner.company_id);
       const allowedOutletId = Number(owner.outlet_id);
+
+      const [ownerRoleRows] = await db.execute(
+        `SELECT DISTINCT r.code
+         FROM roles r
+         INNER JOIN user_roles ur ON ur.role_id = r.id
+         INNER JOIN users u ON u.id = ur.user_id
+         WHERE u.id = ?
+           AND u.company_id = ?
+           AND u.is_active = 1
+           AND r.code IN ('OWNER', 'ADMIN', 'CASHIER', 'ACCOUNTANT')
+         ORDER BY r.code ASC`,
+        [ownerUserId, companyId]
+      );
+      const expectedOwnerRoles = ownerRoleRows.map((row) => row.code);
+
+      const [ownerOutletRows] = await db.execute(
+        `SELECT o.id, o.code, o.name
+         FROM outlets o
+         INNER JOIN user_outlets uo ON uo.outlet_id = o.id
+         INNER JOIN users u ON u.id = uo.user_id
+         WHERE u.id = ?
+           AND u.company_id = ?
+           AND u.is_active = 1
+           AND o.company_id = ?
+         ORDER BY o.id ASC`,
+        [ownerUserId, companyId, companyId]
+      );
+      const expectedOwnerOutlets = ownerOutletRows.map((row) => ({
+        id: Number(row.id),
+        code: row.code,
+        name: row.name
+      }));
 
       const [deniedOutletResult] = await db.execute(
         `INSERT INTO outlets (company_id, code, name)
@@ -310,6 +351,8 @@ test(
       assert.equal(meWithTokenBody.user.id, ownerUserId);
       assert.equal(meWithTokenBody.user.company_id, companyId);
       assert.equal(meWithTokenBody.user.email, ownerEmail);
+      assert.deepEqual(meWithTokenBody.user.roles, expectedOwnerRoles);
+      assert.deepEqual(meWithTokenBody.user.outlets, expectedOwnerOutlets);
 
       const ownerAllowedOutletResponse = await fetch(
         `${baseUrl}/api/outlet-access?outlet_id=${allowedOutletId}`,
@@ -402,6 +445,201 @@ test(
 
       if (deniedOutletId > 0) {
         await db.execute("DELETE FROM outlets WHERE id = ?", [deniedOutletId]);
+      }
+
+      await db.end();
+    }
+  }
+);
+
+test(
+  "auth integration: startup fails fast when AUTH_JWT_ACCESS_SECRET is blank",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const port = await getFreePort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const server = startApiServer(port, {
+      envOverrides: {
+        AUTH_JWT_ACCESS_SECRET: "   "
+      }
+    });
+    const { childProcess, serverLogs } = server;
+
+    try {
+      let becameHealthy = false;
+      const startedAt = Date.now();
+
+      while (Date.now() - startedAt < 15000) {
+        if (childProcess.exitCode != null) {
+          break;
+        }
+
+        try {
+          const response = await fetch(`${baseUrl}/api/health`);
+          if (response.status === 200) {
+            becameHealthy = true;
+            break;
+          }
+        } catch {
+          // Ignore transient startup errors while booting.
+        }
+
+        await delay(250);
+      }
+
+      assert.equal(becameHealthy, false);
+
+      const logs = serverLogs.join("");
+      assert.match(logs, /Invalid API environment configuration:/);
+      assert.match(logs, /AUTH_JWT_ACCESS_SECRET is required/);
+    } finally {
+      await stopApiServer(childProcess);
+    }
+  }
+);
+
+test(
+  "auth integration: startup fails fast when AUTH_JWT_ACCESS_SECRET is unset",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const port = await getFreePort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const server = startApiServer(port, {
+      envWithoutKeys: ["AUTH_JWT_ACCESS_SECRET"]
+    });
+    const { childProcess, serverLogs } = server;
+
+    try {
+      let becameHealthy = false;
+      const startedAt = Date.now();
+
+      while (Date.now() - startedAt < 15000) {
+        if (childProcess.exitCode != null) {
+          break;
+        }
+
+        try {
+          const response = await fetch(`${baseUrl}/api/health`);
+          if (response.status === 200) {
+            becameHealthy = true;
+            break;
+          }
+        } catch {
+          // Ignore transient startup errors while booting.
+        }
+
+        await delay(250);
+      }
+
+      assert.equal(becameHealthy, false);
+
+      const logs = serverLogs.join("");
+      assert.match(logs, /Invalid API environment configuration:/);
+      assert.match(logs, /AUTH_JWT_ACCESS_SECRET is required/);
+    } finally {
+      await stopApiServer(childProcess);
+    }
+  }
+);
+
+test(
+  "auth integration: login fails closed when audit write fails",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = await mysql.createConnection(dbConfigFromEnv());
+    let childProcess;
+    let triggerCreated = false;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const auditFailureUserAgent = `m2auditfail${runId}`;
+    const triggerName = `m2_audit_fail_${runId}`;
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+         LIMIT 1`,
+        [companyCode, ownerEmail]
+      );
+
+      if (!ownerRows[0]) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      await db.execute(`DROP TRIGGER IF EXISTS \`${triggerName}\``);
+      await db.execute(
+        `CREATE TRIGGER \`${triggerName}\`
+         BEFORE INSERT ON audit_logs
+         FOR EACH ROW
+         SET NEW.result = IF(
+           JSON_UNQUOTE(JSON_EXTRACT(NEW.payload_json, '$.user_agent')) = '${auditFailureUserAgent}',
+           'BROKEN',
+           NEW.result
+         )`
+      );
+      triggerCreated = true;
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port);
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const response = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": "203.0.113.78",
+          "user-agent": auditFailureUserAgent
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+
+      assert.equal(response.status, 500);
+      const body = await response.json();
+      assert.equal(body.ok, false);
+      assert.equal(body.error.code, "INTERNAL_SERVER_ERROR");
+      assert.equal(Object.hasOwn(body, "access_token"), false);
+
+      const [auditRows] = await db.execute(
+        `SELECT COUNT(*) AS total
+         FROM audit_logs
+         WHERE action = 'AUTH_LOGIN'
+           AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.user_agent')) = ?`,
+        [auditFailureUserAgent]
+      );
+
+      assert.equal(Number(auditRows[0].total), 0);
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (triggerCreated) {
+        await db.execute(`DROP TRIGGER IF EXISTS \`${triggerName}\``);
       }
 
       await db.end();
