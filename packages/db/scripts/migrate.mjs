@@ -25,6 +25,27 @@ function dbConfigFromEnv() {
   };
 }
 
+function escapeIdentifier(identifier) {
+  return `\`${String(identifier).replace(/`/g, "``")}\``;
+}
+
+async function ensureDatabaseExists(config) {
+  const bootstrapConnection = await mysql.createConnection({
+    host: config.host,
+    port: config.port,
+    user: config.user,
+    password: config.password
+  });
+
+  try {
+    await bootstrapConnection.query(
+      `CREATE DATABASE IF NOT EXISTS ${escapeIdentifier(config.database)}`
+    );
+  } finally {
+    await bootstrapConnection.end();
+  }
+}
+
 async function schemaMigrationsExists(connection, databaseName) {
   const [rows] = await connection.query(
     `SELECT 1
@@ -56,8 +77,10 @@ async function listMigrationFiles() {
 
 async function main() {
   const config = dbConfigFromEnv();
+  await ensureDatabaseExists(config);
   const connection = await mysql.createConnection(config);
   const lockName = `jurnapod:${config.database}:migrations`;
+  let activeMigration = null;
 
   try {
     const [lockRows] = await connection.query(
@@ -78,6 +101,8 @@ async function main() {
         continue;
       }
 
+      activeMigration = fileName;
+
       const fullPath = path.join(migrationsDir, fileName);
       const sql = await readFile(fullPath, "utf8");
 
@@ -92,7 +117,20 @@ async function main() {
       );
 
       console.log(`applied ${fileName}`);
+      activeMigration = null;
     }
+  } catch (error) {
+    if (activeMigration) {
+      console.error(`migration failed while applying ${activeMigration}`);
+      console.error(
+        "MySQL DDL is non-atomic: a failed migration can partially apply changes before schema_migrations is written"
+      );
+      console.error(
+        "After fixing the root cause, rerun npm run db:migrate; migration files are expected to be rerunnable/idempotent"
+      );
+    }
+
+    throw error;
   } finally {
     try {
       await connection.query("SELECT RELEASE_LOCK(?)", [lockName]);
