@@ -42,6 +42,8 @@ Both commands append audit entries (without secret values) to `logs/security-eve
 
 Warning: `npm run auth:secret:generate` prints the raw secret to stdout. Do not run it in environments where command output is persisted or shared (for example CI logs, terminal recording tools, or shared shell sessions).
 
+Password hashing policy is controlled by server env (`AUTH_PASSWORD_ALGO_DEFAULT`, `AUTH_PASSWORD_REHASH_ON_LOGIN`, and algorithm cost settings). New hashes default to Argon2id, and legacy bcrypt hashes can be migrated automatically on successful login when rehash-on-login is enabled.
+
 ## Catatan Arsitektur
 
 - Semua dokumen final diposting ke `journal_batches` + `journal_lines`.

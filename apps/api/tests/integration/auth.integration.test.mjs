@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import argon2 from "argon2";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
 
@@ -498,6 +499,215 @@ test(
       assert.match(logs, /AUTH_JWT_ACCESS_SECRET is required/);
     } finally {
       await stopApiServer(childProcess);
+    }
+  }
+);
+
+test(
+  "auth integration: password policy supports bcrypt, argon2id, and rehash migration",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = await mysql.createConnection(dbConfigFromEnv());
+    let childProcess;
+    const createdUserIds = [];
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const runId = Date.now().toString(36);
+    const testPassword = "PolicyPass123!";
+    const bcryptRehashEmail = `bcrypt-rehash-${runId}@example.com`;
+    const bcryptNoRehashEmail = `bcrypt-stay-${runId}@example.com`;
+    const argonEmail = `argon-${runId}@example.com`;
+    const unknownHashEmail = `unknown-hash-${runId}@example.com`;
+    const auditIp = "203.0.113.79";
+    const auditUserAgent = `m2-auth-policy-${runId}`;
+
+    try {
+      const [companyRows] = await db.execute(
+        `SELECT id
+         FROM companies
+         WHERE code = ?
+         LIMIT 1`,
+        [companyCode]
+      );
+      const company = companyRows[0];
+      if (!company) {
+        throw new Error(
+          "company fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const companyId = Number(company.id);
+
+      const bcryptRehashHash = await bcrypt.hash(testPassword, 12);
+      const bcryptNoRehashHash = await bcrypt.hash(testPassword, 12);
+      const argonHash = await argon2.hash(testPassword, {
+        type: argon2.argon2id,
+        memoryCost: 65536,
+        timeCost: 3,
+        parallelism: 1
+      });
+
+      const testUsers = [
+        [bcryptRehashEmail, bcryptRehashHash],
+        [bcryptNoRehashEmail, bcryptNoRehashHash],
+        [argonEmail, argonHash],
+        [unknownHashEmail, "invalid-hash-format"]
+      ];
+
+      for (const [email, passwordHash] of testUsers) {
+        const [result] = await db.execute(
+          `INSERT INTO users (company_id, email, password_hash, is_active)
+           VALUES (?, ?, ?, 1)
+           ON DUPLICATE KEY UPDATE
+             password_hash = VALUES(password_hash),
+             is_active = 1,
+             id = LAST_INSERT_ID(id),
+             updated_at = CURRENT_TIMESTAMP`,
+          [companyId, email, passwordHash]
+        );
+        createdUserIds.push(Number(result.insertId));
+      }
+
+      const policyEnv = {
+        AUTH_PASSWORD_ALGO_DEFAULT: "argon2id",
+        AUTH_PASSWORD_REHASH_ON_LOGIN: "true",
+        AUTH_BCRYPT_ROUNDS: "12",
+        AUTH_ARGON2_MEMORY_KB: "65536",
+        AUTH_ARGON2_TIME_COST: "3",
+        AUTH_ARGON2_PARALLELISM: "1"
+      };
+
+      const rehashPort = await getFreePort();
+      const rehashBaseUrl = `http://127.0.0.1:${rehashPort}`;
+      const rehashServer = startApiServer(rehashPort, {
+        envOverrides: policyEnv
+      });
+      childProcess = rehashServer.childProcess;
+      await waitForHealthcheck(rehashBaseUrl, childProcess, rehashServer.serverLogs);
+
+      const bcryptRehashResponse = await fetch(`${rehashBaseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": auditIp,
+          "user-agent": auditUserAgent
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: bcryptRehashEmail,
+          password: testPassword
+        })
+      });
+      assert.equal(bcryptRehashResponse.status, 200);
+
+      const [rehashRows] = await db.execute(
+        `SELECT password_hash
+         FROM users
+         WHERE company_id = ? AND email = ?
+         LIMIT 1`,
+        [companyId, bcryptRehashEmail]
+      );
+      assert.equal(rehashRows[0].password_hash.startsWith("$argon2id$"), true);
+
+      const argonLoginResponse = await fetch(`${rehashBaseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": auditIp,
+          "user-agent": auditUserAgent
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: argonEmail,
+          password: testPassword
+        })
+      });
+      assert.equal(argonLoginResponse.status, 200);
+
+      const unknownHashResponse = await fetch(`${rehashBaseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": auditIp,
+          "user-agent": auditUserAgent
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: unknownHashEmail,
+          password: testPassword
+        })
+      });
+      assert.equal(unknownHashResponse.status, 401);
+      const unknownHashBody = await unknownHashResponse.json();
+      assert.equal(unknownHashBody.ok, false);
+      assert.equal(unknownHashBody.error.code, "INVALID_CREDENTIALS");
+
+      await stopApiServer(childProcess);
+      childProcess = null;
+
+      const noRehashPort = await getFreePort();
+      const noRehashBaseUrl = `http://127.0.0.1:${noRehashPort}`;
+      const noRehashServer = startApiServer(noRehashPort, {
+        envOverrides: {
+          ...policyEnv,
+          AUTH_PASSWORD_REHASH_ON_LOGIN: "false"
+        }
+      });
+      childProcess = noRehashServer.childProcess;
+      await waitForHealthcheck(noRehashBaseUrl, childProcess, noRehashServer.serverLogs);
+
+      const bcryptNoRehashResponse = await fetch(`${noRehashBaseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": auditIp,
+          "user-agent": auditUserAgent
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: bcryptNoRehashEmail,
+          password: testPassword
+        })
+      });
+      assert.equal(bcryptNoRehashResponse.status, 200);
+
+      const [noRehashRows] = await db.execute(
+        `SELECT password_hash
+         FROM users
+         WHERE company_id = ? AND email = ?
+         LIMIT 1`,
+        [companyId, bcryptNoRehashEmail]
+      );
+      const unchangedHash = noRehashRows[0].password_hash;
+      const stillBcrypt =
+        unchangedHash.startsWith("$2a$") ||
+        unchangedHash.startsWith("$2b$") ||
+        unchangedHash.startsWith("$2y$");
+      assert.equal(stillBcrypt, true);
+    } finally {
+      await stopApiServer(childProcess);
+
+      await db.execute(
+        `DELETE FROM audit_logs
+         WHERE action = 'AUTH_LOGIN'
+           AND ip_address = ?
+           AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.user_agent')) = ?`,
+        [auditIp, auditUserAgent]
+      );
+
+      for (const userId of createdUserIds) {
+        if (userId > 0) {
+          await db.execute("DELETE FROM user_outlets WHERE user_id = ?", [userId]);
+          await db.execute("DELETE FROM user_roles WHERE user_id = ?", [userId]);
+          await db.execute("DELETE FROM users WHERE id = ?", [userId]);
+        }
+      }
+
+      await db.end();
     }
   }
 );

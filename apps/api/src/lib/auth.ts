@@ -1,9 +1,9 @@
-import bcrypt from "bcryptjs";
 import { SignJWT } from "jose";
-import type { RowDataPacket } from "mysql2";
+import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { z } from "zod";
 import { getDbPool } from "./db";
 import { getAppEnv } from "./env";
+import { hashPassword, needsRehash, verifyPassword, type PasswordHashPolicy } from "./password-hash";
 
 const DUMMY_BCRYPT_HASH =
   "$2a$12$M7v0M3yiY6L6HhM0iK0Qx.hoXrn1eSxn/OI8hM6SxQ0V4zH5mA8Pe";
@@ -95,6 +95,18 @@ export function parseLoginRequest(payload: unknown): LoginRequest {
   return loginRequestSchema.parse(payload);
 }
 
+function passwordHashPolicyFromEnv(): PasswordHashPolicy {
+  const env = getAppEnv();
+
+  return {
+    defaultAlgorithm: env.auth.password.defaultAlgorithm,
+    bcryptRounds: env.auth.password.bcryptRounds,
+    argon2MemoryKb: env.auth.password.argon2MemoryKb,
+    argon2TimeCost: env.auth.password.argon2TimeCost,
+    argon2Parallelism: env.auth.password.argon2Parallelism
+  };
+}
+
 async function findUserForLogin(
   companyCode: string,
   email: string
@@ -139,10 +151,34 @@ async function signAccessToken(user: UserLoginRow): Promise<string> {
   return jwt.sign(secret);
 }
 
+async function rehashUserPasswordIfNeeded(
+  user: UserLoginRow,
+  plainPassword: string,
+  policy: PasswordHashPolicy
+): Promise<void> {
+  const env = getAppEnv();
+  if (!env.auth.password.rehashOnLogin || !needsRehash(user.password_hash, policy)) {
+    return;
+  }
+
+  const nextPasswordHash = await hashPassword(plainPassword, policy);
+  const pool = getDbPool();
+  await pool.execute<ResultSetHeader>(
+    `UPDATE users
+     SET password_hash = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?
+       AND company_id = ?
+       AND password_hash = ?`,
+    [nextPasswordHash, user.id, user.company_id, user.password_hash]
+  );
+}
+
 export async function authenticateLogin(request: LoginRequest): Promise<LoginResult> {
+  const policy = passwordHashPolicyFromEnv();
   const user = await findUserForLogin(request.companyCode, request.email);
   const passwordHash = user?.password_hash ?? DUMMY_BCRYPT_HASH;
-  const passwordMatches = await bcrypt.compare(request.password, passwordHash);
+  const passwordMatches = await verifyPassword(request.password, passwordHash);
 
   if (!user || !user.is_active || !passwordMatches) {
     return {
@@ -151,6 +187,8 @@ export async function authenticateLogin(request: LoginRequest): Promise<LoginRes
       companyId: user?.company_id ?? null
     };
   }
+
+  await rehashUserPasswordIfNeeded(user, request.password, policy);
 
   const accessToken = await signAccessToken(user);
   const env = getAppEnv();

@@ -1,8 +1,38 @@
 import "./load-env.mjs";
+import argon2 from "argon2";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
 
-const BCRYPT_COST = 12;
+const DEFAULT_PASSWORD_ALGO = "argon2id";
+const DEFAULT_BCRYPT_ROUNDS = 12;
+const DEFAULT_ARGON2_MEMORY_KB = 65536;
+const DEFAULT_ARGON2_TIME_COST = 3;
+const DEFAULT_ARGON2_PARALLELISM = 1;
+
+function parsePositiveInt(value, fallback, key) {
+  if (value == null || value.length === 0) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${key} must be a positive integer`);
+  }
+
+  return parsed;
+}
+
+function parsePasswordAlgorithm(value, fallback, key) {
+  if (value == null || value.length === 0) {
+    return fallback;
+  }
+
+  if (value === "argon2id" || value === "bcrypt") {
+    return value;
+  }
+
+  throw new Error(`${key} must be "argon2id" or "bcrypt"`);
+}
 
 function dbConfigFromEnv() {
   const port = Number(process.env.DB_PORT ?? "3306");
@@ -28,6 +58,49 @@ function seedConfigFromEnv() {
     ownerEmail: process.env.JP_OWNER_EMAIL ?? "owner@local",
     ownerPassword: process.env.JP_OWNER_PASSWORD ?? "ChangeMe123!"
   };
+}
+
+function passwordPolicyFromEnv() {
+  return {
+    defaultAlgorithm: parsePasswordAlgorithm(
+      process.env.AUTH_PASSWORD_ALGO_DEFAULT,
+      DEFAULT_PASSWORD_ALGO,
+      "AUTH_PASSWORD_ALGO_DEFAULT"
+    ),
+    bcryptRounds: parsePositiveInt(
+      process.env.AUTH_BCRYPT_ROUNDS,
+      DEFAULT_BCRYPT_ROUNDS,
+      "AUTH_BCRYPT_ROUNDS"
+    ),
+    argon2MemoryKb: parsePositiveInt(
+      process.env.AUTH_ARGON2_MEMORY_KB,
+      DEFAULT_ARGON2_MEMORY_KB,
+      "AUTH_ARGON2_MEMORY_KB"
+    ),
+    argon2TimeCost: parsePositiveInt(
+      process.env.AUTH_ARGON2_TIME_COST,
+      DEFAULT_ARGON2_TIME_COST,
+      "AUTH_ARGON2_TIME_COST"
+    ),
+    argon2Parallelism: parsePositiveInt(
+      process.env.AUTH_ARGON2_PARALLELISM,
+      DEFAULT_ARGON2_PARALLELISM,
+      "AUTH_ARGON2_PARALLELISM"
+    )
+  };
+}
+
+async function hashOwnerPassword(password, policy) {
+  if (policy.defaultAlgorithm === "bcrypt") {
+    return bcrypt.hash(password, policy.bcryptRounds);
+  }
+
+  return argon2.hash(password, {
+    type: argon2.argon2id,
+    memoryCost: policy.argon2MemoryKb,
+    timeCost: policy.argon2TimeCost,
+    parallelism: policy.argon2Parallelism
+  });
 }
 
 async function upsertCompany(connection, companyCode, companyName) {
@@ -102,6 +175,7 @@ async function upsertFeatureFlag(connection, companyId, flagKey, enabled, config
 async function main() {
   const dbConfig = dbConfigFromEnv();
   const seedConfig = seedConfigFromEnv();
+  const passwordPolicy = passwordPolicyFromEnv();
   const connection = await mysql.createConnection(dbConfig);
 
   try {
@@ -138,10 +212,7 @@ async function main() {
       throw new Error("OWNER role id not found after seed upsert");
     }
 
-    const ownerPasswordHash = await bcrypt.hash(
-      seedConfig.ownerPassword,
-      BCRYPT_COST
-    );
+    const ownerPasswordHash = await hashOwnerPassword(seedConfig.ownerPassword, passwordPolicy);
     const ownerUserId = await upsertOwner(
       connection,
       companyId,
