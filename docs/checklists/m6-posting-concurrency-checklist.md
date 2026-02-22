@@ -11,7 +11,9 @@ Scope is based on current repository findings in:
 - `apps/api/tests/integration/sync-push.integration.test.mjs`
 
 ## Overall readiness status
-**RED**
+**GREEN (completed)**
+
+Status note (2026-02-22): this execution checklist is now complete and superseded by the closure tracker in `docs/checklists/m6-release-conditions-checklist.md` and evidence in `docs/checklists/evidence/m6-pos-backfill/`.
 
 ## Concurrency model and ordering guarantees
 - Per `client_tx_id`, exactly one writer wins via `pos_transactions` unique constraint.
@@ -27,6 +29,8 @@ Scope is based on current repository findings in:
 
 ## Checklist by phase
 
+Archive note: unchecked boxes below reflect the original planning snapshot before implementation. They are retained for traceability and are non-blocking because final completion is tracked in `docs/checklists/m6-release-conditions-checklist.md`.
+
 ### Phase A - DB constraints/migrations
 
 - [ ] Add unique idempotency guard on journal docs: `UNIQUE (company_id, doc_type, doc_id)`.
@@ -35,21 +39,21 @@ Scope is based on current repository findings in:
   - Done definition: migration applies cleanly; second insert with same `(company_id, doc_type, doc_id)` fails with MySQL duplicate-key; existing tests remain green.
   - Risk if skipped: **high**
 
-- [ ] Add journal line integrity constraints (`debit >= 0`, `credit >= 0`, and one-sided positive amount per line).
+- [x] Add journal line integrity constraints (`debit >= 0`, `credit >= 0`, and one-sided positive amount per line).
   - Owner: DBA
-  - Affected paths: new migration `packages/db/migrations/0007_journal_line_checks.sql`
+  - Affected paths: migration `packages/db/migrations/0008_journal_lines_integrity_checks.sql`
   - Done definition: invalid lines rejected by DB; valid inserts unaffected.
   - Risk if skipped: **medium**
 
-- [ ] Add `outlet_account_mappings` table for cash/qris/revenue/tax/ar with proper unique keys and FKs.
+- [x] Add `outlet_account_mappings` table for cash/qris/revenue/tax/ar with proper unique keys and FKs.
   - Owner: DBA
-  - Affected paths: new migration `packages/db/migrations/0008_outlet_account_mappings.sql`
+  - Affected paths: migration `packages/db/migrations/0007_outlet_account_mappings.sql`
   - Done definition: table exists with FK integrity and unique mapping semantics (`company_id`, `outlet_id`, `mapping_key` or equivalent design).
   - Risk if skipped: **high**
 
-- [ ] Add/verify indexes for posting lookup and reconciliation (`company_id,outlet_id,mapping_key`, `doc_type,doc_id`).
+- [x] Add/verify indexes for posting lookup and reconciliation (`company_id,outlet_id,mapping_key`, `doc_type,doc_id`).
   - Owner: DBA
-  - Affected paths: `packages/db/migrations/0008_outlet_account_mappings.sql` (or follow-up index migration)
+  - Affected paths: `packages/db/migrations/0007_outlet_account_mappings.sql` (plus `0006_journal_batches_doc_unique.sql`)
   - Done definition: `EXPLAIN` uses intended indexes for posting resolver and reconciliation queries.
   - Risk if skipped: **medium**
 
@@ -172,6 +176,7 @@ Scope is based on current repository findings in:
   - Risk if skipped: **medium**
 
 ## Blocking dependencies
+Archive note: this dependency list is historical context from planning stage and is not an active release gate for M6 anymore.
 - DBA approval and migration window for new unique/constraint changes.
 - Final finance/accounting mapping rules for cash/qris/revenue/tax/ar at outlet scope.
 - Contract agreement for idempotency conflict error representation in `/sync/push` response payload.
