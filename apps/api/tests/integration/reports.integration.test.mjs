@@ -173,7 +173,7 @@ async function ensureDailySalesView(db) {
   await db.execute(DAILY_SALES_VIEW_SQL);
 }
 
-async function loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword) {
+async function loginUser(baseUrl, companyCode, email, password) {
   const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: {
@@ -181,14 +181,18 @@ async function loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword) {
     },
     body: JSON.stringify({
       companyCode,
-      email: ownerEmail,
-      password: ownerPassword
+      email,
+      password
     })
   });
   assert.equal(loginResponse.status, 200);
   const loginBody = await loginResponse.json();
   assert.equal(loginBody.ok, true);
   return loginBody.access_token;
+}
+
+async function loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword) {
+  return loginUser(baseUrl, companyCode, ownerEmail, ownerPassword);
 }
 
 test(
@@ -819,6 +823,165 @@ test(
 );
 
 test(
+  "reports integration: daily-sales falls back to base tables when view is invalid",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = await mysql.createConnection(dbConfigFromEnv());
+    let childProcess;
+    let txClientId = "";
+    let invalidSourceTable = "";
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+      const reportDate = "2099-03-11";
+      const trxAtSql = "2099-03-11 10:15:00";
+
+      await ensureDailySalesView(db);
+
+      txClientId = randomUUID();
+      const [txInsert] = await db.execute(
+        `INSERT INTO pos_transactions (
+           company_id,
+           outlet_id,
+           client_tx_id,
+           status,
+           trx_at,
+           payload_sha256,
+           payload_hash_version
+         ) VALUES (?, ?, ?, 'COMPLETED', ?, '', 1)`,
+        [companyId, outletId, txClientId, trxAtSql]
+      );
+      const txId = Number(txInsert.insertId);
+
+      await db.execute(
+        `INSERT INTO pos_transaction_items (
+           pos_transaction_id,
+           company_id,
+           outlet_id,
+           line_no,
+           item_id,
+           qty,
+           price_snapshot,
+           name_snapshot
+         ) VALUES (?, ?, ?, 1, 1, 2, 17500, 'Fallback Invalid View Item')`,
+        [txId, companyId, outletId]
+      );
+
+      await db.execute(
+        `INSERT INTO pos_transaction_payments (
+           pos_transaction_id,
+           company_id,
+           outlet_id,
+           payment_no,
+           method,
+           amount
+         ) VALUES (?, ?, ?, 1, 'CASH', 35000)`,
+        [txId, companyId, outletId]
+      );
+
+      invalidSourceTable = `it_daily_invalid_${runId}`;
+      await db.execute(
+        `CREATE TABLE \`${invalidSourceTable}\` (
+           id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+           company_id BIGINT UNSIGNED NOT NULL,
+           outlet_id BIGINT UNSIGNED NULL,
+           trx_date DATE NOT NULL,
+           status ENUM('COMPLETED', 'VOID', 'REFUND') NOT NULL,
+           tx_count BIGINT UNSIGNED NOT NULL,
+           gross_total DECIMAL(18,2) NOT NULL,
+           paid_total DECIMAL(18,2) NOT NULL,
+           PRIMARY KEY (id)
+         ) ENGINE=InnoDB`
+      );
+
+      await db.execute(
+        `CREATE OR REPLACE VIEW v_pos_daily_totals AS
+         SELECT src.company_id,
+                src.outlet_id,
+                src.trx_date,
+                src.status,
+                src.tx_count,
+                src.gross_total,
+                src.paid_total
+         FROM \`${invalidSourceTable}\` src`
+      );
+
+      await db.execute(`DROP TABLE \`${invalidSourceTable}\``);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port);
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
+
+      const response = await fetch(
+        `${baseUrl}/api/reports/daily-sales?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&status=COMPLETED`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.ok, true);
+
+      const row = body.rows.find((entry) => Number(entry.outlet_id) === outletId);
+      assert.equal(Boolean(row), true);
+      assert.equal(Number(row.tx_count) >= 1, true);
+      assert.equal(Number(row.gross_total) >= 35000, true);
+      assert.equal(Number(row.paid_total) >= 35000, true);
+    } finally {
+      await stopApiServer(childProcess);
+      await ensureDailySalesView(db);
+
+      if (invalidSourceTable) {
+        await db.execute(`DROP TABLE IF EXISTS \`${invalidSourceTable}\``);
+      }
+
+      if (txClientId) {
+        await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [txClientId]);
+      }
+
+      await db.end();
+    }
+  }
+);
+
+test(
   "reports integration: POS as_of keeps pagination snapshot stable across concurrent inserts",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
@@ -937,6 +1100,198 @@ test(
 );
 
 test(
+  "reports integration: journals as_of keeps pagination snapshot stable across concurrent inserts",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = await mysql.createConnection(dbConfigFromEnv());
+    let childProcess;
+    let accountId = 0;
+    const batchIds = [];
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const reportDate = "2020-05-10";
+    const runId = Date.now().toString(36);
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const accountCode = `ITRPTJAS${runId}`.slice(0, 32).toUpperCase();
+      const [accountInsert] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name)
+         VALUES (?, ?, ?)`,
+        [companyId, accountCode, `Journal as_of account ${runId}`]
+      );
+      accountId = Number(accountInsert.insertId);
+
+      const [batch1Insert] = await db.execute(
+        `INSERT INTO journal_batches (company_id, outlet_id, doc_type, doc_id, posted_at)
+         VALUES (?, ?, 'IT_JRNL_ASOF', ?, '${reportDate} 10:00:00')`,
+        [companyId, outletId, Number(Date.now())]
+      );
+      batchIds.push(Number(batch1Insert.insertId));
+
+      const [batch2Insert] = await db.execute(
+        `INSERT INTO journal_batches (company_id, outlet_id, doc_type, doc_id, posted_at)
+         VALUES (?, ?, 'IT_JRNL_ASOF', ?, '${reportDate} 10:05:00')`,
+        [companyId, outletId, Number(Date.now()) + 1]
+      );
+      batchIds.push(Number(batch2Insert.insertId));
+
+      await db.execute(
+        `INSERT INTO journal_lines (
+           journal_batch_id,
+           company_id,
+           outlet_id,
+           account_id,
+           line_date,
+           debit,
+           credit,
+           description
+         ) VALUES
+           (?, ?, ?, ?, ?, 100, 0, 'Journal as_of debit 1'),
+           (?, ?, ?, ?, ?, 0, 100, 'Journal as_of credit 1'),
+           (?, ?, ?, ?, ?, 100, 0, 'Journal as_of debit 2'),
+           (?, ?, ?, ?, ?, 0, 100, 'Journal as_of credit 2')`,
+        [
+          batchIds[0],
+          companyId,
+          outletId,
+          accountId,
+          reportDate,
+          batchIds[0],
+          companyId,
+          outletId,
+          accountId,
+          reportDate,
+          batchIds[1],
+          companyId,
+          outletId,
+          accountId,
+          reportDate,
+          batchIds[1],
+          companyId,
+          outletId,
+          accountId,
+          reportDate
+        ]
+      );
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port);
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
+
+      const page1Response = await fetch(
+        `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&limit=1&offset=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(page1Response.status, 200);
+      const page1Body = await page1Response.json();
+      assert.equal(page1Body.ok, true);
+      assert.equal(typeof page1Body.filters.as_of, "string");
+      assert.equal(typeof page1Body.filters.as_of_id, "number");
+      assert.equal(page1Body.total, 2);
+      const firstPageBatchId = page1Body.journals[0]?.id;
+
+      const [batch3Insert] = await db.execute(
+        `INSERT INTO journal_batches (company_id, outlet_id, doc_type, doc_id, posted_at)
+         VALUES (?, ?, 'IT_JRNL_ASOF', ?, '${reportDate} 10:10:00')`,
+        [companyId, outletId, Number(Date.now()) + 2]
+      );
+      const concurrentBatchId = Number(batch3Insert.insertId);
+      batchIds.push(concurrentBatchId);
+
+      await db.execute(
+        `INSERT INTO journal_lines (
+           journal_batch_id,
+           company_id,
+           outlet_id,
+           account_id,
+           line_date,
+           debit,
+           credit,
+           description
+         ) VALUES
+           (?, ?, ?, ?, ?, 100, 0, 'Journal as_of debit 3'),
+           (?, ?, ?, ?, ?, 0, 100, 'Journal as_of credit 3')`,
+        [concurrentBatchId, companyId, outletId, accountId, reportDate, concurrentBatchId, companyId, outletId, accountId, reportDate]
+      );
+
+      const page2Response = await fetch(
+        `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&limit=1&offset=1&as_of=${encodeURIComponent(page1Body.filters.as_of)}&as_of_id=${page1Body.filters.as_of_id}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(page2Response.status, 200);
+      const page2Body = await page2Response.json();
+      assert.equal(page2Body.ok, true);
+      assert.equal(page2Body.total, 2);
+
+      const returnedPage2Ids = page2Body.journals.map((row) => row.id);
+      assert.equal(returnedPage2Ids.includes(concurrentBatchId), false);
+      assert.equal(returnedPage2Ids.includes(firstPageBatchId), false);
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (batchIds.length > 0) {
+        await db.execute(
+          `DELETE FROM journal_lines WHERE journal_batch_id IN (${batchIds.map(() => "?").join(", ")})`,
+          batchIds
+        );
+        await db.execute(
+          `DELETE FROM journal_batches WHERE id IN (${batchIds.map(() => "?").join(", ")})`,
+          batchIds
+        );
+      }
+
+      if (accountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [accountId]);
+      }
+
+      await db.end();
+    }
+  }
+);
+
+test(
   "reports integration: outlet filter denies inaccessible outlet",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
@@ -1025,6 +1380,145 @@ test(
 
       if (deniedOutletId > 0) {
         await db.execute("DELETE FROM outlets WHERE id = ?", [deniedOutletId]);
+      }
+
+      await db.end();
+    }
+  }
+);
+
+test(
+  "reports integration: report endpoints enforce OWNER/ADMIN/ACCOUNTANT allow and CASHIER deny",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = await mysql.createConnection(dbConfigFromEnv());
+    let childProcess;
+    const createdUserIds = [];
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const roleEmails = {
+      ADMIN: `reports-admin-${runId}@example.com`,
+      ACCOUNTANT: `reports-accountant-${runId}@example.com`,
+      CASHIER: `reports-cashier-${runId}@example.com`
+    };
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, u.password_hash, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const [roleRows] = await db.execute(
+        `SELECT id, code
+         FROM roles
+         WHERE code IN ('ADMIN', 'ACCOUNTANT', 'CASHIER')`
+      );
+      const roleIdByCode = new Map(roleRows.map((row) => [row.code, Number(row.id)]));
+      for (const code of ["ADMIN", "ACCOUNTANT", "CASHIER"]) {
+        if (!roleIdByCode.has(code)) {
+          throw new Error(`${code} role fixture not found; run database seed first`);
+        }
+      }
+
+      for (const roleCode of ["ADMIN", "ACCOUNTANT", "CASHIER"]) {
+        const [userInsert] = await db.execute(
+          `INSERT INTO users (company_id, email, password_hash, is_active)
+           VALUES (?, ?, ?, 1)`,
+          [companyId, roleEmails[roleCode], owner.password_hash]
+        );
+        const userId = Number(userInsert.insertId);
+        createdUserIds.push(userId);
+
+        await db.execute(
+          `INSERT INTO user_roles (user_id, role_id)
+           VALUES (?, ?)`,
+          [userId, roleIdByCode.get(roleCode)]
+        );
+
+        await db.execute(
+          `INSERT INTO user_outlets (user_id, outlet_id)
+           VALUES (?, ?)`,
+          [userId, outletId]
+        );
+      }
+
+      await ensureDailySalesView(db);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port);
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const ownerToken = await loginUser(baseUrl, companyCode, ownerEmail, ownerPassword);
+      const adminToken = await loginUser(baseUrl, companyCode, roleEmails.ADMIN, ownerPassword);
+      const accountantToken = await loginUser(baseUrl, companyCode, roleEmails.ACCOUNTANT, ownerPassword);
+      const cashierToken = await loginUser(baseUrl, companyCode, roleEmails.CASHIER, ownerPassword);
+
+      const reportUrls = [
+        `/api/reports/pos-transactions?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
+        `/api/reports/daily-sales?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
+        `/api/reports/journals?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
+        `/api/reports/trial-balance?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`
+      ];
+
+      for (const accessToken of [ownerToken, adminToken, accountantToken]) {
+        for (const reportUrl of reportUrls) {
+          const response = await fetch(`${baseUrl}${reportUrl}`, {
+            headers: {
+              authorization: `Bearer ${accessToken}`
+            }
+          });
+          assert.equal(response.status, 200);
+          const body = await response.json();
+          assert.equal(body.ok, true);
+        }
+      }
+
+      for (const reportUrl of reportUrls) {
+        const response = await fetch(`${baseUrl}${reportUrl}`, {
+          headers: {
+            authorization: `Bearer ${cashierToken}`
+          }
+        });
+        assert.equal(response.status, 403);
+        const body = await response.json();
+        assert.equal(body.ok, false);
+        assert.equal(body.error.code, "FORBIDDEN");
+      }
+    } finally {
+      await stopApiServer(childProcess);
+
+      for (const userId of createdUserIds) {
+        await db.execute("DELETE FROM user_outlets WHERE user_id = ?", [userId]);
+        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [userId]);
+        await db.execute("DELETE FROM users WHERE id = ?", [userId]);
       }
 
       await db.end();
