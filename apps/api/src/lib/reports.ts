@@ -51,6 +51,35 @@ type TrialBalanceRow = RowDataPacket & {
   balance: number | string;
 };
 
+type GeneralLedgerRow = RowDataPacket & {
+  account_id: number;
+  account_code: string;
+  account_name: string;
+  report_group: string | null;
+  normal_balance: string | null;
+  opening_debit: number | string | null;
+  opening_credit: number | string | null;
+  period_debit: number | string | null;
+  period_credit: number | string | null;
+};
+
+type ProfitLossRow = RowDataPacket & {
+  account_id: number;
+  account_code: string;
+  account_name: string;
+  total_debit: number | string | null;
+  total_credit: number | string | null;
+};
+
+type WorksheetRow = RowDataPacket & {
+  account_id: number;
+  account_code: string;
+  account_name: string;
+  report_group: string | null;
+  total_debit: number | string | null;
+  total_credit: number | string | null;
+};
+
 type BaseFilter = {
   companyId: number;
   outletIds: readonly number[];
@@ -79,8 +108,36 @@ type TrialBalanceFilter = BaseFilter & {
   includeUnassignedOutlet?: boolean;
 };
 
+type GeneralLedgerFilter = BaseFilter & {
+  includeUnassignedOutlet?: boolean;
+};
+
+type ProfitLossFilter = BaseFilter & {
+  includeUnassignedOutlet?: boolean;
+};
+
+type WorksheetFilter = BaseFilter & {
+  includeUnassignedOutlet?: boolean;
+};
+
 function toNumber(value: number | string | null | undefined): number {
   return Number(value ?? 0);
+}
+
+function buildOutletPredicate(
+  column: string,
+  outletIds: readonly number[],
+  includeUnassignedOutlet: boolean
+): { sql: string; values: number[] } {
+  if (outletIds.length === 0) {
+    return { sql: "FALSE", values: [] };
+  }
+
+  const placeholders = outletIds.map(() => "?").join(", ");
+  const clause = includeUnassignedOutlet
+    ? `(${column} IS NULL OR ${column} IN (${placeholders}))`
+    : `${column} IN (${placeholders})`;
+  return { sql: clause, values: [...outletIds] };
 }
 
 function toIsoDateTime(value: Date): string {
@@ -524,4 +581,178 @@ export async function getTrialBalance(filter: TrialBalanceFilter) {
     total_credit: toNumber(row.total_credit),
     balance: toNumber(row.balance)
   }));
+}
+
+export async function getGeneralLedgerSummary(filter: GeneralLedgerFilter) {
+  const pool = getDbPool();
+
+  if (filter.outletIds.length === 0) {
+    return [];
+  }
+
+  const outletClause = buildOutletPredicate(
+    "jl.outlet_id",
+    filter.outletIds,
+    filter.includeUnassignedOutlet ?? true
+  );
+
+  const [rows] = await pool.execute<GeneralLedgerRow[]>(
+    `SELECT a.id AS account_id,
+            a.code AS account_code,
+            a.name AS account_name,
+            a.report_group,
+            a.normal_balance,
+            SUM(CASE WHEN jl.line_date < ? THEN jl.debit ELSE 0 END) AS opening_debit,
+            SUM(CASE WHEN jl.line_date < ? THEN jl.credit ELSE 0 END) AS opening_credit,
+            SUM(CASE WHEN jl.line_date BETWEEN ? AND ? THEN jl.debit ELSE 0 END) AS period_debit,
+            SUM(CASE WHEN jl.line_date BETWEEN ? AND ? THEN jl.credit ELSE 0 END) AS period_credit
+     FROM accounts a
+     LEFT JOIN journal_lines jl
+       ON jl.account_id = a.id
+      AND jl.company_id = ?
+      AND ${outletClause.sql}
+     WHERE a.company_id = ?
+       AND a.is_group = 0
+     GROUP BY a.id, a.code, a.name, a.report_group, a.normal_balance
+     ORDER BY a.code ASC`,
+    [
+      filter.dateFrom,
+      filter.dateFrom,
+      filter.dateFrom,
+      filter.dateTo,
+      filter.dateFrom,
+      filter.dateTo,
+      filter.companyId,
+      ...outletClause.values,
+      filter.companyId
+    ]
+  );
+
+  return rows.map((row) => {
+    const openingDebit = toNumber(row.opening_debit);
+    const openingCredit = toNumber(row.opening_credit);
+    const periodDebit = toNumber(row.period_debit);
+    const periodCredit = toNumber(row.period_credit);
+    const openingBalance = openingDebit - openingCredit;
+    const endingBalance = openingBalance + periodDebit - periodCredit;
+
+    return {
+      account_id: Number(row.account_id),
+      account_code: row.account_code,
+      account_name: row.account_name,
+      report_group: row.report_group,
+      normal_balance: row.normal_balance,
+      opening_debit: openingDebit,
+      opening_credit: openingCredit,
+      period_debit: periodDebit,
+      period_credit: periodCredit,
+      opening_balance: openingBalance,
+      ending_balance: endingBalance
+    };
+  });
+}
+
+export async function getProfitLoss(filter: ProfitLossFilter) {
+  const pool = getDbPool();
+
+  if (filter.outletIds.length === 0) {
+    return { rows: [], totals: { total_debit: 0, total_credit: 0, net: 0 } };
+  }
+
+  const outletClause = buildOutletPredicate(
+    "jl.outlet_id",
+    filter.outletIds,
+    filter.includeUnassignedOutlet ?? true
+  );
+
+  const [rows] = await pool.execute<ProfitLossRow[]>(
+    `SELECT a.id AS account_id,
+            a.code AS account_code,
+            a.name AS account_name,
+            SUM(jl.debit) AS total_debit,
+            SUM(jl.credit) AS total_credit
+     FROM journal_lines jl
+     INNER JOIN accounts a ON a.id = jl.account_id
+     WHERE jl.company_id = ?
+       AND jl.line_date BETWEEN ? AND ?
+       AND a.report_group = 'LR'
+       AND a.is_group = 0
+       AND ${outletClause.sql}
+     GROUP BY a.id, a.code, a.name
+     ORDER BY a.code ASC`,
+    [filter.companyId, filter.dateFrom, filter.dateTo, ...outletClause.values]
+  );
+
+  const mapped = rows.map((row) => ({
+    account_id: Number(row.account_id),
+    account_code: row.account_code,
+    account_name: row.account_name,
+    total_debit: toNumber(row.total_debit),
+    total_credit: toNumber(row.total_credit),
+    net: toNumber(row.total_credit) - toNumber(row.total_debit)
+  }));
+
+  const totals = mapped.reduce(
+    (acc, row) => ({
+      total_debit: acc.total_debit + row.total_debit,
+      total_credit: acc.total_credit + row.total_credit,
+      net: acc.net + row.net
+    }),
+    { total_debit: 0, total_credit: 0, net: 0 }
+  );
+
+  return { rows: mapped, totals };
+}
+
+export async function getTrialBalanceWorksheet(filter: WorksheetFilter) {
+  const pool = getDbPool();
+
+  if (filter.outletIds.length === 0) {
+    return [];
+  }
+
+  const outletClause = buildOutletPredicate(
+    "jl.outlet_id",
+    filter.outletIds,
+    filter.includeUnassignedOutlet ?? true
+  );
+
+  const [rows] = await pool.execute<WorksheetRow[]>(
+    `SELECT jl.account_id,
+            a.code AS account_code,
+            a.name AS account_name,
+            a.report_group,
+            SUM(jl.debit) AS total_debit,
+            SUM(jl.credit) AS total_credit
+     FROM journal_lines jl
+     INNER JOIN accounts a ON a.id = jl.account_id
+     WHERE jl.company_id = ?
+       AND jl.line_date BETWEEN ? AND ?
+       AND a.is_group = 0
+       AND ${outletClause.sql}
+     GROUP BY jl.account_id, a.code, a.name, a.report_group
+     ORDER BY a.code ASC`,
+    [filter.companyId, filter.dateFrom, filter.dateTo, ...outletClause.values]
+  );
+
+  return rows.map((row) => {
+    const totalDebit = toNumber(row.total_debit);
+    const totalCredit = toNumber(row.total_credit);
+    const balance = totalDebit - totalCredit;
+    const isBalanceSheet = row.report_group === "NRC";
+
+    return {
+      account_id: Number(row.account_id),
+      account_code: row.account_code,
+      account_name: row.account_name,
+      report_group: row.report_group,
+      total_debit: totalDebit,
+      total_credit: totalCredit,
+      balance,
+      bs_debit: isBalanceSheet ? totalDebit : 0,
+      bs_credit: isBalanceSheet ? totalCredit : 0,
+      pl_debit: isBalanceSheet ? 0 : totalDebit,
+      pl_credit: isBalanceSheet ? 0 : totalCredit
+    };
+  });
 }

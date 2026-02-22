@@ -6,7 +6,7 @@ SET @stmt = IF(
       AND table_name = 'outlet_account_mappings'
       AND constraint_name = 'chk_outlet_account_mappings_mapping_key'
   ),
-  'ALTER TABLE outlet_account_mappings DROP CHECK chk_outlet_account_mappings_mapping_key',
+  'ALTER TABLE outlet_account_mappings DROP CONSTRAINT chk_outlet_account_mappings_mapping_key',
   'SELECT 1'
 );
 PREPARE stmt FROM @stmt;
