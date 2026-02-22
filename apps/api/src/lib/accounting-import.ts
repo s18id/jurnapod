@@ -645,13 +645,13 @@ function buildParsedFile(fileName: string, text: string): ParsedFile {
 export async function importAccountingCsv(input: {
   companyId: number;
   userId: number;
-  daFile: ParsedFile;
-  trnsFile: ParsedFile;
-  alkFile: ParsedFile;
+  accountsFile: ParsedFile;
+  transactionsFile: ParsedFile;
+  allocationsFile: ParsedFile;
 }): Promise<ImportResult> {
-  const accounts = parseAccounts(input.daFile.text);
-  const trnsRows = parseTransactions(input.trnsFile.text);
-  const alkRows = parseAllocations(input.alkFile.text);
+  const accounts = parseAccounts(input.accountsFile.text);
+  const trnsRows = parseTransactions(input.transactionsFile.text);
+  const alkRows = parseAllocations(input.allocationsFile.text);
 
   if (accounts.length === 0) {
     throw new Error("No accounts found in DA");
@@ -700,9 +700,9 @@ export async function importAccountingCsv(input: {
   }
 
   const fileHash = createFileHash([
-    Buffer.from(input.daFile.text, "utf8"),
-    Buffer.from(input.trnsFile.text, "utf8"),
-    Buffer.from(input.alkFile.text, "utf8")
+    Buffer.from(input.accountsFile.text, "utf8"),
+    Buffer.from(input.transactionsFile.text, "utf8"),
+    Buffer.from(input.allocationsFile.text, "utf8")
   ]);
 
   const pool = getDbPool();
@@ -732,14 +732,21 @@ export async function importAccountingCsv(input: {
     const [insertResult] = await connection.execute<ResultSetHeader>(
       `INSERT INTO data_imports (
          company_id,
-         da_file_name,
-         trns_file_name,
-         alk_file_name,
+         accounts_file_name,
+         transactions_file_name,
+         allocations_file_name,
          file_hash,
          status,
          created_by
        ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`,
-      [input.companyId, input.daFile.fileName, input.trnsFile.fileName, input.alkFile.fileName, fileHash, input.userId]
+      [
+        input.companyId,
+        input.accountsFile.fileName,
+        input.transactionsFile.fileName,
+        input.allocationsFile.fileName,
+        fileHash,
+        input.userId
+      ]
     );
     const importId = Number(insertResult.insertId);
 
@@ -783,16 +790,16 @@ export async function importAccountingCsv(input: {
 }
 
 export function parseImportFiles(input: {
-  daFileName: string;
-  daText: string;
-  trnsFileName: string;
-  trnsText: string;
-  alkFileName: string;
-  alkText: string;
+  accountsFileName: string;
+  accountsText: string;
+  transactionsFileName: string;
+  transactionsText: string;
+  allocationsFileName: string;
+  allocationsText: string;
 }) {
   return {
-    daFile: buildParsedFile(input.daFileName, input.daText),
-    trnsFile: buildParsedFile(input.trnsFileName, input.trnsText),
-    alkFile: buildParsedFile(input.alkFileName, input.alkText)
+    accountsFile: buildParsedFile(input.accountsFileName, input.accountsText),
+    transactionsFile: buildParsedFile(input.transactionsFileName, input.transactionsText),
+    allocationsFile: buildParsedFile(input.allocationsFileName, input.allocationsText)
   };
 }

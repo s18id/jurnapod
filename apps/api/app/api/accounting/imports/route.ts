@@ -9,22 +9,26 @@ export const POST = withAuth(
   async (request, auth) => {
     try {
       const form = await request.formData();
-      const daFile = form.get("da");
-      const trnsFile = form.get("trns");
-      const alkFile = form.get("alk");
+      const accountsFile = form.get("accounts");
+      const transactionsFile = form.get("transactions");
+      const allocationsFile = form.get("allocations");
 
-      if (!isFile(daFile) || !isFile(trnsFile) || !isFile(alkFile)) {
+      if (!isFile(accountsFile) || !isFile(transactionsFile) || !isFile(allocationsFile)) {
         return Response.json({ ok: false, error: { code: "INVALID_REQUEST", message: "Missing files" } }, { status: 400 });
       }
 
-      const [daText, trnsText, alkText] = await Promise.all([daFile.text(), trnsFile.text(), alkFile.text()]);
+      const [accountsText, transactionsText, allocationsText] = await Promise.all([
+        accountsFile.text(),
+        transactionsFile.text(),
+        allocationsFile.text()
+      ]);
       const parsed = parseImportFiles({
-        daFileName: daFile.name,
-        daText,
-        trnsFileName: trnsFile.name,
-        trnsText,
-        alkFileName: alkFile.name,
-        alkText
+        accountsFileName: accountsFile.name,
+        accountsText,
+        transactionsFileName: transactionsFile.name,
+        transactionsText,
+        allocationsFileName: allocationsFile.name,
+        allocationsText
       });
 
       const result = await importAccountingCsv({
