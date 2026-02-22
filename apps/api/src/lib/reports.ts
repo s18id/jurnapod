@@ -22,6 +22,14 @@ type PosDailyRow = RowDataPacket & {
   paid_total: number | string | null;
 };
 
+type PosPaymentRow = RowDataPacket & {
+  outlet_id: number;
+  outlet_name: string | null;
+  method: string;
+  payment_count: number;
+  total_amount: number | string | null;
+};
+
 type JournalBatchRow = RowDataPacket & {
   id: number;
   outlet_id: number | null;
@@ -318,6 +326,52 @@ export async function listDailySalesSummary(
     tx_count: Number(row.tx_count),
     gross_total: toNumber(row.gross_total),
     paid_total: toNumber(row.paid_total)
+  }));
+}
+
+export async function listPosPaymentsSummary(
+  filter: BaseFilter & { status?: "COMPLETED" | "VOID" | "REFUND" }
+) {
+  const pool = getDbPool();
+  const outletClause = buildOutletInClause(filter.outletIds);
+  const range = toDateTimeRange(filter.dateFrom, filter.dateTo);
+
+  const values: Array<number | string> = [
+    filter.companyId,
+    range.fromStart,
+    range.nextDayStart,
+    ...outletClause.values
+  ];
+
+  let statusClause = "";
+  if (filter.status) {
+    statusClause = " AND pt.status = ?";
+    values.push(filter.status);
+  }
+
+  const [rows] = await pool.execute<PosPaymentRow[]>(
+    `SELECT pt.outlet_id,
+            o.name AS outlet_name,
+            ptp.method,
+            COUNT(*) AS payment_count,
+            COALESCE(SUM(ptp.amount), 0) AS total_amount
+     FROM pos_transaction_payments ptp
+     INNER JOIN pos_transactions pt ON pt.id = ptp.pos_transaction_id
+     LEFT JOIN outlets o ON o.id = pt.outlet_id
+     WHERE pt.company_id = ?
+       AND pt.trx_at >= ?
+       AND pt.trx_at < ?${outletClause.sql}${statusClause}
+     GROUP BY pt.outlet_id, o.name, ptp.method
+     ORDER BY pt.outlet_id ASC, ptp.method ASC`,
+    values
+  );
+
+  return rows.map((row) => ({
+    outlet_id: Number(row.outlet_id),
+    outlet_name: row.outlet_name,
+    method: row.method,
+    payment_count: Number(row.payment_count),
+    total_amount: toNumber(row.total_amount)
   }));
 }
 

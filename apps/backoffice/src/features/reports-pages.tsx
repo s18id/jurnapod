@@ -38,6 +38,19 @@ type DailySalesResponse = {
   rows: DailySalesRow[];
 };
 
+type PosPaymentRow = {
+  outlet_id: number;
+  outlet_name: string | null;
+  method: "CASH" | "QRIS" | "CARD" | string;
+  payment_count: number;
+  total_amount: number;
+};
+
+type PosPaymentsResponse = {
+  ok: true;
+  rows: PosPaymentRow[];
+};
+
 type JournalRow = {
   id: number;
   outlet_id: number | null;
@@ -272,6 +285,100 @@ export function DailySalesPage(props: ReportsProps) {
               <td style={cellStyle}>{row.tx_count}</td>
               <td style={cellStyle}>{row.gross_total.toFixed(2)}</td>
               <td style={cellStyle}>{row.paid_total.toFixed(2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+export function PosPaymentsPage(props: ReportsProps) {
+  const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
+  const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(7));
+  const [dateTo, setDateTo] = useState<string>(todayIso());
+  const [status, setStatus] = useState<string>("COMPLETED");
+  const [rows, setRows] = useState<PosPaymentRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadRows() {
+    setError(null);
+    try {
+      const response = await apiRequest<PosPaymentsResponse>(
+        `/reports/pos-payments?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}&status=${status}`,
+        {},
+        props.accessToken
+      );
+      setRows(response.rows);
+    } catch (fetchError) {
+      if (fetchError instanceof ApiError) {
+        setError(fetchError.message);
+      } else {
+        setError("Failed to load POS payment summary");
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (outletId > 0) {
+      loadRows().catch(() => undefined);
+    }
+  }, [outletId, dateFrom, dateTo, status]);
+
+  const totals = useMemo(
+    () =>
+      rows.reduce(
+        (acc, row) => ({
+          payment_count: acc.payment_count + row.payment_count,
+          total_amount: acc.total_amount + row.total_amount
+        }),
+        { payment_count: 0, total_amount: 0 }
+      ),
+    [rows]
+  );
+
+  return (
+    <section style={boxStyle}>
+      <h2 style={{ marginTop: 0 }}>POS Payment Summary</h2>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
+        <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
+          {props.user.outlets.map((outlet) => (
+            <option key={outlet.id} value={outlet.id}>
+              {outlet.code} - {outlet.name}
+            </option>
+          ))}
+        </select>
+        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
+        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
+        <select value={status} onChange={(event) => setStatus(event.target.value)} style={inputStyle}>
+          <option value="COMPLETED">COMPLETED</option>
+          <option value="VOID">VOID</option>
+          <option value="REFUND">REFUND</option>
+        </select>
+        <button type="button" onClick={() => loadRows()}>
+          Refresh
+        </button>
+      </div>
+      {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
+      <p>
+        Total payments: {totals.payment_count} | Total amount: {totals.total_amount.toFixed(2)}
+      </p>
+      <table style={tableStyle}>
+        <thead>
+          <tr>
+            <th style={cellStyle}>Outlet</th>
+            <th style={cellStyle}>Method</th>
+            <th style={cellStyle}>Payment Count</th>
+            <th style={cellStyle}>Total Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.outlet_id}:${row.method}`}>
+              <td style={cellStyle}>{row.outlet_name ?? `#${row.outlet_id}`}</td>
+              <td style={cellStyle}>{row.method}</td>
+              <td style={cellStyle}>{row.payment_count}</td>
+              <td style={cellStyle}>{row.total_amount.toFixed(2)}</td>
             </tr>
           ))}
         </tbody>

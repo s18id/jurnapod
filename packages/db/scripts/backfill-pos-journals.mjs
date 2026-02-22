@@ -5,7 +5,7 @@ const POS_SALE_DOC_TYPE = "POS_SALE"
 const JOURNAL_BATCH_DOC_UNIQUE_KEY = "uq_journal_batches_company_doc"
 const MYSQL_DUPLICATE_ERROR_CODE = 1062
 const TAX_FLAG_KEYS = ["pos.tax", "pos.config"]
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "SALES_REVENUE", "SALES_TAX", "AR"]
+const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "SALES_TAX", "AR"]
 const MONEY_SCALE = 100
 const MAX_LIMIT = 10000
 

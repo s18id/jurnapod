@@ -2,8 +2,11 @@ import { ItemsPricesPage as ItemsPricesManagementPage } from "./items-prices-pag
 import {
   DailySalesPage as DailySalesReportPage,
   JournalsPage as JournalsReportPage,
+  PosPaymentsPage as PosPaymentsReportPage,
   PosTransactionsPage as PosTransactionsReportPage
 } from "./reports-pages";
+import { SalesInvoicesPage as SalesInvoicesManagementPage } from "./sales-invoices-page";
+import { SalesPaymentsPage as SalesPaymentsManagementPage } from "./sales-payments-page";
 
 type PlaceholderProps = {
   title: string;
@@ -32,9 +35,15 @@ export const ItemsPricesPage = ItemsPricesManagementPage;
 
 export const PosTransactionsPage = PosTransactionsReportPage;
 
+export const PosPaymentsPage = PosPaymentsReportPage;
+
 export const DailySalesPage = DailySalesReportPage;
 
 export const JournalsPage = JournalsReportPage;
+
+export const SalesInvoicesPage = SalesInvoicesManagementPage;
+
+export const SalesPaymentsPage = SalesPaymentsManagementPage;
 
 export function ForbiddenPage() {
   return (

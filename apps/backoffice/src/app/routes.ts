@@ -13,8 +13,23 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {
+    path: "/sales-invoices",
+    label: "Sales Invoices",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/sales-payments",
+    label: "Sales Payments",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
     path: "/pos-transactions",
     label: "POS Transactions",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/pos-payments",
+    label: "POS Payments",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {

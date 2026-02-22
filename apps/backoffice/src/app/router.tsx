@@ -21,7 +21,10 @@ import {
   ForbiddenPage,
   ItemsPricesPage,
   JournalsPage,
-  PosTransactionsPage
+  PosPaymentsPage,
+  PosTransactionsPage,
+  SalesInvoicesPage,
+  SalesPaymentsPage
 } from "../features/pages";
 
 type SessionStatus = "loading" | "anonymous" | "authenticated";
@@ -36,8 +39,17 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   if (props.path === "/items-prices") {
     return <ItemsPricesPage user={props.user} accessToken={props.accessToken} />;
   }
+  if (props.path === "/sales-invoices") {
+    return <SalesInvoicesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/sales-payments") {
+    return <SalesPaymentsPage user={props.user} accessToken={props.accessToken} />;
+  }
   if (props.path === "/pos-transactions") {
     return <PosTransactionsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/pos-payments") {
+    return <PosPaymentsPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/daily-sales") {
     return <DailySalesPage user={props.user} accessToken={props.accessToken} />;

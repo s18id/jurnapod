@@ -10,7 +10,14 @@ const POS_SALE_DOC_TYPE = "POS_SALE";
 const MONEY_SCALE = 100;
 const TAX_FLAG_KEYS = ["pos.tax", "pos.config"] as const;
 
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "SALES_REVENUE", "SALES_TAX", "AR"] as const;
+const OUTLET_ACCOUNT_MAPPING_KEYS = [
+  "CASH",
+  "QRIS",
+  "CARD",
+  "SALES_REVENUE",
+  "SALES_TAX",
+  "AR"
+] as const;
 type OutletAccountMappingKey = (typeof OUTLET_ACCOUNT_MAPPING_KEYS)[number];
 
 export const OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE = "OUTLET_ACCOUNT_MAPPING_MISSING";
@@ -151,12 +158,8 @@ function isTestUnbalancedPostingEnabled(): boolean {
 
 function normalizePaymentMethodToMappingKey(method: string): OutletAccountMappingKey {
   const normalized = method.trim().toUpperCase();
-  if (normalized === "CASH" || normalized === "QRIS") {
+  if (normalized === "CASH" || normalized === "QRIS" || normalized === "CARD") {
     return normalized;
-  }
-
-  if (normalized === "CARD") {
-    return "CASH";
   }
 
   throw new Error(UNSUPPORTED_PAYMENT_METHOD_MESSAGE);
@@ -268,6 +271,7 @@ async function readOutletAccountMappingByKey(
   return {
     CASH: accountByKey.get("CASH") as number,
     QRIS: accountByKey.get("QRIS") as number,
+    CARD: accountByKey.get("CARD") as number,
     SALES_REVENUE: accountByKey.get("SALES_REVENUE") as number,
     SALES_TAX: accountByKey.get("SALES_TAX") as number,
     AR: accountByKey.get("AR") as number

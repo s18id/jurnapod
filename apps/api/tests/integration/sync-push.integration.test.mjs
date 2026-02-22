@@ -28,7 +28,7 @@ const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
 const SYNC_PUSH_POSTING_MODE_ENV = "SYNC_PUSH_POSTING_MODE";
 const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
 const POS_SALE_DOC_TYPE = "POS_SALE";
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "SALES_REVENUE", "SALES_TAX", "AR"];
+const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "SALES_TAX", "AR"];
 
 function readEnv(name, fallback = null) {
   const value = process.env[name];
@@ -463,6 +463,40 @@ function buildTestAccountCode(mappingKey) {
 }
 
 async function ensureOutletAccountMappings(db, companyId, outletId) {
+  const [constraintRows] = await db.execute(
+    `SELECT check_clause
+     FROM information_schema.check_constraints
+     WHERE constraint_schema = DATABASE()
+       AND constraint_name = 'chk_outlet_account_mappings_mapping_key'
+     LIMIT 1`
+  );
+
+  const clause = constraintRows[0]?.check_clause ?? "";
+  if (typeof clause !== "string" || !clause.includes("'CARD'")) {
+    const dropConstraintStatements = [
+      "ALTER TABLE outlet_account_mappings DROP CONSTRAINT chk_outlet_account_mappings_mapping_key",
+      "ALTER TABLE outlet_account_mappings DROP CHECK chk_outlet_account_mappings_mapping_key"
+    ];
+
+    for (const statement of dropConstraintStatements) {
+      try {
+        await db.execute(statement);
+        break;
+      } catch (error) {
+        const message = error?.message ?? "";
+        if (typeof message === "string" && message.includes("doesn't exist")) {
+          break;
+        }
+      }
+    }
+
+    await db.execute(
+      `ALTER TABLE outlet_account_mappings
+       ADD CONSTRAINT chk_outlet_account_mappings_mapping_key
+       CHECK (mapping_key IN ('CASH', 'QRIS', 'CARD', 'SALES_REVENUE', 'SALES_TAX', 'AR'))`
+    );
+  }
+
   const placeholders = OUTLET_ACCOUNT_MAPPING_KEYS.map(() => "?").join(", ");
   const [existingRows] = await db.execute(
     `SELECT mapping_key
