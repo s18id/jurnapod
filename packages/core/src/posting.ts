@@ -5,11 +5,59 @@ export interface PostingMapper {
 }
 
 export interface PostingRepository {
-  begin(): Promise<void>;
-  commit(): Promise<void>;
-  rollback(): Promise<void>;
-  createJournalBatch(request: PostingRequest): Promise<{ journal_batch_id: string }>;
-  insertJournalLines(journalBatchId: string, lines: JournalLine[]): Promise<void>;
+  begin?(): Promise<void>;
+  commit?(): Promise<void>;
+  rollback?(): Promise<void>;
+  createJournalBatch(request: PostingRequest): Promise<{ journal_batch_id: number }>;
+  insertJournalLines(journalBatchId: number, request: PostingRequest, lines: JournalLine[]): Promise<void>;
+}
+
+export type PostingTransactionOwner = "service" | "external";
+
+export interface PostingOptions {
+  transactionOwner?: PostingTransactionOwner;
+}
+
+export class UnbalancedJournalError extends Error {
+  constructor() {
+    super("UNBALANCED_JOURNAL");
+    this.name = "UnbalancedJournalError";
+  }
+}
+
+const MINOR_UNITS_SCALE = 100;
+
+function toMinorUnits(value: number): number {
+  return Math.round(value * MINOR_UNITS_SCALE);
+}
+
+function assertBalancedLines(lines: JournalLine[]): void {
+  if (lines.length === 0) {
+    throw new UnbalancedJournalError();
+  }
+
+  let totalDebitMinor = 0;
+  let totalCreditMinor = 0;
+  for (const line of lines) {
+    totalDebitMinor += toMinorUnits(line.debit);
+    totalCreditMinor += toMinorUnits(line.credit);
+  }
+
+  if (totalDebitMinor !== totalCreditMinor) {
+    throw new UnbalancedJournalError();
+  }
+}
+
+function requireTransactionMethod(
+  repository: PostingRepository,
+  methodName: "begin" | "commit" | "rollback"
+): () => Promise<void> {
+  const method = repository[methodName];
+  if (!method) {
+    throw new Error(`Posting repository missing required method: ${methodName}`);
+  }
+
+  return method.bind(repository);
 }
 
 export class PostingService {
@@ -18,24 +66,40 @@ export class PostingService {
     private readonly mapperByDocType: Record<string, PostingMapper>
   ) {}
 
-  async post(request: PostingRequest): Promise<PostingResult> {
+  async post(request: PostingRequest, options: PostingOptions = {}): Promise<PostingResult> {
     const mapper = this.mapperByDocType[request.doc_type];
     if (!mapper) {
       throw new Error(`No posting mapper for doc_type=${request.doc_type}`);
     }
 
-    await this.repository.begin();
+    const transactionOwner = options.transactionOwner ?? "service";
+    const ownsTransaction = transactionOwner === "service";
+    const begin = ownsTransaction ? requireTransactionMethod(this.repository, "begin") : null;
+    const commit = ownsTransaction ? requireTransactionMethod(this.repository, "commit") : null;
+    const rollback = ownsTransaction ? requireTransactionMethod(this.repository, "rollback") : null;
+
+    if (begin) {
+      await begin();
+    }
+
     try {
       const lines = await mapper.mapToJournal(request);
+      assertBalancedLines(lines);
       const batch = await this.repository.createJournalBatch(request);
-      await this.repository.insertJournalLines(batch.journal_batch_id, lines);
-      await this.repository.commit();
+      await this.repository.insertJournalLines(batch.journal_batch_id, request, lines);
+      if (commit) {
+        await commit();
+      }
+
       return {
-        journal_batch_id: batch.journal_batch_id,
+        journal_batch_id: batch.journal_batch_id as unknown as PostingResult["journal_batch_id"],
         lines
       };
     } catch (error) {
-      await this.repository.rollback();
+      if (rollback) {
+        await rollback();
+      }
+
       throw error;
     }
   }

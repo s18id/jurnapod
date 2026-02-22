@@ -8,7 +8,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "node ./scripts/migrate.mjs",
     "db:seed": "node ./scripts/seed.mjs",
-    "db:smoke": "node ./scripts/smoke.mjs"
+    "db:smoke": "node ./scripts/smoke.mjs",
+    "db:backfill:pos-journals": "node ./scripts/backfill-pos-journals.mjs",
+    "db:reconcile:pos-journals": "node ./scripts/reconcile-pos-journals.mjs"
   },
   "dependencies": {
     "argon2": "^0.44.0",

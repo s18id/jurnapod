@@ -17,12 +17,18 @@ const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
 const SYNC_PUSH_ACCEPTED_AUDIT_ACTION = "SYNC_PUSH_ACCEPTED";
+const SYNC_PUSH_DUPLICATE_AUDIT_ACTION = "SYNC_PUSH_DUPLICATE";
+const SYNC_PUSH_POSTING_HOOK_FAIL_AUDIT_ACTION = "SYNC_PUSH_POSTING_HOOK_FAIL";
 const IDEMPOTENCY_CONFLICT_MESSAGE = "IDEMPOTENCY_CONFLICT";
 const RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE = "RETRYABLE_DB_LOCK_TIMEOUT";
 const RETRYABLE_DB_DEADLOCK_MESSAGE = "RETRYABLE_DB_DEADLOCK";
 const TEST_FORCE_DB_ERRNO_HEADER = "x-jp-sync-push-force-db-errno";
 const TEST_FAIL_AFTER_HEADER_INSERT_HEADER = "x-jp-sync-push-fail-after-header";
 const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
+const SYNC_PUSH_POSTING_MODE_ENV = "SYNC_PUSH_POSTING_MODE";
+const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
+const POS_SALE_DOC_TYPE = "POS_SALE";
+const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "SALES_REVENUE", "SALES_TAX", "AR"];
 
 function readEnv(name, fallback = null) {
   const value = process.env[name];
@@ -109,10 +115,12 @@ async function getFreePort() {
 
 function startApiServer(port, options = {}) {
   const enableSyncPushTestHooks = options.enableSyncPushTestHooks === true;
+  const envOverrides = options.envOverrides ?? {};
   const childEnv = {
     ...process.env,
     NODE_ENV: "test",
-    [SYNC_PUSH_TEST_HOOKS_ENV]: enableSyncPushTestHooks ? "1" : "0"
+    [SYNC_PUSH_TEST_HOOKS_ENV]: enableSyncPushTestHooks ? "1" : "0",
+    ...envOverrides
   };
 
   const serverLogs = [];
@@ -242,6 +250,79 @@ async function countAcceptedSyncPushEvents(db, clientTxId) {
   return Number(rows[0].total);
 }
 
+async function countDuplicateSyncPushEvents(db, clientTxId) {
+  const [rows] = await db.execute(
+    `SELECT COUNT(*) AS total
+     FROM audit_logs
+     WHERE action = ?
+       AND result = 'SUCCESS'
+       AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
+    [SYNC_PUSH_DUPLICATE_AUDIT_ACTION, clientTxId]
+  );
+
+  return Number(rows[0].total);
+}
+
+async function readAcceptedSyncPushAuditPayload(db, clientTxId) {
+  const [rows] = await db.execute(
+    `SELECT payload_json
+     FROM audit_logs
+     WHERE action = ?
+       AND result = 'SUCCESS'
+       AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [SYNC_PUSH_ACCEPTED_AUDIT_ACTION, clientTxId]
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const payloadJson = String(rows[0].payload_json ?? "{}");
+  return JSON.parse(payloadJson);
+}
+
+async function readPostingHookFailureAuditPayload(db, clientTxId) {
+  const [rows] = await db.execute(
+    `SELECT payload_json
+     FROM audit_logs
+     WHERE action = ?
+       AND result = 'FAIL'
+       AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [SYNC_PUSH_POSTING_HOOK_FAIL_AUDIT_ACTION, clientTxId]
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const payloadJson = String(rows[0].payload_json ?? "{}");
+  return JSON.parse(payloadJson);
+}
+
+async function readDuplicateSyncPushAuditPayload(db, clientTxId) {
+  const [rows] = await db.execute(
+    `SELECT payload_json
+     FROM audit_logs
+     WHERE action = ?
+       AND result = 'SUCCESS'
+       AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [SYNC_PUSH_DUPLICATE_AUDIT_ACTION, clientTxId]
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const payloadJson = String(rows[0].payload_json ?? "{}");
+  return JSON.parse(payloadJson);
+}
+
 async function countSyncPushPersistedRows(db, clientTxId) {
   const [rows] = await db.execute(
     `SELECT
@@ -266,6 +347,222 @@ async function countSyncPushPersistedRows(db, clientTxId) {
     item_total: Number(rows[0].item_total),
     payment_total: Number(rows[0].payment_total)
   };
+}
+
+async function countSyncPushJournalRows(db, clientTxId) {
+  const [rows] = await db.execute(
+    `SELECT
+       (
+         SELECT COUNT(*)
+         FROM journal_batches jb
+         INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
+         WHERE jb.doc_type = ?
+           AND pt.client_tx_id = ?
+       ) AS batch_total,
+       (
+         SELECT COUNT(*)
+         FROM journal_lines jl
+         INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
+         INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
+         WHERE jb.doc_type = ?
+           AND pt.client_tx_id = ?
+       ) AS line_total`,
+    [POS_SALE_DOC_TYPE, clientTxId, POS_SALE_DOC_TYPE, clientTxId]
+  );
+
+  return {
+    batch_total: Number(rows[0].batch_total),
+    line_total: Number(rows[0].line_total)
+  };
+}
+
+async function readSyncPushJournalSummary(db, clientTxId) {
+  const [rows] = await db.execute(
+    `SELECT
+       COALESCE(SUM(jl.debit), 0) AS debit_total,
+       COALESCE(SUM(jl.credit), 0) AS credit_total,
+       COALESCE(SUM(CASE WHEN jl.description = 'POS sales tax' THEN jl.credit ELSE 0 END), 0) AS tax_credit_total,
+       COALESCE(SUM(CASE WHEN jl.description = 'POS sales tax' THEN 1 ELSE 0 END), 0) AS tax_line_total
+     FROM journal_lines jl
+     INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
+     INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
+     WHERE jb.doc_type = ?
+       AND pt.client_tx_id = ?`,
+    [POS_SALE_DOC_TYPE, clientTxId]
+  );
+
+  return {
+    debit_total: Number(rows[0].debit_total),
+    credit_total: Number(rows[0].credit_total),
+    tax_credit_total: Number(rows[0].tax_credit_total),
+    tax_line_total: Number(rows[0].tax_line_total)
+  };
+}
+
+async function setCompanyPosTaxConfig(db, companyId, config) {
+  const [rows] = await db.execute(
+    `SELECT enabled, config_json
+     FROM feature_flags
+     WHERE company_id = ?
+       AND \`key\` = 'pos.tax'
+     LIMIT 1`,
+    [companyId]
+  );
+
+  const previous = rows.length > 0
+    ? {
+        existed: true,
+        enabled: Number(rows[0].enabled),
+        config_json: String(rows[0].config_json ?? "{}")
+      }
+    : {
+        existed: false,
+        enabled: 0,
+        config_json: "{}"
+      };
+
+  await db.execute(
+    `INSERT INTO feature_flags (company_id, \`key\`, enabled, config_json)
+     VALUES (?, 'pos.tax', 1, ?)
+     ON DUPLICATE KEY UPDATE
+       enabled = VALUES(enabled),
+       config_json = VALUES(config_json),
+       updated_at = CURRENT_TIMESTAMP`,
+    [companyId, JSON.stringify(config)]
+  );
+
+  return previous;
+}
+
+async function restoreCompanyPosTaxConfig(db, companyId, previous) {
+  if (!previous.existed) {
+    await db.execute(
+      `DELETE FROM feature_flags
+       WHERE company_id = ?
+         AND \`key\` = 'pos.tax'`,
+      [companyId]
+    );
+    return;
+  }
+
+  await db.execute(
+    `UPDATE feature_flags
+     SET enabled = ?,
+         config_json = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE company_id = ?
+       AND \`key\` = 'pos.tax'`,
+    [previous.enabled, previous.config_json, companyId]
+  );
+}
+
+function buildTestAccountCode(mappingKey) {
+  const suffix = randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
+  const base = `IT${mappingKey.replaceAll("_", "")}${suffix}`;
+  return base.slice(0, 32);
+}
+
+async function ensureOutletAccountMappings(db, companyId, outletId) {
+  const placeholders = OUTLET_ACCOUNT_MAPPING_KEYS.map(() => "?").join(", ");
+  const [existingRows] = await db.execute(
+    `SELECT mapping_key
+     FROM outlet_account_mappings
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND mapping_key IN (${placeholders})`,
+    [companyId, outletId, ...OUTLET_ACCOUNT_MAPPING_KEYS]
+  );
+
+  const existingKeys = new Set(
+    (existingRows).map((row) => String(row.mapping_key ?? "")).filter((value) => value.length > 0)
+  );
+
+  const createdMappingKeys = [];
+  const createdAccountIds = [];
+
+  for (const mappingKey of OUTLET_ACCOUNT_MAPPING_KEYS) {
+    if (existingKeys.has(mappingKey)) {
+      continue;
+    }
+
+    const accountCode = buildTestAccountCode(mappingKey);
+    const [accountInsertResult] = await db.execute(
+      `INSERT INTO accounts (company_id, code, name)
+       VALUES (?, ?, ?)`,
+      [companyId, accountCode, `Integration Test ${mappingKey}`]
+    );
+    const accountId = Number(accountInsertResult.insertId);
+
+    await db.execute(
+      `INSERT INTO outlet_account_mappings (
+         company_id,
+         outlet_id,
+         mapping_key,
+         account_id
+       ) VALUES (?, ?, ?, ?)`,
+      [companyId, outletId, mappingKey, accountId]
+    );
+
+    createdMappingKeys.push(mappingKey);
+    createdAccountIds.push(accountId);
+  }
+
+  return {
+    createdMappingKeys,
+    createdAccountIds
+  };
+}
+
+async function cleanupCreatedOutletAccountMappings(db, companyId, outletId, fixture) {
+  if (fixture.createdMappingKeys.length > 0) {
+    const mappingPlaceholders = fixture.createdMappingKeys.map(() => "?").join(", ");
+    await db.execute(
+      `DELETE FROM outlet_account_mappings
+       WHERE company_id = ?
+         AND outlet_id = ?
+         AND mapping_key IN (${mappingPlaceholders})`,
+      [companyId, outletId, ...fixture.createdMappingKeys]
+    );
+  }
+
+  if (fixture.createdAccountIds.length > 0) {
+    const accountPlaceholders = fixture.createdAccountIds.map(() => "?").join(", ");
+    await db.execute(
+      `DELETE FROM accounts
+       WHERE company_id = ?
+         AND id IN (${accountPlaceholders})`,
+      [companyId, ...fixture.createdAccountIds]
+    );
+  }
+}
+
+async function cleanupSyncPushPersistedArtifacts(db, clientTxId) {
+  await db.execute(
+    `DELETE jl
+     FROM journal_lines jl
+     INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
+     INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
+     WHERE jb.doc_type = ?
+       AND pt.client_tx_id = ?`,
+    [POS_SALE_DOC_TYPE, clientTxId]
+  );
+
+  await db.execute(
+    `DELETE jb
+     FROM journal_batches jb
+     INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
+     WHERE jb.doc_type = ?
+       AND pt.client_tx_id = ?`,
+    [POS_SALE_DOC_TYPE, clientTxId]
+  );
+
+  await db.execute(
+    `DELETE FROM audit_logs
+     WHERE JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
+    [clientTxId]
+  );
+
+  await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [clientTxId]);
 }
 
 test(
@@ -401,9 +698,8 @@ test(
       for (const clientTxId of createdClientTxIds) {
         await db.execute(
           `DELETE FROM audit_logs
-           WHERE action = ?
-             AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
-          [SYNC_PUSH_ACCEPTED_AUDIT_ACTION, clientTxId]
+           WHERE JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
+          [clientTxId]
         );
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [clientTxId]);
       }
@@ -1563,15 +1859,602 @@ test(
       for (const clientTxId of createdClientTxIds) {
         await db.execute(
           `DELETE FROM audit_logs
-           WHERE action = ?
-             AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
-          [SYNC_PUSH_ACCEPTED_AUDIT_ACTION, clientTxId]
+           WHERE JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
+          [clientTxId]
         );
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [clientTxId]);
       }
 
       if (deniedOutletId > 0) {
         await db.execute("DELETE FROM outlets WHERE id = ?", [deniedOutletId]);
+      }
+
+      await db.end();
+    }
+  }
+);
+
+test(
+  "sync push integration: active posting card policy, sales tax posting, and duplicate replay journal idempotency",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = await mysql.createConnection(dbConfigFromEnv());
+    let childProcess;
+    let companyId = 0;
+    let outletId = 0;
+    let ownerUserId = 0;
+    const createdClientTxIds = [];
+    let postingFixture = {
+      createdMappingKeys: [],
+      createdAccountIds: []
+    };
+    let previousPosTaxConfig = null;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      ownerUserId = Number(owner.id);
+      companyId = Number(owner.company_id);
+      outletId = Number(owner.outlet_id);
+      postingFixture = await ensureOutletAccountMappings(db, companyId, outletId);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, {
+        envOverrides: {
+          [SYNC_PUSH_POSTING_MODE_ENV]: "active"
+        }
+      });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await loginResponse.json();
+      assert.equal(loginBody.ok, true);
+      const accessToken = loginBody.access_token;
+
+      const cardClientTxId = randomUUID();
+      const cardPolicyResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            {
+              ...buildSyncTransaction({
+                clientTxId: cardClientTxId,
+                companyId,
+                outletId,
+                cashierUserId: ownerUserId,
+                trxAt: new Date().toISOString()
+              }),
+              payments: [
+                {
+                  method: "CARD",
+                  amount: 12500
+                }
+              ]
+            }
+          ]
+        })
+      });
+      assert.equal(cardPolicyResponse.status, 200);
+      const cardPolicyBody = await cardPolicyResponse.json();
+      assert.equal(cardPolicyBody.ok, true);
+      assert.deepEqual(cardPolicyBody.results, [
+        {
+          client_tx_id: cardClientTxId,
+          result: "OK"
+        }
+      ]);
+      createdClientTxIds.push(cardClientTxId);
+      assert.deepEqual(await countSyncPushPersistedRows(db, cardClientTxId), {
+        tx_total: 1,
+        item_total: 1,
+        payment_total: 1
+      });
+      assert.deepEqual(await countSyncPushJournalRows(db, cardClientTxId), {
+        batch_total: 1,
+        line_total: 2
+      });
+      assert.equal(await countAcceptedSyncPushEvents(db, cardClientTxId), 1);
+      const cardAcceptedAuditPayload = await readAcceptedSyncPushAuditPayload(db, cardClientTxId);
+      assert.notEqual(cardAcceptedAuditPayload, null);
+      assert.equal(cardAcceptedAuditPayload.posting_mode, "active");
+      assert.equal(cardAcceptedAuditPayload.balance_ok, true);
+      assert.equal(Number.isInteger(Number(cardAcceptedAuditPayload.journal_batch_id)), true);
+      assert.equal(Number(cardAcceptedAuditPayload.journal_batch_id) > 0, true);
+
+      previousPosTaxConfig = await setCompanyPosTaxConfig(db, companyId, {
+        rate: 10,
+        inclusive: false
+      });
+
+      const taxedClientTxId = randomUUID();
+      const taxedResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            {
+              ...buildSyncTransaction({
+                clientTxId: taxedClientTxId,
+                companyId,
+                outletId,
+                cashierUserId: ownerUserId,
+                trxAt: new Date().toISOString()
+              }),
+              payments: [
+                {
+                  method: "CASH",
+                  amount: 13750
+                }
+              ]
+            }
+          ]
+        })
+      });
+      assert.equal(taxedResponse.status, 200);
+      const taxedBody = await taxedResponse.json();
+      assert.equal(taxedBody.ok, true);
+      assert.deepEqual(taxedBody.results, [
+        {
+          client_tx_id: taxedClientTxId,
+          result: "OK"
+        }
+      ]);
+      createdClientTxIds.push(taxedClientTxId);
+
+      assert.deepEqual(await countSyncPushJournalRows(db, taxedClientTxId), {
+        batch_total: 1,
+        line_total: 3
+      });
+      assert.equal(await countAcceptedSyncPushEvents(db, taxedClientTxId), 1);
+      const taxedAcceptedAuditPayload = await readAcceptedSyncPushAuditPayload(db, taxedClientTxId);
+      assert.notEqual(taxedAcceptedAuditPayload, null);
+      assert.equal(taxedAcceptedAuditPayload.posting_mode, "active");
+      assert.equal(taxedAcceptedAuditPayload.balance_ok, true);
+      assert.equal(Number.isInteger(Number(taxedAcceptedAuditPayload.journal_batch_id)), true);
+      const taxedSummary = await readSyncPushJournalSummary(db, taxedClientTxId);
+      assert.equal(taxedSummary.tax_line_total, 1);
+      assert.equal(taxedSummary.tax_credit_total, 1250);
+      assert.equal(taxedSummary.debit_total, taxedSummary.credit_total);
+
+      if (previousPosTaxConfig) {
+        await restoreCompanyPosTaxConfig(db, companyId, previousPosTaxConfig);
+        previousPosTaxConfig = null;
+      }
+
+      const duplicateClientTxId = randomUUID();
+      const duplicatePayload = {
+        outlet_id: outletId,
+        transactions: [
+          buildSyncTransaction({
+            clientTxId: duplicateClientTxId,
+            companyId,
+            outletId,
+            cashierUserId: ownerUserId,
+            trxAt: new Date().toISOString()
+          })
+        ]
+      };
+
+      const firstDuplicateResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(duplicatePayload)
+      });
+      assert.equal(firstDuplicateResponse.status, 200);
+      const firstDuplicateBody = await firstDuplicateResponse.json();
+      assert.equal(firstDuplicateBody.ok, true);
+      assert.deepEqual(firstDuplicateBody.results, [
+        {
+          client_tx_id: duplicateClientTxId,
+          result: "OK"
+        }
+      ]);
+      createdClientTxIds.push(duplicateClientTxId);
+
+      assert.deepEqual(await countSyncPushJournalRows(db, duplicateClientTxId), {
+        batch_total: 1,
+        line_total: 2
+      });
+
+      const replayDuplicateResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(duplicatePayload)
+      });
+      assert.equal(replayDuplicateResponse.status, 200);
+      const replayDuplicateBody = await replayDuplicateResponse.json();
+      assert.equal(replayDuplicateBody.ok, true);
+      assert.deepEqual(replayDuplicateBody.results, [
+        {
+          client_tx_id: duplicateClientTxId,
+          result: "DUPLICATE"
+        }
+      ]);
+
+      assert.deepEqual(await countSyncPushPersistedRows(db, duplicateClientTxId), {
+        tx_total: 1,
+        item_total: 1,
+        payment_total: 1
+      });
+      assert.deepEqual(await countSyncPushJournalRows(db, duplicateClientTxId), {
+        batch_total: 1,
+        line_total: 2
+      });
+      assert.equal(await countAcceptedSyncPushEvents(db, duplicateClientTxId), 1);
+      assert.equal(await countDuplicateSyncPushEvents(db, duplicateClientTxId), 1);
+      const duplicateAuditPayload = await readDuplicateSyncPushAuditPayload(db, duplicateClientTxId);
+      assert.notEqual(duplicateAuditPayload, null);
+      assert.equal(duplicateAuditPayload.posting_mode, "active");
+      assert.equal(duplicateAuditPayload.balance_ok, true);
+      assert.equal(duplicateAuditPayload.reason, "DUPLICATE_REPLAY");
+      assert.equal(Number.isInteger(Number(duplicateAuditPayload.journal_batch_id)), true);
+      assert.equal(Number(duplicateAuditPayload.journal_batch_id) > 0, true);
+
+      const concurrentDuplicateClientTxId = randomUUID();
+      const concurrentDuplicatePayload = {
+        outlet_id: outletId,
+        transactions: [
+          buildSyncTransaction({
+            clientTxId: concurrentDuplicateClientTxId,
+            companyId,
+            outletId,
+            cashierUserId: ownerUserId,
+            trxAt: new Date().toISOString()
+          })
+        ]
+      };
+
+      const [concurrentDuplicateFirstResponse, concurrentDuplicateSecondResponse] = await Promise.all([
+        fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(concurrentDuplicatePayload)
+        }),
+        fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(concurrentDuplicatePayload)
+        })
+      ]);
+      assert.equal(concurrentDuplicateFirstResponse.status, 200);
+      assert.equal(concurrentDuplicateSecondResponse.status, 200);
+
+      const [concurrentDuplicateFirstBody, concurrentDuplicateSecondBody] = await Promise.all([
+        concurrentDuplicateFirstResponse.json(),
+        concurrentDuplicateSecondResponse.json()
+      ]);
+      assertSyncPushResponseShape(concurrentDuplicateFirstBody);
+      assertSyncPushResponseShape(concurrentDuplicateSecondBody);
+
+      const concurrentDuplicateResults = [
+        concurrentDuplicateFirstBody.results?.[0]?.result,
+        concurrentDuplicateSecondBody.results?.[0]?.result
+      ].sort((left, right) => String(left).localeCompare(String(right)));
+      assert.deepEqual(concurrentDuplicateResults, ["DUPLICATE", "OK"]);
+      createdClientTxIds.push(concurrentDuplicateClientTxId);
+
+      const concurrentDuplicateJournalCounts = await countSyncPushJournalRows(db, concurrentDuplicateClientTxId);
+      assert.equal(concurrentDuplicateJournalCounts.batch_total, 1);
+      assert.equal(concurrentDuplicateJournalCounts.line_total > 0, true);
+
+      const concurrentDuplicateReplayResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(concurrentDuplicatePayload)
+      });
+      assert.equal(concurrentDuplicateReplayResponse.status, 200);
+      const concurrentDuplicateReplayBody = await concurrentDuplicateReplayResponse.json();
+      assert.equal(concurrentDuplicateReplayBody.ok, true);
+      assert.deepEqual(concurrentDuplicateReplayBody.results, [
+        {
+          client_tx_id: concurrentDuplicateClientTxId,
+          result: "DUPLICATE"
+        }
+      ]);
+
+      assert.deepEqual(await countSyncPushJournalRows(db, concurrentDuplicateClientTxId), {
+        batch_total: 1,
+        line_total: concurrentDuplicateJournalCounts.line_total
+      });
+
+      const concurrentConflictClientTxId = randomUUID();
+      const concurrentConflictPayloadA = {
+        outlet_id: outletId,
+        transactions: [
+          buildSyncTransaction({
+            clientTxId: concurrentConflictClientTxId,
+            companyId,
+            outletId,
+            cashierUserId: ownerUserId,
+            trxAt: new Date().toISOString()
+          })
+        ]
+      };
+      const concurrentConflictPayloadB = {
+        outlet_id: outletId,
+        transactions: [
+          {
+            ...buildSyncTransaction({
+              clientTxId: concurrentConflictClientTxId,
+              companyId,
+              outletId,
+              cashierUserId: ownerUserId,
+              trxAt: concurrentConflictPayloadA.transactions[0].trx_at
+            }),
+            items: [
+              {
+                ...buildSyncTransaction({
+                  clientTxId: concurrentConflictClientTxId,
+                  companyId,
+                  outletId,
+                  cashierUserId: ownerUserId,
+                  trxAt: concurrentConflictPayloadA.transactions[0].trx_at
+                }).items[0],
+                name_snapshot: "Test Item Conflict"
+              }
+            ]
+          }
+        ]
+      };
+
+      const [concurrentConflictFirstResponse, concurrentConflictSecondResponse] = await Promise.all([
+        fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(concurrentConflictPayloadA)
+        }),
+        fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(concurrentConflictPayloadB)
+        })
+      ]);
+      assert.equal(concurrentConflictFirstResponse.status, 200);
+      assert.equal(concurrentConflictSecondResponse.status, 200);
+
+      const [concurrentConflictFirstBody, concurrentConflictSecondBody] = await Promise.all([
+        concurrentConflictFirstResponse.json(),
+        concurrentConflictSecondResponse.json()
+      ]);
+      assertSyncPushResponseShape(concurrentConflictFirstBody);
+      assertSyncPushResponseShape(concurrentConflictSecondBody);
+
+      const concurrentConflictResults = [
+        concurrentConflictFirstBody.results?.[0],
+        concurrentConflictSecondBody.results?.[0]
+      ];
+      const concurrentConflictOk = concurrentConflictResults.find((item) => item?.result === "OK");
+      const concurrentConflictError = concurrentConflictResults.find((item) => item?.result === "ERROR");
+      assert.ok(concurrentConflictOk);
+      assert.ok(concurrentConflictError);
+      assert.equal(concurrentConflictError.message, IDEMPOTENCY_CONFLICT_MESSAGE);
+      createdClientTxIds.push(concurrentConflictClientTxId);
+
+      assert.deepEqual(await countSyncPushJournalRows(db, concurrentConflictClientTxId), {
+        batch_total: 1,
+        line_total: concurrentDuplicateJournalCounts.line_total
+      });
+      assert.equal(await countAcceptedSyncPushEvents(db, concurrentConflictClientTxId), 1);
+    } finally {
+      await stopApiServer(childProcess);
+
+      for (const clientTxId of createdClientTxIds) {
+        await cleanupSyncPushPersistedArtifacts(db, clientTxId);
+      }
+
+      if (companyId > 0 && previousPosTaxConfig) {
+        await restoreCompanyPosTaxConfig(db, companyId, previousPosTaxConfig);
+      }
+
+      if (companyId > 0 && outletId > 0) {
+        await cleanupCreatedOutletAccountMappings(db, companyId, outletId, postingFixture);
+      }
+
+      await db.end();
+    }
+  }
+);
+
+test(
+  "sync push integration: active posting unbalanced journal is rejected and rolled back",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = await mysql.createConnection(dbConfigFromEnv());
+    let childProcess;
+    let companyId = 0;
+    let outletId = 0;
+    let ownerUserId = 0;
+    let postingFixture = {
+      createdMappingKeys: [],
+      createdAccountIds: []
+    };
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      ownerUserId = Number(owner.id);
+      companyId = Number(owner.company_id);
+      outletId = Number(owner.outlet_id);
+      postingFixture = await ensureOutletAccountMappings(db, companyId, outletId);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, {
+        envOverrides: {
+          [SYNC_PUSH_POSTING_MODE_ENV]: "active",
+          [SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV]: "1"
+        }
+      });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await loginResponse.json();
+      assert.equal(loginBody.ok, true);
+      const accessToken = loginBody.access_token;
+
+      const unbalancedClientTxId = randomUUID();
+      const unbalancedResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            buildSyncTransaction({
+              clientTxId: unbalancedClientTxId,
+              companyId,
+              outletId,
+              cashierUserId: ownerUserId,
+              trxAt: new Date().toISOString()
+            })
+          ]
+        })
+      });
+      assert.equal(unbalancedResponse.status, 200);
+      const unbalancedBody = await unbalancedResponse.json();
+      assert.equal(unbalancedBody.ok, true);
+      assert.deepEqual(unbalancedBody.results, [
+        {
+          client_tx_id: unbalancedClientTxId,
+          result: "ERROR",
+          message: "insert failed"
+        }
+      ]);
+
+      const postingFailureAuditPayload = await readPostingHookFailureAuditPayload(db, unbalancedClientTxId);
+      assert.notEqual(postingFailureAuditPayload, null);
+      assert.equal(postingFailureAuditPayload.posting_mode, "active");
+      assert.equal(postingFailureAuditPayload.balance_ok, false);
+      assert.equal(postingFailureAuditPayload.journal_batch_id, null);
+      assert.equal(typeof postingFailureAuditPayload.reason, "string");
+      assert.equal(postingFailureAuditPayload.reason.length > 0, true);
+
+      assert.deepEqual(await countSyncPushPersistedRows(db, unbalancedClientTxId), {
+        tx_total: 0,
+        item_total: 0,
+        payment_total: 0
+      });
+      assert.deepEqual(await countSyncPushJournalRows(db, unbalancedClientTxId), {
+        batch_total: 0,
+        line_total: 0
+      });
+      assert.equal(await countAcceptedSyncPushEvents(db, unbalancedClientTxId), 0);
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (companyId > 0 && outletId > 0) {
+        await cleanupCreatedOutletAccountMappings(db, companyId, outletId, postingFixture);
       }
 
       await db.end();

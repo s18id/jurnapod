@@ -8,13 +8,17 @@ import { getRequestCorrelationId } from "../../../../src/lib/correlation-id";
 import { getDbPool } from "../../../../src/lib/db";
 import {
   SyncPushPostingHookError,
+  type SyncPushPostingHookResult,
   runSyncPushPostingHook
 } from "../../../../src/lib/sync-push-posting";
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 const MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE = 1205;
 const MYSQL_DEADLOCK_ERROR_CODE = 1213;
+const POS_TRANSACTIONS_CLIENT_TX_UNIQUE_KEY = "uq_pos_transactions_client_tx_id";
+const POS_SALE_DOC_TYPE = "POS_SALE";
 const SYNC_PUSH_ACCEPTED_AUDIT_ACTION = "SYNC_PUSH_ACCEPTED";
+const SYNC_PUSH_DUPLICATE_AUDIT_ACTION = "SYNC_PUSH_DUPLICATE";
 const SYNC_PUSH_POSTING_HOOK_FAIL_AUDIT_ACTION = "SYNC_PUSH_POSTING_HOOK_FAIL";
 const IDEMPOTENCY_CONFLICT_MESSAGE = "IDEMPOTENCY_CONFLICT";
 const RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE = "RETRYABLE_DB_LOCK_TIMEOUT";
@@ -43,6 +47,8 @@ const INTERNAL_SERVER_ERROR_RESPONSE = {
 type MysqlError = {
   errno?: number;
   code?: string;
+  message?: string;
+  sqlMessage?: string;
 };
 
 type SyncPushResultCode = "OK" | "DUPLICATE" | "ERROR";
@@ -53,8 +59,16 @@ type AcceptedSyncPushContext = {
   outletId: number;
   userId: number;
   clientTxId: string;
+  status: "COMPLETED" | "VOID" | "REFUND";
   trxAt: string;
   posTransactionId: number;
+};
+
+type PostingAuditMetadata = {
+  postingMode: string | null;
+  journalBatchId: number | null;
+  balanceOk: boolean | null;
+  reason: string | null;
 };
 
 type SyncPushTransactionPayload = {
@@ -113,6 +127,35 @@ function isRetryableMysqlError(error: unknown): error is MysqlError {
     isMysqlError(error) &&
     (error.errno === MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE || error.errno === MYSQL_DEADLOCK_ERROR_CODE)
   );
+}
+
+function readDuplicateKeyName(error: MysqlError): string | null {
+  const rawMessage = (typeof error.sqlMessage === "string" && error.sqlMessage)
+    || (typeof error.message === "string" && error.message)
+    || "";
+  if (rawMessage.length === 0) {
+    return null;
+  }
+
+  const keyMatch = rawMessage.match(/for key ['`"]([^'`"]+)['`"]/i);
+  if (!keyMatch) {
+    return null;
+  }
+
+  const keyName = keyMatch[1]?.trim();
+  if (!keyName) {
+    return null;
+  }
+
+  return keyName.split(".").pop() ?? keyName;
+}
+
+function isClientTxIdDuplicateError(error: unknown): error is MysqlError {
+  if (!isMysqlError(error) || error.errno !== MYSQL_DUPLICATE_ERROR_CODE) {
+    return false;
+  }
+
+  return readDuplicateKeyName(error) === POS_TRANSACTIONS_CLIENT_TX_UNIQUE_KEY;
 }
 
 function toMysqlDateTime(value: string): string {
@@ -470,7 +513,8 @@ function withCorrelationHeaders(correlationId: string): HeadersInit {
 
 async function runAcceptedSyncPushHook(
   dbExecutor: QueryExecutor,
-  context: AcceptedSyncPushContext
+  context: AcceptedSyncPushContext,
+  posting: SyncPushPostingHookResult
 ): Promise<void> {
   await dbExecutor.execute(
     `INSERT INTO audit_logs (
@@ -491,7 +535,126 @@ async function runAcceptedSyncPushHook(
         pos_transaction_id: context.posTransactionId,
         client_tx_id: context.clientTxId,
         trx_at: context.trxAt,
-        correlation_id: context.correlationId
+        correlation_id: context.correlationId,
+        posting_mode: posting.mode,
+        journal_batch_id: posting.journalBatchId,
+        balance_ok: posting.balanceOk,
+        reason: posting.reason
+      })
+    ]
+  );
+}
+
+async function readAcceptedPostingAuditMetadata(
+  dbExecutor: QueryExecutor,
+  clientTxId: string
+): Promise<PostingAuditMetadata> {
+  const [rows] = await dbExecutor.execute(
+    `SELECT payload_json
+     FROM audit_logs
+     WHERE action = ?
+       AND result = 'SUCCESS'
+       AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [SYNC_PUSH_ACCEPTED_AUDIT_ACTION, clientTxId]
+  );
+
+  const row = (rows as Array<{ payload_json?: string | null }>)[0];
+  if (!row || typeof row.payload_json !== "string") {
+    return {
+      postingMode: null,
+      journalBatchId: null,
+      balanceOk: null,
+      reason: null
+    };
+  }
+
+  let payload: unknown = null;
+  try {
+    payload = JSON.parse(row.payload_json);
+  } catch {
+    payload = null;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return {
+      postingMode: null,
+      journalBatchId: null,
+      balanceOk: null,
+      reason: null
+    };
+  }
+
+  const data = payload as Record<string, unknown>;
+  const batchParsed = Number(data.journal_batch_id);
+  return {
+    postingMode: typeof data.posting_mode === "string" ? data.posting_mode : null,
+    journalBatchId: Number.isInteger(batchParsed) ? batchParsed : null,
+    balanceOk: typeof data.balance_ok === "boolean" ? data.balance_ok : null,
+    reason: typeof data.reason === "string" ? data.reason : null
+  };
+}
+
+async function readJournalBatchIdByPosTransactionId(
+  dbExecutor: QueryExecutor,
+  posTransactionId: number
+): Promise<number | null> {
+  const [rows] = await dbExecutor.execute(
+    `SELECT id
+     FROM journal_batches
+     WHERE doc_type = ?
+       AND doc_id = ?
+     LIMIT 1`,
+    [POS_SALE_DOC_TYPE, posTransactionId]
+  );
+
+  const row = (rows as Array<{ id?: number | null }>)[0];
+  if (!row || !Number.isFinite(row.id)) {
+    return null;
+  }
+
+  return Number(row.id);
+}
+
+async function recordSyncPushDuplicateReplayAudit(
+  dbExecutor: QueryExecutor,
+  params: {
+    authUserId: number;
+    correlationId: string;
+    companyId: number;
+    outletId: number;
+    clientTxId: string;
+    posTransactionId: number;
+  }
+): Promise<void> {
+  const metadata = await readAcceptedPostingAuditMetadata(dbExecutor, params.clientTxId);
+  const fallbackJournalBatchId = await readJournalBatchIdByPosTransactionId(dbExecutor, params.posTransactionId);
+  const journalBatchId = metadata.journalBatchId ?? fallbackJournalBatchId;
+
+  await dbExecutor.execute(
+    `INSERT INTO audit_logs (
+       company_id,
+       outlet_id,
+       user_id,
+       action,
+       result,
+       ip_address,
+       payload_json
+     ) VALUES (?, ?, ?, ?, 'SUCCESS', NULL, ?)`,
+    [
+      params.companyId,
+      params.outletId,
+      params.authUserId,
+      SYNC_PUSH_DUPLICATE_AUDIT_ACTION,
+      JSON.stringify({
+        correlation_id: params.correlationId,
+        pos_transaction_id: params.posTransactionId,
+        client_tx_id: params.clientTxId,
+        posting_mode: metadata.postingMode,
+        journal_batch_id: journalBatchId,
+        balance_ok: metadata.balanceOk,
+        reason: "DUPLICATE_REPLAY"
       })
     ]
   );
@@ -532,7 +695,9 @@ async function recordSyncPushPostingHookFailure(
           correlation_id: context.correlationId,
           pos_transaction_id: context.posTransactionId,
           client_tx_id: context.clientTxId,
-          mode,
+          posting_mode: mode,
+          journal_batch_id: null,
+          balance_ok: false,
           reason: message
         })
       ]
@@ -620,6 +785,7 @@ export const POST = withAuth(
           const trxAtCanonical = toMysqlDateTime(tx.trx_at);
           const payloadSha256 = computePayloadSha256(canonicalizeTransactionForHash(tx));
           const payloadSha256Legacy = computePayloadSha256(canonicalizeTransactionForLegacyHash(tx));
+          let acceptedContextForFailureAudit: AcceptedSyncPushContext | null = null;
 
           try {
             await dbConnection.beginTransaction();
@@ -715,17 +881,34 @@ export const POST = withAuth(
               outletId: tx.outlet_id,
               userId: auth.userId,
               clientTxId: tx.client_tx_id,
+              status: tx.status,
               trxAt: tx.trx_at,
               posTransactionId
             };
+            acceptedContextForFailureAudit = acceptedContext;
 
-            await runAcceptedSyncPushHook(dbConnection, acceptedContext);
+            let postingResult: SyncPushPostingHookResult;
 
             try {
-              await runSyncPushPostingHook(dbConnection, acceptedContext);
+              postingResult = await runSyncPushPostingHook(dbConnection, acceptedContext);
             } catch (postingHookError) {
-              await recordSyncPushPostingHookFailure(dbConnection, acceptedContext, postingHookError);
+              if (
+                postingHookError instanceof SyncPushPostingHookError
+                && postingHookError.mode === "shadow"
+              ) {
+                await recordSyncPushPostingHookFailure(dbConnection, acceptedContext, postingHookError);
+                postingResult = {
+                  mode: postingHookError.mode,
+                  journalBatchId: null,
+                  balanceOk: false,
+                  reason: postingHookError.message
+                };
+              } else {
+                throw postingHookError;
+              }
             }
+
+            await runAcceptedSyncPushHook(dbConnection, acceptedContext, postingResult);
 
             await dbConnection.commit();
 
@@ -735,7 +918,7 @@ export const POST = withAuth(
             });
             logTransactionResult("OK");
           } catch (error) {
-            if (isMysqlError(error) && error.errno === MYSQL_DUPLICATE_ERROR_CODE) {
+            if (isClientTxIdDuplicateError(error)) {
               await rollbackQuietly(dbConnection);
 
               const existingRecord = await readExistingIdempotencyRecordByClientTxId(dbConnection, tx.client_tx_id);
@@ -755,6 +938,14 @@ export const POST = withAuth(
                   continue;
                 }
 
+                await recordSyncPushDuplicateReplayAudit(dbConnection, {
+                  authUserId: auth.userId,
+                  correlationId,
+                  companyId: tx.company_id,
+                  outletId: tx.outlet_id,
+                  clientTxId: tx.client_tx_id,
+                  posTransactionId: existingRecord.posTransactionId
+                });
                 results.push({
                   client_tx_id: tx.client_tx_id,
                   result: "DUPLICATE"
@@ -764,6 +955,14 @@ export const POST = withAuth(
               }
 
               if (normalizedExistingHash === payloadSha256) {
+                await recordSyncPushDuplicateReplayAudit(dbConnection, {
+                  authUserId: auth.userId,
+                  correlationId,
+                  companyId: tx.company_id,
+                  outletId: tx.outlet_id,
+                  clientTxId: tx.client_tx_id,
+                  posTransactionId: existingRecord.posTransactionId
+                });
                 results.push({
                   client_tx_id: tx.client_tx_id,
                   result: "DUPLICATE"
@@ -773,6 +972,14 @@ export const POST = withAuth(
               }
 
               if (existingHashVersion <= 1 && normalizedExistingHash === payloadSha256Legacy) {
+                await recordSyncPushDuplicateReplayAudit(dbConnection, {
+                  authUserId: auth.userId,
+                  correlationId,
+                  companyId: tx.company_id,
+                  outletId: tx.outlet_id,
+                  clientTxId: tx.client_tx_id,
+                  posTransactionId: existingRecord.posTransactionId
+                });
                 results.push({
                   client_tx_id: tx.client_tx_id,
                   result: "DUPLICATE"
@@ -789,6 +996,14 @@ export const POST = withAuth(
                   tx
                 );
                 if (legacyReplayMatch) {
+                  await recordSyncPushDuplicateReplayAudit(dbConnection, {
+                    authUserId: auth.userId,
+                    correlationId,
+                    companyId: tx.company_id,
+                    outletId: tx.outlet_id,
+                    clientTxId: tx.client_tx_id,
+                    posTransactionId: existingRecord.posTransactionId
+                  });
                   results.push({
                     client_tx_id: tx.client_tx_id,
                     result: "DUPLICATE"
@@ -811,6 +1026,14 @@ export const POST = withAuth(
             }
 
             await rollbackQuietly(dbConnection);
+
+            if (
+              acceptedContextForFailureAudit
+              && error instanceof SyncPushPostingHookError
+              && error.mode !== "shadow"
+            ) {
+              await recordSyncPushPostingHookFailure(dbPool, acceptedContextForFailureAudit, error);
+            }
 
             console.error("POST /sync/push transaction insert failed", {
               correlation_id: correlationId,
