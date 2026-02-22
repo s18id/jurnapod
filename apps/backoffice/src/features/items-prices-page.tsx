@@ -1,0 +1,516 @@
+import { useEffect, useMemo, useState } from "react";
+import { apiRequest, ApiError } from "../lib/api-client";
+import type { SessionUser } from "../lib/session";
+
+type ItemType = "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+
+type Item = {
+  id: number;
+  company_id: number;
+  sku: string | null;
+  name: string;
+  type: ItemType;
+  is_active: boolean;
+  updated_at: string;
+};
+
+type ItemPrice = {
+  id: number;
+  company_id: number;
+  outlet_id: number;
+  item_id: number;
+  price: number;
+  is_active: boolean;
+  updated_at: string;
+};
+
+type ItemsResponse = { ok: true; items: Item[] };
+type ItemPricesResponse = { ok: true; prices: ItemPrice[] };
+
+const itemTypeOptions: readonly ItemType[] = ["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"];
+
+const boxStyle = {
+  border: "1px solid #e2ddd2",
+  borderRadius: "10px",
+  padding: "16px",
+  backgroundColor: "#fcfbf8",
+  marginBottom: "14px"
+} as const;
+
+const tableStyle = {
+  width: "100%",
+  borderCollapse: "collapse" as const
+};
+
+const cellStyle = {
+  borderBottom: "1px solid #ece7dc",
+  padding: "8px"
+} as const;
+
+const inputStyle = {
+  border: "1px solid #cabfae",
+  borderRadius: "6px",
+  padding: "6px 8px"
+} as const;
+
+type ItemsPricesPageProps = {
+  user: SessionUser;
+  accessToken: string;
+};
+
+export function ItemsPricesPage(props: ItemsPricesPageProps) {
+  const [items, setItems] = useState<Item[]>([]);
+  const [prices, setPrices] = useState<ItemPrice[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedOutletId, setSelectedOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
+
+  const [newItem, setNewItem] = useState({
+    sku: "",
+    name: "",
+    type: "PRODUCT" as ItemType,
+    is_active: true
+  });
+  const [newPrice, setNewPrice] = useState({
+    item_id: 0,
+    price: "",
+    is_active: true
+  });
+
+  const itemMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+
+  async function refreshData(outletId: number) {
+    setLoading(true);
+    setError(null);
+    try {
+      const [itemsResponse, pricesResponse] = await Promise.all([
+        apiRequest<ItemsResponse>("/items", {}, props.accessToken),
+        apiRequest<ItemPricesResponse>(`/item-prices?outlet_id=${outletId}`, {}, props.accessToken)
+      ]);
+      setItems(itemsResponse.items);
+      setPrices(pricesResponse.prices);
+      setNewPrice((prev) => ({
+        ...prev,
+        item_id: prev.item_id > 0 ? prev.item_id : itemsResponse.items[0]?.id ?? 0
+      }));
+    } catch (fetchError) {
+      if (fetchError instanceof ApiError) {
+        setError(fetchError.message);
+      } else {
+        setError("Failed to load items and prices");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (selectedOutletId > 0) {
+      refreshData(selectedOutletId).catch(() => undefined);
+    }
+  }, [selectedOutletId]);
+
+  async function createItem() {
+    try {
+      await apiRequest("/items", {
+        method: "POST",
+        body: JSON.stringify({
+          sku: newItem.sku.trim() || null,
+          name: newItem.name.trim(),
+          type: newItem.type,
+          is_active: newItem.is_active
+        })
+      }, props.accessToken);
+      setNewItem({ sku: "", name: "", type: "PRODUCT", is_active: true });
+      await refreshData(selectedOutletId);
+    } catch (createError) {
+      if (createError instanceof ApiError) {
+        setError(createError.message);
+      }
+    }
+  }
+
+  async function saveItem(item: Item) {
+    try {
+      await apiRequest(`/items/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          sku: item.sku,
+          name: item.name,
+          type: item.type,
+          is_active: item.is_active
+        })
+      }, props.accessToken);
+      await refreshData(selectedOutletId);
+    } catch (saveError) {
+      if (saveError instanceof ApiError) {
+        setError(saveError.message);
+      }
+    }
+  }
+
+  async function deleteItem(itemId: number) {
+    try {
+      await apiRequest(`/items/${itemId}`, { method: "DELETE" }, props.accessToken);
+      await refreshData(selectedOutletId);
+    } catch (deleteError) {
+      if (deleteError instanceof ApiError) {
+        setError(deleteError.message);
+      }
+    }
+  }
+
+  async function createPrice() {
+    if (newPrice.item_id <= 0 || !newPrice.price.trim()) {
+      return;
+    }
+
+    try {
+      await apiRequest("/item-prices", {
+        method: "POST",
+        body: JSON.stringify({
+          item_id: newPrice.item_id,
+          outlet_id: selectedOutletId,
+          price: Number(newPrice.price),
+          is_active: newPrice.is_active
+        })
+      }, props.accessToken);
+      setNewPrice((prev) => ({ ...prev, price: "", is_active: true }));
+      await refreshData(selectedOutletId);
+    } catch (createError) {
+      if (createError instanceof ApiError) {
+        setError(createError.message);
+      }
+    }
+  }
+
+  async function savePrice(price: ItemPrice) {
+    try {
+      await apiRequest(`/item-prices/${price.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          item_id: price.item_id,
+          outlet_id: price.outlet_id,
+          price: price.price,
+          is_active: price.is_active
+        })
+      }, props.accessToken);
+      await refreshData(selectedOutletId);
+    } catch (saveError) {
+      if (saveError instanceof ApiError) {
+        setError(saveError.message);
+      }
+    }
+  }
+
+  async function deletePrice(priceId: number) {
+    try {
+      await apiRequest(`/item-prices/${priceId}`, { method: "DELETE" }, props.accessToken);
+      await refreshData(selectedOutletId);
+    } catch (deleteError) {
+      if (deleteError instanceof ApiError) {
+        setError(deleteError.message);
+      }
+    }
+  }
+
+  return (
+    <div>
+      <section style={boxStyle}>
+        <h2 style={{ marginTop: 0 }}>Items + Prices Management</h2>
+        <p style={{ marginTop: 0 }}>Outlet scope for prices:</p>
+        <select
+          value={selectedOutletId}
+          onChange={(event) => setSelectedOutletId(Number(event.target.value))}
+          style={inputStyle}
+        >
+          {props.user.outlets.map((outlet) => (
+            <option key={outlet.id} value={outlet.id}>
+              {outlet.code} - {outlet.name}
+            </option>
+          ))}
+        </select>
+        {loading ? <p>Loading data...</p> : null}
+        {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
+      </section>
+
+      <section style={boxStyle}>
+        <h3 style={{ marginTop: 0 }}>Create Item</h3>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <input
+            placeholder="SKU"
+            value={newItem.sku}
+            onChange={(event) => setNewItem((prev) => ({ ...prev, sku: event.target.value }))}
+            style={inputStyle}
+          />
+          <input
+            placeholder="Name"
+            value={newItem.name}
+            onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
+            style={inputStyle}
+          />
+          <select
+            value={newItem.type}
+            onChange={(event) =>
+              setNewItem((prev) => ({
+                ...prev,
+                type: event.target.value as ItemType
+              }))
+            }
+            style={inputStyle}
+          >
+            {itemTypeOptions.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+          <label>
+            <input
+              type="checkbox"
+              checked={newItem.is_active}
+              onChange={(event) =>
+                setNewItem((prev) => ({
+                  ...prev,
+                  is_active: event.target.checked
+                }))
+              }
+            />
+            Active
+          </label>
+          <button type="button" onClick={() => createItem()}>
+            Add item
+          </button>
+        </div>
+      </section>
+
+      <section style={boxStyle}>
+        <h3 style={{ marginTop: 0 }}>Items</h3>
+        <table style={tableStyle}>
+          <thead>
+            <tr>
+              <th style={cellStyle}>ID</th>
+              <th style={cellStyle}>SKU</th>
+              <th style={cellStyle}>Name</th>
+              <th style={cellStyle}>Type</th>
+              <th style={cellStyle}>Active</th>
+              <th style={cellStyle}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id}>
+                <td style={cellStyle}>{item.id}</td>
+                <td style={cellStyle}>
+                  <input
+                    value={item.sku ?? ""}
+                    onChange={(event) =>
+                      setItems((prev) =>
+                        prev.map((entry) =>
+                          entry.id === item.id ? { ...entry, sku: event.target.value || null } : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <input
+                    value={item.name}
+                    onChange={(event) =>
+                      setItems((prev) =>
+                        prev.map((entry) =>
+                          entry.id === item.id ? { ...entry, name: event.target.value } : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <select
+                    value={item.type}
+                    onChange={(event) =>
+                      setItems((prev) =>
+                        prev.map((entry) =>
+                          entry.id === item.id
+                            ? { ...entry, type: event.target.value as ItemType }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  >
+                    {itemTypeOptions.map((type) => (
+                      <option key={type} value={type}>
+                        {type}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td style={cellStyle}>
+                  <input
+                    type="checkbox"
+                    checked={item.is_active}
+                    onChange={(event) =>
+                      setItems((prev) =>
+                        prev.map((entry) =>
+                          entry.id === item.id
+                            ? { ...entry, is_active: event.target.checked }
+                            : entry
+                        )
+                      )
+                    }
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <button type="button" onClick={() => saveItem(item)}>
+                    Save
+                  </button>
+                  <button type="button" onClick={() => deleteItem(item.id)}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section style={boxStyle}>
+        <h3 style={{ marginTop: 0 }}>Create Price</h3>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <select
+            value={newPrice.item_id}
+            onChange={(event) =>
+              setNewPrice((prev) => ({
+                ...prev,
+                item_id: Number(event.target.value)
+              }))
+            }
+            style={inputStyle}
+          >
+            <option value={0}>Select item</option>
+            {items.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <input
+            placeholder="Price"
+            value={newPrice.price}
+            onChange={(event) => setNewPrice((prev) => ({ ...prev, price: event.target.value }))}
+            style={inputStyle}
+          />
+          <label>
+            <input
+              type="checkbox"
+              checked={newPrice.is_active}
+              onChange={(event) =>
+                setNewPrice((prev) => ({
+                  ...prev,
+                  is_active: event.target.checked
+                }))
+              }
+            />
+            Active
+          </label>
+          <button type="button" onClick={() => createPrice()}>
+            Add price
+          </button>
+        </div>
+      </section>
+
+      <section style={boxStyle}>
+        <h3 style={{ marginTop: 0 }}>Outlet Prices</h3>
+        <table style={tableStyle}>
+          <thead>
+            <tr>
+              <th style={cellStyle}>ID</th>
+              <th style={cellStyle}>Item</th>
+              <th style={cellStyle}>Price</th>
+              <th style={cellStyle}>Active</th>
+              <th style={cellStyle}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {prices.map((price) => (
+              <tr key={price.id}>
+                <td style={cellStyle}>{price.id}</td>
+                <td style={cellStyle}>
+                  <select
+                    value={price.item_id}
+                    onChange={(event) =>
+                      setPrices((prev) =>
+                        prev.map((entry) =>
+                          entry.id === price.id
+                            ? { ...entry, item_id: Number(event.target.value) }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  >
+                    {items.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td style={cellStyle}>
+                  <input
+                    value={price.price}
+                    onChange={(event) =>
+                      setPrices((prev) =>
+                        prev.map((entry) =>
+                          entry.id === price.id
+                            ? { ...entry, price: Number(event.target.value || "0") }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <input
+                    type="checkbox"
+                    checked={price.is_active}
+                    onChange={(event) =>
+                      setPrices((prev) =>
+                        prev.map((entry) =>
+                          entry.id === price.id
+                            ? { ...entry, is_active: event.target.checked }
+                            : entry
+                        )
+                      )
+                    }
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <button type="button" onClick={() => savePrice(price)}>
+                    Save
+                  </button>
+                  <button type="button" onClick={() => deletePrice(price.id)}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {prices.length === 0 ? <p>No prices for selected outlet.</p> : null}
+      </section>
+
+      <section style={boxStyle}>
+        <strong>Quick checks</strong>
+        <p style={{ marginBottom: 0 }}>
+          Loaded {items.length} items and {prices.length} prices for outlet #{selectedOutletId}. First
+          visible item: {itemMap.get(items[0]?.id ?? -1)?.name ?? "-"}
+        </p>
+      </section>
+    </div>
+  );
+}
