@@ -1,6 +1,6 @@
 # Milestone M4 PR-08 Implementation Blueprint (POS Offline v0)
 
-Status: draft implementation spec
+Status: implemented (reference blueprint)
 
 This blueprint converts the M4 audit decisions into build-ready tasks for PR-08.
 

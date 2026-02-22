@@ -9,9 +9,9 @@ Use this during manual execution of:
 - Start time (local): `not recorded`
 - End time (local): `not recorded`
 - Tester name: `ahmad`
-- Browser: `<Chrome|Edge>`
+- Browser: `Chrome`
 - Browser version: `not recorded`
-- Execution mode: `<browser tab|installed app window|both>`
+- Execution mode: `both`
 - Environment URL: `http://127.0.0.1:4173`
 - Ticket/record link: `not recorded`
 

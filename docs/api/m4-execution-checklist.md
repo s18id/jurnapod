@@ -1,12 +1,13 @@
 # Milestone M4 Execution Checklist
 
-Status: working checklist
+Status: completed
 
 Tech baseline: POS client is **Vite + React + PWA** (offline-first behavior is mandatory).
 
 Scope references:
 - `docs/api/m3-master-data-handover.md`
 - `docs/api/m4-pr08-implementation-blueprint.md`
+- `docs/api/m4-post-closure-notes.md`
 
 Core decisions locked:
 - Internal PK/FK use BIGINT (numeric IDs in contracts).

@@ -9,3 +9,5 @@ pnpm-lock.yaml
 .env
 .opencode
 .next
+apps/pos/.lighthouseci/
+apps/pos/test-results/
