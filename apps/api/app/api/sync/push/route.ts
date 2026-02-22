@@ -21,6 +21,8 @@ const RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE = "RETRYABLE_DB_LOCK_TIMEOUT";
 const RETRYABLE_DB_DEADLOCK_MESSAGE = "RETRYABLE_DB_DEADLOCK";
 const TEST_FAIL_AFTER_HEADER_INSERT_HEADER = "x-jp-sync-push-fail-after-header";
 const TEST_FORCE_DB_ERRNO_HEADER = "x-jp-sync-push-force-db-errno";
+const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
+const PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT = 2;
 
 const INVALID_REQUEST_RESPONSE = {
   ok: false,
@@ -77,6 +79,7 @@ type SyncPushTransactionPayload = {
 type ExistingIdempotencyRecord = {
   posTransactionId: number;
   payloadSha256: string | null;
+  payloadHashVersion: number | null;
 };
 
 type LegacyComparablePayload = {
@@ -84,6 +87,7 @@ type LegacyComparablePayload = {
   company_id: number;
   outlet_id: number;
   status: "COMPLETED" | "VOID" | "REFUND";
+  trx_at: string;
   items: Array<{
     item_id: number;
     qty: number;
@@ -160,7 +164,45 @@ function canonicalizeTransactionForHash(tx: {
     outlet_id: tx.outlet_id,
     cashier_user_id: tx.cashier_user_id,
     status: tx.status,
-    trx_at: tx.trx_at,
+    trx_at: toMysqlDateTime(tx.trx_at),
+    items: tx.items.map((item) => ({
+      item_id: item.item_id,
+      qty: item.qty,
+      price_snapshot: item.price_snapshot,
+      name_snapshot: item.name_snapshot
+    })),
+    payments: tx.payments.map((payment) => ({
+      method: payment.method,
+      amount: payment.amount
+    }))
+  });
+}
+
+function canonicalizeTransactionForLegacyHash(tx: {
+  client_tx_id: string;
+  company_id: number;
+  outlet_id: number;
+  cashier_user_id: number;
+  status: "COMPLETED" | "VOID" | "REFUND";
+  trx_at: string;
+  items: Array<{
+    item_id: number;
+    qty: number;
+    price_snapshot: number;
+    name_snapshot: string;
+  }>;
+  payments: Array<{
+    method: string;
+    amount: number;
+  }>;
+}, trxAtOverride?: string): string {
+  return JSON.stringify({
+    client_tx_id: tx.client_tx_id,
+    company_id: tx.company_id,
+    outlet_id: tx.outlet_id,
+    cashier_user_id: tx.cashier_user_id,
+    status: tx.status,
+    trx_at: trxAtOverride ?? tx.trx_at,
     items: tx.items.map((item) => ({
       item_id: item.item_id,
       qty: item.qty,
@@ -180,6 +222,7 @@ function canonicalizeTransactionForLegacyCompare(payload: LegacyComparablePayloa
     company_id: payload.company_id,
     outlet_id: payload.outlet_id,
     status: payload.status,
+    trx_at: payload.trx_at,
     items: payload.items.map((item) => ({
       item_id: item.item_id,
       qty: item.qty,
@@ -193,16 +236,53 @@ function canonicalizeTransactionForLegacyCompare(payload: LegacyComparablePayloa
   });
 }
 
+function listLegacyEquivalentTrxAtVariants(trxAt: string): string[] {
+  const variants = new Set<string>();
+  const trimmed = trxAt.trim();
+  if (trimmed.length === 0) {
+    return [];
+  }
+
+  variants.add(trimmed);
+
+  const noMillisIsoMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(Z|[+-]\d{2}:\d{2})$/);
+  if (noMillisIsoMatch) {
+    variants.add(`${noMillisIsoMatch[1]}.000${noMillisIsoMatch[2]}`);
+  }
+
+  const zeroMillisIsoMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.000(Z|[+-]\d{2}:\d{2})$/);
+  if (zeroMillisIsoMatch) {
+    variants.add(`${zeroMillisIsoMatch[1]}${zeroMillisIsoMatch[2]}`);
+  }
+
+  return Array.from(variants);
+}
+
+function hasLegacyEquivalentHashMatch(existingHash: string, incomingTx: SyncPushTransactionPayload): boolean {
+  for (const trxAtVariant of listLegacyEquivalentTrxAtVariants(incomingTx.trx_at)) {
+    const candidateHash = computePayloadSha256(canonicalizeTransactionForLegacyHash(incomingTx, trxAtVariant));
+    if (candidateHash === existingHash) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function computePayloadSha256(canonicalPayload: string): string {
   return createHash("sha256").update(canonicalPayload).digest("hex");
 }
 
+function isSyncPushTestHookEnabled(): boolean {
+  return process.env.NODE_ENV !== "production" && process.env[SYNC_PUSH_TEST_HOOKS_ENV] === "1";
+}
+
 function shouldInjectFailureAfterHeaderInsert(request: Request): boolean {
-  return process.env.NODE_ENV !== "production" && request.headers.get(TEST_FAIL_AFTER_HEADER_INSERT_HEADER) === "1";
+  return isSyncPushTestHookEnabled() && request.headers.get(TEST_FAIL_AFTER_HEADER_INSERT_HEADER) === "1";
 }
 
 function readForcedRetryableErrno(request: Request): number | null {
-  if (process.env.NODE_ENV === "production") {
+  if (!isSyncPushTestHookEnabled()) {
     return null;
   }
 
@@ -236,21 +316,22 @@ async function readExistingIdempotencyRecordByClientTxId(
   clientTxId: string
 ): Promise<ExistingIdempotencyRecord | null> {
   const [rows] = await dbConnection.execute(
-    `SELECT id, payload_sha256
+    `SELECT id, payload_sha256, payload_hash_version
      FROM pos_transactions
      WHERE client_tx_id = ?
      LIMIT 1`,
     [clientTxId]
   );
 
-  const row = (rows as Array<{ id?: number; payload_sha256?: string | null }>)[0];
+  const row = (rows as Array<{ id?: number; payload_sha256?: string | null; payload_hash_version?: number | null }>)[0];
   if (!row || !Number.isFinite(row.id)) {
     return null;
   }
 
   return {
     posTransactionId: Number(row.id),
-    payloadSha256: typeof row.payload_sha256 === "string" ? row.payload_sha256 : null
+    payloadSha256: typeof row.payload_sha256 === "string" ? row.payload_sha256 : null,
+    payloadHashVersion: Number.isFinite(row.payload_hash_version) ? Number(row.payload_hash_version) : null
   };
 }
 
@@ -259,7 +340,7 @@ async function readLegacyComparablePayloadByPosTransactionId(
   posTransactionId: number
 ): Promise<LegacyComparablePayload | null> {
   const [headerRows] = await dbConnection.execute(
-    `SELECT client_tx_id, company_id, outlet_id, status
+    `SELECT client_tx_id, company_id, outlet_id, status, DATE_FORMAT(trx_at, '%Y-%m-%d %H:%i:%s') AS trx_at
      FROM pos_transactions
      WHERE id = ?
      LIMIT 1`,
@@ -272,6 +353,7 @@ async function readLegacyComparablePayloadByPosTransactionId(
       company_id?: number;
       outlet_id?: number;
       status?: "COMPLETED" | "VOID" | "REFUND";
+      trx_at?: string;
     }>
   )[0];
   if (
@@ -279,6 +361,7 @@ async function readLegacyComparablePayloadByPosTransactionId(
     typeof header.client_tx_id !== "string" ||
     !Number.isFinite(header.company_id) ||
     !Number.isFinite(header.outlet_id) ||
+    typeof header.trx_at !== "string" ||
     (header.status !== "COMPLETED" && header.status !== "VOID" && header.status !== "REFUND")
   ) {
     return null;
@@ -305,6 +388,7 @@ async function readLegacyComparablePayloadByPosTransactionId(
     company_id: Number(header.company_id),
     outlet_id: Number(header.outlet_id),
     status: header.status,
+    trx_at: header.trx_at,
     items: (itemRows as Array<{ item_id: number; qty: number; price_snapshot: number; name_snapshot: string }>).map((row) => ({
       item_id: Number(row.item_id),
       qty: Number(row.qty),
@@ -333,6 +417,7 @@ async function doesLegacyPayloadReplayMatch(
     company_id: incomingTx.company_id,
     outlet_id: incomingTx.outlet_id,
     status: incomingTx.status,
+    trx_at: toMysqlDateTime(incomingTx.trx_at),
     items: incomingTx.items.map((item) => ({
       item_id: item.item_id,
       qty: item.qty,
@@ -346,6 +431,19 @@ async function doesLegacyPayloadReplayMatch(
   };
 
   return canonicalizeTransactionForLegacyCompare(existingPayload) === canonicalizeTransactionForLegacyCompare(incomingPayload);
+}
+
+async function doesLegacyV1HashMismatchReplayMatch(
+  dbConnection: PoolConnection,
+  posTransactionId: number,
+  existingHash: string,
+  incomingTx: SyncPushTransactionPayload
+): Promise<boolean> {
+  if (!hasLegacyEquivalentHashMatch(existingHash, incomingTx)) {
+    return false;
+  }
+
+  return doesLegacyPayloadReplayMatch(dbConnection, posTransactionId, incomingTx);
 }
 
 function logSyncPushTransactionResult(params: {
@@ -452,6 +550,14 @@ const syncPushOutletGuardSchema = SyncPushRequestSchema.pick({
   outlet_id: true
 });
 
+const syncPushTransactionSchemaWithOffset = SyncPushRequestSchema.shape.transactions.element.extend({
+  trx_at: z.string().datetime({ offset: true })
+});
+
+const syncPushRequestSchemaWithOffset = SyncPushRequestSchema.extend({
+  transactions: z.array(syncPushTransactionSchemaWithOffset).min(1)
+});
+
 const invalidJsonGuardError = new ZodError([
   {
     code: z.ZodIssueCode.custom,
@@ -481,7 +587,7 @@ export const POST = withAuth(
 
     try {
       const payload = await request.json();
-      const input = SyncPushRequestSchema.parse(payload);
+      const input = syncPushRequestSchemaWithOffset.parse(payload);
       const dbPool = getDbPool();
       const dbConnection = await dbPool.getConnection();
       const results: SyncPushResultItem[] = [];
@@ -511,9 +617,11 @@ export const POST = withAuth(
             continue;
           }
 
+          const trxAtCanonical = toMysqlDateTime(tx.trx_at);
+          const payloadSha256 = computePayloadSha256(canonicalizeTransactionForHash(tx));
+          const payloadSha256Legacy = computePayloadSha256(canonicalizeTransactionForLegacyHash(tx));
+
           try {
-            const canonicalPayload = canonicalizeTransactionForHash(tx);
-            const payloadSha256 = computePayloadSha256(canonicalPayload);
             await dbConnection.beginTransaction();
 
             if (forcedRetryableErrno !== null) {
@@ -537,9 +645,9 @@ export const POST = withAuth(
                 tx.outlet_id,
                 tx.client_tx_id,
                 tx.status,
-                toMysqlDateTime(tx.trx_at),
+                trxAtCanonical,
                 payloadSha256,
-                1
+                PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT
               ]
             );
 
@@ -637,6 +745,7 @@ export const POST = withAuth(
                 continue;
               }
 
+              const existingHashVersion = existingRecord.payloadHashVersion ?? 1;
               const normalizedExistingHash = existingRecord.payloadSha256?.trim() ?? "";
               if (normalizedExistingHash.length === 0) {
                 const legacyReplayMatch = await doesLegacyPayloadReplayMatch(dbConnection, existingRecord.posTransactionId, tx);
@@ -654,18 +763,43 @@ export const POST = withAuth(
                 continue;
               }
 
-              const incomingPayloadHash = computePayloadSha256(canonicalizeTransactionForHash(tx));
-              if (normalizedExistingHash !== incomingPayloadHash) {
-                results.push(toErrorResult(tx.client_tx_id, IDEMPOTENCY_CONFLICT_MESSAGE));
-                logTransactionResult("ERROR");
+              if (normalizedExistingHash === payloadSha256) {
+                results.push({
+                  client_tx_id: tx.client_tx_id,
+                  result: "DUPLICATE"
+                });
+                logTransactionResult("DUPLICATE");
                 continue;
               }
 
-              results.push({
-                client_tx_id: tx.client_tx_id,
-                result: "DUPLICATE"
-              });
-              logTransactionResult("DUPLICATE");
+              if (existingHashVersion <= 1 && normalizedExistingHash === payloadSha256Legacy) {
+                results.push({
+                  client_tx_id: tx.client_tx_id,
+                  result: "DUPLICATE"
+                });
+                logTransactionResult("DUPLICATE");
+                continue;
+              }
+
+              if (existingHashVersion <= 1) {
+                const legacyReplayMatch = await doesLegacyV1HashMismatchReplayMatch(
+                  dbConnection,
+                  existingRecord.posTransactionId,
+                  normalizedExistingHash,
+                  tx
+                );
+                if (legacyReplayMatch) {
+                  results.push({
+                    client_tx_id: tx.client_tx_id,
+                    result: "DUPLICATE"
+                  });
+                  logTransactionResult("DUPLICATE");
+                  continue;
+                }
+              }
+
+              results.push(toErrorResult(tx.client_tx_id, IDEMPOTENCY_CONFLICT_MESSAGE));
+              logTransactionResult("ERROR");
               continue;
             }
 

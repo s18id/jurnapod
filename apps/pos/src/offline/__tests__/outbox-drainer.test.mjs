@@ -92,6 +92,92 @@ test("pending job becomes SENT when sender succeeds", async () => {
   }
 });
 
+test("drain attempt log includes lease token context", { concurrency: false }, async () => {
+  const db = createPosOfflineDb(`jp-pos-outbox-drainer-test-${crypto.randomUUID()}`);
+  const fixedNow = Date.parse("2026-02-21T10:05:00.000Z");
+  const capturedLogs = [];
+  const originalConsoleInfo = console.info;
+  console.info = (...args) => {
+    capturedLogs.push(args);
+  };
+
+  try {
+    await seedPendingOutboxJob(db, nowIso(fixedNow - 1_000));
+
+    const result = await drainOutboxJobs(
+      {
+        now: () => fixedNow,
+        sender: async () => {
+          return { result: "OK" };
+        }
+      },
+      db
+    );
+
+    const attemptLog = capturedLogs.find(
+      (entry) => entry[0] === "POS outbox drain attempt" && entry[1]?.result === "SENT"
+    );
+
+    assert.equal(result.sent_count, 1);
+    assert.ok(attemptLog);
+    assert.equal(typeof attemptLog[1].lease_token, "string");
+    assert.match(attemptLog[1].lease_token, /^\*\*\*.{8}$/);
+  } finally {
+    console.info = originalConsoleInfo;
+    db.close();
+    await db.delete();
+  }
+});
+
+test("drain attempt log masks short lease tokens", { concurrency: false }, async () => {
+  const db = createPosOfflineDb(`jp-pos-outbox-drainer-test-${crypto.randomUUID()}`);
+  const fixedNow = Date.parse("2026-02-21T10:06:00.000Z");
+  const capturedLogs = [];
+  const originalConsoleInfo = console.info;
+  const originalRandomUUID = globalThis.crypto.randomUUID;
+  const shortLeaseToken = "tok123";
+  let randomUuidCallCount = 0;
+  console.info = (...args) => {
+    capturedLogs.push(args);
+  };
+
+  try {
+    await seedPendingOutboxJob(db, nowIso(fixedNow - 1_000));
+    globalThis.crypto.randomUUID = () => {
+      randomUuidCallCount += 1;
+      if (randomUuidCallCount === 1) {
+        return shortLeaseToken;
+      }
+
+      return originalRandomUUID();
+    };
+
+    const result = await drainOutboxJobs(
+      {
+        now: () => fixedNow,
+        sender: async () => {
+          return { result: "OK" };
+        }
+      },
+      db
+    );
+
+    const attemptLog = capturedLogs.find(
+      (entry) => entry[0] === "POS outbox drain attempt" && entry[1]?.result === "SENT"
+    );
+
+    assert.equal(result.sent_count, 1);
+    assert.ok(attemptLog);
+    assert.equal(attemptLog[1].lease_token, `***${shortLeaseToken}`);
+    assert.notEqual(attemptLog[1].lease_token, shortLeaseToken);
+  } finally {
+    globalThis.crypto.randomUUID = originalRandomUUID;
+    console.info = originalConsoleInfo;
+    db.close();
+    await db.delete();
+  }
+});
+
 test("server DUPLICATE result marks job SENT", async () => {
   const db = createPosOfflineDb(`jp-pos-outbox-drainer-test-${crypto.randomUUID()}`);
   const fixedNow = Date.parse("2026-02-21T11:00:00.000Z");

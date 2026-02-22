@@ -158,10 +158,24 @@ function readClientTxIdFromOutboxPayload(job: OutboxJobRow): string {
   return UNKNOWN_CLIENT_TX_ID;
 }
 
+function maskLeaseToken(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    return "***";
+  }
+
+  return `***${normalized.slice(-8)}`;
+}
+
 function logOutboxDrainAttempt(params: {
   correlationId: string | null;
   clientTxId: string;
   attempt: number;
+  leaseToken: string | null;
   drainReason: string;
   latencyMs: number;
   result: "SENT" | "FAILED" | "STALE";
@@ -170,6 +184,7 @@ function logOutboxDrainAttempt(params: {
     correlation_id: params.correlationId,
     client_tx_id: params.clientTxId,
     attempt: params.attempt,
+    lease_token: maskLeaseToken(params.leaseToken),
     drain_reason: params.drainReason,
     latency_ms: params.latencyMs,
     result: params.result
@@ -275,6 +290,7 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
           correlationId: sendResult.correlation_id ?? null,
           clientTxId,
           attempt: attempt.attempt,
+          leaseToken,
           drainReason,
           latencyMs: Math.max(0, now() - sendStartedAtMs),
           result: "SENT"
@@ -285,6 +301,7 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
           correlationId: sendResult.correlation_id ?? null,
           clientTxId,
           attempt: attempt.attempt,
+          leaseToken,
           drainReason,
           latencyMs: Math.max(0, now() - sendStartedAtMs),
           result: "STALE"
@@ -311,6 +328,7 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
           correlationId: null,
           clientTxId,
           attempt: attempt.attempt,
+          leaseToken,
           drainReason,
           latencyMs: Math.max(0, now() - sendStartedAtMs),
           result: "FAILED"
@@ -321,6 +339,7 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
           correlationId: null,
           clientTxId,
           attempt: attempt.attempt,
+          leaseToken,
           drainReason,
           latencyMs: Math.max(0, now() - sendStartedAtMs),
           result: "STALE"
