@@ -60,6 +60,18 @@ Sales v1 delivers invoice and payment-in workflows with full GL posting, print/P
 | Print/PDF output | ✅ Done | print/PDF routes |
 | Integration tests | ✅ Done | `apps/api/tests/integration/sales.integration.test.mjs` |
 
+## PR Checklist Alignment
+
+### PR-15: Sales invoice module
+- [x] CRUD invoice + lines
+- [x] POST action: lock & post → generate journal
+- [x] PDF/print endpoint (v1 simple HTML->PDF / print view)
+
+### PR-16: Payment in + allocation
+- [x] CRUD payment_in
+- [x] Allocate ke invoice (partial allowed)
+- [x] Posting payment → journal (cash/bank vs AR)
+
 ---
 
 **Sign-off:** M8 implemented end-to-end with posting, print/PDF, UI lists, and tests.
