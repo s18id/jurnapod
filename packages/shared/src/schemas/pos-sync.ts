@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { PosStatusSchema, UUID } from "./common";
+import { NumericIdSchema, PosStatusSchema, UUID } from "./common";
 
 export const PosItemSchema = z.object({
-  item_id: UUID,
+  item_id: NumericIdSchema,
   qty: z.number().positive(),
   price_snapshot: z.number().nonnegative(),
   name_snapshot: z.string().min(1)
@@ -15,9 +15,9 @@ export const PosPaymentSchema = z.object({
 
 export const PosTransactionSchema = z.object({
   client_tx_id: UUID,
-  company_id: UUID,
-  outlet_id: UUID,
-  cashier_user_id: UUID,
+  company_id: NumericIdSchema,
+  outlet_id: NumericIdSchema,
+  cashier_user_id: NumericIdSchema,
   status: PosStatusSchema.default("COMPLETED"),
   trx_at: z.string().datetime(),
   items: z.array(PosItemSchema).min(1),
@@ -25,7 +25,7 @@ export const PosTransactionSchema = z.object({
 });
 
 export const SyncPushRequestSchema = z.object({
-  outlet_id: UUID,
+  outlet_id: NumericIdSchema,
   transactions: z.array(PosTransactionSchema).min(1)
 });
 
@@ -35,5 +35,11 @@ export const SyncPushResultItemSchema = z.object({
   message: z.string().optional()
 });
 
+export const SyncPushResponseSchema = z.object({
+  results: z.array(SyncPushResultItemSchema)
+});
+
 export type PosTransaction = z.infer<typeof PosTransactionSchema>;
 export type SyncPushRequest = z.infer<typeof SyncPushRequestSchema>;
+export type SyncPushResultItem = z.infer<typeof SyncPushResultItemSchema>;
+export type SyncPushResponse = z.infer<typeof SyncPushResponseSchema>;

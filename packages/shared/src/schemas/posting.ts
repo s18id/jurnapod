@@ -1,22 +1,22 @@
 import { z } from "zod";
-import { UUID } from "./common";
+import { NumericIdSchema } from "./common";
 
 export const PostingRequestSchema = z.object({
   doc_type: z.string().min(1),
-  doc_id: UUID,
-  company_id: UUID,
-  outlet_id: UUID.optional()
+  doc_id: NumericIdSchema,
+  company_id: NumericIdSchema,
+  outlet_id: NumericIdSchema.optional()
 });
 
 export const JournalLineSchema = z.object({
-  account_id: UUID,
+  account_id: NumericIdSchema,
   debit: z.number().nonnegative(),
   credit: z.number().nonnegative(),
   description: z.string().min(1)
 });
 
 export const PostingResultSchema = z.object({
-  journal_batch_id: UUID,
+  journal_batch_id: NumericIdSchema,
   lines: z.array(JournalLineSchema).min(1)
 });
 

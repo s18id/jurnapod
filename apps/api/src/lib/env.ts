@@ -104,7 +104,34 @@ export type AppEnv = {
 let cachedEnv: AppEnv | null = null;
 let cachedEnvError: Error | null = null;
 
+function loadRepoRootEnv(): void {
+  if (process.env.AUTH_JWT_ACCESS_SECRET) {
+    return;
+  }
+
+  if (typeof process.loadEnvFile !== "function") {
+    return;
+  }
+
+  const moduleRelativeEnvPath = new URL("../../../../.env", import.meta.url).pathname;
+  const candidatePaths = [".env", "../.env", "../../.env", moduleRelativeEnvPath];
+
+  for (const candidatePath of candidatePaths) {
+    if (process.env.AUTH_JWT_ACCESS_SECRET) {
+      return;
+    }
+
+    try {
+      process.loadEnvFile(candidatePath);
+    } catch {
+      // Ignore missing/unreadable path and continue probing.
+    }
+  }
+}
+
 export function getAppEnv(): AppEnv {
+  loadRepoRootEnv();
+
   if (cachedEnv) {
     return cachedEnv;
   }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const UUID = z.string().uuid();
+export const NumericIdSchema = z.coerce.number().int().positive();
 
 export const RoleSchema = z.enum(["OWNER", "ADMIN", "CASHIER", "ACCOUNTANT"]);
 

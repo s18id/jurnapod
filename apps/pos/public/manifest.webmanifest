@@ -1,0 +1,39 @@
+{
+  "name": "Jurnapod POS",
+  "short_name": "Jurnapod",
+  "description": "Offline-first POS for Jurnapod",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f4f0",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "/icons/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/checkout-wide.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "POS checkout desktop layout"
+    },
+    {
+      "src": "/screenshots/checkout-mobile.png",
+      "sizes": "720x1280",
+      "type": "image/png",
+      "label": "POS checkout mobile layout"
+    }
+  ]
+}

@@ -1,6 +1,5 @@
 import { z } from "zod";
-
-export const NumericIdSchema = z.coerce.number().int().positive();
+import { NumericIdSchema } from "./common";
 
 export const ItemTypeSchema = z.enum(["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"]);
 
