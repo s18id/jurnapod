@@ -100,6 +100,9 @@ export interface OutboxJobRow {
   payload_json: string;
   status: OutboxJobStatus;
   attempts: number;
+  lease_owner_id: string | null;
+  lease_token: string | null;
+  lease_expires_at: string | null;
   next_attempt_at: string | null;
   last_error: string | null;
   created_at: string;
@@ -161,17 +164,27 @@ export interface EnqueueOutboxJobInput {
 export interface OutboxAttemptToken {
   job_id: string;
   attempt: number;
+  lease_token: string | null;
+  claimed: boolean;
 }
 
 export interface UpdateOutboxStatusInput {
   job_id: string;
   attempt_token: number;
+  lease_token?: string | null;
   status: OutboxJobStatus;
   next_attempt_at?: string | null;
   last_error?: string | null;
 }
 
-export type OutboxStatusUpdateReason = "APPLIED" | "STALE_ATTEMPT" | "ALREADY_SENT";
+export interface ReserveOutboxAttemptInput {
+  job_id: string;
+  owner_id: string;
+  lease_ms: number;
+  now?: () => number;
+}
+
+export type OutboxStatusUpdateReason = "APPLIED" | "STALE_ATTEMPT" | "STALE_LEASE" | "ALREADY_SENT";
 
 export interface OutboxStatusUpdateResult {
   applied: boolean;

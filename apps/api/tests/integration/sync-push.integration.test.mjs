@@ -17,6 +17,10 @@ const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
 const SYNC_PUSH_ACCEPTED_AUDIT_ACTION = "SYNC_PUSH_ACCEPTED";
+const IDEMPOTENCY_CONFLICT_MESSAGE = "IDEMPOTENCY_CONFLICT";
+const RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE = "RETRYABLE_DB_LOCK_TIMEOUT";
+const RETRYABLE_DB_DEADLOCK_MESSAGE = "RETRYABLE_DB_DEADLOCK";
+const TEST_FORCE_DB_ERRNO_HEADER = "x-jp-sync-push-force-db-errno";
 
 function readEnv(name, fallback = null) {
   const value = process.env[name];
@@ -48,6 +52,10 @@ function dbConfigFromEnv() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function toMysqlDateTime(value) {
+  return new Date(value).toISOString().slice(0, 19).replace("T", " ");
 }
 
 async function getFreePort() {
@@ -207,6 +215,32 @@ async function countAcceptedSyncPushEvents(db, clientTxId) {
   return Number(rows[0].total);
 }
 
+async function countSyncPushPersistedRows(db, clientTxId) {
+  const [rows] = await db.execute(
+    `SELECT
+       (SELECT COUNT(*) FROM pos_transactions WHERE client_tx_id = ?) AS tx_total,
+       (
+         SELECT COUNT(*)
+         FROM pos_transaction_items pti
+         INNER JOIN pos_transactions pt ON pt.id = pti.pos_transaction_id
+         WHERE pt.client_tx_id = ?
+       ) AS item_total,
+       (
+         SELECT COUNT(*)
+         FROM pos_transaction_payments ptp
+         INNER JOIN pos_transactions pt ON pt.id = ptp.pos_transaction_id
+         WHERE pt.client_tx_id = ?
+       ) AS payment_total`,
+    [clientTxId, clientTxId, clientTxId]
+  );
+
+  return {
+    tx_total: Number(rows[0].tx_total),
+    item_total: Number(rows[0].item_total),
+    payment_total: Number(rows[0].payment_total)
+  };
+}
+
 test(
   "sync push integration: first insert, replay duplicate, mixed batch statuses",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
@@ -328,6 +362,11 @@ test(
       );
       assert.equal(Number(firstCountRows[0].total), 1);
       assert.equal(await countAcceptedSyncPushEvents(db, firstClientTxId), 1);
+      assert.deepEqual(await countSyncPushPersistedRows(db, firstClientTxId), {
+        tx_total: 1,
+        item_total: 1,
+        payment_total: 1
+      });
 
       const replayResponse = await fetch(`${baseUrl}/api/sync/push`, {
         method: "POST",
@@ -356,6 +395,156 @@ test(
       );
       assert.equal(Number(replayCountRows[0].total), 1);
       assert.equal(await countAcceptedSyncPushEvents(db, firstClientTxId), 1);
+      assert.deepEqual(await countSyncPushPersistedRows(db, firstClientTxId), {
+        tx_total: 1,
+        item_total: 1,
+        payment_total: 1
+      });
+
+      const legacyClientTxId = randomUUID();
+      const legacyTransaction = buildSyncTransaction({
+        clientTxId: legacyClientTxId,
+        companyId,
+        outletId,
+        cashierUserId: ownerUserId,
+        trxAt
+      });
+      const [legacyInsertResult] = await db.execute(
+        `INSERT INTO pos_transactions (
+           company_id,
+           outlet_id,
+           client_tx_id,
+           status,
+           trx_at,
+           payload_sha256,
+           payload_hash_version
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          companyId,
+          outletId,
+          legacyClientTxId,
+          legacyTransaction.status,
+          toMysqlDateTime(legacyTransaction.trx_at),
+          "",
+          1
+        ]
+      );
+      const legacyPosTransactionId = Number(legacyInsertResult.insertId);
+      await db.execute(
+        `INSERT INTO pos_transaction_items (
+           pos_transaction_id,
+           company_id,
+           outlet_id,
+           line_no,
+           item_id,
+           qty,
+           price_snapshot,
+           name_snapshot
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          legacyPosTransactionId,
+          companyId,
+          outletId,
+          1,
+          legacyTransaction.items[0].item_id,
+          legacyTransaction.items[0].qty,
+          legacyTransaction.items[0].price_snapshot,
+          legacyTransaction.items[0].name_snapshot
+        ]
+      );
+      await db.execute(
+        `INSERT INTO pos_transaction_payments (
+           pos_transaction_id,
+           company_id,
+           outlet_id,
+           payment_no,
+           method,
+           amount
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          legacyPosTransactionId,
+          companyId,
+          outletId,
+          1,
+          legacyTransaction.payments[0].method,
+          legacyTransaction.payments[0].amount
+        ]
+      );
+      createdClientTxIds.push(legacyClientTxId);
+
+      const legacyReplayResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [legacyTransaction]
+        })
+      });
+      assert.equal(legacyReplayResponse.status, 200);
+      const legacyReplayBody = await legacyReplayResponse.json();
+      assert.equal(legacyReplayBody.ok, true);
+      assertSyncPushResponseShape(legacyReplayBody);
+      assert.deepEqual(legacyReplayBody.results, [
+        {
+          client_tx_id: legacyClientTxId,
+          result: "DUPLICATE"
+        }
+      ]);
+      assert.equal(await countAcceptedSyncPushEvents(db, legacyClientTxId), 0);
+      assert.deepEqual(await countSyncPushPersistedRows(db, legacyClientTxId), {
+        tx_total: 1,
+        item_total: 1,
+        payment_total: 1
+      });
+
+      for (const retryableCase of [
+        { errno: 1205, message: RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE },
+        { errno: 1213, message: RETRYABLE_DB_DEADLOCK_MESSAGE }
+      ]) {
+        const forcedErrnoClientTxId = randomUUID();
+        const forcedErrnoPayload = {
+          outlet_id: outletId,
+          transactions: [
+            buildSyncTransaction({
+              clientTxId: forcedErrnoClientTxId,
+              companyId,
+              outletId,
+              cashierUserId: ownerUserId,
+              trxAt
+            })
+          ]
+        };
+
+        const forcedErrnoResponse = await fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json",
+            [TEST_FORCE_DB_ERRNO_HEADER]: String(retryableCase.errno)
+          },
+          body: JSON.stringify(forcedErrnoPayload)
+        });
+        assert.equal(forcedErrnoResponse.status, 200);
+        const forcedErrnoBody = await forcedErrnoResponse.json();
+        assert.equal(forcedErrnoBody.ok, true);
+        assertSyncPushResponseShape(forcedErrnoBody);
+        assert.deepEqual(forcedErrnoBody.results, [
+          {
+            client_tx_id: forcedErrnoClientTxId,
+            result: "ERROR",
+            message: retryableCase.message
+          }
+        ]);
+        assert.equal(await countAcceptedSyncPushEvents(db, forcedErrnoClientTxId), 0);
+        assert.deepEqual(await countSyncPushPersistedRows(db, forcedErrnoClientTxId), {
+          tx_total: 0,
+          item_total: 0,
+          payment_total: 0
+        });
+      }
 
       const secondClientTxId = randomUUID();
       const mismatchClientTxId = randomUUID();
@@ -445,6 +634,11 @@ test(
       assert.equal(await countAcceptedSyncPushEvents(db, firstClientTxId), 1);
       assert.equal(await countAcceptedSyncPushEvents(db, mismatchClientTxId), 0);
       assert.equal(await countAcceptedSyncPushEvents(db, outletMismatchClientTxId), 0);
+      assert.deepEqual(await countSyncPushPersistedRows(db, secondClientTxId), {
+        tx_total: 1,
+        item_total: 1,
+        payment_total: 1
+      });
 
       const [mismatchCountRows] = await db.execute(
         `SELECT COUNT(*) AS total
@@ -515,6 +709,190 @@ test(
       );
       assert.equal(Number(sameRequestDuplicateCountRows[0].total), 1);
       assert.equal(await countAcceptedSyncPushEvents(db, sameRequestDuplicateClientTxId), 1);
+      assert.deepEqual(await countSyncPushPersistedRows(db, sameRequestDuplicateClientTxId), {
+        tx_total: 1,
+        item_total: 1,
+        payment_total: 1
+      });
+
+      const concurrentDuplicateClientTxId = randomUUID();
+      const concurrentDuplicatePayload = {
+        outlet_id: outletId,
+        transactions: [
+          buildSyncTransaction({
+            clientTxId: concurrentDuplicateClientTxId,
+            companyId,
+            outletId,
+            cashierUserId: ownerUserId,
+            trxAt
+          })
+        ]
+      };
+
+      const [concurrentFirstResponse, concurrentSecondResponse] = await Promise.all([
+        fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(concurrentDuplicatePayload)
+        }),
+        fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(concurrentDuplicatePayload)
+        })
+      ]);
+      assert.equal(concurrentFirstResponse.status, 200);
+      assert.equal(concurrentSecondResponse.status, 200);
+
+      const [concurrentFirstBody, concurrentSecondBody] = await Promise.all([
+        concurrentFirstResponse.json(),
+        concurrentSecondResponse.json()
+      ]);
+
+      assertSyncPushResponseShape(concurrentFirstBody);
+      assertSyncPushResponseShape(concurrentSecondBody);
+      const concurrentResults = [
+        concurrentFirstBody.results?.[0]?.result,
+        concurrentSecondBody.results?.[0]?.result
+      ].sort((left, right) => String(left).localeCompare(String(right)));
+      assert.deepEqual(concurrentResults, ["DUPLICATE", "OK"]);
+      createdClientTxIds.push(concurrentDuplicateClientTxId);
+
+      assert.deepEqual(await countSyncPushPersistedRows(db, concurrentDuplicateClientTxId), {
+        tx_total: 1,
+        item_total: 1,
+        payment_total: 1
+      });
+      assert.equal(await countAcceptedSyncPushEvents(db, concurrentDuplicateClientTxId), 1);
+
+      const conflictClientTxId = randomUUID();
+      const conflictPayloadA = {
+        outlet_id: outletId,
+        transactions: [
+          buildSyncTransaction({
+            clientTxId: conflictClientTxId,
+            companyId,
+            outletId,
+            cashierUserId: ownerUserId,
+            trxAt
+          })
+        ]
+      };
+      const conflictPayloadB = {
+        outlet_id: outletId,
+        transactions: [
+          {
+            ...buildSyncTransaction({
+              clientTxId: conflictClientTxId,
+              companyId,
+              outletId,
+              cashierUserId: ownerUserId,
+              trxAt
+            }),
+            items: [
+              {
+                item_id: 1,
+                qty: 2,
+                price_snapshot: 13000,
+                name_snapshot: "Test Item Conflict"
+              }
+            ]
+          }
+        ]
+      };
+
+      const [conflictFirstResponse, conflictSecondResponse] = await Promise.all([
+        fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(conflictPayloadA)
+        }),
+        fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(conflictPayloadB)
+        })
+      ]);
+      assert.equal(conflictFirstResponse.status, 200);
+      assert.equal(conflictSecondResponse.status, 200);
+
+      const [conflictFirstBody, conflictSecondBody] = await Promise.all([
+        conflictFirstResponse.json(),
+        conflictSecondResponse.json()
+      ]);
+      assertSyncPushResponseShape(conflictFirstBody);
+      assertSyncPushResponseShape(conflictSecondBody);
+
+      const conflictItems = [
+        conflictFirstBody.results?.[0],
+        conflictSecondBody.results?.[0]
+      ];
+      const okItem = conflictItems.find((item) => item?.result === "OK");
+      const errorItem = conflictItems.find((item) => item?.result === "ERROR");
+      assert.ok(okItem);
+      assert.ok(errorItem);
+      assert.equal(errorItem.message, IDEMPOTENCY_CONFLICT_MESSAGE);
+      createdClientTxIds.push(conflictClientTxId);
+
+      assert.deepEqual(await countSyncPushPersistedRows(db, conflictClientTxId), {
+        tx_total: 1,
+        item_total: 1,
+        payment_total: 1
+      });
+      assert.equal(await countAcceptedSyncPushEvents(db, conflictClientTxId), 1);
+
+      const rollbackClientTxId = randomUUID();
+      const rollbackPayload = {
+        outlet_id: outletId,
+        transactions: [
+          buildSyncTransaction({
+            clientTxId: rollbackClientTxId,
+            companyId,
+            outletId,
+            cashierUserId: ownerUserId,
+            trxAt
+          })
+        ]
+      };
+
+      const rollbackResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-jp-sync-push-fail-after-header": "1"
+        },
+        body: JSON.stringify(rollbackPayload)
+      });
+      assert.equal(rollbackResponse.status, 200);
+      const rollbackBody = await rollbackResponse.json();
+      assert.equal(rollbackBody.ok, true);
+      assert.deepEqual(rollbackBody.results, [
+        {
+          client_tx_id: rollbackClientTxId,
+          result: "ERROR",
+          message: "insert failed"
+        }
+      ]);
+
+      assert.deepEqual(await countSyncPushPersistedRows(db, rollbackClientTxId), {
+        tx_total: 0,
+        item_total: 0,
+        payment_total: 0
+      });
+      assert.equal(await countAcceptedSyncPushEvents(db, rollbackClientTxId), 0);
 
       const deniedOutletTxId = randomUUID();
       const deniedOutletResponse = await fetch(`${baseUrl}/api/sync/push`, {

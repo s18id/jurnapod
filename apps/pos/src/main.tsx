@@ -9,13 +9,14 @@ import {
   readRuntimeProductCatalog,
   resolveRuntimeCheckoutConfig,
   resolveRuntimePaymentMethod,
-  runRuntimeOutboxDrainCycle,
   resolveRuntimeSyncBadgeState,
   type RuntimeProductCatalogItem,
   type RuntimeOutletScope,
   type RuntimeSyncBadgeState
 } from "./offline/runtime.js";
 import { drainOutboxJobs } from "./offline/outbox-drainer.js";
+import { createOutboxDrainScheduler } from "./offline/outbox-drain-scheduler.js";
+import { runOutboxDrainAsLeader } from "./offline/outbox-leader.js";
 import { sendOutboxJobToSyncPush } from "./offline/outbox-sender.js";
 import { clearAccessToken, readAccessToken, writeAccessToken } from "./offline/auth-session.js";
 import { completeSale, createSaleDraft } from "./offline/sales.js";
@@ -157,14 +158,89 @@ function App() {
   const [inFlightFlowIds, setInFlightFlowIds] = React.useState<Record<string, true>>({});
   const [pullSyncInFlight, setPullSyncInFlight] = React.useState<boolean>(false);
   const [pullSyncMessage, setPullSyncMessage] = React.useState<string | null>(null);
+  const [pushSyncInFlight, setPushSyncInFlight] = React.useState<boolean>(false);
+  const [pushSyncMessage, setPushSyncMessage] = React.useState<string | null>(null);
   const [lastDataVersion, setLastDataVersion] = React.useState<number>(0);
   const [lastCompleteMessage, setLastCompleteMessage] = React.useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = React.useState<number>(0);
   const inFlightFlowIdsRef = React.useRef<Set<string>>(new Set());
+  const drainSchedulerRef = React.useRef<ReturnType<typeof createOutboxDrainScheduler> | null>(null);
 
   React.useEffect(() => {
     let disposed = false;
     let refreshQueue = Promise.resolve();
+    const scheduler = createOutboxDrainScheduler({
+      on_error: (error) => {
+        if (disposed) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : "Unknown error";
+        setPushSyncMessage(`Sync push failed: ${message}`);
+      },
+      drain: async ({ reasons }) => {
+        if (disposed) {
+          return;
+        }
+
+        const hasManualReason = reasons.includes("MANUAL_PUSH");
+        setPushSyncInFlight(true);
+
+        try {
+          const online = await readRuntimeOnlineState();
+          if (!online) {
+            if (hasManualReason) {
+              setPushSyncMessage("Sync push skipped: offline.");
+            }
+            return;
+          }
+
+          const dueCount = await readRuntimeGlobalDueOutboxCount();
+          if (dueCount <= 0) {
+            if (hasManualReason) {
+              setPushSyncMessage("Sync push skipped: no pending outbox jobs.");
+            }
+            return;
+          }
+
+          const leaderResult = await runOutboxDrainAsLeader(async () => {
+            const drainReason = reasons.slice().sort().join(",");
+            return drainOutboxJobs({
+              drain_reason: drainReason,
+              sender: async ({ job, db }) => {
+                return sendOutboxJobToSyncPush(
+                  {
+                    job,
+                    endpoint: `${API_ORIGIN}/api/sync/push`,
+                    access_token: authToken ?? undefined
+                  },
+                  db
+                );
+              }
+            });
+          });
+
+          if (!leaderResult.acquired) {
+            if (hasManualReason) {
+              setPushSyncMessage("Sync push skipped: another tab is currently draining outbox.");
+            }
+            return;
+          }
+
+          const drainResult = leaderResult.value;
+          if (hasManualReason && drainResult) {
+            setPushSyncMessage(
+              `Sync push done: sent=${drainResult.sent_count}, failed=${drainResult.failed_count}, stale=${drainResult.stale_count}.`
+            );
+          }
+        } finally {
+          if (!disposed) {
+            setPushSyncInFlight(false);
+          }
+        }
+      }
+    });
+    drainSchedulerRef.current = scheduler;
 
     const runRefresh = async () => {
       const [snapshot, products, globalDueOutboxCount, scopedConfig] = await Promise.all([
@@ -176,24 +252,9 @@ function App() {
       const checkoutConfig = resolveRuntimeCheckoutConfig(scopedConfig);
       const online = await readRuntimeOnlineState();
 
-      await runRuntimeOutboxDrainCycle({
-        is_online: online,
-        pending_outbox_count: globalDueOutboxCount,
-        drain: async () => {
-          await drainOutboxJobs({
-            sender: async ({ job, db }) => {
-              return sendOutboxJobToSyncPush(
-                {
-                  job,
-                  endpoint: `${API_ORIGIN}/api/sync/push`,
-                  access_token: authToken ?? undefined
-                },
-                db
-              );
-            }
-          });
-        }
-      });
+      if (online && globalDueOutboxCount > 0) {
+        await scheduler.requestDrain("AUTO_REFRESH");
+      }
 
       if (disposed) {
         return;
@@ -241,6 +302,10 @@ function App() {
 
     return () => {
       disposed = true;
+      scheduler.dispose();
+      if (drainSchedulerRef.current === scheduler) {
+        drainSchedulerRef.current = null;
+      }
       window.clearInterval(intervalId);
       window.removeEventListener("online", onNetworkChange);
       window.removeEventListener("offline", onNetworkChange);
@@ -419,6 +484,22 @@ function App() {
     }
   }, [authToken, pullSyncInFlight, scope.company_id, scope.outlet_id]);
 
+  const runSyncPushNow = React.useCallback(async () => {
+    if (pushSyncInFlight) {
+      return;
+    }
+
+    const scheduler = drainSchedulerRef.current;
+    if (!scheduler) {
+      setPushSyncMessage("Sync push scheduler is not ready yet.");
+      return;
+    }
+
+    setPushSyncMessage("Sync push requested...");
+    await scheduler.requestDrain("MANUAL_PUSH");
+    setRefreshNonce((previous) => previous + 1);
+  }, [pushSyncInFlight]);
+
   const runLogin = React.useCallback(async () => {
     if (loginInFlight) {
       return;
@@ -533,6 +614,25 @@ function App() {
           <button
             type="button"
             onClick={() => {
+              void runSyncPushNow();
+            }}
+            disabled={pushSyncInFlight}
+            style={{
+              border: "none",
+              background: pushSyncInFlight ? "#94a3b8" : "#0f766e",
+              color: "#ffffff",
+              borderRadius: 8,
+              padding: "8px 12px",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: pushSyncInFlight ? "not-allowed" : "pointer"
+            }}
+          >
+            {pushSyncInFlight ? "Pushing..." : "Sync push now"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               void runSyncPullNow();
             }}
             disabled={pullSyncInFlight}
@@ -553,6 +653,7 @@ function App() {
         </div>
 
         {pullSyncMessage ? <p style={{ marginTop: 10, fontSize: 13, color: "#1f2937" }}>{pullSyncMessage}</p> : null}
+        {pushSyncMessage ? <p style={{ marginTop: 8, fontSize: 13, color: "#1f2937" }}>{pushSyncMessage}</p> : null}
 
         <p style={{ marginTop: 12, marginBottom: 16, color: "#334155" }}>
           PR-09 checkout uses IndexedDB local-first flow and blocks completion when required outlet cache is missing.

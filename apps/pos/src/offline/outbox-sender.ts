@@ -2,6 +2,11 @@ import { type PosOfflineDb, posDb } from "./db.js";
 import type { OutboxJobRow, PaymentRow, SaleItemRow, SaleRow } from "./types.js";
 
 const DEFAULT_SYNC_PUSH_ENDPOINT = "/api/sync/push";
+const DEFAULT_SYNC_PUSH_TIMEOUT_MS = 10_000;
+const RETRYABLE_SYNC_RESULT_MESSAGES = new Set([
+  "RETRYABLE_DB_LOCK_TIMEOUT",
+  "RETRYABLE_DB_DEADLOCK"
+]);
 
 export type OutboxSendErrorCategory = "RETRYABLE" | "NON_RETRYABLE";
 export type OutboxServerResult = "OK" | "DUPLICATE";
@@ -9,6 +14,7 @@ export type OutboxServerResult = "OK" | "DUPLICATE";
 export interface OutboxSendAck {
   result: OutboxServerResult;
   message?: string;
+  correlation_id?: string;
 }
 
 export interface SendOutboxJobToSyncPushInput {
@@ -16,6 +22,7 @@ export interface SendOutboxJobToSyncPushInput {
   endpoint?: string;
   fetch_impl?: typeof fetch;
   access_token?: string;
+  timeout_ms?: number;
 }
 
 export interface SyncPushTransactionItem {
@@ -226,6 +233,23 @@ function classifyTransportError(error: unknown): OutboxSenderError {
   return new OutboxSenderError("RETRYABLE", "UNEXPECTED_SEND_ERROR", normalizeErrorMessage(error));
 }
 
+function classifySyncResultError(clientTxId: string, message: string | undefined): OutboxSenderError {
+  const normalized = typeof message === "string" ? message.trim().toUpperCase() : "";
+  if (RETRYABLE_SYNC_RESULT_MESSAGES.has(normalized)) {
+    return new OutboxSenderError(
+      "RETRYABLE",
+      normalized,
+      message ?? `Sync push returned retryable ERROR for client_tx_id ${clientTxId}`
+    );
+  }
+
+  return new OutboxSenderError(
+    "NON_RETRYABLE",
+    "SYNC_RESULT_ERROR",
+    message ?? `Sync push returned ERROR for client_tx_id ${clientTxId}`
+  );
+}
+
 function asSyncResultItems(payload: unknown): SyncPushResultItem[] {
   const rawItems = Array.isArray(payload)
     ? payload
@@ -279,6 +303,15 @@ export async function sendOutboxJobToSyncPush(
   const payload = parseOutboxPayload(input.job);
   const snapshot = await hydrateSaleSnapshot(input.job, db);
   const requestBody = buildSyncRequest(payload, snapshot);
+  const requestCorrelationId = crypto.randomUUID();
+  const timeoutMs = Number.isFinite(input.timeout_ms) && (input.timeout_ms ?? 0) > 0 ? Number(input.timeout_ms) : DEFAULT_SYNC_PUSH_TIMEOUT_MS;
+  const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeoutId =
+    abortController && timeoutMs > 0
+      ? globalThis.setTimeout(() => {
+          abortController.abort();
+        }, timeoutMs)
+      : null;
 
   let response: Response;
   try {
@@ -286,12 +319,18 @@ export async function sendOutboxJobToSyncPush(
       method: "POST",
       headers: {
         "content-type": "application/json",
+        "x-correlation-id": requestCorrelationId,
         ...(input.access_token ? { authorization: `Bearer ${input.access_token}` } : {})
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: abortController?.signal
     });
   } catch (error) {
     throw classifyTransportError(error);
+  } finally {
+    if (timeoutId != null) {
+      globalThis.clearTimeout(timeoutId);
+    }
   }
 
   if (!response.ok) {
@@ -316,15 +355,14 @@ export async function sendOutboxJobToSyncPush(
   }
 
   if (match.result === "ERROR") {
-    throw new OutboxSenderError(
-      "NON_RETRYABLE",
-      "SYNC_RESULT_ERROR",
-      match.message ?? `Sync push returned ERROR for client_tx_id ${payload.client_tx_id}`
-    );
+    throw classifySyncResultError(payload.client_tx_id, match.message);
   }
+
+  const responseCorrelationId = response.headers.get("x-correlation-id")?.trim();
 
   return {
     result: match.result,
-    message: match.message
+    message: match.message,
+    correlation_id: responseCorrelationId && responseCorrelationId.length > 0 ? responseCorrelationId : requestCorrelationId
   };
 }

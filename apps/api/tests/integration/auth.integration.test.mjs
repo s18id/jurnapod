@@ -723,6 +723,9 @@ test(
     const port = await getFreePort();
     const baseUrl = `http://127.0.0.1:${port}`;
     const server = startApiServer(port, {
+      envOverrides: {
+        JP_DISABLE_REPO_ROOT_ENV_AUTOLOAD: "true"
+      },
       envWithoutKeys: ["AUTH_JWT_ACCESS_SECRET"]
     });
     const { childProcess, serverLogs } = server;

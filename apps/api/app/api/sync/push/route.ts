@@ -1,5 +1,6 @@
 import { type ResultSetHeader } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
+import { createHash } from "node:crypto";
 import { SyncPushRequestSchema, SyncPushResponseSchema, type SyncPushResultItem } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
 import { requireOutletAccess, requireRole, withAuth } from "../../../../src/lib/auth-guard";
@@ -11,8 +12,15 @@ import {
 } from "../../../../src/lib/sync-push-posting";
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
+const MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE = 1205;
+const MYSQL_DEADLOCK_ERROR_CODE = 1213;
 const SYNC_PUSH_ACCEPTED_AUDIT_ACTION = "SYNC_PUSH_ACCEPTED";
 const SYNC_PUSH_POSTING_HOOK_FAIL_AUDIT_ACTION = "SYNC_PUSH_POSTING_HOOK_FAIL";
+const IDEMPOTENCY_CONFLICT_MESSAGE = "IDEMPOTENCY_CONFLICT";
+const RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE = "RETRYABLE_DB_LOCK_TIMEOUT";
+const RETRYABLE_DB_DEADLOCK_MESSAGE = "RETRYABLE_DB_DEADLOCK";
+const TEST_FAIL_AFTER_HEADER_INSERT_HEADER = "x-jp-sync-push-fail-after-header";
+const TEST_FORCE_DB_ERRNO_HEADER = "x-jp-sync-push-force-db-errno";
 
 const INVALID_REQUEST_RESPONSE = {
   ok: false,
@@ -32,6 +40,7 @@ const INTERNAL_SERVER_ERROR_RESPONSE = {
 
 type MysqlError = {
   errno?: number;
+  code?: string;
 };
 
 type SyncPushResultCode = "OK" | "DUPLICATE" | "ERROR";
@@ -46,12 +55,60 @@ type AcceptedSyncPushContext = {
   posTransactionId: number;
 };
 
+type SyncPushTransactionPayload = {
+  client_tx_id: string;
+  company_id: number;
+  outlet_id: number;
+  cashier_user_id: number;
+  status: "COMPLETED" | "VOID" | "REFUND";
+  trx_at: string;
+  items: Array<{
+    item_id: number;
+    qty: number;
+    price_snapshot: number;
+    name_snapshot: string;
+  }>;
+  payments: Array<{
+    method: string;
+    amount: number;
+  }>;
+};
+
+type ExistingIdempotencyRecord = {
+  posTransactionId: number;
+  payloadSha256: string | null;
+};
+
+type LegacyComparablePayload = {
+  client_tx_id: string;
+  company_id: number;
+  outlet_id: number;
+  status: "COMPLETED" | "VOID" | "REFUND";
+  items: Array<{
+    item_id: number;
+    qty: number;
+    price_snapshot: number;
+    name_snapshot: string;
+  }>;
+  payments: Array<{
+    method: string;
+    amount: number;
+  }>;
+};
+
 type QueryExecutor = {
   execute: PoolConnection["execute"];
 };
 
 function isMysqlError(error: unknown): error is MysqlError {
   return typeof error === "object" && error !== null && "errno" in error;
+}
+
+function isRetryableMysqlError(error: unknown): error is MysqlError {
+  return (
+    isMysqlError(error) &&
+    (error.errno === MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE || error.errno === MYSQL_DEADLOCK_ERROR_CODE)
+  );
 }
 
 function toMysqlDateTime(value: string): string {
@@ -71,16 +128,246 @@ function toErrorResult(clientTxId: string, message: string): SyncPushResultItem 
   };
 }
 
+function toRetryableDbErrorMessage(error: MysqlError): string {
+  if (error.errno === MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE) {
+    return RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE;
+  }
+
+  return RETRYABLE_DB_DEADLOCK_MESSAGE;
+}
+
+function canonicalizeTransactionForHash(tx: {
+  client_tx_id: string;
+  company_id: number;
+  outlet_id: number;
+  cashier_user_id: number;
+  status: "COMPLETED" | "VOID" | "REFUND";
+  trx_at: string;
+  items: Array<{
+    item_id: number;
+    qty: number;
+    price_snapshot: number;
+    name_snapshot: string;
+  }>;
+  payments: Array<{
+    method: string;
+    amount: number;
+  }>;
+}): string {
+  return JSON.stringify({
+    client_tx_id: tx.client_tx_id,
+    company_id: tx.company_id,
+    outlet_id: tx.outlet_id,
+    cashier_user_id: tx.cashier_user_id,
+    status: tx.status,
+    trx_at: tx.trx_at,
+    items: tx.items.map((item) => ({
+      item_id: item.item_id,
+      qty: item.qty,
+      price_snapshot: item.price_snapshot,
+      name_snapshot: item.name_snapshot
+    })),
+    payments: tx.payments.map((payment) => ({
+      method: payment.method,
+      amount: payment.amount
+    }))
+  });
+}
+
+function canonicalizeTransactionForLegacyCompare(payload: LegacyComparablePayload): string {
+  return JSON.stringify({
+    client_tx_id: payload.client_tx_id,
+    company_id: payload.company_id,
+    outlet_id: payload.outlet_id,
+    status: payload.status,
+    items: payload.items.map((item) => ({
+      item_id: item.item_id,
+      qty: item.qty,
+      price_snapshot: item.price_snapshot,
+      name_snapshot: item.name_snapshot
+    })),
+    payments: payload.payments.map((payment) => ({
+      method: payment.method,
+      amount: payment.amount
+    }))
+  });
+}
+
+function computePayloadSha256(canonicalPayload: string): string {
+  return createHash("sha256").update(canonicalPayload).digest("hex");
+}
+
+function shouldInjectFailureAfterHeaderInsert(request: Request): boolean {
+  return process.env.NODE_ENV !== "production" && request.headers.get(TEST_FAIL_AFTER_HEADER_INSERT_HEADER) === "1";
+}
+
+function readForcedRetryableErrno(request: Request): number | null {
+  if (process.env.NODE_ENV === "production") {
+    return null;
+  }
+
+  const headerValue = request.headers.get(TEST_FORCE_DB_ERRNO_HEADER)?.trim();
+  if (!headerValue) {
+    return null;
+  }
+
+  const parsed = Number(headerValue);
+  if (!Number.isInteger(parsed)) {
+    return null;
+  }
+
+  if (parsed !== MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE && parsed !== MYSQL_DEADLOCK_ERROR_CODE) {
+    return null;
+  }
+
+  return parsed;
+}
+
+async function rollbackQuietly(dbConnection: PoolConnection): Promise<void> {
+  try {
+    await dbConnection.rollback();
+  } catch {
+    // Ignore rollback errors to preserve root cause handling.
+  }
+}
+
+async function readExistingIdempotencyRecordByClientTxId(
+  dbConnection: PoolConnection,
+  clientTxId: string
+): Promise<ExistingIdempotencyRecord | null> {
+  const [rows] = await dbConnection.execute(
+    `SELECT id, payload_sha256
+     FROM pos_transactions
+     WHERE client_tx_id = ?
+     LIMIT 1`,
+    [clientTxId]
+  );
+
+  const row = (rows as Array<{ id?: number; payload_sha256?: string | null }>)[0];
+  if (!row || !Number.isFinite(row.id)) {
+    return null;
+  }
+
+  return {
+    posTransactionId: Number(row.id),
+    payloadSha256: typeof row.payload_sha256 === "string" ? row.payload_sha256 : null
+  };
+}
+
+async function readLegacyComparablePayloadByPosTransactionId(
+  dbConnection: PoolConnection,
+  posTransactionId: number
+): Promise<LegacyComparablePayload | null> {
+  const [headerRows] = await dbConnection.execute(
+    `SELECT client_tx_id, company_id, outlet_id, status
+     FROM pos_transactions
+     WHERE id = ?
+     LIMIT 1`,
+    [posTransactionId]
+  );
+
+  const header = (
+    headerRows as Array<{
+      client_tx_id?: string;
+      company_id?: number;
+      outlet_id?: number;
+      status?: "COMPLETED" | "VOID" | "REFUND";
+    }>
+  )[0];
+  if (
+    !header ||
+    typeof header.client_tx_id !== "string" ||
+    !Number.isFinite(header.company_id) ||
+    !Number.isFinite(header.outlet_id) ||
+    (header.status !== "COMPLETED" && header.status !== "VOID" && header.status !== "REFUND")
+  ) {
+    return null;
+  }
+
+  const [itemRows] = await dbConnection.execute(
+    `SELECT item_id, qty, price_snapshot, name_snapshot
+     FROM pos_transaction_items
+     WHERE pos_transaction_id = ?
+     ORDER BY line_no ASC`,
+    [posTransactionId]
+  );
+
+  const [paymentRows] = await dbConnection.execute(
+    `SELECT method, amount
+     FROM pos_transaction_payments
+     WHERE pos_transaction_id = ?
+     ORDER BY payment_no ASC`,
+    [posTransactionId]
+  );
+
+  return {
+    client_tx_id: header.client_tx_id,
+    company_id: Number(header.company_id),
+    outlet_id: Number(header.outlet_id),
+    status: header.status,
+    items: (itemRows as Array<{ item_id: number; qty: number; price_snapshot: number; name_snapshot: string }>).map((row) => ({
+      item_id: Number(row.item_id),
+      qty: Number(row.qty),
+      price_snapshot: Number(row.price_snapshot),
+      name_snapshot: String(row.name_snapshot)
+    })),
+    payments: (paymentRows as Array<{ method: string; amount: number }>).map((row) => ({
+      method: String(row.method),
+      amount: Number(row.amount)
+    }))
+  };
+}
+
+async function doesLegacyPayloadReplayMatch(
+  dbConnection: PoolConnection,
+  posTransactionId: number,
+  incomingTx: SyncPushTransactionPayload
+): Promise<boolean> {
+  const existingPayload = await readLegacyComparablePayloadByPosTransactionId(dbConnection, posTransactionId);
+  if (!existingPayload) {
+    return false;
+  }
+
+  const incomingPayload: LegacyComparablePayload = {
+    client_tx_id: incomingTx.client_tx_id,
+    company_id: incomingTx.company_id,
+    outlet_id: incomingTx.outlet_id,
+    status: incomingTx.status,
+    items: incomingTx.items.map((item) => ({
+      item_id: item.item_id,
+      qty: item.qty,
+      price_snapshot: item.price_snapshot,
+      name_snapshot: item.name_snapshot
+    })),
+    payments: incomingTx.payments.map((payment) => ({
+      method: payment.method,
+      amount: payment.amount
+    }))
+  };
+
+  return canonicalizeTransactionForLegacyCompare(existingPayload) === canonicalizeTransactionForLegacyCompare(incomingPayload);
+}
+
 function logSyncPushTransactionResult(params: {
   correlationId: string;
   clientTxId: string;
+  attempt: number;
+  latencyMs: number;
   result: SyncPushResultCode;
 }) {
   console.info("POST /sync/push transaction", {
     correlation_id: params.correlationId,
     client_tx_id: params.clientTxId,
+    attempt: params.attempt,
+    latency_ms: params.latencyMs,
     result: params.result
   });
+}
+
+function withCorrelationHeaders(correlationId: string): HeadersInit {
+  return {
+    "x-correlation-id": correlationId
+  };
 }
 
 async function runAcceptedSyncPushHook(
@@ -189,6 +476,8 @@ async function parseOutletIdForGuard(request: Request): Promise<number> {
 export const POST = withAuth(
   async (request, auth) => {
     const correlationId = getRequestCorrelationId(request);
+    const injectFailureAfterHeaderInsert = shouldInjectFailureAfterHeaderInsert(request);
+    const forcedRetryableErrno = readForcedRetryableErrno(request);
 
     try {
       const payload = await request.json();
@@ -197,39 +486,120 @@ export const POST = withAuth(
       const dbConnection = await dbPool.getConnection();
       const results: SyncPushResultItem[] = [];
       try {
-        for (const tx of input.transactions) {
-          if (tx.company_id !== auth.companyId) {
-            results.push(toErrorResult(tx.client_tx_id, "company_id mismatch"));
+        for (const [txIndex, tx] of input.transactions.entries()) {
+          const attempt = txIndex + 1;
+          const startedAtMs = Date.now();
+          const logTransactionResult = (result: SyncPushResultCode) => {
             logSyncPushTransactionResult({
               correlationId,
               clientTxId: tx.client_tx_id,
-              result: "ERROR"
+              attempt,
+              latencyMs: Math.max(0, Date.now() - startedAtMs),
+              result
             });
+          };
+
+          if (tx.company_id !== auth.companyId) {
+            results.push(toErrorResult(tx.client_tx_id, "company_id mismatch"));
+            logTransactionResult("ERROR");
             continue;
           }
 
           if (tx.outlet_id !== input.outlet_id) {
             results.push(toErrorResult(tx.client_tx_id, "outlet_id mismatch"));
-            logSyncPushTransactionResult({
-              correlationId,
-              clientTxId: tx.client_tx_id,
-              result: "ERROR"
-            });
+            logTransactionResult("ERROR");
             continue;
           }
 
           try {
+            const canonicalPayload = canonicalizeTransactionForHash(tx);
+            const payloadSha256 = computePayloadSha256(canonicalPayload);
+            await dbConnection.beginTransaction();
+
+            if (forcedRetryableErrno !== null) {
+              throw {
+                errno: forcedRetryableErrno
+              } satisfies MysqlError;
+            }
+
             const [insertResult] = await dbConnection.execute<ResultSetHeader>(
-              `INSERT INTO pos_transactions (company_id, outlet_id, client_tx_id, status, trx_at)
-               VALUES (?, ?, ?, ?, ?)`,
+              `INSERT INTO pos_transactions (
+                 company_id,
+                 outlet_id,
+                 client_tx_id,
+                 status,
+                 trx_at,
+                 payload_sha256,
+                 payload_hash_version
+               ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
               [
                 tx.company_id,
                 tx.outlet_id,
                 tx.client_tx_id,
                 tx.status,
-                toMysqlDateTime(tx.trx_at)
+                toMysqlDateTime(tx.trx_at),
+                payloadSha256,
+                1
               ]
             );
+
+            const posTransactionId = Number(insertResult.insertId);
+
+            if (injectFailureAfterHeaderInsert) {
+              throw new Error("SYNC_PUSH_TEST_FAIL_AFTER_HEADER_INSERT");
+            }
+
+            if (tx.items.length > 0) {
+              const itemPlaceholders = tx.items.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+              const itemValues = tx.items.flatMap((item, index) => [
+                posTransactionId,
+                tx.company_id,
+                tx.outlet_id,
+                index + 1,
+                item.item_id,
+                item.qty,
+                item.price_snapshot,
+                item.name_snapshot
+              ]);
+
+              await dbConnection.execute(
+                `INSERT INTO pos_transaction_items (
+                   pos_transaction_id,
+                   company_id,
+                   outlet_id,
+                   line_no,
+                   item_id,
+                   qty,
+                   price_snapshot,
+                   name_snapshot
+                 ) VALUES ${itemPlaceholders}`,
+                itemValues
+              );
+            }
+
+            if (tx.payments.length > 0) {
+              const paymentPlaceholders = tx.payments.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
+              const paymentValues = tx.payments.flatMap((payment, index) => [
+                posTransactionId,
+                tx.company_id,
+                tx.outlet_id,
+                index + 1,
+                payment.method,
+                payment.amount
+              ]);
+
+              await dbConnection.execute(
+                `INSERT INTO pos_transaction_payments (
+                   pos_transaction_id,
+                   company_id,
+                   outlet_id,
+                   payment_no,
+                   method,
+                   amount
+                 ) VALUES ${paymentPlaceholders}`,
+                paymentValues
+              );
+            }
 
             const acceptedContext: AcceptedSyncPushContext = {
               correlationId,
@@ -238,7 +608,7 @@ export const POST = withAuth(
               userId: auth.userId,
               clientTxId: tx.client_tx_id,
               trxAt: tx.trx_at,
-              posTransactionId: Number(insertResult.insertId)
+              posTransactionId
             };
 
             await runAcceptedSyncPushHook(dbConnection, acceptedContext);
@@ -249,28 +619,64 @@ export const POST = withAuth(
               await recordSyncPushPostingHookFailure(dbConnection, acceptedContext, postingHookError);
             }
 
+            await dbConnection.commit();
+
             results.push({
               client_tx_id: tx.client_tx_id,
               result: "OK"
             });
-            logSyncPushTransactionResult({
-              correlationId,
-              clientTxId: tx.client_tx_id,
-              result: "OK"
-            });
+            logTransactionResult("OK");
           } catch (error) {
             if (isMysqlError(error) && error.errno === MYSQL_DUPLICATE_ERROR_CODE) {
+              await rollbackQuietly(dbConnection);
+
+              const existingRecord = await readExistingIdempotencyRecordByClientTxId(dbConnection, tx.client_tx_id);
+              if (!existingRecord) {
+                results.push(toErrorResult(tx.client_tx_id, RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE));
+                logTransactionResult("ERROR");
+                continue;
+              }
+
+              const normalizedExistingHash = existingRecord.payloadSha256?.trim() ?? "";
+              if (normalizedExistingHash.length === 0) {
+                const legacyReplayMatch = await doesLegacyPayloadReplayMatch(dbConnection, existingRecord.posTransactionId, tx);
+                if (!legacyReplayMatch) {
+                  results.push(toErrorResult(tx.client_tx_id, IDEMPOTENCY_CONFLICT_MESSAGE));
+                  logTransactionResult("ERROR");
+                  continue;
+                }
+
+                results.push({
+                  client_tx_id: tx.client_tx_id,
+                  result: "DUPLICATE"
+                });
+                logTransactionResult("DUPLICATE");
+                continue;
+              }
+
+              const incomingPayloadHash = computePayloadSha256(canonicalizeTransactionForHash(tx));
+              if (normalizedExistingHash !== incomingPayloadHash) {
+                results.push(toErrorResult(tx.client_tx_id, IDEMPOTENCY_CONFLICT_MESSAGE));
+                logTransactionResult("ERROR");
+                continue;
+              }
+
               results.push({
                 client_tx_id: tx.client_tx_id,
                 result: "DUPLICATE"
               });
-              logSyncPushTransactionResult({
-                correlationId,
-                clientTxId: tx.client_tx_id,
-                result: "DUPLICATE"
-              });
+              logTransactionResult("DUPLICATE");
               continue;
             }
+
+            if (isRetryableMysqlError(error)) {
+              await rollbackQuietly(dbConnection);
+              results.push(toErrorResult(tx.client_tx_id, toRetryableDbErrorMessage(error)));
+              logTransactionResult("ERROR");
+              continue;
+            }
+
+            await rollbackQuietly(dbConnection);
 
             console.error("POST /sync/push transaction insert failed", {
               correlation_id: correlationId,
@@ -278,11 +684,7 @@ export const POST = withAuth(
               error
             });
             results.push(toErrorResult(tx.client_tx_id, "insert failed"));
-            logSyncPushTransactionResult({
-              correlationId,
-              clientTxId: tx.client_tx_id,
-              result: "ERROR"
-            });
+            logTransactionResult("ERROR");
           }
         }
       } finally {
@@ -296,18 +698,27 @@ export const POST = withAuth(
           ok: true,
           ...response
         },
-        { status: 200 }
+        {
+          status: 200,
+          headers: withCorrelationHeaders(correlationId)
+        }
       );
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return Response.json(INVALID_REQUEST_RESPONSE, {
+          status: 400,
+          headers: withCorrelationHeaders(correlationId)
+        });
       }
 
       console.error("POST /sync/push failed", {
         correlation_id: correlationId,
         error
       });
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, {
+        status: 500,
+        headers: withCorrelationHeaders(correlationId)
+      });
     }
   },
   [

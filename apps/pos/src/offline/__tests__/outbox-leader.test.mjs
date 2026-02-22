@@ -52,6 +52,12 @@ function createDeferred() {
   };
 }
 
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 test("localStorage fallback elects one active outbox drainer", async () => {
   const lockName = `jp-pos-outbox-leader-${crypto.randomUUID()}`;
   const storage = createMemoryStorage();
@@ -220,5 +226,61 @@ test("localStorage fallback maintains single winner across deterministic content
 
     assert.equal(winners.length, 1);
     assert.equal(firstOperations + secondOperations, 1);
+  }
+});
+
+test("localStorage lease renewal keeps long-running leader exclusive", async () => {
+  const lockName = `jp-pos-outbox-leader-${crypto.randomUUID()}`;
+  const storage = createMemoryStorage();
+  const gate = createDeferred();
+  let nowMs = 10_000;
+
+  const firstLeader = createOutboxDrainLeader({
+    lock_name: lockName,
+    owner_id: "tab-a-long",
+    lease_ms: 80,
+    now: () => nowMs,
+    navigator: {},
+    storage
+  });
+
+  const secondLeader = createOutboxDrainLeader({
+    lock_name: lockName,
+    owner_id: "tab-b-long",
+    lease_ms: 80,
+    now: () => nowMs,
+    navigator: {},
+    storage
+  });
+
+  const logicalClockId = setInterval(() => {
+    nowMs += 25;
+  }, 10);
+
+  try {
+    const firstRun = firstLeader.runIfLeader(async () => {
+      await gate.promise;
+      return "A";
+    });
+
+    await delay(160);
+
+    const blockedDuringLongRun = await secondLeader.runIfLeader(async () => "B");
+    assert.equal(blockedDuringLongRun.acquired, false);
+    assert.equal(blockedDuringLongRun.mechanism, "LOCAL_STORAGE");
+    assert.equal(blockedDuringLongRun.value, null);
+
+    gate.resolve();
+
+    const firstResult = await firstRun;
+    assert.equal(firstResult.acquired, true);
+    assert.equal(firstResult.mechanism, "LOCAL_STORAGE");
+    assert.equal(firstResult.value, "A");
+
+    const secondAfterRelease = await secondLeader.runIfLeader(async () => "B");
+    assert.equal(secondAfterRelease.acquired, true);
+    assert.equal(secondAfterRelease.value, "B");
+  } finally {
+    clearInterval(logicalClockId);
   }
 });

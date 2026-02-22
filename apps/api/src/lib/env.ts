@@ -8,6 +8,7 @@ const DEFAULT_ARGON2_MEMORY_KB = 65536;
 const DEFAULT_ARGON2_TIME_COST = 3;
 const DEFAULT_ARGON2_PARALLELISM = 1;
 const ENV_VALIDATION_PREFIX = "Invalid API environment configuration:";
+const REPO_ROOT_ENV_AUTOLOAD_DISABLE_KEY = "JP_DISABLE_REPO_ROOT_ENV_AUTOLOAD";
 
 export type PasswordHashAlgorithm = "argon2id" | "bcrypt";
 
@@ -105,6 +106,10 @@ let cachedEnv: AppEnv | null = null;
 let cachedEnvError: Error | null = null;
 
 function loadRepoRootEnv(): void {
+  if (process.env[REPO_ROOT_ENV_AUTOLOAD_DISABLE_KEY] === "true") {
+    return;
+  }
+
   if (process.env.AUTH_JWT_ACCESS_SECRET) {
     return;
   }

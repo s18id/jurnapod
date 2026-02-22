@@ -52,6 +52,7 @@ interface StorageLeasePayload {
 
 const DEFAULT_LOCK_NAME = "jurnapod:pos:outbox-drainer";
 const DEFAULT_LEASE_MS = 15_000;
+const MIN_LEASE_RENEW_INTERVAL_MS = 25;
 const heldInProcessLocks = new Set<string>();
 
 function nextTask(): Promise<void> {
@@ -130,6 +131,22 @@ function hasSameLeaseIdentity(left: StorageLeasePayload | null, right: StorageLe
   );
 }
 
+function hasSameLeaseOwnership(left: StorageLeasePayload | null, right: StorageLeasePayload): boolean {
+  if (!left) {
+    return false;
+  }
+
+  if (left.owner_id !== right.owner_id) {
+    return false;
+  }
+
+  if (left.ownership_token && right.ownership_token) {
+    return left.ownership_token === right.ownership_token;
+  }
+
+  return hasSameLeaseIdentity(left, right);
+}
+
 async function tryAcquireStorageLease(
   storage: StorageLike,
   storageKey: string,
@@ -169,9 +186,38 @@ async function tryAcquireStorageLease(
 
 function releaseStorageLease(storage: StorageLike, storageKey: string, lease: StorageLeasePayload): void {
   const current = parseStorageLease(storage.getItem(storageKey));
-  if (hasSameLeaseIdentity(current, lease)) {
+  if (hasSameLeaseOwnership(current, lease)) {
     storage.removeItem(storageKey);
   }
+}
+
+function renewStorageLease(
+  storage: StorageLike,
+  storageKey: string,
+  lease: StorageLeasePayload,
+  nowMs: number,
+  leaseMs: number
+): StorageLeasePayload | null {
+  const current = parseStorageLease(storage.getItem(storageKey));
+  if (!hasSameLeaseOwnership(current, lease)) {
+    return null;
+  }
+
+  const next: StorageLeasePayload = {
+    owner_id: lease.owner_id,
+    expires_at: nowMs + leaseMs,
+    ownership_token: lease.ownership_token,
+    lease_version: (current?.lease_version ?? lease.lease_version ?? 0) + 1
+  };
+
+  storage.setItem(storageKey, JSON.stringify(next));
+
+  const confirmed = parseStorageLease(storage.getItem(storageKey));
+  if (!hasSameLeaseIdentity(confirmed, next)) {
+    return null;
+  }
+
+  return next;
 }
 
 async function runWithInMemoryLease<T>(lockName: string, operation: () => Promise<T> | T): Promise<OutboxDrainLeaderResult<T>> {
@@ -216,6 +262,7 @@ async function runWithStorageLease<T>(
   const storageKey = resolveStorageKey(lockName);
   let heldLease: StorageLeasePayload | null = null;
   let hasInProcessLock = false;
+  let renewLeaseIntervalId: ReturnType<typeof globalThis.setInterval> | null = null;
   try {
     heldLease = await tryAcquireStorageLease(storage, storageKey, ownerId, now(), leaseMs, settle);
     if (!heldLease) {
@@ -237,6 +284,20 @@ async function runWithStorageLease<T>(
     heldInProcessLocks.add(lockName);
     hasInProcessLock = true;
 
+    let activeLease = heldLease;
+    const renewIntervalMs = Math.max(MIN_LEASE_RENEW_INTERVAL_MS, Math.floor(leaseMs / 3));
+    renewLeaseIntervalId = globalThis.setInterval(() => {
+      try {
+        const renewedLease = renewStorageLease(storage, storageKey, activeLease, now(), leaseMs);
+        if (renewedLease) {
+          activeLease = renewedLease;
+          heldLease = renewedLease;
+        }
+      } catch {
+        // Best-effort renewal; deterministic lease checks still guard overlaps.
+      }
+    }, renewIntervalMs);
+
     const value = await operation();
     return {
       acquired: true,
@@ -244,6 +305,10 @@ async function runWithStorageLease<T>(
       value
     };
   } finally {
+    if (renewLeaseIntervalId !== null) {
+      globalThis.clearInterval(renewLeaseIntervalId);
+    }
+
     if (hasInProcessLock) {
       heldInProcessLocks.delete(lockName);
     }

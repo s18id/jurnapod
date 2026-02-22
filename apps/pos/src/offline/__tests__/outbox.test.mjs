@@ -67,15 +67,18 @@ test("stale attempt token is ignored and does not mutate job", async () => {
     const job = await enqueueOutboxJob({ sale_id: saleId }, db);
 
     const firstAttempt = await reserveOutboxAttempt(job.job_id, db);
-    const secondAttempt = await reserveOutboxAttempt(job.job_id, db);
+    const blockedAttempt = await reserveOutboxAttempt(job.job_id, db);
 
     assert.equal(firstAttempt.attempt, 1);
-    assert.equal(secondAttempt.attempt, 2);
+    assert.equal(firstAttempt.claimed, true);
+    assert.equal(typeof firstAttempt.lease_token, "string");
+    assert.equal(blockedAttempt.claimed, false);
+    assert.equal(blockedAttempt.attempt, 1);
 
     const staleUpdate = await updateOutboxJobStatus(
       {
         job_id: job.job_id,
-        attempt_token: firstAttempt.attempt,
+        attempt_token: firstAttempt.attempt + 1,
         status: "FAILED",
         last_error: "STALE_SHOULD_NOT_APPLY"
       },
@@ -85,13 +88,14 @@ test("stale attempt token is ignored and does not mutate job", async () => {
     assert.equal(staleUpdate.applied, false);
     assert.equal(staleUpdate.reason, "STALE_ATTEMPT");
     assert.equal(staleUpdate.job.status, "PENDING");
-    assert.equal(staleUpdate.job.attempts, 2);
+    assert.equal(staleUpdate.job.attempts, 1);
     assert.equal(staleUpdate.job.last_error, null);
 
     const freshUpdate = await updateOutboxJobStatus(
       {
         job_id: job.job_id,
-        attempt_token: secondAttempt.attempt,
+        attempt_token: firstAttempt.attempt,
+        lease_token: firstAttempt.lease_token,
         status: "FAILED",
         next_attempt_at: nowIso(),
         last_error: "NETWORK_TIMEOUT"
@@ -102,8 +106,53 @@ test("stale attempt token is ignored and does not mutate job", async () => {
     assert.equal(freshUpdate.applied, true);
     assert.equal(freshUpdate.reason, "APPLIED");
     assert.equal(freshUpdate.job.status, "FAILED");
-    assert.equal(freshUpdate.job.attempts, 2);
+    assert.equal(freshUpdate.job.attempts, 1);
     assert.equal(freshUpdate.job.last_error, "NETWORK_TIMEOUT");
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});
+
+test("stale lease token is rejected by CAS update", async () => {
+  const db = createPosOfflineDb(`jp-pos-outbox-test-${crypto.randomUUID()}`);
+  const timestamp = nowIso();
+  const saleId = crypto.randomUUID();
+  const clientTxId = crypto.randomUUID();
+
+  try {
+    await db.sales.add(buildCompletedSale(saleId, clientTxId, timestamp));
+    const job = await enqueueOutboxJob({ sale_id: saleId }, db);
+    const attempt = await reserveOutboxAttempt(job.job_id, db);
+
+    assert.equal(attempt.claimed, true);
+
+    const staleLeaseUpdate = await updateOutboxJobStatus(
+      {
+        job_id: job.job_id,
+        attempt_token: attempt.attempt,
+        lease_token: `${attempt.lease_token}-stale`,
+        status: "SENT"
+      },
+      db
+    );
+
+    assert.equal(staleLeaseUpdate.applied, false);
+    assert.equal(staleLeaseUpdate.reason, "STALE_LEASE");
+    assert.equal(staleLeaseUpdate.job.status, "PENDING");
+
+    const freshUpdate = await updateOutboxJobStatus(
+      {
+        job_id: job.job_id,
+        attempt_token: attempt.attempt,
+        lease_token: attempt.lease_token,
+        status: "SENT"
+      },
+      db
+    );
+
+    assert.equal(freshUpdate.applied, true);
+    assert.equal(freshUpdate.job.status, "SENT");
   } finally {
     db.close();
     await db.delete();
@@ -125,6 +174,7 @@ test("SENT is terminal against later FAILED/PENDING updates", async () => {
       {
         job_id: job.job_id,
         attempt_token: attempt.attempt,
+        lease_token: attempt.lease_token,
         status: "SENT"
       },
       db

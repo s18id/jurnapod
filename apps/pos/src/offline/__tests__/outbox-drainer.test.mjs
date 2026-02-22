@@ -132,6 +132,7 @@ test("retryable sender failure marks job FAILED and schedules near retry", async
     const result = await drainOutboxJobs(
       {
         now: () => fixedNow,
+        random: () => 1,
         sender: async () => {
           throw new OutboxSenderError("RETRYABLE", "NETWORK_ERROR", "NETWORK_TIMEOUT");
         }
@@ -163,6 +164,7 @@ test("non-retryable validation failure marks FAILED with tagged reason", async (
     const result = await drainOutboxJobs(
       {
         now: () => fixedNow,
+        random: () => 0,
         sender: async () => {
           throw new OutboxSenderError("NON_RETRYABLE", "VALIDATION_ERROR", "INVALID_PAYLOAD");
         }
@@ -229,31 +231,54 @@ test("failed job with future next_attempt_at is skipped", async () => {
   }
 });
 
-test("stale update path is ignored when attempt token is superseded", async () => {
+test("active lease prevents overlapping second drain send", async () => {
   const db = createPosOfflineDb(`jp-pos-outbox-drainer-test-${crypto.randomUUID()}`);
   const fixedNow = Date.parse("2026-02-21T15:00:00.000Z");
 
   try {
     const job = await seedPendingOutboxJob(db, nowIso(fixedNow - 1_000));
+    const senderGate = createDeferred();
+    const releaseSender = createDeferred();
+    let senderCalls = 0;
 
-    const result = await drainOutboxJobs(
+    const firstDrainPromise = drainOutboxJobs(
       {
         now: () => fixedNow,
         sender: async ({ job: activeJob }) => {
-          await reserveOutboxAttempt(activeJob.job_id, db);
+          senderCalls += 1;
+          assert.equal(activeJob.job_id, job.job_id);
+          senderGate.resolve();
+          await releaseSender.promise;
           return { result: "OK" };
         }
       },
       db
     );
 
+    await senderGate.promise;
+
+    const secondDrainResult = await drainOutboxJobs(
+      {
+        now: () => fixedNow,
+        sender: async () => {
+          senderCalls += 1;
+          return { result: "OK" };
+        }
+      },
+      db
+    );
+
+    releaseSender.resolve();
+    const firstDrainResult = await firstDrainPromise;
+
     const persisted = await db.outbox_jobs.get(job.job_id);
 
-    assert.equal(result.sent_count, 0);
-    assert.equal(result.failed_count, 0);
-    assert.equal(result.stale_count, 1);
-    assert.equal(persisted?.status, "PENDING");
-    assert.equal(persisted?.attempts, 2);
+    assert.equal(senderCalls, 1);
+    assert.equal(secondDrainResult.selected_count, 0);
+    assert.equal(secondDrainResult.sent_count, 0);
+    assert.equal(firstDrainResult.sent_count, 1);
+    assert.equal(persisted?.status, "SENT");
+    assert.equal(persisted?.attempts, 1);
     assert.equal(persisted?.last_error, null);
   } finally {
     db.close();
@@ -261,61 +286,48 @@ test("stale update path is ignored when attempt token is superseded", async () =
   }
 });
 
-test("delayed older failure cannot overwrite newer SENT status", async () => {
+test("timeout-like retry then duplicate replay converges to SENT", async () => {
   const db = createPosOfflineDb(`jp-pos-outbox-drainer-test-${crypto.randomUUID()}`);
   const fixedNow = Date.parse("2026-02-21T16:00:00.000Z");
 
   try {
     const job = await seedPendingOutboxJob(db, nowIso(fixedNow - 1_000));
-    const firstAttemptEntered = createDeferred();
-    const releaseFirstAttemptFailure = createDeferred();
-
     let senderCalls = 0;
     const sender = async ({ attempt_token }) => {
       senderCalls += 1;
-
       if (attempt_token === 1) {
-        firstAttemptEntered.resolve();
-        await releaseFirstAttemptFailure.promise;
-        throw new OutboxSenderError("RETRYABLE", "NETWORK_ERROR", "LATE_FAILURE");
+        throw new OutboxSenderError("RETRYABLE", "REQUEST_ABORTED", "AbortError");
       }
 
-      if (attempt_token === 2) {
-        return { result: "OK" };
-      }
-
-      throw new Error(`Unexpected attempt token: ${attempt_token}`);
+      return { result: "DUPLICATE" };
     };
 
-    const firstDrainPromise = drainOutboxJobs(
+    const firstDrainResult = await drainOutboxJobs(
       {
         now: () => fixedNow,
+        random: () => 1,
         sender
       },
       db
     );
-
-    await firstAttemptEntered.promise;
 
     const secondDrainResult = await drainOutboxJobs(
       {
-        now: () => fixedNow,
+        now: () => fixedNow + 5_000,
         sender
       },
       db
     );
 
-    releaseFirstAttemptFailure.resolve();
-    const firstDrainResult = await firstDrainPromise;
     const persisted = await db.outbox_jobs.get(job.job_id);
 
     assert.equal(senderCalls, 2);
+    assert.equal(firstDrainResult.sent_count, 0);
+    assert.equal(firstDrainResult.failed_count, 1);
+    assert.equal(firstDrainResult.stale_count, 0);
     assert.equal(secondDrainResult.sent_count, 1);
     assert.equal(secondDrainResult.failed_count, 0);
     assert.equal(secondDrainResult.stale_count, 0);
-    assert.equal(firstDrainResult.sent_count, 0);
-    assert.equal(firstDrainResult.failed_count, 0);
-    assert.equal(firstDrainResult.stale_count, 1);
     assert.equal(persisted?.status, "SENT");
     assert.equal(persisted?.attempts, 2);
     assert.equal(persisted?.next_attempt_at, null);
