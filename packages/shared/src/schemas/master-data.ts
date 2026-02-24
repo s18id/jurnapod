@@ -1,6 +1,33 @@
 import { z } from "zod";
 import { NumericIdSchema } from "./common";
 
+/**
+ * Item Type Taxonomy
+ * 
+ * SERVICE: Non-tangible offerings (labor, delivery, consulting)
+ *   - Never tracked in inventory
+ *   - Examples: Delivery fee, barista service, event catering
+ * 
+ * PRODUCT: Finished goods sold to customers (default type)
+ *   - Physical items or prepared menu items
+ *   - Optional inventory tracking (level 1+)
+ *   - Can be made from recipes (level 2+)
+ *   - Examples: Coffee drinks, pastries, retail items
+ * 
+ * INGREDIENT: Raw materials used to make products
+ *   - Used in recipe composition (level 2+)
+ *   - Inventory tracking recommended (level 1+)
+ *   - Can be sold directly (flexible for retail scenarios)
+ *   - Examples: Coffee beans, milk, sugar, cups
+ * 
+ * RECIPE: Bill of Materials (BOM) / formulas
+ *   - Templates for making products from ingredients
+ *   - Not physical items (no stock tracking)
+ *   - Functional in inventory level 2+ only
+ *   - Examples: "Latte recipe", "Cookie recipe"
+ * 
+ * @see docs/adr/ADR-0002-item-types-taxonomy.md for detailed documentation
+ */
 export const ItemTypeSchema = z.enum(["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"]);
 
 const optionalSkuSchema = z

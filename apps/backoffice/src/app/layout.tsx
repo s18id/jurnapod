@@ -75,6 +75,25 @@ const styles = {
     borderRadius: "8px",
     padding: "6px 10px",
     cursor: "pointer"
+  } as const,
+  posLink: {
+    border: "1px solid #2f5f4a",
+    backgroundColor: "#2f5f4a",
+    color: "#fff",
+    borderRadius: "8px",
+    padding: "6px 12px",
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    fontSize: "14px",
+    fontWeight: "500",
+    transition: "all 0.2s ease"
+  } as const,
+  topbarActions: {
+    display: "flex",
+    gap: "8px",
+    alignItems: "center"
   } as const
 };
 
@@ -89,9 +108,20 @@ export function AppLayout(props: AppLayoutProps) {
               {props.user.email} · company #{props.user.company_id}
             </p>
           </div>
-          <button type="button" onClick={props.onSignOut} style={styles.signOutButton}>
-            Sign out
-          </button>
+          <div style={styles.topbarActions}>
+            <a 
+              href="http://localhost:5173" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              style={styles.posLink}
+              title="Open POS in new tab"
+            >
+              🛒 Open POS
+            </a>
+            <button type="button" onClick={props.onSignOut} style={styles.signOutButton}>
+              Sign out
+            </button>
+          </div>
         </header>
 
         <nav style={styles.nav}>

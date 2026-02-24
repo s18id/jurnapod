@@ -29,6 +29,30 @@ type ItemPricesResponse = { ok: true; prices: ItemPrice[] };
 
 const itemTypeOptions: readonly ItemType[] = ["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"];
 
+const itemTypeDescriptions: Record<ItemType, string> = {
+  SERVICE: "Non-tangible offerings (e.g., delivery, labor)",
+  PRODUCT: "Finished goods sold to customers (default)",
+  INGREDIENT: "Raw materials used in production",
+  RECIPE: "Bill of Materials / formulas (inventory level 2+)"
+};
+
+const itemTypeExamples: Record<ItemType, string> = {
+  SERVICE: "Examples: Delivery fee, consulting, event catering",
+  PRODUCT: "Examples: Coffee drinks, pastries, retail items",
+  INGREDIENT: "Examples: Coffee beans, milk, sugar, cups",
+  RECIPE: "Examples: Latte recipe, cookie recipe"
+};
+
+function getItemTypeWarning(type: ItemType, hasPrice: boolean): string | null {
+  if (type === "RECIPE" && hasPrice) {
+    return "⚠️ RECIPE items typically don't need prices. Consider pricing the PRODUCT instead.";
+  }
+  if (type === "INGREDIENT" && hasPrice) {
+    return "💡 Selling ingredients directly? You may want to create a PRODUCT item for retail sales.";
+  }
+  return null;
+}
+
 const boxStyle = {
   border: "1px solid #e2ddd2",
   borderRadius: "10px",
@@ -218,6 +242,24 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     <div>
       <section style={boxStyle}>
         <h2 style={{ marginTop: 0 }}>Items + Prices Management</h2>
+        
+        <details style={{ marginBottom: "16px", padding: "12px", backgroundColor: "#f8f6f3", borderRadius: "6px" }}>
+          <summary style={{ cursor: "pointer", fontWeight: "bold", color: "#2f5f4a" }}>
+            📖 Item Types Guide
+          </summary>
+          <div style={{ marginTop: "12px", fontSize: "13px", lineHeight: "1.6" }}>
+            <ul style={{ margin: "8px 0", paddingLeft: "20px" }}>
+              <li><strong>SERVICE:</strong> Non-tangible offerings like delivery fees, labor, consulting</li>
+              <li><strong>PRODUCT:</strong> Finished goods sold to customers (coffee, pastries, retail items) - Default type</li>
+              <li><strong>INGREDIENT:</strong> Raw materials used in production (beans, milk, sugar, cups)</li>
+              <li><strong>RECIPE:</strong> Bill of Materials / formulas for making products (requires inventory level 2+)</li>
+            </ul>
+            <p style={{ margin: "8px 0", fontSize: "12px", color: "#6b5d48" }}>
+              ℹ️ All types can be sold via POS. INGREDIENT and RECIPE types will have special behavior when inventory module is enabled.
+            </p>
+          </div>
+        </details>
+
         <p style={{ marginTop: 0 }}>Outlet scope for prices:</p>
         <select
           value={selectedOutletId}
@@ -236,7 +278,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
 
       <section style={boxStyle}>
         <h3 style={{ marginTop: 0 }}>Create Item</h3>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-start" }}>
           <input
             placeholder="SKU"
             value={newItem.sku}
@@ -249,22 +291,28 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
             style={inputStyle}
           />
-          <select
-            value={newItem.type}
-            onChange={(event) =>
-              setNewItem((prev) => ({
-                ...prev,
-                type: event.target.value as ItemType
-              }))
-            }
-            style={inputStyle}
-          >
-            {itemTypeOptions.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <select
+              value={newItem.type}
+              onChange={(event) =>
+                setNewItem((prev) => ({
+                  ...prev,
+                  type: event.target.value as ItemType
+                }))
+              }
+              style={inputStyle}
+              title={itemTypeDescriptions[newItem.type]}
+            >
+              {itemTypeOptions.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+            <small style={{ color: "#6b5d48", fontSize: "11px", maxWidth: "200px" }}>
+              {itemTypeDescriptions[newItem.type]}
+            </small>
+          </div>
           <label>
             <input
               type="checkbox"
@@ -282,6 +330,9 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             Add item
           </button>
         </div>
+        <p style={{ fontSize: "12px", color: "#6b5d48", marginBottom: 0, marginTop: "8px" }}>
+          💡 {itemTypeExamples[newItem.type]}
+        </p>
       </section>
 
       <section style={boxStyle}>
@@ -393,7 +444,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             <option value={0}>Select item</option>
             {items.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.name}
+                {item.name} ({item.type})
               </option>
             ))}
           </select>
@@ -420,6 +471,17 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             Add price
           </button>
         </div>
+        {newPrice.item_id > 0 && (() => {
+          const selectedItem = itemMap.get(newPrice.item_id);
+          if (!selectedItem) return null;
+          const warning = getItemTypeWarning(selectedItem.type, newPrice.price.trim().length > 0);
+          if (!warning) return null;
+          return (
+            <p style={{ fontSize: "12px", color: "#a67c00", marginBottom: 0, marginTop: "8px", backgroundColor: "#fff9e6", padding: "8px", borderRadius: "4px" }}>
+              {warning}
+            </p>
+          );
+        })()}
       </section>
 
       <section style={boxStyle}>

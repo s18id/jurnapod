@@ -10,7 +10,16 @@
   "scripts": {
     "clean": "npx rimraf dist \"apps/*/dist\" \"packages/*/dist\" \"packages/modules/*/dist\" \"packages/**/src/**/*.js\" \"packages/**/src/**/*.d.ts\" \"packages/**/src/**/*.map\" \"**/*.tsbuildinfo\"",
     "build": "npm run clean && npm run build -ws --if-present",
-    "dev": "npm run dev -ws --if-present",
+    "dev": "npm run dev:check && concurrently -n api,backoffice,pos -c blue,green,magenta --restart-tries 3 --restart-after 5000 \"npm:dev:api\" \"npm run dev:backoffice:wait\" \"npm run dev:pos:wait\"",
+    "dev:all": "npm run dev",
+    "dev:api+backoffice": "npm run dev:check && concurrently -n api,backoffice -c blue,green --restart-tries 3 --restart-after 5000 \"npm:dev:api\" \"npm run dev:backoffice:wait\"",
+    "dev:api+pos": "npm run dev:check && concurrently -n api,pos -c blue,magenta --restart-tries 3 --restart-after 5000 \"npm:dev:api\" \"npm run dev:pos:wait\"",
+    "dev:backoffice:wait": "wait-on http://127.0.0.1:3001/api/health && npm run dev:backoffice",
+    "dev:pos:wait": "wait-on http://127.0.0.1:3001/api/health && npm run dev:pos",
+    "dev:check": "node scripts/check-env.mjs",
+    "dev:kill": "node scripts/kill-ports.mjs",
+    "dev:stop": "npm run dev:kill",
+    "dev:restart": "npm run dev:stop && npm run dev",
     "typecheck": "npm run typecheck -ws --if-present",
     "lint": "npm run lint -ws --if-present",
     "dev:pos": "npm run dev -w @jurnapod/pos",
@@ -33,6 +42,8 @@
     "auth:secret:regenerate": "node ./scripts/auth-secret-regenerate.mjs"
   },
   "devDependencies": {
-    "rimraf": "^5.0.10"
+    "concurrently": "^9.2.1",
+    "rimraf": "^5.0.10",
+    "wait-on": "^8.0.1"
   }
 }

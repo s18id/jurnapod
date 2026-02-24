@@ -6,13 +6,13 @@ export class PosSalePostingMapper implements PostingMapper {
   async mapToJournal(_request: PostingRequest): Promise<JournalLine[]> {
     return [
       {
-        account_id: "00000000-0000-0000-0000-000000000003",
+        account_id: 11100, // Cash account (placeholder)
         debit: 100,
         credit: 0,
         description: "Cash"
       },
       {
-        account_id: "00000000-0000-0000-0000-000000000004",
+        account_id: 40100, // POS sales revenue account (placeholder)
         debit: 0,
         credit: 100,
         description: "POS sales revenue"
