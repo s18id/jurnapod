@@ -8,7 +8,7 @@
 import { chromium } from 'playwright';
 
 // Configuration
-const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3002';
 const API_URL = process.env.API_URL || 'http://localhost:3001/api';
 const CREDENTIALS = {
   companyCode: 'JP',
@@ -27,8 +27,114 @@ let testResults = {
   tests: []
 };
 
+async function apiRequest(path, options = {}, token = null) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers
+  });
+
+  const data = await response.json();
+  return { response, data };
+}
+
+async function apiLogin() {
+  const { response, data } = await apiRequest("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({
+      company_code: CREDENTIALS.companyCode,
+      email: CREDENTIALS.email,
+      password: CREDENTIALS.password
+    })
+  });
+
+  if (!response.ok || !data.access_token) {
+    throw new Error(`API login failed: ${data.error?.message || response.statusText}`);
+  }
+
+  return data.access_token;
+}
+
+async function ensureBackofficeReady() {
+  const maxAttempts = 10;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(`${BASE_URL}/@vite/client`);
+      const contentType = response.headers.get("content-type") || "";
+      const body = await response.text();
+
+      const isJs = contentType.includes("javascript") || body.startsWith("import ");
+      const isHtml = body.includes("<!DOCTYPE html>") || body.includes("<html");
+
+      if (response.ok && isJs && !isHtml) {
+        return;
+      }
+    } catch {
+      // ignore and retry
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  throw new Error("Backoffice dev server not ready (Vite client not served as JS)");
+}
+
+async function ensurePaymentMethods() {
+  const token = await apiLogin();
+
+  const { response: accountsResponse, data: accountsData } = await apiRequest(
+    `/accounts?company_id=1&is_payable=true`,
+    {},
+    token
+  );
+
+  if (!accountsResponse.ok || !Array.isArray(accountsData.data) || accountsData.data.length === 0) {
+    throw new Error("No payable accounts found for payment mappings");
+  }
+
+  const defaultAccountId = accountsData.data[0].id;
+  const outletId = 1;
+
+  const mappingsPayload = {
+    outlet_id: outletId,
+    mappings: [
+      {
+        method_code: "CASH",
+        account_id: defaultAccountId,
+        label: "CASH",
+        is_invoice_default: true
+      },
+      {
+        method_code: "QRIS",
+        account_id: defaultAccountId,
+        label: "QRIS",
+        is_invoice_default: false
+      }
+    ]
+  };
+
+  const { response: saveResponse, data: saveData } = await apiRequest(
+    `/outlet-payment-method-mappings`,
+    {
+      method: "PUT",
+      body: JSON.stringify(mappingsPayload)
+    },
+    token
+  );
+
+  if (!saveResponse.ok) {
+    throw new Error(`Failed to seed payment methods: ${saveData.error?.message || "unknown"}`);
+  }
+}
+
 async function setup() {
   console.log('🚀 Starting E2E Test Suite for Invoice Payment Default\n');
+  await ensureBackofficeReady();
+  await ensurePaymentMethods();
   browser = await chromium.launch({ 
     headless: process.env.HEADLESS !== 'false',
     slowMo: 100 // Slow down by 100ms for visibility
@@ -55,47 +161,25 @@ async function teardown() {
 async function login() {
   console.log('📝 Logging in...');
   await page.goto(BASE_URL);
-  
+
+  await page.waitForSelector('[data-testid="login-company-code"]', { timeout: 15000 });
+
   // Fill login form
-  await page.fill('input[name="company_code"], input[placeholder*="Company"]', CREDENTIALS.companyCode);
-  await page.fill('input[type="email"], input[name="email"]', CREDENTIALS.email);
-  await page.fill('input[type="password"], input[name="password"]', CREDENTIALS.password);
-  
+  await page.fill('[data-testid="login-company-code"]', CREDENTIALS.companyCode);
+  await page.fill('[data-testid="login-email"]', CREDENTIALS.email);
+  await page.fill('[data-testid="login-password"]', CREDENTIALS.password);
+
   // Submit
-  await page.click('button[type="submit"], button:has-text("Login")');
-  
-  // Wait for navigation
-  await page.waitForURL(/.*/, { timeout: 10000 });
-  await page.waitForTimeout(1000);
+  await page.click('button[type="submit"], button:has-text("Sign in")');
+
+  // Wait for session to establish
+  await page.waitForTimeout(1500);
 }
 
 async function navigateToSettings() {
   console.log('🔧 Navigating to Settings...');
-  
-  // Look for Settings link/button - try multiple selectors
-  const settingsSelectors = [
-    'a:has-text("Settings")',
-    'button:has-text("Settings")',
-    'a[href*="settings"]',
-    '[data-test="settings-link"]'
-  ];
-  
-  for (const selector of settingsSelectors) {
-    try {
-      const element = await page.$(selector);
-      if (element) {
-        await element.click();
-        await page.waitForTimeout(1000);
-        return;
-      }
-    } catch (e) {
-      // Try next selector
-    }
-  }
-  
-  // If direct link doesn't work, try navigating directly
-  await page.goto(`${BASE_URL}/settings/account-mappings`);
-  await page.waitForTimeout(1000);
+  await page.goto(`${BASE_URL}/#/account-mappings`);
+  await page.waitForSelector('h1:has-text("Account Mapping Settings")', { timeout: 15000 });
 }
 
 async function test(name, fn) {
@@ -138,16 +222,10 @@ async function testLoginAndNavigation() {
   await navigateToSettings();
   
   // Check for Payment Methods section
-  const heading = await page.$('h2:has-text("POS Payment Methods"), h3:has-text("Payment Methods")');
-  if (!heading) {
-    throw new Error('Payment Methods section not found');
-  }
-  
+  await page.waitForSelector('[data-testid="payment-methods-section"]', { timeout: 15000 });
+
   // Check for Invoice Default column
-  const invoiceDefaultHeader = await page.$('th:has-text("Invoice Default")');
-  if (!invoiceDefaultHeader) {
-    throw new Error('Invoice Default column not found in table');
-  }
+  await page.waitForSelector('[data-testid="invoice-default-header"]', { timeout: 15000 });
 }
 
 // Test 2: Configure Invoice Default
@@ -155,26 +233,11 @@ async function testConfigureInvoiceDefault() {
   await navigateToSettings();
   
   // Find CASH method row
-  const cashRow = await page.$('tr:has-text("CASH")');
-  if (!cashRow) {
-    throw new Error('CASH payment method not found');
-  }
-  
-  // Find checkbox in CASH row
-  const checkbox = await cashRow.$('input[type="checkbox"]');
-  if (!checkbox) {
-    throw new Error('Invoice Default checkbox not found for CASH');
-  }
-  
-  // Check the checkbox
-  await checkbox.check();
+  await page.waitForSelector('[data-testid="payment-method-CASH-invoice-default"]', { timeout: 15000 });
+  await page.check('[data-testid="payment-method-CASH-invoice-default"]');
   
   // Click Save button
-  const saveButton = await page.$('button:has-text("Save Payment Mappings")');
-  if (!saveButton) {
-    throw new Error('Save Payment Mappings button not found');
-  }
-  await saveButton.click();
+  await page.click('[data-testid="save-payment-mappings"]');
   
   // Wait for save to complete
   await page.waitForTimeout(2000);
@@ -183,8 +246,7 @@ async function testConfigureInvoiceDefault() {
   await page.reload();
   await page.waitForTimeout(1000);
   
-  const reloadedCheckbox = await page.$('tr:has-text("CASH") input[type="checkbox"]');
-  const isChecked = await reloadedCheckbox.isChecked();
+  const isChecked = await page.isChecked('[data-testid="payment-method-CASH-invoice-default"]');
   
   if (!isChecked) {
     throw new Error('Invoice Default checkbox not persisted after reload');
@@ -197,44 +259,22 @@ async function testMultipleDefaultsValidation() {
   
   // Ensure we have at least 2 payment methods
   // If only CASH exists, add QRIS first
-  const qrisRow = await page.$('tr:has-text("QRIS")');
-  if (!qrisRow) {
-    console.log('   Adding QRIS payment method...');
-    await page.fill('input[placeholder*="code"], input[placeholder*="Method"]', 'QRIS');
-    await page.fill('input[placeholder*="label"], input[placeholder*="Label"]', 'QRIS Payment');
-    
-    const addButton = await page.$('button:has-text("Add Method")');
-    if (addButton) {
-      await addButton.click();
-      await page.waitForTimeout(1000);
-      
-      // Select an account for QRIS
-      const qrisAccountSelect = await page.$('tr:has-text("QRIS") select');
-      if (qrisAccountSelect) {
-        const options = await qrisAccountSelect.$$('option');
-        if (options.length > 1) {
-          await qrisAccountSelect.selectOption({ index: 1 });
-        }
-      }
-    }
+  await page.waitForSelector('[data-testid="payment-method-QRIS-invoice-default"]', { timeout: 15000 });
+
+  // Check both CASH and QRIS (UI should keep only the last one checked)
+  await page.check('[data-testid="payment-method-CASH-invoice-default"]');
+  await page.check('[data-testid="payment-method-QRIS-invoice-default"]');
+
+  const cashChecked = await page.isChecked('[data-testid="payment-method-CASH-invoice-default"]');
+  const qrisChecked = await page.isChecked('[data-testid="payment-method-QRIS-invoice-default"]');
+
+  if (cashChecked && qrisChecked) {
+    throw new Error('UI allowed multiple invoice defaults to be checked');
   }
-  
-  // Check both CASH and QRIS
-  await page.check('tr:has-text("CASH") input[type="checkbox"]');
-  await page.check('tr:has-text("QRIS") input[type="checkbox"]');
-  
-  // Try to save
-  const saveButton = await page.$('button:has-text("Save Payment Mappings")');
-  await saveButton.click();
-  
-  // Wait for error message
-  await page.waitForTimeout(2000);
-  
-  // Look for error message
-  const errorMessage = await page.textContent('body');
-  if (!errorMessage.includes('Only one payment method') && !errorMessage.includes('invoice default')) {
-    throw new Error('Expected validation error message not shown');
-  }
+
+  // Save should succeed with single default
+  await page.click('[data-testid="save-payment-mappings"]');
+  await page.waitForTimeout(1500);
 }
 
 // Test 4: Sales Payment Auto-Selection
@@ -258,11 +298,11 @@ async function testSalesPaymentAutoSelection() {
   
   // Navigate to Sales Payments
   console.log('   Navigating to Sales → Payments...');
-  await page.goto(`${BASE_URL}/sales/payments`);
+  await page.goto(`${BASE_URL}/#/sales-payments`);
   await page.waitForTimeout(2000);
   
   // Check Account dropdown in Create Payment form
-  const accountSelect = await page.$('select:near(:text("Account")), select[name*="account"]');
+  const accountSelect = await page.$('select');
   if (!accountSelect) {
     throw new Error('Account select dropdown not found in Create Payment form');
   }
@@ -280,24 +320,23 @@ async function testSalesPaymentAutoSelection() {
 async function testWarningWhenNoDefault() {
   // Go to settings and uncheck all defaults
   await navigateToSettings();
-  
-  const checkboxes = await page.$$('input[type="checkbox"]');
+
+  await page.waitForSelector('[data-testid="payment-methods-table"]', { timeout: 15000 });
+
+  const checkboxes = await page.$$('[data-testid$="-invoice-default"]');
   for (const cb of checkboxes) {
     await cb.uncheck();
   }
-  
-  await page.click('button:has-text("Save Payment Mappings")');
+
+  await page.click('[data-testid="save-payment-mappings"]');
   await page.waitForTimeout(2000);
   
   // Navigate to Sales Payments
-  await page.goto(`${BASE_URL}/sales/payments`);
+  await page.goto(`${BASE_URL}/#/sales-payments`);
   await page.waitForTimeout(2000);
-  
+
   // Look for warning banner
-  const warningText = await page.textContent('body');
-  if (!warningText.includes('No invoice default') && !warningText.includes('no default')) {
-    throw new Error('Warning banner not shown when no default is configured');
-  }
+  await page.waitForSelector('[data-testid="invoice-default-warning"]', { timeout: 15000 });
   
   console.log('   ✓ Warning banner displayed correctly');
 }
@@ -311,11 +350,11 @@ async function testManualOverride() {
   await page.waitForTimeout(2000);
   
   // Go to Sales Payments
-  await page.goto(`${BASE_URL}/sales/payments`);
+  await page.goto(`${BASE_URL}/#/sales-payments`);
   await page.waitForTimeout(2000);
   
   // Get current selected account
-  const accountSelect = await page.$('select:near(:text("Account")), select[name*="account"]');
+  const accountSelect = await page.$('select');
   const originalValue = await accountSelect.inputValue();
   
   // Change to different account

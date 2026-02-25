@@ -6,7 +6,7 @@ Automated end-to-end tests for the invoice payment default feature, based on `MA
 
 1. **Dev servers must be running:**
    - API: http://localhost:3001/api
-   - Backoffice: http://localhost:5173
+   - Backoffice: http://localhost:3002
 
 2. **Database:** MySQL with migration 0027 applied
 
@@ -86,14 +86,14 @@ On test failure, screenshots are saved to `screenshots/` directory with timestam
 
 ## Environment Variables
 
-- `BASE_URL` - Backoffice URL (default: http://localhost:5173)
+- `BASE_URL` - Backoffice URL (default: http://localhost:3002)
 - `API_URL` - API URL (default: http://localhost:3001/api)
 - `HEADLESS` - Run in headless mode (default: true)
 - `PWDEBUG` - Enable Playwright debugger (default: false)
 
 Example:
 ```bash
-BASE_URL=http://localhost:3000 npm test
+BASE_URL=http://localhost:3002 npm test
 ```
 
 ## Troubleshooting

@@ -68,6 +68,9 @@ export function LoginPage(props: LoginPageProps) {
           Company code
           <input
             style={inputStyle}
+            name="company_code"
+            data-testid="login-company-code"
+            placeholder="Company code"
             value={companyCode}
             onChange={(event) => setCompanyCode(event.target.value)}
             autoComplete="organization"
@@ -79,6 +82,9 @@ export function LoginPage(props: LoginPageProps) {
           Email
           <input
             style={inputStyle}
+            name="email"
+            data-testid="login-email"
+            placeholder="Email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             autoComplete="email"
@@ -91,6 +97,9 @@ export function LoginPage(props: LoginPageProps) {
           Password
           <input
             style={inputStyle}
+            name="password"
+            data-testid="login-password"
+            placeholder="Password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="current-password"

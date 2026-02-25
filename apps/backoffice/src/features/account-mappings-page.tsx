@@ -352,7 +352,7 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
         {saving ? "Saving..." : "Save Sales Mappings"}
       </button>
 
-      <section style={boxStyle}>
+      <section style={boxStyle} data-testid="payment-methods-section">
         <h2 style={{ marginTop: 0 }}>POS Payment Methods</h2>
         <p style={{ color: "#5b6664", marginTop: 0 }}>
           Map each POS payment method to a cash/bank account. Set the default payment method for invoice payments.
@@ -382,18 +382,18 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
         {effectivePaymentMethods.length === 0 ? (
           <p style={{ color: "#5b6664" }}>No payment methods configured.</p>
         ) : (
-          <table style={tableStyle}>
+          <table style={tableStyle} data-testid="payment-methods-table">
             <thead>
               <tr>
                 <th style={cellStyle}>Method Code</th>
                 <th style={cellStyle}>Label</th>
                 <th style={cellStyle}>Account</th>
-                <th style={cellStyle}>Invoice Default</th>
+                <th style={cellStyle} data-testid="invoice-default-header">Invoice Default</th>
               </tr>
             </thead>
             <tbody>
               {effectivePaymentMethods.map((method) => (
-                <tr key={method.code}>
+                <tr key={method.code} data-testid={`payment-method-${method.code}`}>
                   <td style={cellStyle}>{method.code}</td>
                   <td style={cellStyle}>
                     <input
@@ -430,6 +430,7 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
                   <td style={{ ...cellStyle, textAlign: "center" }}>
                     <input
                       type="checkbox"
+                      data-testid={`payment-method-${method.code}-invoice-default`}
                       checked={invoiceDefaultMethod === method.code}
                       onChange={(event) => {
                         setInvoiceDefaultMethod(event.target.checked ? method.code : null);
@@ -441,13 +442,23 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
             </tbody>
           </table>
         )}
-        {paymentSubmitError ? <p style={{ color: "#8d2626" }}>{paymentSubmitError}</p> : null}
+        {paymentSubmitError ? (
+          <p style={{ color: "#8d2626" }} data-testid="payment-mappings-error">
+            {paymentSubmitError}
+          </p>
+        ) : null}
         {missingPaymentMethods.length > 0 ? (
           <p style={{ color: "#8d2626" }}>
             Missing payment mappings: {missingPaymentMethods.map((method) => method.label).join(", ")}
           </p>
         ) : null}
-        <button type="button" style={primaryButtonStyle} onClick={handlePaymentSave} disabled={paymentSaving}>
+        <button
+          type="button"
+          style={primaryButtonStyle}
+          onClick={handlePaymentSave}
+          disabled={paymentSaving}
+          data-testid="save-payment-mappings"
+        >
           {paymentSaving ? "Saving..." : "Save Payment Mappings"}
         </button>
       </section>

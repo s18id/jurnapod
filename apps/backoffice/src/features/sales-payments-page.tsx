@@ -345,6 +345,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
               fontSize: "13px",
               color: "#664d00"
             }}
+            data-testid="invoice-default-warning"
           >
             ℹ️ No invoice default payment method configured. Please set a default in Settings → Payment Methods.
           </div>

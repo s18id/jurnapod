@@ -4,7 +4,7 @@
 
 **Dev Environment Running:**
 - ✅ API Server: http://localhost:3001/api
-- ✅ Backoffice: http://localhost:5173
+- ✅ Backoffice: http://localhost:3002
 - ✅ Database: MySQL (db3307)
 
 **Test Credentials:**
@@ -19,7 +19,7 @@
 ### Test 1: Login and Navigate to Settings
 
 **Steps:**
-1. Open browser: http://localhost:5173
+1. Open browser: http://localhost:3002
 2. Login with credentials above
 3. Navigate to: Settings → Account Mapping Settings (or Payment Methods)
 
@@ -306,10 +306,10 @@ Once all tests pass:
 
 ```bash
 # Open backoffice in browser
-xdg-open http://localhost:5173
+xdg-open http://localhost:3002
 
 # Or on Mac:
-open http://localhost:5173
+open http://localhost:3002
 
 # Monitor API logs in terminal:
 tail -f apps/api/logs/app.log

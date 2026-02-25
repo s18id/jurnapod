@@ -19,8 +19,8 @@ if ! curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
 fi
 echo "✅ API server is running"
 
-if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
-    echo "❌ Backoffice not running at http://localhost:5173"
+if ! curl -s http://localhost:3002 > /dev/null 2>&1; then
+    echo "❌ Backoffice not running at http://localhost:3002"
     echo "   Please start: cd apps/backoffice && npm run dev"
     exit 1
 fi

@@ -47,7 +47,9 @@ const styles = {
     borderBottom: "1px solid #ece8df"
   } as const,
   navButton: {
-    border: "1px solid #d9d2c7",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "#d9d2c7",
     borderRadius: "999px",
     padding: "6px 12px",
     backgroundColor: "#fff",
