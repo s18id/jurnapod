@@ -4,6 +4,7 @@ import { TransactionsPage as TransactionInputPage } from "./transactions-page";
 import { ItemsPricesPage as ItemsPricesManagementPage } from "./items-prices-page";
 import { TransactionTemplatesPage as TransactionTemplatesManagementPage } from "./transaction-templates-page";
 import {
+  AccountingWorksheetPage as AccountingWorksheetReportPage,
   DailySalesPage as DailySalesReportPage,
   GeneralLedgerPage as GeneralLedgerReportPage,
   JournalsPage as JournalsReportPage,
@@ -61,6 +62,8 @@ export const DailySalesPage = DailySalesReportPage;
 export const GeneralLedgerPage = GeneralLedgerReportPage;
 
 export const JournalsPage = JournalsReportPage;
+
+export const AccountingWorksheetPage = AccountingWorksheetReportPage;
 
 export const SalesInvoicesPage = SalesInvoicesManagementPage;
 

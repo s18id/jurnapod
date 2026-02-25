@@ -92,9 +92,13 @@ type WorksheetRow = RowDataPacket & {
   account_id: number;
   account_code: string;
   account_name: string;
+  type_name: string | null;
   report_group: string | null;
-  total_debit: number | string | null;
-  total_credit: number | string | null;
+  normal_balance: string | null;
+  opening_debit: number | string | null;
+  opening_credit: number | string | null;
+  period_debit: number | string | null;
+  period_credit: number | string | null;
 };
 
 type BaseFilter = {
@@ -853,41 +857,74 @@ export async function getTrialBalanceWorksheet(filter: WorksheetFilter) {
   );
 
   const [rows] = await pool.execute<WorksheetRow[]>(
-    `SELECT jl.account_id,
+    `SELECT a.id AS account_id,
             a.code AS account_code,
             a.name AS account_name,
+            a.type_name,
             a.report_group,
-            SUM(jl.debit) AS total_debit,
-            SUM(jl.credit) AS total_credit
-     FROM journal_lines jl
-     INNER JOIN accounts a ON a.id = jl.account_id
-     WHERE jl.company_id = ?
-       AND jl.line_date BETWEEN ? AND ?
-       AND a.is_group = 0
+            a.normal_balance,
+            SUM(CASE WHEN jl.line_date < ? THEN jl.debit ELSE 0 END) AS opening_debit,
+            SUM(CASE WHEN jl.line_date < ? THEN jl.credit ELSE 0 END) AS opening_credit,
+            SUM(CASE WHEN jl.line_date BETWEEN ? AND ? THEN jl.debit ELSE 0 END) AS period_debit,
+            SUM(CASE WHEN jl.line_date BETWEEN ? AND ? THEN jl.credit ELSE 0 END) AS period_credit
+     FROM accounts a
+      LEFT JOIN journal_lines jl
+        ON jl.account_id = a.id
+       AND jl.company_id = ?
+       AND jl.line_date <= ?
        AND ${outletClause.sql}
-     GROUP BY jl.account_id, a.code, a.name, a.report_group
+     WHERE a.company_id = ?
+       AND a.is_group = 0
+     GROUP BY a.id, a.code, a.name, a.type_name, a.report_group, a.normal_balance
      ORDER BY a.code ASC`,
-    [filter.companyId, filter.dateFrom, filter.dateTo, ...outletClause.values]
+    [
+      filter.dateFrom,
+      filter.dateFrom,
+      filter.dateFrom,
+      filter.dateTo,
+      filter.dateFrom,
+      filter.dateTo,
+      filter.companyId,
+      filter.dateTo,
+      ...outletClause.values,
+      filter.companyId
+    ]
   );
 
   return rows.map((row) => {
-    const totalDebit = toNumber(row.total_debit);
-    const totalCredit = toNumber(row.total_credit);
-    const balance = totalDebit - totalCredit;
+    const openingDebitTotal = toNumber(row.opening_debit);
+    const openingCreditTotal = toNumber(row.opening_credit);
+    const openingBalance = openingDebitTotal - openingCreditTotal;
+    const openingDebit = openingBalance > 0 ? openingBalance : 0;
+    const openingCredit = openingBalance < 0 ? Math.abs(openingBalance) : 0;
+    const periodDebit = toNumber(row.period_debit);
+    const periodCredit = toNumber(row.period_credit);
+    const endingBalance = openingBalance + periodDebit - periodCredit;
+    const endingDebit = endingBalance > 0 ? endingBalance : 0;
+    const endingCredit = endingBalance < 0 ? Math.abs(endingBalance) : 0;
     const isBalanceSheet = row.report_group === "NRC";
 
     return {
       account_id: Number(row.account_id),
       account_code: row.account_code,
       account_name: row.account_name,
+      type_name: row.type_name,
       report_group: row.report_group,
-      total_debit: totalDebit,
-      total_credit: totalCredit,
-      balance,
-      bs_debit: isBalanceSheet ? totalDebit : 0,
-      bs_credit: isBalanceSheet ? totalCredit : 0,
-      pl_debit: isBalanceSheet ? 0 : totalDebit,
-      pl_credit: isBalanceSheet ? 0 : totalCredit
+      normal_balance: row.normal_balance,
+      opening_debit: openingDebit,
+      opening_credit: openingCredit,
+      period_debit: periodDebit,
+      period_credit: periodCredit,
+      ending_balance: endingBalance,
+      ending_debit: endingDebit,
+      ending_credit: endingCredit,
+      total_debit: periodDebit,
+      total_credit: periodCredit,
+      balance: endingBalance,
+      bs_debit: isBalanceSheet ? endingDebit : 0,
+      bs_credit: isBalanceSheet ? endingCredit : 0,
+      pl_debit: isBalanceSheet ? 0 : endingDebit,
+      pl_credit: isBalanceSheet ? 0 : endingCredit
     };
   });
 }

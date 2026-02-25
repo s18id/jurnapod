@@ -135,6 +135,51 @@ type GeneralLedgerResponse = {
   rows: GeneralLedgerRow[];
 };
 
+type WorksheetRow = {
+  account_id: number;
+  account_code: string;
+  account_name: string;
+  type_name: string | null;
+  report_group: string | null;
+  normal_balance: string | null;
+  opening_debit: number;
+  opening_credit: number;
+  period_debit: number;
+  period_credit: number;
+  ending_debit: number;
+  ending_credit: number;
+  pl_debit: number;
+  pl_credit: number;
+  bs_debit: number;
+  bs_credit: number;
+};
+
+type WorksheetResponse = {
+  ok: true;
+  filters: {
+    outlet_ids: number[];
+    date_from: string;
+    date_to: string;
+    round: number;
+  };
+  summary: {
+    opening_debit: number;
+    opening_credit: number;
+    period_debit: number;
+    period_credit: number;
+    ending_debit: number;
+    ending_credit: number;
+    total_debit: number;
+    total_credit: number;
+    balance: number;
+    bs_debit: number;
+    bs_credit: number;
+    pl_debit: number;
+    pl_credit: number;
+  };
+  rows: WorksheetRow[];
+};
+
 const boxStyle = {
   border: "1px solid #e2ddd2",
   borderRadius: "10px",
@@ -152,6 +197,12 @@ const cellStyle = {
   borderBottom: "1px solid #ece7dc",
   padding: "8px"
 } as const;
+
+const numberCellStyle = {
+  ...cellStyle,
+  textAlign: "right" as const,
+  fontVariantNumeric: "tabular-nums" as const
+};
 
 const inputStyle = {
   border: "1px solid #cabfae",
@@ -807,5 +858,150 @@ export function JournalsPage(props: ReportsProps) {
         </table>
       </section>
     </div>
+  );
+}
+
+export function AccountingWorksheetPage(props: ReportsProps) {
+  const isOnline = useOnlineStatus();
+  const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
+  const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(30));
+  const [dateTo, setDateTo] = useState<string>(todayIso());
+  const [rows, setRows] = useState<WorksheetRow[]>([]);
+  const [summary, setSummary] = useState<WorksheetResponse["summary"]>({
+    opening_debit: 0,
+    opening_credit: 0,
+    period_debit: 0,
+    period_credit: 0,
+    ending_debit: 0,
+    ending_credit: 0,
+    total_debit: 0,
+    total_credit: 0,
+    balance: 0,
+    bs_debit: 0,
+    bs_credit: 0,
+    pl_debit: 0,
+    pl_credit: 0
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function loadRows() {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiRequest<WorksheetResponse>(
+        `/reports/worksheet?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}&round=2`,
+        {},
+        props.accessToken
+      );
+      setRows(response.rows);
+      setSummary(response.summary);
+    } catch (fetchError) {
+      if (fetchError instanceof ApiError) {
+        setError(fetchError.message);
+      } else {
+        setError("Failed to load accounting worksheet");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (outletId > 0) {
+      loadRows().catch(() => undefined);
+    }
+  }, [outletId, dateFrom, dateTo]);
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to View Reports"
+        message="Reports require real-time data. Please connect to the internet."
+      />
+    );
+  }
+
+  const profit = summary.pl_credit - summary.pl_debit;
+
+  return (
+    <section style={boxStyle}>
+      <h2 style={{ marginTop: 0 }}>Accounting Worksheet</h2>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
+        <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
+          {props.user.outlets.map((outlet) => (
+            <option key={outlet.id} value={outlet.id}>
+              {outlet.code} - {outlet.name}
+            </option>
+          ))}
+        </select>
+        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
+        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
+        <button type="button" onClick={() => loadRows()} disabled={loading}>
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+      {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
+
+      <div style={{ overflowX: "auto" }}>
+        <table style={tableStyle}>
+          <thead>
+            <tr>
+              <th style={cellStyle}>Code</th>
+              <th style={cellStyle}>Account Name</th>
+              <th style={numberCellStyle}>Opening Debit</th>
+              <th style={numberCellStyle}>Opening Credit</th>
+              <th style={numberCellStyle}>Movement Debit</th>
+              <th style={numberCellStyle}>Movement Credit</th>
+              <th style={numberCellStyle}>Ending Debit</th>
+              <th style={numberCellStyle}>Ending Credit</th>
+              <th style={numberCellStyle}>P/L Debit</th>
+              <th style={numberCellStyle}>P/L Credit</th>
+              <th style={numberCellStyle}>BS Debit</th>
+              <th style={numberCellStyle}>BS Credit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.account_id}>
+                <td style={cellStyle}>{row.account_code}</td>
+                <td style={cellStyle}>{row.account_name}</td>
+                <td style={numberCellStyle}>{formatMoney(row.opening_debit)}</td>
+                <td style={numberCellStyle}>{formatMoney(row.opening_credit)}</td>
+                <td style={numberCellStyle}>{formatMoney(row.period_debit)}</td>
+                <td style={numberCellStyle}>{formatMoney(row.period_credit)}</td>
+                <td style={numberCellStyle}>{formatMoney(row.ending_debit)}</td>
+                <td style={numberCellStyle}>{formatMoney(row.ending_credit)}</td>
+                <td style={numberCellStyle}>{formatMoney(row.pl_debit)}</td>
+                <td style={numberCellStyle}>{formatMoney(row.pl_credit)}</td>
+                <td style={numberCellStyle}>{formatMoney(row.bs_debit)}</td>
+                <td style={numberCellStyle}>{formatMoney(row.bs_credit)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th style={cellStyle} colSpan={2}>
+                Total
+              </th>
+              <th style={numberCellStyle}>{formatMoney(summary.opening_debit)}</th>
+              <th style={numberCellStyle}>{formatMoney(summary.opening_credit)}</th>
+              <th style={numberCellStyle}>{formatMoney(summary.period_debit)}</th>
+              <th style={numberCellStyle}>{formatMoney(summary.period_credit)}</th>
+              <th style={numberCellStyle}>{formatMoney(summary.ending_debit)}</th>
+              <th style={numberCellStyle}>{formatMoney(summary.ending_credit)}</th>
+              <th style={numberCellStyle}>{formatMoney(summary.pl_debit)}</th>
+              <th style={numberCellStyle}>{formatMoney(summary.pl_credit)}</th>
+              <th style={numberCellStyle}>{formatMoney(summary.bs_debit)}</th>
+              <th style={numberCellStyle}>{formatMoney(summary.bs_credit)}</th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <p style={{ marginTop: "10px", marginBottom: 0 }}>
+        Profit/Loss: {formatMoney(profit)} | Balance Sheet: {formatMoney(summary.bs_debit)} / {formatMoney(summary.bs_credit)}
+      </p>
+    </section>
   );
 }

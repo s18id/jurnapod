@@ -98,6 +98,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     path: "/journals",
     label: "Journals & Trial Balance",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/accounting-worksheet",
+    label: "Accounting Worksheet",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   }
 ];
 

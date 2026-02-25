@@ -61,6 +61,12 @@ export const GET = withAuth(
 
       const summary = rows.reduce(
         (acc, row) => ({
+          opening_debit: acc.opening_debit + (row.opening_debit ?? 0),
+          opening_credit: acc.opening_credit + (row.opening_credit ?? 0),
+          period_debit: acc.period_debit + (row.period_debit ?? 0),
+          period_credit: acc.period_credit + (row.period_credit ?? 0),
+          ending_debit: acc.ending_debit + (row.ending_debit ?? 0),
+          ending_credit: acc.ending_credit + (row.ending_credit ?? 0),
           total_debit: acc.total_debit + (row.total_debit ?? 0),
           total_credit: acc.total_credit + (row.total_credit ?? 0),
           balance: acc.balance + (row.balance ?? 0),
@@ -70,6 +76,12 @@ export const GET = withAuth(
           pl_credit: acc.pl_credit + (row.pl_credit ?? 0)
         }),
         {
+          opening_debit: 0,
+          opening_credit: 0,
+          period_debit: 0,
+          period_credit: 0,
+          ending_debit: 0,
+          ending_credit: 0,
           total_debit: 0,
           total_credit: 0,
           balance: 0,
@@ -80,6 +92,12 @@ export const GET = withAuth(
         }
       );
       const roundedSummary = {
+        opening_debit: roundTo(summary.opening_debit, roundDecimals),
+        opening_credit: roundTo(summary.opening_credit, roundDecimals),
+        period_debit: roundTo(summary.period_debit, roundDecimals),
+        period_credit: roundTo(summary.period_credit, roundDecimals),
+        ending_debit: roundTo(summary.ending_debit, roundDecimals),
+        ending_credit: roundTo(summary.ending_credit, roundDecimals),
         total_debit: roundTo(summary.total_debit, roundDecimals),
         total_credit: roundTo(summary.total_credit, roundDecimals),
         balance: roundTo(summary.balance, roundDecimals),
@@ -91,6 +109,13 @@ export const GET = withAuth(
 
       const roundedRows = rows.map((row) => ({
         ...row,
+        opening_debit: roundTo(row.opening_debit ?? 0, roundDecimals),
+        opening_credit: roundTo(row.opening_credit ?? 0, roundDecimals),
+        period_debit: roundTo(row.period_debit ?? 0, roundDecimals),
+        period_credit: roundTo(row.period_credit ?? 0, roundDecimals),
+        ending_balance: roundTo(row.ending_balance ?? 0, roundDecimals),
+        ending_debit: roundTo(row.ending_debit ?? 0, roundDecimals),
+        ending_credit: roundTo(row.ending_credit ?? 0, roundDecimals),
         total_debit: roundTo(row.total_debit ?? 0, roundDecimals),
         total_credit: roundTo(row.total_credit ?? 0, roundDecimals),
         balance: roundTo(row.balance ?? 0, roundDecimals),

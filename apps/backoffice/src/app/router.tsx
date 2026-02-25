@@ -22,6 +22,7 @@ import { LoginPage } from "../features/auth/login-page";
 import {
   AccountsPage,
   AccountTypesPage,
+  AccountingWorksheetPage,
   TransactionsPage,
   TransactionTemplatesPage,
   DailySalesPage,
@@ -99,6 +100,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/journals") {
     return <JournalsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/accounting-worksheet") {
+    return <AccountingWorksheetPage user={props.user} accessToken={props.accessToken} />;
   }
   return <ItemsPricesPage user={props.user} accessToken={props.accessToken} />;
 }
