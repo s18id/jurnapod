@@ -108,6 +108,58 @@ const primaryButtonStyle = {
   border: "1px solid #2f5f4a"
 } as const;
 
+const drawerOverlayStyle = {
+  position: "fixed" as const,
+  inset: 0,
+  backgroundColor: "rgba(0, 0, 0, 0.3)",
+  zIndex: 50
+};
+
+const drawerStyle = {
+  position: "fixed" as const,
+  top: 0,
+  right: 0,
+  height: "100vh",
+  width: "520px",
+  maxWidth: "95vw",
+  backgroundColor: "#fff",
+  borderLeft: "1px solid #e2ddd2",
+  boxShadow: "-12px 0 24px rgba(0, 0, 0, 0.12)",
+  zIndex: 60,
+  display: "flex",
+  flexDirection: "column"
+} as const;
+
+const drawerHeaderStyle = {
+  padding: "16px",
+  borderBottom: "1px solid #ece7dc",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between"
+} as const;
+
+const drawerBodyStyle = {
+  padding: "16px",
+  overflowY: "auto" as const,
+  display: "grid",
+  gap: "12px"
+};
+
+const formFieldStyle = {
+  display: "grid",
+  gap: "6px",
+  fontSize: "14px",
+  color: "#3d3023"
+} as const;
+
+const drawerFooterStyle = {
+  padding: "16px",
+  borderTop: "1px solid #ece7dc",
+  display: "flex",
+  gap: "8px",
+  justifyContent: "flex-end"
+} as const;
+
 type FixedAssetFormState = {
   outlet_id: number | null;
   category_id: number | null;
@@ -117,6 +169,10 @@ type FixedAssetFormState = {
   purchase_date: string;
   purchase_cost: string;
   is_active: boolean;
+};
+
+type FixedAssetEditState = FixedAssetFormState & {
+  id: number;
 };
 
 const emptyForm: FixedAssetFormState = {
@@ -169,6 +225,8 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
   const [depreciationPlan, setDepreciationPlan] = useState<DepreciationPlan>(null);
   const [planFormVisible, setPlanFormVisible] = useState(false);
   const [accounts, setAccounts] = useState<Array<{ id: number; code: string; name: string }>>([]);
+  const [editingAsset, setEditingAsset] = useState<FixedAssetEditState | null>(null);
+  const [editingAssetBase, setEditingAssetBase] = useState<FixedAsset | null>(null);
   const [runPeriodYear, setRunPeriodYear] = useState("");
   const [runPeriodMonth, setRunPeriodMonth] = useState("");
   const [runLoading, setRunLoading] = useState(false);
@@ -177,6 +235,22 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
   const categoryOptions = useMemo(() => {
     return [...categories].sort((a, b) => a.name.localeCompare(b.name));
   }, [categories]);
+
+  const categoryLabelById = useMemo(() => {
+    const map = new Map<number, string>();
+    categories.forEach((category) => {
+      map.set(category.id, `${category.code} - ${category.name}`);
+    });
+    return map;
+  }, [categories]);
+
+  const outletLabelById = useMemo(() => {
+    const map = new Map<number, string>();
+    outletOptions.forEach((outlet) => {
+      map.set(outlet.id, `${outlet.code} - ${outlet.name}`);
+    });
+    return map;
+  }, [outletOptions]);
 
   async function refreshFixedAsset(filter: OutletFilter) {
     setLoading(true);
@@ -459,6 +533,49 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     setPlanFormVisible(true);
     await loadDepreciationPlan(assetId);
     await loadAccounts();
+  }
+
+  function openEditAsset(item: FixedAsset) {
+    setEditingAssetBase(item);
+    setEditingAsset({
+      id: item.id,
+      outlet_id: item.outlet_id,
+      category_id: item.category_id,
+      asset_tag: item.asset_tag ?? "",
+      name: item.name,
+      serial_number: item.serial_number ?? "",
+      purchase_date: item.purchase_date ? item.purchase_date.slice(0, 10) : "",
+      purchase_cost: item.purchase_cost == null ? "" : String(item.purchase_cost),
+      is_active: item.is_active
+    });
+  }
+
+  function closeEditAsset() {
+    setEditingAsset(null);
+    setEditingAssetBase(null);
+  }
+
+  async function handleSaveEditingAsset() {
+    if (!editingAsset || !editingAssetBase) {
+      return;
+    }
+
+    const payload: FixedAsset = {
+      ...editingAssetBase,
+      outlet_id: editingAsset.outlet_id,
+      category_id: editingAsset.category_id,
+      asset_tag: editingAsset.asset_tag.trim() || null,
+      name: editingAsset.name.trim(),
+      serial_number: editingAsset.serial_number.trim() || null,
+      purchase_date: editingAsset.purchase_date.trim() || null,
+      purchase_cost: editingAsset.purchase_cost.trim()
+        ? Number(editingAsset.purchase_cost)
+        : null,
+      is_active: editingAsset.is_active
+    };
+
+    await handleSaveFixedAsset(payload);
+    closeEditAsset();
   }
 
   async function handleSaveDepreciationPlan(assetId: number) {
@@ -1052,153 +1169,25 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             {visibleFixedAsset.map((item) => (
               <tr key={item.id}>
                 <td style={cellStyle}>{item.id}</td>
+                <td style={cellStyle}>{item.name}</td>
+                <td style={cellStyle}>{item.asset_tag ?? "-"}</td>
                 <td style={cellStyle}>
-                  <input
-                    value={item.name}
-                    onChange={(event) =>
-                      setFixedAsset((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id ? { ...entry, name: event.target.value } : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  />
+                  {item.category_id
+                    ? categoryLabelById.get(item.category_id) ?? `#${item.category_id}`
+                    : "Uncategorized"}
                 </td>
+                <td style={cellStyle}>{item.serial_number ?? "-"}</td>
                 <td style={cellStyle}>
-                  <input
-                    value={item.asset_tag ?? ""}
-                    onChange={(event) =>
-                      setFixedAsset((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id
-                            ? { ...entry, asset_tag: event.target.value || null }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  />
+                  {item.outlet_id
+                    ? outletLabelById.get(item.outlet_id) ?? `#${item.outlet_id}`
+                    : "Unassigned"}
                 </td>
+                <td style={cellStyle}>{item.purchase_date ? item.purchase_date.slice(0, 10) : "-"}</td>
+                <td style={cellStyle}>{item.purchase_cost ?? "-"}</td>
+                <td style={cellStyle}>{item.is_active ? "Yes" : "No"}</td>
                 <td style={cellStyle}>
-                  <select
-                    value={item.category_id ?? ""}
-                    onChange={(event) =>
-                      setFixedAsset((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id
-                            ? {
-                                ...entry,
-                                category_id: event.target.value ? Number(event.target.value) : null
-                              }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  >
-                    <option value="">Uncategorized</option>
-                    {categoryOptions.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.code} - {category.name}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td style={cellStyle}>
-                  <input
-                    value={item.serial_number ?? ""}
-                    onChange={(event) =>
-                      setFixedAsset((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id
-                            ? { ...entry, serial_number: event.target.value || null }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <select
-                    value={item.outlet_id ?? ""}
-                    onChange={(event) =>
-                      setFixedAsset((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id
-                            ? {
-                                ...entry,
-                                outlet_id: event.target.value ? Number(event.target.value) : null
-                              }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  >
-                    <option value="">Unassigned</option>
-                    {outletOptions.map((outlet) => (
-                      <option key={outlet.id} value={outlet.id}>
-                        {outlet.code} - {outlet.name}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td style={cellStyle}>
-                  <input
-                    value={item.purchase_date ?? ""}
-                    onChange={(event) =>
-                      setFixedAsset((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id
-                            ? { ...entry, purchase_date: event.target.value || null }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                    placeholder="YYYY-MM-DD"
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <input
-                    value={item.purchase_cost ?? ""}
-                    onChange={(event) =>
-                      setFixedAsset((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id
-                            ? {
-                                ...entry,
-                                purchase_cost: event.target.value
-                                  ? Number(event.target.value)
-                                  : null
-                              }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <input
-                    type="checkbox"
-                    checked={item.is_active}
-                    onChange={(event) =>
-                      setFixedAsset((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id
-                            ? { ...entry, is_active: event.target.checked }
-                            : entry
-                        )
-                      )
-                    }
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <button type="button" onClick={() => handleSaveFixedAsset(item)} style={buttonStyle}>
-                    Save
+                  <button type="button" onClick={() => openEditAsset(item)} style={buttonStyle}>
+                    Edit
                   </button>
                   <button type="button" onClick={() => handleDeleteFixedAsset(item.id)} style={buttonStyle}>
                     Delete
@@ -1221,193 +1210,357 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
         </p>
       </section>
 
-      {planFormVisible && selectedFixedAssetId && (
-        <section style={boxStyle}>
-          <h3 style={{ marginTop: 0 }}>Depreciation Plan</h3>
-          <p>FixedAsset ID: {selectedFixedAssetId}</p>
-          {depreciationPlan ? (
-            <div>
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", marginBottom: "4px" }}>Method</label>
-                <select
-                  value={depreciationPlan.method}
-                  onChange={(e) =>
-                    setDepreciationPlan({
-                      ...depreciationPlan,
-                      method: e.target.value as
-                        | "STRAIGHT_LINE"
-                        | "DECLINING_BALANCE"
-                        | "SUM_OF_YEARS"
-                    })
-                  }
-                  style={inputStyle}
-                >
-                  <option value="STRAIGHT_LINE">Straight Line</option>
-                  <option value="DECLINING_BALANCE">Declining Balance</option>
-                  <option value="SUM_OF_YEARS">Sum of Years</option>
-                </select>
+      {planFormVisible && selectedFixedAssetId ? (
+        <>
+          <div style={drawerOverlayStyle} onClick={() => setPlanFormVisible(false)} />
+          <aside style={drawerStyle}>
+            <div style={drawerHeaderStyle}>
+              <div>
+                <strong>Depreciation Plan</strong>
+                <div style={{ fontSize: "12px", color: "#6a5d4b" }}>Asset ID #{selectedFixedAssetId}</div>
               </div>
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", marginBottom: "4px" }}>Useful Life (Months)</label>
-                <input
-                  type="number"
-                  value={depreciationPlan.useful_life_months}
-                  onChange={(e) =>
-                    setDepreciationPlan({ ...depreciationPlan, useful_life_months: Number(e.target.value) })
-                  }
-                  style={inputStyle}
-                />
-              </div>
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", marginBottom: "4px" }}>Salvage Value</label>
-                <input
-                  type="number"
-                  value={depreciationPlan.salvage_value}
-                  onChange={(e) =>
-                    setDepreciationPlan({ ...depreciationPlan, salvage_value: Number(e.target.value) })
-                  }
-                  style={inputStyle}
-                />
-              </div>
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", marginBottom: "4px" }}>Expense Account</label>
-                <select
-                  value={depreciationPlan.expense_account_id}
-                  onChange={(e) =>
-                    setDepreciationPlan({ ...depreciationPlan, expense_account_id: Number(e.target.value) })
-                  }
-                  style={inputStyle}
-                >
-                  <option value="">Select account</option>
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.code} - {account.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", marginBottom: "4px" }}>Accumulated Depreciation Account</label>
-                <select
-                  value={depreciationPlan.accum_depr_account_id}
-                  onChange={(e) =>
-                    setDepreciationPlan({ ...depreciationPlan, accum_depr_account_id: Number(e.target.value) })
-                  }
-                  style={inputStyle}
-                >
-                  <option value="">Select account</option>
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.code} - {account.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", marginBottom: "4px" }}>Status</label>
-                <select
-                  value={depreciationPlan.status}
-                  onChange={(e) =>
-                    setDepreciationPlan({
-                      ...depreciationPlan,
-                      status: e.target.value as "DRAFT" | "ACTIVE" | "VOID"
-                    })
-                  }
-                  style={inputStyle}
-                >
-                  <option value="DRAFT">DRAFT</option>
-                  <option value="ACTIVE">ACTIVE</option>
-                  <option value="VOID">VOID</option>
-                </select>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleSaveDepreciationPlan(selectedFixedAssetId)}
-                style={primaryButtonStyle}
-              >
-                Save Plan
-              </button>
               <button type="button" onClick={() => setPlanFormVisible(false)} style={buttonStyle}>
                 Close
               </button>
-              {depreciationPlan.status === "ACTIVE" && (
-                <div style={{ marginTop: "16px", borderTop: "1px solid #e2ddd2", paddingTop: "16px" }}>
-                  <h4 style={{ marginTop: 0 }}>Run Depreciation</h4>
-                  <div style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
-                    <div>
-                      <label style={{ display: "block", marginBottom: "4px" }}>Year</label>
-                      <input
-                        type="number"
-                        value={runPeriodYear}
-                        onChange={(e) => setRunPeriodYear(e.target.value)}
-                        placeholder="2026"
-                        style={inputStyle}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: "block", marginBottom: "4px" }}>Month</label>
-                      <input
-                        type="number"
-                        value={runPeriodMonth}
-                        onChange={(e) => setRunPeriodMonth(e.target.value)}
-                        placeholder="1"
-                        min="1"
-                        max="12"
-                        style={inputStyle}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleRunDepreciation}
-                      disabled={runLoading}
-                      style={primaryButtonStyle}
+            </div>
+            <div style={drawerBodyStyle}>
+              {depreciationPlan ? (
+                <>
+                  <label style={formFieldStyle}>
+                    Method
+                    <select
+                      value={depreciationPlan.method}
+                      onChange={(e) =>
+                        setDepreciationPlan({
+                          ...depreciationPlan,
+                          method: e.target.value as
+                            | "STRAIGHT_LINE"
+                            | "DECLINING_BALANCE"
+                            | "SUM_OF_YEARS"
+                        })
+                      }
+                      style={inputStyle}
                     >
-                      {runLoading ? "Running..." : "Run Period"}
-                    </button>
-                  </div>
+                      <option value="STRAIGHT_LINE">Straight Line</option>
+                      <option value="DECLINING_BALANCE">Declining Balance</option>
+                      <option value="SUM_OF_YEARS">Sum of Years</option>
+                    </select>
+                  </label>
+                  <label style={formFieldStyle}>
+                    Useful Life (Months)
+                    <input
+                      type="number"
+                      value={depreciationPlan.useful_life_months}
+                      onChange={(e) =>
+                        setDepreciationPlan({
+                          ...depreciationPlan,
+                          useful_life_months: Number(e.target.value)
+                        })
+                      }
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={formFieldStyle}>
+                    Salvage Value
+                    <input
+                      type="number"
+                      value={depreciationPlan.salvage_value}
+                      onChange={(e) =>
+                        setDepreciationPlan({ ...depreciationPlan, salvage_value: Number(e.target.value) })
+                      }
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={formFieldStyle}>
+                    Expense Account
+                    <select
+                      value={depreciationPlan.expense_account_id}
+                      onChange={(e) =>
+                        setDepreciationPlan({
+                          ...depreciationPlan,
+                          expense_account_id: Number(e.target.value)
+                        })
+                      }
+                      style={inputStyle}
+                    >
+                      <option value="">Select account</option>
+                      {accounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.code} - {account.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={formFieldStyle}>
+                    Accumulated Depreciation Account
+                    <select
+                      value={depreciationPlan.accum_depr_account_id}
+                      onChange={(e) =>
+                        setDepreciationPlan({
+                          ...depreciationPlan,
+                          accum_depr_account_id: Number(e.target.value)
+                        })
+                      }
+                      style={inputStyle}
+                    >
+                      <option value="">Select account</option>
+                      {accounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.code} - {account.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={formFieldStyle}>
+                    Status
+                    <select
+                      value={depreciationPlan.status}
+                      onChange={(e) =>
+                        setDepreciationPlan({
+                          ...depreciationPlan,
+                          status: e.target.value as "DRAFT" | "ACTIVE" | "VOID"
+                        })
+                      }
+                      style={inputStyle}
+                    >
+                      <option value="DRAFT">DRAFT</option>
+                      <option value="ACTIVE">ACTIVE</option>
+                      <option value="VOID">VOID</option>
+                    </select>
+                  </label>
+                  {depreciationPlan.status === "ACTIVE" ? (
+                    <div style={{ borderTop: "1px solid #ece7dc", paddingTop: "12px" }}>
+                      <strong style={{ display: "block", marginBottom: "8px" }}>Run Depreciation</strong>
+                      <div style={{ display: "grid", gap: "8px" }}>
+                        <label style={formFieldStyle}>
+                          Year
+                          <input
+                            type="number"
+                            value={runPeriodYear}
+                            onChange={(e) => setRunPeriodYear(e.target.value)}
+                            placeholder="2026"
+                            style={inputStyle}
+                          />
+                        </label>
+                        <label style={formFieldStyle}>
+                          Month
+                          <input
+                            type="number"
+                            value={runPeriodMonth}
+                            onChange={(e) => setRunPeriodMonth(e.target.value)}
+                            placeholder="1"
+                            min="1"
+                            max="12"
+                            style={inputStyle}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleRunDepreciation}
+                          disabled={runLoading}
+                          style={primaryButtonStyle}
+                        >
+                          {runLoading ? "Running..." : "Run Period"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div>
+                  <p>No depreciation plan exists. Create one:</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const selectedFixedAsset = asset.find((e) => e.id === selectedFixedAssetId);
+                      const selectedCategory = categories.find(
+                        (category) => category.id === selectedFixedAsset?.category_id
+                      );
+                      const purchaseCost = selectedFixedAsset?.purchase_cost ?? 0;
+                      const residualPct = selectedCategory?.residual_value_pct ?? 0;
+                      setDepreciationPlan({
+                        id: 0,
+                        company_id: props.user.company_id,
+                        asset_id: selectedFixedAssetId,
+                        outlet_id: selectedFixedAsset?.outlet_id ?? null,
+                        method: selectedCategory?.depreciation_method ?? "STRAIGHT_LINE",
+                        start_date: selectedFixedAsset?.purchase_date ?? "",
+                        useful_life_months: selectedCategory?.useful_life_months ?? 60,
+                        salvage_value: purchaseCost * (residualPct / 100),
+                        purchase_cost_snapshot: selectedFixedAsset?.purchase_cost ?? 0,
+                        expense_account_id: selectedCategory?.expense_account_id ?? 0,
+                        accum_depr_account_id: selectedCategory?.accum_depr_account_id ?? 0,
+                        status: "DRAFT",
+                        created_at: "",
+                        updated_at: ""
+                      });
+                    }}
+                    style={primaryButtonStyle}
+                  >
+                    Create Plan
+                  </button>
                 </div>
               )}
             </div>
-          ) : (
-            <div>
-              <p>No depreciation plan exists. Create one:</p>
-              <button
-                type="button"
-                onClick={() => {
-                  const selectedFixedAsset = asset.find((e) => e.id === selectedFixedAssetId);
-                  const selectedCategory = categories.find(
-                    (category) => category.id === selectedFixedAsset?.category_id
-                  );
-                  const purchaseCost = selectedFixedAsset?.purchase_cost ?? 0;
-                    const residualPct = selectedCategory?.residual_value_pct ?? 0;
-                    setDepreciationPlan({
-                      id: 0,
-                      company_id: props.user.company_id,
-                      asset_id: selectedFixedAssetId,
-                      outlet_id: selectedFixedAsset?.outlet_id ?? null,
-                      method: selectedCategory?.depreciation_method ?? "STRAIGHT_LINE",
-                      start_date: selectedFixedAsset?.purchase_date ?? "",
-                      useful_life_months: selectedCategory?.useful_life_months ?? 60,
-                      salvage_value: purchaseCost * (residualPct / 100),
-                      purchase_cost_snapshot: selectedFixedAsset?.purchase_cost ?? 0,
-                      expense_account_id: selectedCategory?.expense_account_id ?? 0,
-                      accum_depr_account_id: selectedCategory?.accum_depr_account_id ?? 0,
-                      status: "DRAFT",
-                      created_at: "",
-                      updated_at: ""
-                    });
-                }}
-                style={primaryButtonStyle}
-              >
-                Create Plan
-              </button>
-              <button type="button" onClick={() => setPlanFormVisible(false)} style={buttonStyle}>
+            {depreciationPlan ? (
+              <div style={drawerFooterStyle}>
+                <button type="button" onClick={() => setPlanFormVisible(false)} style={buttonStyle}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveDepreciationPlan(selectedFixedAssetId)}
+                  style={primaryButtonStyle}
+                >
+                  Save Plan
+                </button>
+              </div>
+            ) : (
+              <div style={drawerFooterStyle}>
+                <button type="button" onClick={() => setPlanFormVisible(false)} style={buttonStyle}>
+                  Close
+                </button>
+              </div>
+            )}
+          </aside>
+        </>
+      ) : null}
+      {editingAsset ? (
+        <>
+          <div style={drawerOverlayStyle} onClick={closeEditAsset} />
+          <aside style={drawerStyle}>
+            <div style={drawerHeaderStyle}>
+              <div>
+                <strong>Edit Fixed Asset</strong>
+                <div style={{ fontSize: "12px", color: "#6a5d4b" }}>ID #{editingAsset.id}</div>
+              </div>
+              <button type="button" onClick={closeEditAsset} style={buttonStyle}>
                 Close
               </button>
             </div>
-          )}
-        </section>
-      )}
+            <div style={drawerBodyStyle}>
+              <label style={formFieldStyle}>
+                Name
+                <input
+                  value={editingAsset.name}
+                  onChange={(event) =>
+                    setEditingAsset((prev) => (prev ? { ...prev, name: event.target.value } : prev))
+                  }
+                  style={inputStyle}
+                />
+              </label>
+              <label style={formFieldStyle}>
+                Asset Tag
+                <input
+                  value={editingAsset.asset_tag}
+                  onChange={(event) =>
+                    setEditingAsset((prev) => (prev ? { ...prev, asset_tag: event.target.value } : prev))
+                  }
+                  style={inputStyle}
+                />
+              </label>
+              <label style={formFieldStyle}>
+                Category
+                <select
+                  value={editingAsset.category_id ?? ""}
+                  onChange={(event) =>
+                    setEditingAsset((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            category_id: event.target.value ? Number(event.target.value) : null
+                          }
+                        : prev
+                    )
+                  }
+                  style={inputStyle}
+                >
+                  <option value="">Uncategorized</option>
+                  {categoryOptions.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.code} - {category.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={formFieldStyle}>
+                Serial Number
+                <input
+                  value={editingAsset.serial_number}
+                  onChange={(event) =>
+                    setEditingAsset((prev) => (prev ? { ...prev, serial_number: event.target.value } : prev))
+                  }
+                  style={inputStyle}
+                />
+              </label>
+              <label style={formFieldStyle}>
+                Outlet
+                <select
+                  value={editingAsset.outlet_id ?? ""}
+                  onChange={(event) =>
+                    setEditingAsset((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            outlet_id: event.target.value ? Number(event.target.value) : null
+                          }
+                        : prev
+                    )
+                  }
+                  style={inputStyle}
+                >
+                  <option value="">Unassigned</option>
+                  {outletOptions.map((outlet) => (
+                    <option key={outlet.id} value={outlet.id}>
+                      {outlet.code} - {outlet.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={formFieldStyle}>
+                Purchase Date
+                <input
+                  type="date"
+                  value={editingAsset.purchase_date}
+                  onChange={(event) =>
+                    setEditingAsset((prev) => (prev ? { ...prev, purchase_date: event.target.value } : prev))
+                  }
+                  style={inputStyle}
+                />
+              </label>
+              <label style={formFieldStyle}>
+                Purchase Cost
+                <input
+                  type="number"
+                  value={editingAsset.purchase_cost}
+                  onChange={(event) =>
+                    setEditingAsset((prev) => (prev ? { ...prev, purchase_cost: event.target.value } : prev))
+                  }
+                  style={inputStyle}
+                />
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input
+                  type="checkbox"
+                  checked={editingAsset.is_active}
+                  onChange={(event) =>
+                    setEditingAsset((prev) => (prev ? { ...prev, is_active: event.target.checked } : prev))
+                  }
+                />
+                Active
+              </label>
+            </div>
+            <div style={drawerFooterStyle}>
+              <button type="button" onClick={closeEditAsset} style={buttonStyle}>
+                Cancel
+              </button>
+              <button type="button" onClick={handleSaveEditingAsset} style={primaryButtonStyle}>
+                Save Changes
+              </button>
+            </div>
+          </aside>
+        </>
+      ) : null}
     </div>
   );
 }
