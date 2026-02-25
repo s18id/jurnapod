@@ -923,6 +923,9 @@ export function AccountingWorksheetPage(props: ReportsProps) {
   }
 
   const profit = summary.pl_credit - summary.pl_debit;
+  const isBalanced = Math.abs(summary.bs_debit - summary.bs_credit) < 0.005;
+  const balanceLabel = isBalanced ? "BALANCED" : "NOT BALANCED";
+  const profitLabel = profit >= 0 ? "PROFIT" : "LOSS";
 
   return (
     <section style={boxStyle}>
@@ -1000,7 +1003,7 @@ export function AccountingWorksheetPage(props: ReportsProps) {
       </div>
 
       <p style={{ marginTop: "10px", marginBottom: 0 }}>
-        Profit/Loss: {formatMoney(profit)} | Balance Sheet: {formatMoney(summary.bs_debit)} / {formatMoney(summary.bs_credit)}
+        Final P/L ({profitLabel}): {formatMoney(Math.abs(profit))} | Balance Sheet: {formatMoney(summary.bs_debit)} / {formatMoney(summary.bs_credit)} | {balanceLabel}
       </p>
     </section>
   );
