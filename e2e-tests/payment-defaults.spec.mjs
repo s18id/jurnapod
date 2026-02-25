@@ -6,6 +6,7 @@
  */
 
 import { chromium } from 'playwright';
+import { mkdir, rm } from 'node:fs/promises';
 
 // Configuration
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3002';
@@ -133,6 +134,8 @@ async function ensurePaymentMethods() {
 
 async function setup() {
   console.log('🚀 Starting E2E Test Suite for Invoice Payment Default\n');
+  await rm('screenshots', { recursive: true, force: true });
+  await mkdir('screenshots', { recursive: true });
   await ensureBackofficeReady();
   await ensurePaymentMethods();
   browser = await chromium.launch({ 
@@ -200,7 +203,7 @@ async function test(name, fn) {
     // Take screenshot on failure
     try {
       const filename = `error-${Date.now()}.png`;
-      await page.screenshot({ path: `e2e-tests/screenshots/${filename}` });
+      await page.screenshot({ path: `screenshots/${filename}` });
       console.log(`   Screenshot: ${filename}`);
     } catch (e) {
       // Ignore screenshot errors
