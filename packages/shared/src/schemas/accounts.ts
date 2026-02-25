@@ -73,6 +73,7 @@ export const AccountResponseSchema = z.object({
   report_group: ReportGroupSchema.nullable(), // Legacy field
   parent_account_id: NumericIdSchema.nullable(),
   is_group: z.boolean(),
+  is_payable: z.boolean(),
   is_active: z.boolean(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime()
@@ -93,6 +94,7 @@ export const AccountCreateRequestSchema = z.object({
   report_group: ReportGroupSchema.optional().nullable(), // Legacy field
   parent_account_id: NumericIdSchema.optional().nullable(),
   is_group: z.boolean().default(false),
+  is_payable: z.boolean().optional().default(false),
   is_active: z.boolean().default(true)
 });
 
@@ -111,6 +113,7 @@ export const AccountUpdateRequestSchema = z
     report_group: ReportGroupSchema.optional().nullable(), // Legacy field
     parent_account_id: NumericIdSchema.optional().nullable(),
     is_group: z.boolean().optional(),
+    is_payable: z.boolean().optional(),
     is_active: z.boolean().optional()
   })
   .refine((data) => Object.keys(data).length > 0, {
@@ -124,6 +127,13 @@ export const AccountUpdateRequestSchema = z
 export const AccountListQuerySchema = z.object({
   company_id: NumericIdSchema,
   is_active: z
+    .string()
+    .optional()
+    .transform((val) => {
+      if (val === undefined || val === "") return undefined;
+      return val === "true" || val === "1";
+    }),
+  is_payable: z
     .string()
     .optional()
     .transform((val) => {
@@ -159,6 +169,7 @@ export const AccountTreeNodeSchema: z.ZodType<{
   report_group: "NRC" | "LR" | null;
   parent_account_id: number | null;
   is_group: boolean;
+  is_payable: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;

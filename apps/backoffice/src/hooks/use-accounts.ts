@@ -159,6 +159,9 @@ export function useAccounts(
     if (filters?.report_group) {
       result = result.filter((account) => account.report_group === filters.report_group);
     }
+    if (filters?.is_payable !== undefined) {
+      result = result.filter((account) => account.is_payable === filters.is_payable);
+    }
     if (filters?.parent_account_id !== undefined) {
       result = result.filter((account) => account.parent_account_id === filters.parent_account_id);
     }
@@ -198,6 +201,9 @@ export function useAccounts(
         }
         if (filters?.report_group) {
           params.set("report_group", filters.report_group);
+        }
+        if (filters?.is_payable !== undefined) {
+          params.set("is_payable", String(filters.is_payable));
         }
         if (filters?.parent_account_id !== undefined) {
           params.set("parent_account_id", String(filters.parent_account_id));

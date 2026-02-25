@@ -182,16 +182,10 @@ class SalesPaymentPostingMapper implements PostingMapper {
       this.payment.company_id,
       this.payment.outlet_id
     );
-    const paymentMethodMappings = await readOutletPaymentMethodMappings(
-      this.dbExecutor,
-      this.payment.company_id,
-      this.payment.outlet_id
-    );
-    const methodCode = normalizePaymentMethodCode(this.payment.method);
-    const cashBankAccountId = paymentMethodMappings.get(methodCode);
-    if (!cashBankAccountId) {
-      throw new Error(OUTLET_PAYMENT_MAPPING_MISSING_MESSAGE);
-    }
+
+    // Use account_id directly from payment
+    const cashBankAccountId = this.payment.account_id;
+    const accountLabel = this.payment.account_name ?? `Account #${cashBankAccountId}`;
 
     const lines: JournalLine[] = [];
 
@@ -199,7 +193,7 @@ class SalesPaymentPostingMapper implements PostingMapper {
       account_id: cashBankAccountId,
       debit: normalizeMoney(this.payment.amount),
       credit: 0,
-      description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${methodCode}`
+      description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${accountLabel}`
     });
 
     lines.push({

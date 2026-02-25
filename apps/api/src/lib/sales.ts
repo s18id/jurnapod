@@ -111,7 +111,9 @@ type SalesPaymentRow = RowDataPacket & {
   invoice_id: number;
   payment_no: string;
   payment_at: Date | string;
-  method: "CASH" | "QRIS" | "CARD";
+  account_id: number;
+  account_name?: string;
+  method?: "CASH" | "QRIS" | "CARD"; // deprecated
   status: "DRAFT" | "POSTED" | "VOID";
   amount: string | number;
   created_at: Date;
@@ -125,7 +127,9 @@ export type SalesPayment = {
   invoice_id: number;
   payment_no: string;
   payment_at: string;
-  method: "CASH" | "QRIS" | "CARD";
+  account_id: number;
+  account_name?: string;
+  method?: "CASH" | "QRIS" | "CARD"; // deprecated
   status: "DRAFT" | "POSTED" | "VOID";
   amount: number;
   created_at: string;
@@ -710,6 +714,8 @@ function normalizePayment(row: SalesPaymentRow): SalesPayment {
     invoice_id: Number(row.invoice_id),
     payment_no: row.payment_no,
     payment_at: new Date(row.payment_at).toISOString(),
+    account_id: Number(row.account_id),
+    account_name: row.account_name,
     method: row.method,
     status: row.status,
     amount: Number(row.amount),
@@ -726,11 +732,13 @@ async function findPaymentByIdWithExecutor(
 ): Promise<SalesPayment | null> {
   const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
   const [rows] = await executor.execute<SalesPaymentRow[]>(
-    `SELECT id, company_id, outlet_id, invoice_id, payment_no, payment_at, method, status,
-            amount, created_at, updated_at
-     FROM sales_payments
-     WHERE company_id = ?
-       AND id = ?
+    `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.payment_at,
+            sp.account_id, a.name as account_name, sp.method, sp.status,
+            sp.amount, sp.created_at, sp.updated_at
+     FROM sales_payments sp
+     LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
+     WHERE sp.company_id = ?
+       AND sp.id = ?
      LIMIT 1${forUpdateClause}`,
     [companyId, paymentId]
   );
@@ -743,7 +751,7 @@ async function findPaymentByIdWithExecutor(
 }
 
 function buildPaymentWhereClause(companyId: number, filters: PaymentListFilters) {
-  const conditions: string[] = ["company_id = ?"];
+  const conditions: string[] = ["sp.company_id = ?"];
   const values: Array<string | number> = [companyId];
 
   if (filters.outletIds) {
@@ -751,22 +759,22 @@ function buildPaymentWhereClause(companyId: number, filters: PaymentListFilters)
       return { clause: "", values: [], isEmpty: true };
     }
     const placeholders = filters.outletIds.map(() => "?").join(", ");
-    conditions.push(`outlet_id IN (${placeholders})`);
+    conditions.push(`sp.outlet_id IN (${placeholders})`);
     values.push(...filters.outletIds);
   }
 
   if (filters.status) {
-    conditions.push("status = ?");
+    conditions.push("sp.status = ?");
     values.push(filters.status);
   }
 
   if (filters.dateFrom) {
-    conditions.push("payment_at >= ?");
+    conditions.push("sp.payment_at >= ?");
     values.push(filters.dateFrom);
   }
 
   if (filters.dateTo) {
-    conditions.push("payment_at <= ?");
+    conditions.push("sp.payment_at <= ?");
     values.push(filters.dateTo);
   }
 
@@ -785,18 +793,20 @@ export async function listPayments(companyId: number, filters: PaymentListFilter
 
   const [countRows] = await pool.execute<RowDataPacket[]>(
     `SELECT COUNT(*) as total
-     FROM sales_payments
+     FROM sales_payments sp
      WHERE ${where.clause}`,
     where.values
   );
   const total = Number(countRows[0]?.total ?? 0);
 
   const [rows] = await pool.execute<SalesPaymentRow[]>(
-    `SELECT id, company_id, outlet_id, invoice_id, payment_no, payment_at, method, status,
-            amount, created_at, updated_at
-     FROM sales_payments
+    `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.payment_at,
+            sp.account_id, a.name as account_name, sp.method, sp.status,
+            sp.amount, sp.created_at, sp.updated_at
+     FROM sales_payments sp
+     LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
      WHERE ${where.clause}
-     ORDER BY payment_at DESC, id DESC
+     ORDER BY sp.payment_at DESC, sp.id DESC
      LIMIT ? OFFSET ?`,
     [...where.values, limit, offset]
   );
@@ -816,7 +826,8 @@ export async function createPayment(
     invoice_id: number;
     payment_no: string;
     payment_at: string;
-    method: "CASH" | "QRIS" | "CARD";
+    account_id: number;
+    method?: "CASH" | "QRIS" | "CARD"; // deprecated
     amount: number;
   },
   actor?: MutationActor
@@ -825,6 +836,17 @@ export async function createPayment(
     await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
     if (actor) {
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+    }
+
+    // Verify account exists, belongs to company, and is payable
+    const [accountRows] = await connection.execute<RowDataPacket[]>(
+      `SELECT id FROM accounts
+       WHERE id = ? AND company_id = ? AND is_payable = 1
+       LIMIT 1`,
+      [input.account_id, companyId]
+    );
+    if (accountRows.length === 0) {
+      throw new DatabaseReferenceError("Account not found or not payable");
     }
 
     const invoice = await findInvoiceByIdWithExecutor(connection, companyId, input.invoice_id);
@@ -847,19 +869,21 @@ export async function createPayment(
            invoice_id,
            payment_no,
            payment_at,
+           account_id,
            method,
            status,
            amount,
            created_by_user_id,
            updated_by_user_id
-         ) VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?)`,
         [
           companyId,
           input.outlet_id,
           input.invoice_id,
           input.payment_no,
           paymentAt,
-          input.method,
+          input.account_id,
+          input.method ?? null,
           amount,
           actor?.userId ?? null,
           actor?.userId ?? null
@@ -891,7 +915,8 @@ export async function updatePayment(
     invoice_id?: number;
     payment_no?: string;
     payment_at?: string;
-    method?: "CASH" | "QRIS" | "CARD";
+    account_id?: number;
+    method?: "CASH" | "QRIS" | "CARD"; // deprecated
     amount?: number;
   },
   actor?: MutationActor
@@ -919,10 +944,24 @@ export async function updatePayment(
       }
     }
 
+    // Verify account if provided
+    if (typeof input.account_id === "number") {
+      const [accountRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT id FROM accounts
+         WHERE id = ? AND company_id = ? AND is_payable = 1
+         LIMIT 1`,
+        [input.account_id, companyId]
+      );
+      if (accountRows.length === 0) {
+        throw new DatabaseReferenceError("Account not found or not payable");
+      }
+    }
+
     const nextOutletId = input.outlet_id ?? current.outlet_id;
     const nextInvoiceId = input.invoice_id ?? current.invoice_id;
     const nextPaymentNo = input.payment_no ?? current.payment_no;
     const nextPaymentAt = toMysqlDateTime(input.payment_at ?? current.payment_at);
+    const nextAccountId = input.account_id ?? current.account_id;
     const nextMethod = input.method ?? current.method;
     const nextAmount =
       typeof input.amount === "number" ? normalizeMoney(input.amount) : current.amount;
@@ -945,6 +984,7 @@ export async function updatePayment(
              invoice_id = ?,
              payment_no = ?,
              payment_at = ?,
+             account_id = ?,
              method = ?,
              amount = ?,
              updated_by_user_id = ?,
@@ -956,7 +996,8 @@ export async function updatePayment(
           nextInvoiceId,
           nextPaymentNo,
           nextPaymentAt,
-          nextMethod,
+          nextAccountId,
+          nextMethod ?? null,
           nextAmount,
           actor?.userId ?? null,
           companyId,

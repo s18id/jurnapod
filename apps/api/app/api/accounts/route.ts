@@ -45,6 +45,7 @@ export const GET = withAuth(
       const query = AccountListQuerySchema.parse({
         company_id: url.searchParams.get("company_id") || String(auth.companyId),
         is_active: url.searchParams.get("is_active") || undefined,
+        is_payable: url.searchParams.get("is_payable") || undefined,
         report_group: url.searchParams.get("report_group") || undefined,
         parent_account_id: url.searchParams.get("parent_account_id") || undefined,
         search: url.searchParams.get("search") || undefined,

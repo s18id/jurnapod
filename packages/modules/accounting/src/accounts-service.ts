@@ -108,12 +108,12 @@ export class AccountsService {
    * List accounts with optional filtering
    */
   async listAccounts(filters: AccountListQuery): Promise<AccountResponse[]> {
-    const { company_id, is_active, report_group, parent_account_id, search } = filters;
+    const { company_id, is_active, is_payable, report_group, parent_account_id, search } = filters;
 
     let sql = `
       SELECT 
         id, company_id, code, name, type_name, normal_balance, report_group,
-        parent_account_id, account_type_id, is_group, is_active, created_at, updated_at
+        parent_account_id, account_type_id, is_group, is_payable, is_active, created_at, updated_at
       FROM accounts
       WHERE company_id = ?
     `;
@@ -122,6 +122,11 @@ export class AccountsService {
     if (is_active !== undefined) {
       sql += ` AND is_active = ?`;
       params.push(is_active ? 1 : 0);
+    }
+
+    if (is_payable !== undefined) {
+      sql += ` AND is_payable = ?`;
+      params.push(is_payable ? 1 : 0);
     }
 
     if (report_group) {
@@ -157,7 +162,7 @@ export class AccountsService {
     const sql = `
       SELECT 
         id, company_id, code, name, account_type_id, type_name, normal_balance, report_group,
-        parent_account_id, is_group, is_active, created_at, updated_at
+        parent_account_id, is_group, is_payable, is_active, created_at, updated_at
       FROM accounts
       WHERE id = ? AND company_id = ?
       LIMIT 1
@@ -200,7 +205,7 @@ export class AccountsService {
       const sql = `
         INSERT INTO accounts (
           company_id, code, name, account_type_id, type_name, normal_balance, report_group,
-          parent_account_id, is_group, is_active, created_at, updated_at
+          parent_account_id, is_group, is_payable, is_active, created_at, updated_at
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
       `;
@@ -215,6 +220,7 @@ export class AccountsService {
         data.report_group ?? null,
         data.parent_account_id ?? null,
         data.is_group ? 1 : 0,
+        data.is_payable ? 1 : 0,
         data.is_active ? 1 : 0
       ];
 
@@ -305,6 +311,11 @@ export class AccountsService {
     if (data.is_group !== undefined) {
       updateFields.push("is_group = ?");
       params.push(data.is_group ? 1 : 0);
+    }
+
+    if (data.is_payable !== undefined) {
+      updateFields.push("is_payable = ?");
+      params.push(data.is_payable ? 1 : 0);
     }
 
     if (data.is_active !== undefined) {
@@ -470,7 +481,7 @@ export class AccountsService {
     let sql = `
       SELECT 
         id, company_id, code, name, account_type_id, type_name, normal_balance, report_group,
-        parent_account_id, is_group, is_active, created_at, updated_at
+        parent_account_id, is_group, is_payable, is_active, created_at, updated_at
       FROM accounts
       WHERE company_id = ?
     `;
@@ -692,6 +703,7 @@ export class AccountsService {
       report_group: row.report_group,
       parent_account_id: row.parent_account_id,
       is_group: Boolean(row.is_group),
+      is_payable: Boolean(row.is_payable),
       is_active: Boolean(row.is_active),
       created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
       updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at

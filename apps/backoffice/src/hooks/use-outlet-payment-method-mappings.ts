@@ -10,6 +10,8 @@ export type PaymentMethodConfig = {
 export type PaymentMethodMapping = {
   method_code: string;
   account_id: number;
+  label?: string;
+  is_invoice_default?: boolean;
 };
 
 type MappingResponse = {

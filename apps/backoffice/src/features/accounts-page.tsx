@@ -35,6 +35,7 @@ type AccountFormData = {
   type_name: string | null; // Legacy field, kept for backward compatibility
   normal_balance: NormalBalance | null; // Legacy field
   report_group: ReportGroup | null; // Legacy field
+  is_payable: boolean;
   is_active: boolean;
 };
 
@@ -47,6 +48,7 @@ const emptyForm: AccountFormData = {
   type_name: null,
   normal_balance: null,
   report_group: null,
+  is_payable: false,
   is_active: true
 };
 
@@ -115,6 +117,12 @@ const groupBadgeStyle = {
   ...badgeStyle,
   backgroundColor: "#d1ecf1",
   color: "#0c5460"
+} as const;
+
+const payableBadgeStyle = {
+  ...badgeStyle,
+  backgroundColor: "#efe3c2",
+  color: "#5b4b2f"
 } as const;
 
 export function AccountsPage(props: AccountsPageProps) {
@@ -240,6 +248,7 @@ export function AccountsPage(props: AccountsPageProps) {
       type_name: account.type_name,
       normal_balance: account.normal_balance,
       report_group: account.report_group,
+      is_payable: account.is_payable ?? false,
       is_active: account.is_active
     });
     setFormErrors({});
@@ -290,6 +299,7 @@ export function AccountsPage(props: AccountsPageProps) {
             type_name: formData.type_name, // Legacy field for backward compatibility
             normal_balance: formData.normal_balance, // Legacy field
             report_group: formData.report_group, // Legacy field
+            is_payable: formData.is_payable,
             is_active: formData.is_active
           },
           props.accessToken
@@ -307,6 +317,7 @@ export function AccountsPage(props: AccountsPageProps) {
             type_name: formData.type_name, // Legacy field for backward compatibility
             normal_balance: formData.normal_balance, // Legacy field
             report_group: formData.report_group, // Legacy field
+            is_payable: formData.is_payable,
             is_active: formData.is_active
           },
           props.accessToken
@@ -418,6 +429,7 @@ export function AccountsPage(props: AccountsPageProps) {
                   <span style={inactiveBadgeStyle}>Inactive</span>
                 )}
                 {node.is_group && <span style={groupBadgeStyle}>Group</span>}
+                {node.is_payable && <span style={payableBadgeStyle}>Payable</span>}
                 {node.report_group && (
                   <span style={{ ...badgeStyle, backgroundColor: "#e7e7e7", color: "#333" }}>
                     {node.report_group}
@@ -690,6 +702,20 @@ export function AccountsPage(props: AccountsPageProps) {
                 />
                 Active
               </label>
+            </div>
+
+            <div>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "bold" }}>
+                <input
+                  type="checkbox"
+                  checked={formData.is_payable}
+                  onChange={(e) => setFormData({ ...formData, is_payable: e.target.checked })}
+                />
+                Payment Destination
+              </label>
+              <small style={{ color: "#6b5d48", fontSize: "11px", display: "block", marginTop: "4px" }}>
+                Allow this account to receive POS and sales payments
+              </small>
             </div>
           </div>
 

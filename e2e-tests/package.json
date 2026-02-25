@@ -1,0 +1,17 @@
+{
+  "name": "jurnapod-e2e-tests",
+  "version": "1.0.0",
+  "description": "E2E tests for Jurnapod invoice payment default feature",
+  "type": "module",
+  "scripts": {
+    "test": "node payment-defaults-api.spec.mjs",
+    "test:api": "node payment-defaults-api.spec.mjs",
+    "test:ui": "node payment-defaults.spec.mjs",
+    "test:ui:headed": "HEADLESS=false node payment-defaults.spec.mjs",
+    "test:ui:debug": "HEADLESS=false PWDEBUG=1 node payment-defaults.spec.mjs",
+    "install-browsers": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0"
+  }
+}

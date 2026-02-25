@@ -10,6 +10,7 @@ import {
 } from "../hooks/use-outlet-account-mappings";
 import {
   useOutletPaymentMethodMappings,
+  type PaymentMethodConfig,
   type PaymentMethodMapping
 } from "../hooks/use-outlet-payment-method-mappings";
 import { ApiError } from "../lib/api-client";
@@ -97,6 +98,10 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
   const [paymentSubmitError, setPaymentSubmitError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [paymentSaving, setPaymentSaving] = useState(false);
+  const [draftMethodCode, setDraftMethodCode] = useState("");
+  const [draftMethodLabel, setDraftMethodLabel] = useState("");
+  const [draftMethods, setDraftMethods] = useState<PaymentMethodConfig[]>([]);
+  const [paymentLabelState, setPaymentLabelState] = useState<Record<string, string>>({});
 
   const { data: mappings, loading, error, refetch, save } = useOutletAccountMappings(outletId, accessToken);
   const {
@@ -111,10 +116,20 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
   const { data: accounts } = useAccounts(user.company_id, accessToken, accountFilters);
 
   const accountOptions = useMemo(
-    () => accounts.map((account) => ({ id: account.id, label: `${account.code} - ${account.name}` })),
+    () =>
+      accounts.map((account) => ({
+        id: account.id,
+        label: `${account.code} - ${account.name}`,
+        is_payable: account.is_payable
+      })),
     [accounts]
   );
+  const paymentAccountOptions = useMemo(
+    () => accountOptions.filter((account) => account.is_payable),
+    [accountOptions]
+  );
   const [paymentFormState, setPaymentFormState] = useState<Record<string, number | "">>({});
+  const [invoiceDefaultMethod, setInvoiceDefaultMethod] = useState<string | null>(null);
 
   useEffect(() => {
     const nextState = buildDefaultMappings();
@@ -126,16 +141,37 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
 
   useEffect(() => {
     const nextState: Record<string, number | ""> = {};
+    const nextLabels: Record<string, string> = {};
+    let invoiceDefault: string | null = null;
+    
     paymentMethods.forEach((method) => {
       nextState[method.code] = "";
+      nextLabels[method.code] = method.label;
     });
     paymentMappings.forEach((mapping) => {
       if (mapping.method_code) {
         nextState[mapping.method_code] = mapping.account_id;
+        if (mapping.label) {
+          nextLabels[mapping.method_code] = mapping.label;
+        }
+        if (mapping.is_invoice_default) {
+          invoiceDefault = mapping.method_code;
+        }
       }
     });
     setPaymentFormState(nextState);
+    setPaymentLabelState(nextLabels);
+    setInvoiceDefaultMethod(invoiceDefault);
   }, [paymentMethods, paymentMappings]);
+
+  useEffect(() => {
+    setDraftMethods([]);
+    setDraftMethodCode("");
+    setDraftMethodLabel("");
+    setPaymentSubmitError(null);
+    setPaymentLabelState({});
+    setInvoiceDefaultMethod(null);
+  }, [outletId]);
 
   if (!isOnline) {
     return (
@@ -147,7 +183,17 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
   }
 
   const missingKeys = allMappingKeys.filter((key) => !formState[key]);
-  const missingPaymentMethods = paymentMethods.filter((method) => !paymentFormState[method.code]);
+  const effectivePaymentMethods = useMemo(() => {
+    const methodMap = new Map(paymentMethods.map((method) => [method.code, method]));
+    draftMethods.forEach((method) => {
+      if (!methodMap.has(method.code)) {
+        methodMap.set(method.code, method);
+      }
+    });
+    return Array.from(methodMap.values());
+  }, [paymentMethods, draftMethods]);
+
+  const missingPaymentMethods = effectivePaymentMethods.filter((method) => !paymentFormState[method.code]);
 
   async function handleSave() {
     setSubmitError(null);
@@ -184,12 +230,18 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
 
     setPaymentSaving(true);
     try {
-      const payload: PaymentMethodMapping[] = paymentMethods.map((method) => ({
+      const payload: PaymentMethodMapping[] = effectivePaymentMethods.map((method) => ({
         method_code: method.code,
-        account_id: Number(paymentFormState[method.code])
+        account_id: Number(paymentFormState[method.code]),
+        label: paymentLabelState[method.code]?.trim() || undefined,
+        is_invoice_default: invoiceDefaultMethod === method.code
       }));
       await savePayment(payload);
       await refetchPayment();
+      setDraftMethods([]);
+      setDraftMethodCode("");
+      setDraftMethodLabel("");
+      setPaymentLabelState({});
     } catch (err) {
       if (err instanceof ApiError) {
         setPaymentSubmitError(err.message);
@@ -199,6 +251,26 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
     } finally {
       setPaymentSaving(false);
     }
+  }
+
+  function handleAddPaymentMethod() {
+    const normalizedCode = draftMethodCode.trim().toUpperCase();
+    const normalizedLabel = draftMethodLabel.trim() || normalizedCode;
+    if (!normalizedCode) {
+      setPaymentSubmitError("Payment method code is required.");
+      return;
+    }
+    const exists = effectivePaymentMethods.some((method) => method.code === normalizedCode);
+    if (exists) {
+      setPaymentSubmitError("Payment method code already exists.");
+      return;
+    }
+    setDraftMethods((prev) => [...prev, { code: normalizedCode, label: normalizedLabel }]);
+    setPaymentFormState((prev) => ({ ...prev, [normalizedCode]: "" }));
+    setPaymentLabelState((prev) => ({ ...prev, [normalizedCode]: normalizedLabel }));
+    setDraftMethodCode("");
+    setDraftMethodLabel("");
+    setPaymentSubmitError(null);
   }
 
   function renderMappingRow(entry: { key: OutletAccountMappingKey; label: string }) {
@@ -283,22 +355,59 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
       <section style={boxStyle}>
         <h2 style={{ marginTop: 0 }}>POS Payment Methods</h2>
         <p style={{ color: "#5b6664", marginTop: 0 }}>
-          Map each POS payment method to a cash/bank account.
+          Map each POS payment method to a cash/bank account. Set the default payment method for invoice payments.
         </p>
-        {paymentMethods.length === 0 ? (
+        <p style={{ color: "#5b6664", fontSize: "13px", marginTop: "8px", marginBottom: "12px" }}>
+          <strong>Invoice Default:</strong> Pre-selected payment account when creating sales payments in backoffice. Cashiers will manually select payment methods in POS.
+        </p>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
+          <input
+            type="text"
+            placeholder="Method code (e.g., CARD_BCA)"
+            value={draftMethodCode}
+            onChange={(event) => setDraftMethodCode(event.target.value)}
+            style={{ ...inputStyle, flex: "1 1 220px" }}
+          />
+          <input
+            type="text"
+            placeholder="Label (optional)"
+            value={draftMethodLabel}
+            onChange={(event) => setDraftMethodLabel(event.target.value)}
+            style={{ ...inputStyle, flex: "1 1 220px" }}
+          />
+          <button type="button" onClick={handleAddPaymentMethod} style={buttonStyle}>
+            Add Method
+          </button>
+        </div>
+        {effectivePaymentMethods.length === 0 ? (
           <p style={{ color: "#5b6664" }}>No payment methods configured.</p>
         ) : (
           <table style={tableStyle}>
             <thead>
               <tr>
-                <th style={cellStyle}>Payment Method</th>
+                <th style={cellStyle}>Method Code</th>
+                <th style={cellStyle}>Label</th>
                 <th style={cellStyle}>Account</th>
+                <th style={cellStyle}>Invoice Default</th>
               </tr>
             </thead>
             <tbody>
-              {paymentMethods.map((method) => (
+              {effectivePaymentMethods.map((method) => (
                 <tr key={method.code}>
-                  <td style={cellStyle}>{method.label}</td>
+                  <td style={cellStyle}>{method.code}</td>
+                  <td style={cellStyle}>
+                    <input
+                      type="text"
+                      value={paymentLabelState[method.code] ?? method.label}
+                      onChange={(event) =>
+                        setPaymentLabelState((prev) => ({
+                          ...prev,
+                          [method.code]: event.target.value
+                        }))
+                      }
+                      style={inputStyle}
+                    />
+                  </td>
                   <td style={cellStyle}>
                     <select
                       value={paymentFormState[method.code] ?? ""}
@@ -311,12 +420,21 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
                       style={inputStyle}
                     >
                       <option value="">Select account</option>
-                      {accountOptions.map((account) => (
+                      {paymentAccountOptions.map((account) => (
                         <option key={account.id} value={account.id}>
                           {account.label}
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td style={{ ...cellStyle, textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={invoiceDefaultMethod === method.code}
+                      onChange={(event) => {
+                        setInvoiceDefaultMethod(event.target.checked ? method.code : null);
+                      }}
+                    />
                   </td>
                 </tr>
               ))}

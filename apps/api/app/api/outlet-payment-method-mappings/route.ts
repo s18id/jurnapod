@@ -13,7 +13,9 @@ const bodySchema = z.object({
   mappings: z.array(
     z.object({
       method_code: z.string().trim().min(1),
-      account_id: z.number().int().positive()
+      account_id: z.number().int().positive(),
+      label: z.string().trim().min(1).optional(),
+      is_invoice_default: z.boolean().optional()
     })
   )
 });
@@ -129,23 +131,57 @@ export const GET = withAuth(
       const paymentMethods = await readPaymentMethods(auth.companyId);
       const pool = getDbPool();
       const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT method_code, account_id
+        `SELECT method_code, account_id, label, is_invoice_default
          FROM outlet_payment_method_mappings
          WHERE company_id = ?
            AND outlet_id = ?`,
         [auth.companyId, parsed.outlet_id]
       );
 
-      const mappings = (rows as Array<{ method_code?: string; account_id?: number }>).map((row) => ({
-        method_code: normalizeMethodCode(String(row.method_code ?? "")),
-        account_id: Number(row.account_id ?? 0)
-      })).filter((row) => row.method_code.length > 0 && Number.isFinite(row.account_id) && row.account_id > 0);
+      const mappings = (rows as Array<{ 
+        method_code?: string; 
+        account_id?: number; 
+        label?: string | null;
+        is_invoice_default?: number;
+      }>).map(
+        (row) => ({
+          method_code: normalizeMethodCode(String(row.method_code ?? "")),
+          account_id: Number(row.account_id ?? 0),
+          label: typeof row.label === "string" && row.label.trim().length > 0 ? row.label.trim() : undefined,
+          is_invoice_default: row.is_invoice_default === 1
+        })
+      ).filter((row) => row.method_code.length > 0 && Number.isFinite(row.account_id) && row.account_id > 0);
+
+      const methodCodes = new Set(paymentMethods.map((method) => method.code));
+      const mergedPaymentMethods = paymentMethods.map((method) => ({ ...method }));
+      const mappingLabels = new Map(
+        mappings
+          .filter((mapping) => typeof mapping.label === "string" && mapping.label.length > 0)
+          .map((mapping) => [mapping.method_code, mapping.label as string])
+      );
+
+      mergedPaymentMethods.forEach((method) => {
+        const overrideLabel = mappingLabels.get(method.code);
+        if (overrideLabel) {
+          method.label = overrideLabel;
+        }
+      });
+
+      mappings.forEach((mapping) => {
+        if (!methodCodes.has(mapping.method_code)) {
+          methodCodes.add(mapping.method_code);
+          mergedPaymentMethods.push({
+            code: mapping.method_code,
+            label: mapping.label ?? mapping.method_code
+          });
+        }
+      });
 
       return Response.json(
         {
           ok: true,
           outlet_id: parsed.outlet_id,
-          payment_methods: paymentMethods,
+          payment_methods: mergedPaymentMethods,
           mappings
         },
         { status: 200 }
@@ -173,6 +209,36 @@ export const PUT = withAuth(
         return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
+      // Validate: only one invoice_default per outlet
+      const invoiceDefaults = parsed.mappings.filter((m) => m.is_invoice_default === true);
+      
+      if (invoiceDefaults.length > 1) {
+        return errorResponse(
+          "MULTIPLE_INVOICE_DEFAULTS", 
+          "Only one payment method can be set as invoice default", 
+          400
+        );
+      }
+
+      const accountIds = Array.from(new Set(parsed.mappings.map((mapping) => mapping.account_id)));
+      if (accountIds.length > 0) {
+        const placeholders = accountIds.map(() => "?").join(", ");
+        const pool = getDbPool();
+        const [rows] = await pool.execute<RowDataPacket[]>(
+          `SELECT id
+           FROM accounts
+           WHERE company_id = ?
+             AND is_payable = 1
+             AND id IN (${placeholders})`,
+          [auth.companyId, ...accountIds]
+        );
+        const payableIds = new Set((rows as Array<{ id?: number }>).map((row) => Number(row.id)));
+        const invalidIds = accountIds.filter((id) => !payableIds.has(id));
+        if (invalidIds.length > 0) {
+          return errorResponse("INVALID_PAYMENT_ACCOUNT", "Account is not eligible for payments", 400);
+        }
+      }
+
       const pool = getDbPool();
       const connection = await pool.getConnection();
       try {
@@ -187,10 +253,13 @@ export const PUT = withAuth(
 
         for (const mapping of parsed.mappings) {
           const methodCode = normalizeMethodCode(mapping.method_code);
+          const label = mapping.label ? mapping.label.trim() : null;
+          const isInvoiceDefault = mapping.is_invoice_default === true ? 1 : 0;
           await connection.execute(
-            `INSERT INTO outlet_payment_method_mappings (company_id, outlet_id, method_code, account_id)
-             VALUES (?, ?, ?, ?)`,
-            [auth.companyId, parsed.outlet_id, methodCode, mapping.account_id]
+            `INSERT INTO outlet_payment_method_mappings 
+             (company_id, outlet_id, method_code, label, account_id, is_invoice_default)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [auth.companyId, parsed.outlet_id, methodCode, label, mapping.account_id, isInvoiceDefault]
           );
         }
 

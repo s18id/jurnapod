@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
+import { useAccounts } from "../hooks/use-accounts";
+import { useOutletPaymentMethodMappings } from "../hooks/use-outlet-payment-method-mappings";
 
 type PaymentStatus = "DRAFT" | "POSTED" | "VOID";
-type PaymentMethod = "CASH" | "QRIS" | "CARD";
 
 type Payment = {
   id: number;
@@ -12,7 +13,8 @@ type Payment = {
   invoice_id: number;
   payment_no: string;
   payment_at: string;
-  method: PaymentMethod;
+  account_id: number;
+  account_name?: string;
   status: PaymentStatus;
   amount: number;
   created_at: string;
@@ -71,18 +73,7 @@ function getStatusBadgeColor(status: PaymentStatus): string {
   }
 }
 
-function getMethodBadgeColor(method: PaymentMethod): string {
-  switch (method) {
-    case "CASH":
-      return "#4caf50";
-    case "QRIS":
-      return "#2196f3";
-    case "CARD":
-      return "#9c27b0";
-    default:
-      return "#666";
-  }
-}
+
 
 type SalesPaymentsPageProps = {
   user: SessionUser;
@@ -93,7 +84,7 @@ type PaymentDraft = {
   payment_no: string;
   invoice_id: string;
   payment_at: string;
-  method: PaymentMethod;
+  account_id: string;
   amount: string;
 };
 
@@ -119,10 +110,24 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     payment_no: "",
     invoice_id: "",
     payment_at: toLocalDateTimeInput(new Date()),
-    method: "CASH",
+    account_id: "",
     amount: "0"
   }));
   const [editingPayment, setEditingPayment] = useState<PaymentEditDraft | null>(null);
+
+  // Fetch payable accounts for payment destination dropdown
+  const accountFilter = useMemo(() => ({ is_payable: true }), []);
+  const { data: payableAccounts, loading: accountsLoading } = useAccounts(
+    props.user.company_id,
+    props.accessToken,
+    accountFilter
+  );
+
+  // Fetch payment method mappings to get the invoice default
+  const { mappings: paymentMappings, loading: mappingsLoading } = useOutletPaymentMethodMappings(
+    selectedOutletId,
+    props.accessToken
+  );
 
   async function refreshData(outletId: number) {
     setLoading(true);
@@ -151,6 +156,19 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     }
   }, [selectedOutletId]);
 
+  // Set default account_id from invoice default payment method mapping
+  useEffect(() => {
+    if (!mappingsLoading && paymentMappings.length > 0) {
+      const invoiceDefault = paymentMappings.find((m) => m.is_invoice_default === true);
+      if (invoiceDefault && newPayment.account_id === "") {
+        setNewPayment((prev) => ({
+          ...prev,
+          account_id: String(invoiceDefault.account_id)
+        }));
+      }
+    }
+  }, [mappingsLoading, paymentMappings, newPayment.account_id]);
+
   function handleOutletChange(event: React.ChangeEvent<HTMLSelectElement>) {
     setSelectedOutletId(Number(event.target.value));
   }
@@ -160,7 +178,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
       payment_no: "",
       invoice_id: "",
       payment_at: toLocalDateTimeInput(new Date()),
-      method: "CASH",
+      account_id: "",
       amount: "0"
     });
   }
@@ -184,6 +202,11 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
       return;
     }
 
+    if (!newPayment.account_id.trim()) {
+      setError("Payment account is required");
+      return;
+    }
+
     const paymentAtIso = toIsoString(newPayment.payment_at);
     if (!paymentAtIso) {
       setError("Payment date is invalid");
@@ -202,7 +225,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
             invoice_id: Number(newPayment.invoice_id),
             payment_no: newPayment.payment_no.trim(),
             payment_at: paymentAtIso,
-            method: newPayment.method,
+            account_id: Number(newPayment.account_id),
             amount: Number(newPayment.amount)
           })
         },
@@ -227,7 +250,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
       payment_no: payment.payment_no,
       invoice_id: String(payment.invoice_id),
       payment_at: toLocalDateTimeInput(new Date(payment.payment_at)),
-      method: payment.method,
+      account_id: String(payment.account_id),
       amount: String(payment.amount)
     });
   }
@@ -244,6 +267,11 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
 
     if (!editingPayment.invoice_id.trim()) {
       setError("Invoice ID is required");
+      return;
+    }
+
+    if (!editingPayment.account_id.trim()) {
+      setError("Payment account is required");
       return;
     }
 
@@ -264,7 +292,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
             invoice_id: Number(editingPayment.invoice_id),
             payment_no: editingPayment.payment_no.trim(),
             payment_at: paymentAtIso,
-            method: editingPayment.method,
+            account_id: Number(editingPayment.account_id),
             amount: Number(editingPayment.amount)
           })
         },
@@ -306,6 +334,21 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
 
       <div style={boxStyle}>
         <h3 style={{ marginTop: 0 }}>Create Payment</h3>
+        {!mappingsLoading && paymentMappings.length > 0 && !paymentMappings.some((m) => m.is_invoice_default) && (
+          <div
+            style={{
+              backgroundColor: "#fff9e6",
+              border: "1px solid #ffcc00",
+              borderRadius: "6px",
+              padding: "10px",
+              marginBottom: "12px",
+              fontSize: "13px",
+              color: "#664d00"
+            }}
+          >
+            ℹ️ No invoice default payment method configured. Please set a default in Settings → Payment Methods.
+          </div>
+        )}
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
           <input
             placeholder="Payment No"
@@ -341,18 +384,22 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
             style={inputStyle}
           />
           <select
-            value={newPayment.method}
+            value={newPayment.account_id}
             onChange={(event) =>
               setNewPayment((prev) => ({
                 ...prev,
-                method: event.target.value as PaymentMethod
+                account_id: event.target.value
               }))
             }
             style={inputStyle}
+            disabled={accountsLoading}
           >
-            <option value="CASH">CASH</option>
-            <option value="QRIS">QRIS</option>
-            <option value="CARD">CARD</option>
+            <option value="">-- Select Account --</option>
+            {payableAccounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.code} - {account.name}
+              </option>
+            ))}
           </select>
           <input
             placeholder="Amount"
@@ -421,22 +468,26 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
               style={inputStyle}
             />
             <select
-              value={editingPayment.method}
+              value={editingPayment.account_id}
               onChange={(event) =>
                 setEditingPayment((prev) =>
                   prev
                     ? {
                         ...prev,
-                        method: event.target.value as PaymentMethod
+                        account_id: event.target.value
                       }
                     : prev
                 )
               }
               style={inputStyle}
+              disabled={accountsLoading}
             >
-              <option value="CASH">CASH</option>
-              <option value="QRIS">QRIS</option>
-              <option value="CARD">CARD</option>
+              <option value="">-- Select Account --</option>
+              {payableAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.code} - {account.name}
+                </option>
+              ))}
             </select>
             <input
               placeholder="Amount"
@@ -513,7 +564,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
               <tr style={{ backgroundColor: "#f5f0e8" }}>
                 <th style={{ ...cellStyle, textAlign: "left" }}>Payment No</th>
                 <th style={{ ...cellStyle, textAlign: "left" }}>Date & Time</th>
-                <th style={{ ...cellStyle, textAlign: "center" }}>Method</th>
+                <th style={{ ...cellStyle, textAlign: "left" }}>Account</th>
                 <th style={{ ...cellStyle, textAlign: "center" }}>Status</th>
                 <th style={{ ...cellStyle, textAlign: "right" }}>Amount</th>
                 <th style={{ ...cellStyle, textAlign: "center" }}>Invoice ID</th>
@@ -525,20 +576,8 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
                 <tr key={payment.id}>
                   <td style={cellStyle}>{payment.payment_no}</td>
                   <td style={cellStyle}>{formatDateTime(payment.payment_at)}</td>
-                  <td style={{ ...cellStyle, textAlign: "center" }}>
-                    <span
-                      style={{
-                        display: "inline-block",
-                        padding: "2px 8px",
-                        borderRadius: "4px",
-                        fontSize: "12px",
-                        fontWeight: 500,
-                        backgroundColor: getMethodBadgeColor(payment.method),
-                        color: "white"
-                      }}
-                    >
-                      {payment.method}
-                    </span>
+                  <td style={cellStyle}>
+                    {payment.account_name ?? `Account #${payment.account_id}`}
                   </td>
                   <td style={{ ...cellStyle, textAlign: "center" }}>
                     <span

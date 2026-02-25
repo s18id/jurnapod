@@ -93,7 +93,8 @@ export const SalesPaymentCreateRequestSchema = z.object({
   invoice_id: NumericIdSchema,
   payment_no: z.string().trim().min(1).max(64),
   payment_at: z.string().datetime(),
-  method: SalesPaymentMethodSchema,
+  account_id: NumericIdSchema,
+  method: SalesPaymentMethodSchema.optional(), // deprecated, kept for backward compat
   amount: MoneyInputPositiveSchema
 });
 
@@ -103,7 +104,8 @@ export const SalesPaymentUpdateRequestSchema = z
     invoice_id: NumericIdSchema.optional(),
     payment_no: z.string().trim().min(1).max(64).optional(),
     payment_at: z.string().datetime().optional(),
-    method: SalesPaymentMethodSchema.optional(),
+    account_id: NumericIdSchema.optional(),
+    method: SalesPaymentMethodSchema.optional(), // deprecated
     amount: MoneyInputPositiveSchema.optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
@@ -117,7 +119,9 @@ export const SalesPaymentSchema = z.object({
   invoice_id: NumericIdSchema,
   payment_no: z.string().min(1),
   payment_at: z.string().datetime(),
-  method: SalesPaymentMethodSchema,
+  account_id: NumericIdSchema,
+  account_name: z.string().optional(), // joined from accounts table
+  method: SalesPaymentMethodSchema.optional(), // deprecated
   status: DocumentStatusSchema,
   amount: MoneySchema.positive(),
   created_at: z.string().datetime(),
