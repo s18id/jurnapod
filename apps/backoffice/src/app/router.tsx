@@ -28,6 +28,7 @@ import {
   ForbiddenPage,
   ItemsPricesPage,
   JournalsPage,
+  GeneralLedgerPage,
   FixedAssetsPage,
   PosPaymentsPage,
   PosTransactionsPage,
@@ -71,6 +72,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/daily-sales") {
     return <DailySalesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/general-ledger") {
+    return <GeneralLedgerPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/chart-of-accounts") {
     return <AccountsPage user={props.user} accessToken={props.accessToken} />;

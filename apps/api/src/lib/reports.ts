@@ -63,6 +63,23 @@ type GeneralLedgerRow = RowDataPacket & {
   period_credit: number | string | null;
 };
 
+type GeneralLedgerLineRow = RowDataPacket & {
+  line_id: number;
+  account_id: number;
+  account_code: string;
+  account_name: string;
+  line_date: Date;
+  debit: number | string;
+  credit: number | string;
+  description: string;
+  outlet_id: number | null;
+  outlet_name: string | null;
+  journal_batch_id: number;
+  doc_type: string;
+  doc_id: number;
+  posted_at: Date;
+};
+
 type ProfitLossRow = RowDataPacket & {
   account_id: number;
   account_code: string;
@@ -110,6 +127,9 @@ type TrialBalanceFilter = BaseFilter & {
 
 type GeneralLedgerFilter = BaseFilter & {
   includeUnassignedOutlet?: boolean;
+  accountId?: number;
+  lineLimit?: number;
+  lineOffset?: number;
 };
 
 type ProfitLossFilter = BaseFilter & {
@@ -142,6 +162,10 @@ function buildOutletPredicate(
 
 function toIsoDateTime(value: Date): string {
   return new Date(value).toISOString();
+}
+
+function toIsoDate(value: Date): string {
+  return new Date(value).toISOString().slice(0, 10);
 }
 
 function toDateTimeRange(dateFrom: string, dateTo: string): { fromStart: string; nextDayStart: string } {
@@ -583,7 +607,7 @@ export async function getTrialBalance(filter: TrialBalanceFilter) {
   }));
 }
 
-export async function getGeneralLedgerSummary(filter: GeneralLedgerFilter) {
+export async function getGeneralLedgerDetail(filter: GeneralLedgerFilter) {
   const pool = getDbPool();
 
   if (filter.outletIds.length === 0) {
@@ -596,6 +620,47 @@ export async function getGeneralLedgerSummary(filter: GeneralLedgerFilter) {
     filter.includeUnassignedOutlet ?? true
   );
 
+  const accountClause = typeof filter.accountId === "number"
+    ? { sql: "AND a.id = ?", values: [filter.accountId] }
+    : { sql: "", values: [] as number[] };
+
+  const lineAccountClause = typeof filter.accountId === "number"
+    ? { sql: "AND jl.account_id = ?", values: [filter.accountId] }
+    : { sql: "", values: [] as number[] };
+
+  const shouldLimitLines = typeof filter.accountId === "number" && typeof filter.lineLimit === "number";
+  const lineOffset = filter.lineOffset ?? 0;
+  const lineLimitClause = shouldLimitLines ? "LIMIT ? OFFSET ?" : "";
+  const lineLimitValues = shouldLimitLines
+    ? [filter.lineLimit as number, lineOffset]
+    : [];
+
+  let pagedOpeningDelta = 0;
+  if (shouldLimitLines && lineOffset > 0) {
+    const [priorRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(prior.debit - prior.credit), 0) AS balance
+       FROM (
+         SELECT jl.debit, jl.credit
+         FROM journal_lines jl
+         WHERE jl.company_id = ?
+           AND jl.line_date BETWEEN ? AND ?
+           AND ${outletClause.sql}
+           ${lineAccountClause.sql}
+         ORDER BY jl.line_date ASC, jl.id ASC
+         LIMIT ?
+       ) prior`,
+      [
+        filter.companyId,
+        filter.dateFrom,
+        filter.dateTo,
+        ...outletClause.values,
+        ...lineAccountClause.values,
+        lineOffset
+      ]
+    );
+    pagedOpeningDelta = toNumber(priorRows[0]?.balance);
+  }
+
   const [rows] = await pool.execute<GeneralLedgerRow[]>(
     `SELECT a.id AS account_id,
             a.code AS account_code,
@@ -607,14 +672,15 @@ export async function getGeneralLedgerSummary(filter: GeneralLedgerFilter) {
             SUM(CASE WHEN jl.line_date BETWEEN ? AND ? THEN jl.debit ELSE 0 END) AS period_debit,
             SUM(CASE WHEN jl.line_date BETWEEN ? AND ? THEN jl.credit ELSE 0 END) AS period_credit
      FROM accounts a
-     LEFT JOIN journal_lines jl
-       ON jl.account_id = a.id
-      AND jl.company_id = ?
-      AND ${outletClause.sql}
+      LEFT JOIN journal_lines jl
+        ON jl.account_id = a.id
+       AND jl.company_id = ?
+       AND ${outletClause.sql}
      WHERE a.company_id = ?
        AND a.is_group = 0
-     GROUP BY a.id, a.code, a.name, a.report_group, a.normal_balance
-     ORDER BY a.code ASC`,
+       ${accountClause.sql}
+      GROUP BY a.id, a.code, a.name, a.report_group, a.normal_balance
+      ORDER BY a.code ASC`,
     [
       filter.dateFrom,
       filter.dateFrom,
@@ -624,9 +690,55 @@ export async function getGeneralLedgerSummary(filter: GeneralLedgerFilter) {
       filter.dateTo,
       filter.companyId,
       ...outletClause.values,
-      filter.companyId
+      filter.companyId,
+      ...accountClause.values
     ]
   );
+
+  const [lineRows] = await pool.execute<GeneralLedgerLineRow[]>(
+    `SELECT jl.id AS line_id,
+            jl.account_id,
+            a.code AS account_code,
+            a.name AS account_name,
+            jl.line_date,
+            jl.debit,
+            jl.credit,
+            jl.description,
+            jl.outlet_id,
+            o.name AS outlet_name,
+            jb.id AS journal_batch_id,
+            jb.doc_type,
+            jb.doc_id,
+            jb.posted_at
+     FROM journal_lines jl
+      INNER JOIN accounts a ON a.id = jl.account_id
+      INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
+      LEFT JOIN outlets o ON o.id = jl.outlet_id
+     WHERE jl.company_id = ?
+       AND jl.line_date BETWEEN ? AND ?
+       AND ${outletClause.sql}
+       ${lineAccountClause.sql}
+     ORDER BY a.code ASC, jl.line_date ASC, jl.id ASC
+     ${lineLimitClause}`,
+    [
+      filter.companyId,
+      filter.dateFrom,
+      filter.dateTo,
+      ...outletClause.values,
+      ...lineAccountClause.values,
+      ...lineLimitValues
+    ]
+  );
+
+  const linesByAccount = new Map<number, GeneralLedgerLineRow[]>();
+  for (const line of lineRows) {
+    const bucket = linesByAccount.get(line.account_id);
+    if (bucket) {
+      bucket.push(line);
+    } else {
+      linesByAccount.set(line.account_id, [line]);
+    }
+  }
 
   return rows.map((row) => {
     const openingDebit = toNumber(row.opening_debit);
@@ -635,6 +747,28 @@ export async function getGeneralLedgerSummary(filter: GeneralLedgerFilter) {
     const periodCredit = toNumber(row.period_credit);
     const openingBalance = openingDebit - openingCredit;
     const endingBalance = openingBalance + periodDebit - periodCredit;
+    const accountLines = linesByAccount.get(Number(row.account_id)) ?? [];
+    const isPagedAccount = typeof filter.accountId === "number" && Number(row.account_id) === filter.accountId;
+    let runningBalance = openingBalance + (isPagedAccount ? pagedOpeningDelta : 0);
+    const mappedLines = accountLines.map((line) => {
+      const debit = toNumber(line.debit);
+      const credit = toNumber(line.credit);
+      runningBalance += debit - credit;
+      return {
+        line_id: Number(line.line_id),
+        line_date: toIsoDate(line.line_date),
+        description: line.description,
+        debit,
+        credit,
+        balance: runningBalance,
+        outlet_id: line.outlet_id == null ? null : Number(line.outlet_id),
+        outlet_name: line.outlet_name,
+        journal_batch_id: Number(line.journal_batch_id),
+        doc_type: line.doc_type,
+        doc_id: Number(line.doc_id),
+        posted_at: toIsoDateTime(line.posted_at)
+      };
+    });
 
     return {
       account_id: Number(row.account_id),
@@ -647,7 +781,8 @@ export async function getGeneralLedgerSummary(filter: GeneralLedgerFilter) {
       period_debit: periodDebit,
       period_credit: periodCredit,
       opening_balance: openingBalance,
-      ending_balance: endingBalance
+      ending_balance: endingBalance,
+      lines: mappedLines
     };
   });
 }

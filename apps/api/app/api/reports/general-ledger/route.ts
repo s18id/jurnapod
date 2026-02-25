@@ -1,13 +1,16 @@
 import { z } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
-import { getGeneralLedgerSummary } from "../../../../src/lib/reports";
+import { getGeneralLedgerDetail } from "../../../../src/lib/reports";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive().optional(),
+  account_id: z.coerce.number().int().positive().optional(),
   date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  round: z.coerce.number().int().min(0).max(6).optional()
+  round: z.coerce.number().int().min(0).max(6).optional(),
+  line_limit: z.coerce.number().int().min(1).max(500).optional(),
+  line_offset: z.coerce.number().int().min(0).optional()
 });
 
 function getDefaultDateRange(): { dateFrom: string; dateTo: string } {
@@ -30,9 +33,12 @@ export const GET = withAuth(
       const url = new URL(request.url);
       const parsed = querySchema.parse({
         outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+        account_id: url.searchParams.get("account_id") ?? undefined,
         date_from: url.searchParams.get("date_from") ?? undefined,
         date_to: url.searchParams.get("date_to") ?? undefined,
-        round: url.searchParams.get("round") ?? undefined
+        round: url.searchParams.get("round") ?? undefined,
+        line_limit: url.searchParams.get("line_limit") ?? undefined,
+        line_offset: url.searchParams.get("line_offset") ?? undefined
       });
 
       const defaults = getDefaultDateRange();
@@ -51,12 +57,15 @@ export const GET = withAuth(
         outletIds = await listUserOutletIds(auth.userId, auth.companyId);
       }
 
-      const rows = await getGeneralLedgerSummary({
+      const rows = await getGeneralLedgerDetail({
         companyId: auth.companyId,
         outletIds,
         dateFrom,
         dateTo,
-        includeUnassignedOutlet: typeof parsed.outlet_id !== "number"
+        includeUnassignedOutlet: typeof parsed.outlet_id !== "number",
+        accountId: parsed.account_id,
+        lineLimit: parsed.account_id ? (parsed.line_limit ?? 200) : undefined,
+        lineOffset: parsed.account_id ? parsed.line_offset ?? 0 : undefined
       });
 
       const roundedRows = rows.map((row) => ({
@@ -66,7 +75,13 @@ export const GET = withAuth(
         period_debit: roundTo(row.period_debit ?? 0, roundDecimals),
         period_credit: roundTo(row.period_credit ?? 0, roundDecimals),
         opening_balance: roundTo(row.opening_balance ?? 0, roundDecimals),
-        ending_balance: roundTo(row.ending_balance ?? 0, roundDecimals)
+        ending_balance: roundTo(row.ending_balance ?? 0, roundDecimals),
+        lines: row.lines.map((line) => ({
+          ...line,
+          debit: roundTo(line.debit ?? 0, roundDecimals),
+          credit: roundTo(line.credit ?? 0, roundDecimals),
+          balance: roundTo(line.balance ?? 0, roundDecimals)
+        }))
       }));
 
       return Response.json(
@@ -74,9 +89,12 @@ export const GET = withAuth(
           ok: true,
           filters: {
             outlet_ids: outletIds,
+            account_id: parsed.account_id ?? null,
             date_from: dateFrom,
             date_to: dateTo,
-            round: roundDecimals
+            round: roundDecimals,
+            line_limit: parsed.account_id ? (parsed.line_limit ?? 200) : null,
+            line_offset: parsed.account_id ? parsed.line_offset ?? 0 : null
           },
           rows: roundedRows
         },

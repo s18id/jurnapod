@@ -3,6 +3,7 @@ import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 import { useOnlineStatus } from "../lib/connection";
 import { OfflinePage } from "../components/offline-page";
+import { useAccounts } from "../hooks/use-accounts";
 
 type ReportsProps = {
   user: SessionUser;
@@ -90,6 +91,50 @@ type TrialBalanceResponse = {
   rows: TrialBalanceRow[];
 };
 
+type GeneralLedgerLine = {
+  line_id: number;
+  line_date: string;
+  description: string;
+  debit: number;
+  credit: number;
+  balance: number;
+  outlet_id: number | null;
+  outlet_name: string | null;
+  journal_batch_id: number;
+  doc_type: string;
+  doc_id: number;
+  posted_at: string;
+};
+
+type GeneralLedgerRow = {
+  account_id: number;
+  account_code: string;
+  account_name: string;
+  report_group: string | null;
+  normal_balance: string | null;
+  opening_debit: number;
+  opening_credit: number;
+  period_debit: number;
+  period_credit: number;
+  opening_balance: number;
+  ending_balance: number;
+  lines: GeneralLedgerLine[];
+};
+
+type GeneralLedgerResponse = {
+  ok: true;
+  filters: {
+    outlet_ids: number[];
+    account_id: number | null;
+    date_from: string;
+    date_to: string;
+    round: number;
+    line_limit: number | null;
+    line_offset: number | null;
+  };
+  rows: GeneralLedgerRow[];
+};
+
 const boxStyle = {
   border: "1px solid #e2ddd2",
   borderRadius: "10px",
@@ -114,6 +159,20 @@ const inputStyle = {
   padding: "6px 8px"
 } as const;
 
+const summaryGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "10px",
+  marginBottom: "12px"
+} as const;
+
+const summaryCardStyle = {
+  border: "1px solid #e6e0d6",
+  borderRadius: "10px",
+  padding: "10px 12px",
+  backgroundColor: "#fff"
+} as const;
+
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -122,6 +181,10 @@ function beforeDaysIso(days: number): string {
   const date = new Date();
   date.setDate(date.getDate() - days);
   return date.toISOString().slice(0, 10);
+}
+
+function formatMoney(value: number): string {
+  return value.toFixed(2);
 }
 
 export function PosTransactionsPage(props: ReportsProps) {
@@ -311,6 +374,196 @@ export function DailySalesPage(props: ReportsProps) {
           ))}
         </tbody>
       </table>
+    </section>
+  );
+}
+
+export function GeneralLedgerPage(props: ReportsProps) {
+  const isOnline = useOnlineStatus();
+  const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
+  const [accountId, setAccountId] = useState<number>(0);
+  const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(30));
+  const [dateTo, setDateTo] = useState<string>(todayIso());
+  const [lineLimit, setLineLimit] = useState<number>(50);
+  const [lineOffset, setLineOffset] = useState<number>(0);
+  const [rows, setRows] = useState<GeneralLedgerRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const { data: accounts, loading: accountsLoading, error: accountsError } = useAccounts(
+    props.user.company_id,
+    props.accessToken
+  );
+  const activeAccounts = useMemo(() => accounts.filter((account) => account.is_active), [accounts]);
+
+  async function loadRows() {
+    if (!accountId) {
+      setRows([]);
+      setError("Select an account to load the ledger.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiRequest<GeneralLedgerResponse>(
+        `/reports/general-ledger?outlet_id=${outletId}&account_id=${accountId}&date_from=${dateFrom}&date_to=${dateTo}&round=2&line_limit=${lineLimit}&line_offset=${lineOffset}`,
+        {},
+        props.accessToken
+      );
+      setRows(response.rows);
+    } catch (fetchError) {
+      if (fetchError instanceof ApiError) {
+        setError(fetchError.message);
+      } else {
+        setError("Failed to load general ledger");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setLineOffset(0);
+  }, [outletId, accountId, dateFrom, dateTo, lineLimit]);
+
+  useEffect(() => {
+    if (accountId > 0) {
+      loadRows().catch(() => undefined);
+    }
+  }, [outletId, accountId, dateFrom, dateTo, lineLimit, lineOffset]);
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to View Reports"
+        message="Reports require real-time data. Please connect to the internet."
+      />
+    );
+  }
+
+  const row = rows[0];
+  const canPageBack = lineOffset > 0;
+  const canPageNext = row ? row.lines.length === lineLimit : false;
+
+  return (
+    <section style={boxStyle}>
+      <h2 style={{ marginTop: 0 }}>General Ledger</h2>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
+        <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
+          {props.user.outlets.map((outlet) => (
+            <option key={outlet.id} value={outlet.id}>
+              {outlet.code} - {outlet.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={accountId}
+          onChange={(event) => setAccountId(Number(event.target.value))}
+          style={inputStyle}
+        >
+          <option value={0}>Select account</option>
+          {activeAccounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.code} - {account.name}
+            </option>
+          ))}
+        </select>
+        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
+        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
+        <select value={lineLimit} onChange={(event) => setLineLimit(Number(event.target.value))} style={inputStyle}>
+          <option value={25}>25 lines</option>
+          <option value={50}>50 lines</option>
+          <option value={100}>100 lines</option>
+          <option value={200}>200 lines</option>
+        </select>
+        <button type="button" onClick={() => loadRows()} disabled={loading}>
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+      {accountsLoading ? <p>Loading accounts...</p> : null}
+      {accountsError ? <p style={{ color: "#8d2626" }}>{accountsError}</p> : null}
+      {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
+
+      {row ? (
+        <div style={summaryGridStyle}>
+          <div style={summaryCardStyle}>
+            <strong>Account</strong>
+            <div>{row.account_code}</div>
+            <div>{row.account_name}</div>
+          </div>
+          <div style={summaryCardStyle}>
+            <strong>Opening Balance</strong>
+            <div>{formatMoney(row.opening_balance)}</div>
+            <div style={{ fontSize: "12px", color: "#5b6664" }}>
+              Debit {formatMoney(row.opening_debit)} | Credit {formatMoney(row.opening_credit)}
+            </div>
+          </div>
+          <div style={summaryCardStyle}>
+            <strong>Period Movement</strong>
+            <div style={{ fontSize: "12px", color: "#5b6664" }}>
+              Debit {formatMoney(row.period_debit)} | Credit {formatMoney(row.period_credit)}
+            </div>
+          </div>
+          <div style={summaryCardStyle}>
+            <strong>Ending Balance</strong>
+            <div>{formatMoney(row.ending_balance)}</div>
+          </div>
+        </div>
+      ) : (
+        <p style={{ color: "#5b6664" }}>Select an account to view its ledger lines.</p>
+      )}
+
+      {row ? (
+        <div style={{ marginBottom: "10px", display: "flex", gap: "8px", alignItems: "center" }}>
+          <button
+            type="button"
+            onClick={() => setLineOffset(Math.max(0, lineOffset - lineLimit))}
+            disabled={!canPageBack}
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            onClick={() => setLineOffset(lineOffset + lineLimit)}
+            disabled={!canPageNext}
+          >
+            Next
+          </button>
+          <span style={{ color: "#5b6664", fontSize: "12px" }}>
+            Showing {lineOffset + 1}-{lineOffset + row.lines.length}
+          </span>
+        </div>
+      ) : null}
+
+      {row ? (
+        <table style={tableStyle}>
+          <thead>
+            <tr>
+              <th style={cellStyle}>Date</th>
+              <th style={cellStyle}>Description</th>
+              <th style={cellStyle}>Outlet</th>
+              <th style={cellStyle}>Debit</th>
+              <th style={cellStyle}>Credit</th>
+              <th style={cellStyle}>Balance</th>
+              <th style={cellStyle}>Doc</th>
+            </tr>
+          </thead>
+          <tbody>
+            {row.lines.map((line) => (
+              <tr key={line.line_id}>
+                <td style={cellStyle}>{line.line_date}</td>
+                <td style={cellStyle}>{line.description}</td>
+                <td style={cellStyle}>{line.outlet_name ?? "ALL"}</td>
+                <td style={cellStyle}>{formatMoney(line.debit)}</td>
+                <td style={cellStyle}>{formatMoney(line.credit)}</td>
+                <td style={cellStyle}>{formatMoney(line.balance)}</td>
+                <td style={cellStyle}>
+                  {line.doc_type} #{line.doc_id}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
     </section>
   );
 }

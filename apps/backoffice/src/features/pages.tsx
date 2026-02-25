@@ -5,6 +5,7 @@ import { ItemsPricesPage as ItemsPricesManagementPage } from "./items-prices-pag
 import { TransactionTemplatesPage as TransactionTemplatesManagementPage } from "./transaction-templates-page";
 import {
   DailySalesPage as DailySalesReportPage,
+  GeneralLedgerPage as GeneralLedgerReportPage,
   JournalsPage as JournalsReportPage,
   PosPaymentsPage as PosPaymentsReportPage,
   PosTransactionsPage as PosTransactionsReportPage
@@ -56,6 +57,8 @@ export const PosTransactionsPage = PosTransactionsReportPage;
 export const PosPaymentsPage = PosPaymentsReportPage;
 
 export const DailySalesPage = DailySalesReportPage;
+
+export const GeneralLedgerPage = GeneralLedgerReportPage;
 
 export const JournalsPage = JournalsReportPage;
 
