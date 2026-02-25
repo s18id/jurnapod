@@ -10,17 +10,11 @@ const POS_SALE_DOC_TYPE = "POS_SALE";
 const MONEY_SCALE = 100;
 const TAX_FLAG_KEYS = ["pos.tax", "pos.config"] as const;
 
-const OUTLET_ACCOUNT_MAPPING_KEYS = [
-  "CASH",
-  "QRIS",
-  "CARD",
-  "SALES_REVENUE",
-  "SALES_TAX",
-  "AR"
-] as const;
+const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
 type OutletAccountMappingKey = (typeof OUTLET_ACCOUNT_MAPPING_KEYS)[number];
 
 export const OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE = "OUTLET_ACCOUNT_MAPPING_MISSING";
+export const OUTLET_PAYMENT_MAPPING_MISSING_MESSAGE = "OUTLET_PAYMENT_MAPPING_MISSING";
 export const UNSUPPORTED_PAYMENT_METHOD_MESSAGE = "UNSUPPORTED_PAYMENT_METHOD";
 const POS_EMPTY_PAYMENT_SET_MESSAGE = "POS_EMPTY_PAYMENT_SET";
 const POS_OVERPAYMENT_NOT_SUPPORTED_MESSAGE = "POS_OVERPAYMENT_NOT_SUPPORTED";
@@ -156,13 +150,12 @@ function isTestUnbalancedPostingEnabled(): boolean {
   );
 }
 
-function normalizePaymentMethodToMappingKey(method: string): OutletAccountMappingKey {
+function normalizePaymentMethodCode(method: string): string {
   const normalized = method.trim().toUpperCase();
-  if (normalized === "CASH" || normalized === "QRIS" || normalized === "CARD") {
-    return normalized;
+  if (!normalized) {
+    throw new Error(UNSUPPORTED_PAYMENT_METHOD_MESSAGE);
   }
-
-  throw new Error(UNSUPPORTED_PAYMENT_METHOD_MESSAGE);
+  return normalized;
 }
 
 type PosTaxConfig = {
@@ -269,13 +262,55 @@ async function readOutletAccountMappingByKey(
   }
 
   return {
-    CASH: accountByKey.get("CASH") as number,
-    QRIS: accountByKey.get("QRIS") as number,
-    CARD: accountByKey.get("CARD") as number,
     SALES_REVENUE: accountByKey.get("SALES_REVENUE") as number,
     SALES_TAX: accountByKey.get("SALES_TAX") as number,
     AR: accountByKey.get("AR") as number
   };
+}
+
+async function readOutletPaymentMethodMappings(
+  dbExecutor: QueryExecutor,
+  context: SyncPushPostingContext
+): Promise<Map<string, number>> {
+  const [rows] = await dbExecutor.execute(
+    `SELECT method_code, account_id
+     FROM outlet_payment_method_mappings
+     WHERE company_id = ?
+       AND outlet_id = ?`,
+    [context.companyId, context.outletId]
+  );
+
+  const accountByMethod = new Map<string, number>();
+  for (const row of rows as Array<{ method_code?: string; account_id?: number }>) {
+    if (!row.method_code || !Number.isFinite(row.account_id)) {
+      continue;
+    }
+    const methodCode = normalizePaymentMethodCode(String(row.method_code));
+    accountByMethod.set(methodCode, Number(row.account_id));
+  }
+
+  const fallbackKeys = ["CASH", "QRIS", "CARD"];
+  const placeholders = fallbackKeys.map(() => "?").join(", ");
+  const [fallbackRows] = await dbExecutor.execute(
+    `SELECT mapping_key, account_id
+     FROM outlet_account_mappings
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND mapping_key IN (${placeholders})`,
+    [context.companyId, context.outletId, ...fallbackKeys]
+  );
+
+  for (const row of fallbackRows as Array<{ mapping_key?: string; account_id?: number }>) {
+    if (!row.mapping_key || !Number.isFinite(row.account_id)) {
+      continue;
+    }
+    const methodCode = normalizePaymentMethodCode(String(row.mapping_key));
+    if (!accountByMethod.has(methodCode)) {
+      accountByMethod.set(methodCode, Number(row.account_id));
+    }
+  }
+
+  return accountByMethod;
 }
 
 async function readPosPaymentsByMethod(
@@ -324,6 +359,7 @@ async function buildPosSaleJournalLines(
   context: SyncPushPostingContext
 ): Promise<JournalLine[]> {
   const mapping = await readOutletAccountMappingByKey(dbExecutor, context);
+  const paymentMethodMappings = await readOutletPaymentMethodMappings(dbExecutor, context);
   const payments = await readPosPaymentsByMethod(dbExecutor, context);
   const grossSales = await readPosGrossSalesAmount(dbExecutor, context);
   const taxConfig = await readCompanyPosTaxConfig(dbExecutor, context);
@@ -346,15 +382,18 @@ async function buildPosSaleJournalLines(
   let paymentTotal = 0;
 
   for (const payment of payments) {
-    const paymentMappingKey = normalizePaymentMethodToMappingKey(payment.method);
-    const accountId = mapping[paymentMappingKey];
+    const methodCode = normalizePaymentMethodCode(payment.method);
+    const accountId = paymentMethodMappings.get(methodCode);
+    if (!accountId) {
+      throw new Error(OUTLET_PAYMENT_MAPPING_MISSING_MESSAGE);
+    }
     const amount = normalizeMoney(payment.amount);
     paymentTotal = normalizeMoney(paymentTotal + amount);
     lines.push({
       account_id: accountId,
       debit: amount,
       credit: 0,
-      description: `POS ${paymentMappingKey} receipt`
+      description: `POS ${methodCode} receipt`
     });
   }
 

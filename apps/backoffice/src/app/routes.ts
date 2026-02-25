@@ -58,6 +58,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     label: "PWA Settings",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
+  {
+    path: "/account-mappings",
+    label: "Account Mappings",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
   
   // === SALES ===
   {
@@ -87,6 +92,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/daily-sales",
     label: "Daily Sales",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/profit-loss",
+    label: "Profit & Loss",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {

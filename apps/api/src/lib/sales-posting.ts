@@ -7,18 +7,12 @@ import type { SalesInvoiceDetail, SalesPayment } from "./sales";
 const SALES_INVOICE_DOC_TYPE = "SALES_INVOICE";
 const SALES_PAYMENT_IN_DOC_TYPE = "SALES_PAYMENT_IN";
 
-const OUTLET_ACCOUNT_MAPPING_KEYS = [
-  "CASH",
-  "QRIS",
-  "CARD",
-  "SALES_REVENUE",
-  "SALES_TAX",
-  "AR"
-] as const;
+const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
 type OutletAccountMappingKey = (typeof OUTLET_ACCOUNT_MAPPING_KEYS)[number];
 type OutletAccountMapping = Record<OutletAccountMappingKey, number>;
 
 export const OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE = "OUTLET_ACCOUNT_MAPPING_MISSING";
+export const OUTLET_PAYMENT_MAPPING_MISSING_MESSAGE = "OUTLET_PAYMENT_MAPPING_MISSING";
 export const UNSUPPORTED_PAYMENT_METHOD_MESSAGE = "UNSUPPORTED_PAYMENT_METHOD";
 
 type QueryExecutor = {
@@ -39,13 +33,12 @@ function normalizeMoney(value: number): number {
   return fromMinorUnits(toMinorUnits(value));
 }
 
-function resolvePaymentMapping(method: string): OutletAccountMappingKey {
+function normalizePaymentMethodCode(method: string): string {
   const normalized = method.trim().toUpperCase();
-  if (normalized === "CASH" || normalized === "QRIS" || normalized === "CARD") {
-    return normalized;
+  if (!normalized) {
+    throw new Error(UNSUPPORTED_PAYMENT_METHOD_MESSAGE);
   }
-
-  throw new Error(UNSUPPORTED_PAYMENT_METHOD_MESSAGE);
+  return normalized;
 }
 
 async function readOutletAccountMappingByKey(
@@ -82,13 +75,56 @@ async function readOutletAccountMappingByKey(
   }
 
   return {
-    CASH: accountByKey.get("CASH") as number,
-    QRIS: accountByKey.get("QRIS") as number,
     SALES_REVENUE: accountByKey.get("SALES_REVENUE") as number,
     SALES_TAX: accountByKey.get("SALES_TAX") as number,
-    CARD: accountByKey.get("CARD") as number,
     AR: accountByKey.get("AR") as number
   };
+}
+
+async function readOutletPaymentMethodMappings(
+  dbExecutor: QueryExecutor,
+  companyId: number,
+  outletId: number
+): Promise<Map<string, number>> {
+  const [rows] = await dbExecutor.execute<RowDataPacket[]>(
+    `SELECT method_code, account_id
+     FROM outlet_payment_method_mappings
+     WHERE company_id = ?
+       AND outlet_id = ?`,
+    [companyId, outletId]
+  );
+
+  const accountByMethod = new Map<string, number>();
+  for (const row of rows as Array<{ method_code?: string; account_id?: number }>) {
+    if (!row.method_code || !Number.isFinite(row.account_id)) {
+      continue;
+    }
+    const methodCode = normalizePaymentMethodCode(String(row.method_code));
+    accountByMethod.set(methodCode, Number(row.account_id));
+  }
+
+  const fallbackKeys = ["CASH", "QRIS", "CARD"];
+  const placeholders = fallbackKeys.map(() => "?").join(", ");
+  const [fallbackRows] = await dbExecutor.execute<RowDataPacket[]>(
+    `SELECT mapping_key, account_id
+     FROM outlet_account_mappings
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND mapping_key IN (${placeholders})`,
+    [companyId, outletId, ...fallbackKeys]
+  );
+
+  for (const row of fallbackRows as Array<{ mapping_key?: string; account_id?: number }>) {
+    if (!row.mapping_key || !Number.isFinite(row.account_id)) {
+      continue;
+    }
+    const methodCode = normalizePaymentMethodCode(String(row.mapping_key));
+    if (!accountByMethod.has(methodCode)) {
+      accountByMethod.set(methodCode, Number(row.account_id));
+    }
+  }
+
+  return accountByMethod;
 }
 
 class SalesInvoicePostingMapper implements PostingMapper {
@@ -146,9 +182,16 @@ class SalesPaymentPostingMapper implements PostingMapper {
       this.payment.company_id,
       this.payment.outlet_id
     );
-
-    const paymentMappingKey = resolvePaymentMapping(this.payment.method);
-    const cashBankAccountId = mapping[paymentMappingKey];
+    const paymentMethodMappings = await readOutletPaymentMethodMappings(
+      this.dbExecutor,
+      this.payment.company_id,
+      this.payment.outlet_id
+    );
+    const methodCode = normalizePaymentMethodCode(this.payment.method);
+    const cashBankAccountId = paymentMethodMappings.get(methodCode);
+    if (!cashBankAccountId) {
+      throw new Error(OUTLET_PAYMENT_MAPPING_MISSING_MESSAGE);
+    }
 
     const lines: JournalLine[] = [];
 
@@ -156,7 +199,7 @@ class SalesPaymentPostingMapper implements PostingMapper {
       account_id: cashBankAccountId,
       debit: normalizeMoney(this.payment.amount),
       credit: 0,
-      description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${paymentMappingKey}`
+      description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${methodCode}`
     });
 
     lines.push({

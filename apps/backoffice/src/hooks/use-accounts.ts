@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
 import { CacheService } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
@@ -148,6 +148,8 @@ export function useAccounts(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isOnline = useOnlineStatus();
+  const inFlightRef = useRef(false);
+  const lastFetchRef = useRef<{ key: string; at: number } | null>(null);
 
   function applyAccountFilters(accounts: AccountResponse[]) {
     let result = accounts;
@@ -169,11 +171,26 @@ export function useAccounts(
     return result;
   }
 
-  const refetch = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      if (isOnline) {
+  const refetch = useCallback(
+    async (options?: { force?: boolean }) => {
+      const force = options?.force ?? false;
+      const paramsKey = JSON.stringify({ companyId, filters, isOnline });
+      const lastFetch = lastFetchRef.current;
+      if (!force) {
+        if (inFlightRef.current && lastFetch?.key === paramsKey) {
+          return;
+        }
+        if (lastFetch && lastFetch.key === paramsKey && Date.now() - lastFetch.at < 2000) {
+          return;
+        }
+      }
+
+      inFlightRef.current = true;
+      lastFetchRef.current = { key: paramsKey, at: Date.now() };
+      setLoading(true);
+      setError(null);
+      try {
+        if (isOnline) {
         const params = new URLSearchParams({ company_id: String(companyId) });
         
         if (filters?.is_active !== undefined) {
@@ -212,10 +229,13 @@ export function useAccounts(
         setError("Failed to load accounts");
       }
       setData([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId, accessToken, filters, isOnline]);
+      } finally {
+        setLoading(false);
+        inFlightRef.current = false;
+      }
+    },
+    [companyId, accessToken, filters, isOnline]
+  );
 
   useEffect(() => {
     refetch();

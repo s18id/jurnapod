@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 import { useOnlineStatus } from "../lib/connection";
 import { OfflinePage } from "../components/offline-page";
-import { useAccounts } from "../hooks/use-accounts";
+import { useAccounts, useAccountTypes } from "../hooks/use-accounts";
 
 type ReportsProps = {
   user: SessionUser;
@@ -180,6 +180,31 @@ type WorksheetResponse = {
   rows: WorksheetRow[];
 };
 
+type ProfitLossRow = {
+  account_id: number;
+  account_code: string;
+  account_name: string;
+  total_debit: number;
+  total_credit: number;
+  net: number;
+};
+
+type ProfitLossResponse = {
+  ok: true;
+  filters: {
+    outlet_ids: number[];
+    date_from: string;
+    date_to: string;
+    round: number;
+  };
+  totals: {
+    total_debit: number;
+    total_credit: number;
+    net: number;
+  };
+  rows: ProfitLossRow[];
+};
+
 const boxStyle = {
   border: "1px solid #e2ddd2",
   borderRadius: "10px",
@@ -202,6 +227,19 @@ const numberCellStyle = {
   ...cellStyle,
   textAlign: "right" as const,
   fontVariantNumeric: "tabular-nums" as const
+};
+
+const sectionHeaderStyle = {
+  ...cellStyle,
+  fontWeight: "bold" as const,
+  backgroundColor: "#f5f1ea",
+  textTransform: "uppercase" as const
+};
+
+const totalRowStyle = {
+  ...cellStyle,
+  fontWeight: "bold" as const,
+  borderTop: "2px solid #e2ddd2"
 };
 
 const inputStyle = {
@@ -228,19 +266,62 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function startOfYearIso(): string {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1);
+  return start.toISOString().slice(0, 10);
+}
+
 function beforeDaysIso(days: number): string {
   const date = new Date();
   date.setDate(date.getDate() - days);
   return date.toISOString().slice(0, 10);
 }
 
+const monthNames = [
+  "JANUARI",
+  "FEBRUARI",
+  "MARET",
+  "APRIL",
+  "MEI",
+  "JUNI",
+  "JULI",
+  "AGUSTUS",
+  "SEPTEMBER",
+  "OKTOBER",
+  "NOVEMBER",
+  "DESEMBER"
+];
+
+function formatPeriod(dateFrom: string, dateTo: string): string {
+  const from = new Date(`${dateFrom}T00:00:00`);
+  const to = new Date(`${dateTo}T00:00:00`);
+  const fromMonth = monthNames[from.getMonth()] ?? "";
+  const toMonth = monthNames[to.getMonth()] ?? "";
+  const fromYear = from.getFullYear();
+  const toYear = to.getFullYear();
+  if (fromYear === toYear) {
+    return `PERIODE ${fromMonth} - ${toMonth} ${fromYear}`;
+  }
+  return `PERIODE ${fromMonth} ${fromYear} - ${toMonth} ${toYear}`;
+}
+
 function formatMoney(value: number): string {
   return value.toFixed(2);
 }
 
+const moneyFormatter = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
+function formatMoneyDisplay(value: number): string {
+  return moneyFormatter.format(value);
+}
+
 export function PosTransactionsPage(props: ReportsProps) {
   const isOnline = useOnlineStatus();
-  const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
+  const [outletId, setOutletId] = useState<number>(0);
   const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(7));
   const [dateTo, setDateTo] = useState<string>(todayIso());
   const [rows, setRows] = useState<PosTransaction[]>([]);
@@ -858,6 +939,267 @@ export function JournalsPage(props: ReportsProps) {
         </table>
       </section>
     </div>
+  );
+}
+
+export function ProfitLossPage(props: ReportsProps) {
+  const isOnline = useOnlineStatus();
+  const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
+  const [dateFrom, setDateFrom] = useState<string>(startOfYearIso());
+  const [dateTo, setDateTo] = useState<string>(todayIso());
+  const [rows, setRows] = useState<ProfitLossRow[]>([]);
+  const [totals, setTotals] = useState<ProfitLossResponse["totals"]>({
+    total_debit: 0,
+    total_credit: 0,
+    net: 0
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const accountFilters = useMemo(() => ({ report_group: "LR" as const, is_active: true }), []);
+  const { data: accounts, loading: accountsLoading, error: accountsError } = useAccounts(
+    props.user.company_id,
+    props.accessToken,
+    accountFilters
+  );
+  const { data: accountTypes, loading: accountTypesLoading, error: accountTypesError } = useAccountTypes(
+    props.user.company_id,
+    props.accessToken
+  );
+
+  async function loadRows() {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({
+        date_from: dateFrom,
+        date_to: dateTo,
+        round: "2"
+      });
+      if (outletId > 0) {
+        params.set("outlet_id", String(outletId));
+      }
+      const response = await apiRequest<ProfitLossResponse>(
+        `/reports/profit-loss?${params.toString()}`,
+        {},
+        props.accessToken
+      );
+      setRows(response.rows);
+      setTotals(response.totals);
+    } catch (fetchError) {
+      if (fetchError instanceof ApiError) {
+        setError(fetchError.message);
+      } else {
+        setError("Failed to load profit loss report");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadRows().catch(() => undefined);
+  }, [outletId, dateFrom, dateTo]);
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to View Reports"
+        message="Reports require real-time data. Please connect to the internet."
+      />
+    );
+  }
+
+  const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
+  const accountTypeById = useMemo(
+    () => new Map(accountTypes.map((type) => [type.id, type])),
+    [accountTypes]
+  );
+
+  type ProfitLossGroup = {
+    key: string;
+    label: string;
+    category: "REVENUE" | "EXPENSE" | "OTHER";
+    isTaxGroup: boolean;
+    rows: Array<ProfitLossRow & { displayNet: number }>;
+    displayTotal: number;
+    netTotal: number;
+  };
+
+  const grouped = useMemo(() => {
+    const buckets = new Map<string, ProfitLossGroup>();
+
+    rows.forEach((row) => {
+      const account = accountById.get(row.account_id);
+      const accountType = account?.account_type_id ? accountTypeById.get(account.account_type_id) : null;
+      const rawCategory = accountType?.category ?? null;
+      const category: ProfitLossGroup["category"] =
+        rawCategory === "REVENUE" || rawCategory === "EXPENSE"
+          ? rawCategory
+          : row.account_code.startsWith("4")
+            ? "REVENUE"
+            : row.account_code.startsWith("5")
+              ? "EXPENSE"
+              : "OTHER";
+      const typeName = account?.type_name ?? accountType?.name ?? null;
+      const label = (typeName ?? (category === "REVENUE" ? "PENDAPATAN" : category === "EXPENSE" ? "BEBAN" : "LAIN-LAIN")).toUpperCase();
+      const isTaxGroup = /PAJAK/i.test(typeName ?? "") || /^5-3/.test(row.account_code);
+      const displayNet = category === "EXPENSE" ? Math.abs(row.net) : row.net;
+      const key = `${category}:${label}`;
+      const bucket = buckets.get(key) ?? {
+        key,
+        label,
+        category,
+        isTaxGroup,
+        rows: [],
+        displayTotal: 0,
+        netTotal: 0
+      };
+      bucket.rows.push({ ...row, displayNet });
+      bucket.displayTotal += displayNet;
+      bucket.netTotal += row.net;
+      bucket.isTaxGroup = bucket.isTaxGroup || isTaxGroup;
+      buckets.set(key, bucket);
+    });
+
+    const categoryOrder = ["REVENUE", "EXPENSE", "OTHER"] as const;
+    return Array.from(buckets.values()).sort((left, right) => {
+      const categoryDiff = categoryOrder.indexOf(left.category) - categoryOrder.indexOf(right.category);
+      if (categoryDiff !== 0) return categoryDiff;
+      return left.label.localeCompare(right.label);
+    });
+  }, [rows, accountById, accountTypeById]);
+
+  const revenueGroups = grouped.filter((group) => group.category === "REVENUE");
+  const expenseGroups = grouped.filter((group) => group.category === "EXPENSE" && !group.isTaxGroup);
+  const taxGroups = grouped.filter((group) => group.category === "EXPENSE" && group.isTaxGroup);
+
+  const totalRevenue = revenueGroups.reduce((acc, group) => acc + group.displayTotal, 0);
+  const totalExpense = expenseGroups.reduce((acc, group) => acc + group.displayTotal, 0);
+  const totalTax = taxGroups.reduce((acc, group) => acc + group.displayTotal, 0);
+  const taxNet = taxGroups.reduce((acc, group) => acc + group.netTotal, 0);
+  const netBeforeTax = totals.net - taxNet;
+
+  function renderGroupRows(group: ProfitLossGroup) {
+    return (
+      <>
+        <tr>
+          <td style={sectionHeaderStyle} colSpan={3}>
+            {group.label}
+          </td>
+        </tr>
+        {group.rows.map((row) => (
+          <tr key={row.account_id}>
+            <td style={cellStyle}>{row.account_code}</td>
+            <td style={cellStyle}>{row.account_name}</td>
+            <td style={numberCellStyle}>{formatMoneyDisplay(row.displayNet)}</td>
+          </tr>
+        ))}
+        <tr>
+          <td style={totalRowStyle} colSpan={2}>
+            TOTAL {group.label}
+          </td>
+          <td style={numberCellStyle}>{formatMoneyDisplay(group.displayTotal)}</td>
+        </tr>
+      </>
+    );
+  }
+
+  return (
+    <section style={boxStyle}>
+      <div style={{ textAlign: "center", marginBottom: "12px" }}>
+        <h2 style={{ marginTop: 0, marginBottom: "4px" }}>LAPORAN LABA RUGI</h2>
+        <div style={{ fontSize: "12px", color: "#5b6664", letterSpacing: "0.08em" }}>
+          {formatPeriod(dateFrom, dateTo)}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
+        <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
+          <option value={0}>ALL OUTLETS</option>
+          {props.user.outlets.map((outlet) => (
+            <option key={outlet.id} value={outlet.id}>
+              {outlet.code} - {outlet.name}
+            </option>
+          ))}
+        </select>
+        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
+        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
+        <button type="button" onClick={() => loadRows()} disabled={loading}>
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+
+      {accountsLoading || accountTypesLoading ? <p>Loading account mappings...</p> : null}
+      {accountsError ? <p style={{ color: "#8d2626" }}>{accountsError}</p> : null}
+      {accountTypesError ? <p style={{ color: "#8d2626" }}>{accountTypesError}</p> : null}
+      {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
+
+      {rows.length === 0 ? (
+        <p style={{ color: "#5b6664" }}>No P/L data available for the selected period.</p>
+      ) : (
+        <table style={tableStyle}>
+          <thead>
+            <tr>
+              <th style={cellStyle}>KODE</th>
+              <th style={cellStyle}>KETERANGAN</th>
+              <th style={numberCellStyle}>SALDO</th>
+            </tr>
+          </thead>
+          <tbody>
+            {revenueGroups.map((group) => (
+              <Fragment key={group.key}>{renderGroupRows(group)}</Fragment>
+            ))}
+
+            <tr>
+              <td style={totalRowStyle} colSpan={2}>
+                TOTAL PENDAPATAN
+              </td>
+              <td style={numberCellStyle}>{formatMoneyDisplay(totalRevenue)}</td>
+            </tr>
+
+            {expenseGroups.map((group) => (
+              <Fragment key={group.key}>{renderGroupRows(group)}</Fragment>
+            ))}
+
+            <tr>
+              <td style={totalRowStyle} colSpan={2}>
+                TOTAL BEBAN
+              </td>
+              <td style={numberCellStyle}>{formatMoneyDisplay(totalExpense)}</td>
+            </tr>
+
+            {taxGroups.length > 0 ? (
+              <tr>
+                <td style={totalRowStyle} colSpan={2}>
+                  LABA BERSIH SEBELUM PAJAK
+                </td>
+                <td style={numberCellStyle}>{formatMoneyDisplay(netBeforeTax)}</td>
+              </tr>
+            ) : null}
+
+            {taxGroups.map((group) => (
+              <Fragment key={group.key}>{renderGroupRows(group)}</Fragment>
+            ))}
+
+            {taxGroups.length > 0 ? (
+              <tr>
+                <td style={totalRowStyle} colSpan={2}>
+                  TOTAL BEBAN PAJAK PERUSAHAAN
+                </td>
+                <td style={numberCellStyle}>{formatMoneyDisplay(totalTax)}</td>
+              </tr>
+            ) : null}
+
+            <tr>
+              <td style={totalRowStyle} colSpan={2}>
+                {taxGroups.length > 0 ? "LABA BERSIH SETELAH PAJAK" : "LABA BERSIH"}
+              </td>
+              <td style={numberCellStyle}>{formatMoneyDisplay(totals.net)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }
 

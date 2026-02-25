@@ -188,12 +188,21 @@ export const SyncPullPriceSchema = z.object({
   updated_at: z.string().datetime()
 });
 
+export const PaymentMethodConfigSchema = z.object({
+  code: z.string().trim().min(1),
+  label: z.string().trim().min(1),
+  method: z.string().trim().min(1).optional()
+});
+
 export const SyncPullConfigSchema = z.object({
   tax: z.object({
     rate: z.number().finite().min(0).default(0),
     inclusive: z.boolean().default(false)
   }),
-  payment_methods: z.array(z.string().trim().min(1)).default(["CASH"])
+  payment_methods: z
+    .array(z.string().trim().min(1))
+    .or(z.array(PaymentMethodConfigSchema))
+    .default(["CASH"])
 });
 
 export const SyncPullResponseSchema = z.object({

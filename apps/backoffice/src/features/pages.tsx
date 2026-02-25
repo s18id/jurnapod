@@ -8,6 +8,7 @@ import {
   DailySalesPage as DailySalesReportPage,
   GeneralLedgerPage as GeneralLedgerReportPage,
   JournalsPage as JournalsReportPage,
+  ProfitLossPage as ProfitLossReportPage,
   PosPaymentsPage as PosPaymentsReportPage,
   PosTransactionsPage as PosTransactionsReportPage
 } from "./reports-pages";
@@ -15,6 +16,7 @@ import { SalesInvoicesPage as SalesInvoicesManagementPage } from "./sales-invoic
 import { SalesPaymentsPage as SalesPaymentsManagementPage } from "./sales-payments-page";
 import { SuppliesPage as SuppliesManagementPage } from "./supplies-page";
 import { FixedAssetPage as FixedAssetsManagementPage } from "./fixed-assets-page";
+import { AccountMappingsPage as AccountMappingsSettingsPage } from "./account-mappings-page";
 
 type PlaceholderProps = {
   title: string;
@@ -63,11 +65,15 @@ export const GeneralLedgerPage = GeneralLedgerReportPage;
 
 export const JournalsPage = JournalsReportPage;
 
+export const ProfitLossPage = ProfitLossReportPage;
+
 export const AccountingWorksheetPage = AccountingWorksheetReportPage;
 
 export const SalesInvoicesPage = SalesInvoicesManagementPage;
 
 export const SalesPaymentsPage = SalesPaymentsManagementPage;
+
+export const AccountMappingsPage = AccountMappingsSettingsPage;
 
 export function ForbiddenPage() {
   return (

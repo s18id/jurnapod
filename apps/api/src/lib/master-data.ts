@@ -115,9 +115,22 @@ const syncTaxConfigSchema = z.object({
   inclusive: z.coerce.boolean().optional()
 });
 
+const paymentMethodConfigSchema = z.object({
+  code: z.string().trim().min(1),
+  label: z.string().trim().min(1),
+  method: z.string().trim().min(1).optional()
+});
+
 const syncPaymentMethodsConfigSchema = z
   .array(z.string().trim().min(1))
-  .or(z.object({ methods: z.array(z.string().trim().min(1)) }))
+  .or(z.array(paymentMethodConfigSchema))
+  .or(
+    z.object({
+      methods: z
+        .array(z.string().trim().min(1))
+        .or(z.array(paymentMethodConfigSchema))
+    })
+  )
   .optional();
 
 function isMysqlError(error: unknown): error is { errno?: number } {
@@ -1569,7 +1582,7 @@ async function readSyncConfig(companyId: number): Promise<SyncPullResponse["conf
 
   let taxRate = 0;
   let taxInclusive = false;
-  let paymentMethods: string[] = ["CASH"];
+  let paymentMethods: Array<string | z.infer<typeof paymentMethodConfigSchema>> = ["CASH"];
 
   for (const row of rows) {
     if (row.enabled !== 1) {

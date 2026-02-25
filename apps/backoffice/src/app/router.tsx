@@ -30,12 +30,14 @@ import {
   ItemsPricesPage,
   JournalsPage,
   GeneralLedgerPage,
+  ProfitLossPage,
   FixedAssetsPage,
   PosPaymentsPage,
   PosTransactionsPage,
   SalesInvoicesPage,
   SalesPaymentsPage,
-  SuppliesPage
+  SuppliesPage,
+  AccountMappingsPage
 } from "../features/pages";
 import { SyncQueuePage } from "../features/sync-queue-page";
 import { SyncHistoryPage } from "../features/sync-history-page";
@@ -74,6 +76,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   if (props.path === "/daily-sales") {
     return <DailySalesPage user={props.user} accessToken={props.accessToken} />;
   }
+  if (props.path === "/profit-loss") {
+    return <ProfitLossPage user={props.user} accessToken={props.accessToken} />;
+  }
   if (props.path === "/general-ledger") {
     return <GeneralLedgerPage user={props.user} accessToken={props.accessToken} />;
   }
@@ -97,6 +102,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/pwa-settings") {
     return <PWASettingsPage />;
+  }
+  if (props.path === "/account-mappings") {
+    return <AccountMappingsPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/journals") {
     return <JournalsPage user={props.user} accessToken={props.accessToken} />;
