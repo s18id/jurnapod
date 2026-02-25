@@ -29,6 +29,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {
+    path: "/transaction-templates",
+    label: "Transaction Templates",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
     path: "/sync-queue",
     label: "Sync Queue",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]

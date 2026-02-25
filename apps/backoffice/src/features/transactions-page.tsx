@@ -8,7 +8,7 @@ import { useOnlineStatus } from "../lib/connection";
 import { QueueStatusBadge } from "../components/queue-status-badge";
 import { db } from "../lib/offline-db";
 import { ERROR_MESSAGES } from "../lib/error-messages";
-import type { AccountResponse, JournalBatchResponse } from "@jurnapod/shared";
+import type { JournalBatchResponse } from "@jurnapod/shared";
 
 type TransactionsPageProps = {
   user: SessionUser;
@@ -21,6 +21,15 @@ type JournalLine = {
   debit: number;
   credit: number;
   description: string;
+};
+
+type TransactionTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  lines: JournalLine[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 const emptyLine: JournalLine = {
@@ -83,6 +92,17 @@ const cellStyle = {
   padding: "8px"
 } as const;
 
+function createId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+}
+
+function getTemplatesKey(companyId: number) {
+  return `transaction-templates:${companyId}`;
+}
+
 export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
   const companyId = user.company_id;
   const accountsFilter = useMemo(() => ({ is_active: true }), []);
@@ -98,6 +118,9 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
     { ...emptyLine, id: "1" },
     { ...emptyLine, id: "2" }
   ]);
+  const [templates, setTemplates] = useState<TransactionTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [templateNotice, setTemplateNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitStatus, setSubmitStatus] = useState<"success" | "queued" | null>(null);
@@ -131,6 +154,59 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
       { ...emptyLine, id: "1" },
       { ...emptyLine, id: "2" }
     ]);
+    setSelectedTemplateId("");
+    setTemplateNotice(null);
+    setSubmitError(null);
+    setSubmitStatus(null);
+  }
+
+  function applyTemplate(template: TransactionTemplate) {
+    setLines(template.lines.map((line) => ({ ...line, id: createId() })));
+    if (template.description) {
+      setDescription(template.description);
+    }
+    setTemplateNotice(null);
+    setSubmitError(null);
+    setSubmitStatus(null);
+  }
+
+  function handleSaveAsTemplate() {
+    const name = globalThis.prompt("Template name", description || "");
+    if (!name || !name.trim()) {
+      setSubmitError("Template name is required");
+      return;
+    }
+    if (lines.length < 2) {
+      setSubmitError("At least 2 lines required to save a template");
+      return;
+    }
+    const missingAccounts = lines.some((line) => !line.account_id);
+    if (missingAccounts) {
+      setSubmitError("All lines must have an account selected before saving a template");
+      return;
+    }
+    const invalidLine = lines.some((line) => line.debit > 0 && line.credit > 0);
+    if (invalidLine) {
+      setSubmitError("Lines cannot have both debit and credit amounts");
+      return;
+    }
+    if (!isBalanced) {
+      setSubmitError("Template lines must be balanced before saving");
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const newTemplate: TransactionTemplate = {
+      id: createId(),
+      name: name.trim(),
+      description: description.trim(),
+      lines,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    setTemplates((prev) => [newTemplate, ...prev]);
+    setSelectedTemplateId(newTemplate.id);
+    setTemplateNotice("Template saved");
     setSubmitError(null);
     setSubmitStatus(null);
   }
@@ -167,6 +243,28 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
   }, [draftKey]);
 
   useEffect(() => {
+    const stored = globalThis.localStorage.getItem(getTemplatesKey(companyId));
+    if (!stored) {
+      setTemplates([]);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(stored) as TransactionTemplate[];
+      if (Array.isArray(parsed)) {
+        setTemplates(parsed);
+      } else {
+        setTemplates([]);
+      }
+    } catch {
+      setTemplates([]);
+    }
+  }, [companyId]);
+
+  useEffect(() => {
+    globalThis.localStorage.setItem(getTemplatesKey(companyId), JSON.stringify(templates));
+  }, [companyId, templates]);
+
+  useEffect(() => {
     const intervalId = window.setInterval(() => {
       if (!description.trim()) {
         return;
@@ -188,6 +286,7 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
       window.clearInterval(intervalId);
     };
   }, [draftKey, entryDate, description, lines, user.id]);
+
 
   // Quick templates
   function loadExpenseTemplate() {
@@ -314,7 +413,39 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
       {/* Quick Templates */}
       <div style={boxStyle}>
         <h3 style={{ marginTop: 0, marginBottom: "12px" }}>Quick Templates</h3>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginBottom: "8px" }}>
+          <select
+            value={selectedTemplateId}
+            onChange={(e) => {
+              const nextId = e.target.value;
+              setSelectedTemplateId(nextId);
+              const selected = templates.find((template) => template.id === nextId);
+              if (selected) {
+                applyTemplate(selected);
+              }
+            }}
+            style={{ ...selectStyle, width: "240px" }}
+          >
+            <option value="">Apply saved template...</option>
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}
+              </option>
+            ))}
+          </select>
+          <a
+            href="#/transaction-templates"
+            title="Manage templates"
+            aria-label="Manage templates"
+            style={{ ...buttonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+          >
+            ⚙️
+          </a>
+          <button type="button" onClick={handleSaveAsTemplate} style={buttonStyle}>
+            ⭐ Save Template
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
           <button onClick={loadExpenseTemplate} style={buttonStyle}>
             💰 Expense Payment
           </button>
@@ -325,6 +456,9 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
             🔄 Clear Form
           </button>
         </div>
+        {templateNotice ? (
+          <p style={{ margin: "10px 0 0", color: "#155724" }}>{templateNotice}</p>
+        ) : null}
       </div>
 
       {/* Entry Form */}

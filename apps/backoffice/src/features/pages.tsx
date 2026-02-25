@@ -2,6 +2,7 @@ import { AccountsPage as ChartOfAccountsPage } from "./accounts-page";
 import { AccountTypesPage as AccountTypesManagementPage } from "./account-types-page";
 import { TransactionsPage as TransactionInputPage } from "./transactions-page";
 import { ItemsPricesPage as ItemsPricesManagementPage } from "./items-prices-page";
+import { TransactionTemplatesPage as TransactionTemplatesManagementPage } from "./transaction-templates-page";
 import {
   DailySalesPage as DailySalesReportPage,
   JournalsPage as JournalsReportPage,
@@ -39,6 +40,8 @@ export const AccountsPage = ChartOfAccountsPage;
 export const AccountTypesPage = AccountTypesManagementPage;
 
 export const TransactionsPage = TransactionInputPage;
+
+export const TransactionTemplatesPage = TransactionTemplatesManagementPage;
 
 export const ItemsPricesPage = ItemsPricesManagementPage;
 

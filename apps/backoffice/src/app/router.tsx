@@ -23,6 +23,7 @@ import {
   AccountsPage,
   AccountTypesPage,
   TransactionsPage,
+  TransactionTemplatesPage,
   DailySalesPage,
   ForbiddenPage,
   ItemsPricesPage,
@@ -71,6 +72,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/transactions") {
     return <TransactionsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/transaction-templates") {
+    return <TransactionTemplatesPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/sync-queue") {
     return <SyncQueuePage />;
