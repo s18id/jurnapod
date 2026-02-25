@@ -14,6 +14,16 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {
+    path: "/supplies",
+    label: "Supplies",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/equipment",
+    label: "Equipment",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
     path: "/chart-of-accounts",
     label: "Chart of Accounts",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]

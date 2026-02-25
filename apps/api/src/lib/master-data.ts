@@ -25,6 +25,29 @@ type ItemPriceRow = RowDataPacket & {
   updated_at: Date;
 };
 
+type SupplyRow = RowDataPacket & {
+  id: number;
+  company_id: number;
+  sku: string | null;
+  name: string;
+  unit: string;
+  is_active: number;
+  updated_at: Date;
+};
+
+type EquipmentRow = RowDataPacket & {
+  id: number;
+  company_id: number;
+  outlet_id: number | null;
+  asset_tag: string | null;
+  name: string;
+  serial_number: string | null;
+  purchase_date: Date | null;
+  purchase_cost: string | number | null;
+  is_active: number;
+  updated_at: Date;
+};
+
 type VersionRow = RowDataPacket & {
   current_version: number;
 };
@@ -44,7 +67,13 @@ const masterDataAuditActions = {
   itemDelete: "MASTER_DATA_ITEM_DELETE",
   itemPriceCreate: "MASTER_DATA_ITEM_PRICE_CREATE",
   itemPriceUpdate: "MASTER_DATA_ITEM_PRICE_UPDATE",
-  itemPriceDelete: "MASTER_DATA_ITEM_PRICE_DELETE"
+  itemPriceDelete: "MASTER_DATA_ITEM_PRICE_DELETE",
+  supplyCreate: "MASTER_DATA_SUPPLY_CREATE",
+  supplyUpdate: "MASTER_DATA_SUPPLY_UPDATE",
+  supplyDelete: "MASTER_DATA_SUPPLY_DELETE",
+  equipmentCreate: "MASTER_DATA_EQUIPMENT_CREATE",
+  equipmentUpdate: "MASTER_DATA_EQUIPMENT_UPDATE",
+  equipmentDelete: "MASTER_DATA_EQUIPMENT_DELETE"
 } as const;
 
 type MasterDataAuditAction = (typeof masterDataAuditActions)[keyof typeof masterDataAuditActions];
@@ -145,6 +174,33 @@ function normalizeItemPrice(row: ItemPriceRow) {
     outlet_id: Number(row.outlet_id),
     item_id: Number(row.item_id),
     price: Number(row.price),
+    is_active: row.is_active === 1,
+    updated_at: new Date(row.updated_at).toISOString()
+  };
+}
+
+function normalizeSupply(row: SupplyRow) {
+  return {
+    id: Number(row.id),
+    company_id: Number(row.company_id),
+    sku: row.sku,
+    name: row.name,
+    unit: row.unit,
+    is_active: row.is_active === 1,
+    updated_at: new Date(row.updated_at).toISOString()
+  };
+}
+
+function normalizeEquipment(row: EquipmentRow) {
+  return {
+    id: Number(row.id),
+    company_id: Number(row.company_id),
+    outlet_id: row.outlet_id == null ? null : Number(row.outlet_id),
+    asset_tag: row.asset_tag,
+    name: row.name,
+    serial_number: row.serial_number,
+    purchase_date: row.purchase_date ? new Date(row.purchase_date).toISOString() : null,
+    purchase_cost: row.purchase_cost == null ? null : Number(row.purchase_cost),
     is_active: row.is_active === 1,
     updated_at: new Date(row.updated_at).toISOString()
   };
@@ -257,6 +313,53 @@ async function findItemPriceByIdWithExecutor(
   }
 
   return normalizeItemPrice(rows[0]);
+}
+
+async function findSupplyByIdWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  supplyId: number,
+  options?: { forUpdate?: boolean }
+) {
+  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
+  const [rows] = await executor.execute<SupplyRow[]>(
+    `SELECT id, company_id, sku, name, unit, is_active, updated_at
+     FROM supplies
+     WHERE company_id = ?
+       AND id = ?
+     LIMIT 1${forUpdateClause}`,
+    [companyId, supplyId]
+  );
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  return normalizeSupply(rows[0]);
+}
+
+async function findEquipmentByIdWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  equipmentId: number,
+  options?: { forUpdate?: boolean }
+) {
+  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
+  const [rows] = await executor.execute<EquipmentRow[]>(
+    `SELECT id, company_id, outlet_id, asset_tag, name, serial_number, purchase_date, purchase_cost,
+            is_active, updated_at
+     FROM equipment
+     WHERE company_id = ?
+       AND id = ?
+     LIMIT 1${forUpdateClause}`,
+    [companyId, equipmentId]
+  );
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  return normalizeEquipment(rows[0]);
 }
 
 export async function listItems(companyId: number, filters?: { isActive?: boolean }) {
@@ -484,6 +587,456 @@ export async function listItemPrices(
 export async function findItemPriceById(companyId: number, itemPriceId: number) {
   const pool = getDbPool();
   return findItemPriceByIdWithExecutor(pool, companyId, itemPriceId);
+}
+
+export async function listSupplies(companyId: number, filters?: { isActive?: boolean }) {
+  const pool = getDbPool();
+  const values: Array<number> = [companyId];
+
+  let sql =
+    "SELECT id, company_id, sku, name, unit, is_active, updated_at FROM supplies WHERE company_id = ?";
+
+  if (typeof filters?.isActive === "boolean") {
+    sql += " AND is_active = ?";
+    values.push(filters.isActive ? 1 : 0);
+  }
+
+  sql += " ORDER BY id ASC";
+
+  const [rows] = await pool.execute<SupplyRow[]>(sql, values);
+  return rows.map(normalizeSupply);
+}
+
+export async function findSupplyById(companyId: number, supplyId: number) {
+  const pool = getDbPool();
+  return findSupplyByIdWithExecutor(pool, companyId, supplyId);
+}
+
+export async function createSupply(
+  companyId: number,
+  input: {
+    sku?: string | null;
+    name: string;
+    unit?: string;
+    is_active?: boolean;
+  },
+  actor?: MutationAuditActor
+) {
+  return withTransaction(async (connection) => {
+    try {
+      const [result] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO supplies (company_id, sku, name, unit, is_active)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          companyId,
+          input.sku ?? null,
+          input.name,
+          input.unit?.trim() || "unit",
+          input.is_active === false ? 0 : 1
+        ]
+      );
+
+      const supply = await findSupplyByIdWithExecutor(connection, companyId, Number(result.insertId));
+      if (!supply) {
+        throw new Error("Created supply not found");
+      }
+
+      await recordMasterDataAuditLog(connection, {
+        companyId,
+        outletId: null,
+        actor,
+        action: masterDataAuditActions.supplyCreate,
+        payload: {
+          supply_id: supply.id,
+          after: supply
+        }
+      });
+
+      return supply;
+    } catch (error) {
+      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        throw new DatabaseConflictError("Duplicate supply");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function updateSupply(
+  companyId: number,
+  supplyId: number,
+  input: {
+    sku?: string | null;
+    name?: string;
+    unit?: string;
+    is_active?: boolean;
+  },
+  actor?: MutationAuditActor
+) {
+  const fields: string[] = [];
+  const values: Array<string | number | null> = [];
+
+  if (Object.hasOwn(input, "sku")) {
+    fields.push("sku = ?");
+    values.push(input.sku ?? null);
+  }
+
+  if (typeof input.name === "string") {
+    fields.push("name = ?");
+    values.push(input.name);
+  }
+
+  if (typeof input.unit === "string") {
+    fields.push("unit = ?");
+    values.push(input.unit.trim());
+  }
+
+  if (typeof input.is_active === "boolean") {
+    fields.push("is_active = ?");
+    values.push(input.is_active ? 1 : 0);
+  }
+
+  return withTransaction(async (connection) => {
+    const before = await findSupplyByIdWithExecutor(connection, companyId, supplyId, {
+      forUpdate: true
+    });
+    if (!before) {
+      return null;
+    }
+
+    if (fields.length === 0) {
+      return before;
+    }
+
+    values.push(companyId, supplyId);
+
+    try {
+      await connection.execute<ResultSetHeader>(
+        `UPDATE supplies
+         SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
+         WHERE company_id = ?
+           AND id = ?`,
+        values
+      );
+
+      const supply = await findSupplyByIdWithExecutor(connection, companyId, supplyId);
+      if (!supply) {
+        return null;
+      }
+
+      await recordMasterDataAuditLog(connection, {
+        companyId,
+        outletId: null,
+        actor,
+        action: masterDataAuditActions.supplyUpdate,
+        payload: {
+          supply_id: supply.id,
+          before,
+          after: supply
+        }
+      });
+
+      return supply;
+    } catch (error) {
+      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        throw new DatabaseConflictError("Duplicate supply");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function deleteSupply(
+  companyId: number,
+  supplyId: number,
+  actor?: MutationAuditActor
+): Promise<boolean> {
+  return withTransaction(async (connection) => {
+    const before = await findSupplyByIdWithExecutor(connection, companyId, supplyId, {
+      forUpdate: true
+    });
+    if (!before) {
+      return false;
+    }
+
+    await connection.execute<ResultSetHeader>(
+      `DELETE FROM supplies
+       WHERE company_id = ?
+         AND id = ?`,
+      [companyId, supplyId]
+    );
+
+    await recordMasterDataAuditLog(connection, {
+      companyId,
+      outletId: null,
+      actor,
+      action: masterDataAuditActions.supplyDelete,
+      payload: {
+        supply_id: before.id,
+        before
+      }
+    });
+
+    return true;
+  });
+}
+
+export async function listEquipment(
+  companyId: number,
+  filters?: { outletId?: number; isActive?: boolean }
+) {
+  const pool = getDbPool();
+  const values: Array<number> = [companyId];
+
+  let sql =
+    "SELECT id, company_id, outlet_id, asset_tag, name, serial_number, purchase_date, purchase_cost, is_active, updated_at FROM equipment WHERE company_id = ?";
+
+  if (typeof filters?.outletId === "number") {
+    sql += " AND outlet_id = ?";
+    values.push(filters.outletId);
+  }
+
+  if (typeof filters?.isActive === "boolean") {
+    sql += " AND is_active = ?";
+    values.push(filters.isActive ? 1 : 0);
+  }
+
+  sql += " ORDER BY id ASC";
+
+  const [rows] = await pool.execute<EquipmentRow[]>(sql, values);
+  return rows.map(normalizeEquipment);
+}
+
+export async function findEquipmentById(companyId: number, equipmentId: number) {
+  const pool = getDbPool();
+  return findEquipmentByIdWithExecutor(pool, companyId, equipmentId);
+}
+
+export async function createEquipment(
+  companyId: number,
+  input: {
+    outlet_id?: number | null;
+    asset_tag?: string | null;
+    name: string;
+    serial_number?: string | null;
+    purchase_date?: string | null;
+    purchase_cost?: number | null;
+    is_active?: boolean;
+  },
+  actor?: MutationAuditActor
+) {
+  return withTransaction(async (connection) => {
+    if (typeof input.outlet_id === "number") {
+      await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+      if (actor) {
+        await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+      }
+    }
+
+    try {
+      const [result] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO equipment (
+           company_id, outlet_id, asset_tag, name, serial_number, purchase_date, purchase_cost, is_active
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          companyId,
+          input.outlet_id ?? null,
+          input.asset_tag ?? null,
+          input.name,
+          input.serial_number ?? null,
+          input.purchase_date ?? null,
+          input.purchase_cost ?? null,
+          input.is_active === false ? 0 : 1
+        ]
+      );
+
+      const equipment = await findEquipmentByIdWithExecutor(connection, companyId, Number(result.insertId));
+      if (!equipment) {
+        throw new Error("Created equipment not found");
+      }
+
+      await recordMasterDataAuditLog(connection, {
+        companyId,
+        outletId: equipment.outlet_id,
+        actor,
+        action: masterDataAuditActions.equipmentCreate,
+        payload: {
+          equipment_id: equipment.id,
+          after: equipment
+        }
+      });
+
+      return equipment;
+    } catch (error) {
+      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        throw new DatabaseConflictError("Duplicate equipment");
+      }
+
+      if (isMysqlError(error) && error.errno === mysqlForeignKeyErrorCode) {
+        throw new DatabaseReferenceError("Invalid company references");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function updateEquipment(
+  companyId: number,
+  equipmentId: number,
+  input: {
+    outlet_id?: number | null;
+    asset_tag?: string | null;
+    name?: string;
+    serial_number?: string | null;
+    purchase_date?: string | null;
+    purchase_cost?: number | null;
+    is_active?: boolean;
+  },
+  actor?: MutationAuditActor
+) {
+  const fields: string[] = [];
+  const values: Array<string | number | null> = [];
+
+  if (Object.hasOwn(input, "asset_tag")) {
+    fields.push("asset_tag = ?");
+    values.push(input.asset_tag ?? null);
+  }
+
+  if (typeof input.name === "string") {
+    fields.push("name = ?");
+    values.push(input.name);
+  }
+
+  if (Object.hasOwn(input, "serial_number")) {
+    fields.push("serial_number = ?");
+    values.push(input.serial_number ?? null);
+  }
+
+  if (Object.hasOwn(input, "purchase_date")) {
+    fields.push("purchase_date = ?");
+    values.push(input.purchase_date ?? null);
+  }
+
+  if (Object.hasOwn(input, "purchase_cost")) {
+    fields.push("purchase_cost = ?");
+    values.push(input.purchase_cost ?? null);
+  }
+
+  if (typeof input.is_active === "boolean") {
+    fields.push("is_active = ?");
+    values.push(input.is_active ? 1 : 0);
+  }
+
+  return withTransaction(async (connection) => {
+    const before = await findEquipmentByIdWithExecutor(connection, companyId, equipmentId, {
+      forUpdate: true
+    });
+    if (!before) {
+      return null;
+    }
+
+    if (actor && before.outlet_id != null) {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, before.outlet_id);
+    }
+
+    if (Object.hasOwn(input, "outlet_id")) {
+      if (typeof input.outlet_id === "number") {
+        await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+        if (actor) {
+          await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+        }
+      }
+      fields.push("outlet_id = ?");
+      values.push(input.outlet_id ?? null);
+    }
+
+    if (fields.length === 0) {
+      return before;
+    }
+
+    values.push(companyId, equipmentId);
+
+    try {
+      await connection.execute<ResultSetHeader>(
+        `UPDATE equipment
+         SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
+         WHERE company_id = ?
+           AND id = ?`,
+        values
+      );
+
+      const equipment = await findEquipmentByIdWithExecutor(connection, companyId, equipmentId);
+      if (!equipment) {
+        return null;
+      }
+
+      await recordMasterDataAuditLog(connection, {
+        companyId,
+        outletId: equipment.outlet_id,
+        actor,
+        action: masterDataAuditActions.equipmentUpdate,
+        payload: {
+          equipment_id: equipment.id,
+          before,
+          after: equipment
+        }
+      });
+
+      return equipment;
+    } catch (error) {
+      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        throw new DatabaseConflictError("Duplicate equipment");
+      }
+
+      if (isMysqlError(error) && error.errno === mysqlForeignKeyErrorCode) {
+        throw new DatabaseReferenceError("Invalid company references");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function deleteEquipment(
+  companyId: number,
+  equipmentId: number,
+  actor?: MutationAuditActor
+): Promise<boolean> {
+  return withTransaction(async (connection) => {
+    const before = await findEquipmentByIdWithExecutor(connection, companyId, equipmentId, {
+      forUpdate: true
+    });
+    if (!before) {
+      return false;
+    }
+
+    if (actor && before.outlet_id != null) {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, before.outlet_id);
+    }
+
+    await connection.execute<ResultSetHeader>(
+      `DELETE FROM equipment
+       WHERE company_id = ?
+         AND id = ?`,
+      [companyId, equipmentId]
+    );
+
+    await recordMasterDataAuditLog(connection, {
+      companyId,
+      outletId: before.outlet_id,
+      actor,
+      action: masterDataAuditActions.equipmentDelete,
+      payload: {
+        equipment_id: before.id,
+        before
+      }
+    });
+
+    return true;
+  });
 }
 
 export async function createItemPrice(

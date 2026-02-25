@@ -43,6 +43,20 @@ const optionalSkuSchema = z
     return value;
   });
 
+const optionalShortTextSchema = (maxLength: number) =>
+  z
+    .string()
+    .trim()
+    .max(maxLength)
+    .optional()
+    .transform((value) => {
+      if (!value) {
+        return null;
+      }
+
+      return value;
+    });
+
 export const ItemCreateRequestSchema = z.object({
   sku: optionalSkuSchema,
   name: z.string().trim().min(1).max(191),
@@ -73,6 +87,48 @@ export const ItemPriceUpdateRequestSchema = z
     item_id: NumericIdSchema.optional(),
     outlet_id: NumericIdSchema.optional(),
     price: z.coerce.number().finite().nonnegative().optional(),
+    is_active: z.boolean().optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided"
+  });
+
+export const SupplyCreateRequestSchema = z.object({
+  sku: optionalSkuSchema,
+  name: z.string().trim().min(1).max(191),
+  unit: z.string().trim().min(1).max(32).optional(),
+  is_active: z.boolean().optional()
+});
+
+export const SupplyUpdateRequestSchema = z
+  .object({
+    sku: optionalSkuSchema,
+    name: z.string().trim().min(1).max(191).optional(),
+    unit: z.string().trim().min(1).max(32).optional(),
+    is_active: z.boolean().optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided"
+  });
+
+export const EquipmentCreateRequestSchema = z.object({
+  asset_tag: optionalShortTextSchema(64),
+  name: z.string().trim().min(1).max(191),
+  serial_number: optionalShortTextSchema(128),
+  outlet_id: NumericIdSchema.optional(),
+  purchase_date: z.string().trim().min(1).optional(),
+  purchase_cost: z.coerce.number().finite().nonnegative().optional(),
+  is_active: z.boolean().optional()
+});
+
+export const EquipmentUpdateRequestSchema = z
+  .object({
+    asset_tag: optionalShortTextSchema(64),
+    name: z.string().trim().min(1).max(191).optional(),
+    serial_number: optionalShortTextSchema(128),
+    outlet_id: NumericIdSchema.optional(),
+    purchase_date: z.string().trim().min(1).optional(),
+    purchase_cost: z.coerce.number().finite().nonnegative().optional(),
     is_active: z.boolean().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {

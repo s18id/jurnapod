@@ -3,13 +3,41 @@
 --              and map existing Indonesian type names to their categories
 
 -- Add category column
-ALTER TABLE account_types 
-  ADD COLUMN category VARCHAR(20) NULL 
-    COMMENT 'Standard account category: ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE'
-    AFTER name;
+SET @account_type_category_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'account_types'
+    AND COLUMN_NAME = 'category'
+);
 
--- Add index for category filtering
-CREATE INDEX idx_account_types_category ON account_types (company_id, category, is_active);
+SET @add_account_type_category_sql := IF(
+  @account_type_category_exists = 0,
+  'ALTER TABLE account_types ADD COLUMN category VARCHAR(20) NULL COMMENT \'Standard account category: ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE\' AFTER name',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @add_account_type_category_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @account_type_category_index_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'account_types'
+    AND INDEX_NAME = 'idx_account_types_category'
+);
+
+SET @add_account_type_category_index_sql := IF(
+  @account_type_category_index_exists = 0,
+  'CREATE INDEX idx_account_types_category ON account_types (company_id, category, is_active)',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @add_account_type_category_index_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- Map Indonesian type names to standard categories
 -- ASSET types

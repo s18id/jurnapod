@@ -11,6 +11,8 @@ import {
 } from "./reports-pages";
 import { SalesInvoicesPage as SalesInvoicesManagementPage } from "./sales-invoices-page";
 import { SalesPaymentsPage as SalesPaymentsManagementPage } from "./sales-payments-page";
+import { SuppliesPage as SuppliesManagementPage } from "./supplies-page";
+import { EquipmentPage as EquipmentManagementPage } from "./equipment-page";
 
 type PlaceholderProps = {
   title: string;
@@ -44,6 +46,10 @@ export const TransactionsPage = TransactionInputPage;
 export const TransactionTemplatesPage = TransactionTemplatesManagementPage;
 
 export const ItemsPricesPage = ItemsPricesManagementPage;
+
+export const SuppliesPage = SuppliesManagementPage;
+
+export const EquipmentPage = EquipmentManagementPage;
 
 export const PosTransactionsPage = PosTransactionsReportPage;
 

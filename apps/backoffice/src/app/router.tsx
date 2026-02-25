@@ -28,10 +28,12 @@ import {
   ForbiddenPage,
   ItemsPricesPage,
   JournalsPage,
+  EquipmentPage,
   PosPaymentsPage,
   PosTransactionsPage,
   SalesInvoicesPage,
-  SalesPaymentsPage
+  SalesPaymentsPage,
+  SuppliesPage
 } from "../features/pages";
 import { SyncQueuePage } from "../features/sync-queue-page";
 import { SyncHistoryPage } from "../features/sync-history-page";
@@ -48,6 +50,12 @@ function ensureHash(path: string): void {
 function RouteScreen(props: { path: string; user: SessionUser; accessToken: string }) {
   if (props.path === "/items-prices") {
     return <ItemsPricesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/supplies") {
+    return <SuppliesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/equipment") {
+    return <EquipmentPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/sales-invoices") {
     return <SalesInvoicesPage user={props.user} accessToken={props.accessToken} />;

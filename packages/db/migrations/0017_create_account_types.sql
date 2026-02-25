@@ -22,11 +22,59 @@ CREATE TABLE IF NOT EXISTS account_types (
 COMMENT='Account type definitions with normal balance and report group';
 
 -- Add account_type_id column to accounts table
-ALTER TABLE accounts 
-  ADD COLUMN account_type_id BIGINT UNSIGNED NULL AFTER name,
-  ADD KEY idx_accounts_type (account_type_id),
-  ADD CONSTRAINT fk_accounts_account_type FOREIGN KEY (account_type_id) 
-    REFERENCES account_types(id) ON DELETE SET NULL;
+SET @account_type_column_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'accounts'
+    AND COLUMN_NAME = 'account_type_id'
+);
+
+SET @add_account_type_column_sql := IF(
+  @account_type_column_exists = 0,
+  'ALTER TABLE accounts ADD COLUMN account_type_id BIGINT UNSIGNED NULL AFTER name',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @add_account_type_column_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @account_type_index_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'accounts'
+    AND INDEX_NAME = 'idx_accounts_type'
+);
+
+SET @add_account_type_index_sql := IF(
+  @account_type_index_exists = 0,
+  'ALTER TABLE accounts ADD KEY idx_accounts_type (account_type_id)',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @add_account_type_index_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @account_type_fk_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.REFERENTIAL_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'accounts'
+    AND CONSTRAINT_NAME = 'fk_accounts_account_type'
+);
+
+SET @add_account_type_fk_sql := IF(
+  @account_type_fk_exists = 0,
+  'ALTER TABLE accounts ADD CONSTRAINT fk_accounts_account_type FOREIGN KEY (account_type_id) REFERENCES account_types(id) ON DELETE SET NULL',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @add_account_type_fk_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- Migrate existing data: Create account types from distinct type_name values
 INSERT INTO account_types (company_id, name, normal_balance, report_group, is_active)
