@@ -18,6 +18,7 @@ type TransactionsPageProps = {
 type JournalLine = {
   id: string; // Temporary ID for UI
   account_id: number | null;
+  entry_type?: "debit" | "credit";
   debit: number;
   credit: number;
   description: string;
@@ -35,6 +36,7 @@ type TransactionTemplate = {
 const emptyLine: JournalLine = {
   id: "",
   account_id: null,
+  entry_type: "debit",
   debit: 0,
   credit: 0,
   description: ""
@@ -99,8 +101,28 @@ function createId() {
   return `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 }
 
+function getLineType(line: JournalLine) {
+  return line.entry_type ?? (line.credit > 0 ? "credit" : "debit");
+}
+
+function getLineAmount(line: JournalLine) {
+  return getLineType(line) === "credit" ? line.credit : line.debit;
+}
+
 function getTemplatesKey(companyId: number) {
   return `transaction-templates:${companyId}`;
+}
+
+function normalizeLines(lines: JournalLine[]) {
+  return lines.map((line) => {
+    const inferredType = line.credit > 0 ? "credit" : "debit";
+    return {
+      ...line,
+      entry_type: line.entry_type ?? inferredType,
+      debit: line.debit ?? 0,
+      credit: line.credit ?? 0
+    };
+  });
 }
 
 export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
@@ -231,7 +253,7 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
         setDescription(data.description);
       }
       if (data.lines && data.lines.length > 0) {
-        setLines(data.lines);
+        setLines(normalizeLines(data.lines));
       }
     }
 
@@ -251,7 +273,10 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
     try {
       const parsed = JSON.parse(stored) as TransactionTemplate[];
       if (Array.isArray(parsed)) {
-        setTemplates(parsed);
+        setTemplates(parsed.map((template) => ({
+          ...template,
+          lines: normalizeLines(template.lines || [])
+        })));
       } else {
         setTemplates([]);
       }
@@ -300,8 +325,8 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
     );
 
     setLines([
-      { ...emptyLine, id: "1", account_id: expenseAccounts[0]?.id || null, debit: 0, description: "Expense" },
-      { ...emptyLine, id: "2", account_id: cashAccounts[0]?.id || null, credit: 0, description: "Payment" }
+      { ...emptyLine, id: "1", account_id: expenseAccounts[0]?.id || null, entry_type: "debit", debit: 0, description: "Expense" },
+      { ...emptyLine, id: "2", account_id: cashAccounts[0]?.id || null, entry_type: "credit", credit: 0, description: "Payment" }
     ]);
     setDescription("Expense payment");
   }
@@ -317,8 +342,8 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
     );
 
     setLines([
-      { ...emptyLine, id: "1", account_id: bankAccounts[0]?.id || null, debit: 0, description: "Deposit to bank" },
-      { ...emptyLine, id: "2", account_id: cashAccounts[0]?.id || null, credit: 0, description: "From cash" }
+      { ...emptyLine, id: "1", account_id: bankAccounts[0]?.id || null, entry_type: "debit", debit: 0, description: "Deposit to bank" },
+      { ...emptyLine, id: "2", account_id: cashAccounts[0]?.id || null, entry_type: "credit", credit: 0, description: "From cash" }
     ]);
     setDescription("Cash to bank transfer");
   }
@@ -501,14 +526,15 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
             <thead>
               <tr style={{ backgroundColor: "#f5f1ea" }}>
                 <th style={{ ...cellStyle, textAlign: "left", width: "35%" }}>Account</th>
-                <th style={{ ...cellStyle, textAlign: "right", width: "15%" }}>Debit</th>
-                <th style={{ ...cellStyle, textAlign: "right", width: "15%" }}>Credit</th>
+                <th style={{ ...cellStyle, textAlign: "left", width: "12%" }}>Type</th>
+                <th style={{ ...cellStyle, textAlign: "right", width: "18%" }}>Amount</th>
                 <th style={{ ...cellStyle, textAlign: "left", width: "30%" }}>Description</th>
                 <th style={{ ...cellStyle, textAlign: "center", width: "5%" }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {lines.map((line, index) => (
+                
                 <tr key={line.id}>
                   <td style={cellStyle}>
                     <select
@@ -526,33 +552,45 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
                     </select>
                   </td>
                   <td style={cellStyle}>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={line.debit === 0 ? "" : line.debit}
+                    <select
+                      value={getLineType(line)}
                       onChange={(e) => {
-                        const val = e.target.value === "" ? 0 : parseFloat(e.target.value);
-                        if (!isNaN(val)) {
-                          updateLine(line.id, "debit", val);
-                          if (val > 0) updateLine(line.id, "credit", 0);
+                        const nextType = e.target.value as "debit" | "credit";
+                        const amount = getLineAmount(line);
+                        updateLine(line.id, "entry_type", nextType);
+                        if (nextType === "debit") {
+                          updateLine(line.id, "debit", amount);
+                          updateLine(line.id, "credit", 0);
+                        } else {
+                          updateLine(line.id, "credit", amount);
+                          updateLine(line.id, "debit", 0);
                         }
                       }}
-                      style={{ ...inputStyle, textAlign: "right" }}
-                      placeholder="0.00"
-                    />
+                      style={selectStyle}
+                      aria-label={`Line ${index + 1} type`}
+                    >
+                      <option value="debit">Debit</option>
+                      <option value="credit">Credit</option>
+                    </select>
                   </td>
                   <td style={cellStyle}>
                     <input
                       type="number"
                       step="0.01"
                       min="0"
-                      value={line.credit === 0 ? "" : line.credit}
+                      value={getLineAmount(line) === 0 ? "" : getLineAmount(line)}
                       onChange={(e) => {
                         const val = e.target.value === "" ? 0 : parseFloat(e.target.value);
                         if (!isNaN(val)) {
-                          updateLine(line.id, "credit", val);
-                          if (val > 0) updateLine(line.id, "debit", 0);
+                          const nextType = getLineType(line);
+                          updateLine(line.id, "entry_type", nextType);
+                          if (nextType === "debit") {
+                            updateLine(line.id, "debit", val);
+                            updateLine(line.id, "credit", 0);
+                          } else {
+                            updateLine(line.id, "credit", val);
+                            updateLine(line.id, "debit", 0);
+                          }
                         }
                       }}
                       style={{ ...inputStyle, textAlign: "right" }}
