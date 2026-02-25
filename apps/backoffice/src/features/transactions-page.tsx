@@ -1,8 +1,12 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SessionUser } from "../lib/session";
 import { useAccounts } from "../hooks/use-accounts";
 import { useJournalBatches, createManualJournalEntry } from "../hooks/use-journals";
 import { ApiError } from "../lib/api-client";
+import { OutboxService } from "../lib/outbox-service";
+import { useOnlineStatus } from "../lib/connection";
+import { QueueStatusBadge } from "../components/queue-status-badge";
+import { db } from "../lib/offline-db";
 import type { AccountResponse, JournalBatchResponse } from "@jurnapod/shared";
 
 type TransactionsPageProps = {
@@ -82,6 +86,7 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
   const companyId = user.company_id;
   const accountsFilter = useMemo(() => ({ is_active: true }), []);
   const journalFilter = useMemo(() => ({ limit: 10 }), []);
+  const isOnline = useOnlineStatus();
   
   const { data: accounts } = useAccounts(companyId, accessToken, accountsFilter);
   const { data: recentEntries, refetch: refetchEntries } = useJournalBatches(companyId, accessToken, journalFilter);
@@ -94,7 +99,8 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
   ]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<"success" | "queued" | null>(null);
+  const draftKey = `journal-draft:${user.id}`;
 
   // Calculate totals
   const totalDebit = lines.reduce((sum, line) => sum + (line.debit || 0), 0);
@@ -125,8 +131,62 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
       { ...emptyLine, id: "2" }
     ]);
     setSubmitError(null);
-    setSubmitSuccess(false);
+    setSubmitStatus(null);
   }
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadDraft() {
+      const draft = await db.formDrafts.get(draftKey);
+      if (!draft || !isMounted) {
+        return;
+      }
+      const data = draft.data as {
+        entryDate: string;
+        description: string;
+        lines: JournalLine[];
+      };
+      if (data.entryDate) {
+        setEntryDate(data.entryDate);
+      }
+      if (data.description) {
+        setDescription(data.description);
+      }
+      if (data.lines && data.lines.length > 0) {
+        setLines(data.lines);
+      }
+    }
+
+    loadDraft().catch(() => undefined);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [draftKey]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (!description.trim()) {
+        return;
+      }
+      db.formDrafts.put({
+        id: draftKey,
+        formType: "journal",
+        data: {
+          entryDate,
+          description,
+          lines
+        },
+        savedAt: new Date(),
+        userId: user.id
+      }).catch(() => undefined);
+    }, 30000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [draftKey, entryDate, description, lines, user.id]);
 
   // Quick templates
   function loadExpenseTemplate() {
@@ -198,29 +258,35 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
 
     setSubmitting(true);
     setSubmitError(null);
-    setSubmitSuccess(false);
+    setSubmitStatus(null);
 
     try {
-      await createManualJournalEntry(
-        {
-          company_id: companyId,
-          entry_date: entryDate,
-          description,
-          lines: lines.map(line => ({
-            account_id: line.account_id!,
-            debit: line.debit || 0,
-            credit: line.credit || 0,
-            description: line.description || description
-          }))
-        },
-        accessToken
-      );
-      
-      setSubmitSuccess(true);
-      setTimeout(() => {
-        clearForm();
-        refetchEntries();
-      }, 1500);
+      const payload = {
+        company_id: companyId,
+        entry_date: entryDate,
+        description,
+        lines: lines.map(line => ({
+          account_id: line.account_id!,
+          debit: line.debit || 0,
+          credit: line.credit || 0,
+          description: line.description || description
+        }))
+      };
+
+      if (isOnline) {
+        await createManualJournalEntry(payload, accessToken);
+        setSubmitStatus("success");
+        setTimeout(() => {
+          clearForm();
+          refetchEntries();
+        }, 1500);
+      } else {
+        await OutboxService.queueTransaction("journal", payload, user.id);
+        setSubmitStatus("queued");
+        setTimeout(() => {
+          clearForm();
+        }, 1500);
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         setSubmitError(err.message);
@@ -235,7 +301,10 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
   return (
     <div style={{ padding: "20px", maxWidth: "1400px", margin: "0 auto" }}>
       <div style={{ marginBottom: "20px" }}>
-        <h1 style={{ marginBottom: "8px" }}>Transaction Input</h1>
+        <h1 style={{ marginBottom: "8px" }}>
+          Transaction Input
+          <QueueStatusBadge />
+        </h1>
         <p style={{ color: "#666", margin: 0 }}>
           Create manual journal entries for expenses, transfers, and adjustments
         </p>
@@ -417,17 +486,19 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
             </div>
           )}
 
-          {submitSuccess && (
+          {submitStatus && (
             <div
               style={{
                 marginTop: "16px",
                 padding: "12px",
-                backgroundColor: "#d4edda",
-                color: "#155724",
+                backgroundColor: submitStatus === "success" ? "#d4edda" : "#fff3cd",
+                color: submitStatus === "success" ? "#155724" : "#856404",
                 borderRadius: "6px"
               }}
             >
-              ✓ Journal entry created successfully!
+              {submitStatus === "success"
+                ? "✓ Journal entry created successfully!"
+                : "⏳ Journal entry saved to queue. Will sync when online."}
             </div>
           )}
 

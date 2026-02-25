@@ -30,6 +30,7 @@ import {
   SalesInvoicesPage,
   SalesPaymentsPage
 } from "../features/pages";
+import { SyncQueuePage } from "../features/sync-queue-page";
 
 type SessionStatus = "loading" | "anonymous" | "authenticated";
 
@@ -66,6 +67,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/transactions") {
     return <TransactionsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/sync-queue") {
+    return <SyncQueuePage />;
   }
   if (props.path === "/journals") {
     return <JournalsPage user={props.user} accessToken={props.accessToken} />;

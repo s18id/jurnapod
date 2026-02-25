@@ -28,6 +28,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     label: "Transaction Input",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
+  {
+    path: "/sync-queue",
+    label: "Sync Queue",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
   
   // === SALES ===
   {
