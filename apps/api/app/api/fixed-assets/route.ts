@@ -1,14 +1,14 @@
 import {
-  EquipmentCreateRequestSchema,
+  FixedAssetCreateRequestSchema,
   NumericIdSchema
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../src/lib/auth-guard";
 import {
-  createEquipment,
+  createFixedAsset,
   DatabaseConflictError,
   DatabaseReferenceError,
-  listEquipment
+  listFixedAssets
 } from "../../../src/lib/master-data";
 
 const INVALID_REQUEST_RESPONSE = {
@@ -23,7 +23,7 @@ const INTERNAL_SERVER_ERROR_RESPONSE = {
   ok: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
-    message: "Equipment request failed"
+    message: "Fixed asset request failed"
   }
 };
 
@@ -31,7 +31,7 @@ const CONFLICT_RESPONSE = {
   ok: false,
   error: {
     code: "CONFLICT",
-    message: "Equipment conflict"
+    message: "Fixed asset conflict"
   }
 };
 
@@ -39,7 +39,7 @@ const REFERENCE_RESPONSE = {
   ok: false,
   error: {
     code: "INVALID_REFERENCE",
-    message: "Invalid equipment reference"
+    message: "Invalid fixed asset reference"
   }
 };
 
@@ -75,15 +75,15 @@ export const GET = withAuth(
 
       const outletId = outletIdRaw == null ? undefined : NumericIdSchema.parse(outletIdRaw);
       const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
-      const equipment = await listEquipment(auth.companyId, { outletId, isActive });
+      const assets = await listFixedAssets(auth.companyId, { outletId, isActive });
 
-      return Response.json({ ok: true, equipment }, { status: 200 });
+      return Response.json({ ok: true, assets }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
       }
 
-      console.error("GET /equipment failed", error);
+      console.error("GET /fixed-assets failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
@@ -94,8 +94,8 @@ export const POST = withAuth(
   async (request, auth) => {
     try {
       const payload = await request.json();
-      const input = EquipmentCreateRequestSchema.parse(payload);
-      const equipment = await createEquipment(auth.companyId, {
+      const input = FixedAssetCreateRequestSchema.parse(payload);
+      const asset = await createFixedAsset(auth.companyId, {
         outlet_id: input.outlet_id ?? null,
         asset_tag: input.asset_tag,
         name: input.name,
@@ -107,7 +107,7 @@ export const POST = withAuth(
         userId: auth.userId
       });
 
-      return Response.json({ ok: true, equipment }, { status: 201 });
+      return Response.json({ ok: true, asset }, { status: 201 });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -121,7 +121,7 @@ export const POST = withAuth(
         return Response.json(REFERENCE_RESPONSE, { status: 400 });
       }
 
-      console.error("POST /equipment failed", error);
+      console.error("POST /fixed-assets failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },

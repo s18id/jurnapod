@@ -2,6 +2,7 @@ export * from "./schemas/account-types";
 export * from "./schemas/accounts";
 export * from "./schemas/audit-logs";
 export * from "./schemas/common";
+export * from "./schemas/depreciation";
 export * from "./schemas/journals";
 export * from "./schemas/master-data";
 export * from "./schemas/posting";

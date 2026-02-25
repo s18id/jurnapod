@@ -28,7 +28,7 @@ import {
   ForbiddenPage,
   ItemsPricesPage,
   JournalsPage,
-  EquipmentPage,
+  FixedAssetsPage,
   PosPaymentsPage,
   PosTransactionsPage,
   SalesInvoicesPage,
@@ -54,8 +54,8 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   if (props.path === "/supplies") {
     return <SuppliesPage user={props.user} accessToken={props.accessToken} />;
   }
-  if (props.path === "/equipment") {
-    return <EquipmentPage user={props.user} accessToken={props.accessToken} />;
+  if (props.path === "/fixed-assets") {
+    return <FixedAssetsPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/sales-invoices") {
     return <SalesInvoicesPage user={props.user} accessToken={props.accessToken} />;

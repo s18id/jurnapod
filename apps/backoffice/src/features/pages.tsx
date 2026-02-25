@@ -12,7 +12,7 @@ import {
 import { SalesInvoicesPage as SalesInvoicesManagementPage } from "./sales-invoices-page";
 import { SalesPaymentsPage as SalesPaymentsManagementPage } from "./sales-payments-page";
 import { SuppliesPage as SuppliesManagementPage } from "./supplies-page";
-import { EquipmentPage as EquipmentManagementPage } from "./equipment-page";
+import { FixedAssetPage as FixedAssetsManagementPage } from "./fixed-assets-page";
 
 type PlaceholderProps = {
   title: string;
@@ -49,7 +49,7 @@ export const ItemsPricesPage = ItemsPricesManagementPage;
 
 export const SuppliesPage = SuppliesManagementPage;
 
-export const EquipmentPage = EquipmentManagementPage;
+export const FixedAssetsPage = FixedAssetsManagementPage;
 
 export const PosTransactionsPage = PosTransactionsReportPage;
 

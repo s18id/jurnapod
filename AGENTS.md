@@ -1,4 +1,5 @@
 # AGENTS.md
+Important: Use codex-* subagents if the invoker is from openai model, and use claude-* if the invoker is from anthropic model.
 
 **Product:** Jurnapod
 **Tagline:** From cashier to ledger.

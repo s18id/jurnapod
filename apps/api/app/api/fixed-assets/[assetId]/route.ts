@@ -1,12 +1,12 @@
-import { EquipmentUpdateRequestSchema, NumericIdSchema } from "@jurnapod/shared";
+import { FixedAssetUpdateRequestSchema, NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
 import {
   DatabaseConflictError,
   DatabaseReferenceError,
-  deleteEquipment,
-  findEquipmentById,
-  updateEquipment
+  deleteFixedAsset,
+  findFixedAssetById,
+  updateFixedAsset
 } from "../../../../src/lib/master-data";
 
 const INVALID_REQUEST_RESPONSE = {
@@ -21,7 +21,7 @@ const NOT_FOUND_RESPONSE = {
   ok: false,
   error: {
     code: "NOT_FOUND",
-    message: "Equipment not found"
+    message: "Fixed asset not found"
   }
 };
 
@@ -29,7 +29,7 @@ const CONFLICT_RESPONSE = {
   ok: false,
   error: {
     code: "CONFLICT",
-    message: "Equipment conflict"
+    message: "Fixed asset conflict"
   }
 };
 
@@ -37,7 +37,7 @@ const REFERENCE_RESPONSE = {
   ok: false,
   error: {
     code: "INVALID_REFERENCE",
-    message: "Invalid equipment reference"
+    message: "Invalid fixed asset reference"
   }
 };
 
@@ -45,33 +45,33 @@ const INTERNAL_SERVER_ERROR_RESPONSE = {
   ok: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
-    message: "Equipment request failed"
+    message: "Fixed asset request failed"
   }
 };
 
-function parseEquipmentId(request: Request): number {
+function parseAssetId(request: Request): number {
   const pathname = new URL(request.url).pathname;
-  const equipmentIdRaw = pathname.split("/").filter(Boolean).pop();
-  return NumericIdSchema.parse(equipmentIdRaw);
+  const assetIdRaw = pathname.split("/").filter(Boolean).pop();
+  return NumericIdSchema.parse(assetIdRaw);
 }
 
 export const GET = withAuth(
   async (request, auth) => {
     try {
-      const equipmentId = parseEquipmentId(request);
-      const equipment = await findEquipmentById(auth.companyId, equipmentId);
+      const assetId = parseAssetId(request);
+      const asset = await findFixedAssetById(auth.companyId, assetId);
 
-      if (!equipment) {
+      if (!asset) {
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ ok: true, equipment }, { status: 200 });
+      return Response.json({ ok: true, asset }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
       }
 
-      console.error("GET /equipment/:id failed", error);
+      console.error("GET /fixed-assets/:id failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
@@ -81,11 +81,11 @@ export const GET = withAuth(
 export const PATCH = withAuth(
   async (request, auth) => {
     try {
-      const equipmentId = parseEquipmentId(request);
+      const assetId = parseAssetId(request);
       const payload = await request.json();
-      const input = EquipmentUpdateRequestSchema.parse(payload);
+      const input = FixedAssetUpdateRequestSchema.parse(payload);
 
-      const equipment = await updateEquipment(auth.companyId, equipmentId, {
+      const asset = await updateFixedAsset(auth.companyId, assetId, {
         outlet_id: input.outlet_id ?? null,
         asset_tag: input.asset_tag,
         name: input.name,
@@ -97,11 +97,11 @@ export const PATCH = withAuth(
         userId: auth.userId
       });
 
-      if (!equipment) {
+      if (!asset) {
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ ok: true, equipment }, { status: 200 });
+      return Response.json({ ok: true, asset }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -115,7 +115,7 @@ export const PATCH = withAuth(
         return Response.json(REFERENCE_RESPONSE, { status: 400 });
       }
 
-      console.error("PATCH /equipment/:id failed", error);
+      console.error("PATCH /fixed-assets/:id failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
@@ -125,8 +125,8 @@ export const PATCH = withAuth(
 export const DELETE = withAuth(
   async (request, auth) => {
     try {
-      const equipmentId = parseEquipmentId(request);
-      const removed = await deleteEquipment(auth.companyId, equipmentId, {
+      const assetId = parseAssetId(request);
+      const removed = await deleteFixedAsset(auth.companyId, assetId, {
         userId: auth.userId
       });
 
@@ -140,7 +140,7 @@ export const DELETE = withAuth(
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
       }
 
-      console.error("DELETE /equipment/:id failed", error);
+      console.error("DELETE /fixed-assets/:id failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },

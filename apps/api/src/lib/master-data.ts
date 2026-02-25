@@ -35,7 +35,7 @@ type SupplyRow = RowDataPacket & {
   updated_at: Date;
 };
 
-type EquipmentRow = RowDataPacket & {
+type FixedAssetRow = RowDataPacket & {
   id: number;
   company_id: number;
   outlet_id: number | null;
@@ -71,9 +71,9 @@ const masterDataAuditActions = {
   supplyCreate: "MASTER_DATA_SUPPLY_CREATE",
   supplyUpdate: "MASTER_DATA_SUPPLY_UPDATE",
   supplyDelete: "MASTER_DATA_SUPPLY_DELETE",
-  equipmentCreate: "MASTER_DATA_EQUIPMENT_CREATE",
-  equipmentUpdate: "MASTER_DATA_EQUIPMENT_UPDATE",
-  equipmentDelete: "MASTER_DATA_EQUIPMENT_DELETE"
+  fixedAssetCreate: "MASTER_DATA_FIXED_ASSET_CREATE",
+  fixedAssetUpdate: "MASTER_DATA_FIXED_ASSET_UPDATE",
+  fixedAssetDelete: "MASTER_DATA_FIXED_ASSET_DELETE"
 } as const;
 
 type MasterDataAuditAction = (typeof masterDataAuditActions)[keyof typeof masterDataAuditActions];
@@ -191,7 +191,7 @@ function normalizeSupply(row: SupplyRow) {
   };
 }
 
-function normalizeEquipment(row: EquipmentRow) {
+function normalizeFixedAsset(row: FixedAssetRow) {
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
@@ -338,28 +338,28 @@ async function findSupplyByIdWithExecutor(
   return normalizeSupply(rows[0]);
 }
 
-async function findEquipmentByIdWithExecutor(
+async function findFixedAssetByIdWithExecutor(
   executor: QueryExecutor,
   companyId: number,
-  equipmentId: number,
+  assetId: number,
   options?: { forUpdate?: boolean }
 ) {
   const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
-  const [rows] = await executor.execute<EquipmentRow[]>(
+  const [rows] = await executor.execute<FixedAssetRow[]>(
     `SELECT id, company_id, outlet_id, asset_tag, name, serial_number, purchase_date, purchase_cost,
             is_active, updated_at
-     FROM equipment
+     FROM fixed_assets
      WHERE company_id = ?
        AND id = ?
      LIMIT 1${forUpdateClause}`,
-    [companyId, equipmentId]
+    [companyId, assetId]
   );
 
   if (!rows[0]) {
     return null;
   }
 
-  return normalizeEquipment(rows[0]);
+  return normalizeFixedAsset(rows[0]);
 }
 
 export async function listItems(companyId: number, filters?: { isActive?: boolean }) {
@@ -783,7 +783,7 @@ export async function deleteSupply(
   });
 }
 
-export async function listEquipment(
+export async function listFixedAssets(
   companyId: number,
   filters?: { outletId?: number; isActive?: boolean }
 ) {
@@ -791,7 +791,7 @@ export async function listEquipment(
   const values: Array<number> = [companyId];
 
   let sql =
-    "SELECT id, company_id, outlet_id, asset_tag, name, serial_number, purchase_date, purchase_cost, is_active, updated_at FROM equipment WHERE company_id = ?";
+    "SELECT id, company_id, outlet_id, asset_tag, name, serial_number, purchase_date, purchase_cost, is_active, updated_at FROM fixed_assets WHERE company_id = ?";
 
   if (typeof filters?.outletId === "number") {
     sql += " AND outlet_id = ?";
@@ -805,16 +805,16 @@ export async function listEquipment(
 
   sql += " ORDER BY id ASC";
 
-  const [rows] = await pool.execute<EquipmentRow[]>(sql, values);
-  return rows.map(normalizeEquipment);
+  const [rows] = await pool.execute<FixedAssetRow[]>(sql, values);
+  return rows.map(normalizeFixedAsset);
 }
 
-export async function findEquipmentById(companyId: number, equipmentId: number) {
+export async function findFixedAssetById(companyId: number, assetId: number) {
   const pool = getDbPool();
-  return findEquipmentByIdWithExecutor(pool, companyId, equipmentId);
+  return findFixedAssetByIdWithExecutor(pool, companyId, assetId);
 }
 
-export async function createEquipment(
+export async function createFixedAsset(
   companyId: number,
   input: {
     outlet_id?: number | null;
@@ -837,7 +837,7 @@ export async function createEquipment(
 
     try {
       const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO equipment (
+        `INSERT INTO fixed_assets (
            company_id, outlet_id, asset_tag, name, serial_number, purchase_date, purchase_cost, is_active
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
@@ -852,26 +852,26 @@ export async function createEquipment(
         ]
       );
 
-      const equipment = await findEquipmentByIdWithExecutor(connection, companyId, Number(result.insertId));
-      if (!equipment) {
-        throw new Error("Created equipment not found");
+      const fixed_assets = await findFixedAssetByIdWithExecutor(connection, companyId, Number(result.insertId));
+      if (!fixed_assets) {
+        throw new Error("Created fixed_assets not found");
       }
 
       await recordMasterDataAuditLog(connection, {
         companyId,
-        outletId: equipment.outlet_id,
+        outletId: fixed_assets.outlet_id,
         actor,
-        action: masterDataAuditActions.equipmentCreate,
+        action: masterDataAuditActions.fixedAssetCreate,
         payload: {
-          equipment_id: equipment.id,
-          after: equipment
+          equipment_id: fixed_assets.id,
+          after: fixed_assets
         }
       });
 
-      return equipment;
+      return fixed_assets;
     } catch (error) {
       if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
-        throw new DatabaseConflictError("Duplicate equipment");
+        throw new DatabaseConflictError("Duplicate fixed_assets");
       }
 
       if (isMysqlError(error) && error.errno === mysqlForeignKeyErrorCode) {
@@ -883,9 +883,9 @@ export async function createEquipment(
   });
 }
 
-export async function updateEquipment(
+export async function updateFixedAsset(
   companyId: number,
-  equipmentId: number,
+  assetId: number,
   input: {
     outlet_id?: number | null;
     asset_tag?: string | null;
@@ -931,7 +931,7 @@ export async function updateEquipment(
   }
 
   return withTransaction(async (connection) => {
-    const before = await findEquipmentByIdWithExecutor(connection, companyId, equipmentId, {
+    const before = await findFixedAssetByIdWithExecutor(connection, companyId, assetId, {
       forUpdate: true
     });
     if (!before) {
@@ -957,38 +957,38 @@ export async function updateEquipment(
       return before;
     }
 
-    values.push(companyId, equipmentId);
+    values.push(companyId, assetId);
 
     try {
       await connection.execute<ResultSetHeader>(
-        `UPDATE equipment
+        `UPDATE fixed_assets
          SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
          WHERE company_id = ?
            AND id = ?`,
         values
       );
 
-      const equipment = await findEquipmentByIdWithExecutor(connection, companyId, equipmentId);
-      if (!equipment) {
+      const fixed_assets = await findFixedAssetByIdWithExecutor(connection, companyId, assetId);
+      if (!fixed_assets) {
         return null;
       }
 
       await recordMasterDataAuditLog(connection, {
         companyId,
-        outletId: equipment.outlet_id,
+        outletId: fixed_assets.outlet_id,
         actor,
-        action: masterDataAuditActions.equipmentUpdate,
+        action: masterDataAuditActions.fixedAssetUpdate,
         payload: {
-          equipment_id: equipment.id,
+          equipment_id: fixed_assets.id,
           before,
-          after: equipment
+          after: fixed_assets
         }
       });
 
-      return equipment;
+      return fixed_assets;
     } catch (error) {
       if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
-        throw new DatabaseConflictError("Duplicate equipment");
+        throw new DatabaseConflictError("Duplicate fixed_assets");
       }
 
       if (isMysqlError(error) && error.errno === mysqlForeignKeyErrorCode) {
@@ -1000,13 +1000,13 @@ export async function updateEquipment(
   });
 }
 
-export async function deleteEquipment(
+export async function deleteFixedAsset(
   companyId: number,
-  equipmentId: number,
+  assetId: number,
   actor?: MutationAuditActor
 ): Promise<boolean> {
   return withTransaction(async (connection) => {
-    const before = await findEquipmentByIdWithExecutor(connection, companyId, equipmentId, {
+    const before = await findFixedAssetByIdWithExecutor(connection, companyId, assetId, {
       forUpdate: true
     });
     if (!before) {
@@ -1018,17 +1018,17 @@ export async function deleteEquipment(
     }
 
     await connection.execute<ResultSetHeader>(
-      `DELETE FROM equipment
+      `DELETE FROM fixed_assets
        WHERE company_id = ?
          AND id = ?`,
-      [companyId, equipmentId]
+      [companyId, assetId]
     );
 
     await recordMasterDataAuditLog(connection, {
       companyId,
       outletId: before.outlet_id,
       actor,
-      action: masterDataAuditActions.equipmentDelete,
+      action: masterDataAuditActions.fixedAssetDelete,
       payload: {
         equipment_id: before.id,
         before

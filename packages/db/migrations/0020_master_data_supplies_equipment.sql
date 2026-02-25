@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS supplies (
   CONSTRAINT fk_supplies_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS equipment (
+CREATE TABLE IF NOT EXISTS fixed_assets (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   company_id BIGINT UNSIGNED NOT NULL,
   outlet_id BIGINT UNSIGNED DEFAULT NULL,
@@ -27,11 +27,11 @@ CREATE TABLE IF NOT EXISTS equipment (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_equipment_company_asset_tag (company_id, asset_tag),
-  KEY idx_equipment_company_outlet (company_id, outlet_id),
-  KEY idx_equipment_company_active (company_id, is_active),
-  KEY idx_equipment_company_updated (company_id, updated_at),
-  CONSTRAINT chk_equipment_purchase_cost_non_negative CHECK (purchase_cost IS NULL OR purchase_cost >= 0),
-  CONSTRAINT fk_equipment_company FOREIGN KEY (company_id) REFERENCES companies(id),
-  CONSTRAINT fk_equipment_outlet FOREIGN KEY (outlet_id) REFERENCES outlets(id)
+  UNIQUE KEY uq_fixed_assets_company_asset_tag (company_id, asset_tag),
+  KEY idx_fixed_assets_company_outlet (company_id, outlet_id),
+  KEY idx_fixed_assets_company_active (company_id, is_active),
+  KEY idx_fixed_assets_company_updated (company_id, updated_at),
+  CONSTRAINT chk_fixed_assets_purchase_cost_non_negative CHECK (purchase_cost IS NULL OR purchase_cost >= 0),
+  CONSTRAINT fk_fixed_assets_company FOREIGN KEY (company_id) REFERENCES companies(id),
+  CONSTRAINT fk_fixed_assets_outlet FOREIGN KEY (outlet_id) REFERENCES outlets(id)
 ) ENGINE=InnoDB;

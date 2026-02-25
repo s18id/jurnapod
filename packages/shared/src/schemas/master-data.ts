@@ -111,7 +111,7 @@ export const SupplyUpdateRequestSchema = z
     message: "At least one field must be provided"
   });
 
-export const EquipmentCreateRequestSchema = z.object({
+export const FixedAssetCreateRequestSchema = z.object({
   asset_tag: optionalShortTextSchema(64),
   name: z.string().trim().min(1).max(191),
   serial_number: optionalShortTextSchema(128),
@@ -121,7 +121,7 @@ export const EquipmentCreateRequestSchema = z.object({
   is_active: z.boolean().optional()
 });
 
-export const EquipmentUpdateRequestSchema = z
+export const FixedAssetUpdateRequestSchema = z
   .object({
     asset_tag: optionalShortTextSchema(64),
     name: z.string().trim().min(1).max(191).optional(),
