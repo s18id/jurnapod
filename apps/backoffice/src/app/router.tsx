@@ -8,6 +8,7 @@ import {
   userCanAccessRoute
 } from "./routes";
 import { ApiError } from "../lib/api-client";
+import { setupMasterDataRefresh } from "../lib/cache-service";
 import {
   clearAccessToken,
   fetchCurrentUser,
@@ -121,6 +122,21 @@ export function AppRouter() {
       setSessionStatus("anonymous");
     });
   }, []);
+
+  useEffect(() => {
+    if (!user || !accessToken) {
+      return;
+    }
+
+    const outletId = user.outlets[0]?.id ?? 0;
+    const cleanup = setupMasterDataRefresh({
+      companyId: user.company_id,
+      outletId,
+      accessToken
+    });
+
+    return cleanup;
+  }, [user, accessToken]);
 
   const availableRoutes = useMemo(() => {
     if (!user) {

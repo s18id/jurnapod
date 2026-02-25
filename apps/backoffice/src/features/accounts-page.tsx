@@ -8,6 +8,7 @@ import {
   reactivateAccount
 } from "../hooks/use-accounts";
 import { ApiError } from "../lib/api-client";
+import { StaleDataWarning } from "../components/stale-data-warning";
 import type {
   AccountResponse,
   AccountTreeNode,
@@ -476,6 +477,8 @@ export function AccountsPage(props: AccountsPageProps) {
             Create Account
           </button>
         </div>
+
+        <StaleDataWarning cacheKey="accounts" label="accounts" />
 
         {loading && <p>Loading accounts...</p>}
         {treeError && <p style={{ color: "#8d2626" }}>{treeError}</p>}

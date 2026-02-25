@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
+import { CacheService } from "../lib/cache-service";
+import { useOnlineStatus } from "../lib/connection";
 import type {
   AccountResponse,
   AccountCreateRequest,
@@ -45,6 +47,44 @@ type AccountTypesListResponse = {
   data: AccountTypeResponse[];
 };
 
+function buildAccountTree(accounts: AccountResponse[]): AccountTreeNode[] {
+  const nodeMap = new Map<number, AccountTreeNode>();
+  const roots: AccountTreeNode[] = [];
+
+  for (const account of accounts) {
+    nodeMap.set(account.id, {
+      ...account,
+      children: []
+    });
+  }
+
+  for (const node of nodeMap.values()) {
+    if (node.parent_account_id && nodeMap.has(node.parent_account_id)) {
+      const parent = nodeMap.get(node.parent_account_id);
+      parent?.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  return roots;
+}
+
+function flattenTree(nodes: AccountTreeNode[]): AccountResponse[] {
+  const result: AccountResponse[] = [];
+  const stack = [...nodes];
+  while (stack.length > 0) {
+    const node = stack.shift();
+    if (!node) continue;
+    const { children, ...rest } = node;
+    result.push(rest);
+    if (children && children.length > 0) {
+      stack.push(...children);
+    }
+  }
+  return result;
+}
+
 /**
  * Hook: useAccountTypes
  * Fetches list of account types for a company
@@ -53,22 +93,29 @@ export function useAccountTypes(companyId: number, accessToken: string) {
   const [data, setData] = useState<AccountTypeResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isOnline = useOnlineStatus();
 
   const refetch = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ 
-        company_id: String(companyId),
-        is_active: "true"
-      });
+      if (isOnline) {
+        const params = new URLSearchParams({ 
+          company_id: String(companyId),
+          is_active: "true"
+        });
 
-      const response = await apiRequest<AccountTypesListResponse>(
-        `/account-types?${params.toString()}`,
-        {},
-        accessToken
-      );
-      setData(response.data);
+        const response = await apiRequest<AccountTypesListResponse>(
+          `/account-types?${params.toString()}`,
+          {},
+          accessToken
+        );
+        setData(response.data);
+        await CacheService.cacheAccountTypes(response.data);
+      } else {
+        const cached = await CacheService.getCachedAccountTypes(companyId, accessToken, { allowStale: true });
+        setData(cached);
+      }
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -79,7 +126,7 @@ export function useAccountTypes(companyId: number, accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [companyId, accessToken]);
+  }, [companyId, accessToken, isOnline]);
 
   useEffect(() => {
     refetch();
@@ -100,35 +147,64 @@ export function useAccounts(
   const [data, setData] = useState<AccountResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isOnline = useOnlineStatus();
+
+  function applyAccountFilters(accounts: AccountResponse[]) {
+    let result = accounts;
+    if (filters?.is_active !== undefined) {
+      result = result.filter((account) => account.is_active === filters.is_active);
+    }
+    if (filters?.report_group) {
+      result = result.filter((account) => account.report_group === filters.report_group);
+    }
+    if (filters?.parent_account_id !== undefined) {
+      result = result.filter((account) => account.parent_account_id === filters.parent_account_id);
+    }
+    if (filters?.search) {
+      const query = filters.search.toLowerCase();
+      result = result.filter((account) =>
+        account.name.toLowerCase().includes(query) || account.code.toLowerCase().includes(query)
+      );
+    }
+    return result;
+  }
 
   const refetch = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ company_id: String(companyId) });
-      
-      if (filters?.is_active !== undefined) {
-        params.set("is_active", String(filters.is_active));
-      }
-      if (filters?.report_group) {
-        params.set("report_group", filters.report_group);
-      }
-      if (filters?.parent_account_id !== undefined) {
-        params.set("parent_account_id", String(filters.parent_account_id));
-      }
-      if (filters?.search) {
-        params.set("search", filters.search);
-      }
-      if (filters?.include_children !== undefined) {
-        params.set("include_children", String(filters.include_children));
-      }
+      if (isOnline) {
+        const params = new URLSearchParams({ company_id: String(companyId) });
+        
+        if (filters?.is_active !== undefined) {
+          params.set("is_active", String(filters.is_active));
+        }
+        if (filters?.report_group) {
+          params.set("report_group", filters.report_group);
+        }
+        if (filters?.parent_account_id !== undefined) {
+          params.set("parent_account_id", String(filters.parent_account_id));
+        }
+        if (filters?.search) {
+          params.set("search", filters.search);
+        }
+        if (filters?.include_children !== undefined) {
+          params.set("include_children", String(filters.include_children));
+        }
 
-      const response = await apiRequest<AccountsListResponse>(
-        `/accounts?${params.toString()}`,
-        {},
-        accessToken
-      );
-      setData(response.data);
+        const response = await apiRequest<AccountsListResponse>(
+          `/accounts?${params.toString()}`,
+          {},
+          accessToken
+        );
+        setData(response.data);
+        if (filters?.is_active !== false) {
+          await CacheService.cacheAccounts(response.data);
+        }
+      } else {
+        const cached = await CacheService.getCachedAccounts(companyId, accessToken, { allowStale: true });
+        setData(applyAccountFilters(cached));
+      }
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -139,7 +215,7 @@ export function useAccounts(
     } finally {
       setLoading(false);
     }
-  }, [companyId, accessToken, filters]);
+  }, [companyId, accessToken, filters, isOnline]);
 
   useEffect(() => {
     refetch();
@@ -160,22 +236,30 @@ export function useAccountTree(
   const [data, setData] = useState<AccountTreeNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isOnline = useOnlineStatus();
 
   const refetch = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ company_id: String(companyId) });
-      if (includeInactive !== undefined) {
-        params.set("include_inactive", String(includeInactive));
-      }
+      if (isOnline) {
+        const params = new URLSearchParams({ company_id: String(companyId) });
+        if (includeInactive !== undefined) {
+          params.set("include_inactive", String(includeInactive));
+        }
 
-      const response = await apiRequest<AccountTreeResponse>(
-        `/accounts/tree?${params.toString()}`,
-        {},
-        accessToken
-      );
-      setData(response.data);
+        const response = await apiRequest<AccountTreeResponse>(
+          `/accounts/tree?${params.toString()}`,
+          {},
+          accessToken
+        );
+        setData(response.data);
+        await CacheService.cacheAccounts(flattenTree(response.data));
+      } else {
+        const cached = await CacheService.getCachedAccounts(companyId, accessToken, { allowStale: true });
+        const filtered = includeInactive ? cached : cached.filter((account) => account.is_active);
+        setData(buildAccountTree(filtered));
+      }
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -186,7 +270,7 @@ export function useAccountTree(
     } finally {
       setLoading(false);
     }
-  }, [companyId, accessToken, includeInactive]);
+  }, [companyId, accessToken, includeInactive, isOnline]);
 
   useEffect(() => {
     refetch();
@@ -207,6 +291,7 @@ export function useAccount(
   const [data, setData] = useState<AccountResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isOnline = useOnlineStatus();
 
   const refetch = useCallback(async () => {
     if (!accountId) {
@@ -219,13 +304,19 @@ export function useAccount(
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ company_id: String(companyId) });
-      const response = await apiRequest<AccountSingleResponse>(
-        `/accounts/${accountId}?${params.toString()}`,
-        {},
-        accessToken
-      );
-      setData(response.data);
+      if (isOnline) {
+        const params = new URLSearchParams({ company_id: String(companyId) });
+        const response = await apiRequest<AccountSingleResponse>(
+          `/accounts/${accountId}?${params.toString()}`,
+          {},
+          accessToken
+        );
+        setData(response.data);
+      } else {
+        const cached = await CacheService.getCachedAccounts(companyId, accessToken, { allowStale: true });
+        const match = cached.find((account) => account.id === accountId) ?? null;
+        setData(match);
+      }
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -236,7 +327,7 @@ export function useAccount(
     } finally {
       setLoading(false);
     }
-  }, [accountId, companyId, accessToken]);
+  }, [accountId, companyId, accessToken, isOnline]);
 
   useEffect(() => {
     refetch();

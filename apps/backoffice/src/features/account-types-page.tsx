@@ -8,6 +8,7 @@ import {
 } from "../hooks/use-accounts";
 import { ApiError } from "../lib/api-client";
 import type { AccountTypeResponse } from "@jurnapod/shared";
+import { StaleDataWarning } from "../components/stale-data-warning";
 
 type AccountTypesPageProps = {
   user: SessionUser;
@@ -253,6 +254,7 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
         <p style={{ color: "#666", margin: 0 }}>
           Manage account type categories for your chart of accounts
         </p>
+        <StaleDataWarning cacheKey="account_types" label="account types" />
       </div>
 
       {/* Filters and Actions */}

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
+import { CacheService } from "../lib/cache-service";
+import { useOnlineStatus } from "../lib/connection";
+import { StaleDataWarning } from "../components/stale-data-warning";
 import type { SessionUser } from "../lib/session";
 
 type ItemType = "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
@@ -23,9 +26,6 @@ type ItemPrice = {
   is_active: boolean;
   updated_at: string;
 };
-
-type ItemsResponse = { ok: true; items: Item[] };
-type ItemPricesResponse = { ok: true; prices: ItemPrice[] };
 
 const itemTypeOptions: readonly ItemType[] = ["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"];
 
@@ -88,6 +88,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedOutletId, setSelectedOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
+  const isOnline = useOnlineStatus();
 
   const [newItem, setNewItem] = useState({
     sku: "",
@@ -107,21 +108,36 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     setLoading(true);
     setError(null);
     try {
-      const [itemsResponse, pricesResponse] = await Promise.all([
-        apiRequest<ItemsResponse>("/items", {}, props.accessToken),
-        apiRequest<ItemPricesResponse>(`/item-prices?outlet_id=${outletId}`, {}, props.accessToken)
-      ]);
-      setItems(itemsResponse.items);
-      setPrices(pricesResponse.prices);
+      let itemsData: Item[] = [];
+      let pricesData: ItemPrice[] = [];
+
+      if (isOnline) {
+        const [itemsResponse, pricesResponse] = await Promise.all([
+          CacheService.refreshItems(props.accessToken),
+          CacheService.refreshItemPrices(outletId, props.accessToken)
+        ]);
+        itemsData = itemsResponse as Item[];
+        pricesData = pricesResponse as ItemPrice[];
+      } else {
+        const [itemsResponse, pricesResponse] = await Promise.all([
+          CacheService.getCachedItems(props.accessToken, { allowStale: true }),
+          CacheService.getCachedItemPrices(outletId, props.accessToken, { allowStale: true })
+        ]);
+        itemsData = itemsResponse as Item[];
+        pricesData = pricesResponse as ItemPrice[];
+      }
+
+      setItems(itemsData);
+      setPrices(pricesData);
       setNewPrice((prev) => ({
         ...prev,
-        item_id: prev.item_id > 0 ? prev.item_id : itemsResponse.items[0]?.id ?? 0
+        item_id: prev.item_id > 0 ? prev.item_id : itemsData[0]?.id ?? 0
       }));
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
       } else {
-        setError("Failed to load items and prices");
+        setError(isOnline ? "Failed to load items and prices" : "No cached items/prices available offline");
       }
     } finally {
       setLoading(false);
@@ -132,7 +148,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     if (selectedOutletId > 0) {
       refreshData(selectedOutletId).catch(() => undefined);
     }
-  }, [selectedOutletId]);
+  }, [selectedOutletId, isOnline]);
 
   async function createItem() {
     try {
@@ -272,6 +288,11 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             </option>
           ))}
         </select>
+        <StaleDataWarning cacheKey="items" label="items" />
+        <StaleDataWarning
+          cacheKey={`item_prices:${selectedOutletId}`}
+          label={`prices for outlet #${selectedOutletId}`}
+        />
         {loading ? <p>Loading data...</p> : null}
         {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
       </section>
