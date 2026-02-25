@@ -39,11 +39,24 @@ type FixedAssetRow = RowDataPacket & {
   id: number;
   company_id: number;
   outlet_id: number | null;
+  category_id: number | null;
   asset_tag: string | null;
   name: string;
   serial_number: string | null;
   purchase_date: Date | null;
   purchase_cost: string | number | null;
+  is_active: number;
+  updated_at: Date;
+};
+
+type FixedAssetCategoryRow = RowDataPacket & {
+  id: number;
+  company_id: number;
+  code: string;
+  name: string;
+  depreciation_method: "STRAIGHT_LINE";
+  useful_life_months: number;
+  residual_value_pct: string | number;
   is_active: number;
   updated_at: Date;
 };
@@ -73,7 +86,10 @@ const masterDataAuditActions = {
   supplyDelete: "MASTER_DATA_SUPPLY_DELETE",
   fixedAssetCreate: "MASTER_DATA_FIXED_ASSET_CREATE",
   fixedAssetUpdate: "MASTER_DATA_FIXED_ASSET_UPDATE",
-  fixedAssetDelete: "MASTER_DATA_FIXED_ASSET_DELETE"
+  fixedAssetDelete: "MASTER_DATA_FIXED_ASSET_DELETE",
+  fixedAssetCategoryCreate: "MASTER_DATA_FIXED_ASSET_CATEGORY_CREATE",
+  fixedAssetCategoryUpdate: "MASTER_DATA_FIXED_ASSET_CATEGORY_UPDATE",
+  fixedAssetCategoryDelete: "MASTER_DATA_FIXED_ASSET_CATEGORY_DELETE"
 } as const;
 
 type MasterDataAuditAction = (typeof masterDataAuditActions)[keyof typeof masterDataAuditActions];
@@ -196,11 +212,26 @@ function normalizeFixedAsset(row: FixedAssetRow) {
     id: Number(row.id),
     company_id: Number(row.company_id),
     outlet_id: row.outlet_id == null ? null : Number(row.outlet_id),
+    category_id: row.category_id == null ? null : Number(row.category_id),
     asset_tag: row.asset_tag,
     name: row.name,
     serial_number: row.serial_number,
     purchase_date: row.purchase_date ? new Date(row.purchase_date).toISOString() : null,
     purchase_cost: row.purchase_cost == null ? null : Number(row.purchase_cost),
+    is_active: row.is_active === 1,
+    updated_at: new Date(row.updated_at).toISOString()
+  };
+}
+
+function normalizeFixedAssetCategory(row: FixedAssetCategoryRow) {
+  return {
+    id: Number(row.id),
+    company_id: Number(row.company_id),
+    code: row.code,
+    name: row.name,
+    depreciation_method: row.depreciation_method,
+    useful_life_months: Number(row.useful_life_months),
+    residual_value_pct: Number(row.residual_value_pct),
     is_active: row.is_active === 1,
     updated_at: new Date(row.updated_at).toISOString()
   };
@@ -241,6 +272,25 @@ async function ensureCompanyOutletExists(
 
   if (rows.length === 0) {
     throw new DatabaseReferenceError("Outlet not found for company");
+  }
+}
+
+async function ensureCompanyFixedAssetCategoryExists(
+  executor: QueryExecutor,
+  companyId: number,
+  categoryId: number
+): Promise<void> {
+  const [rows] = await executor.execute<RowDataPacket[]>(
+    `SELECT id
+     FROM fixed_asset_categories
+     WHERE id = ?
+       AND company_id = ?
+     LIMIT 1`,
+    [categoryId, companyId]
+  );
+
+  if (rows.length === 0) {
+    throw new DatabaseReferenceError("Fixed asset category not found for company");
   }
 }
 
@@ -338,6 +388,30 @@ async function findSupplyByIdWithExecutor(
   return normalizeSupply(rows[0]);
 }
 
+async function findFixedAssetCategoryByIdWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  categoryId: number,
+  options?: { forUpdate?: boolean }
+) {
+  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
+  const [rows] = await executor.execute<FixedAssetCategoryRow[]>(
+    `SELECT id, company_id, code, name, depreciation_method, useful_life_months, residual_value_pct,
+            is_active, updated_at
+     FROM fixed_asset_categories
+     WHERE company_id = ?
+       AND id = ?
+     LIMIT 1${forUpdateClause}`,
+    [companyId, categoryId]
+  );
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  return normalizeFixedAssetCategory(rows[0]);
+}
+
 async function findFixedAssetByIdWithExecutor(
   executor: QueryExecutor,
   companyId: number,
@@ -346,7 +420,7 @@ async function findFixedAssetByIdWithExecutor(
 ) {
   const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
   const [rows] = await executor.execute<FixedAssetRow[]>(
-    `SELECT id, company_id, outlet_id, asset_tag, name, serial_number, purchase_date, purchase_cost,
+    `SELECT id, company_id, outlet_id, category_id, asset_tag, name, serial_number, purchase_date, purchase_cost,
             is_active, updated_at
      FROM fixed_assets
      WHERE company_id = ?
@@ -783,6 +857,227 @@ export async function deleteSupply(
   });
 }
 
+export async function listFixedAssetCategories(
+  companyId: number,
+  filters?: { isActive?: boolean }
+) {
+  const pool = getDbPool();
+  const values: Array<number> = [companyId];
+
+  let sql =
+    "SELECT id, company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, is_active, updated_at FROM fixed_asset_categories WHERE company_id = ?";
+
+  if (typeof filters?.isActive === "boolean") {
+    sql += " AND is_active = ?";
+    values.push(filters.isActive ? 1 : 0);
+  }
+
+  sql += " ORDER BY id ASC";
+
+  const [rows] = await pool.execute<FixedAssetCategoryRow[]>(sql, values);
+  return rows.map(normalizeFixedAssetCategory);
+}
+
+export async function findFixedAssetCategoryById(
+  companyId: number,
+  categoryId: number
+) {
+  const pool = getDbPool();
+  return findFixedAssetCategoryByIdWithExecutor(pool, companyId, categoryId);
+}
+
+export async function createFixedAssetCategory(
+  companyId: number,
+  input: {
+    code: string;
+    name: string;
+    depreciation_method?: "STRAIGHT_LINE";
+    useful_life_months: number;
+    residual_value_pct?: number;
+    is_active?: boolean;
+  },
+  actor?: MutationAuditActor
+) {
+  return withTransaction(async (connection) => {
+    try {
+      const [result] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO fixed_asset_categories (
+           company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, is_active
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          companyId,
+          input.code,
+          input.name,
+          input.depreciation_method ?? "STRAIGHT_LINE",
+          input.useful_life_months,
+          input.residual_value_pct ?? 0,
+          input.is_active === false ? 0 : 1
+        ]
+      );
+
+      const category = await findFixedAssetCategoryByIdWithExecutor(
+        connection,
+        companyId,
+        Number(result.insertId)
+      );
+      if (!category) {
+        throw new Error("Created fixed asset category not found");
+      }
+
+      await recordMasterDataAuditLog(connection, {
+        companyId,
+        outletId: null,
+        actor,
+        action: masterDataAuditActions.fixedAssetCategoryCreate,
+        payload: {
+          fixed_asset_category_id: category.id,
+          after: category
+        }
+      });
+
+      return category;
+    } catch (error) {
+      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        throw new DatabaseConflictError("Duplicate fixed asset category");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function updateFixedAssetCategory(
+  companyId: number,
+  categoryId: number,
+  input: {
+    code?: string;
+    name?: string;
+    depreciation_method?: "STRAIGHT_LINE";
+    useful_life_months?: number;
+    residual_value_pct?: number;
+    is_active?: boolean;
+  },
+  actor?: MutationAuditActor
+) {
+  const fields: string[] = [];
+  const values: Array<string | number> = [];
+
+  if (typeof input.code === "string") {
+    fields.push("code = ?");
+    values.push(input.code);
+  }
+
+  if (typeof input.name === "string") {
+    fields.push("name = ?");
+    values.push(input.name);
+  }
+
+  if (typeof input.depreciation_method === "string") {
+    fields.push("depreciation_method = ?");
+    values.push(input.depreciation_method);
+  }
+
+  if (typeof input.useful_life_months === "number") {
+    fields.push("useful_life_months = ?");
+    values.push(input.useful_life_months);
+  }
+
+  if (typeof input.residual_value_pct === "number") {
+    fields.push("residual_value_pct = ?");
+    values.push(input.residual_value_pct);
+  }
+
+  if (typeof input.is_active === "boolean") {
+    fields.push("is_active = ?");
+    values.push(input.is_active ? 1 : 0);
+  }
+
+  return withTransaction(async (connection) => {
+    const before = await findFixedAssetCategoryByIdWithExecutor(connection, companyId, categoryId, {
+      forUpdate: true
+    });
+    if (!before) {
+      return null;
+    }
+
+    if (fields.length === 0) {
+      return before;
+    }
+
+    values.push(companyId, categoryId);
+
+    try {
+      await connection.execute<ResultSetHeader>(
+        `UPDATE fixed_asset_categories
+         SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
+         WHERE company_id = ?
+           AND id = ?`,
+        values
+      );
+
+      const category = await findFixedAssetCategoryByIdWithExecutor(connection, companyId, categoryId);
+      if (!category) {
+        return null;
+      }
+
+      await recordMasterDataAuditLog(connection, {
+        companyId,
+        outletId: null,
+        actor,
+        action: masterDataAuditActions.fixedAssetCategoryUpdate,
+        payload: {
+          fixed_asset_category_id: category.id,
+          before,
+          after: category
+        }
+      });
+
+      return category;
+    } catch (error) {
+      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        throw new DatabaseConflictError("Duplicate fixed asset category");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function deleteFixedAssetCategory(
+  companyId: number,
+  categoryId: number,
+  actor?: MutationAuditActor
+): Promise<boolean> {
+  return withTransaction(async (connection) => {
+    const before = await findFixedAssetCategoryByIdWithExecutor(connection, companyId, categoryId, {
+      forUpdate: true
+    });
+    if (!before) {
+      return false;
+    }
+
+    await connection.execute<ResultSetHeader>(
+      `DELETE FROM fixed_asset_categories
+       WHERE company_id = ?
+         AND id = ?`,
+      [companyId, categoryId]
+    );
+
+    await recordMasterDataAuditLog(connection, {
+      companyId,
+      outletId: null,
+      actor,
+      action: masterDataAuditActions.fixedAssetCategoryDelete,
+      payload: {
+        fixed_asset_category_id: before.id,
+        before
+      }
+    });
+
+    return true;
+  });
+}
+
 export async function listFixedAssets(
   companyId: number,
   filters?: { outletId?: number; isActive?: boolean }
@@ -791,7 +1086,7 @@ export async function listFixedAssets(
   const values: Array<number> = [companyId];
 
   let sql =
-    "SELECT id, company_id, outlet_id, asset_tag, name, serial_number, purchase_date, purchase_cost, is_active, updated_at FROM fixed_assets WHERE company_id = ?";
+    "SELECT id, company_id, outlet_id, category_id, asset_tag, name, serial_number, purchase_date, purchase_cost, is_active, updated_at FROM fixed_assets WHERE company_id = ?";
 
   if (typeof filters?.outletId === "number") {
     sql += " AND outlet_id = ?";
@@ -818,6 +1113,7 @@ export async function createFixedAsset(
   companyId: number,
   input: {
     outlet_id?: number | null;
+    category_id?: number | null;
     asset_tag?: string | null;
     name: string;
     serial_number?: string | null;
@@ -835,14 +1131,19 @@ export async function createFixedAsset(
       }
     }
 
+    if (typeof input.category_id === "number") {
+      await ensureCompanyFixedAssetCategoryExists(connection, companyId, input.category_id);
+    }
+
     try {
       const [result] = await connection.execute<ResultSetHeader>(
         `INSERT INTO fixed_assets (
-           company_id, outlet_id, asset_tag, name, serial_number, purchase_date, purchase_cost, is_active
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           company_id, outlet_id, category_id, asset_tag, name, serial_number, purchase_date, purchase_cost, is_active
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           companyId,
           input.outlet_id ?? null,
+          input.category_id ?? null,
           input.asset_tag ?? null,
           input.name,
           input.serial_number ?? null,
@@ -888,6 +1189,7 @@ export async function updateFixedAsset(
   assetId: number,
   input: {
     outlet_id?: number | null;
+    category_id?: number | null;
     asset_tag?: string | null;
     name?: string;
     serial_number?: string | null;
@@ -951,6 +1253,14 @@ export async function updateFixedAsset(
       }
       fields.push("outlet_id = ?");
       values.push(input.outlet_id ?? null);
+    }
+
+    if (Object.hasOwn(input, "category_id")) {
+      if (typeof input.category_id === "number") {
+        await ensureCompanyFixedAssetCategoryExists(connection, companyId, input.category_id);
+      }
+      fields.push("category_id = ?");
+      values.push(input.category_id ?? null);
     }
 
     if (fields.length === 0) {

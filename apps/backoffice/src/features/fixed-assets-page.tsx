@@ -8,11 +8,24 @@ type FixedAsset = {
   id: number;
   company_id: number;
   outlet_id: number | null;
+  category_id: number | null;
   asset_tag: string | null;
   name: string;
   serial_number: string | null;
   purchase_date: string | null;
   purchase_cost: number | null;
+  is_active: boolean;
+  updated_at: string;
+};
+
+type FixedAssetCategory = {
+  id: number;
+  company_id: number;
+  code: string;
+  name: string;
+  depreciation_method: "STRAIGHT_LINE";
+  useful_life_months: number;
+  residual_value_pct: number;
   is_active: boolean;
   updated_at: string;
 };
@@ -95,6 +108,7 @@ const primaryButtonStyle = {
 
 type FixedAssetFormState = {
   outlet_id: number | null;
+  category_id: number | null;
   asset_tag: string;
   name: string;
   serial_number: string;
@@ -105,6 +119,7 @@ type FixedAssetFormState = {
 
 const emptyForm: FixedAssetFormState = {
   outlet_id: null,
+  category_id: null,
   asset_tag: "",
   name: "",
   serial_number: "",
@@ -113,15 +128,36 @@ const emptyForm: FixedAssetFormState = {
   is_active: true
 };
 
+type FixedAssetCategoryFormState = {
+  code: string;
+  name: string;
+  depreciation_method: "STRAIGHT_LINE";
+  useful_life_months: string;
+  residual_value_pct: string;
+  is_active: boolean;
+};
+
+const emptyCategoryForm: FixedAssetCategoryFormState = {
+  code: "",
+  name: "",
+  depreciation_method: "STRAIGHT_LINE",
+  useful_life_months: "60",
+  residual_value_pct: "0",
+  is_active: true
+};
+
 type OutletFilter = "ALL" | "UNASSIGNED" | number;
 
 export function FixedAssetPage(props: FixedAssetPageProps) {
   const isOnline = useOnlineStatus();
   const [asset, setFixedAsset] = useState<FixedAsset[]>([]);
+  const [categories, setCategories] = useState<FixedAssetCategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formState, setFormState] = useState<FixedAssetFormState>(emptyForm);
+  const [categoryFormState, setCategoryFormState] = useState<FixedAssetCategoryFormState>(emptyCategoryForm);
   const [showInactive, setShowInactive] = useState(false);
+  const [showInactiveCategories, setShowInactiveCategories] = useState(false);
   const [outletFilter, setOutletFilter] = useState<OutletFilter>("ALL");
   const [selectedFixedAssetId, setSelectedFixedAssetId] = useState<number | null>(null);
   const [depreciationPlan, setDepreciationPlan] = useState<DepreciationPlan>(null);
@@ -132,6 +168,9 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
   const [runLoading, setRunLoading] = useState(false);
 
   const outletOptions = useMemo(() => props.user.outlets ?? [], [props.user.outlets]);
+  const categoryOptions = useMemo(() => {
+    return [...categories].sort((a, b) => a.name.localeCompare(b.name));
+  }, [categories]);
 
   async function refreshFixedAsset(filter: OutletFilter) {
     setLoading(true);
@@ -140,12 +179,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       const query =
         typeof filter === "number" ? `?outlet_id=${filter}` : "";
-      const response = await apiRequest<{ ok: true; asset: FixedAsset[] }>(
-        `/asset${query}`,
+      const response = await apiRequest<{ ok: true; assets: FixedAsset[] }>(
+        `/fixed-assets${query}`,
         {},
         props.accessToken
       );
-      setFixedAsset(response.asset);
+      setFixedAsset(response.assets);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -157,9 +196,27 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     }
   }
 
+  async function refreshCategories() {
+    try {
+      const response = await apiRequest<{ ok: true; categories: FixedAssetCategory[] }>(
+        "/fixed-asset-categories",
+        {},
+        props.accessToken
+      );
+      setCategories(response.categories);
+    } catch (fetchError) {
+      if (fetchError instanceof ApiError) {
+        setError(fetchError.message);
+      } else {
+        setError("Failed to load categories");
+      }
+    }
+  }
+
   useEffect(() => {
     if (isOnline) {
       refreshFixedAsset(outletFilter).catch(() => undefined);
+      refreshCategories().catch(() => undefined);
     }
   }, [isOnline, outletFilter]);
 
@@ -172,11 +229,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       setError(null);
       await apiRequest(
-        "/asset",
+        "/fixed-assets",
         {
           method: "POST",
           body: JSON.stringify({
             outlet_id: formState.outlet_id,
+            category_id: formState.category_id,
             asset_tag: formState.asset_tag.trim() || null,
             name: formState.name.trim(),
             serial_number: formState.serial_number.trim() || null,
@@ -204,11 +262,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       setError(null);
       await apiRequest(
-        `/asset/${item.id}`,
+        `/fixed-assets/${item.id}`,
         {
           method: "PATCH",
           body: JSON.stringify({
             outlet_id: item.outlet_id,
+            category_id: item.category_id,
             asset_tag: item.asset_tag,
             name: item.name,
             serial_number: item.serial_number,
@@ -236,7 +295,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
 
     try {
       setError(null);
-      await apiRequest(`/asset/${assetId}`, { method: "DELETE" }, props.accessToken);
+      await apiRequest(`/fixed-assets/${assetId}`, { method: "DELETE" }, props.accessToken);
       await refreshFixedAsset(outletFilter);
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {
@@ -247,11 +306,101 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     }
   }
 
+  async function handleCreateCategory() {
+    if (!categoryFormState.code.trim() || !categoryFormState.name.trim()) {
+      setError("Category code and name are required");
+      return;
+    }
+
+    if (!categoryFormState.useful_life_months.trim()) {
+      setError("Useful life is required");
+      return;
+    }
+
+    try {
+      setError(null);
+      await apiRequest(
+        "/fixed-asset-categories",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            code: categoryFormState.code.trim(),
+            name: categoryFormState.name.trim(),
+            depreciation_method: categoryFormState.depreciation_method,
+            useful_life_months: Number(categoryFormState.useful_life_months),
+            residual_value_pct: Number(categoryFormState.residual_value_pct || 0),
+            is_active: categoryFormState.is_active
+          })
+        },
+        props.accessToken
+      );
+      setCategoryFormState(emptyCategoryForm);
+      await refreshCategories();
+    } catch (createError) {
+      if (createError instanceof ApiError) {
+        setError(createError.message);
+      } else {
+        setError("Failed to create category");
+      }
+    }
+  }
+
+  async function handleSaveCategory(category: FixedAssetCategory) {
+    try {
+      setError(null);
+      await apiRequest(
+        `/fixed-asset-categories/${category.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            code: category.code,
+            name: category.name,
+            depreciation_method: category.depreciation_method,
+            useful_life_months: category.useful_life_months,
+            residual_value_pct: category.residual_value_pct,
+            is_active: category.is_active
+          })
+        },
+        props.accessToken
+      );
+      await refreshCategories();
+    } catch (saveError) {
+      if (saveError instanceof ApiError) {
+        setError(saveError.message);
+      } else {
+        setError("Failed to update category");
+      }
+    }
+  }
+
+  async function handleDeleteCategory(categoryId: number) {
+    if (!globalThis.confirm("Delete this category?")) {
+      return;
+    }
+
+    try {
+      setError(null);
+      await apiRequest(
+        `/fixed-asset-categories/${categoryId}`,
+        { method: "DELETE" },
+        props.accessToken
+      );
+      await refreshCategories();
+      await refreshFixedAsset(outletFilter);
+    } catch (deleteError) {
+      if (deleteError instanceof ApiError) {
+        setError(deleteError.message);
+      } else {
+        setError("Failed to delete category");
+      }
+    }
+  }
+
   async function loadDepreciationPlan(assetId: number) {
     try {
       setError(null);
       const response = await apiRequest<{ ok: true; plan: DepreciationPlan }>(
-        `/asset/${assetId}/depreciation-plan`,
+        `/fixed-assets/${assetId}/depreciation-plan`,
         {},
         props.accessToken
       );
@@ -295,7 +444,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
       setError(null);
       if (depreciationPlan.id) {
         await apiRequest(
-          `/asset/${assetId}/depreciation-plan`,
+          `/fixed-assets/${assetId}/depreciation-plan`,
           {
             method: "PATCH",
             body: JSON.stringify({
@@ -310,7 +459,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
         );
       } else {
         await apiRequest(
-          `/asset/${assetId}/depreciation-plan`,
+          `/fixed-assets/${assetId}/depreciation-plan`,
           {
             method: "POST",
             body: JSON.stringify({
@@ -400,6 +549,10 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     return true;
   });
 
+  const visibleCategories = showInactiveCategories
+    ? categoryOptions
+    : categoryOptions.filter((category) => category.is_active);
+
   return (
     <div>
       <section style={boxStyle}>
@@ -407,6 +560,229 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
         <p>Manage durable assets and outlet assignments.</p>
         {loading ? <p>Loading asset...</p> : null}
         {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
+      </section>
+
+      <section style={boxStyle}>
+        <h3 style={{ marginTop: 0 }}>Create Category</h3>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-start" }}>
+          <input
+            placeholder="Code"
+            value={categoryFormState.code}
+            onChange={(event) =>
+              setCategoryFormState((prev) => ({ ...prev, code: event.target.value }))
+            }
+            style={inputStyle}
+          />
+          <input
+            placeholder="Name"
+            value={categoryFormState.name}
+            onChange={(event) =>
+              setCategoryFormState((prev) => ({ ...prev, name: event.target.value }))
+            }
+            style={inputStyle}
+          />
+          <select
+            value={categoryFormState.depreciation_method}
+            onChange={(event) =>
+              setCategoryFormState((prev) => ({
+                ...prev,
+                depreciation_method: event.target.value as "STRAIGHT_LINE"
+              }))
+            }
+            style={inputStyle}
+          >
+            <option value="STRAIGHT_LINE">Straight Line</option>
+          </select>
+          <input
+            type="number"
+            placeholder="Useful life (months)"
+            value={categoryFormState.useful_life_months}
+            onChange={(event) =>
+              setCategoryFormState((prev) => ({ ...prev, useful_life_months: event.target.value }))
+            }
+            style={inputStyle}
+          />
+          <input
+            type="number"
+            placeholder="Residual %"
+            value={categoryFormState.residual_value_pct}
+            onChange={(event) =>
+              setCategoryFormState((prev) => ({ ...prev, residual_value_pct: event.target.value }))
+            }
+            style={inputStyle}
+          />
+          <label>
+            <input
+              type="checkbox"
+              checked={categoryFormState.is_active}
+              onChange={(event) =>
+                setCategoryFormState((prev) => ({
+                  ...prev,
+                  is_active: event.target.checked
+                }))
+              }
+            />
+            Active
+          </label>
+          <button type="button" onClick={handleCreateCategory} style={primaryButtonStyle}>
+            Add category
+          </button>
+        </div>
+      </section>
+
+      <section style={boxStyle}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Category List</h3>
+          <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <input
+              type="checkbox"
+              checked={showInactiveCategories}
+              onChange={(event) => setShowInactiveCategories(event.target.checked)}
+            />
+            Show Inactive
+          </label>
+        </div>
+        <table style={tableStyle}>
+          <thead>
+            <tr>
+              <th style={cellStyle}>ID</th>
+              <th style={cellStyle}>Code</th>
+              <th style={cellStyle}>Name</th>
+              <th style={cellStyle}>Method</th>
+              <th style={cellStyle}>Life (Months)</th>
+              <th style={cellStyle}>Residual %</th>
+              <th style={cellStyle}>Active</th>
+              <th style={cellStyle}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleCategories.map((category) => (
+              <tr key={category.id}>
+                <td style={cellStyle}>{category.id}</td>
+                <td style={cellStyle}>
+                  <input
+                    value={category.code}
+                    onChange={(event) =>
+                      setCategories((prev) =>
+                        prev.map((entry) =>
+                          entry.id === category.id
+                            ? { ...entry, code: event.target.value }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <input
+                    value={category.name}
+                    onChange={(event) =>
+                      setCategories((prev) =>
+                        prev.map((entry) =>
+                          entry.id === category.id
+                            ? { ...entry, name: event.target.value }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <select
+                    value={category.depreciation_method}
+                    onChange={(event) =>
+                      setCategories((prev) =>
+                        prev.map((entry) =>
+                          entry.id === category.id
+                            ? {
+                                ...entry,
+                                depreciation_method: event.target.value as "STRAIGHT_LINE"
+                              }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  >
+                    <option value="STRAIGHT_LINE">Straight Line</option>
+                  </select>
+                </td>
+                <td style={cellStyle}>
+                  <input
+                    type="number"
+                    value={category.useful_life_months}
+                    onChange={(event) =>
+                      setCategories((prev) =>
+                        prev.map((entry) =>
+                          entry.id === category.id
+                            ? {
+                                ...entry,
+                                useful_life_months: Number(event.target.value)
+                              }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <input
+                    type="number"
+                    value={category.residual_value_pct}
+                    onChange={(event) =>
+                      setCategories((prev) =>
+                        prev.map((entry) =>
+                          entry.id === category.id
+                            ? {
+                                ...entry,
+                                residual_value_pct: Number(event.target.value)
+                              }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <input
+                    type="checkbox"
+                    checked={category.is_active}
+                    onChange={(event) =>
+                      setCategories((prev) =>
+                        prev.map((entry) =>
+                          entry.id === category.id
+                            ? { ...entry, is_active: event.target.checked }
+                            : entry
+                        )
+                      )
+                    }
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveCategory(category)}
+                    style={buttonStyle}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCategory(category.id)}
+                    style={buttonStyle}
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {visibleCategories.length === 0 ? <p>No categories available.</p> : null}
       </section>
 
       <section style={boxStyle}>
@@ -424,6 +800,23 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             onChange={(event) => setFormState((prev) => ({ ...prev, asset_tag: event.target.value }))}
             style={inputStyle}
           />
+          <select
+            value={formState.category_id ?? ""}
+            onChange={(event) =>
+              setFormState((prev) => ({
+                ...prev,
+                category_id: event.target.value ? Number(event.target.value) : null
+              }))
+            }
+            style={inputStyle}
+          >
+            <option value="">Uncategorized</option>
+            {categoryOptions.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.code} - {category.name}
+              </option>
+            ))}
+          </select>
           <input
             placeholder="Serial number"
             value={formState.serial_number}
@@ -524,6 +917,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
               <th style={cellStyle}>ID</th>
               <th style={cellStyle}>Name</th>
               <th style={cellStyle}>Asset Tag</th>
+              <th style={cellStyle}>Category</th>
               <th style={cellStyle}>Serial</th>
               <th style={cellStyle}>Outlet</th>
               <th style={cellStyle}>Purchase Date</th>
@@ -563,6 +957,31 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
                     }
                     style={inputStyle}
                   />
+                </td>
+                <td style={cellStyle}>
+                  <select
+                    value={item.category_id ?? ""}
+                    onChange={(event) =>
+                      setFixedAsset((prev) =>
+                        prev.map((entry) =>
+                          entry.id === item.id
+                            ? {
+                                ...entry,
+                                category_id: event.target.value ? Number(event.target.value) : null
+                              }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  >
+                    <option value="">Uncategorized</option>
+                    {categoryOptions.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.code} - {category.name}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td style={cellStyle}>
                   <input
@@ -675,7 +1094,9 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
 
       <section style={boxStyle}>
         <strong>Quick checks</strong>
-        <p style={{ marginBottom: 0 }}>Loaded {asset.length} asset records.</p>
+        <p style={{ marginBottom: 0 }}>
+          Loaded {asset.length} asset records and {categories.length} categories.
+        </p>
       </section>
 
       {planFormVisible && selectedFixedAssetId && (

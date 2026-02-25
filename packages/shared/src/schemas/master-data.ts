@@ -116,6 +116,7 @@ export const FixedAssetCreateRequestSchema = z.object({
   name: z.string().trim().min(1).max(191),
   serial_number: optionalShortTextSchema(128),
   outlet_id: NumericIdSchema.optional(),
+  category_id: NumericIdSchema.optional(),
   purchase_date: z.string().trim().min(1).optional(),
   purchase_cost: z.coerce.number().finite().nonnegative().optional(),
   is_active: z.boolean().optional()
@@ -127,8 +128,33 @@ export const FixedAssetUpdateRequestSchema = z
     name: z.string().trim().min(1).max(191).optional(),
     serial_number: optionalShortTextSchema(128),
     outlet_id: NumericIdSchema.optional(),
+    category_id: NumericIdSchema.optional(),
     purchase_date: z.string().trim().min(1).optional(),
     purchase_cost: z.coerce.number().finite().nonnegative().optional(),
+    is_active: z.boolean().optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided"
+  });
+
+export const FixedAssetCategoryMethodSchema = z.enum(["STRAIGHT_LINE"]);
+
+export const FixedAssetCategoryCreateRequestSchema = z.object({
+  code: z.string().trim().min(1).max(64),
+  name: z.string().trim().min(1).max(191),
+  depreciation_method: FixedAssetCategoryMethodSchema.optional(),
+  useful_life_months: z.coerce.number().int().positive(),
+  residual_value_pct: z.coerce.number().min(0).max(100).optional(),
+  is_active: z.boolean().optional()
+});
+
+export const FixedAssetCategoryUpdateRequestSchema = z
+  .object({
+    code: z.string().trim().min(1).max(64).optional(),
+    name: z.string().trim().min(1).max(191).optional(),
+    depreciation_method: FixedAssetCategoryMethodSchema.optional(),
+    useful_life_months: z.coerce.number().int().positive().optional(),
+    residual_value_pct: z.coerce.number().min(0).max(100).optional(),
     is_active: z.boolean().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
