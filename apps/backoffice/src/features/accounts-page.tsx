@@ -9,6 +9,8 @@ import {
 } from "../hooks/use-accounts";
 import { ApiError } from "../lib/api-client";
 import { StaleDataWarning } from "../components/stale-data-warning";
+import { useOnlineStatus } from "../lib/connection";
+import { OfflinePage } from "../components/offline-page";
 import type {
   AccountResponse,
   AccountTreeNode,
@@ -116,6 +118,7 @@ const groupBadgeStyle = {
 } as const;
 
 export function AccountsPage(props: AccountsPageProps) {
+  const isOnline = useOnlineStatus();
   const [searchTerm, setSearchTerm] = useState("");
   const [showInactive, setShowInactive] = useState(false);
   const [reportGroupFilter, setReportGroupFilter] = useState<ReportGroup | "ALL">("ALL");
@@ -139,6 +142,15 @@ export function AccountsPage(props: AccountsPageProps) {
     props.user.company_id,
     props.accessToken
   );
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to Manage Master Data"
+        message="Chart of accounts changes require a connection."
+      />
+    );
+  }
 
   // Flatten tree for parent dropdown and search
   const flatAccounts = useMemo(() => {

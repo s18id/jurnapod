@@ -3,6 +3,7 @@ import { apiRequest, ApiError } from "../lib/api-client";
 import { CacheService } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
 import { StaleDataWarning } from "../components/stale-data-warning";
+import { OfflinePage } from "../components/offline-page";
 import type { SessionUser } from "../lib/session";
 
 type ItemType = "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
@@ -252,6 +253,15 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
         setError(deleteError.message);
       }
     }
+  }
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to Manage Master Data"
+        message="Items and pricing changes require a connection."
+      />
+    );
   }
 
   return (

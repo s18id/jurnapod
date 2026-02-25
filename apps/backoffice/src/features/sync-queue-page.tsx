@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { OutboxService } from "../lib/outbox-service";
 import type { OutboxItem } from "../lib/offline-db";
+import { ConflictDialog } from "../components/conflict-dialog";
 
 const boxStyle = {
   border: "1px solid #e2ddd2",
@@ -43,6 +44,7 @@ function formatDateTime(value: Date) {
 export function SyncQueuePage() {
   const [queue, setQueue] = useState<OutboxItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [conflictItem, setConflictItem] = useState<OutboxItem | null>(null);
 
   async function loadQueue() {
     setLoading(true);
@@ -99,6 +101,11 @@ export function SyncQueuePage() {
                   <td style={cellStyle}>{item.status}</td>
                   <td style={cellStyle}>{item.error ?? "-"}</td>
                   <td style={{ ...cellStyle, textAlign: "center" }}>
+                    {item.status === "failed" ? (
+                      <button type="button" style={buttonStyle} onClick={() => setConflictItem(item)}>
+                        Review
+                      </button>
+                    ) : null}
                     <button type="button" style={dangerButtonStyle} onClick={() => handleDelete(item.id)}>
                       Delete
                     </button>
@@ -109,6 +116,25 @@ export function SyncQueuePage() {
           </table>
         )}
       </div>
+      {conflictItem ? (
+        <ConflictDialog
+          item={conflictItem}
+          onClose={() => setConflictItem(null)}
+          onResolve={async (action) => {
+            if (action === "discard") {
+              await OutboxService.deleteItem(conflictItem.id);
+            }
+            if (action === "keep") {
+              await OutboxService.updateStatus(conflictItem.id, "failed", conflictItem.error);
+            }
+            if (action === "edit") {
+              window.location.hash = "#/transactions";
+            }
+            setConflictItem(null);
+            await loadQueue();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

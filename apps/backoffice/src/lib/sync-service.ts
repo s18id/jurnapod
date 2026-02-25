@@ -1,5 +1,6 @@
 import { ApiError, apiRequest } from "./api-client";
 import { db, type OutboxItem } from "./offline-db";
+import { ERROR_MESSAGES } from "./error-messages";
 
 export type SyncResult = {
   success: number;
@@ -74,7 +75,7 @@ export class SyncService {
         } catch (error) {
           await this.scheduleRetry(
             item,
-            error instanceof Error ? error.message : "Network error"
+            error instanceof Error ? error.message : ERROR_MESSAGES.NETWORK_ERROR
           );
         }
       }
@@ -100,14 +101,14 @@ export class SyncService {
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 409) {
-          return { ok: false, conflict: true, error: error.message };
+          return { ok: false, conflict: true, error: ERROR_MESSAGES.CONFLICT };
         }
         if (error.status >= 400 && error.status < 500) {
-          return { ok: false, conflict: false, error: error.message };
+          return { ok: false, conflict: false, error: ERROR_MESSAGES.VALIDATION_ERROR };
         }
-        return { ok: false, conflict: false, error: error.message };
+        return { ok: false, conflict: false, error: ERROR_MESSAGES.SERVER_ERROR };
       }
-      return { ok: false, conflict: false, error: "Network error" };
+      return { ok: false, conflict: false, error: ERROR_MESSAGES.NETWORK_ERROR };
     }
   }
 
@@ -117,7 +118,7 @@ export class SyncService {
       await db.outbox.update(item.id, {
         status: "failed",
         retryCount,
-        error: "Max retries reached"
+        error: ERROR_MESSAGES.MAX_RETRIES
       });
       return;
     }

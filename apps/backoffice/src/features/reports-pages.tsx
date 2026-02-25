@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
+import { useOnlineStatus } from "../lib/connection";
+import { OfflinePage } from "../components/offline-page";
 
 type ReportsProps = {
   user: SessionUser;
@@ -123,6 +125,7 @@ function beforeDaysIso(days: number): string {
 }
 
 export function PosTransactionsPage(props: ReportsProps) {
+  const isOnline = useOnlineStatus();
   const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
   const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(7));
   const [dateTo, setDateTo] = useState<string>(todayIso());
@@ -154,6 +157,15 @@ export function PosTransactionsPage(props: ReportsProps) {
       loadRows().catch(() => undefined);
     }
   }, [outletId, dateFrom, dateTo]);
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to View Reports"
+        message="Reports require real-time data. Please connect to the internet."
+      />
+    );
+  }
 
   return (
     <section style={boxStyle}>
@@ -203,6 +215,7 @@ export function PosTransactionsPage(props: ReportsProps) {
 }
 
 export function DailySalesPage(props: ReportsProps) {
+  const isOnline = useOnlineStatus();
   const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
   const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(7));
   const [dateTo, setDateTo] = useState<string>(todayIso());
@@ -245,6 +258,15 @@ export function DailySalesPage(props: ReportsProps) {
       ),
     [rows]
   );
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to View Reports"
+        message="Reports require real-time data. Please connect to the internet."
+      />
+    );
+  }
 
   return (
     <section style={boxStyle}>
@@ -294,6 +316,7 @@ export function DailySalesPage(props: ReportsProps) {
 }
 
 export function PosPaymentsPage(props: ReportsProps) {
+  const isOnline = useOnlineStatus();
   const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
   const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(7));
   const [dateTo, setDateTo] = useState<string>(todayIso());
@@ -336,6 +359,15 @@ export function PosPaymentsPage(props: ReportsProps) {
       ),
     [rows]
   );
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to View Reports"
+        message="Reports require real-time data. Please connect to the internet."
+      />
+    );
+  }
 
   return (
     <section style={boxStyle}>
@@ -388,6 +420,7 @@ export function PosPaymentsPage(props: ReportsProps) {
 }
 
 export function JournalsPage(props: ReportsProps) {
+  const isOnline = useOnlineStatus();
   const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
   const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(7));
   const [dateTo, setDateTo] = useState<string>(todayIso());
@@ -434,6 +467,15 @@ export function JournalsPage(props: ReportsProps) {
       loadRows().catch(() => undefined);
     }
   }, [outletId, dateFrom, dateTo]);
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to View Reports"
+        message="Reports require real-time data. Please connect to the internet."
+      />
+    );
+  }
 
   return (
     <div>

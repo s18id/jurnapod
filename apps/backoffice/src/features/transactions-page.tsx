@@ -7,6 +7,7 @@ import { OutboxService } from "../lib/outbox-service";
 import { useOnlineStatus } from "../lib/connection";
 import { QueueStatusBadge } from "../components/queue-status-badge";
 import { db } from "../lib/offline-db";
+import { ERROR_MESSAGES } from "../lib/error-messages";
 import type { AccountResponse, JournalBatchResponse } from "@jurnapod/shared";
 
 type TransactionsPageProps = {
@@ -291,7 +292,7 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
       if (err instanceof ApiError) {
         setSubmitError(err.message);
       } else {
-        setSubmitError("An unexpected error occurred");
+        setSubmitError(isOnline ? ERROR_MESSAGES.SERVER_ERROR : ERROR_MESSAGES.NETWORK_ERROR);
       }
     } finally {
       setSubmitting(false);

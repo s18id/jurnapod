@@ -9,6 +9,8 @@ import {
 import { ApiError } from "../lib/api-client";
 import type { AccountTypeResponse } from "@jurnapod/shared";
 import { StaleDataWarning } from "../components/stale-data-warning";
+import { useOnlineStatus } from "../lib/connection";
+import { OfflinePage } from "../components/offline-page";
 
 type AccountTypesPageProps = {
   user: SessionUser;
@@ -130,6 +132,7 @@ const REPORT_GROUPS = [
 ];
 
 export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
+  const isOnline = useOnlineStatus();
   const companyId = user.company_id;
   const { data: accountTypes, loading, error, refetch } = useAccountTypes(companyId, accessToken);
 
@@ -140,6 +143,15 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to Manage Master Data"
+        message="Account type changes require a connection."
+      />
+    );
+  }
 
   // Filter account types
   const filteredAccountTypes = accountTypes.filter((type) => {

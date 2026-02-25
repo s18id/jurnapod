@@ -33,6 +33,16 @@ export const APP_ROUTES: readonly AppRoute[] = [
     label: "Sync Queue",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
+  {
+    path: "/sync-history",
+    label: "Sync History",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/pwa-settings",
+    label: "PWA Settings",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
   
   // === SALES ===
   {

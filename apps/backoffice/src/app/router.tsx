@@ -33,6 +33,8 @@ import {
   SalesPaymentsPage
 } from "../features/pages";
 import { SyncQueuePage } from "../features/sync-queue-page";
+import { SyncHistoryPage } from "../features/sync-history-page";
+import { PWASettingsPage } from "../features/pwa-settings-page";
 
 type SessionStatus = "loading" | "anonymous" | "authenticated";
 
@@ -72,6 +74,12 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/sync-queue") {
     return <SyncQueuePage />;
+  }
+  if (props.path === "/sync-history") {
+    return <SyncHistoryPage />;
+  }
+  if (props.path === "/pwa-settings") {
+    return <PWASettingsPage />;
   }
   if (props.path === "/journals") {
     return <JournalsPage user={props.user} accessToken={props.accessToken} />;
