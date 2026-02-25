@@ -7,6 +7,7 @@ export type OutboxItem = {
   timestamp: Date;
   status: "pending" | "syncing" | "failed";
   retryCount: number;
+  nextRetryAt?: Date;
   error?: string;
   userId: number;
 };

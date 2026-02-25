@@ -9,6 +9,8 @@ import {
 } from "./routes";
 import { ApiError } from "../lib/api-client";
 import { setupMasterDataRefresh } from "../lib/cache-service";
+import { setupAutoSync } from "../lib/auto-sync";
+import { SyncNotification } from "../components/sync-notification";
 import {
   clearAccessToken,
   fetchCurrentUser,
@@ -142,6 +144,14 @@ export function AppRouter() {
     return cleanup;
   }, [user, accessToken]);
 
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+
+    return setupAutoSync(accessToken);
+  }, [accessToken]);
+
   const availableRoutes = useMemo(() => {
     if (!user) {
       return APP_ROUTES;
@@ -192,18 +202,21 @@ export function AppRouter() {
   }
 
   return (
-    <AppLayout
-      user={user}
-      routes={availableRoutes}
-      activePath={route?.path ?? DEFAULT_ROUTE_PATH}
-      onNavigate={ensureHash}
-      onSignOut={handleSignOut}
-    >
-      {canAccess && route ? (
-        <RouteScreen path={route.path} user={user} accessToken={accessToken} />
-      ) : (
-        <ForbiddenPage />
-      )}
-    </AppLayout>
+    <>
+      <AppLayout
+        user={user}
+        routes={availableRoutes}
+        activePath={route?.path ?? DEFAULT_ROUTE_PATH}
+        onNavigate={ensureHash}
+        onSignOut={handleSignOut}
+      >
+        {canAccess && route ? (
+          <RouteScreen path={route.path} user={user} accessToken={accessToken} />
+        ) : (
+          <ForbiddenPage />
+        )}
+      </AppLayout>
+      <SyncNotification accessToken={accessToken} />
+    </>
   );
 }

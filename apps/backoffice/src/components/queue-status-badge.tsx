@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
 import { OutboxService } from "../lib/outbox-service";
+import { SyncService } from "../lib/sync-service";
 import { useOnlineStatus } from "../lib/connection";
 
-export function QueueStatusBadge() {
+type QueueStatusBadgeProps = {
+  accessToken?: string | null;
+};
+
+export function QueueStatusBadge({ accessToken }: QueueStatusBadgeProps) {
   const isOnline = useOnlineStatus();
   const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -27,6 +33,17 @@ export function QueueStatusBadge() {
     };
   }, []);
 
+  async function handleManualSync() {
+    if (!accessToken) {
+      return;
+    }
+    setSyncing(true);
+    await SyncService.syncAll(accessToken).catch(() => undefined);
+    setSyncing(false);
+    const count = await OutboxService.getPendingCount();
+    setPendingCount(count);
+  }
+
   if (pendingCount === 0) {
     return null;
   }
@@ -45,6 +62,24 @@ export function QueueStatusBadge() {
       }}
     >
       {isOnline ? `Queue: ${pendingCount}` : `Offline queue: ${pendingCount}`}
+      {isOnline && accessToken ? (
+        <button
+          type="button"
+          onClick={handleManualSync}
+          disabled={syncing}
+          style={{
+            marginLeft: "8px",
+            border: "1px solid #cabfae",
+            borderRadius: "999px",
+            padding: "2px 8px",
+            backgroundColor: "#fff",
+            cursor: syncing ? "not-allowed" : "pointer",
+            fontSize: "11px"
+          }}
+        >
+          {syncing ? "Syncing..." : "Sync now"}
+        </button>
+      ) : null}
     </span>
   );
 }
