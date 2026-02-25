@@ -149,6 +149,8 @@ export const FixedAssetCategoryCreateRequestSchema = z.object({
   depreciation_method: FixedAssetCategoryMethodSchema.optional(),
   useful_life_months: z.coerce.number().int().positive(),
   residual_value_pct: z.coerce.number().min(0).max(100).optional(),
+  expense_account_id: NumericIdSchema.nullable().optional(),
+  accum_depr_account_id: NumericIdSchema.nullable().optional(),
   is_active: z.boolean().optional()
 });
 
@@ -159,6 +161,8 @@ export const FixedAssetCategoryUpdateRequestSchema = z
     depreciation_method: FixedAssetCategoryMethodSchema.optional(),
     useful_life_months: z.coerce.number().int().positive().optional(),
     residual_value_pct: z.coerce.number().min(0).max(100).optional(),
+    expense_account_id: NumericIdSchema.nullable().optional(),
+    accum_depr_account_id: NumericIdSchema.nullable().optional(),
     is_active: z.boolean().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {

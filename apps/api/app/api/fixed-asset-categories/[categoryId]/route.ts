@@ -88,6 +88,8 @@ export const PATCH = withAuth(
           depreciation_method: input.depreciation_method,
           useful_life_months: input.useful_life_months,
           residual_value_pct: input.residual_value_pct,
+          expense_account_id: input.expense_account_id,
+          accum_depr_account_id: input.accum_depr_account_id,
           is_active: input.is_active
         },
         {

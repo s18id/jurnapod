@@ -57,6 +57,8 @@ type FixedAssetCategoryRow = RowDataPacket & {
   depreciation_method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
   useful_life_months: number;
   residual_value_pct: string | number;
+  expense_account_id: number | null;
+  accum_depr_account_id: number | null;
   is_active: number;
   updated_at: Date;
 };
@@ -245,9 +247,30 @@ function normalizeFixedAssetCategory(row: FixedAssetCategoryRow) {
     depreciation_method: row.depreciation_method,
     useful_life_months: Number(row.useful_life_months),
     residual_value_pct: Number(row.residual_value_pct),
+    expense_account_id: row.expense_account_id == null ? null : Number(row.expense_account_id),
+    accum_depr_account_id: row.accum_depr_account_id == null ? null : Number(row.accum_depr_account_id),
     is_active: row.is_active === 1,
     updated_at: new Date(row.updated_at).toISOString()
   };
+}
+
+async function ensureCompanyAccountExists(
+  executor: QueryExecutor,
+  companyId: number,
+  accountId: number
+): Promise<void> {
+  const [rows] = await executor.execute<RowDataPacket[]>(
+    `SELECT id
+     FROM accounts
+     WHERE id = ?
+       AND company_id = ?
+     LIMIT 1`,
+    [accountId, companyId]
+  );
+
+  if (rows.length === 0) {
+    throw new DatabaseReferenceError("Account not found for company");
+  }
 }
 
 async function ensureCompanyItemExists(
@@ -410,7 +433,7 @@ async function findFixedAssetCategoryByIdWithExecutor(
   const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
   const [rows] = await executor.execute<FixedAssetCategoryRow[]>(
     `SELECT id, company_id, code, name, depreciation_method, useful_life_months, residual_value_pct,
-            is_active, updated_at
+            expense_account_id, accum_depr_account_id, is_active, updated_at
      FROM fixed_asset_categories
      WHERE company_id = ?
        AND id = ?
@@ -878,7 +901,7 @@ export async function listFixedAssetCategories(
   const values: Array<number> = [companyId];
 
   let sql =
-    "SELECT id, company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, is_active, updated_at FROM fixed_asset_categories WHERE company_id = ?";
+    "SELECT id, company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, expense_account_id, accum_depr_account_id, is_active, updated_at FROM fixed_asset_categories WHERE company_id = ?";
 
   if (typeof filters?.isActive === "boolean") {
     sql += " AND is_active = ?";
@@ -907,16 +930,26 @@ export async function createFixedAssetCategory(
     depreciation_method?: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
     useful_life_months: number;
     residual_value_pct?: number;
+    expense_account_id?: number | null;
+    accum_depr_account_id?: number | null;
     is_active?: boolean;
   },
   actor?: MutationAuditActor
 ) {
   return withTransaction(async (connection) => {
     try {
+      if (typeof input.expense_account_id === "number") {
+        await ensureCompanyAccountExists(connection, companyId, input.expense_account_id);
+      }
+      if (typeof input.accum_depr_account_id === "number") {
+        await ensureCompanyAccountExists(connection, companyId, input.accum_depr_account_id);
+      }
+
       const [result] = await connection.execute<ResultSetHeader>(
         `INSERT INTO fixed_asset_categories (
-           company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, is_active
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           company_id, code, name, depreciation_method, useful_life_months, residual_value_pct,
+           expense_account_id, accum_depr_account_id, is_active
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           companyId,
           input.code,
@@ -924,6 +957,8 @@ export async function createFixedAssetCategory(
           input.depreciation_method ?? "STRAIGHT_LINE",
           input.useful_life_months,
           input.residual_value_pct ?? 0,
+          input.expense_account_id ?? null,
+          input.accum_depr_account_id ?? null,
           input.is_active === false ? 0 : 1
         ]
       );
@@ -968,12 +1003,14 @@ export async function updateFixedAssetCategory(
     depreciation_method?: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
     useful_life_months?: number;
     residual_value_pct?: number;
+    expense_account_id?: number | null;
+    accum_depr_account_id?: number | null;
     is_active?: boolean;
   },
   actor?: MutationAuditActor
 ) {
   const fields: string[] = [];
-  const values: Array<string | number> = [];
+  const values: Array<string | number | null> = [];
 
   if (typeof input.code === "string") {
     fields.push("code = ?");
@@ -1006,6 +1043,22 @@ export async function updateFixedAssetCategory(
   }
 
   return withTransaction(async (connection) => {
+    if (input.expense_account_id !== undefined) {
+      if (typeof input.expense_account_id === "number") {
+        await ensureCompanyAccountExists(connection, companyId, input.expense_account_id);
+      }
+      fields.push("expense_account_id = ?");
+      values.push(input.expense_account_id);
+    }
+
+    if (input.accum_depr_account_id !== undefined) {
+      if (typeof input.accum_depr_account_id === "number") {
+        await ensureCompanyAccountExists(connection, companyId, input.accum_depr_account_id);
+      }
+      fields.push("accum_depr_account_id = ?");
+      values.push(input.accum_depr_account_id);
+    }
+
     const before = await findFixedAssetCategoryByIdWithExecutor(connection, companyId, categoryId, {
       forUpdate: true
     });

@@ -26,6 +26,8 @@ type FixedAssetCategory = {
   depreciation_method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
   useful_life_months: number;
   residual_value_pct: number;
+  expense_account_id: number | null;
+  accum_depr_account_id: number | null;
   is_active: boolean;
   updated_at: string;
 };
@@ -134,6 +136,8 @@ type FixedAssetCategoryFormState = {
   depreciation_method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
   useful_life_months: string;
   residual_value_pct: string;
+  expense_account_id: string;
+  accum_depr_account_id: string;
   is_active: boolean;
 };
 
@@ -143,6 +147,8 @@ const emptyCategoryForm: FixedAssetCategoryFormState = {
   depreciation_method: "STRAIGHT_LINE",
   useful_life_months: "60",
   residual_value_pct: "0",
+  expense_account_id: "",
+  accum_depr_account_id: "",
   is_active: true
 };
 
@@ -217,6 +223,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     if (isOnline) {
       refreshFixedAsset(outletFilter).catch(() => undefined);
       refreshCategories().catch(() => undefined);
+      loadAccounts().catch(() => undefined);
     }
   }, [isOnline, outletFilter]);
 
@@ -329,6 +336,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             depreciation_method: categoryFormState.depreciation_method,
             useful_life_months: Number(categoryFormState.useful_life_months),
             residual_value_pct: Number(categoryFormState.residual_value_pct || 0),
+            expense_account_id: categoryFormState.expense_account_id
+              ? Number(categoryFormState.expense_account_id)
+              : null,
+            accum_depr_account_id: categoryFormState.accum_depr_account_id
+              ? Number(categoryFormState.accum_depr_account_id)
+              : null,
             is_active: categoryFormState.is_active
           })
         },
@@ -358,6 +371,8 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             depreciation_method: category.depreciation_method,
             useful_life_months: category.useful_life_months,
             residual_value_pct: category.residual_value_pct,
+            expense_account_id: category.expense_account_id,
+            accum_depr_account_id: category.accum_depr_account_id,
             is_active: category.is_active
           })
         },
@@ -416,14 +431,26 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
 
   async function loadAccounts() {
     try {
-      const response = await apiRequest<{ ok: true; accounts: Array<{ id: number; code: string; name: string }> }>(
+      const response = await apiRequest<
+        | { ok: true; accounts: Array<{ id: number; code: string; name: string }> }
+        | { success: true; data: Array<{ id: number; code: string; name: string }> }
+      >(
         `/accounts?company_id=${props.user.company_id}`,
         {},
         props.accessToken
       );
-      setAccounts(response.accounts);
+      if ("accounts" in response && Array.isArray(response.accounts)) {
+        setAccounts(response.accounts);
+        return;
+      }
+      if ("data" in response && Array.isArray(response.data)) {
+        setAccounts(response.data);
+        return;
+      }
+      setAccounts([]);
     } catch (err) {
       console.error("Failed to load accounts", err);
+      setAccounts([]);
     }
   }
 
@@ -617,6 +644,34 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             }
             style={inputStyle}
           />
+          <select
+            value={categoryFormState.expense_account_id}
+            onChange={(event) =>
+              setCategoryFormState((prev) => ({ ...prev, expense_account_id: event.target.value }))
+            }
+            style={inputStyle}
+          >
+            <option value="">Depreciation expense account</option>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.code} - {account.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={categoryFormState.accum_depr_account_id}
+            onChange={(event) =>
+              setCategoryFormState((prev) => ({ ...prev, accum_depr_account_id: event.target.value }))
+            }
+            style={inputStyle}
+          >
+            <option value="">Accumulated depreciation account</option>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.code} - {account.name}
+              </option>
+            ))}
+          </select>
           <label>
             <input
               type="checkbox"
@@ -657,6 +712,8 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
               <th style={cellStyle}>Method</th>
               <th style={cellStyle}>Life (Months)</th>
               <th style={cellStyle}>Residual %</th>
+              <th style={cellStyle}>Expense Account</th>
+              <th style={cellStyle}>Accum. Depr</th>
               <th style={cellStyle}>Active</th>
               <th style={cellStyle}>Actions</th>
             </tr>
@@ -757,6 +814,60 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
                     }
                     style={inputStyle}
                   />
+                </td>
+                <td style={cellStyle}>
+                  <select
+                    value={category.expense_account_id ?? ""}
+                    onChange={(event) =>
+                      setCategories((prev) =>
+                        prev.map((entry) =>
+                          entry.id === category.id
+                            ? {
+                                ...entry,
+                                expense_account_id: event.target.value
+                                  ? Number(event.target.value)
+                                  : null
+                              }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  >
+                    <option value="">Select account</option>
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.code} - {account.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td style={cellStyle}>
+                  <select
+                    value={category.accum_depr_account_id ?? ""}
+                    onChange={(event) =>
+                      setCategories((prev) =>
+                        prev.map((entry) =>
+                          entry.id === category.id
+                            ? {
+                                ...entry,
+                                accum_depr_account_id: event.target.value
+                                  ? Number(event.target.value)
+                                  : null
+                              }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  >
+                    <option value="">Select account</option>
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.code} - {account.name}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td style={cellStyle}>
                   <input
@@ -1268,23 +1379,23 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
                     (category) => category.id === selectedFixedAsset?.category_id
                   );
                   const purchaseCost = selectedFixedAsset?.purchase_cost ?? 0;
-                  const residualPct = selectedCategory?.residual_value_pct ?? 0;
-                  setDepreciationPlan({
-                    id: 0,
-                    company_id: props.user.company_id,
-                    asset_id: selectedFixedAssetId,
-                    outlet_id: selectedFixedAsset?.outlet_id ?? null,
-                    method: selectedCategory?.depreciation_method ?? "STRAIGHT_LINE",
-                    start_date: selectedFixedAsset?.purchase_date ?? "",
-                    useful_life_months: selectedCategory?.useful_life_months ?? 60,
-                    salvage_value: purchaseCost * (residualPct / 100),
-                    purchase_cost_snapshot: selectedFixedAsset?.purchase_cost ?? 0,
-                    expense_account_id: 0,
-                    accum_depr_account_id: 0,
-                    status: "DRAFT",
-                    created_at: "",
-                    updated_at: ""
-                  });
+                    const residualPct = selectedCategory?.residual_value_pct ?? 0;
+                    setDepreciationPlan({
+                      id: 0,
+                      company_id: props.user.company_id,
+                      asset_id: selectedFixedAssetId,
+                      outlet_id: selectedFixedAsset?.outlet_id ?? null,
+                      method: selectedCategory?.depreciation_method ?? "STRAIGHT_LINE",
+                      start_date: selectedFixedAsset?.purchase_date ?? "",
+                      useful_life_months: selectedCategory?.useful_life_months ?? 60,
+                      salvage_value: purchaseCost * (residualPct / 100),
+                      purchase_cost_snapshot: selectedFixedAsset?.purchase_cost ?? 0,
+                      expense_account_id: selectedCategory?.expense_account_id ?? 0,
+                      accum_depr_account_id: selectedCategory?.accum_depr_account_id ?? 0,
+                      status: "DRAFT",
+                      created_at: "",
+                      updated_at: ""
+                    });
                 }}
                 style={primaryButtonStyle}
               >
