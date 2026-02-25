@@ -23,7 +23,7 @@ type FixedAssetCategory = {
   company_id: number;
   code: string;
   name: string;
-  depreciation_method: "STRAIGHT_LINE";
+  depreciation_method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
   useful_life_months: number;
   residual_value_pct: number;
   is_active: boolean;
@@ -35,7 +35,7 @@ type DepreciationPlan = {
   company_id: number;
   asset_id: number;
   outlet_id: number | null;
-  method: "STRAIGHT_LINE";
+  method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
   start_date: string;
   useful_life_months: number;
   salvage_value: number;
@@ -131,7 +131,7 @@ const emptyForm: FixedAssetFormState = {
 type FixedAssetCategoryFormState = {
   code: string;
   name: string;
-  depreciation_method: "STRAIGHT_LINE";
+  depreciation_method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
   useful_life_months: string;
   residual_value_pct: string;
   is_active: boolean;
@@ -448,6 +448,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
           {
             method: "PATCH",
             body: JSON.stringify({
+              method: depreciationPlan.method,
               useful_life_months: depreciationPlan.useful_life_months,
               salvage_value: depreciationPlan.salvage_value,
               expense_account_id: depreciationPlan.expense_account_id,
@@ -464,7 +465,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             method: "POST",
             body: JSON.stringify({
               asset_id: assetId,
-              method: "STRAIGHT_LINE",
+              method: depreciationPlan.method,
               useful_life_months: depreciationPlan.useful_life_months,
               salvage_value: depreciationPlan.salvage_value,
               expense_account_id: depreciationPlan.expense_account_id,
@@ -586,12 +587,17 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             onChange={(event) =>
               setCategoryFormState((prev) => ({
                 ...prev,
-                depreciation_method: event.target.value as "STRAIGHT_LINE"
+                depreciation_method: event.target.value as
+                  | "STRAIGHT_LINE"
+                  | "DECLINING_BALANCE"
+                  | "SUM_OF_YEARS"
               }))
             }
             style={inputStyle}
           >
             <option value="STRAIGHT_LINE">Straight Line</option>
+            <option value="DECLINING_BALANCE">Declining Balance</option>
+            <option value="SUM_OF_YEARS">Sum of Years</option>
           </select>
           <input
             type="number"
@@ -698,7 +704,10 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
                           entry.id === category.id
                             ? {
                                 ...entry,
-                                depreciation_method: event.target.value as "STRAIGHT_LINE"
+                                depreciation_method: event.target.value as
+                                  | "STRAIGHT_LINE"
+                                  | "DECLINING_BALANCE"
+                                  | "SUM_OF_YEARS"
                               }
                             : entry
                         )
@@ -707,6 +716,8 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
                     style={inputStyle}
                   >
                     <option value="STRAIGHT_LINE">Straight Line</option>
+                    <option value="DECLINING_BALANCE">Declining Balance</option>
+                    <option value="SUM_OF_YEARS">Sum of Years</option>
                   </select>
                 </td>
                 <td style={cellStyle}>
@@ -1106,6 +1117,26 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
           {depreciationPlan ? (
             <div>
               <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", marginBottom: "4px" }}>Method</label>
+                <select
+                  value={depreciationPlan.method}
+                  onChange={(e) =>
+                    setDepreciationPlan({
+                      ...depreciationPlan,
+                      method: e.target.value as
+                        | "STRAIGHT_LINE"
+                        | "DECLINING_BALANCE"
+                        | "SUM_OF_YEARS"
+                    })
+                  }
+                  style={inputStyle}
+                >
+                  <option value="STRAIGHT_LINE">Straight Line</option>
+                  <option value="DECLINING_BALANCE">Declining Balance</option>
+                  <option value="SUM_OF_YEARS">Sum of Years</option>
+                </select>
+              </div>
+              <div style={{ marginBottom: "12px" }}>
                 <label style={{ display: "block", marginBottom: "4px" }}>Useful Life (Months)</label>
                 <input
                   type="number"
@@ -1233,15 +1264,20 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
                 type="button"
                 onClick={() => {
                   const selectedFixedAsset = asset.find((e) => e.id === selectedFixedAssetId);
+                  const selectedCategory = categories.find(
+                    (category) => category.id === selectedFixedAsset?.category_id
+                  );
+                  const purchaseCost = selectedFixedAsset?.purchase_cost ?? 0;
+                  const residualPct = selectedCategory?.residual_value_pct ?? 0;
                   setDepreciationPlan({
                     id: 0,
                     company_id: props.user.company_id,
                     asset_id: selectedFixedAssetId,
                     outlet_id: selectedFixedAsset?.outlet_id ?? null,
-                    method: "STRAIGHT_LINE",
+                    method: selectedCategory?.depreciation_method ?? "STRAIGHT_LINE",
                     start_date: selectedFixedAsset?.purchase_date ?? "",
-                    useful_life_months: 60,
-                    salvage_value: 0,
+                    useful_life_months: selectedCategory?.useful_life_months ?? 60,
+                    salvage_value: purchaseCost * (residualPct / 100),
                     purchase_cost_snapshot: selectedFixedAsset?.purchase_cost ?? 0,
                     expense_account_id: 0,
                     accum_depr_account_id: 0,

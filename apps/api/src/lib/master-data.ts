@@ -54,7 +54,7 @@ type FixedAssetCategoryRow = RowDataPacket & {
   company_id: number;
   code: string;
   name: string;
-  depreciation_method: "STRAIGHT_LINE";
+  depreciation_method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
   useful_life_months: number;
   residual_value_pct: string | number;
   is_active: number;
@@ -891,7 +891,7 @@ export async function createFixedAssetCategory(
   input: {
     code: string;
     name: string;
-    depreciation_method?: "STRAIGHT_LINE";
+    depreciation_method?: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
     useful_life_months: number;
     residual_value_pct?: number;
     is_active?: boolean;
@@ -952,7 +952,7 @@ export async function updateFixedAssetCategory(
   input: {
     code?: string;
     name?: string;
-    depreciation_method?: "STRAIGHT_LINE";
+    depreciation_method?: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
     useful_life_months?: number;
     residual_value_pct?: number;
     is_active?: boolean;

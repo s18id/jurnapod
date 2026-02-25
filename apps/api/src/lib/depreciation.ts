@@ -16,7 +16,7 @@ type DepreciationPlanRow = RowDataPacket & {
   company_id: number;
   asset_id: number;
   outlet_id: number | null;
-  method: "STRAIGHT_LINE";
+  method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
   start_date: Date | string;
   useful_life_months: number;
   salvage_value: string | number;
@@ -59,7 +59,7 @@ export type DepreciationPlan = {
   company_id: number;
   asset_id: number;
   outlet_id: number | null;
-  method: "STRAIGHT_LINE";
+  method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
   start_date: string;
   useful_life_months: number;
   salvage_value: number;
@@ -300,6 +300,24 @@ async function countPostedRunsWithExecutor(
   return Number(rows[0]?.total ?? 0);
 }
 
+async function getPostedRunSummaryWithExecutor(
+  executor: QueryExecutor,
+  planId: number
+): Promise<{ totalCount: number; totalAmount: number }> {
+  const [rows] = await executor.execute<RowDataPacket[]>(
+    `SELECT COUNT(*) AS total_count, COALESCE(SUM(amount), 0) AS total_amount
+     FROM asset_depreciation_runs
+     WHERE plan_id = ?
+       AND status = 'POSTED'`,
+    [planId]
+  );
+
+  return {
+    totalCount: Number(rows[0]?.total_count ?? 0),
+    totalAmount: Number(rows[0]?.total_amount ?? 0)
+  };
+}
+
 async function findRunByPlanPeriodWithExecutor(
   executor: QueryExecutor,
   companyId: number,
@@ -351,7 +369,7 @@ export async function createDepreciationPlan(
   input: {
     asset_id: number;
     outlet_id?: number;
-    method: "STRAIGHT_LINE";
+    method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
     start_date?: string;
     useful_life_months: number;
     salvage_value: number;
@@ -449,7 +467,7 @@ export async function updateDepreciationPlan(
   planId: number,
   input: {
     outlet_id?: number;
-    method?: "STRAIGHT_LINE";
+    method?: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
     start_date?: string;
     useful_life_months?: number;
     salvage_value?: number;
@@ -573,13 +591,51 @@ export async function runDepreciationPlan(
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, plan.outlet_id);
     }
 
-    if (comparePeriodToStart(plan.start_date, input.period_year, input.period_month) < 0) {
+    const periodOffset = comparePeriodToStart(plan.start_date, input.period_year, input.period_month);
+    if (periodOffset < 0) {
       throw new DepreciationPlanValidationError("Run period is before plan start date");
     }
+    if (periodOffset >= plan.useful_life_months) {
+      throw new DepreciationPlanValidationError("Run period exceeds useful life");
+    }
+
+    const summary = await getPostedRunSummaryWithExecutor(connection, plan.id);
+    const accumulated = summary.totalAmount;
 
     const depreciableBase = plan.purchase_cost_snapshot - plan.salvage_value;
     ensureValidPlanAmounts(plan.purchase_cost_snapshot, plan.salvage_value);
-    const amount = normalizeMoney(depreciableBase / plan.useful_life_months);
+
+    const remainingBase = plan.purchase_cost_snapshot - plan.salvage_value - accumulated;
+    if (remainingBase <= 0) {
+      throw new DepreciationPlanValidationError("Asset is fully depreciated");
+    }
+
+    let rawAmount = 0;
+    switch (plan.method) {
+      case "STRAIGHT_LINE":
+        rawAmount = depreciableBase / plan.useful_life_months;
+        break;
+      case "DECLINING_BALANCE": {
+        const bookValue = plan.purchase_cost_snapshot - accumulated;
+        const monthlyRate = 2 / plan.useful_life_months;
+        rawAmount = bookValue * monthlyRate;
+        break;
+      }
+      case "SUM_OF_YEARS": {
+        const totalPeriods = plan.useful_life_months;
+        const remainingPeriods = totalPeriods - periodOffset;
+        const sumOfYears = (totalPeriods * (totalPeriods + 1)) / 2;
+        rawAmount = depreciableBase * (remainingPeriods / sumOfYears);
+        break;
+      }
+      default:
+        throw new DepreciationPlanValidationError("Unsupported depreciation method");
+    }
+
+    const amount = normalizeMoney(Math.min(rawAmount, remainingBase));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new DepreciationPlanValidationError("Depreciation amount is invalid for period");
+    }
 
     const runDate = input.run_date ?? getLastDayOfMonth(input.period_year, input.period_month);
 

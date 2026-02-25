@@ -137,7 +137,11 @@ export const FixedAssetUpdateRequestSchema = z
     message: "At least one field must be provided"
   });
 
-export const FixedAssetCategoryMethodSchema = z.enum(["STRAIGHT_LINE"]);
+export const FixedAssetCategoryMethodSchema = z.enum([
+  "STRAIGHT_LINE",
+  "DECLINING_BALANCE",
+  "SUM_OF_YEARS"
+]);
 
 export const FixedAssetCategoryCreateRequestSchema = z.object({
   code: z.string().trim().min(1).max(64),

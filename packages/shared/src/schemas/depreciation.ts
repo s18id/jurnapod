@@ -6,7 +6,11 @@ const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const MoneyInputSchema = z.coerce.number().finite();
 const MoneyInputNonNegativeSchema = MoneyInputSchema.pipe(MoneySchema.nonnegative());
 
-export const DepreciationMethodSchema = z.enum(["STRAIGHT_LINE"]);
+export const DepreciationMethodSchema = z.enum([
+  "STRAIGHT_LINE",
+  "DECLINING_BALANCE",
+  "SUM_OF_YEARS"
+]);
 
 export const DepreciationPlanStatusSchema = z.enum(["DRAFT", "ACTIVE", "VOID"]);
 
