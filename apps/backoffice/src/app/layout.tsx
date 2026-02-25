@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { AppRoute } from "./routes";
 import type { SessionUser } from "../lib/session";
+import { useOnlineStatus } from "../lib/connection";
 
 type AppLayoutProps = {
   user: SessionUser;
@@ -94,8 +95,41 @@ const styles = {
     display: "flex",
     gap: "8px",
     alignItems: "center"
+  } as const,
+  connectionBadge: {
+    padding: "6px 12px",
+    borderRadius: "999px",
+    fontSize: "12px",
+    fontWeight: 600,
+    letterSpacing: "0.02em",
+    border: "1px solid transparent"
+  } as const,
+  connectionOnline: {
+    backgroundColor: "#d4edda",
+    color: "#155724",
+    borderColor: "#c3e6cb"
+  } as const,
+  connectionOffline: {
+    backgroundColor: "#f8d7da",
+    color: "#721c24",
+    borderColor: "#f5c6cb"
   } as const
 };
+
+function ConnectionStatusBadge() {
+  const isOnline = useOnlineStatus();
+
+  return (
+    <span
+      style={{
+        ...styles.connectionBadge,
+        ...(isOnline ? styles.connectionOnline : styles.connectionOffline)
+      }}
+    >
+      {isOnline ? "Online" : "Offline"}
+    </span>
+  );
+}
 
 export function AppLayout(props: AppLayoutProps) {
   return (
@@ -109,6 +143,7 @@ export function AppLayout(props: AppLayoutProps) {
             </p>
           </div>
           <div style={styles.topbarActions}>
+            <ConnectionStatusBadge />
             <a 
               href="http://localhost:5173" 
               target="_blank" 

@@ -1,0 +1,475 @@
+import { useState, useMemo } from "react";
+import type { SessionUser } from "../lib/session";
+import { useAccounts } from "../hooks/use-accounts";
+import { useJournalBatches, createManualJournalEntry } from "../hooks/use-journals";
+import { ApiError } from "../lib/api-client";
+import type { AccountResponse, JournalBatchResponse } from "@jurnapod/shared";
+
+type TransactionsPageProps = {
+  user: SessionUser;
+  accessToken: string;
+};
+
+type JournalLine = {
+  id: string; // Temporary ID for UI
+  account_id: number | null;
+  debit: number;
+  credit: number;
+  description: string;
+};
+
+const emptyLine: JournalLine = {
+  id: "",
+  account_id: null,
+  debit: 0,
+  credit: 0,
+  description: ""
+};
+
+const boxStyle = {
+  border: "1px solid #e2ddd2",
+  borderRadius: "10px",
+  padding: "16px",
+  backgroundColor: "#fcfbf8",
+  marginBottom: "14px"
+} as const;
+
+const inputStyle = {
+  border: "1px solid #cabfae",
+  borderRadius: "6px",
+  padding: "6px 8px",
+  width: "100%"
+} as const;
+
+const selectStyle = {
+  ...inputStyle
+} as const;
+
+const buttonStyle = {
+  border: "1px solid #cabfae",
+  borderRadius: "6px",
+  padding: "6px 12px",
+  backgroundColor: "#fff",
+  cursor: "pointer",
+  marginRight: "8px"
+} as const;
+
+const primaryButtonStyle = {
+  ...buttonStyle,
+  backgroundColor: "#2f5f4a",
+  color: "#fff",
+  border: "1px solid #2f5f4a"
+} as const;
+
+const dangerButtonStyle = {
+  ...buttonStyle,
+  backgroundColor: "#d32f2f",
+  color: "#fff",
+  border: "1px solid #d32f2f"
+} as const;
+
+const tableStyle = {
+  width: "100%",
+  borderCollapse: "collapse" as const
+};
+
+const cellStyle = {
+  borderBottom: "1px solid #ece7dc",
+  padding: "8px"
+} as const;
+
+export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
+  const companyId = user.company_id;
+  const accountsFilter = useMemo(() => ({ is_active: true }), []);
+  const journalFilter = useMemo(() => ({ limit: 10 }), []);
+  
+  const { data: accounts } = useAccounts(companyId, accessToken, accountsFilter);
+  const { data: recentEntries, refetch: refetchEntries } = useJournalBatches(companyId, accessToken, journalFilter);
+
+  const [entryDate, setEntryDate] = useState(new Date().toISOString().split("T")[0]);
+  const [description, setDescription] = useState("");
+  const [lines, setLines] = useState<JournalLine[]>([
+    { ...emptyLine, id: "1" },
+    { ...emptyLine, id: "2" }
+  ]);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  // Calculate totals
+  const totalDebit = lines.reduce((sum, line) => sum + (line.debit || 0), 0);
+  const totalCredit = lines.reduce((sum, line) => sum + (line.credit || 0), 0);
+  const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
+  const difference = totalDebit - totalCredit;
+
+  function updateLine(id: string, field: keyof JournalLine, value: any) {
+    setLines(lines.map(line => line.id === id ? { ...line, [field]: value } : line));
+  }
+
+  function addLine() {
+    const newId = String(Date.now());
+    setLines([...lines, { ...emptyLine, id: newId }]);
+  }
+
+  function removeLine(id: string) {
+    if (lines.length > 2) {
+      setLines(lines.filter(line => line.id !== id));
+    }
+  }
+
+  function clearForm() {
+    setEntryDate(new Date().toISOString().split("T")[0]);
+    setDescription("");
+    setLines([
+      { ...emptyLine, id: "1" },
+      { ...emptyLine, id: "2" }
+    ]);
+    setSubmitError(null);
+    setSubmitSuccess(false);
+  }
+
+  // Quick templates
+  function loadExpenseTemplate() {
+    const expenseAccounts = accounts.filter(acc => 
+      acc.type_name?.toLowerCase().includes("beban") || 
+      acc.name.toLowerCase().includes("expense")
+    );
+    const cashAccounts = accounts.filter(acc => 
+      acc.type_name?.toLowerCase().includes("kas") || 
+      acc.name.toLowerCase().includes("cash")
+    );
+
+    setLines([
+      { ...emptyLine, id: "1", account_id: expenseAccounts[0]?.id || null, debit: 0, description: "Expense" },
+      { ...emptyLine, id: "2", account_id: cashAccounts[0]?.id || null, credit: 0, description: "Payment" }
+    ]);
+    setDescription("Expense payment");
+  }
+
+  function loadBankTransferTemplate() {
+    const cashAccounts = accounts.filter(acc => 
+      acc.type_name?.toLowerCase().includes("kas") || 
+      acc.name.toLowerCase().includes("cash")
+    );
+    const bankAccounts = accounts.filter(acc => 
+      acc.type_name?.toLowerCase().includes("bank") || 
+      acc.name.toLowerCase().includes("bank")
+    );
+
+    setLines([
+      { ...emptyLine, id: "1", account_id: bankAccounts[0]?.id || null, debit: 0, description: "Deposit to bank" },
+      { ...emptyLine, id: "2", account_id: cashAccounts[0]?.id || null, credit: 0, description: "From cash" }
+    ]);
+    setDescription("Cash to bank transfer");
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    
+    // Validation
+    if (!description.trim()) {
+      setSubmitError("Description is required");
+      return;
+    }
+
+    if (lines.length < 2) {
+      setSubmitError("At least 2 lines required");
+      return;
+    }
+
+    if (!isBalanced) {
+      setSubmitError("Entry is not balanced. Debits must equal credits");
+      return;
+    }
+
+    // Check all lines have account selected
+    const invalidLines = lines.filter(line => !line.account_id);
+    if (invalidLines.length > 0) {
+      setSubmitError("All lines must have an account selected");
+      return;
+    }
+
+    // Check all lines have either debit or credit
+    const emptyLines = lines.filter(line => line.debit === 0 && line.credit === 0);
+    if (emptyLines.length > 0) {
+      setSubmitError("All lines must have either debit or credit amount");
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitError(null);
+    setSubmitSuccess(false);
+
+    try {
+      await createManualJournalEntry(
+        {
+          company_id: companyId,
+          entry_date: entryDate,
+          description,
+          lines: lines.map(line => ({
+            account_id: line.account_id!,
+            debit: line.debit || 0,
+            credit: line.credit || 0,
+            description: line.description || description
+          }))
+        },
+        accessToken
+      );
+      
+      setSubmitSuccess(true);
+      setTimeout(() => {
+        clearForm();
+        refetchEntries();
+      }, 1500);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setSubmitError(err.message);
+      } else {
+        setSubmitError("An unexpected error occurred");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div style={{ padding: "20px", maxWidth: "1400px", margin: "0 auto" }}>
+      <div style={{ marginBottom: "20px" }}>
+        <h1 style={{ marginBottom: "8px" }}>Transaction Input</h1>
+        <p style={{ color: "#666", margin: 0 }}>
+          Create manual journal entries for expenses, transfers, and adjustments
+        </p>
+      </div>
+
+      {/* Quick Templates */}
+      <div style={boxStyle}>
+        <h3 style={{ marginTop: 0, marginBottom: "12px" }}>Quick Templates</h3>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <button onClick={loadExpenseTemplate} style={buttonStyle}>
+            💰 Expense Payment
+          </button>
+          <button onClick={loadBankTransferTemplate} style={buttonStyle}>
+            🏦 Bank Transfer
+          </button>
+          <button onClick={clearForm} style={buttonStyle}>
+            🔄 Clear Form
+          </button>
+        </div>
+      </div>
+
+      {/* Entry Form */}
+      <form onSubmit={handleSubmit}>
+        <div style={boxStyle}>
+          <h3 style={{ marginTop: 0, marginBottom: "16px" }}>Journal Entry Details</h3>
+          
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "16px", marginBottom: "16px" }}>
+            <div>
+              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+                Date *
+              </label>
+              <input
+                type="date"
+                value={entryDate}
+                onChange={(e) => setEntryDate(e.target.value)}
+                required
+                style={inputStyle}
+              />
+            </div>
+            
+            <div>
+              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+                Description *
+              </label>
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="e.g., Office supplies purchase"
+                required
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
+          {/* Journal Lines */}
+          <h4 style={{ marginBottom: "8px" }}>Journal Lines</h4>
+          <table style={tableStyle}>
+            <thead>
+              <tr style={{ backgroundColor: "#f5f1ea" }}>
+                <th style={{ ...cellStyle, textAlign: "left", width: "35%" }}>Account</th>
+                <th style={{ ...cellStyle, textAlign: "right", width: "15%" }}>Debit</th>
+                <th style={{ ...cellStyle, textAlign: "right", width: "15%" }}>Credit</th>
+                <th style={{ ...cellStyle, textAlign: "left", width: "30%" }}>Description</th>
+                <th style={{ ...cellStyle, textAlign: "center", width: "5%" }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((line, index) => (
+                <tr key={line.id}>
+                  <td style={cellStyle}>
+                    <select
+                      value={line.account_id || ""}
+                      onChange={(e) => updateLine(line.id, "account_id", parseInt(e.target.value) || null)}
+                      style={selectStyle}
+                      required
+                    >
+                      <option value="">- Select Account -</option>
+                      {accounts.map(acc => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.code} - {acc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td style={cellStyle}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={line.debit === 0 ? "" : line.debit}
+                      onChange={(e) => {
+                        const val = e.target.value === "" ? 0 : parseFloat(e.target.value);
+                        if (!isNaN(val)) {
+                          updateLine(line.id, "debit", val);
+                          if (val > 0) updateLine(line.id, "credit", 0);
+                        }
+                      }}
+                      style={{ ...inputStyle, textAlign: "right" }}
+                      placeholder="0.00"
+                    />
+                  </td>
+                  <td style={cellStyle}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={line.credit === 0 ? "" : line.credit}
+                      onChange={(e) => {
+                        const val = e.target.value === "" ? 0 : parseFloat(e.target.value);
+                        if (!isNaN(val)) {
+                          updateLine(line.id, "credit", val);
+                          if (val > 0) updateLine(line.id, "debit", 0);
+                        }
+                      }}
+                      style={{ ...inputStyle, textAlign: "right" }}
+                      placeholder="0.00"
+                    />
+                  </td>
+                  <td style={cellStyle}>
+                    <input
+                      type="text"
+                      value={line.description}
+                      onChange={(e) => updateLine(line.id, "description", e.target.value)}
+                      placeholder="Line description (optional)"
+                      style={inputStyle}
+                    />
+                  </td>
+                  <td style={{ ...cellStyle, textAlign: "center" }}>
+                    {lines.length > 2 && (
+                      <button
+                        type="button"
+                        onClick={() => removeLine(line.id)}
+                        style={{ ...dangerButtonStyle, padding: "4px 8px", fontSize: "12px" }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ backgroundColor: "#f5f1ea", fontWeight: "bold" }}>
+                <td style={cellStyle}>TOTAL</td>
+                <td style={{ ...cellStyle, textAlign: "right" }}>{totalDebit.toFixed(2)}</td>
+                <td style={{ ...cellStyle, textAlign: "right" }}>{totalCredit.toFixed(2)}</td>
+                <td style={cellStyle}>
+                  {isBalanced ? (
+                    <span style={{ color: "#155724" }}>✓ Balanced</span>
+                  ) : (
+                    <span style={{ color: "#721c24" }}>
+                      ✗ Difference: {difference.toFixed(2)}
+                    </span>
+                  )}
+                </td>
+                <td style={cellStyle}></td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div style={{ marginTop: "12px" }}>
+            <button type="button" onClick={addLine} style={buttonStyle}>
+              + Add Line
+            </button>
+          </div>
+
+          {submitError && (
+            <div
+              style={{
+                marginTop: "16px",
+                padding: "12px",
+                backgroundColor: "#f8d7da",
+                color: "#721c24",
+                borderRadius: "6px"
+              }}
+            >
+              {submitError}
+            </div>
+          )}
+
+          {submitSuccess && (
+            <div
+              style={{
+                marginTop: "16px",
+                padding: "12px",
+                backgroundColor: "#d4edda",
+                color: "#155724",
+                borderRadius: "6px"
+              }}
+            >
+              ✓ Journal entry created successfully!
+            </div>
+          )}
+
+          <div style={{ marginTop: "16px", display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+            <button type="button" onClick={clearForm} style={buttonStyle} disabled={submitting}>
+              Clear
+            </button>
+            <button type="submit" style={primaryButtonStyle} disabled={submitting || !isBalanced}>
+              {submitting ? "Saving..." : "Create Journal Entry"}
+            </button>
+          </div>
+        </div>
+      </form>
+
+      {/* Recent Entries */}
+      <div style={boxStyle}>
+        <h3 style={{ marginTop: 0, marginBottom: "12px" }}>Recent Entries (Last 10)</h3>
+        {recentEntries.length === 0 ? (
+          <p style={{ margin: 0, color: "#666", textAlign: "center" }}>No entries yet</p>
+        ) : (
+          <table style={tableStyle}>
+            <thead>
+              <tr style={{ backgroundColor: "#f5f1ea" }}>
+                <th style={{ ...cellStyle, textAlign: "left" }}>Date</th>
+                <th style={{ ...cellStyle, textAlign: "left" }}>Type</th>
+                <th style={{ ...cellStyle, textAlign: "left" }}>ID</th>
+                <th style={{ ...cellStyle, textAlign: "right" }}>Lines</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentEntries.map((entry: JournalBatchResponse) => (
+                <tr key={entry.id}>
+                  <td style={cellStyle}>{new Date(entry.posted_at).toLocaleDateString()}</td>
+                  <td style={cellStyle}>{entry.doc_type}</td>
+                  <td style={cellStyle}>#{entry.id}</td>
+                  <td style={{ ...cellStyle, textAlign: "right" }}>{entry.lines?.length || 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}

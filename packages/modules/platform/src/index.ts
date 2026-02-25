@@ -5,3 +5,5 @@ export type FeatureFlagKey =
   | "inventory.enabled"
   | "purchasing.enabled"
   | "recipes.enabled";
+
+export * from "./audit-service";

@@ -1,3 +1,6 @@
+import { AccountsPage as ChartOfAccountsPage } from "./accounts-page";
+import { AccountTypesPage as AccountTypesManagementPage } from "./account-types-page";
+import { TransactionsPage as TransactionInputPage } from "./transactions-page";
 import { ItemsPricesPage as ItemsPricesManagementPage } from "./items-prices-page";
 import {
   DailySalesPage as DailySalesReportPage,
@@ -30,6 +33,12 @@ function PlaceholderPanel(props: PlaceholderProps) {
     </section>
   );
 }
+
+export const AccountsPage = ChartOfAccountsPage;
+
+export const AccountTypesPage = AccountTypesManagementPage;
+
+export const TransactionsPage = TransactionInputPage;
 
 export const ItemsPricesPage = ItemsPricesManagementPage;
 

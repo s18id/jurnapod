@@ -7,11 +7,29 @@ export type AppRoute = {
 };
 
 export const APP_ROUTES: readonly AppRoute[] = [
+  // === MASTER DATA ===
   {
     path: "/items-prices",
     label: "Items & Prices",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
+  {
+    path: "/chart-of-accounts",
+    label: "Chart of Accounts",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/account-types",
+    label: "Account Types",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/transactions",
+    label: "Transaction Input",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  
+  // === SALES ===
   {
     path: "/sales-invoices",
     label: "Sales Invoices",
@@ -22,6 +40,8 @@ export const APP_ROUTES: readonly AppRoute[] = [
     label: "Sales Payments",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
+  
+  // === POS ===
   {
     path: "/pos-transactions",
     label: "POS Transactions",
@@ -32,6 +52,8 @@ export const APP_ROUTES: readonly AppRoute[] = [
     label: "POS Payments",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
+  
+  // === REPORTS ===
   {
     path: "/daily-sales",
     label: "Daily Sales",

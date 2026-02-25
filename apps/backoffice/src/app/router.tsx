@@ -17,6 +17,9 @@ import {
 } from "../lib/session";
 import { LoginPage } from "../features/auth/login-page";
 import {
+  AccountsPage,
+  AccountTypesPage,
+  TransactionsPage,
   DailySalesPage,
   ForbiddenPage,
   ItemsPricesPage,
@@ -53,6 +56,15 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/daily-sales") {
     return <DailySalesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/chart-of-accounts") {
+    return <AccountsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/account-types") {
+    return <AccountTypesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/transactions") {
+    return <TransactionsPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/journals") {
     return <JournalsPage user={props.user} accessToken={props.accessToken} />;
