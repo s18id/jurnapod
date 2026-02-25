@@ -39,26 +39,82 @@ const styles = {
     borderBottom: "1px solid #ece8df",
     backgroundColor: "#faf8f3"
   } as const,
-  nav: {
+  navbar: {
     display: "flex",
-    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    padding: "10px 20px",
+    borderBottom: "1px solid #e4ded4",
+    backgroundColor: "#f7f2e9"
+  } as const,
+  navBrand: {
+    fontSize: "12px",
+    fontWeight: 700,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+    color: "#6a5d4b"
+  } as const,
+  navGroup: {
+    display: "flex",
+    alignItems: "center",
     gap: "8px",
-    padding: "12px 20px",
-    borderBottom: "1px solid #ece8df"
+    padding: "4px 8px",
+    backgroundColor: "#fff",
+    borderRadius: "10px",
+    border: "1px solid #e1d8cb"
+  } as const,
+  navGroupActive: {
+    borderColor: "#2f5f4a",
+    boxShadow: "0 6px 14px rgba(47, 95, 74, 0.15)",
+    backgroundColor: "#f3f8f5"
+  } as const,
+  navGroupLabel: {
+    fontSize: "12px",
+    fontWeight: 700,
+    color: "#6a5d4b",
+    letterSpacing: "0.06em",
+    textTransform: "uppercase"
+  } as const,
+  navSelect: {
+    border: "none",
+    outline: "none",
+    fontSize: "14px",
+    fontWeight: 600,
+    backgroundColor: "transparent",
+    color: "#2f2a24",
+    paddingRight: "6px",
+    cursor: "pointer"
+  } as const,
+  navSelectActive: {
+    color: "#2f5f4a"
+  } as const,
+  navList: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    overflowX: "auto",
+    paddingBottom: "2px",
+    WebkitOverflowScrolling: "touch"
   } as const,
   navButton: {
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "#d9d2c7",
-    borderRadius: "999px",
-    padding: "6px 12px",
+    borderRadius: "10px",
+    padding: "8px 14px",
     backgroundColor: "#fff",
-    cursor: "pointer"
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: 600,
+    color: "#2f2a24",
+    whiteSpace: "nowrap"
   } as const,
   navButtonActive: {
     backgroundColor: "#2f5f4a",
     color: "#fff",
-    borderColor: "#2f5f4a"
+    borderColor: "#2f5f4a",
+    boxShadow: "0 6px 14px rgba(47, 95, 74, 0.2)"
   } as const,
   content: {
     padding: "20px"
@@ -118,6 +174,39 @@ const styles = {
   } as const
 };
 
+const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
+  {
+    label: "Core",
+    paths: ["/daily-sales", "/profit-loss", "/general-ledger", "/journals", "/accounting-worksheet"]
+  },
+  {
+    label: "Operations",
+    paths: [
+      "/transactions",
+      "/transaction-templates",
+      "/sales-invoices",
+      "/sales-payments",
+      "/pos-transactions",
+      "/pos-payments"
+    ]
+  },
+  {
+    label: "Assets",
+    paths: ["/items-prices", "/supplies", "/fixed-assets"]
+  },
+  {
+    label: "Admin",
+    paths: [
+      "/chart-of-accounts",
+      "/account-types",
+      "/account-mappings",
+      "/sync-queue",
+      "/sync-history",
+      "/pwa-settings"
+    ]
+  }
+];
+
 function ConnectionStatusBadge() {
   const isOnline = useOnlineStatus();
 
@@ -161,23 +250,52 @@ export function AppLayout(props: AppLayoutProps) {
           </div>
         </header>
 
-        <nav style={styles.nav}>
-          {props.routes.map((route) => {
-            const isActive = route.path === props.activePath;
-            return (
-              <button
-                key={route.path}
-                type="button"
-                onClick={() => props.onNavigate(route.path)}
-                style={{
-                  ...styles.navButton,
-                  ...(isActive ? styles.navButtonActive : undefined)
-                }}
-              >
-                {route.label}
-              </button>
-            );
-          })}
+        <nav style={styles.navbar}>
+          <span style={styles.navBrand}>Menu</span>
+          <div style={styles.navList}>
+            {NAV_GROUPS.map((group) => {
+              const groupRoutes = props.routes.filter((route) => group.paths.includes(route.path));
+              if (groupRoutes.length === 0) {
+                return null;
+              }
+              const selectedPath = groupRoutes.some((route) => route.path === props.activePath)
+                ? props.activePath
+                : "";
+
+              return (
+                <label
+                  key={group.label}
+                  style={{
+                    ...styles.navGroup,
+                    ...(selectedPath ? styles.navGroupActive : undefined)
+                  }}
+                >
+                  <span style={styles.navGroupLabel}>{group.label}</span>
+                  <select
+                    value={selectedPath}
+                    onChange={(event) => {
+                      const nextPath = event.target.value;
+                      if (nextPath) {
+                        props.onNavigate(nextPath);
+                      }
+                    }}
+                    style={{
+                      ...styles.navSelect,
+                      ...(selectedPath ? styles.navSelectActive : undefined)
+                    }}
+                    aria-label={`${group.label} navigation`}
+                  >
+                    <option value="">Select...</option>
+                    {groupRoutes.map((route) => (
+                      <option key={route.path} value={route.path}>
+                        {route.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              );
+            })}
+          </div>
         </nav>
 
         <section style={styles.content}>{props.children}</section>
