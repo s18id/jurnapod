@@ -2,10 +2,7 @@ import type { Pool, PoolConnection } from "mysql2/promise";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import {
   JournalsService,
-  type JournalsDbClient,
-  JournalNotBalancedError,
-  JournalNotFoundError,
-  InvalidJournalLineError
+  type JournalsDbClient
 } from "@jurnapod/modules-accounting";
 import type {
   ManualJournalEntryCreateRequest,
@@ -137,4 +134,4 @@ export {
   JournalNotBalancedError,
   JournalNotFoundError,
   InvalidJournalLineError
-};
+} from "@jurnapod/modules-accounting";

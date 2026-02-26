@@ -95,7 +95,7 @@ ON DUPLICATE KEY UPDATE
 -- Update accounts to reference account_types
 UPDATE accounts a
 INNER JOIN account_types at ON a.company_id = at.company_id 
-  AND CAST(a.type_name AS CHAR CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) = at.name
+  AND CONVERT(a.type_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = at.name
 SET a.account_type_id = at.id
 WHERE a.type_name IS NOT NULL AND a.type_name != '';
 

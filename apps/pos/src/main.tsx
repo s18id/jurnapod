@@ -27,7 +27,14 @@ const PLACEHOLDER_OUTLETS = [{ outlet_id: 1, label: "Outlet 1 (placeholder)" }];
 const POLL_INTERVAL_MS = 1500;
 const CASHIER_USER_ID = 1;
 const DEFAULT_CHECKOUT_CONFIG = resolveRuntimeCheckoutConfig(null);
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || undefined;
+type RuntimeConfig = {
+  API_BASE_URL?: string;
+};
+
+const runtimeConfig = globalThis as RuntimeConfig;
+const runtimeBaseUrl = runtimeConfig.API_BASE_URL?.trim();
+const envBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+const API_BASE_URL = runtimeBaseUrl || envBaseUrl || undefined;
 const API_ORIGIN = API_BASE_URL ?? window.location.origin;
 
 interface CartLine {

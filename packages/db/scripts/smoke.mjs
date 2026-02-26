@@ -1,5 +1,5 @@
 import "./load-env.mjs";
-import argon2 from "argon2";
+import { hash as argon2HashFn, verify as argon2Verify } from "@node-rs/argon2";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
 
@@ -17,7 +17,8 @@ function dbConfigFromEnv() {
     port,
     user: process.env.DB_USER ?? "root",
     password: process.env.DB_PASSWORD ?? "",
-    database: process.env.DB_NAME ?? "jurnapod"
+    database: process.env.DB_NAME ?? "jurnapod",
+    multipleStatements: true
   };
 }
 
@@ -59,7 +60,7 @@ async function verifyOwnerPassword(plainPassword, passwordHash) {
 
   if (passwordHash.startsWith("$argon2")) {
     try {
-      return await argon2.verify(passwordHash, plainPassword);
+      return await argon2Verify(passwordHash, plainPassword);
     } catch {
       return false;
     }
@@ -78,23 +79,24 @@ function isWritePermissionError(error) {
 
 async function assertTransactionalTableEngines(connection) {
   const placeholders = REQUIRED_TRANSACTIONAL_TABLES.map(() => "?").join(", ");
+  const env = dbConfigFromEnv(); // for side-effect of validating DB_NAME presence and format
   const [tableRows] = await connection.execute(
-    `SELECT table_name, engine
+    `SELECT table_name as 'table_name', engine as 'engine'
      FROM information_schema.tables
-     WHERE table_schema = DATABASE() AND table_name IN (${placeholders})`,
+     WHERE table_schema = '${env.database}' AND table_name IN (${placeholders})`,
     REQUIRED_TRANSACTIONAL_TABLES
   );
 
-  const tableEngineByName = new Map(
-    tableRows.map((row) => [row.table_name, row.engine == null ? null : String(row.engine)])
-  );
+  const tablePairs = tableRows.map((row) => [row.table_name, row.engine]);
+  const tableNames = tableRows.map((row) => row.table_name);
+  const tableEngineByName = new Map(tablePairs);
 
   const missingTables = REQUIRED_TRANSACTIONAL_TABLES.filter(
     (tableName) => !tableEngineByName.has(tableName)
   );
   if (missingTables.length > 0) {
     throw new Error(
-      `smoke prerequisites failed: required tables missing (${missingTables.join(", ")}). run db:migrate first`
+      `smoke prerequisites failed: required tables missing (${missingTables.join(", ")}) found (${tableNames.join(", ")}). run db:migrate first`
     );
   }
 
@@ -155,8 +157,8 @@ async function assertPasswordVerifierPaths() {
   const wrongPassword = "SmokeHashPath-2026?-wrong";
 
   const bcryptHash = await bcrypt.hash(plainPassword, 4);
-  const argon2Hash = await argon2.hash(plainPassword, {
-    type: argon2.argon2id,
+  const argon2Hash = await argon2HashFn(plainPassword, {
+    algorithm: 2,
     memoryCost: 19456,
     timeCost: 2,
     parallelism: 1

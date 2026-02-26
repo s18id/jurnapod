@@ -45,9 +45,9 @@ const submitStyle = {
 } as const;
 
 export function LoginPage(props: LoginPageProps) {
-  const [companyCode, setCompanyCode] = useState("DEMO");
-  const [email, setEmail] = useState("owner@demo.local");
-  const [password, setPassword] = useState("password");
+  const [companyCode, setCompanyCode] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

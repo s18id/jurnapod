@@ -112,5 +112,5 @@ DEALLOCATE PREPARE stmt;
 ALTER TABLE audit_logs MODIFY COLUMN action VARCHAR(64) NOT NULL COMMENT 'Action performed: CREATE, UPDATE, DELETE, DEACTIVATE, REACTIVATE, etc.';
 ALTER TABLE audit_logs MODIFY COLUMN entity_type VARCHAR(64) DEFAULT NULL COMMENT 'Entity type: account, account_type, item, invoice, etc.';
 ALTER TABLE audit_logs MODIFY COLUMN entity_id VARCHAR(128) DEFAULT NULL COMMENT 'ID of the affected entity';
-ALTER TABLE audit_logs MODIFY COLUMN payload_json LONGTEXT NOT NULL DEFAULT '{}' COMMENT 'Original payload or context data';
+ALTER TABLE audit_logs MODIFY COLUMN payload_json LONGTEXT NOT NULL COMMENT 'Original payload or context data';
 ALTER TABLE audit_logs MODIFY COLUMN changes_json LONGTEXT DEFAULT NULL COMMENT 'Before/after changes for updates (JSON format)';

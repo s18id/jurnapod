@@ -58,10 +58,18 @@ npm run dev:kill     # Force kill processes on dev ports
 npm run dev:check    # Validate environment variables only
 ```
 
-### Service URLs
+### Service URLs (development defaults)
 - **API**: http://localhost:3001
 - **Backoffice**: http://localhost:3002
 - **POS**: http://localhost:5173
+
+### Frontend Base URLs
+Backoffice and POS resolve their API/domain targets from runtime globals (injected on `globalThis`) or env config before falling back to the current origin.
+
+- **Backoffice API** priority: `API_BASE_URL` runtime global, then `VITE_API_BASE_URL`, then `window.location.origin + "/api"`.
+- **POS API** priority: `API_BASE_URL` runtime global, then `VITE_API_BASE_URL`, then `window.location.origin`.
+- **Backoffice POS link** priority: `__JURNAPOD_POS_BASE_URL__` runtime global, then `VITE_POS_BASE_URL`, then `window.location.origin`.
+- **Backoffice dev proxy**: `VITE_API_PROXY_TARGET` (fallbacks to `http://localhost:3001`).
 
 ### Troubleshooting
 
@@ -85,7 +93,7 @@ npm run dev
 - Try starting API alone: `npm run dev:api`
 
 **Services crash immediately:**
-- Check Node version: `node --version` (requires v18+)
+- Check Node version: `node --version` (requires v20.x)
 - Run migrations: `npm run db:migrate`
 - Check database connection: `npm run db:smoke`
 
@@ -184,7 +192,7 @@ This guide covers deploying Jurnapod to production with all three applications: 
 ### 1. Prerequisites
 
 #### System Requirements
-- **Node.js**: v18.x or v20.x (LTS recommended)
+- **Node.js**: v20.x (LTS recommended)
 - **npm**: v9.x or higher (comes with Node.js)
 - **MySQL**: 8.0.44 or higher
 - **Operating System**: Linux (Ubuntu 22.04 LTS recommended) or compatible
@@ -194,7 +202,7 @@ This guide covers deploying Jurnapod to production with all three applications: 
 #### Required Tools
 ```bash
 # Verify Node.js version
-node --version  # Should be v18.x or v20.x
+node --version  # Should be v20.x
 
 # Verify npm version
 npm --version   # Should be v9.x or higher

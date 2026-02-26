@@ -106,6 +106,10 @@ let cachedEnv: AppEnv | null = null;
 let cachedEnvError: Error | null = null;
 
 function loadRepoRootEnv(): void {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+
   if (process.env[REPO_ROOT_ENV_AUTOLOAD_DISABLE_KEY] === "true") {
     return;
   }
@@ -118,8 +122,7 @@ function loadRepoRootEnv(): void {
     return;
   }
 
-  const moduleRelativeEnvPath = new URL("../../../../.env", import.meta.url).pathname;
-  const candidatePaths = [".env", "../.env", "../../.env", moduleRelativeEnvPath];
+  const candidatePaths = [".env", "../.env", "../../.env"];
 
   for (const candidatePath of candidatePaths) {
     if (process.env.AUTH_JWT_ACCESS_SECRET) {

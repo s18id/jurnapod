@@ -1,5 +1,5 @@
 import "./load-env.mjs";
-import argon2 from "argon2";
+import { hash as argon2Hash } from "@node-rs/argon2";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
 
@@ -95,8 +95,8 @@ async function hashOwnerPassword(password, policy) {
     return bcrypt.hash(password, policy.bcryptRounds);
   }
 
-  return argon2.hash(password, {
-    type: argon2.argon2id,
+  return argon2Hash(password, {
+    algorithm: 2,
     memoryCost: policy.argon2MemoryKb,
     timeCost: policy.argon2TimeCost,
     parallelism: policy.argon2Parallelism

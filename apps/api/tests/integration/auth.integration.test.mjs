@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import argon2 from "argon2";
+import { hash as argon2Hash } from "@node-rs/argon2";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
 
@@ -544,8 +544,8 @@ test(
 
       const bcryptRehashHash = await bcrypt.hash(testPassword, 12);
       const bcryptNoRehashHash = await bcrypt.hash(testPassword, 12);
-      const argonHash = await argon2.hash(testPassword, {
-        type: argon2.argon2id,
+      const argonHash = await argon2Hash(testPassword, {
+        algorithm: 2,
         memoryCost: 65536,
         timeCost: 3,
         parallelism: 1

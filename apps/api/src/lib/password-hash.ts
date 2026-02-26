@@ -1,4 +1,4 @@
-import argon2 from "argon2";
+import { hash as argon2Hash, verify as argon2Verify } from "@node-rs/argon2";
 import bcrypt from "bcryptjs";
 import type { PasswordHashAlgorithm } from "./env";
 
@@ -29,8 +29,8 @@ export async function hashPassword(
     return bcrypt.hash(plain, policy.bcryptRounds);
   }
 
-  return argon2.hash(plain, {
-    type: argon2.argon2id,
+  return argon2Hash(plain, {
+    algorithm: 2,
     memoryCost: policy.argon2MemoryKb,
     timeCost: policy.argon2TimeCost,
     parallelism: policy.argon2Parallelism
@@ -47,7 +47,7 @@ export async function verifyPassword(
     }
 
     if (isArgon2IdHash(storedHash)) {
-      return argon2.verify(storedHash, plain);
+      return argon2Verify(storedHash, plain);
     }
   } catch {
     return false;

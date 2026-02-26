@@ -12,6 +12,10 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
+type RuntimeConfig = {
+  __JURNAPOD_POS_BASE_URL__?: string;
+};
+
 const styles = {
   page: {
     fontFamily: "ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
@@ -62,7 +66,9 @@ const styles = {
     padding: "4px 8px",
     backgroundColor: "#fff",
     borderRadius: "10px",
-    border: "1px solid #e1d8cb"
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "#e1d8cb"
   } as const,
   navGroupActive: {
     borderColor: "#2f5f4a",
@@ -222,7 +228,32 @@ function ConnectionStatusBadge() {
   );
 }
 
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function resolvePosBaseUrl(): string {
+  const runtimeConfig = globalThis as RuntimeConfig;
+  const runtimeBaseUrl = runtimeConfig.__JURNAPOD_POS_BASE_URL__?.trim();
+  if (runtimeBaseUrl) {
+    return normalizeBaseUrl(runtimeBaseUrl);
+  }
+
+  const envBaseUrl = import.meta.env.VITE_POS_BASE_URL?.trim();
+  if (envBaseUrl) {
+    return normalizeBaseUrl(envBaseUrl);
+  }
+
+  if (typeof window !== "undefined") {
+    return normalizeBaseUrl(window.location.origin);
+  }
+
+  return "";
+}
+
 export function AppLayout(props: AppLayoutProps) {
+  const posBaseUrl = resolvePosBaseUrl();
+
   return (
     <main style={styles.page}>
       <section style={styles.shell}>
@@ -235,8 +266,8 @@ export function AppLayout(props: AppLayoutProps) {
           </div>
           <div style={styles.topbarActions}>
             <ConnectionStatusBadge />
-            <a 
-              href="http://localhost:5173" 
+            <a
+              href={posBaseUrl}
               target="_blank" 
               rel="noopener noreferrer"
               style={styles.posLink}

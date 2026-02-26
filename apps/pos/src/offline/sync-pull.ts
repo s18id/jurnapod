@@ -123,8 +123,21 @@ function resolvePullUrl(
   outletId: number,
   sinceVersion: number
 ): string {
-  const fallbackBaseUrl = typeof window === "undefined" ? "http://localhost" : window.location.origin;
-  const url = new URL(endpoint, baseUrl ?? fallbackBaseUrl);
+  const trimmedBaseUrl = baseUrl?.trim();
+  if (!trimmedBaseUrl) {
+    if (typeof window !== "undefined") {
+      const url = new URL(endpoint, window.location.origin);
+      url.searchParams.set("outlet_id", String(outletId));
+      url.searchParams.set("since_version", String(sinceVersion));
+      return url.toString();
+    }
+
+    throw new Error(
+      "sync pull base URL is missing. Provide base_url or run in a browser environment with window.location.origin."
+    );
+  }
+
+  const url = new URL(endpoint, trimmedBaseUrl);
   url.searchParams.set("outlet_id", String(outletId));
   url.searchParams.set("since_version", String(sinceVersion));
   return url.toString();

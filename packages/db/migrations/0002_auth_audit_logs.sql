@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   action VARCHAR(64) NOT NULL,
   result VARCHAR(16) NOT NULL,
   ip_address VARCHAR(45) DEFAULT NULL,
-  payload_json LONGTEXT NOT NULL DEFAULT '{}',
+  payload_json LONGTEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_audit_logs_company_created_at (company_id, created_at),

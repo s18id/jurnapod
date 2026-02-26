@@ -1,6 +1,38 @@
-ALTER TABLE pos_transactions
-  ADD COLUMN IF NOT EXISTS payload_sha256 CHAR(64) NOT NULL DEFAULT '',
-  ADD COLUMN IF NOT EXISTS payload_hash_version TINYINT UNSIGNED NOT NULL DEFAULT 1;
+SET @pos_tx_payload_sha256_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'pos_transactions'
+    AND COLUMN_NAME = 'payload_sha256'
+);
+
+SET @add_pos_tx_payload_sha256_sql := IF(
+  @pos_tx_payload_sha256_exists = 0,
+  "ALTER TABLE pos_transactions ADD COLUMN payload_sha256 CHAR(64) NOT NULL DEFAULT ''",
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @add_pos_tx_payload_sha256_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @pos_tx_payload_hash_version_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'pos_transactions'
+    AND COLUMN_NAME = 'payload_hash_version'
+);
+
+SET @add_pos_tx_payload_hash_version_sql := IF(
+  @pos_tx_payload_hash_version_exists = 0,
+  'ALTER TABLE pos_transactions ADD COLUMN payload_hash_version TINYINT UNSIGNED NOT NULL DEFAULT 1',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @add_pos_tx_payload_hash_version_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS pos_transaction_items (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

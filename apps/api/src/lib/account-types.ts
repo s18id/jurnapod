@@ -2,10 +2,7 @@ import type { Pool, PoolConnection } from "mysql2/promise";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import {
   AccountTypesService,
-  type AccountTypesDbClient,
-  AccountTypeNameExistsError,
-  AccountTypeNotFoundError,
-  AccountTypeInUseError
+  type AccountTypesDbClient
 } from "@jurnapod/modules-accounting";
 import type {
   AccountTypeResponse,
@@ -223,4 +220,4 @@ export {
   AccountTypeNameExistsError,
   AccountTypeNotFoundError,
   AccountTypeInUseError
-};
+} from "@jurnapod/modules-accounting";

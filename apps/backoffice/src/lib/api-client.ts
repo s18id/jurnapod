@@ -1,9 +1,3 @@
-const DEFAULT_API_BASE_URL = "http://localhost:3001/api";
-
-type RuntimeConfig = {
-  __JURNAPOD_API_BASE_URL__?: string;
-};
-
 type ApiErrorPayload = {
   error?: {
     code?: string;
@@ -23,14 +17,21 @@ export class ApiError extends Error {
   }
 }
 
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
 function readConfiguredBaseUrl(): string {
-  const runtimeConfig = globalThis as RuntimeConfig;
-  const configured = runtimeConfig.__JURNAPOD_API_BASE_URL__?.trim();
-  return configured && configured.length > 0 ? configured : DEFAULT_API_BASE_URL;
+  const envBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (envBaseUrl) {
+    return normalizeBaseUrl(envBaseUrl+"/api");
+  }
+
+  return "/api";
 }
 
 export function getApiBaseUrl(): string {
-  return readConfiguredBaseUrl().replace(/\/$/, "");
+  return readConfiguredBaseUrl();
 }
 
 export async function apiRequest<TResponse>(

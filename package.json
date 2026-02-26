@@ -2,6 +2,9 @@
   "name": "jurnapod",
   "private": true,
   "version": "0.1.0",
+  "engines": {
+    "node": "20.x"
+  },
   "workspaces": [
     "apps/*",
     "packages/*",
@@ -39,7 +42,9 @@
     "db:reconcile:pos-journals": "npm run db:reconcile:pos-journals -w @jurnapod/db --",
     "test:scripts": "node --test \"scripts/tests/**/*.test.mjs\"",
     "auth:secret:generate": "node ./scripts/auth-secret-generate.mjs",
-    "auth:secret:regenerate": "node ./scripts/auth-secret-regenerate.mjs"
+    "auth:secret:regenerate": "node ./scripts/auth-secret-regenerate.mjs",
+    "deploy:pos": "/bin/cp -R apps/pos/dist/* public_html/pos/",
+    "deploy:backoffice": "/bin/cp -R apps/backoffice/dist/* public_html/backoffice/"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
