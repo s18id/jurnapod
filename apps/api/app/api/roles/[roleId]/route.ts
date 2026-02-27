@@ -4,7 +4,7 @@ import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
 import { getRole, updateRole, deleteRole, RoleNotFoundError } from "../../../../src/lib/users";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -12,7 +12,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Role request failed"
@@ -37,7 +37,7 @@ export const GET = withAuth(
       }
       if (error instanceof RoleNotFoundError) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "NOT_FOUND", message: error.message }
         }, { status: 404 });
       }
@@ -45,7 +45,7 @@ export const GET = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["OWNER", "ADMIN"])]
+  [requireRole(["SUPER_ADMIN", "OWNER", "ADMIN"])]
 );
 
 export const PATCH = withAuth(
@@ -57,7 +57,7 @@ export const PATCH = withAuth(
 
       if (!name || typeof name !== "string" || name.trim().length === 0) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "VALIDATION_ERROR", message: "Role name is required" }
         }, { status: 400 });
       }
@@ -74,7 +74,7 @@ export const PATCH = withAuth(
       }
       if (error instanceof RoleNotFoundError) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "NOT_FOUND", message: error.message }
         }, { status: 404 });
       }
@@ -82,7 +82,7 @@ export const PATCH = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["OWNER"])]
+  [requireRole(["SUPER_ADMIN", "OWNER"])]
 );
 
 export const DELETE = withAuth(
@@ -90,20 +90,20 @@ export const DELETE = withAuth(
     try {
       const roleId = parseRoleId(request);
       await deleteRole({ roleId });
-      return Response.json({ ok: true }, { status: 200 });
+      return Response.json({ success: true }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
       }
       if (error instanceof RoleNotFoundError) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "NOT_FOUND", message: error.message }
         }, { status: 404 });
       }
       if (error instanceof Error && error.message.includes("Cannot delete role")) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "ROLE_IN_USE", message: error.message }
         }, { status: 409 });
       }
@@ -111,5 +111,5 @@ export const DELETE = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["OWNER"])]
+  [requireRole(["SUPER_ADMIN", "OWNER"])]
 );

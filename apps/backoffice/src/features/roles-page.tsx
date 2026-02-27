@@ -97,7 +97,8 @@ const dialogStyle = {
 };
 
 export function RolesPage(props: RolesPageProps) {
-  const { accessToken } = props;
+  const { accessToken, user } = props;
+  const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
   
   // Dialog state
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
