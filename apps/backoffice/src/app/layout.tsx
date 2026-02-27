@@ -182,6 +182,10 @@ const styles = {
 
 const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   {
+    label: "Platform",
+    paths: ["/users"]
+  },
+  {
     label: "Core",
     paths: ["/daily-sales", "/profit-loss", "/general-ledger", "/journals", "/accounting-worksheet"]
   },

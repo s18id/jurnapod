@@ -7,6 +7,13 @@ export type AppRoute = {
 };
 
 export const APP_ROUTES: readonly AppRoute[] = [
+  // === PLATFORM ===
+  {
+    path: "/users",
+    label: "Users",
+    allowedRoles: ["OWNER", "ADMIN"]
+  },
+  
   // === MASTER DATA ===
   {
     path: "/items-prices",

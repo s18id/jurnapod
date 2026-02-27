@@ -1,3 +1,4 @@
+import type { SessionUser } from "../lib/session";
 import { AccountsPage as ChartOfAccountsPage } from "./accounts-page";
 import { AccountTypesPage as AccountTypesManagementPage } from "./account-types-page";
 import { TransactionsPage as TransactionInputPage } from "./transactions-page";
@@ -18,6 +19,7 @@ import { SuppliesPage as SuppliesManagementPage } from "./supplies-page";
 import { FixedAssetPage as FixedAssetsManagementPage } from "./fixed-assets-page";
 import { AccountMappingsPage as AccountMappingsSettingsPage } from "./account-mappings-page";
 import { StaticPagesPage as StaticPagesManagementPage } from "./static-pages-page";
+import { UsersPage as UsersManagementPage } from "./users-page";
 
 type PlaceholderProps = {
   title: string;
@@ -77,6 +79,8 @@ export const SalesPaymentsPage = SalesPaymentsManagementPage;
 export const AccountMappingsPage = AccountMappingsSettingsPage;
 
 export const StaticPagesPage = StaticPagesManagementPage;
+
+export const UsersPage = UsersManagementPage;
 
 export function ForbiddenPage() {
   return (
