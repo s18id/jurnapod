@@ -1,5 +1,13 @@
 import { ZodError } from "zod";
 import { authenticateLogin, parseLoginRequest, recordLoginAudit } from "../../../../src/lib/auth";
+import {
+  buildLoginThrottleKeys,
+  delay,
+  getLoginThrottleDelay,
+  recordLoginFailure,
+  recordLoginSuccess,
+  type LoginThrottleKey
+} from "../../../../src/lib/auth-throttle";
 import { getAppEnv } from "../../../../src/lib/env";
 import { createRefreshTokenCookie, issueRefreshToken } from "../../../../src/lib/refresh-tokens";
 
@@ -67,13 +75,36 @@ async function writeLoginAuditRequired(params: {
 export async function POST(request: Request) {
   const ipAddress = readClientIp(request);
   const userAgent = readUserAgent(request);
+  let throttleKeys: LoginThrottleKey[] = [];
 
   try {
     const payload = await request.json();
     const credentials = parseLoginRequest(payload);
+    throttleKeys = buildLoginThrottleKeys({
+      companyCode: credentials.companyCode,
+      email: credentials.email,
+      ipAddress
+    });
+
+    try {
+      const throttleDelayMs = await getLoginThrottleDelay(throttleKeys);
+      await delay(throttleDelayMs);
+    } catch (error) {
+      console.error("POST /auth/login throttle read failed", error);
+    }
     const authResult = await authenticateLogin(credentials);
 
     if (!authResult.ok) {
+      try {
+        await recordLoginFailure({
+          keys: throttleKeys,
+          ipAddress,
+          userAgent
+        });
+      } catch (error) {
+        console.error("POST /auth/login throttle update failed", error);
+      }
+
       const auditWritten = await writeLoginAuditRequired({
         result: "FAIL",
         companyId: authResult.companyId,
@@ -90,6 +121,12 @@ export async function POST(request: Request) {
       }
 
       return Response.json(INVALID_CREDENTIALS_RESPONSE, { status: 401 });
+    }
+
+    try {
+      await recordLoginSuccess(throttleKeys);
+    } catch (error) {
+      console.error("POST /auth/login throttle clear failed", error);
     }
 
     const auditWritten = await writeLoginAuditRequired({

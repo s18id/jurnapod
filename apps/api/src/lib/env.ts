@@ -2,6 +2,8 @@ const DEFAULT_DB_PORT = 3306;
 const DEFAULT_DB_CONNECTION_LIMIT = 10;
 const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const DEFAULT_REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
+const DEFAULT_LOGIN_THROTTLE_BASE_MS = 10000;
+const DEFAULT_LOGIN_THROTTLE_MAX_MS = 300000;
 const DEFAULT_PASSWORD_ALGO = "argon2id";
 const DEFAULT_PASSWORD_REHASH_ON_LOGIN = true;
 const DEFAULT_BCRYPT_ROUNDS = 12;
@@ -122,6 +124,10 @@ export type AppEnv = {
       argon2TimeCost: number;
       argon2Parallelism: number;
     };
+    loginThrottle: {
+      baseDelayMs: number;
+      maxDelayMs: number;
+    };
   };
   googleOAuth: {
     clientId: string | null;
@@ -198,6 +204,16 @@ export function getAppEnv(): AppEnv {
       DEFAULT_REFRESH_TOKEN_TTL_SECONDS,
       "AUTH_REFRESH_TTL_SECONDS"
     );
+    const loginThrottleBaseMs = parsePositiveInt(
+      process.env.AUTH_LOGIN_THROTTLE_BASE_MS,
+      DEFAULT_LOGIN_THROTTLE_BASE_MS,
+      "AUTH_LOGIN_THROTTLE_BASE_MS"
+    );
+    const loginThrottleMaxMs = parsePositiveInt(
+      process.env.AUTH_LOGIN_THROTTLE_MAX_MS,
+      DEFAULT_LOGIN_THROTTLE_MAX_MS,
+      "AUTH_LOGIN_THROTTLE_MAX_MS"
+    );
     const bcryptRounds = parsePositiveInt(
       process.env.AUTH_BCRYPT_ROUNDS,
       DEFAULT_BCRYPT_ROUNDS,
@@ -236,6 +252,10 @@ export function getAppEnv(): AppEnv {
       throw new Error("GOOGLE_OAUTH_REDIRECT_URIS is required when Google OAuth is enabled");
     }
 
+    if (loginThrottleMaxMs < loginThrottleBaseMs) {
+      throw new Error("AUTH_LOGIN_THROTTLE_MAX_MS must be >= AUTH_LOGIN_THROTTLE_BASE_MS");
+    }
+
     cachedEnv = Object.freeze({
       db: {
         host: process.env.DB_HOST ?? "127.0.0.1",
@@ -269,6 +289,10 @@ export function getAppEnv(): AppEnv {
           argon2MemoryKb,
           argon2TimeCost,
           argon2Parallelism
+        },
+        loginThrottle: {
+          baseDelayMs: loginThrottleBaseMs,
+          maxDelayMs: loginThrottleMaxMs
         }
       },
       googleOAuth: {
