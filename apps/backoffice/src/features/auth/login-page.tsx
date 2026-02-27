@@ -76,7 +76,7 @@ export function LoginPage(props: LoginPageProps) {
     <main style={pageStyle}>
       <form onSubmit={handleSubmit} style={cardStyle}>
         <h1 style={{ marginTop: 0 }}>Jurnapod Backoffice</h1>
-        <p style={{ marginTop: 0 }}>Sign in to open M7 report routes.</p>
+        <p style={{ marginTop: 0 }}>Sign in using your company code and registered email</p>
 
         <label>
           Company code
