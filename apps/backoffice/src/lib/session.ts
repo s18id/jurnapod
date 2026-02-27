@@ -2,7 +2,7 @@ import { apiRequest } from "./api-client";
 
 const ACCESS_TOKEN_KEY = "jurnapod.backoffice.access_token";
 
-export type RoleCode = "OWNER" | "ADMIN" | "CASHIER" | "ACCOUNTANT";
+export type RoleCode = "SUPER_ADMIN" | "OWNER" | "ADMIN" | "CASHIER" | "ACCOUNTANT";
 
 export type UserOutlet = {
   id: number;

@@ -102,14 +102,16 @@ const dialogStyle = {
 export function OutletsPage(props: OutletsPageProps) {
   const { user, accessToken } = props;
   const isOwner = user.roles.includes("OWNER");
+  const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
+  const canManageCompanies = isOwner || isSuperAdmin;
 
   const [selectedCompanyId, setSelectedCompanyId] = useState<number>(user.company_id);
 
   const outletsQuery = useOutletsFull(
-    isOwner ? selectedCompanyId : user.company_id,
+    canManageCompanies ? selectedCompanyId : user.company_id,
     accessToken
   );
-  const companiesQuery = useCompanies(accessToken);
+  const companiesQuery = useCompanies(accessToken, { enabled: canManageCompanies });
 
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingOutlet, setEditingOutlet] = useState<OutletFullResponse | null>(null);
@@ -252,7 +254,7 @@ export function OutletsPage(props: OutletsPageProps) {
         <h2 style={{ marginTop: 0 }}>Outlet Management</h2>
         <p>Manage outlets for your company. Outlets represent physical locations or branches.</p>
 
-        {isOwner && (
+        {canManageCompanies && (
           <div style={{ marginTop: "16px", maxWidth: "360px" }}>
             <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
               Company
@@ -285,14 +287,14 @@ export function OutletsPage(props: OutletsPageProps) {
             type="button"
             onClick={openCreateDialog}
             style={primaryButtonStyle}
-            disabled={isOwner && companies.length === 0}
+            disabled={canManageCompanies && companies.length === 0}
           >
             Create Outlet
           </button>
         </div>
 
-        {isOwner && companiesQuery.loading && <p>Loading companies...</p>}
-        {isOwner && companiesQuery.error && <p style={{ color: "#8d2626" }}>{companiesQuery.error}</p>}
+        {canManageCompanies && companiesQuery.loading && <p>Loading companies...</p>}
+        {canManageCompanies && companiesQuery.error && <p style={{ color: "#8d2626" }}>{companiesQuery.error}</p>}
         {outletsQuery.loading && <p>Loading outlets...</p>}
         {outletsQuery.error && <p style={{ color: "#8d2626" }}>{outletsQuery.error}</p>}
         {error && <p style={{ color: "#8d2626" }}>{error}</p>}
@@ -369,7 +371,7 @@ export function OutletsPage(props: OutletsPageProps) {
               <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
                 Company <span style={{ color: "#8d2626" }}>*</span>
               </label>
-              {dialogMode === "create" && isOwner ? (
+              {dialogMode === "create" && canManageCompanies ? (
                 companies.length === 0 ? (
                   <input
                     type="text"

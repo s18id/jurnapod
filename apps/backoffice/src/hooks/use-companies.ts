@@ -5,31 +5,38 @@ import type { CompanyResponse } from "@jurnapod/shared";
 /**
  * API Response Types
  */
-type CompaniesListResponse = {
+type SuccessResponse<T> = {
   success: true;
-  data: CompanyResponse[];
-};
-
-type CompanySingleResponse = {
-  success: true;
-  data: CompanyResponse;
+  data: T;
 };
 
 /**
  * Hook: useCompanies
  * Fetches list of all companies
  */
-export function useCompanies(accessToken: string) {
+export function useCompanies(
+  accessToken: string,
+  options?: { enabled?: boolean; includeDeleted?: boolean }
+) {
+  const enabled = options?.enabled ?? true;
+  const includeDeleted = options?.includeDeleted ?? false;
   const [data, setData] = useState<CompanyResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
+    if (!enabled) {
+      setData([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const response = await apiRequest<CompaniesListResponse>(
-        "/companies",
+      const query = includeDeleted ? "?include_deleted=1" : "";
+      const response = await apiRequest<SuccessResponse<CompanyResponse[]>>(
+        `/companies${query}`,
         {},
         accessToken
       );
@@ -44,11 +51,17 @@ export function useCompanies(accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [accessToken]);
+  }, [accessToken, enabled, includeDeleted]);
 
   useEffect(() => {
+    if (!enabled) {
+      setData([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     refetch();
-  }, [refetch]);
+  }, [enabled, refetch]);
 
   return { data, loading, error, refetch };
 }
@@ -76,7 +89,7 @@ export function useCompany(
     setLoading(true);
     setError(null);
     try {
-      const response = await apiRequest<CompanySingleResponse>(
+      const response = await apiRequest<SuccessResponse<CompanyResponse>>(
         `/companies/${companyId}`,
         {},
         accessToken
@@ -109,7 +122,7 @@ export async function createCompany(
   data: { code: string; name: string },
   accessToken: string
 ): Promise<CompanyResponse> {
-  const response = await apiRequest<CompanySingleResponse>(
+  const response = await apiRequest<SuccessResponse<CompanyResponse>>(
     "/companies",
     {
       method: "POST",
@@ -129,7 +142,7 @@ export async function updateCompany(
   data: { name: string },
   accessToken: string
 ): Promise<CompanyResponse> {
-  const response = await apiRequest<CompanySingleResponse>(
+  const response = await apiRequest<SuccessResponse<CompanyResponse>>(
     `/companies/${companyId}`,
     {
       method: "PATCH",
@@ -148,11 +161,25 @@ export async function deleteCompany(
   companyId: number,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ ok: true }>(
+  await apiRequest<{ success: true }>(
     `/companies/${companyId}`,
     {
       method: "DELETE"
     },
     accessToken
   );
+}
+
+export async function reactivateCompany(
+  companyId: number,
+  accessToken: string
+): Promise<CompanyResponse> {
+  const response = await apiRequest<SuccessResponse<CompanyResponse>>(
+    `/companies/${companyId}/reactivate`,
+    {
+      method: "POST"
+    },
+    accessToken
+  );
+  return response.data;
 }

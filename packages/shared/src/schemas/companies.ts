@@ -1,16 +1,24 @@
 import { z } from "zod";
 import { NumericIdSchema } from "./common";
 
+export const CompanyCodeSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(32)
+  .regex(/^[A-Z0-9_-]+$/);
+
 export const CompanyResponseSchema = z.object({
   id: NumericIdSchema,
-  code: z.string().trim().min(1).max(32),
+  code: CompanyCodeSchema,
   name: z.string().trim().min(1).max(191),
   created_at: z.string().datetime(),
-  updated_at: z.string().datetime()
+  updated_at: z.string().datetime(),
+  deleted_at: z.string().datetime().nullable()
 });
 
 export const CompanyCreateRequestSchema = z.object({
-  code: z.string().trim().min(1).max(32),
+  code: CompanyCodeSchema,
   name: z.string().trim().min(1).max(191)
 });
 

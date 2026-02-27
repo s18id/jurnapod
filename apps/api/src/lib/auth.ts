@@ -86,7 +86,7 @@ export type AuthenticatedUser = {
   }[];
 };
 
-export const ROLE_CODES = ["OWNER", "ADMIN", "CASHIER", "ACCOUNTANT"] as const;
+export const ROLE_CODES = ["SUPER_ADMIN", "OWNER", "ADMIN", "CASHIER", "ACCOUNTANT"] as const;
 export type RoleCode = (typeof ROLE_CODES)[number];
 
 type AccessCheckRow = RowDataPacket & {
@@ -122,7 +122,9 @@ async function findUserForLogin(
     `SELECT u.id, u.company_id, u.email, u.password_hash, u.is_active
      FROM users u
      INNER JOIN companies c ON c.id = u.company_id
-     WHERE c.code = ? AND u.email = ?
+     WHERE c.code = ?
+       AND c.deleted_at IS NULL
+       AND u.email = ?
      LIMIT 1`,
     [companyCode, email]
   );
@@ -233,9 +235,12 @@ export async function findActiveUserTokenProfile(
 ): Promise<AccessTokenUser | null> {
   const pool = getDbPool();
   const [rows] = await pool.execute<UserTokenRow[]>(
-    `SELECT id, company_id, email, is_active
-     FROM users
-     WHERE id = ? AND company_id = ?
+    `SELECT u.id, u.company_id, u.email, u.is_active
+     FROM users u
+     INNER JOIN companies c ON c.id = u.company_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND c.deleted_at IS NULL
      LIMIT 1`,
     [userId, companyId]
   );
@@ -307,9 +312,12 @@ export async function findActiveUserById(
 ): Promise<AuthenticatedUser | null> {
   const pool = getDbPool();
   const [rows] = await pool.execute<UserProfileRow[]>(
-    `SELECT id, company_id, email, is_active
-     FROM users
-     WHERE id = ? AND company_id = ?
+    `SELECT u.id, u.company_id, u.email, u.is_active
+     FROM users u
+     INNER JOIN companies c ON c.id = u.company_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND c.deleted_at IS NULL
      LIMIT 1`,
     [userId, companyId]
   );
@@ -385,11 +393,13 @@ export async function userHasAnyRole(
   const [rows] = await pool.execute<AccessCheckRow[]>(
     `SELECT u.id
      FROM users u
+     INNER JOIN companies c ON c.id = u.company_id
      INNER JOIN user_roles ur ON ur.user_id = u.id
      INNER JOIN roles r ON r.id = ur.role_id
      WHERE u.id = ?
        AND u.company_id = ?
        AND u.is_active = 1
+       AND c.deleted_at IS NULL
        AND r.code IN (${rolePlaceholders})
      LIMIT 1`,
     [userId, companyId, ...allowedRoles]
@@ -407,11 +417,13 @@ export async function userHasOutletAccess(
   const [rows] = await pool.execute<AccessCheckRow[]>(
     `SELECT u.id
      FROM users u
+     INNER JOIN companies c ON c.id = u.company_id
      INNER JOIN user_outlets uo ON uo.user_id = u.id
      INNER JOIN outlets o ON o.id = uo.outlet_id
      WHERE u.id = ?
        AND u.company_id = ?
        AND u.is_active = 1
+       AND c.deleted_at IS NULL
        AND uo.outlet_id = ?
        AND o.company_id = ?
      LIMIT 1`,

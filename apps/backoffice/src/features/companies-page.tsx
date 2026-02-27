@@ -4,7 +4,8 @@ import {
   useCompanies,
   createCompany,
   updateCompany,
-  deleteCompany
+  deleteCompany,
+  reactivateCompany
 } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
 import type { CompanyResponse } from "@jurnapod/shared";
@@ -97,7 +98,8 @@ const dialogStyle = {
 };
 
 export function CompaniesPage(props: CompaniesPageProps) {
-  const { accessToken } = props;
+  const { accessToken, user } = props;
+  const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
   
   // Dialog state
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
@@ -110,8 +112,12 @@ export function CompaniesPage(props: CompaniesPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
+  const [showArchived, setShowArchived] = useState(false);
+
   // API hooks
-  const companiesQuery = useCompanies(accessToken);
+  const companiesQuery = useCompanies(accessToken, {
+    includeDeleted: isSuperAdmin && showArchived
+  });
   
   // Handlers
   const openCreateDialog = () => {
@@ -197,20 +203,39 @@ export function CompaniesPage(props: CompaniesPageProps) {
   };
   
   const handleDelete = async (company: CompanyResponse) => {
-    if (!confirm(`Delete company "${company.name}"? This will also delete all associated data. This cannot be undone.`)) return;
+    if (!confirm(`Deactivate company "${company.name}"? Users will lose access, but SUPER_ADMIN can still view archived data.`)) return;
     
     setError(null);
     setSuccessMessage(null);
     
     try {
       await deleteCompany(company.id, accessToken);
-      setSuccessMessage(`Company "${company.name}" deleted successfully`);
+      setSuccessMessage(`Company "${company.name}" deactivated successfully`);
       await companiesQuery.refetch();
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {
         setError(deleteError.message);
       } else {
-        setError("Failed to delete company");
+        setError("Failed to deactivate company");
+      }
+    }
+  };
+
+  const handleReactivate = async (company: CompanyResponse) => {
+    if (!confirm(`Reactivate company "${company.name}"? This will restore access for its users.`)) return;
+
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      await reactivateCompany(company.id, accessToken);
+      setSuccessMessage(`Company "${company.name}" reactivated successfully`);
+      await companiesQuery.refetch();
+    } catch (reactivateError) {
+      if (reactivateError instanceof ApiError) {
+        setError(reactivateError.message);
+      } else {
+        setError("Failed to reactivate company");
       }
     }
   };
@@ -220,12 +245,22 @@ export function CompaniesPage(props: CompaniesPageProps) {
       <section style={boxStyle}>
         <h2 style={{ marginTop: 0 }}>Company Management</h2>
         <p>Manage companies in the system. Each company can have multiple users and outlets.</p>
-        
-        <div style={{ marginTop: "16px" }}>
-          <button type="button" onClick={openCreateDialog} style={primaryButtonStyle}>
-            Create Company
-          </button>
-        </div>
+
+        {isSuperAdmin && (
+          <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
+            <button type="button" onClick={openCreateDialog} style={primaryButtonStyle}>
+              Create Company
+            </button>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px" }}>
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(event) => setShowArchived(event.target.checked)}
+              />
+              Show archived
+            </label>
+          </div>
+        )}
         
         {companiesQuery.loading && <p>Loading companies...</p>}
         {companiesQuery.error && <p style={{ color: "#8d2626" }}>{companiesQuery.error}</p>}
@@ -259,22 +294,52 @@ export function CompaniesPage(props: CompaniesPageProps) {
                       {company.code}
                     </code>
                   </td>
-                  <td style={cellStyle}>{company.name}</td>
+                  <td style={cellStyle}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span>{company.name}</span>
+                      {company.deleted_at && (
+                        <span
+                          style={{
+                            backgroundColor: "#f8d7da",
+                            color: "#8d2626",
+                            borderRadius: "12px",
+                            padding: "2px 8px",
+                            fontSize: "11px"
+                          }}
+                        >
+                          Archived
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td style={{ ...cellStyle, textAlign: "right" }}>
-                    <button
-                      type="button"
-                      onClick={() => openEditDialog(company)}
-                      style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(company)}
-                      style={{ ...dangerButtonStyle, fontSize: "12px", padding: "4px 8px" }}
-                    >
-                      Delete
-                    </button>
+                    {!company.deleted_at && (
+                      <button
+                        type="button"
+                        onClick={() => openEditDialog(company)}
+                        style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {isSuperAdmin && !company.deleted_at && (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(company)}
+                        style={{ ...dangerButtonStyle, fontSize: "12px", padding: "4px 8px" }}
+                      >
+                        Deactivate
+                      </button>
+                    )}
+                    {isSuperAdmin && company.deleted_at && (
+                      <button
+                        type="button"
+                        onClick={() => handleReactivate(company)}
+                        style={{ ...primaryButtonStyle, fontSize: "12px", padding: "4px 8px" }}
+                      >
+                        Reactivate
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

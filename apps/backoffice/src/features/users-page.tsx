@@ -144,6 +144,7 @@ const dialogStyle = {
 
 export function UsersPage(props: UsersPageProps) {
   const { user, accessToken } = props;
+  const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
   
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -169,6 +170,9 @@ export function UsersPage(props: UsersPageProps) {
   
   const rolesQuery = useRoles(accessToken);
   const outletsQuery = useOutlets(user.company_id, accessToken);
+  const availableRoles = (rolesQuery.data || []).filter((role) =>
+    isSuperAdmin ? true : role.code !== "SUPER_ADMIN"
+  );
   
   // Filtered users
   const filteredUsers = useMemo(() => {
@@ -423,9 +427,9 @@ export function UsersPage(props: UsersPageProps) {
             style={inputStyle}
           >
             <option value="all">All Roles</option>
-            {(rolesQuery.data || []).map(role => (
-              <option key={role.code} value={role.code}>{role.name}</option>
-            ))}
+          {availableRoles.map(role => (
+            <option key={role.code} value={role.code}>{role.name}</option>
+          ))}
           </select>
         </div>
       </section>
@@ -580,7 +584,7 @@ export function UsersPage(props: UsersPageProps) {
                         Roles
                       </label>
                       <div style={{ border: "1px solid #cabfae", borderRadius: "6px", padding: "8px", maxHeight: "150px", overflow: "auto" }}>
-                        {(rolesQuery.data || []).map(role => (
+                        {availableRoles.map(role => (
                           <label key={role.code} style={{ display: "block", marginBottom: "4px" }}>
                             <input
                               type="checkbox"
@@ -644,7 +648,7 @@ export function UsersPage(props: UsersPageProps) {
                   Select Roles
                 </label>
                 <div style={{ border: "1px solid #cabfae", borderRadius: "6px", padding: "8px", maxHeight: "300px", overflow: "auto" }}>
-                  {(rolesQuery.data || []).map(role => (
+                  {availableRoles.map(role => (
                     <label key={role.code} style={{ display: "block", marginBottom: "4px" }}>
                       <input
                         type="checkbox"
