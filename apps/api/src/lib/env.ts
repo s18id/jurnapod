@@ -1,6 +1,7 @@
 const DEFAULT_DB_PORT = 3306;
 const DEFAULT_DB_CONNECTION_LIMIT = 10;
 const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
+const DEFAULT_REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const DEFAULT_PASSWORD_ALGO = "argon2id";
 const DEFAULT_PASSWORD_REHASH_ON_LOGIN = true;
 const DEFAULT_BCRYPT_ROUNDS = 12;
@@ -54,6 +55,26 @@ function parseBooleanString(value: string | undefined, fallback: boolean, key: s
   throw new Error(`${key} must be \"true\" or \"false\"`);
 }
 
+function parseOptionalString(value: string | undefined): string | null {
+  if (value == null) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseCsv(value: string | undefined): string[] {
+  if (value == null || value.trim().length === 0) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
 function parsePasswordHashAlgorithm(
   value: string | undefined,
   fallback: PasswordHashAlgorithm,
@@ -89,6 +110,8 @@ export type AppEnv = {
   auth: {
     accessTokenSecret: string;
     accessTokenTtlSeconds: number;
+    refreshTokenSecret: string;
+    refreshTokenTtlSeconds: number;
     issuer: string | null;
     audience: string | null;
     password: {
@@ -99,6 +122,11 @@ export type AppEnv = {
       argon2TimeCost: number;
       argon2Parallelism: number;
     };
+  };
+  googleOAuth: {
+    clientId: string | null;
+    clientSecret: string | null;
+    redirectUris: string[];
   };
 };
 
@@ -165,6 +193,11 @@ export function getAppEnv(): AppEnv {
       DEFAULT_PASSWORD_REHASH_ON_LOGIN,
       "AUTH_PASSWORD_REHASH_ON_LOGIN"
     );
+    const refreshTokenTtlSeconds = parsePositiveInt(
+      process.env.AUTH_REFRESH_TTL_SECONDS,
+      DEFAULT_REFRESH_TOKEN_TTL_SECONDS,
+      "AUTH_REFRESH_TTL_SECONDS"
+    );
     const bcryptRounds = parsePositiveInt(
       process.env.AUTH_BCRYPT_ROUNDS,
       DEFAULT_BCRYPT_ROUNDS,
@@ -189,6 +222,20 @@ export function getAppEnv(): AppEnv {
     const issuer = process.env.AUTH_JWT_ISSUER;
     const audience = process.env.AUTH_JWT_AUDIENCE;
 
+    const googleClientId = parseOptionalString(process.env.GOOGLE_OAUTH_CLIENT_ID);
+    const googleClientSecret = parseOptionalString(process.env.GOOGLE_OAUTH_CLIENT_SECRET);
+    const googleRedirectUris = parseCsv(process.env.GOOGLE_OAUTH_REDIRECT_URIS);
+
+    if ((googleClientId && !googleClientSecret) || (!googleClientId && googleClientSecret)) {
+      throw new Error(
+        "GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set together"
+      );
+    }
+
+    if (googleClientId && googleRedirectUris.length === 0) {
+      throw new Error("GOOGLE_OAUTH_REDIRECT_URIS is required when Google OAuth is enabled");
+    }
+
     cachedEnv = Object.freeze({
       db: {
         host: process.env.DB_HOST ?? "127.0.0.1",
@@ -208,6 +255,11 @@ export function getAppEnv(): AppEnv {
           DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
           "AUTH_JWT_ACCESS_TTL_SECONDS"
         ),
+        refreshTokenSecret: requiredEnv(
+          process.env.AUTH_REFRESH_SECRET,
+          "AUTH_REFRESH_SECRET"
+        ),
+        refreshTokenTtlSeconds,
         issuer: issuer && issuer.length > 0 ? issuer : null,
         audience: audience && audience.length > 0 ? audience : null,
         password: {
@@ -218,6 +270,11 @@ export function getAppEnv(): AppEnv {
           argon2TimeCost,
           argon2Parallelism
         }
+      },
+      googleOAuth: {
+        clientId: googleClientId,
+        clientSecret: googleClientSecret,
+        redirectUris: googleRedirectUris
       }
     });
   } catch (error) {

@@ -1,5 +1,7 @@
 import { ZodError } from "zod";
 import { authenticateLogin, parseLoginRequest, recordLoginAudit } from "../../../../src/lib/auth";
+import { getAppEnv } from "../../../../src/lib/env";
+import { createRefreshTokenCookie, issueRefreshToken } from "../../../../src/lib/refresh-tokens";
 
 const INVALID_REQUEST_RESPONSE = {
   ok: false,
@@ -105,7 +107,14 @@ export async function POST(request: Request) {
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
 
-    return Response.json(
+    const refreshToken = await issueRefreshToken({
+      userId: authResult.userId,
+      companyId: authResult.companyId,
+      ipAddress,
+      userAgent
+    });
+    const env = getAppEnv();
+    const response = Response.json(
       {
         ok: true,
         access_token: authResult.accessToken,
@@ -114,6 +123,13 @@ export async function POST(request: Request) {
       },
       { status: 200 }
     );
+
+    response.headers.set(
+      "Set-Cookie",
+      createRefreshTokenCookie(refreshToken.token, env.auth.refreshTokenTtlSeconds)
+    );
+
+    return response;
   } catch (error) {
     if (error instanceof SyntaxError || error instanceof ZodError) {
       const auditWritten = await writeLoginAuditRequired({

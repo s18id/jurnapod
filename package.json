@@ -43,6 +43,8 @@
     "test:scripts": "node --test \"scripts/tests/**/*.test.mjs\"",
     "auth:secret:generate": "node ./scripts/auth-secret-generate.mjs",
     "auth:secret:regenerate": "node ./scripts/auth-secret-regenerate.mjs",
+    "auth:refresh-secret:generate": "node ./scripts/auth-refresh-secret-generate.mjs",
+    "auth:refresh-secret:regenerate": "node ./scripts/auth-refresh-secret-regenerate.mjs",
     "deploy:pos": "/bin/cp -R apps/pos/dist/* public_html/pos/",
     "deploy:backoffice": "/bin/cp -R apps/backoffice/dist/* public_html/backoffice/"
   },

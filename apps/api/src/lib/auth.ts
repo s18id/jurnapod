@@ -51,6 +51,12 @@ type UserLoginRow = RowDataPacket & {
   is_active: number;
 };
 
+export type AccessTokenUser = {
+  id: number;
+  company_id: number;
+  email: string;
+};
+
 type UserProfileRow = RowDataPacket & {
   id: number;
   company_id: number;
@@ -124,7 +130,7 @@ async function findUserForLogin(
   return rows[0] ?? null;
 }
 
-async function signAccessToken(user: UserLoginRow): Promise<string> {
+async function signAccessToken(user: AccessTokenUser): Promise<string> {
   const env = getAppEnv();
   const secret = new TextEncoder().encode(env.auth.accessTokenSecret);
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -149,6 +155,18 @@ async function signAccessToken(user: UserLoginRow): Promise<string> {
   }
 
   return jwt.sign(secret);
+}
+
+export async function issueAccessTokenForUser(
+  user: AccessTokenUser
+): Promise<{ accessToken: string; expiresInSeconds: number }> {
+  const accessToken = await signAccessToken(user);
+  const env = getAppEnv();
+
+  return {
+    accessToken,
+    expiresInSeconds: env.auth.accessTokenTtlSeconds
+  };
 }
 
 async function rehashUserPasswordIfNeeded(
@@ -199,6 +217,38 @@ export async function authenticateLogin(request: LoginRequest): Promise<LoginRes
     expiresInSeconds: env.auth.accessTokenTtlSeconds,
     userId: user.id,
     companyId: user.company_id
+  };
+}
+
+type UserTokenRow = RowDataPacket & {
+  id: number;
+  company_id: number;
+  email: string;
+  is_active: number;
+};
+
+export async function findActiveUserTokenProfile(
+  userId: number,
+  companyId: number
+): Promise<AccessTokenUser | null> {
+  const pool = getDbPool();
+  const [rows] = await pool.execute<UserTokenRow[]>(
+    `SELECT id, company_id, email, is_active
+     FROM users
+     WHERE id = ? AND company_id = ?
+     LIMIT 1`,
+    [userId, companyId]
+  );
+
+  const user = rows[0];
+  if (!user || !user.is_active) {
+    return null;
+  }
+
+  return {
+    id: user.id,
+    company_id: user.company_id,
+    email: user.email
   };
 }
 

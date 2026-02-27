@@ -236,8 +236,11 @@ function buildTestAccountCode(mappingKey) {
   return base.slice(0, 32);
 }
 
+const OUTLET_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "SALES_TAX", "AR"];
+const PAYABLE_MAPPING_KEYS = new Set(["CASH", "QRIS", "CARD"]);
+
 async function ensureOutletAccountMappings(db, companyId, outletId) {
-  const mappingKeys = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "SALES_TAX", "AR"];
+  const mappingKeys = OUTLET_MAPPING_KEYS;
   const placeholders = mappingKeys.map(() => "?").join(", ");
   const [existingRows] = await db.execute(
     `SELECT mapping_key
@@ -261,10 +264,11 @@ async function ensureOutletAccountMappings(db, companyId, outletId) {
     }
 
     const accountCode = buildTestAccountCode(mappingKey);
+    const isPayable = PAYABLE_MAPPING_KEYS.has(mappingKey) ? 1 : 0;
     const [accountInsertResult] = await db.execute(
-      `INSERT INTO accounts (company_id, code, name)
-       VALUES (?, ?, ?)`,
-      [companyId, accountCode, `Integration Test ${mappingKey}`]
+      `INSERT INTO accounts (company_id, code, name, is_payable)
+       VALUES (?, ?, ?, ?)`,
+      [companyId, accountCode, `Integration Test ${mappingKey}`, isPayable]
     );
     const accountId = Number(accountInsertResult.insertId);
 
@@ -282,9 +286,42 @@ async function ensureOutletAccountMappings(db, companyId, outletId) {
     createdAccountIds.push(accountId);
   }
 
+  const [mappingRows] = await db.execute(
+    `SELECT mapping_key, account_id
+     FROM outlet_account_mappings
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND mapping_key IN (${placeholders})`,
+    [companyId, outletId, ...mappingKeys]
+  );
+
+  const accountIdsByKey = mappingRows.reduce((accumulator, row) => {
+    const key = String(row.mapping_key ?? "");
+    if (key.length > 0) {
+      accumulator[key] = Number(row.account_id);
+    }
+    return accumulator;
+  }, {});
+
+  const payableAccountIds = mappingRows
+    .filter((row) => PAYABLE_MAPPING_KEYS.has(String(row.mapping_key ?? "")))
+    .map((row) => Number(row.account_id))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  if (payableAccountIds.length > 0) {
+    const payablePlaceholders = payableAccountIds.map(() => "?").join(", ");
+    await db.execute(
+      `UPDATE accounts
+       SET is_payable = 1
+       WHERE company_id = ? AND id IN (${payablePlaceholders})`,
+      [companyId, ...payableAccountIds]
+    );
+  }
+
   return {
     createdMappingKeys,
-    createdAccountIds
+    createdAccountIds,
+    accountIdsByKey
   };
 }
 
@@ -296,6 +333,12 @@ async function setupTestData(db) {
   // Ensure outlet account mappings exist
   await ensureOutletAccountMappingConstraint(db);
   const mappingFixture = await ensureOutletAccountMappings(db, companyId, outletId);
+  const requiredKeys = ["CASH", "QRIS", "CARD"];
+  for (const key of requiredKeys) {
+    if (!mappingFixture.accountIdsByKey?.[key]) {
+      throw new Error(`Missing outlet account mapping for ${key}`);
+    }
+  }
 
   return { companyId, outletId, userId, mappingFixture };
 }
@@ -484,6 +527,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           invoice_id: invoiceId,
           payment_no: paymentNo,
           payment_at: new Date().toISOString(),
+          account_id: mappingFixture.accountIdsByKey.CASH,
           method: "CASH",
           amount: 1000
         })
@@ -572,6 +616,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           invoice_id: invoiceId,
           payment_no: paymentNo,
           payment_at: new Date().toISOString(),
+          account_id: mappingFixture.accountIdsByKey.CASH,
           method: "CASH",
           amount: 1000
         })
@@ -635,6 +680,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           invoice_id: invoiceId,
           payment_no: payment1No,
           payment_at: new Date().toISOString(),
+          account_id: mappingFixture.accountIdsByKey.CASH,
           method: "CASH",
           amount: 400
         })
@@ -661,6 +707,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           invoice_id: invoiceId,
           payment_no: payment2No,
           payment_at: new Date().toISOString(),
+          account_id: mappingFixture.accountIdsByKey.QRIS,
           method: "QRIS",
           amount: 600
         })
@@ -714,6 +761,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           invoice_id: invoiceId,
           payment_no: paymentNo,
           payment_at: new Date().toISOString(),
+          account_id: mappingFixture.accountIdsByKey.CASH,
           method: "CASH",
           amount: 1500
         })
