@@ -7,7 +7,7 @@ import {
   normalizeHashPath,
   userCanAccessRoute
 } from "./routes";
-import { ApiError } from "../lib/api-client";
+import { ApiError, getApiBaseUrl } from "../lib/api-client";
 import { setupMasterDataRefresh } from "../lib/cache-service";
 import { setupAutoSync } from "../lib/auto-sync";
 import { SyncNotification } from "../components/sync-notification";
@@ -16,6 +16,7 @@ import {
   fetchCurrentUser,
   getStoredAccessToken,
   login,
+  loginWithGoogle,
   type SessionUser
 } from "../lib/session";
 import { LoginPage } from "../features/auth/login-page";
@@ -44,6 +45,10 @@ import { SyncHistoryPage } from "../features/sync-history-page";
 import { PWASettingsPage } from "../features/pwa-settings-page";
 
 type SessionStatus = "loading" | "anonymous" | "authenticated";
+
+const OAUTH_STATE_KEY = "jurnapod.backoffice.oauth.state";
+const OAUTH_COMPANY_KEY = "jurnapod.backoffice.oauth.company";
+const GOOGLE_OAUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 
 function ensureHash(path: string): void {
   if (globalThis.location.hash !== `#${path}`) {
@@ -122,6 +127,8 @@ export function AppRouter() {
   const [activePath, setActivePath] = useState<string>(DEFAULT_ROUTE_PATH);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+  const googleClientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
+  const googleEnabled = googleClientId.length > 0;
 
   useEffect(() => {
     const nextPath = normalizeHashPath(globalThis.location.hash);
@@ -141,7 +148,76 @@ export function AppRouter() {
   }, []);
 
   useEffect(() => {
+    let disposed = false;
+
+    async function applySession(session: { token: string; user: SessionUser }) {
+      if (disposed) {
+        return;
+      }
+
+      setAccessToken(session.token);
+      setUser(session.user);
+      setSessionStatus("authenticated");
+
+      const firstPath = APP_ROUTES.find((item) => userCanAccessRoute(session.user.roles, item))?.path;
+      ensureHash(firstPath ?? DEFAULT_ROUTE_PATH);
+      globalThis.history.replaceState({}, "", `/${globalThis.location.hash}`);
+    }
+
+    async function handleGoogleCallback(): Promise<boolean> {
+      const url = new URL(globalThis.location.href);
+      if (url.pathname !== "/auth/callback") {
+        return false;
+      }
+
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      const storedState = globalThis.sessionStorage.getItem(OAUTH_STATE_KEY);
+      const companyCode = globalThis.sessionStorage.getItem(OAUTH_COMPANY_KEY);
+      globalThis.sessionStorage.removeItem(OAUTH_STATE_KEY);
+      globalThis.sessionStorage.removeItem(OAUTH_COMPANY_KEY);
+
+      setAuthError(null);
+      setAuthLoading(true);
+      setSessionStatus("loading");
+
+      if (!code || !state || !storedState || storedState !== state || !companyCode) {
+        setAuthError("Google sign-in failed. Please try again.");
+        setSessionStatus("anonymous");
+        setAuthLoading(false);
+        globalThis.history.replaceState({}, "", "/");
+        return true;
+      }
+
+      try {
+        const redirectUri = `${globalThis.location.origin}/auth/callback`;
+        const session = await loginWithGoogle({
+          companyCode,
+          code,
+          redirectUri
+        });
+        await applySession(session);
+      } catch (error) {
+        if (error instanceof ApiError) {
+          setAuthError(error.message);
+        } else {
+          setAuthError("Google sign-in failed");
+        }
+        setSessionStatus("anonymous");
+        globalThis.history.replaceState({}, "", "/");
+      } finally {
+        setAuthLoading(false);
+      }
+
+      return true;
+    }
+
     async function bootstrap() {
+      const handledCallback = await handleGoogleCallback();
+      if (handledCallback || disposed) {
+        return;
+      }
+
       const token = getStoredAccessToken();
       if (!token) {
         setSessionStatus("anonymous");
@@ -150,9 +226,7 @@ export function AppRouter() {
 
       try {
         const currentUser = await fetchCurrentUser(token);
-        setAccessToken(token);
-        setUser(currentUser);
-        setSessionStatus("authenticated");
+        await applySession({ token, user: currentUser });
       } catch {
         clearAccessToken();
         setSessionStatus("anonymous");
@@ -163,6 +237,10 @@ export function AppRouter() {
       clearAccessToken();
       setSessionStatus("anonymous");
     });
+
+    return () => {
+      disposed = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -221,7 +299,39 @@ export function AppRouter() {
     }
   }
 
+  function handleGoogleSignIn(companyCode: string) {
+    if (!googleEnabled) {
+      setAuthError("Google sign-in is not configured");
+      return;
+    }
+
+    const trimmedCompanyCode = companyCode.trim();
+    if (trimmedCompanyCode.length === 0) {
+      setAuthError("Company code is required");
+      return;
+    }
+
+    const state = crypto.randomUUID();
+    globalThis.sessionStorage.setItem(OAUTH_STATE_KEY, state);
+    globalThis.sessionStorage.setItem(OAUTH_COMPANY_KEY, trimmedCompanyCode);
+
+    const redirectUri = `${globalThis.location.origin}/auth/callback`;
+    const authUrl = new URL(GOOGLE_OAUTH_URL);
+    authUrl.searchParams.set("client_id", googleClientId);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("scope", "openid email profile");
+    authUrl.searchParams.set("prompt", "select_account");
+    authUrl.searchParams.set("state", state);
+
+    globalThis.location.assign(authUrl.toString());
+  }
+
   function handleSignOut() {
+    void fetch(`${getApiBaseUrl()}/auth/logout`, {
+      method: "POST",
+      credentials: "include"
+    }).catch(() => null);
     clearAccessToken();
     setAccessToken(null);
     setUser(null);
@@ -234,7 +344,15 @@ export function AppRouter() {
   }
 
   if (sessionStatus !== "authenticated" || !user || !accessToken) {
-    return <LoginPage isLoading={authLoading} error={authError} onSubmit={handleSignIn} />;
+    return (
+      <LoginPage
+        isLoading={authLoading}
+        error={authError}
+        onSubmit={handleSignIn}
+        onGoogleSignIn={handleGoogleSignIn}
+        googleEnabled={googleEnabled}
+      />
+    );
   }
 
   return (

@@ -36,6 +36,10 @@ const runtimeBaseUrl = runtimeConfig.API_BASE_URL?.trim();
 const envBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
 const API_BASE_URL = runtimeBaseUrl || envBaseUrl || undefined;
 const API_ORIGIN = API_BASE_URL ?? window.location.origin;
+const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined)?.trim() ?? "";
+const GOOGLE_OAUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const OAUTH_STATE_KEY = "jurnapod.pos.oauth.state";
+const OAUTH_COMPANY_KEY = "jurnapod.pos.oauth.company";
 
 interface CartLine {
   product: RuntimeProductCatalogItem;
@@ -83,6 +87,17 @@ function computeCartTotals(lines: CartLine[], paidAmount: number): {
     paid_total: paidTotal,
     change_total: changeTotal
   };
+}
+
+function buildGoogleAuthUrl(params: { clientId: string; redirectUri: string; state: string }): string {
+  const authUrl = new URL(GOOGLE_OAUTH_URL);
+  authUrl.searchParams.set("client_id", params.clientId);
+  authUrl.searchParams.set("redirect_uri", params.redirectUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", "openid email profile");
+  authUrl.searchParams.set("prompt", "select_account");
+  authUrl.searchParams.set("state", params.state);
+  return authUrl.toString();
 }
 
 function badgeColors(status: RuntimeSyncBadgeState): { background: string; border: string; text: string } {
@@ -160,6 +175,9 @@ function App() {
   const [email, setEmail] = React.useState<string>("");
   const [password, setPassword] = React.useState<string>("");
   const [authToken, setAuthToken] = React.useState<string | null>(() => readAccessToken());
+  const [authStatus, setAuthStatus] = React.useState<"loading" | "anonymous" | "authenticated">(
+    "loading"
+  );
   const [loginInFlight, setLoginInFlight] = React.useState<boolean>(false);
   const [authMessage, setAuthMessage] = React.useState<string | null>(null);
   const [inFlightFlowIds, setInFlightFlowIds] = React.useState<Record<string, true>>({});
@@ -172,6 +190,155 @@ function App() {
   const [refreshNonce, setRefreshNonce] = React.useState<number>(0);
   const inFlightFlowIdsRef = React.useRef<Set<string>>(new Set());
   const drainSchedulerRef = React.useRef<ReturnType<typeof createOutboxDrainScheduler> | null>(null);
+  const googleEnabled = GOOGLE_CLIENT_ID.length > 0;
+
+  const applyAuthenticatedSession = React.useCallback(
+    async (accessToken: string, options?: { message?: string }) => {
+      const meResponse = await fetch(`${API_ORIGIN}/api/me`, {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          accept: "application/json"
+        }
+      });
+
+      if (!meResponse.ok) {
+        throw new Error("Login succeeded but failed to load user outlets");
+      }
+
+      const mePayload = (await meResponse.json()) as {
+        ok: true;
+        user: {
+          company_id: number;
+          outlets: Array<{ id: number; code: string; name: string }>;
+        };
+      };
+
+      if (!mePayload?.ok || !Array.isArray(mePayload.user?.outlets) || mePayload.user.outlets.length === 0) {
+        throw new Error("No outlet access found for this user");
+      }
+
+      const nextOutlets = mePayload.user.outlets.map((outlet) => ({
+        outlet_id: Number(outlet.id),
+        label: `${outlet.code} - ${outlet.name}`
+      }));
+
+      setOutletOptions(nextOutlets);
+      setScope({
+        company_id: Number(mePayload.user.company_id),
+        outlet_id: nextOutlets[0].outlet_id
+      });
+      setAuthToken(accessToken);
+      setAuthStatus("authenticated");
+      if (options?.message) {
+        setAuthMessage(options.message);
+      }
+      setRefreshNonce((previous) => previous + 1);
+    },
+    []
+  );
+
+  React.useEffect(() => {
+    let disposed = false;
+
+    async function handleGoogleCallback(): Promise<boolean> {
+      const url = new URL(globalThis.location.href);
+      if (url.pathname !== "/auth/callback") {
+        return false;
+      }
+
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      const storedState = globalThis.sessionStorage.getItem(OAUTH_STATE_KEY);
+      const storedCompany = globalThis.sessionStorage.getItem(OAUTH_COMPANY_KEY);
+      globalThis.sessionStorage.removeItem(OAUTH_STATE_KEY);
+      globalThis.sessionStorage.removeItem(OAUTH_COMPANY_KEY);
+
+      setAuthMessage(null);
+      setLoginInFlight(true);
+      setAuthStatus("loading");
+
+      if (!code || !state || !storedState || storedState !== state || !storedCompany) {
+        setAuthMessage("Google sign-in failed. Please try again.");
+        setAuthStatus("anonymous");
+        setLoginInFlight(false);
+        globalThis.history.replaceState({}, "", "/");
+        return true;
+      }
+
+      try {
+        const redirectUri = `${globalThis.location.origin}/auth/callback`;
+        const response = await fetch(`${API_ORIGIN}/api/auth/google`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            companyCode: storedCompany,
+            code,
+            redirect_uri: redirectUri
+          })
+        });
+
+        const payload = (await response.json()) as
+          | { ok: true; access_token: string }
+          | { ok: false; error?: { message?: string } };
+
+        if (!response.ok || !payload || payload.ok !== true || typeof payload.access_token !== "string") {
+          const msg = payload && payload.ok === false ? payload.error?.message ?? "Login failed" : "Login failed";
+          throw new Error(msg);
+        }
+
+        writeAccessToken(payload.access_token);
+        await applyAuthenticatedSession(payload.access_token, {
+          message: "Authenticated. Sync pull and push are now authorized."
+        });
+        globalThis.history.replaceState({}, "", "/");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Login failed";
+        setAuthMessage(`Auth failed: ${message}`);
+        setAuthStatus("anonymous");
+        globalThis.history.replaceState({}, "", "/");
+      } finally {
+        if (!disposed) {
+          setLoginInFlight(false);
+        }
+      }
+
+      return true;
+    }
+
+    async function bootstrapAuth() {
+      const handledCallback = await handleGoogleCallback();
+      if (handledCallback || disposed) {
+        return;
+      }
+
+      const storedToken = readAccessToken();
+      if (!storedToken) {
+        setAuthStatus("anonymous");
+        return;
+      }
+
+      try {
+        await applyAuthenticatedSession(storedToken);
+      } catch {
+        clearAccessToken();
+        setAuthToken(null);
+        setAuthStatus("anonymous");
+      }
+    }
+
+    bootstrapAuth().catch(() => {
+      clearAccessToken();
+      setAuthToken(null);
+      setAuthStatus("anonymous");
+    });
+
+    return () => {
+      disposed = true;
+    };
+  }, [applyAuthenticatedSession]);
 
   React.useEffect(() => {
     let disposed = false;
@@ -517,6 +684,7 @@ function App() {
     try {
       const response = await fetch(`${API_ORIGIN}/api/auth/login`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "content-type": "application/json"
         },
@@ -537,58 +705,157 @@ function App() {
       }
 
       writeAccessToken(payload.access_token);
-      setAuthToken(payload.access_token);
-
-      const meResponse = await fetch(`${API_ORIGIN}/api/me`, {
-        headers: {
-          authorization: `Bearer ${payload.access_token}`,
-          accept: "application/json"
-        }
+      await applyAuthenticatedSession(payload.access_token, {
+        message: "Authenticated. Sync pull and push are now authorized."
       });
-
-      if (!meResponse.ok) {
-        throw new Error("Login succeeded but failed to load user outlets");
-      }
-
-      const mePayload = (await meResponse.json()) as {
-        ok: true;
-        user: {
-          company_id: number;
-          outlets: Array<{ id: number; code: string; name: string }>;
-        };
-      };
-
-      if (!mePayload?.ok || !Array.isArray(mePayload.user?.outlets) || mePayload.user.outlets.length === 0) {
-        throw new Error("No outlet access found for this user");
-      }
-
-      const nextOutlets = mePayload.user.outlets.map((outlet) => ({
-        outlet_id: Number(outlet.id),
-        label: `${outlet.code} - ${outlet.name}`
-      }));
-
-      setOutletOptions(nextOutlets);
-      setScope({
-        company_id: Number(mePayload.user.company_id),
-        outlet_id: nextOutlets[0].outlet_id
-      });
-      setAuthMessage("Authenticated. Sync pull and push are now authorized.");
-      setRefreshNonce((previous) => previous + 1);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Login failed";
       setAuthMessage(`Auth failed: ${message}`);
+      setAuthStatus("anonymous");
     } finally {
       setLoginInFlight(false);
     }
-  }, [companyCode, email, loginInFlight, password]);
+  }, [applyAuthenticatedSession, companyCode, email, loginInFlight, password]);
+
+  const runGoogleLogin = React.useCallback(() => {
+    if (loginInFlight) {
+      return;
+    }
+
+    if (!googleEnabled) {
+      setAuthMessage("Google sign-in is not configured.");
+      return;
+    }
+
+    const trimmedCompany = companyCode.trim();
+    if (!trimmedCompany) {
+      setAuthMessage("Company code is required.");
+      return;
+    }
+
+    setAuthMessage(null);
+    const state = crypto.randomUUID();
+    globalThis.sessionStorage.setItem(OAUTH_STATE_KEY, state);
+    globalThis.sessionStorage.setItem(OAUTH_COMPANY_KEY, trimmedCompany);
+    const redirectUri = `${globalThis.location.origin}/auth/callback`;
+    const authUrl = buildGoogleAuthUrl({
+      clientId: GOOGLE_CLIENT_ID,
+      redirectUri,
+      state
+    });
+    globalThis.location.assign(authUrl);
+  }, [companyCode, googleEnabled, loginInFlight]);
 
   const runLogout = React.useCallback(() => {
+    void fetch(`${API_ORIGIN}/api/auth/logout`, {
+      method: "POST",
+      credentials: "include"
+    }).catch(() => null);
     clearAccessToken();
     setAuthToken(null);
     setOutletOptions(PLACEHOLDER_OUTLETS);
     setScope({ company_id: 1, outlet_id: PLACEHOLDER_OUTLETS[0].outlet_id });
     setAuthMessage("Session cleared.");
+    setAuthStatus("anonymous");
   }, []);
+
+  if (authStatus !== "authenticated") {
+    return (
+      <main
+        style={{
+          minHeight: "100vh",
+          margin: 0,
+          padding: 24,
+          background: "linear-gradient(135deg, #ecfeff 0%, #fef3c7 100%)",
+          color: "#0f172a",
+          fontFamily: '"Avenir Next", "Trebuchet MS", sans-serif',
+          display: "grid",
+          placeItems: "center"
+        }}
+      >
+        <section
+          style={{
+            width: "100%",
+            maxWidth: 420,
+            padding: 20,
+            borderRadius: 14,
+            background: "rgba(255, 255, 255, 0.92)",
+            border: "1px solid #e2e8f0",
+            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.12)"
+          }}
+        >
+          <header style={{ marginBottom: 12 }}>
+            <h1 style={{ margin: 0, fontSize: 24 }}>Jurnapod POS</h1>
+            <p style={{ margin: "4px 0 0", color: "#475569", fontSize: 13 }}>
+              Sign in to access checkout, sync, and offline cache.
+            </p>
+          </header>
+
+          <div style={{ display: "grid", gap: 10 }}>
+            <input
+              value={companyCode}
+              onChange={(event) => setCompanyCode(event.target.value)}
+              placeholder="Company code"
+              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
+            />
+            <input
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="Email"
+              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Password"
+              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                void runLogin();
+              }}
+              disabled={loginInFlight}
+              style={{
+                border: "none",
+                background: "#0f766e",
+                color: "#fff",
+                borderRadius: 8,
+                padding: "10px 12px",
+                fontWeight: 700,
+                cursor: loginInFlight ? "not-allowed" : "pointer"
+              }}
+            >
+              {loginInFlight ? "Signing in..." : "Sign in"}
+            </button>
+            {googleEnabled ? (
+              <button
+                type="button"
+                onClick={runGoogleLogin}
+                disabled={loginInFlight || companyCode.trim().length === 0}
+                style={{
+                  border: "1px solid #e2e8f0",
+                  background: "#f8fafc",
+                  color: "#0f172a",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  fontWeight: 700,
+                  cursor: loginInFlight || companyCode.trim().length === 0 ? "not-allowed" : "pointer"
+                }}
+              >
+                Sign in with Google
+              </button>
+            ) : null}
+            {authStatus === "loading" ? (
+              <div style={{ fontSize: 12, color: "#64748b" }}>Checking session...</div>
+            ) : null}
+            {authMessage ? <div style={{ fontSize: 12, color: "#334155" }}>{authMessage}</div> : null}
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main
@@ -614,7 +881,25 @@ function App() {
       >
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <h1 style={{ margin: 0, fontSize: 24 }}>Jurnapod POS</h1>
-          <SyncBadge status={syncBadgeState} pendingCount={pendingOutboxCount} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <SyncBadge status={syncBadgeState} pendingCount={pendingOutboxCount} />
+            <button
+              type="button"
+              onClick={runLogout}
+              style={{
+                border: "1px solid #e2e8f0",
+                background: "#ffffff",
+                color: "#0f172a",
+                borderRadius: 8,
+                padding: "6px 10px",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer"
+              }}
+            >
+              Logout
+            </button>
+          </div>
         </header>
 
         <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
@@ -665,54 +950,6 @@ function App() {
         <p style={{ marginTop: 12, marginBottom: 16, color: "#334155" }}>
           PR-09 checkout uses IndexedDB local-first flow and blocks completion when required outlet cache is missing.
         </p>
-
-        <div style={{ marginBottom: 12, padding: 10, borderRadius: 10, border: "1px solid #cbd5e1", background: "#f8fafc" }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>Login (required for sync pull/push)</div>
-          <div style={{ display: "grid", gap: 8 }}>
-            <input
-              value={companyCode}
-              onChange={(event) => setCompanyCode(event.target.value)}
-              placeholder="Company code"
-              style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1" }}
-            />
-            <input
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="Email"
-              style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1" }}
-            />
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Password"
-              style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1" }}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  void runLogin();
-                }}
-                disabled={loginInFlight}
-                style={{ border: "none", background: "#0f766e", color: "#fff", borderRadius: 8, padding: "8px 12px", fontWeight: 700 }}
-              >
-                {loginInFlight ? "Logging in..." : "Login"}
-              </button>
-              <button
-                type="button"
-                onClick={runLogout}
-                style={{ border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", borderRadius: 8, padding: "8px 12px", fontWeight: 700 }}
-              >
-                Logout
-              </button>
-            </div>
-            <div style={{ fontSize: 12, color: authToken ? "#166534" : "#92400e" }}>
-              {authToken ? "Auth token ready" : "No auth token (sync endpoints will return 401)"}
-            </div>
-            {authMessage ? <div style={{ fontSize: 12, color: "#334155" }}>{authMessage}</div> : null}
-          </div>
-        </div>
 
         <div style={{ marginBottom: 12, fontSize: 14, color: "#475569" }}>Company context (placeholder): {scope.company_id}</div>
 

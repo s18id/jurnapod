@@ -4,6 +4,8 @@ type LoginPageProps = {
   isLoading: boolean;
   error: string | null;
   onSubmit: (input: { companyCode: string; email: string; password: string }) => Promise<void>;
+  onGoogleSignIn?: (companyCode: string) => void;
+  googleEnabled?: boolean;
 };
 
 const cardStyle = {
@@ -42,6 +44,18 @@ const submitStyle = {
   cursor: "pointer",
   backgroundColor: "#2f5f4a",
   color: "#fff"
+} as const;
+
+const googleStyle = {
+  marginTop: "10px",
+  width: "100%",
+  border: "1px solid #d7cebf",
+  borderRadius: "8px",
+  padding: "9px 12px",
+  cursor: "pointer",
+  backgroundColor: "#f8f4ee",
+  color: "#5b4636",
+  fontWeight: 600
 } as const;
 
 export function LoginPage(props: LoginPageProps) {
@@ -111,6 +125,17 @@ export function LoginPage(props: LoginPageProps) {
         <button disabled={props.isLoading} style={submitStyle} type="submit">
           {props.isLoading ? "Signing in..." : "Sign in"}
         </button>
+
+        {props.googleEnabled ? (
+          <button
+            disabled={props.isLoading || companyCode.trim().length === 0}
+            style={googleStyle}
+            type="button"
+            onClick={() => props.onGoogleSignIn?.(companyCode)}
+          >
+            Sign in with Google
+          </button>
+        ) : null}
 
         {props.error ? <p style={{ color: "#8d2626", marginBottom: 0 }}>{props.error}</p> : null}
       </form>

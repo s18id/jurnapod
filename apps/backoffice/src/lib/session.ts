@@ -36,6 +36,12 @@ export type LoginInput = {
   password: string;
 };
 
+export type GoogleLoginInput = {
+  companyCode: string;
+  code: string;
+  redirectUri: string;
+};
+
 export function getStoredAccessToken(): string | null {
   return globalThis.localStorage.getItem(ACCESS_TOKEN_KEY);
 }
@@ -51,10 +57,32 @@ export function clearAccessToken(): void {
 export async function login(input: LoginInput): Promise<{ token: string; user: SessionUser }> {
   const auth = await apiRequest<LoginResponse>("/auth/login", {
     method: "POST",
+    credentials: "include",
     body: JSON.stringify({
       company_code: input.companyCode,
       email: input.email,
       password: input.password
+    })
+  });
+
+  storeAccessToken(auth.access_token);
+  const user = await fetchCurrentUser(auth.access_token);
+  return {
+    token: auth.access_token,
+    user
+  };
+}
+
+export async function loginWithGoogle(
+  input: GoogleLoginInput
+): Promise<{ token: string; user: SessionUser }> {
+  const auth = await apiRequest<LoginResponse>("/auth/google", {
+    method: "POST",
+    credentials: "include",
+    body: JSON.stringify({
+      companyCode: input.companyCode,
+      code: input.code,
+      redirect_uri: input.redirectUri
     })
   });
 

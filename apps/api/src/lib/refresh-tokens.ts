@@ -5,7 +5,6 @@ import { getAppEnv } from "./env";
 
 export const REFRESH_TOKEN_COOKIE_NAME = "jp_refresh_token";
 const COOKIE_PATH = "/";
-const COOKIE_SAMESITE = "Lax";
 const COOKIE_USER_AGENT_MAX_LENGTH = 255;
 
 type RefreshTokenRow = RowDataPacket & {
@@ -48,6 +47,15 @@ function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
+function getRefreshCookieSettings(): { sameSite: string; secure: boolean } {
+  const env = getAppEnv();
+  if (env.auth.refreshCookieCrossSite) {
+    return { sameSite: "None", secure: true };
+  }
+
+  return { sameSite: "Lax", secure: isProduction() };
+}
+
 function normalizeUserAgent(userAgent: string | null): string | null {
   if (!userAgent) {
     return null;
@@ -86,16 +94,17 @@ function toCookieExpiry(maxAgeSeconds: number): string {
 }
 
 export function createRefreshTokenCookie(token: string, maxAgeSeconds: number): string {
+  const cookieSettings = getRefreshCookieSettings();
   const attributes = [
     `${REFRESH_TOKEN_COOKIE_NAME}=${encodeURIComponent(token)}`,
     `Path=${COOKIE_PATH}`,
     "HttpOnly",
-    `SameSite=${COOKIE_SAMESITE}`,
+    `SameSite=${cookieSettings.sameSite}`,
     `Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}`,
     `Expires=${toCookieExpiry(maxAgeSeconds)}`
   ];
 
-  if (isProduction()) {
+  if (cookieSettings.secure) {
     attributes.push("Secure");
   }
 
@@ -103,16 +112,17 @@ export function createRefreshTokenCookie(token: string, maxAgeSeconds: number): 
 }
 
 export function createRefreshTokenClearCookie(): string {
+  const cookieSettings = getRefreshCookieSettings();
   const attributes = [
     `${REFRESH_TOKEN_COOKIE_NAME}=`,
     `Path=${COOKIE_PATH}`,
     "HttpOnly",
-    `SameSite=${COOKIE_SAMESITE}`,
+    `SameSite=${cookieSettings.sameSite}`,
     "Max-Age=0",
     "Expires=Thu, 01 Jan 1970 00:00:00 GMT"
   ];
 
-  if (isProduction()) {
+  if (cookieSettings.secure) {
     attributes.push("Secure");
   }
 

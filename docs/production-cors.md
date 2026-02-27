@@ -445,6 +445,27 @@ Either:
 
 ---
 
+## Google SSO + Refresh Cookies (Cross-Origin)
+
+If Backoffice/POS are on different origins than the API and you want refresh cookies:
+
+- Set `AUTH_REFRESH_COOKIE_CROSS_SITE=true` so the refresh cookie uses `SameSite=None; Secure`.
+- Ensure HTTPS is used (secure cookies do not work on plain HTTP).
+- Use `credentials: "include"` on auth endpoints from the frontends.
+
+Example production env:
+```bash
+AUTH_REFRESH_COOKIE_CROSS_SITE=true
+GOOGLE_OAUTH_CLIENT_ID=your-client-id
+GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
+GOOGLE_OAUTH_REDIRECT_URIS=https://backoffice.example.com/auth/callback,https://pos.example.com/auth/callback
+CORS_ALLOWED_ORIGINS=https://backoffice.example.com,https://pos.example.com
+```
+
+See `docs/auth/google-sso.md` for the full SSO and callback setup.
+
+---
+
 ## Monitoring
 
 ### Metrics to Track

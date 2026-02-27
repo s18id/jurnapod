@@ -4,6 +4,7 @@ const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const DEFAULT_REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const DEFAULT_LOGIN_THROTTLE_BASE_MS = 10000;
 const DEFAULT_LOGIN_THROTTLE_MAX_MS = 300000;
+const DEFAULT_REFRESH_COOKIE_CROSS_SITE = false;
 const DEFAULT_PASSWORD_ALGO = "argon2id";
 const DEFAULT_PASSWORD_REHASH_ON_LOGIN = true;
 const DEFAULT_BCRYPT_ROUNDS = 12;
@@ -128,6 +129,7 @@ export type AppEnv = {
       baseDelayMs: number;
       maxDelayMs: number;
     };
+    refreshCookieCrossSite: boolean;
   };
   googleOAuth: {
     clientId: string | null;
@@ -214,6 +216,11 @@ export function getAppEnv(): AppEnv {
       DEFAULT_LOGIN_THROTTLE_MAX_MS,
       "AUTH_LOGIN_THROTTLE_MAX_MS"
     );
+    const refreshCookieCrossSite = parseBooleanString(
+      process.env.AUTH_REFRESH_COOKIE_CROSS_SITE,
+      DEFAULT_REFRESH_COOKIE_CROSS_SITE,
+      "AUTH_REFRESH_COOKIE_CROSS_SITE"
+    );
     const bcryptRounds = parsePositiveInt(
       process.env.AUTH_BCRYPT_ROUNDS,
       DEFAULT_BCRYPT_ROUNDS,
@@ -293,7 +300,8 @@ export function getAppEnv(): AppEnv {
         loginThrottle: {
           baseDelayMs: loginThrottleBaseMs,
           maxDelayMs: loginThrottleMaxMs
-        }
+        },
+        refreshCookieCrossSite
       },
       googleOAuth: {
         clientId: googleClientId,
