@@ -21,6 +21,7 @@ import { AccountMappingsPage as AccountMappingsSettingsPage } from "./account-ma
 import { StaticPagesPage as StaticPagesManagementPage } from "./static-pages-page";
 import { UsersPage as UsersManagementPage } from "./users-page";
 import { RolesPage as RolesManagementPage } from "./roles-page";
+import { CompaniesPage as CompaniesManagementPage } from "./companies-page";
 
 type PlaceholderProps = {
   title: string;
@@ -84,6 +85,8 @@ export const StaticPagesPage = StaticPagesManagementPage;
 export const UsersPage = UsersManagementPage;
 
 export const RolesPage = RolesManagementPage;
+
+export const CompaniesPage = CompaniesManagementPage;
 
 export function ForbiddenPage() {
   return (

@@ -41,7 +41,8 @@ import {
   AccountMappingsPage,
   StaticPagesPage,
   UsersPage,
-  RolesPage
+  RolesPage,
+  CompaniesPage
 } from "../features/pages";
 import { PrivacyPage, TermsPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
@@ -86,6 +87,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/roles") {
     return <RolesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/companies") {
+    return <CompaniesPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/items-prices") {
     return <ItemsPricesPage user={props.user} accessToken={props.accessToken} />;
