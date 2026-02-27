@@ -56,7 +56,9 @@ function seedConfigFromEnv() {
     outletCode: process.env.JP_OUTLET_CODE ?? "MAIN",
     outletName: process.env.JP_OUTLET_NAME ?? "Main Outlet",
     ownerEmail: process.env.JP_OWNER_EMAIL ?? "owner@local",
-    ownerPassword: process.env.JP_OWNER_PASSWORD ?? "ChangeMe123!"
+    ownerPassword: process.env.JP_OWNER_PASSWORD ?? "ChangeMe123!",
+    superAdminEmail: process.env.JP_SUPER_ADMIN_EMAIL ?? null,
+    superAdminPassword: process.env.JP_SUPER_ADMIN_PASSWORD ?? null
   };
 }
 
@@ -234,6 +236,41 @@ async function main() {
        ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)`,
       [ownerUserId, outletId]
     );
+
+    // Create SUPER_ADMIN user if configured
+    if (seedConfig.superAdminEmail && seedConfig.superAdminPassword) {
+      const [superAdminRoleRows] = await connection.execute(
+        `SELECT id FROM roles WHERE code = ?`,
+        ["SUPER_ADMIN"]
+      );
+      const superAdminRoleId = superAdminRoleRows[0]?.id;
+      if (!superAdminRoleId) {
+        console.warn("SUPER_ADMIN role not found, skipping super admin user creation");
+      } else {
+        const superAdminPasswordHash = await hashOwnerPassword(
+          seedConfig.superAdminPassword,
+          passwordPolicy
+        );
+        const [superAdminResult] = await connection.execute(
+          `INSERT INTO users (company_id, email, password_hash, is_active)
+           VALUES (0, ?, ?, 1)
+           ON DUPLICATE KEY UPDATE
+             password_hash = VALUES(password_hash),
+             is_active = 1,
+             updated_at = CURRENT_TIMESTAMP`,
+          [seedConfig.superAdminEmail.toLowerCase(), superAdminPasswordHash]
+        );
+        const superAdminUserId = superAdminResult.insertId;
+
+        await connection.execute(
+          `INSERT INTO user_roles (user_id, role_id)
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE role_id = VALUES(role_id)`,
+          [superAdminUserId, superAdminRoleId]
+        );
+        console.log(`superadmin=${seedConfig.superAdminEmail}`);
+      }
+    }
 
     const featureFlags = [
       ["pos.enabled", true, "{}"],
