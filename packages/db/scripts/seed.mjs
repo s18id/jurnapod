@@ -194,6 +194,7 @@ async function main() {
     );
 
     const roleDefinitions = [
+      ["SUPER_ADMIN", "Super Admin"],
       ["OWNER", "Owner"],
       ["ADMIN", "Admin"],
       ["CASHIER", "Cashier"],
