@@ -238,6 +238,20 @@ A: No, only one default per outlet. This ensures consistent behavior.
 **Q: What if I delete the default payment method?**
 A: The system will show a warning to configure a new default. You can continue without a default.
 
+---
+
+## Appendix: Static Pages (Privacy)
+
+### Deployment Steps
+- [ ] Apply `static_pages` migration (creates table + seeds `privacy`).
+- [ ] Deploy API with public + admin static pages endpoints.
+- [ ] Deploy backoffice with Static Pages admin and `/privacy` route.
+
+### Verification
+- [ ] Public privacy URL loads without auth: `https://jurnapod.signal18.id/privacy`
+- [ ] Public API returns published page: `GET /api/pages/privacy`
+- [ ] Unpublished pages return 404
+
 **Q: Does this affect POS?**
 A: No, cashiers still manually select payment methods in POS. This only affects backoffice invoice payments.
 

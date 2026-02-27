@@ -63,6 +63,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     label: "Account Mappings",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
+  {
+    path: "/static-pages",
+    label: "Static Pages",
+    allowedRoles: ["OWNER", "ADMIN"]
+  },
   
   // === SALES ===
   {

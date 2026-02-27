@@ -17,6 +17,7 @@ import { SalesPaymentsPage as SalesPaymentsManagementPage } from "./sales-paymen
 import { SuppliesPage as SuppliesManagementPage } from "./supplies-page";
 import { FixedAssetPage as FixedAssetsManagementPage } from "./fixed-assets-page";
 import { AccountMappingsPage as AccountMappingsSettingsPage } from "./account-mappings-page";
+import { StaticPagesPage as StaticPagesManagementPage } from "./static-pages-page";
 
 type PlaceholderProps = {
   title: string;
@@ -74,6 +75,8 @@ export const SalesInvoicesPage = SalesInvoicesManagementPage;
 export const SalesPaymentsPage = SalesPaymentsManagementPage;
 
 export const AccountMappingsPage = AccountMappingsSettingsPage;
+
+export const StaticPagesPage = StaticPagesManagementPage;
 
 export function ForbiddenPage() {
   return (

@@ -206,6 +206,7 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
       "/chart-of-accounts",
       "/account-types",
       "/account-mappings",
+      "/static-pages",
       "/sync-queue",
       "/sync-history",
       "/pwa-settings"

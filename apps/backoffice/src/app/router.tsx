@@ -38,8 +38,10 @@ import {
   SalesInvoicesPage,
   SalesPaymentsPage,
   SuppliesPage,
-  AccountMappingsPage
+  AccountMappingsPage,
+  StaticPagesPage
 } from "../features/pages";
+import { PrivacyPage, TermsPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
 import { SyncHistoryPage } from "../features/sync-history-page";
 import { PWASettingsPage } from "../features/pwa-settings-page";
@@ -51,9 +53,29 @@ const OAUTH_COMPANY_KEY = "jurnapod.backoffice.oauth.company";
 const GOOGLE_OAUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 
 function ensureHash(path: string): void {
+  if (
+    (path === "/privacy" || path === "/terms") &&
+    globalThis.location.pathname === path &&
+    globalThis.location.hash.length === 0
+  ) {
+    return;
+  }
+
   if (globalThis.location.hash !== `#${path}`) {
     globalThis.location.hash = `#${path}`;
   }
+}
+
+function resolvePathFromLocation(): string {
+  if (globalThis.location.hash.length > 0) {
+    return normalizeHashPath(globalThis.location.hash);
+  }
+
+  if (globalThis.location.pathname === "/privacy" || globalThis.location.pathname === "/terms") {
+    return globalThis.location.pathname;
+  }
+
+  return DEFAULT_ROUTE_PATH;
 }
 
 function RouteScreen(props: { path: string; user: SessionUser; accessToken: string }) {
@@ -111,6 +133,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   if (props.path === "/account-mappings") {
     return <AccountMappingsPage user={props.user} accessToken={props.accessToken} />;
   }
+  if (props.path === "/static-pages") {
+    return <StaticPagesPage user={props.user} accessToken={props.accessToken} />;
+  }
   if (props.path === "/journals") {
     return <JournalsPage user={props.user} accessToken={props.accessToken} />;
   }
@@ -131,7 +156,7 @@ export function AppRouter() {
   const googleEnabled = googleClientId.length > 0;
 
   useEffect(() => {
-    const nextPath = normalizeHashPath(globalThis.location.hash);
+    const nextPath = resolvePathFromLocation();
     setActivePath(nextPath);
     ensureHash(nextPath);
 
@@ -272,6 +297,21 @@ export function AppRouter() {
     }
     return APP_ROUTES.filter((route) => userCanAccessRoute(user.roles, route));
   }, [user]);
+
+  const isPublicPrivacy =
+    activePath === "/privacy" ||
+    (typeof window !== "undefined" && window.location.pathname === "/privacy");
+  const isPublicTerms =
+    activePath === "/terms" ||
+    (typeof window !== "undefined" && window.location.pathname === "/terms");
+
+  if (isPublicPrivacy) {
+    return <PrivacyPage />;
+  }
+
+  if (isPublicTerms) {
+    return <TermsPage />;
+  }
 
   const route = findRoute(activePath);
   const canAccess = !!(user && route && userCanAccessRoute(user.roles, route));
