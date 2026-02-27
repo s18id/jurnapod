@@ -172,7 +172,7 @@ export function UsersPage(props: UsersPageProps) {
   
   // Filtered users
   const filteredUsers = useMemo(() => {
-    let result = usersQuery.data;
+    let result = usersQuery.data || [];
     
     if (roleFilter !== "all") {
       result = result.filter(u => u.roles.includes(roleFilter as any));
@@ -423,7 +423,7 @@ export function UsersPage(props: UsersPageProps) {
             style={inputStyle}
           >
             <option value="all">All Roles</option>
-            {rolesQuery.data.map(role => (
+            {(rolesQuery.data || []).map(role => (
               <option key={role.code} value={role.code}>{role.name}</option>
             ))}
           </select>
@@ -580,7 +580,7 @@ export function UsersPage(props: UsersPageProps) {
                         Roles
                       </label>
                       <div style={{ border: "1px solid #cabfae", borderRadius: "6px", padding: "8px", maxHeight: "150px", overflow: "auto" }}>
-                        {rolesQuery.data.map(role => (
+                        {(rolesQuery.data || []).map(role => (
                           <label key={role.code} style={{ display: "block", marginBottom: "4px" }}>
                             <input
                               type="checkbox"
@@ -604,7 +604,7 @@ export function UsersPage(props: UsersPageProps) {
                         Outlets
                       </label>
                       <div style={{ border: "1px solid #cabfae", borderRadius: "6px", padding: "8px", maxHeight: "150px", overflow: "auto" }}>
-                        {outletsQuery.data.map(outlet => (
+                        {(outletsQuery.data || []).map(outlet => (
                           <label key={outlet.id} style={{ display: "block", marginBottom: "4px" }}>
                             <input
                               type="checkbox"
@@ -644,7 +644,7 @@ export function UsersPage(props: UsersPageProps) {
                   Select Roles
                 </label>
                 <div style={{ border: "1px solid #cabfae", borderRadius: "6px", padding: "8px", maxHeight: "300px", overflow: "auto" }}>
-                  {rolesQuery.data.map(role => (
+                  {(rolesQuery.data || []).map(role => (
                     <label key={role.code} style={{ display: "block", marginBottom: "4px" }}>
                       <input
                         type="checkbox"
@@ -670,7 +670,7 @@ export function UsersPage(props: UsersPageProps) {
                   Select Outlets
                 </label>
                 <div style={{ border: "1px solid #cabfae", borderRadius: "6px", padding: "8px", maxHeight: "300px", overflow: "auto" }}>
-                  {outletsQuery.data.map(outlet => (
+                  {(outletsQuery.data || []).map(outlet => (
                     <label key={outlet.id} style={{ display: "block", marginBottom: "4px" }}>
                       <input
                         type="checkbox"
