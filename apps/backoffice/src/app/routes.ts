@@ -23,6 +23,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     label: "Companies",
     allowedRoles: ["OWNER"]
   },
+  {
+    path: "/outlets",
+    label: "Outlets",
+    allowedRoles: ["OWNER", "ADMIN"]
+  },
   
   // === MASTER DATA ===
   {

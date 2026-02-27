@@ -22,6 +22,7 @@ import { StaticPagesPage as StaticPagesManagementPage } from "./static-pages-pag
 import { UsersPage as UsersManagementPage } from "./users-page";
 import { RolesPage as RolesManagementPage } from "./roles-page";
 import { CompaniesPage as CompaniesManagementPage } from "./companies-page";
+import { OutletsPage as OutletsManagementPage } from "./outlets-page";
 
 type PlaceholderProps = {
   title: string;
@@ -87,6 +88,8 @@ export const UsersPage = UsersManagementPage;
 export const RolesPage = RolesManagementPage;
 
 export const CompaniesPage = CompaniesManagementPage;
+
+export const OutletsPage = OutletsManagementPage;
 
 export function ForbiddenPage() {
   return (

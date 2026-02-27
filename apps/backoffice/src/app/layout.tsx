@@ -183,7 +183,7 @@ const styles = {
 const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   {
     label: "Platform",
-    paths: ["/users", "/roles", "/companies"]
+    paths: ["/users", "/roles", "/companies", "/outlets"]
   },
   {
     label: "Core",
