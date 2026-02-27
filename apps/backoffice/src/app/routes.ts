@@ -13,6 +13,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     label: "Users",
     allowedRoles: ["OWNER", "ADMIN"]
   },
+  {
+    path: "/roles",
+    label: "Roles",
+    allowedRoles: ["OWNER"]
+  },
   
   // === MASTER DATA ===
   {

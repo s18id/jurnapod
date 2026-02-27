@@ -691,6 +691,160 @@ export async function listRoles(): Promise<Array<{ id: number; code: string; nam
   }));
 }
 
+export async function getRole(roleId: number): Promise<{ id: number; code: string; name: string }> {
+  const pool = getDbPool();
+  const [rows] = await pool.execute<RoleRow[]>(
+    `SELECT id, code, name
+     FROM roles
+     WHERE id = ?`,
+    [roleId]
+  );
+
+  if (rows.length === 0) {
+    throw new RoleNotFoundError(`Role with id ${roleId} not found`);
+  }
+
+  return {
+    id: Number(rows[0].id),
+    code: rows[0].code,
+    name: rows[0].name
+  };
+}
+
+export async function createRole(params: {
+  code: string;
+  name: string;
+}): Promise<{ id: number; code: string; name: string }> {
+  const pool = getDbPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // Check if role code already exists
+    const [existing] = await connection.execute<RoleRow[]>(
+      `SELECT id FROM roles WHERE code = ?`,
+      [params.code]
+    );
+
+    if (existing.length > 0) {
+      throw new Error(`Role with code ${params.code} already exists`);
+    }
+
+    // Insert role
+    const [result] = await connection.execute<ResultSetHeader>(
+      `INSERT INTO roles (code, name) VALUES (?, ?)`,
+      [params.code, params.name]
+    );
+
+    const roleId = Number(result.insertId);
+
+    await connection.commit();
+
+    return {
+      id: roleId,
+      code: params.code,
+      name: params.name
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+export async function updateRole(params: {
+  roleId: number;
+  name?: string;
+}): Promise<{ id: number; code: string; name: string }> {
+  const pool = getDbPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // Get current role
+    const [rows] = await connection.execute<RoleRow[]>(
+      `SELECT id, code, name FROM roles WHERE id = ?`,
+      [params.roleId]
+    );
+
+    if (rows.length === 0) {
+      throw new RoleNotFoundError(`Role with id ${params.roleId} not found`);
+    }
+
+    const currentRole = rows[0];
+
+    // Build update
+    if (params.name) {
+      await connection.execute(
+        `UPDATE roles SET name = ? WHERE id = ?`,
+        [params.name, params.roleId]
+      );
+    }
+
+    await connection.commit();
+
+    return {
+      id: Number(currentRole.id),
+      code: currentRole.code,
+      name: params.name ?? currentRole.name
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+export async function deleteRole(params: {
+  roleId: number;
+}): Promise<void> {
+  const pool = getDbPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // Get current role
+    const [rows] = await connection.execute<RoleRow[]>(
+      `SELECT id, code, name FROM roles WHERE id = ?`,
+      [params.roleId]
+    );
+
+    if (rows.length === 0) {
+      throw new RoleNotFoundError(`Role with id ${params.roleId} not found`);
+    }
+
+    const role = rows[0];
+
+    // Check if role is in use
+    const [userRoles] = await connection.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) as count FROM user_roles WHERE role_id = ?`,
+      [params.roleId]
+    );
+
+    if (userRoles[0].count > 0) {
+      throw new Error(`Cannot delete role ${role.code}: ${userRoles[0].count} users are assigned to this role`);
+    }
+
+    // Delete role
+    await connection.execute(
+      `DELETE FROM roles WHERE id = ?`,
+      [params.roleId]
+    );
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 export async function listOutlets(
   companyId: number
 ): Promise<Array<{ id: number; code: string; name: string }>> {

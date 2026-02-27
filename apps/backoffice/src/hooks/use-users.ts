@@ -373,3 +373,59 @@ export async function reactivateUser(
   );
   return response.data;
 }
+
+/**
+ * Mutation: createRole
+ * Creates a new role
+ */
+export async function createRole(
+  data: { code: string; name: string },
+  accessToken: string
+): Promise<RoleResponse> {
+  const response = await apiRequest<{ success: true; data: RoleResponse }>(
+    "/roles",
+    {
+      method: "POST",
+      body: JSON.stringify(data)
+    },
+    accessToken
+  );
+  return response.data;
+}
+
+/**
+ * Mutation: updateRole
+ * Updates an existing role
+ */
+export async function updateRole(
+  roleId: number,
+  data: { name: string },
+  accessToken: string
+): Promise<RoleResponse> {
+  const response = await apiRequest<{ success: true; data: RoleResponse }>(
+    `/roles/${roleId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data)
+    },
+    accessToken
+  );
+  return response.data;
+}
+
+/**
+ * Mutation: deleteRole
+ * Deletes a role
+ */
+export async function deleteRole(
+  roleId: number,
+  accessToken: string
+): Promise<void> {
+  await apiRequest<{ ok: true }>(
+    `/roles/${roleId}`,
+    {
+      method: "DELETE"
+    },
+    accessToken
+  );
+}
