@@ -863,3 +863,147 @@ export async function listOutlets(
     name: row.name
   }));
 }
+
+type ModuleRoleRow = RowDataPacket & {
+  id: number;
+  role_id: number;
+  module: string;
+  can_create: number;
+  can_read: number;
+  can_update: number;
+  can_delete: number;
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type ModuleRoleResponse = {
+  id: number;
+  role_id: number;
+  role_code: string;
+  module: string;
+  can_create: boolean;
+  can_read: boolean;
+  can_update: boolean;
+  can_delete: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export class ModuleRoleNotFoundError extends Error {}
+
+export async function listModuleRoles(params?: {
+  roleId?: number;
+  module?: string;
+}): Promise<ModuleRoleResponse[]> {
+  const pool = getDbPool();
+  const conditions: string[] = [];
+  const values: (number | string)[] = [];
+
+  if (params?.roleId) {
+    conditions.push("mr.role_id = ?");
+    values.push(params.roleId);
+  }
+  if (params?.module) {
+    conditions.push("mr.module = ?");
+    values.push(params.module);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const [rows] = await pool.execute<ModuleRoleRow[]>(
+    `SELECT mr.id, mr.role_id, r.code as role_code, mr.module,
+            mr.can_create, mr.can_read, mr.can_update, mr.can_delete,
+            mr.created_at, mr.updated_at
+     FROM module_roles mr
+     INNER JOIN roles r ON r.id = mr.role_id
+     ${whereClause}
+     ORDER BY r.code, mr.module`,
+    values
+  );
+
+  return rows.map((row) => ({
+    id: Number(row.id),
+    role_id: Number(row.role_id),
+    role_code: row.role_code,
+    module: row.module,
+    can_create: Boolean(row.can_create),
+    can_read: Boolean(row.can_read),
+    can_update: Boolean(row.can_update),
+    can_delete: Boolean(row.can_delete),
+    created_at: row.created_at.toISOString(),
+    updated_at: row.updated_at.toISOString()
+  }));
+}
+
+export async function setModuleRolePermission(params: {
+  roleId: number;
+  module: string;
+  canCreate?: boolean;
+  canRead?: boolean;
+  canUpdate?: boolean;
+  canDelete?: boolean;
+}): Promise<ModuleRoleResponse> {
+  const pool = getDbPool();
+
+  const [existing] = await pool.execute<ModuleRoleRow[]>(
+    `SELECT id FROM module_roles WHERE role_id = ? AND module = ?`,
+    [params.roleId, params.module]
+  );
+
+  if (existing.length > 0) {
+    await pool.execute(
+      `UPDATE module_roles
+       SET can_create = ?, can_read = ?, can_update = ?, can_delete = ?
+       WHERE role_id = ? AND module = ?`,
+      [
+        params.canCreate ? 1 : 0,
+        params.canRead ? 1 : 0,
+        params.canUpdate ? 1 : 0,
+        params.canDelete ? 1 : 0,
+        params.roleId,
+        params.module
+      ]
+    );
+  } else {
+    await pool.execute(
+      `INSERT INTO module_roles (role_id, module, can_create, can_read, can_update, can_delete)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        params.roleId,
+        params.module,
+        params.canCreate ? 1 : 0,
+        params.canRead ? 1 : 0,
+        params.canUpdate ? 1 : 0,
+        params.canDelete ? 1 : 0
+      ]
+    );
+  }
+
+  const [rows] = await pool.execute<ModuleRoleRow[]>(
+    `SELECT mr.id, mr.role_id, r.code as role_code, mr.module,
+            mr.can_create, mr.can_read, mr.can_update, mr.can_delete,
+            mr.created_at, mr.updated_at
+     FROM module_roles mr
+     INNER JOIN roles r ON r.id = mr.role_id
+     WHERE mr.role_id = ? AND mr.module = ?`,
+    [params.roleId, params.module]
+  );
+
+  if (rows.length === 0) {
+    throw new ModuleRoleNotFoundError("Module role not found after update");
+  }
+
+  const row = rows[0];
+  return {
+    id: Number(row.id),
+    role_id: Number(row.role_id),
+    role_code: row.role_code,
+    module: row.module,
+    can_create: Boolean(row.can_create),
+    can_read: Boolean(row.can_read),
+    can_update: Boolean(row.can_update),
+    can_delete: Boolean(row.can_delete),
+    created_at: row.created_at.toISOString(),
+    updated_at: row.updated_at.toISOString()
+  };
+}

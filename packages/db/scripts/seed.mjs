@@ -147,6 +147,28 @@ async function upsertRole(connection, roleCode, roleName) {
   return Number(result.insertId);
 }
 
+async function upsertModuleRolePermission(
+  connection,
+  roleId,
+  module,
+  canCreate,
+  canRead,
+  canUpdate,
+  canDelete
+) {
+  await connection.execute(
+    `INSERT INTO module_roles (role_id, module, can_create, can_read, can_update, can_delete)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       can_create = VALUES(can_create),
+       can_read = VALUES(can_read),
+       can_update = VALUES(can_update),
+       can_delete = VALUES(can_delete),
+       updated_at = CURRENT_TIMESTAMP`,
+    [roleId, module, canCreate ? 1 : 0, canRead ? 1 : 0, canUpdate ? 1 : 0, canDelete ? 1 : 0]
+  );
+}
+
 async function upsertOwner(connection, companyId, ownerEmail, passwordHash) {
   const [result] = await connection.execute(
     `INSERT INTO users (company_id, email, password_hash, is_active)
@@ -204,8 +226,10 @@ async function main() {
     ];
 
     let ownerRoleId = 0;
+    let roleIds = {};
     for (const [roleCode, roleName] of roleDefinitions) {
       const roleId = await upsertRole(connection, roleCode, roleName);
+      roleIds[roleCode] = roleId;
       if (roleCode === "OWNER") {
         ownerRoleId = roleId;
       }
@@ -213,6 +237,85 @@ async function main() {
 
     if (!ownerRoleId) {
       throw new Error("OWNER role id not found after seed upsert");
+    }
+
+    // Seed default module permissions
+    const modulePermissions = [
+      // SUPER_ADMIN - full access to all modules
+      { roleCode: "SUPER_ADMIN", module: "companies", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "users", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "roles", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "outlets", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "purchasing", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "reports", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "settings", create: 1, read: 1, update: 1, delete: 1 },
+      // OWNER - full access
+      { roleCode: "OWNER", module: "companies", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "users", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "roles", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "outlets", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "purchasing", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "reports", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "settings", create: 1, read: 1, update: 1, delete: 1 },
+      // ADMIN - same as owner
+      { roleCode: "ADMIN", module: "companies", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ADMIN", module: "users", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "ADMIN", module: "roles", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ADMIN", module: "outlets", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "ADMIN", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "ADMIN", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "ADMIN", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "ADMIN", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "ADMIN", module: "purchasing", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "ADMIN", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ADMIN", module: "settings", create: 0, read: 1, update: 1, delete: 0 },
+      // CASHIER - limited access
+      { roleCode: "CASHIER", module: "companies", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "users", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "roles", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "outlets", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "accounts", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "journals", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "sales", create: 1, read: 1, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "inventory", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "purchasing", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "settings", create: 0, read: 0, update: 0, delete: 0 },
+      // ACCOUNTANT - read mostly
+      { roleCode: "ACCOUNTANT", module: "companies", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "users", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "roles", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "outlets", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "accounts", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "journals", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "sales", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "inventory", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "purchasing", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "settings", create: 0, read: 0, update: 0, delete: 0 }
+    ];
+
+    for (const perm of modulePermissions) {
+      const roleId = roleIds[perm.roleCode];
+      if (roleId) {
+        await upsertModuleRolePermission(
+          connection,
+          roleId,
+          perm.module,
+          perm.create,
+          perm.read,
+          perm.update,
+          perm.delete
+        );
+      }
     }
 
     const ownerPasswordHash = await hashOwnerPassword(seedConfig.ownerPassword, passwordPolicy);

@@ -1,12 +1,12 @@
 import { jwtVerify } from "jose";
 import { z } from "zod";
-import { ROLE_CODES, userHasAnyRole, userHasOutletAccess, type RoleCode } from "./auth";
+import { ROLE_CODES, userHasAnyRole, userHasOutletAccess, userHasModulePermission, type RoleCode, type ModulePermission } from "./auth";
 import { getAppEnv } from "./env";
 
 const BEARER_TOKEN_PATTERN = /^Bearer\s+(\S+)$/i;
 
 const unauthorizedResponseBody = {
-  ok: false,
+  success: false,
   error: {
     code: "UNAUTHORIZED",
     message: "Missing or invalid access token"
@@ -14,7 +14,7 @@ const unauthorizedResponseBody = {
 };
 
 const forbiddenResponseBody = {
-  ok: false,
+  success: false,
   error: {
     code: "FORBIDDEN",
     message: "Forbidden"
@@ -22,7 +22,7 @@ const forbiddenResponseBody = {
 };
 
 const invalidRequestResponseBody = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -170,6 +170,25 @@ export function requireRole(allowedRoles: readonly RoleCode[]): AuthenticatedRou
   return async (_request, auth) => {
     const hasRole = await userHasAnyRole(auth.userId, auth.companyId, uniqueAllowedRoles);
     if (!hasRole) {
+      return createForbiddenResponse();
+    }
+
+    return null;
+  };
+}
+
+export function requireModulePermission(
+  module: string,
+  permission: ModulePermission
+): AuthenticatedRouteGuard {
+  return async (_request, auth) => {
+    const hasPermission = await userHasModulePermission(
+      auth.userId,
+      auth.companyId,
+      module,
+      permission
+    );
+    if (!hasPermission) {
       return createForbiddenResponse();
     }
 

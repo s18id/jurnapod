@@ -1,6 +1,6 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
-import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
+import { requireRole, requireModulePermission, withAuth } from "../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../src/lib/request-meta";
 import {
   findUserById,
@@ -72,7 +72,7 @@ export const GET = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["OWNER", "ADMIN"])]
+  [requireRole(["OWNER", "ADMIN", "SUPER_ADMIN"]), requireModulePermission("users", "read")]
 );
 
 export const PATCH = withAuth(
@@ -109,5 +109,5 @@ export const PATCH = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["OWNER", "ADMIN"])]
+  [requireRole(["OWNER", "ADMIN", "SUPER_ADMIN"]), requireModulePermission("users", "update")]
 );

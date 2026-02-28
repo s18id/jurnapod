@@ -6,6 +6,7 @@ export * from "./schemas/companies";
 export * from "./schemas/depreciation";
 export * from "./schemas/journals";
 export * from "./schemas/master-data";
+export * from "./schemas/module-roles";
 export * from "./schemas/outlets";
 export * from "./schemas/posting";
 export * from "./schemas/pos-sync";

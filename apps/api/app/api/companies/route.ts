@@ -1,6 +1,6 @@
 import { CompanyCreateRequestSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
-import { requireRole, withAuth } from "../../../src/lib/auth-guard";
+import { requireRole, requireModulePermission, withAuth } from "../../../src/lib/auth-guard";
 import { userHasAnyRole } from "../../../src/lib/auth";
 import { listCompanies, createCompany, CompanyCodeExistsError } from "../../../src/lib/companies";
 import { readClientIp } from "../../../src/lib/request-meta";
@@ -31,7 +31,7 @@ export const GET = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["SUPER_ADMIN", "OWNER"])]
+  [requireRole(["SUPER_ADMIN", "OWNER"]), requireModulePermission("companies", "read")]
 );
 
 export const POST = withAuth(
@@ -70,5 +70,5 @@ export const POST = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["SUPER_ADMIN"])]
+  [requireRole(["SUPER_ADMIN"]), requireModulePermission("companies", "create")]
 );

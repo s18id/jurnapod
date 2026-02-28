@@ -1,6 +1,6 @@
 import { CompanyUpdateRequestSchema, NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
-import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
+import { requireRole, requireModulePermission, withAuth } from "../../../../src/lib/auth-guard";
 import { userHasAnyRole } from "../../../../src/lib/auth";
 import { readClientIp } from "../../../../src/lib/request-meta";
 import {
@@ -65,7 +65,7 @@ export const GET = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["SUPER_ADMIN", "OWNER"])]
+  [requireRole(["SUPER_ADMIN", "OWNER"]), requireModulePermission("companies", "read")]
 );
 
 export const PATCH = withAuth(
@@ -114,7 +114,7 @@ export const PATCH = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["SUPER_ADMIN", "OWNER"])]
+  [requireRole(["SUPER_ADMIN", "OWNER"]), requireModulePermission("companies", "update")]
 );
 
 export const DELETE = withAuth(
@@ -168,5 +168,5 @@ export const DELETE = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["SUPER_ADMIN", "OWNER"])]
+  [requireRole(["SUPER_ADMIN", "OWNER"]), requireModulePermission("companies", "delete")]
 );
