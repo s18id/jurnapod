@@ -1,54 +1,13 @@
-import { NumericIdSchema } from "@jurnapod/shared";
-import { ZodError } from "zod";
-import {
-  requireOutletAccess,
-  requireRole,
-  withAuth
-} from "../../../../src/lib/auth-guard";
-import { listItemPrices } from "../../../../src/lib/master-data";
-
-const INVALID_REQUEST_RESPONSE = {
+const ROUTE_MOVED_RESPONSE = {
   ok: false,
   error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
+    code: "ROUTE_MOVED",
+    new_path: "/api/inventory/item-prices/active"
   }
 };
 
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Item prices request failed"
-  }
-};
-
-function parseOutletId(request: Request): number {
-  const outletIdRaw = new URL(request.url).searchParams.get("outlet_id");
-  return NumericIdSchema.parse(outletIdRaw);
+function moved(): Response {
+  return Response.json(ROUTE_MOVED_RESPONSE, { status: 410 });
 }
 
-export const GET = withAuth(
-  async (request, auth) => {
-    try {
-      const outletId = parseOutletId(request);
-      const prices = await listItemPrices(auth.companyId, {
-        outletId,
-        isActive: true
-      });
-
-      return Response.json({ ok: true, prices }, { status: 200 });
-    } catch (error) {
-      if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
-      }
-
-      console.error("GET /item-prices/active failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
-    }
-  },
-  [
-    requireRole(["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"]),
-    requireOutletAccess((request) => parseOutletId(request))
-  ]
-);
+export const GET = moved;

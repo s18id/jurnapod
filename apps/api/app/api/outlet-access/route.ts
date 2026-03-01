@@ -1,27 +1,13 @@
-import {
-  requireOutletAccess,
-  requireRole,
-  withAuth
-} from "../../../src/lib/auth-guard";
-
-function outletIdFromRequest(request: Request): number {
-  const outletIdRaw = new URL(request.url).searchParams.get("outlet_id");
-  if (!outletIdRaw) {
-    return 0;
+const ROUTE_MOVED_RESPONSE = {
+  ok: false,
+  error: {
+    code: "ROUTE_MOVED",
+    new_path: "/api/outlets/access"
   }
+};
 
-  const outletId = Number(outletIdRaw);
-  if (!Number.isSafeInteger(outletId) || outletId <= 0) {
-    return 0;
-  }
-
-  return outletId;
+function moved(): Response {
+  return Response.json(ROUTE_MOVED_RESPONSE, { status: 410 });
 }
 
-export const GET = withAuth(
-  async () => Response.json({ ok: true }, { status: 200 }),
-  [
-    requireRole(["OWNER", "ADMIN", "CASHIER", "ACCOUNTANT"]),
-    requireOutletAccess((request) => outletIdFromRequest(request))
-  ]
-);
+export const GET = moved;
