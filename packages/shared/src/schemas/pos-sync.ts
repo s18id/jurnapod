@@ -13,6 +13,11 @@ export const PosPaymentSchema = z.object({
   amount: z.number().nonnegative()
 });
 
+export const PosTaxLineSchema = z.object({
+  tax_rate_id: NumericIdSchema,
+  amount: z.number().nonnegative()
+});
+
 export const PosTransactionSchema = z.object({
   client_tx_id: UUID,
   company_id: NumericIdSchema,
@@ -21,7 +26,8 @@ export const PosTransactionSchema = z.object({
   status: PosStatusSchema.default("COMPLETED"),
   trx_at: z.string().datetime(),
   items: z.array(PosItemSchema).min(1),
-  payments: z.array(PosPaymentSchema).min(1)
+  payments: z.array(PosPaymentSchema).min(1),
+  taxes: z.array(PosTaxLineSchema).optional()
 });
 
 export const SyncPushRequestSchema = z.object({
@@ -40,6 +46,7 @@ export const SyncPushResponseSchema = z.object({
 });
 
 export type PosTransaction = z.infer<typeof PosTransactionSchema>;
+export type PosTaxLine = z.infer<typeof PosTaxLineSchema>;
 export type SyncPushRequest = z.infer<typeof SyncPushRequestSchema>;
 export type SyncPushResultItem = z.infer<typeof SyncPushResultItemSchema>;
 export type SyncPushResponse = z.infer<typeof SyncPushResponseSchema>;

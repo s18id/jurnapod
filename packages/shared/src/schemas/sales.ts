@@ -28,12 +28,18 @@ export const SalesInvoiceLineInputSchema = z.object({
   unit_price: MoneyInputNonNegativeSchema
 });
 
+export const SalesInvoiceTaxInputSchema = z.object({
+  tax_rate_id: NumericIdSchema,
+  amount: MoneyInputNonNegativeSchema
+});
+
 export const SalesInvoiceCreateRequestSchema = z.object({
   outlet_id: NumericIdSchema,
   invoice_no: z.string().trim().min(1).max(64),
   invoice_date: DateOnlySchema,
   tax_amount: MoneyInputNonNegativeSchema.default(0),
-  lines: z.array(SalesInvoiceLineInputSchema).min(1)
+  lines: z.array(SalesInvoiceLineInputSchema).min(1),
+  taxes: z.array(SalesInvoiceTaxInputSchema).optional()
 });
 
 export const SalesInvoiceUpdateRequestSchema = z
@@ -42,7 +48,8 @@ export const SalesInvoiceUpdateRequestSchema = z
     invoice_no: z.string().trim().min(1).max(64).optional(),
     invoice_date: DateOnlySchema.optional(),
     tax_amount: MoneyInputNonNegativeSchema.optional(),
-    lines: z.array(SalesInvoiceLineInputSchema).min(1).optional()
+    lines: z.array(SalesInvoiceLineInputSchema).min(1).optional(),
+    taxes: z.array(SalesInvoiceTaxInputSchema).optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided"
@@ -56,6 +63,13 @@ export const SalesInvoiceLineSchema = z.object({
   qty: z.number().finite().positive(),
   unit_price: MoneySchema.nonnegative(),
   line_total: MoneySchema.nonnegative()
+});
+
+export const SalesInvoiceTaxLineSchema = z.object({
+  id: NumericIdSchema,
+  invoice_id: NumericIdSchema,
+  tax_rate_id: NumericIdSchema,
+  amount: MoneySchema.nonnegative()
 });
 
 export const SalesInvoiceSchema = z.object({
@@ -75,7 +89,8 @@ export const SalesInvoiceSchema = z.object({
 });
 
 export const SalesInvoiceDetailSchema = SalesInvoiceSchema.extend({
-  lines: z.array(SalesInvoiceLineSchema)
+  lines: z.array(SalesInvoiceLineSchema),
+  taxes: z.array(SalesInvoiceTaxLineSchema).default([])
 });
 
 export const SalesInvoiceResponseSchema = SalesInvoiceDetailSchema;

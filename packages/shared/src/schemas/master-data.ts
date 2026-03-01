@@ -203,6 +203,19 @@ export const SyncPullConfigSchema = z.object({
     rate: z.number().finite().min(0).default(0),
     inclusive: z.boolean().default(false)
   }),
+  tax_rates: z
+    .array(
+      z.object({
+        id: NumericIdSchema,
+        code: z.string().trim().min(1),
+        name: z.string().trim().min(1),
+        rate_percent: z.number().finite().min(0).max(100),
+        is_inclusive: z.boolean(),
+        is_active: z.boolean()
+      })
+    )
+    .default([]),
+  default_tax_rate_ids: z.array(NumericIdSchema).default([]),
   payment_methods: z
     .array(z.string().trim().min(1))
     .or(z.array(PaymentMethodConfigSchema))

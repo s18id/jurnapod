@@ -31,7 +31,10 @@ export const AuditEntityTypeSchema = z.enum([
   "pos_transaction",
   "user",
   "outlet",
-  "company"
+  "company",
+  "setting",
+  "feature_flag",
+  "tax_rate"
 ]);
 
 export type AuditEntityType = z.infer<typeof AuditEntityTypeSchema>;
