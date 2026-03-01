@@ -30,7 +30,7 @@ CREATE INDEX idx_outlet_payment_invoice_default
 
 ## API Changes
 
-### `/api/outlet-payment-method-mappings` (GET/PUT)
+### `/api/settings/outlet-payment-method-mappings` (GET/PUT)
 
 **Updated Request Schema:**
 ```typescript
@@ -110,7 +110,7 @@ export type PaymentMethodMapping = {
 - `packages/db/migrations/0027_outlet_payment_default_flags.sql` - New migration
 
 ### API
-- `apps/api/app/api/outlet-payment-method-mappings/route.ts` - Added default flag support and validation
+- `apps/api/app/api/settings/outlet-payment-method-mappings/route.ts` - Added default flag support and validation
 
 ### Hooks
 - `apps/backoffice/src/hooks/use-outlet-payment-method-mappings.ts` - Updated type definitions

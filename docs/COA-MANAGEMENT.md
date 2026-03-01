@@ -566,7 +566,7 @@ See `outlet_account_mappings` table.
 ### CSV Import
 
 Accounts can be bulk imported via CSV using the accounting import feature:
-- `POST /api/accounting/imports`
+- `POST /api/accounts/imports`
 - DA sheet → COA accounts
 - Supports hierarchical structures
 

@@ -67,8 +67,8 @@ Tasks:
 
 Suggested targets:
 - `apps/api/src/lib/depreciation.ts` (new)
-- `apps/api/app/api/fixed-assets/[assetId]/depreciation-plan/route.ts` (new)
-- `apps/api/app/api/depreciation/run/route.ts` (new)
+- `apps/api/app/api/accounts/fixed-assets/[assetId]/depreciation-plan/route.ts` (new)
+- `apps/api/app/api/accounts/depreciation/run/route.ts` (new)
 
 Rules:
 - Plan changes are blocked after any posted run (must VOID and recreate).

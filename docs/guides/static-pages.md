@@ -26,11 +26,11 @@ Public (no auth):
   - 404 with `{ ok: false, error: { code: "NOT_FOUND" } }` when missing/unpublished.
 
 Admin (OWNER/ADMIN):
-- `GET /api/admin/pages?q=`
-- `POST /api/admin/pages`
-- `PATCH /api/admin/pages/:id`
-- `POST /api/admin/pages/:id/publish`
-- `POST /api/admin/pages/:id/unpublish`
+- `GET /api/settings/pages?q=`
+- `POST /api/settings/pages`
+- `PATCH /api/settings/pages/:id`
+- `POST /api/settings/pages/:id/publish`
+- `POST /api/settings/pages/:id/unpublish`
 
 ## Rendering & Security
 - Markdown is rendered server-side and sanitized before returning HTML.

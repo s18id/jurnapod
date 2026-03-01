@@ -6,7 +6,7 @@ This guide explains how to enable Google SSO for Backoffice and POS, and how to 
 
 - Backoffice and POS redirect to Google, then exchange the `code` with the API.
 - The API returns an access token and sets a refresh cookie.
-- Backoffice/POS store the access token and call `/api/me` to bootstrap session.
+- Backoffice/POS store the access token and call `/api/users/me` to bootstrap session.
 - POS requires login before rendering the POS UI.
 
 ## Required environment variables (API)
@@ -58,7 +58,7 @@ POST /api/auth/google
 
 4) API returns access token and sets refresh cookie.
 
-5) Frontend stores access token and calls `/api/me` to load user + outlets.
+5) Frontend stores access token and calls `/api/users/me` to load user + outlets.
 
 ## Cross-origin refresh cookie behavior
 

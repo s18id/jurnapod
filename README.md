@@ -181,7 +181,7 @@ Jurnapod supports four item types for flexible catalog management:
 - `GET /api/reports/pos-transactions` - POS transaction report
 
 ### Accounting
-- `POST /api/accounting/imports` - Import ODS/Excel (DA → COA, JRNL/TRNS → journals)
+- `POST /api/accounts/imports` - Import ODS/Excel (DA → COA, JRNL/TRNS → journals)
 
 ---
 

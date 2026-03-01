@@ -45,7 +45,7 @@ Standardize outlet account mappings to use `CASH_BANK` for sales payment destina
 
 ## Key Locations
 - DB constraint/migration: `packages/db/migrations/0007_outlet_account_mappings.sql`, new migration file.
-- API mapping validation: `apps/api/app/api/outlet-account-mappings/route.ts`.
+- API mapping validation: `apps/api/app/api/settings/outlet-account-mappings/route.ts`.
 - Posting guards: `apps/api/src/lib/sales.ts`, `apps/api/src/lib/sales-posting.ts`.
 - Backoffice UI: `apps/backoffice/src/features/sales-invoices-page.tsx`, `apps/backoffice/src/features/sales-payments-page.tsx`.
 

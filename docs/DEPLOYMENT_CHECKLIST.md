@@ -65,7 +65,7 @@ npm test
 # (deployment command depends on hosting setup)
 
 # 4. Verify API endpoints
-curl -X GET https://staging.api.jurnapod.com/api/outlet-payment-method-mappings?outlet_id=1 \
+curl -X GET https://staging.api.jurnapod.com/api/settings/outlet-payment-method-mappings?outlet_id=1 \
   -H "Authorization: Bearer $TOKEN"
 ```
 

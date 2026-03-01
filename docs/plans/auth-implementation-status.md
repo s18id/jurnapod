@@ -145,11 +145,11 @@ None (User Management UI completed)
 - [ ] API service layer: `apps/api/src/lib/static-pages.ts`
 - [ ] API endpoints:
   - [ ] `GET /api/pages/:slug` (public, renders Markdown to HTML)
-  - [ ] `GET /api/admin/pages` (list, OWNER/ADMIN only)
-  - [ ] `POST /api/admin/pages` (create, OWNER/ADMIN only)
-  - [ ] `GET /api/admin/pages/:id` (get raw, OWNER/ADMIN only)
-  - [ ] `PATCH /api/admin/pages/:id` (update, OWNER/ADMIN only)
-  - [ ] `DELETE /api/admin/pages/:id` (soft delete, OWNER/ADMIN only)
+  - [ ] `GET /api/settings/pages` (list, OWNER/ADMIN only)
+  - [ ] `POST /api/settings/pages` (create, OWNER/ADMIN only)
+  - [ ] `GET /api/settings/pages/:id` (get raw, OWNER/ADMIN only)
+  - [ ] `PATCH /api/settings/pages/:id` (update, OWNER/ADMIN only)
+  - [ ] `DELETE /api/settings/pages/:id` (soft delete, OWNER/ADMIN only)
 - [ ] Markdown rendering + HTML sanitization (use `marked` + `DOMPurify` or `sanitize-html`)
 - [ ] Backoffice admin UI:
   - [ ] Route `/admin/static-pages` (OWNER/ADMIN only)

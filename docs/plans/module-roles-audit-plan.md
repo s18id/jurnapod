@@ -47,8 +47,8 @@ Address audit findings for module_roles so permissions are enforced, determinist
 - `apps/api/src/lib/auth.ts`
 - `apps/api/src/lib/auth-guard.ts`
 - `apps/api/src/lib/users.ts`
-- `apps/api/app/api/module-roles/route.ts`
-- `apps/api/app/api/module-roles/[roleId]/[module]/route.ts`
+- `apps/api/app/api/settings/module-roles/route.ts`
+- `apps/api/app/api/settings/module-roles/[roleId]/[module]/route.ts`
 - `packages/db/migrations/0035_module_roles.sql` (if tenant-scoped)
 - `packages/shared/src/schemas/module-roles.ts`
 - `docs/plans/module-roles-audit-plan.md`
