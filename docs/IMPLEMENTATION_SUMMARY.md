@@ -31,7 +31,7 @@ CREATE INDEX idx_outlet_payment_invoice_default
 - Applied and verified ✅
 
 ### 2. API Enhancements
-**File:** `apps/api/app/api/outlet-payment-method-mappings/route.ts`
+**File:** `apps/api/app/api/settings/outlet-payment-method-mappings/route.ts`
 
 **Changes:**
 - Added `is_invoice_default` to request/response schema
@@ -131,7 +131,7 @@ Test coverage:
 - `packages/db/migrations/0027_outlet_payment_default_flags.sql` ✨ NEW
 
 ### Backend API
-- `apps/api/app/api/outlet-payment-method-mappings/route.ts` ✏️ MODIFIED
+- `apps/api/app/api/settings/outlet-payment-method-mappings/route.ts` ✏️ MODIFIED
 
 ### Frontend
 - `apps/backoffice/src/features/account-mappings-page.tsx` ✏️ MODIFIED

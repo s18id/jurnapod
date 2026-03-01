@@ -17,27 +17,21 @@ export const ModuleSchema = z.enum([
 
 export type Module = z.infer<typeof ModuleSchema>;
 
-export const PermissionSchema = z.object({
-  can_create: z.boolean(),
-  can_read: z.boolean(),
-  can_update: z.boolean(),
-  can_delete: z.boolean()
-});
+export const PermissionMaskSchema = z.number().int().min(0).max(15);
 
 export const ModuleRoleResponseSchema = z.object({
   id: NumericIdSchema,
   role_id: NumericIdSchema,
   role_code: z.string(),
   module: ModuleSchema,
-  can_create: z.boolean(),
-  can_read: z.boolean(),
-  can_update: z.boolean(),
-  can_delete: z.boolean(),
+  permission_mask: PermissionMaskSchema,
   created_at: z.string().datetime(),
   updated_at: z.string().datetime()
 });
 
-export const ModuleRoleUpdateRequestSchema = PermissionSchema;
+export const ModuleRoleUpdateRequestSchema = z.object({
+  permission_mask: PermissionMaskSchema
+});
 
 export type ModuleRoleResponse = z.infer<typeof ModuleRoleResponseSchema>;
 export type ModuleRoleUpdateRequest = z.infer<typeof ModuleRoleUpdateRequestSchema>;

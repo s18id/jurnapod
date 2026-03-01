@@ -26,18 +26,18 @@ This note is intended as a reference for Milestone M4 so we can build on a stabl
 
 ## Endpoints (M3)
 
-- `GET /api/items`
-- `POST /api/items`
-- `GET /api/items/:itemId`
-- `PATCH /api/items/:itemId`
-- `DELETE /api/items/:itemId`
+- `GET /api/inventory/items`
+- `POST /api/inventory/items`
+- `GET /api/inventory/items/:itemId`
+- `PATCH /api/inventory/items/:itemId`
+- `DELETE /api/inventory/items/:itemId`
 
-- `GET /api/item-prices`
-- `POST /api/item-prices`
-- `GET /api/item-prices/:priceId`
-- `PATCH /api/item-prices/:priceId`
-- `DELETE /api/item-prices/:priceId`
-- `GET /api/item-prices/active?outlet_id=...`
+- `GET /api/inventory/item-prices`
+- `POST /api/inventory/item-prices`
+- `GET /api/inventory/item-prices/:priceId`
+- `PATCH /api/inventory/item-prices/:priceId`
+- `DELETE /api/inventory/item-prices/:priceId`
+- `GET /api/inventory/item-prices/active?outlet_id=...`
 
 - `GET /api/sync/pull?outlet_id=...&since_version=...`
 

@@ -35,7 +35,7 @@ export function useOutletAccountMappings(outletId: number, accessToken: string) 
     setError(null);
     try {
       const response = await apiRequest<MappingResponse>(
-        `/outlet-account-mappings?outlet_id=${outletId}`,
+        `/settings/outlet-account-mappings?outlet_id=${outletId}`,
         {},
         accessToken
       );
@@ -58,7 +58,7 @@ export function useOutletAccountMappings(outletId: number, accessToken: string) 
 
   async function save(mappings: OutletAccountMapping[]) {
     const response = await apiRequest<SaveResponse>(
-      `/outlet-account-mappings`,
+      `/settings/outlet-account-mappings`,
       {
         method: "PUT",
         body: JSON.stringify({ outlet_id: outletId, mappings })

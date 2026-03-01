@@ -19,7 +19,7 @@ PR-14 scope:
 ## Initial Baseline (historical audit snapshot)
 
 - `apps/backoffice/src/main.tsx` was scaffold-only at planning time.
-- Existing API routes include auth/me/outlet-access and master data (`/api/items`, `/api/item-prices`).
+- Existing API routes include auth/users/me/outlets/access and master data (`/api/inventory/items`, `/api/inventory/item-prices`).
 - No reporting routes were present at planning time for POS list, daily sales, journal list, or trial balance.
 - Core DB tables exist (`pos_transactions`, `journal_batches`, `journal_lines`).
 - No confirmed migration for `v_pos_daily_totals` existed at planning time.
@@ -66,10 +66,10 @@ Suggested targets:
 - `apps/backoffice/src/features/shared/table.tsx`
 
 API dependency (already present):
-- `apps/api/app/api/items/route.ts`
-- `apps/api/app/api/items/[itemId]/route.ts`
-- `apps/api/app/api/item-prices/route.ts`
-- `apps/api/app/api/item-prices/[priceId]/route.ts`
+- `apps/api/app/api/inventory/items/route.ts`
+- `apps/api/app/api/inventory/items/[itemId]/route.ts`
+- `apps/api/app/api/inventory/item-prices/route.ts`
+- `apps/api/app/api/inventory/item-prices/[priceId]/route.ts`
 
 Definition of done:
 - Owner/admin can CRUD items and update outlet prices from backoffice.

@@ -210,7 +210,7 @@ Max Age: 30 days
 Max Entries: 100
 
 // API Calls - Master Data (Network-First)
-// /api/accounts, /api/account-types, /api/items
+  // /api/accounts, /api/accounts/types, /api/inventory/items
 Strategy: NetworkFirst
 Fallback: Cache
 Cache: 'api-master-v1'
@@ -704,7 +704,7 @@ const CACHE_POLICIES = {
   
   accountTypes: {
     ttl: 24 * 60 * 60 * 1000, // 24 hours
-    endpoint: '/api/account-types',
+    endpoint: '/api/accounts/types',
     filter: { is_active: true },
     estimatedSize: 2, // KB
     priority: 'high'
@@ -712,7 +712,7 @@ const CACHE_POLICIES = {
   
   items: {
     ttl: 12 * 60 * 60 * 1000, // 12 hours
-    endpoint: '/api/items',
+    endpoint: '/api/inventory/items',
     filter: { is_active: true },
     estimatedSize: 20, // KB
     priority: 'medium'

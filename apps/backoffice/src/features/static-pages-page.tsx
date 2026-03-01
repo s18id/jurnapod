@@ -206,7 +206,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
       try {
         const params = search.trim() ? `?q=${encodeURIComponent(search.trim())}` : "";
         const response = await apiRequest<StaticPagesListResponse>(
-          `/admin/pages${params}`,
+          `/settings/pages${params}`,
           {},
           accessToken
         );
@@ -317,7 +317,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
     setError(null);
     try {
       const response = await apiRequest<StaticPageResponse>(
-        `/admin/pages/${pageId}`,
+        `/settings/pages/${pageId}`,
         {},
         accessToken
       );
@@ -359,7 +359,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
     try {
       if (isEditing && selectedId != null) {
         const response = await apiRequest<StaticPageResponse>(
-          `/admin/pages/${selectedId}`,
+          `/settings/pages/${selectedId}`,
           {
             method: "PATCH",
             body: JSON.stringify({
@@ -379,7 +379,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
         await refreshList();
       } else {
         const response = await apiRequest<StaticPageResponse>(
-          "/admin/pages",
+          "/settings/pages",
           {
             method: "POST",
             body: JSON.stringify({
@@ -426,7 +426,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
     try {
       if (isEditing && selectedId != null) {
         const response = await apiRequest<StaticPageResponse>(
-          `/admin/pages/${selectedId}/publish`,
+          `/settings/pages/${selectedId}/publish`,
           { method: "POST" },
           accessToken
         );
@@ -434,7 +434,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
         await refreshList();
       } else {
         const response = await apiRequest<StaticPageResponse>(
-          "/admin/pages",
+          "/settings/pages",
           {
             method: "POST",
             body: JSON.stringify({
@@ -469,7 +469,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
     setError(null);
     try {
       const response = await apiRequest<StaticPageResponse>(
-        `/admin/pages/${selectedId}/unpublish`,
+        `/settings/pages/${selectedId}/unpublish`,
         { method: "POST" },
         accessToken
       );
@@ -489,7 +489,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
   async function refreshList() {
     const params = search.trim() ? `?q=${encodeURIComponent(search.trim())}` : "";
     const response = await apiRequest<StaticPagesListResponse>(
-      `/admin/pages${params}`,
+      `/settings/pages${params}`,
       {},
       accessToken
     );

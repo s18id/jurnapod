@@ -92,6 +92,13 @@ function passwordPolicyFromEnv() {
   };
 }
 
+const PERMISSION_BITS = {
+  create: 1,
+  read: 2,
+  update: 4,
+  delete: 8
+};
+
 async function hashOwnerPassword(password, policy) {
   if (policy.defaultAlgorithm === "bcrypt") {
     return bcrypt.hash(password, policy.bcryptRounds);
@@ -149,23 +156,18 @@ async function upsertRole(connection, roleCode, roleName) {
 
 async function upsertModuleRolePermission(
   connection,
+  companyId,
   roleId,
   module,
-  canCreate,
-  canRead,
-  canUpdate,
-  canDelete
+  permissionMask
 ) {
   await connection.execute(
-    `INSERT INTO module_roles (role_id, module, can_create, can_read, can_update, can_delete)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+     VALUES (?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
-       can_create = VALUES(can_create),
-       can_read = VALUES(can_read),
-       can_update = VALUES(can_update),
-       can_delete = VALUES(can_delete),
+       permission_mask = VALUES(permission_mask),
        updated_at = CURRENT_TIMESTAMP`,
-    [roleId, module, canCreate ? 1 : 0, canRead ? 1 : 0, canUpdate ? 1 : 0, canDelete ? 1 : 0]
+    [companyId, roleId, module, permissionMask]
   );
 }
 
@@ -306,14 +308,17 @@ async function main() {
     for (const perm of modulePermissions) {
       const roleId = roleIds[perm.roleCode];
       if (roleId) {
+        const permissionMask =
+          (perm.create ? PERMISSION_BITS.create : 0) |
+          (perm.read ? PERMISSION_BITS.read : 0) |
+          (perm.update ? PERMISSION_BITS.update : 0) |
+          (perm.delete ? PERMISSION_BITS.delete : 0);
         await upsertModuleRolePermission(
           connection,
+          companyId,
           roleId,
           perm.module,
-          perm.create,
-          perm.read,
-          perm.update,
-          perm.delete
+          permissionMask
         );
       }
     }
@@ -356,12 +361,12 @@ async function main() {
         );
         const [superAdminResult] = await connection.execute(
           `INSERT INTO users (company_id, email, password_hash, is_active)
-           VALUES (0, ?, ?, 1)
+           VALUES (?, ?, ?, 1)
            ON DUPLICATE KEY UPDATE
              password_hash = VALUES(password_hash),
              is_active = 1,
              updated_at = CURRENT_TIMESTAMP`,
-          [seedConfig.superAdminEmail.toLowerCase(), superAdminPasswordHash]
+          [companyId, seedConfig.superAdminEmail.toLowerCase(), superAdminPasswordHash]
         );
         const superAdminUserId = superAdminResult.insertId;
 

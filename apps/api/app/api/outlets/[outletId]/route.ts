@@ -1,6 +1,6 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
-import { requireRole, requireModulePermission, withAuth } from "../../../../src/lib/auth-guard";
+import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getOutlet, updateOutlet, deleteOutlet, OutletNotFoundError } from "../../../../src/lib/outlets";
 
 const INVALID_REQUEST_RESPONSE = {
@@ -45,7 +45,7 @@ export const GET = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["OWNER", "ADMIN", "SUPER_ADMIN"]), requireModulePermission("outlets", "read")]
+  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "read" })]
 );
 
 export const PATCH = withAuth(
@@ -82,7 +82,7 @@ export const PATCH = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["OWNER", "ADMIN", "SUPER_ADMIN"]), requireModulePermission("outlets", "update")]
+  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "update" })]
 );
 
 export const DELETE = withAuth(
@@ -111,5 +111,5 @@ export const DELETE = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["OWNER", "ADMIN", "SUPER_ADMIN"]), requireModulePermission("outlets", "delete")]
+  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "delete" })]
 );

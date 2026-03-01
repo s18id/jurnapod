@@ -53,18 +53,18 @@ Public (no auth):
   - If not found or not published: `404` with `{ ok: false, error: { code: "NOT_FOUND" } }`.
 
 Admin (OWNER/ADMIN):
-- `GET /api/admin/pages`
+- `GET /api/settings/pages`
   - Supports `?q=` search on title or slug.
   - Returns list including status, updated_at, published_at.
-- `POST /api/admin/pages`
+- `POST /api/settings/pages`
   - Validates slug rules and content.
   - Creates in DRAFT by default unless `status` is provided.
-- `PATCH /api/admin/pages/:id`
+- `PATCH /api/settings/pages/:id`
   - Updates title/content/slug (slug change requires uniqueness check).
   - Updating content should update `updated_at` and clear cache.
-- `POST /api/admin/pages/:id/publish`
+- `POST /api/settings/pages/:id/publish`
   - Sets status to PUBLISHED + `published_at=NOW()`.
-- `POST /api/admin/pages/:id/unpublish`
+- `POST /api/settings/pages/:id/unpublish`
   - Sets status to DRAFT and clears `published_at`.
 
 Audit:

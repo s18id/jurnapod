@@ -1876,7 +1876,7 @@ test(
       });
       assert.equal(deniedOutletResponse.status, 403);
       const deniedOutletBody = await deniedOutletResponse.json();
-      assert.equal(deniedOutletBody.ok, false);
+      assert.equal(deniedOutletBody.success, false);
       assert.equal(deniedOutletBody.error.code, "FORBIDDEN");
 
       const [deniedOutletCountRows] = await db.execute(

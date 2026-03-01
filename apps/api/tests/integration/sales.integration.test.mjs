@@ -353,6 +353,43 @@ async function cleanupTestInvoices(db, invoiceNos) {
   );
 }
 
+async function cleanupTestJournals(db, companyId, invoiceNos) {
+  if (!companyId || invoiceNos.length === 0) return;
+
+  const invoicePlaceholders = invoiceNos.map(() => "?").join(", ");
+  const [invoiceRows] = await db.execute(
+    `SELECT id FROM sales_invoices
+     WHERE company_id = ?
+       AND invoice_no IN (${invoicePlaceholders})`,
+    [companyId, ...invoiceNos]
+  );
+  const invoiceIds = invoiceRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
+  if (invoiceIds.length === 0) return;
+
+  const batchPlaceholders = invoiceIds.map(() => "?").join(", ");
+  const [batchRows] = await db.execute(
+    `SELECT id FROM journal_batches
+     WHERE company_id = ?
+       AND doc_type = ?
+       AND doc_id IN (${batchPlaceholders})`,
+    [companyId, SALES_INVOICE_DOC_TYPE, ...invoiceIds]
+  );
+  const batchIds = batchRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
+  if (batchIds.length === 0) return;
+
+  const journalPlaceholders = batchIds.map(() => "?").join(", ");
+  await db.execute(
+    `DELETE FROM journal_lines
+     WHERE journal_batch_id IN (${journalPlaceholders})`,
+    batchIds
+  );
+  await db.execute(
+    `DELETE FROM journal_batches
+     WHERE id IN (${journalPlaceholders})`,
+    batchIds
+  );
+}
+
 async function cleanupTestPayments(db, paymentNos) {
   if (paymentNos.length === 0) return;
 
@@ -897,6 +934,18 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         if (mappingFixture.createdAccountIds.length > 0) {
           const placeholders = mappingFixture.createdAccountIds.map(() => "?").join(", ");
           await db.execute(
+            `DELETE FROM journal_lines
+             WHERE company_id = ?
+               AND account_id IN (${placeholders})`,
+            [companyId, ...mappingFixture.createdAccountIds]
+          );
+          await db.execute(
+            `DELETE FROM sales_payments
+             WHERE company_id = ?
+               AND account_id IN (${placeholders})`,
+            [companyId, ...mappingFixture.createdAccountIds]
+          );
+          await db.execute(
             `DELETE FROM accounts
              WHERE company_id = ?
                AND id IN (${placeholders})`,
@@ -906,6 +955,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       }
 
       await cleanupTestPayments(db, testPaymentNos);
+      await cleanupTestJournals(db, companyId, testInvoiceNos);
       await cleanupTestInvoices(db, testInvoiceNos);
       await db.end();
       console.log('Database cleanup complete');

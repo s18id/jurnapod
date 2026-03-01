@@ -86,7 +86,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
     setError(null);
     try {
       const response = await apiRequest<{ ok: true; supplies: Supply[] }>(
-        "/supplies",
+        "/inventory/supplies",
         {},
         props.accessToken
       );
@@ -117,7 +117,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
     try {
       setError(null);
       await apiRequest(
-        "/supplies",
+        "/inventory/supplies",
         {
           method: "POST",
           body: JSON.stringify({
@@ -144,7 +144,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
     try {
       setError(null);
       await apiRequest(
-        `/supplies/${supply.id}`,
+        `/inventory/supplies/${supply.id}`,
         {
           method: "PATCH",
           body: JSON.stringify({
@@ -173,7 +173,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
 
     try {
       setError(null);
-      await apiRequest(`/supplies/${supplyId}`, { method: "DELETE" }, props.accessToken);
+      await apiRequest(`/inventory/supplies/${supplyId}`, { method: "DELETE" }, props.accessToken);
       await refreshSupplies();
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {

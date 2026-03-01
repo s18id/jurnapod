@@ -94,7 +94,7 @@ export class CacheService {
 
   static async refreshAccountTypes(companyId: number, accessToken: string): Promise<AccountTypeResponse[]> {
     const params = new URLSearchParams({ company_id: String(companyId), is_active: "true" });
-    const response = await apiRequest<AccountTypesResponse>(`/account-types?${params.toString()}`, {}, accessToken);
+    const response = await apiRequest<AccountTypesResponse>(`/accounts/types?${params.toString()}`, {}, accessToken);
     await upsertCache("account_types", response.data, DAY_MS);
     return response.data;
   }
@@ -112,7 +112,7 @@ export class CacheService {
   }
 
   static async refreshItems(accessToken: string): Promise<unknown[]> {
-    const response = await apiRequest<ItemsResponse>("/items", {}, accessToken);
+    const response = await apiRequest<ItemsResponse>("/inventory/items", {}, accessToken);
     await upsertCache("items", response.items, HALF_DAY_MS);
     return response.items;
   }
@@ -131,7 +131,7 @@ export class CacheService {
   }
 
   static async refreshItemPrices(outletId: number, accessToken: string): Promise<unknown[]> {
-    const response = await apiRequest<ItemPricesResponse>(`/item-prices?outlet_id=${outletId}`, {}, accessToken);
+    const response = await apiRequest<ItemPricesResponse>(`/inventory/item-prices?outlet_id=${outletId}`, {}, accessToken);
     const cacheKey = `item_prices:${outletId}`;
     await db.masterDataCache.put({
       type: cacheKey as "item_prices",

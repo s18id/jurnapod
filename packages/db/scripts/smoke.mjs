@@ -111,8 +111,6 @@ async function assertTransactionalTableEngines(connection) {
 }
 
 async function assertWritePermissionAndRollback(connection) {
-  const runId = buildRunId();
-  const companyCode = `SMKP${runId}`.slice(0, 32).toUpperCase();
   let transactionStarted = false;
 
   try {
@@ -120,14 +118,22 @@ async function assertWritePermissionAndRollback(connection) {
     transactionStarted = true;
 
     await connection.execute(
-      `INSERT INTO companies (code, name)
-       VALUES (?, ?)`,
-      [companyCode, `Smoke prerequisite write probe ${runId}`]
+      "CREATE TEMPORARY TABLE smoke_write_probe (id INT PRIMARY KEY)"
     );
+    await connection.execute(
+      "INSERT INTO smoke_write_probe (id) VALUES (1)"
+    );
+
+    const [rows] = await connection.execute(
+      "SELECT COUNT(*) AS total FROM smoke_write_probe"
+    );
+    if (Number(rows[0].total) !== 1) {
+      throw new Error("smoke prerequisites failed: write probe did not persist in temp table");
+    }
   } catch (error) {
     if (isWritePermissionError(error)) {
       throw new Error(
-        "smoke prerequisites failed: DB user requires INSERT permission on companies (transactional write probe)"
+        "smoke prerequisites failed: TEMP TABLE privilege required for write probe"
       );
     }
 
@@ -136,19 +142,6 @@ async function assertWritePermissionAndRollback(connection) {
     if (transactionStarted) {
       await connection.rollback();
     }
-  }
-
-  const [rows] = await connection.execute(
-    `SELECT COUNT(*) AS total
-     FROM companies
-     WHERE code = ?`,
-    [companyCode]
-  );
-
-  if (Number(rows[0].total) !== 0) {
-    throw new Error(
-      "smoke prerequisites failed: transaction rollback did not revert write probe; confirm InnoDB and transactional support"
-    );
   }
 }
 

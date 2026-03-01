@@ -457,48 +457,135 @@ export async function userHasOutletAccess(
   return rows.length > 0;
 }
 
-type ModulePermissionRow = RowDataPacket & {
-  can_create: number;
-  can_read: number;
-  can_update: number;
-  can_delete: number;
-};
-
 export type ModulePermission = "create" | "read" | "update" | "delete";
 
-export async function userHasModulePermission(
-  userId: number,
-  companyId: number,
-  module: string,
-  permission: ModulePermission
-): Promise<boolean> {
-  const isSuperAdmin = await userIsSuperAdmin(userId);
-  if (isSuperAdmin) {
-    return true;
+// Permission bits for module_roles.permission_mask (create=1, read=2, update=4, delete=8).
+export const MODULE_PERMISSION_BITS: Record<ModulePermission, number> = {
+  create: 1,
+  read: 2,
+  update: 4,
+  delete: 8
+};
+
+export function buildPermissionMask(params: {
+  canCreate?: boolean;
+  canRead?: boolean;
+  canUpdate?: boolean;
+  canDelete?: boolean;
+}): number {
+  return (
+    (params.canCreate ? MODULE_PERMISSION_BITS.create : 0) |
+    (params.canRead ? MODULE_PERMISSION_BITS.read : 0) |
+    (params.canUpdate ? MODULE_PERMISSION_BITS.update : 0) |
+    (params.canDelete ? MODULE_PERMISSION_BITS.delete : 0)
+  );
+}
+
+type AccessSnapshotRow = RowDataPacket & {
+  is_super_admin: number;
+  has_role?: number | null;
+  has_permission?: number | null;
+  has_outlet_access?: number | null;
+};
+
+export type AccessCheckOptions = {
+  userId: number;
+  companyId: number;
+  allowedRoles?: readonly RoleCode[];
+  module?: string;
+  permission?: ModulePermission;
+  outletId?: number;
+};
+
+export type AccessCheckResult = {
+  isSuperAdmin: boolean;
+  hasRole: boolean;
+  hasPermission: boolean;
+  hasOutletAccess: boolean;
+};
+
+export async function checkUserAccess(options: AccessCheckOptions): Promise<AccessCheckResult | null> {
+  const { userId, companyId, allowedRoles, module, permission, outletId } = options;
+  const selectParts: string[] = [
+    `EXISTS(
+       SELECT 1
+       FROM user_roles ur
+       INNER JOIN roles r ON r.id = ur.role_id
+       WHERE ur.user_id = u.id
+         AND r.code = "SUPER_ADMIN"
+     ) AS is_super_admin`
+  ];
+  const params: Array<string | number> = [];
+
+  if (allowedRoles && allowedRoles.length > 0) {
+    const rolePlaceholders = allowedRoles.map(() => "?").join(", ");
+    selectParts.push(
+      `EXISTS(
+         SELECT 1
+         FROM user_roles ur
+         INNER JOIN roles r ON r.id = ur.role_id
+         WHERE ur.user_id = u.id
+           AND r.code IN (${rolePlaceholders})
+       ) AS has_role`
+    );
+    params.push(...allowedRoles);
+  }
+
+  if (module && permission) {
+    const permissionBit = MODULE_PERMISSION_BITS[permission];
+    selectParts.push(
+      `EXISTS(
+         SELECT 1
+         FROM user_roles ur
+         INNER JOIN roles r ON r.id = ur.role_id
+         INNER JOIN module_roles mr ON mr.role_id = r.id
+         WHERE ur.user_id = u.id
+           AND mr.module = ?
+           AND mr.company_id = u.company_id
+           AND (mr.permission_mask & ?) <> 0
+       ) AS has_permission`
+    );
+    params.push(module, permissionBit);
+  }
+
+  if (typeof outletId === "number") {
+    selectParts.push(
+      `EXISTS(
+         SELECT 1
+         FROM user_outlets uo
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE uo.user_id = u.id
+           AND uo.outlet_id = ?
+           AND o.company_id = u.company_id
+       ) AS has_outlet_access`
+    );
+    params.push(outletId);
   }
 
   const pool = getDbPool();
-  const permissionColumn = `can_${permission}` as keyof ModulePermissionRow;
-
-  const [rows] = await pool.execute<ModulePermissionRow[]>(
-    `SELECT mr.can_create, mr.can_read, mr.can_update, mr.can_delete
+  const [rows] = await pool.execute<AccessSnapshotRow[]>(
+    `SELECT ${selectParts.join(", ")}
      FROM users u
      INNER JOIN companies c ON c.id = u.company_id
-     INNER JOIN user_roles ur ON ur.user_id = u.id
-     INNER JOIN roles r ON r.id = ur.role_id
-     LEFT JOIN module_roles mr ON mr.role_id = r.id AND mr.module = ?
      WHERE u.id = ?
        AND u.company_id = ?
        AND u.is_active = 1
-       AND c.deleted_at IS NULL`,
-    [module, userId, companyId]
+       AND c.deleted_at IS NULL
+     LIMIT 1`,
+    [...params, userId, companyId]
   );
 
-  if (rows.length === 0) {
-    return false;
+  const row = rows[0];
+  if (!row) {
+    return null;
   }
 
-  return rows.some((row) => Boolean(row[permissionColumn]));
+  return {
+    isSuperAdmin: Boolean(row.is_super_admin),
+    hasRole: Boolean(row.has_role),
+    hasPermission: Boolean(row.has_permission),
+    hasOutletAccess: Boolean(row.has_outlet_access)
+  };
 }
 
 export async function listUserOutletIds(userId: number, companyId: number): Promise<number[]> {

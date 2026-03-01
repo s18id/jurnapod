@@ -44,7 +44,7 @@ export function useOutletPaymentMethodMappings(outletId: number, accessToken: st
     setError(null);
     try {
       const response = await apiRequest<MappingResponse>(
-        `/outlet-payment-method-mappings?outlet_id=${outletId}`,
+        `/settings/outlet-payment-method-mappings?outlet_id=${outletId}`,
         {},
         accessToken
       );
@@ -69,7 +69,7 @@ export function useOutletPaymentMethodMappings(outletId: number, accessToken: st
 
   async function save(nextMappings: PaymentMethodMapping[]) {
     const response = await apiRequest<SaveResponse>(
-      `/outlet-payment-method-mappings`,
+      `/settings/outlet-payment-method-mappings`,
       {
         method: "PUT",
         body: JSON.stringify({ outlet_id: outletId, mappings: nextMappings })

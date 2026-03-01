@@ -6,7 +6,7 @@ Status: implementation complete, verified in integration suite.
 
 - [x] Items + prices management
   - Backoffice UI: `apps/backoffice/src/features/items-prices-page.tsx`
-  - API: `apps/api/app/api/items/route.ts`, `apps/api/app/api/item-prices/route.ts`
+  - API: `apps/api/app/api/inventory/items/route.ts`, `apps/api/app/api/inventory/item-prices/route.ts`
 
 - [x] POS transactions list (outlet/date filters)
   - Backoffice UI: `apps/backoffice/src/features/reports-pages.tsx`

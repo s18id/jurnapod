@@ -1,6 +1,6 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
-import { requireRole, requireModulePermission, withAuth } from "../../../../../src/lib/auth-guard";
+import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../../src/lib/request-meta";
 import {
   reactivateCompany,
@@ -63,5 +63,5 @@ export const POST = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireRole(["SUPER_ADMIN"]), requireModulePermission("companies", "update")]
+  [requireAccess({ roles: ["SUPER_ADMIN"], module: "companies", permission: "update" })]
 );

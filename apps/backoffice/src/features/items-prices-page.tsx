@@ -153,7 +153,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
 
   async function createItem() {
     try {
-      await apiRequest("/items", {
+      await apiRequest("/inventory/items", {
         method: "POST",
         body: JSON.stringify({
           sku: newItem.sku.trim() || null,
@@ -173,7 +173,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
 
   async function saveItem(item: Item) {
     try {
-      await apiRequest(`/items/${item.id}`, {
+      await apiRequest(`/inventory/items/${item.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           sku: item.sku,
@@ -192,7 +192,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
 
   async function deleteItem(itemId: number) {
     try {
-      await apiRequest(`/items/${itemId}`, { method: "DELETE" }, props.accessToken);
+      await apiRequest(`/inventory/items/${itemId}`, { method: "DELETE" }, props.accessToken);
       await refreshData(selectedOutletId);
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {
@@ -207,7 +207,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     }
 
     try {
-      await apiRequest("/item-prices", {
+      await apiRequest("/inventory/item-prices", {
         method: "POST",
         body: JSON.stringify({
           item_id: newPrice.item_id,
@@ -227,7 +227,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
 
   async function savePrice(price: ItemPrice) {
     try {
-      await apiRequest(`/item-prices/${price.id}`, {
+      await apiRequest(`/inventory/item-prices/${price.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           item_id: price.item_id,
@@ -246,7 +246,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
 
   async function deletePrice(priceId: number) {
     try {
-      await apiRequest(`/item-prices/${priceId}`, { method: "DELETE" }, props.accessToken);
+      await apiRequest(`/inventory/item-prices/${priceId}`, { method: "DELETE" }, props.accessToken);
       await refreshData(selectedOutletId);
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {

@@ -867,11 +867,9 @@ export async function listOutlets(
 type ModuleRoleRow = RowDataPacket & {
   id: number;
   role_id: number;
+  role_code: string;
   module: string;
-  can_create: number;
-  can_read: number;
-  can_update: number;
-  can_delete: number;
+  permission_mask: number;
   created_at: Date;
   updated_at: Date;
 };
@@ -881,17 +879,15 @@ export type ModuleRoleResponse = {
   role_id: number;
   role_code: string;
   module: string;
-  can_create: boolean;
-  can_read: boolean;
-  can_update: boolean;
-  can_delete: boolean;
+  permission_mask: number;
   created_at: string;
   updated_at: string;
 };
 
 export class ModuleRoleNotFoundError extends Error {}
 
-export async function listModuleRoles(params?: {
+export async function listModuleRoles(params: {
+  companyId: number;
   roleId?: number;
   module?: string;
 }): Promise<ModuleRoleResponse[]> {
@@ -899,11 +895,14 @@ export async function listModuleRoles(params?: {
   const conditions: string[] = [];
   const values: (number | string)[] = [];
 
-  if (params?.roleId) {
+  conditions.push("mr.company_id = ?");
+  values.push(params.companyId);
+
+  if (params.roleId) {
     conditions.push("mr.role_id = ?");
     values.push(params.roleId);
   }
-  if (params?.module) {
+  if (params.module) {
     conditions.push("mr.module = ?");
     values.push(params.module);
   }
@@ -912,8 +911,7 @@ export async function listModuleRoles(params?: {
 
   const [rows] = await pool.execute<ModuleRoleRow[]>(
     `SELECT mr.id, mr.role_id, r.code as role_code, mr.module,
-            mr.can_create, mr.can_read, mr.can_update, mr.can_delete,
-            mr.created_at, mr.updated_at
+            mr.permission_mask, mr.created_at, mr.updated_at
      FROM module_roles mr
      INNER JOIN roles r ON r.id = mr.role_id
      ${whereClause}
@@ -926,67 +924,47 @@ export async function listModuleRoles(params?: {
     role_id: Number(row.role_id),
     role_code: row.role_code,
     module: row.module,
-    can_create: Boolean(row.can_create),
-    can_read: Boolean(row.can_read),
-    can_update: Boolean(row.can_update),
-    can_delete: Boolean(row.can_delete),
+    permission_mask: Number(row.permission_mask ?? 0),
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString()
   }));
 }
 
 export async function setModuleRolePermission(params: {
+  companyId: number;
   roleId: number;
   module: string;
-  canCreate?: boolean;
-  canRead?: boolean;
-  canUpdate?: boolean;
-  canDelete?: boolean;
+  permissionMask: number;
 }): Promise<ModuleRoleResponse> {
   const pool = getDbPool();
 
   const [existing] = await pool.execute<ModuleRoleRow[]>(
-    `SELECT id FROM module_roles WHERE role_id = ? AND module = ?`,
-    [params.roleId, params.module]
+    `SELECT id FROM module_roles WHERE company_id = ? AND role_id = ? AND module = ?`,
+    [params.companyId, params.roleId, params.module]
   );
 
   if (existing.length > 0) {
     await pool.execute(
       `UPDATE module_roles
-       SET can_create = ?, can_read = ?, can_update = ?, can_delete = ?
-       WHERE role_id = ? AND module = ?`,
-      [
-        params.canCreate ? 1 : 0,
-        params.canRead ? 1 : 0,
-        params.canUpdate ? 1 : 0,
-        params.canDelete ? 1 : 0,
-        params.roleId,
-        params.module
-      ]
+       SET permission_mask = ?
+       WHERE company_id = ? AND role_id = ? AND module = ?`,
+      [params.permissionMask, params.companyId, params.roleId, params.module]
     );
   } else {
     await pool.execute(
-      `INSERT INTO module_roles (role_id, module, can_create, can_read, can_update, can_delete)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        params.roleId,
-        params.module,
-        params.canCreate ? 1 : 0,
-        params.canRead ? 1 : 0,
-        params.canUpdate ? 1 : 0,
-        params.canDelete ? 1 : 0
-      ]
+      `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+       VALUES (?, ?, ?, ?)`,
+      [params.companyId, params.roleId, params.module, params.permissionMask]
     );
   }
 
   const [rows] = await pool.execute<ModuleRoleRow[]>(
     `SELECT mr.id, mr.role_id, r.code as role_code, mr.module,
-            mr.can_create, mr.can_read, mr.can_update, mr.can_delete,
-            mr.created_at, mr.updated_at
+            mr.permission_mask, mr.created_at, mr.updated_at
      FROM module_roles mr
      INNER JOIN roles r ON r.id = mr.role_id
-     WHERE mr.role_id = ? AND mr.module = ?`,
-    [params.roleId, params.module]
+     WHERE mr.company_id = ? AND mr.role_id = ? AND mr.module = ?`,
+    [params.companyId, params.roleId, params.module]
   );
 
   if (rows.length === 0) {
@@ -999,10 +977,7 @@ export async function setModuleRolePermission(params: {
     role_id: Number(row.role_id),
     role_code: row.role_code,
     module: row.module,
-    can_create: Boolean(row.can_create),
-    can_read: Boolean(row.can_read),
-    can_update: Boolean(row.can_update),
-    can_delete: Boolean(row.can_delete),
+    permission_mask: Number(row.permission_mask ?? 0),
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString()
   };
