@@ -1,0 +1,22 @@
+{
+  "name": "@jurnapod/db",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo 'lint not configured yet for @jurnapod/db'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:migrate": "node ./scripts/migrate.mjs",
+    "db:seed": "node ./scripts/seed.mjs",
+    "db:seed:settings": "node ./scripts/seed-settings-from-env.mjs",
+    "db:smoke": "node ./scripts/smoke.mjs",
+    "db:backfill:pos-journals": "node ./scripts/backfill-pos-journals.mjs",
+    "db:reconcile:pos-journals": "node ./scripts/reconcile-pos-journals.mjs"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
+    "bcryptjs": "^3.0.2",
+    "dotenv": "^16.4.7",
+    "mysql2": "^3.15.3"
+  }
+}

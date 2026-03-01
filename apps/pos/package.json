@@ -1,0 +1,38 @@
+{
+  "name": "@jurnapod/pos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "qa:pwa:build": "npm run build",
+    "qa:pwa:preview": "npm run preview -- --host 127.0.0.1 --port 4173 --strictPort",
+    "qa:e2e": "playwright test",
+    "qa:e2e:headed": "playwright test --headed",
+    "qa:e2e:install": "playwright install chromium",
+    "qa:e2e:real": "playwright test --config=playwright.real.config.ts",
+    "qa:lhci": "CHROME_PATH=$(node -e \"const { chromium } = require('playwright'); process.stdout.write(chromium.executablePath());\") node ./scripts/qa-lighthouse.mjs",
+    "build:offline": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo 'lint not configured yet for @jurnapod/pos'",
+    "test": "npm run build:offline && node --test \"src/offline/__tests__/*.test.mjs\""
+  },
+  "dependencies": {
+    "dexie": "^4.0.11",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.4.1",
+    "fake-indexeddb": "^6.2.5",
+    "lighthouse": "^12.1.0",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.15"
+  }
+}

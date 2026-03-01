@@ -1,0 +1,187 @@
+// Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
+// Ownership: Ahmad Faruk (Signal18 ID)
+
+import type { RoleCode } from "../lib/session";
+
+export type AppRoute = {
+  path: string;
+  label: string;
+  allowedRoles: readonly RoleCode[];
+};
+
+export const APP_ROUTES: readonly AppRoute[] = [
+  // === CORE ===
+  {
+    path: "/daily-sales",
+    label: "Daily Sales",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/profit-loss",
+    label: "Profit & Loss",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/general-ledger",
+    label: "General Ledger",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/journals",
+    label: "Journals & Trial Balance",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/accounting-worksheet",
+    label: "Accounting Worksheet",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+
+  // === ACCOUNTING ===
+  {
+    path: "/chart-of-accounts",
+    label: "Chart of Accounts",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/account-types",
+    label: "Account Types",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/transactions",
+    label: "Transaction Input",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/transaction-templates",
+    label: "Transaction Templates",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/account-mappings",
+    label: "Account Mappings",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+
+  // === SALES ===
+  {
+    path: "/sales-invoices",
+    label: "Sales Invoices",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/sales-payments",
+    label: "Sales Payments",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+
+  // === POS ===
+  {
+    path: "/pos-transactions",
+    label: "POS Transactions",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/pos-payments",
+    label: "POS Payments",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/sync-queue",
+    label: "Sync Queue",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/sync-history",
+    label: "Sync History",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/pwa-settings",
+    label: "PWA Settings",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+
+  // === INVENTORY ===
+  {
+    path: "/items-prices",
+    label: "Items & Prices",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/supplies",
+    label: "Supplies",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/fixed-assets",
+    label: "Fixed Assets",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/inventory-settings",
+    label: "Inventory Settings",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+
+  // === SETTINGS ===
+  {
+    path: "/outlet-settings",
+    label: "Outlet Settings",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/modules",
+    label: "Modules",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/tax-rates",
+    label: "Tax Rates",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/users",
+    label: "Users",
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "ADMIN"]
+  },
+  {
+    path: "/roles",
+    label: "Roles",
+    allowedRoles: ["SUPER_ADMIN", "OWNER"]
+  },
+  {
+    path: "/companies",
+    label: "Companies",
+    allowedRoles: ["SUPER_ADMIN", "OWNER"]
+  },
+  {
+    path: "/outlets",
+    label: "Outlets",
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "ADMIN"]
+  },
+  {
+    path: "/static-pages",
+    label: "Static Pages",
+    allowedRoles: ["OWNER", "ADMIN"]
+  }
+];
+
+export const DEFAULT_ROUTE_PATH = APP_ROUTES[0].path;
+
+export function normalizeHashPath(hash: string): string {
+  const cleaned = hash.replace(/^#/, "").trim();
+  if (cleaned.length === 0 || cleaned === "/") {
+    return DEFAULT_ROUTE_PATH;
+  }
+  return cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
+}
+
+export function findRoute(path: string): AppRoute | null {
+  return APP_ROUTES.find((route) => route.path === path) ?? null;
+}
+
+export function userCanAccessRoute(userRoles: readonly RoleCode[], route: AppRoute): boolean {
+  return route.allowedRoles.some((role) => userRoles.includes(role));
+}

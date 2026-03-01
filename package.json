@@ -1,0 +1,56 @@
+{
+  "name": "jurnapod",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": "20.x"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/modules/*"
+  ],
+  "scripts": {
+    "clean": "npx rimraf dist \"apps/*/dist\" \"packages/*/dist\" \"packages/modules/*/dist\" \"packages/**/src/**/*.js\" \"packages/**/src/**/*.d.ts\" \"packages/**/src/**/*.map\" \"**/*.tsbuildinfo\"",
+    "build": "npm run clean && npm run build -ws --if-present",
+    "dev": "npm run dev:check && concurrently -n api,backoffice,pos -c blue,green,magenta --restart-tries 3 --restart-after 5000 \"npm:dev:api\" \"npm run dev:backoffice:wait\" \"npm run dev:pos:wait\"",
+    "dev:all": "npm run dev",
+    "dev:api+backoffice": "npm run dev:check && concurrently -n api,backoffice -c blue,green --restart-tries 3 --restart-after 5000 \"npm:dev:api\" \"npm run dev:backoffice:wait\"",
+    "dev:api+pos": "npm run dev:check && concurrently -n api,pos -c blue,magenta --restart-tries 3 --restart-after 5000 \"npm:dev:api\" \"npm run dev:pos:wait\"",
+    "dev:backoffice:wait": "wait-on http://127.0.0.1:3001/api/health && npm run dev:backoffice",
+    "dev:pos:wait": "wait-on http://127.0.0.1:3001/api/health && npm run dev:pos",
+    "dev:check": "node scripts/check-env.mjs",
+    "dev:kill": "node scripts/kill-ports.mjs",
+    "dev:stop": "npm run dev:kill",
+    "dev:restart": "npm run dev:stop && npm run dev",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "lint": "npm run lint -ws --if-present",
+    "dev:pos": "npm run dev -w @jurnapod/pos",
+    "dev:api": "npm run dev -w @jurnapod/api",
+    "dev:backoffice": "npm run dev -w @jurnapod/backoffice",
+    "build:pos": "npm run build -w @jurnapod/pos",
+    "build:api": "npm run build -w @jurnapod/api",
+    "build:backoffice": "npm run build -w @jurnapod/backoffice",
+    "qa:pos:e2e": "npm run qa:e2e -w @jurnapod/pos",
+    "qa:pos:e2e:real": "npm run qa:e2e:real -w @jurnapod/pos",
+    "qa:pos:lhci": "npm run qa:lhci -w @jurnapod/pos",
+    "qa:pos:full": "npm run qa:pos:e2e && npm run qa:pos:lhci",
+    "db:migrate": "npm run db:migrate -w @jurnapod/db",
+    "db:seed": "npm run db:seed -w @jurnapod/db",
+    "db:smoke": "npm run db:smoke -w @jurnapod/db",
+    "db:backfill:pos-journals": "npm run db:backfill:pos-journals -w @jurnapod/db --",
+    "db:reconcile:pos-journals": "npm run db:reconcile:pos-journals -w @jurnapod/db --",
+    "test:scripts": "node --test \"scripts/tests/**/*.test.mjs\"",
+    "auth:secret:generate": "node ./scripts/auth-secret-generate.mjs",
+    "auth:secret:regenerate": "node ./scripts/auth-secret-regenerate.mjs",
+    "auth:refresh-secret:generate": "node ./scripts/auth-refresh-secret-generate.mjs",
+    "auth:refresh-secret:regenerate": "node ./scripts/auth-refresh-secret-regenerate.mjs",
+    "deploy:pos": "/bin/cp -R apps/pos/dist/* public_html/pos/",
+    "deploy:backoffice": "/bin/cp -R apps/backoffice/dist/* public_html/backoffice/"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "rimraf": "^5.0.10",
+    "wait-on": "^8.0.1"
+  }
+}

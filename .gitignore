@@ -1,0 +1,14 @@
+node_modules
+dist
+build
+coverage
+*.log
+.DS_Store
+pnpm-lock.yaml
+*.tsbuildinfo
+.env
+.opencode
+.next
+apps/pos/.lighthouseci/
+apps/pos/test-results/
+e2e-tests/screenshots/
