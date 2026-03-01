@@ -1,19 +1,19 @@
 # Jurnapod
 
-Dari kasir sampai neraca.
+From cashier to ledger.
 
-Monorepo ERP modular dengan Accounting/GL sebagai pusat, POS offline-first, dan kontrak modul berbasis TypeScript + Zod.
+Modular ERP monorepo with Accounting/GL at the center, offline-first POS, and module contracts built on TypeScript + Zod.
 
-## Struktur
+## Structure
 
-- `apps/pos`: Vite React PWA untuk kasir offline-first
-- `apps/backoffice`: Backoffice ERP dan laporan
+- `apps/pos`: Vite React PWA for offline-first cashier
+- `apps/backoffice`: ERP backoffice and reports
 - `apps/api`: API server (Nest-ready)
-- `packages/shared`: kontrak lintas app (types, Zod schemas)
-- `packages/core`: business logic framework-agnostic
-- `packages/modules/*`: implementasi modul per domain
-- `packages/db`: SQL migrations MySQL 8.0.44
-- `docs/`: ADR, kontrak API, mapping accounting, template dokumen
+- `packages/shared`: cross-app contracts (types, Zod schemas)
+- `packages/core`: framework-agnostic business logic
+- `packages/modules/*`: domain module implementations
+- `packages/db`: MySQL 8.0.44 SQL migrations
+- `docs/`: ADRs, API contracts, accounting mappings, document templates
 
 ## Quick Start
 
@@ -126,14 +126,14 @@ Warning: `npm run auth:secret:generate` prints the raw secret to stdout. Do not 
 
 Password hashing policy is controlled by server env (`AUTH_PASSWORD_ALGO_DEFAULT`, `AUTH_PASSWORD_REHASH_ON_LOGIN`, and algorithm cost settings). New hashes default to Argon2id, and legacy bcrypt hashes can be migrated automatically on successful login when rehash-on-login is enabled.
 
-## Catatan Arsitektur
+## Architecture Notes
 
-- **Accounting/GL sebagai pusat**: Semua dokumen final diposting ke `journal_batches` + `journal_lines`.
-- **Idempotent sync**: POS menggunakan `client_tx_id` (UUID v4) untuk mencegah duplicate entries.
-- **Status dokumen konsisten**: `DRAFT -> POSTED -> VOID`, POS: `COMPLETED -> VOID/REFUND`.
-- **Multi-company/outlet**: Semua data operasional terikat `company_id` dan `outlet_id`.
-- **Database**: MySQL 8.0.44 (InnoDB), monetary values menggunakan `DECIMAL(18,2)`.
-- **Type safety**: Kontrak modul menggunakan Zod schemas di `packages/shared`.
+- **Accounting/GL at the center**: All final documents post to `journal_batches` + `journal_lines`.
+- **Idempotent sync**: POS uses `client_tx_id` (UUID v4) to prevent duplicate entries.
+- **Consistent document status**: `DRAFT -> POSTED -> VOID`, POS: `COMPLETED -> VOID/REFUND`.
+- **Multi-company/outlet**: All operational data is bound to `company_id` and `outlet_id`.
+- **Database**: MySQL 8.0.44 (InnoDB), monetary values use `DECIMAL(18,2)`.
+- **Type safety**: Module contracts use Zod schemas in `packages/shared`.
 
 ## Modules
 
