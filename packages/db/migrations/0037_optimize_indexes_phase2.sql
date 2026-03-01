@@ -22,39 +22,39 @@
 -- idx_accounts_company_payable_active (company_id, is_payable, is_active, id),
 -- we'll keep idx_accounts_company_id_id for FK support.
 
--- ALTER TABLE accounts DROP INDEX IF EXISTS idx_accounts_company_id_id; -- KEEP for FK
-ALTER TABLE accounts DROP INDEX IF EXISTS idx_accounts_active;
-ALTER TABLE accounts DROP INDEX IF EXISTS idx_accounts_payable;
+-- DROP INDEX IF EXISTS idx_accounts_company_id_id ON accounts; -- KEEP for FK
+DROP INDEX IF EXISTS idx_accounts_active ON accounts;
+DROP INDEX IF EXISTS idx_accounts_payable ON accounts;
 
 -- 2. ACCOUNT_TYPES: Remove index covered by category index
-ALTER TABLE account_types DROP INDEX IF EXISTS idx_account_types_company_active;
+DROP INDEX IF EXISTS idx_account_types_company_active ON account_types;
 
 -- 3. POS_TRANSACTIONS: Remove indexes covered by new compound indexes
-ALTER TABLE pos_transactions DROP INDEX IF EXISTS idx_pos_transactions_company_status;
-ALTER TABLE pos_transactions DROP INDEX IF EXISTS idx_pos_transactions_company_trx_at;
+DROP INDEX IF EXISTS idx_pos_transactions_company_status ON pos_transactions;
+DROP INDEX IF EXISTS idx_pos_transactions_company_trx_at ON pos_transactions;
 
 -- 4. JOURNAL_LINES: Remove indexes covered by new compound indexes
-ALTER TABLE journal_lines DROP INDEX IF EXISTS idx_journal_lines_company_date;
+DROP INDEX IF EXISTS idx_journal_lines_company_date ON journal_lines;
 -- NOTE: idx_journal_lines_outlet_date CANNOT be dropped!
 -- It's required by FK: fk_journal_lines_outlet (outlet_id) REFERENCES outlets (id)
 -- MySQL requires an index starting with outlet_id for this FK.
 -- Our new idx_journal_lines_company_date_outlet starts with company_id, not outlet_id.
--- ALTER TABLE journal_lines DROP INDEX IF EXISTS idx_journal_lines_outlet_date; -- KEEP for FK
+-- DROP INDEX IF EXISTS idx_journal_lines_outlet_date ON journal_lines; -- KEEP for FK
 
 -- 5. AUDIT_LOGS: Remove index replaced by better compound index
-ALTER TABLE audit_logs DROP INDEX IF EXISTS idx_audit_logs_company_entity;
+DROP INDEX IF EXISTS idx_audit_logs_company_entity ON audit_logs;
 
 -- 6. SALES_INVOICES: Remove index covered by date+status compound
-ALTER TABLE sales_invoices DROP INDEX IF EXISTS idx_sales_invoices_company_status;
+DROP INDEX IF EXISTS idx_sales_invoices_company_status ON sales_invoices;
 
 -- 7. OUTLETS: Remove index redundant with UNIQUE constraint prefix
-ALTER TABLE outlets DROP INDEX IF EXISTS idx_outlets_company;
+DROP INDEX IF EXISTS idx_outlets_company ON outlets;
 
 -- 8. ITEM_PRICES: Remove index redundant with UNIQUE constraint prefix
-ALTER TABLE item_prices DROP INDEX IF EXISTS idx_item_prices_outlet;
+DROP INDEX IF EXISTS idx_item_prices_outlet ON item_prices;
 
 -- 9. ASSET_DEPRECIATION_PLANS: Remove index covered by compound
-ALTER TABLE asset_depreciation_plans DROP INDEX IF EXISTS idx_depr_plans_company_status;
+DROP INDEX IF EXISTS idx_depr_plans_company_status ON asset_depreciation_plans;
 
 -- ====================================================================
 -- SUMMARY:
