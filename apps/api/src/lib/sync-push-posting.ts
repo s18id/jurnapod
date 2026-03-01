@@ -2,14 +2,13 @@ import { PostingService, type PostingMapper, type PostingRepository } from "@jur
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
 import type { ResultSetHeader } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
+import { listCompanyDefaultTaxRates, resolveCombinedTaxConfig } from "./taxes";
 
 const DEFAULT_SYNC_PUSH_POSTING_MODE = "disabled" as const;
 const SYNC_PUSH_POSTING_MODE_ENV_KEY = "SYNC_PUSH_POSTING_MODE";
 const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV_KEY = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
 const POS_SALE_DOC_TYPE = "POS_SALE";
 const MONEY_SCALE = 100;
-const TAX_FLAG_KEYS = ["pos.tax", "pos.config"] as const;
-
 const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
 type OutletAccountMappingKey = (typeof OUTLET_ACCOUNT_MAPPING_KEYS)[number];
 
@@ -163,70 +162,12 @@ type PosTaxConfig = {
   inclusive: boolean;
 };
 
-function normalizeTaxRate(value: unknown): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 0;
-  }
-
-  return parsed;
-}
-
 async function readCompanyPosTaxConfig(
   dbExecutor: QueryExecutor,
   context: SyncPushPostingContext
 ): Promise<PosTaxConfig> {
-  const placeholders = TAX_FLAG_KEYS.map(() => "?").join(", ");
-  const [rows] = await dbExecutor.execute(
-    `SELECT \`key\`, enabled, config_json
-     FROM feature_flags
-     WHERE company_id = ?
-       AND \`key\` IN (${placeholders})`,
-    [context.companyId, ...TAX_FLAG_KEYS]
-  );
-
-  let rate = 0;
-  let inclusive = false;
-
-  for (const row of rows as Array<{ key?: string; enabled?: number; config_json?: string }>) {
-    if (row.enabled !== 1 || typeof row.key !== "string" || typeof row.config_json !== "string") {
-      continue;
-    }
-
-    let parsed: unknown = null;
-    try {
-      parsed = JSON.parse(row.config_json);
-    } catch {
-      parsed = null;
-    }
-
-    if (!parsed || typeof parsed !== "object") {
-      continue;
-    }
-
-    if (row.key === "pos.tax") {
-      const tax = parsed as Record<string, unknown>;
-      rate = normalizeTaxRate(tax.rate);
-      inclusive = tax.inclusive === true;
-      continue;
-    }
-
-    if (row.key === "pos.config") {
-      const config = parsed as Record<string, unknown>;
-      if (!config.tax || typeof config.tax !== "object") {
-        continue;
-      }
-
-      const tax = config.tax as Record<string, unknown>;
-      rate = normalizeTaxRate(tax.rate);
-      inclusive = tax.inclusive === true;
-    }
-  }
-
-  return {
-    rate,
-    inclusive
-  };
+  const defaults = await listCompanyDefaultTaxRates(dbExecutor, context.companyId);
+  return resolveCombinedTaxConfig(defaults);
 }
 
 async function readOutletAccountMappingByKey(
@@ -354,6 +295,39 @@ async function readPosGrossSalesAmount(dbExecutor: QueryExecutor, context: SyncP
   return grossSales;
 }
 
+async function readPosTaxSummary(
+  dbExecutor: QueryExecutor,
+  context: SyncPushPostingContext
+): Promise<{ total: number; inclusive: boolean } | null> {
+  const [rows] = await dbExecutor.execute(
+    `SELECT ptt.amount, tr.is_inclusive
+     FROM pos_transaction_taxes ptt
+     INNER JOIN tax_rates tr ON tr.id = ptt.tax_rate_id
+     WHERE ptt.pos_transaction_id = ?`,
+    [context.posTransactionId]
+  );
+
+  const parsed = (rows as Array<{ amount?: number | string; is_inclusive?: number }>).map((row) => ({
+    amount: normalizeMoney(Number(row.amount ?? 0)),
+    is_inclusive: row.is_inclusive === 1
+  })).filter((row) => row.amount > 0);
+
+  if (parsed.length === 0) {
+    return null;
+  }
+
+  const inclusiveFlag = parsed[0].is_inclusive;
+  if (parsed.some((row) => row.is_inclusive !== inclusiveFlag)) {
+    throw new Error("MIXED_TAX_INCLUSIVE");
+  }
+
+  const total = normalizeMoney(parsed.reduce((acc, row) => acc + row.amount, 0));
+  return {
+    total,
+    inclusive: inclusiveFlag
+  };
+}
+
 async function buildPosSaleJournalLines(
   dbExecutor: QueryExecutor,
   context: SyncPushPostingContext
@@ -362,11 +336,17 @@ async function buildPosSaleJournalLines(
   const paymentMethodMappings = await readOutletPaymentMethodMappings(dbExecutor, context);
   const payments = await readPosPaymentsByMethod(dbExecutor, context);
   const grossSales = await readPosGrossSalesAmount(dbExecutor, context);
-  const taxConfig = await readCompanyPosTaxConfig(dbExecutor, context);
+  const taxSummary = await readPosTaxSummary(dbExecutor, context);
+  const taxConfig = taxSummary ? null : await readCompanyPosTaxConfig(dbExecutor, context);
 
   let salesTaxAmount = 0;
   let salesRevenueAmount = grossSales;
-  if (taxConfig.rate > 0) {
+  if (taxSummary) {
+    salesTaxAmount = normalizeMoney(taxSummary.total);
+    if (taxSummary.inclusive) {
+      salesRevenueAmount = normalizeMoney(grossSales - salesTaxAmount);
+    }
+  } else if (taxConfig && taxConfig.rate > 0) {
     const taxMultiplier = taxConfig.rate / 100;
     if (taxConfig.inclusive) {
       salesRevenueAmount = normalizeMoney(grossSales / (1 + taxMultiplier));
@@ -376,7 +356,8 @@ async function buildPosSaleJournalLines(
     }
   }
 
-  const totalDue = normalizeMoney(grossSales + (taxConfig.inclusive ? 0 : salesTaxAmount));
+  const isInclusive = taxSummary ? taxSummary.inclusive : taxConfig?.inclusive ?? false;
+  const totalDue = normalizeMoney(grossSales + (isInclusive ? 0 : salesTaxAmount));
 
   const lines: JournalLine[] = [];
   let paymentTotal = 0;

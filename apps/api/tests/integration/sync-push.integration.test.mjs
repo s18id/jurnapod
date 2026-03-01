@@ -399,61 +399,58 @@ async function readSyncPushJournalSummary(db, clientTxId) {
   };
 }
 
-async function setCompanyPosTaxConfig(db, companyId, config) {
-  const [rows] = await db.execute(
-    `SELECT enabled, config_json
-     FROM feature_flags
-     WHERE company_id = ?
-       AND \`key\` = 'pos.tax'
-     LIMIT 1`,
+async function setCompanyDefaultTaxRate(db, companyId, config) {
+  const [defaultRows] = await db.execute(
+    `SELECT tax_rate_id
+     FROM company_tax_defaults
+     WHERE company_id = ?`,
+    [companyId]
+  );
+  const previousDefaults = defaultRows.map((row) => Number(row.tax_rate_id)).filter((id) => id > 0);
+
+  const code = `SYNC_TAX_${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+  const [insertResult] = await db.execute(
+    `INSERT INTO tax_rates (company_id, code, name, rate_percent, is_inclusive, is_active)
+     VALUES (?, ?, ?, ?, ?, 1)`,
+    [companyId, code, "Sync Tax", config.rate, config.inclusive ? 1 : 0]
+  );
+  const taxRateId = Number(insertResult.insertId);
+
+  await db.execute(
+    `DELETE FROM company_tax_defaults WHERE company_id = ?`,
+    [companyId]
+  );
+  await db.execute(
+    `INSERT INTO company_tax_defaults (company_id, tax_rate_id)
+     VALUES (?, ?)`,
+    [companyId, taxRateId]
+  );
+
+  return { previousDefaults, taxRateId };
+}
+
+async function restoreCompanyDefaultTaxRate(db, companyId, previous) {
+  await db.execute(
+    `DELETE FROM company_tax_defaults WHERE company_id = ?`,
     [companyId]
   );
 
-  const previous = rows.length > 0
-    ? {
-        existed: true,
-        enabled: Number(rows[0].enabled),
-        config_json: String(rows[0].config_json ?? "{}")
-      }
-    : {
-        existed: false,
-        enabled: 0,
-        config_json: "{}"
-      };
-
-  await db.execute(
-    `INSERT INTO feature_flags (company_id, \`key\`, enabled, config_json)
-     VALUES (?, 'pos.tax', 1, ?)
-     ON DUPLICATE KEY UPDATE
-       enabled = VALUES(enabled),
-       config_json = VALUES(config_json),
-       updated_at = CURRENT_TIMESTAMP`,
-    [companyId, JSON.stringify(config)]
-  );
-
-  return previous;
-}
-
-async function restoreCompanyPosTaxConfig(db, companyId, previous) {
-  if (!previous.existed) {
+  if (Array.isArray(previous.previousDefaults) && previous.previousDefaults.length > 0) {
+    const placeholders = previous.previousDefaults.map(() => "(?, ?)").join(", ");
+    const values = previous.previousDefaults.flatMap((taxRateId) => [companyId, taxRateId]);
     await db.execute(
-      `DELETE FROM feature_flags
-       WHERE company_id = ?
-         AND \`key\` = 'pos.tax'`,
-      [companyId]
+      `INSERT INTO company_tax_defaults (company_id, tax_rate_id)
+       VALUES ${placeholders}`,
+      values
     );
-    return;
   }
 
-  await db.execute(
-    `UPDATE feature_flags
-     SET enabled = ?,
-         config_json = ?,
-         updated_at = CURRENT_TIMESTAMP
-     WHERE company_id = ?
-       AND \`key\` = 'pos.tax'`,
-    [previous.enabled, previous.config_json, companyId]
-  );
+  if (Number.isFinite(previous.taxRateId)) {
+    await db.execute(
+      `DELETE FROM tax_rates WHERE id = ? AND company_id = ?`,
+      [previous.taxRateId, companyId]
+    );
+  }
 }
 
 function buildTestAccountCode(mappingKey) {
@@ -2040,7 +2037,7 @@ test(
       assert.equal(Number.isInteger(Number(cardAcceptedAuditPayload.journal_batch_id)), true);
       assert.equal(Number(cardAcceptedAuditPayload.journal_batch_id) > 0, true);
 
-      previousPosTaxConfig = await setCompanyPosTaxConfig(db, companyId, {
+      previousPosTaxConfig = await setCompanyDefaultTaxRate(db, companyId, {
         rate: 10,
         inclusive: false
       });
@@ -2100,7 +2097,7 @@ test(
       assert.equal(taxedSummary.debit_total, taxedSummary.credit_total);
 
       if (previousPosTaxConfig) {
-        await restoreCompanyPosTaxConfig(db, companyId, previousPosTaxConfig);
+        await restoreCompanyDefaultTaxRate(db, companyId, previousPosTaxConfig);
         previousPosTaxConfig = null;
       }
 
@@ -2347,7 +2344,7 @@ test(
       }
 
       if (companyId > 0 && previousPosTaxConfig) {
-        await restoreCompanyPosTaxConfig(db, companyId, previousPosTaxConfig);
+        await restoreCompanyDefaultTaxRate(db, companyId, previousPosTaxConfig);
       }
 
       if (companyId > 0 && outletId > 0) {

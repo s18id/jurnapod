@@ -1,6 +1,11 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { z } from "zod";
+import {
+  listCompanyDefaultTaxRates,
+  listCompanyTaxRates,
+  resolveCombinedTaxConfig
+} from "./taxes";
 import type { SyncPullResponse } from "@jurnapod/shared";
 import { SyncPullConfigSchema } from "@jurnapod/shared";
 import { getDbPool } from "./db";
@@ -67,10 +72,9 @@ type VersionRow = RowDataPacket & {
   current_version: number;
 };
 
-type FeatureFlagRow = RowDataPacket & {
-  key: string;
-  enabled: number;
-  config_json: string;
+type CompanyModuleRow = RowDataPacket & {
+  enabled: number | null;
+  config_json: string | null;
 };
 
 const mysqlDuplicateErrorCode = 1062;
@@ -112,11 +116,6 @@ export class DatabaseConflictError extends Error {}
 export class DatabaseReferenceError extends Error {}
 export class DatabaseForbiddenError extends Error {}
 
-const syncTaxConfigSchema = z.object({
-  rate: z.coerce.number().finite().min(0).optional(),
-  inclusive: z.coerce.boolean().optional()
-});
-
 const paymentMethodConfigSchema = z.object({
   code: z.string().trim().min(1),
   label: z.string().trim().min(1),
@@ -134,6 +133,24 @@ const syncPaymentMethodsConfigSchema = z
     })
   )
   .optional();
+
+function normalizePaymentMethods(value: unknown): string[] | null {
+  const parsed = syncPaymentMethodsConfigSchema.safeParse(value);
+  if (!parsed.success) {
+    return null;
+  }
+
+  const methods = Array.isArray(parsed.data) ? parsed.data : parsed.data?.methods;
+  if (!methods || methods.length === 0) {
+    return null;
+  }
+
+  const normalized = methods
+    .map((method) => (typeof method === "string" ? method.trim() : method.code.trim()))
+    .filter((method) => method.length > 0);
+
+  return normalized.length > 0 ? normalized : null;
+}
 
 function isMysqlError(error: unknown): error is { errno?: number } {
   return typeof error === "object" && error !== null && "errno" in error;
@@ -1625,66 +1642,45 @@ export async function getCompanyDataVersion(companyId: number): Promise<number> 
 
 async function readSyncConfig(companyId: number): Promise<SyncPullResponse["config"]> {
   const pool = getDbPool();
-  const [rows] = await pool.execute<FeatureFlagRow[]>(
-    `SELECT \`key\`, enabled, config_json
-     FROM feature_flags
-     WHERE company_id = ?
-       AND \`key\` IN ('pos.tax', 'pos.payment_methods', 'pos.config')`,
+  const [rows] = await pool.execute<CompanyModuleRow[]>(
+    `SELECT cm.enabled, cm.config_json
+     FROM company_modules cm
+     INNER JOIN modules m ON m.id = cm.module_id
+     WHERE cm.company_id = ?
+       AND m.code = 'pos'
+     LIMIT 1`,
     [companyId]
   );
 
-  let taxRate = 0;
-  let taxInclusive = false;
+  const [taxRates, defaultTaxRates] = await Promise.all([
+    listCompanyTaxRates(pool, companyId),
+    listCompanyDefaultTaxRates(pool, companyId)
+  ]);
+
+  const activeTaxRates = taxRates.filter((rate) => rate.is_active);
+  const defaultTaxRateIds = defaultTaxRates.map((rate) => rate.id);
+  const combinedTax = resolveCombinedTaxConfig(defaultTaxRates);
+
+  let taxRate = combinedTax.rate;
+  let taxInclusive = combinedTax.inclusive;
   let paymentMethods: Array<string | z.infer<typeof paymentMethodConfigSchema>> = ["CASH"];
 
-  for (const row of rows) {
-    if (row.enabled !== 1) {
-      continue;
-    }
-
+  const posRow = rows[0];
+  if (posRow && posRow.enabled === 1) {
     let parsed: unknown = null;
     try {
-      parsed = JSON.parse(row.config_json);
+      parsed = typeof posRow.config_json === "string" ? JSON.parse(posRow.config_json) : null;
     } catch {
       parsed = null;
     }
 
-    if (row.key === "pos.tax") {
-      const taxConfig = syncTaxConfigSchema.safeParse(parsed);
-      if (taxConfig.success) {
-        taxRate = taxConfig.data.rate ?? taxRate;
-        taxInclusive = taxConfig.data.inclusive ?? taxInclusive;
-      }
-      continue;
-    }
-
-    if (row.key === "pos.payment_methods") {
-      const methodsConfig = syncPaymentMethodsConfigSchema.safeParse(parsed);
-      if (methodsConfig.success) {
-        paymentMethods = Array.isArray(methodsConfig.data)
-          ? methodsConfig.data
-          : methodsConfig.data?.methods ?? paymentMethods;
-      }
-      continue;
-    }
-
-    if (row.key === "pos.config" && parsed && typeof parsed === "object") {
-      const configObject = parsed as Record<string, unknown>;
-
-      const taxConfig = syncTaxConfigSchema.safeParse(configObject.tax);
-      if (taxConfig.success) {
-        taxRate = taxConfig.data.rate ?? taxRate;
-        taxInclusive = taxConfig.data.inclusive ?? taxInclusive;
-      }
-
-      const methodsConfig = syncPaymentMethodsConfigSchema.safeParse(
-        configObject.payment_methods
-      );
-      if (methodsConfig.success) {
-        paymentMethods = Array.isArray(methodsConfig.data)
-          ? methodsConfig.data
-          : methodsConfig.data?.methods ?? paymentMethods;
-      }
+    const candidate =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>).payment_methods ?? parsed
+        : parsed;
+    const normalized = normalizePaymentMethods(candidate);
+    if (normalized) {
+      paymentMethods = normalized;
     }
   }
 
@@ -1693,6 +1689,15 @@ async function readSyncConfig(companyId: number): Promise<SyncPullResponse["conf
       rate: taxRate,
       inclusive: taxInclusive
     },
+    tax_rates: activeTaxRates.map((rate) => ({
+      id: rate.id,
+      code: rate.code,
+      name: rate.name,
+      rate_percent: rate.rate_percent,
+      is_inclusive: rate.is_inclusive,
+      is_active: rate.is_active
+    })),
+    default_tax_rate_ids: defaultTaxRateIds,
     payment_methods: paymentMethods
   });
 }

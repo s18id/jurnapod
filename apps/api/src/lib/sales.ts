@@ -1,6 +1,7 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "./db";
+import { calculateTaxLines, listCompanyDefaultTaxRates } from "./taxes";
 import { postSalesInvoiceToJournal, postSalesPaymentToJournal } from "./sales-posting";
 
 type SalesInvoiceRow = RowDataPacket & {
@@ -29,6 +30,13 @@ type SalesInvoiceLineRow = RowDataPacket & {
   line_total: string | number;
 };
 
+type SalesInvoiceTaxRow = RowDataPacket & {
+  id: number;
+  invoice_id: number;
+  tax_rate_id: number;
+  amount: string | number;
+};
+
 type AccessCheckRow = RowDataPacket & {
   id: number;
 };
@@ -45,6 +53,11 @@ type InvoiceLineInput = {
   description: string;
   qty: number;
   unit_price: number;
+};
+
+type InvoiceTaxInput = {
+  tax_rate_id: number;
+  amount: number;
 };
 
 type PreparedInvoiceLine = {
@@ -100,8 +113,16 @@ export type SalesInvoiceLine = {
   line_total: number;
 };
 
+export type SalesInvoiceTax = {
+  id: number;
+  invoice_id: number;
+  tax_rate_id: number;
+  amount: number;
+};
+
 export type SalesInvoiceDetail = SalesInvoice & {
   lines: SalesInvoiceLine[];
+  taxes: SalesInvoiceTax[];
 };
 
 type SalesPaymentRow = RowDataPacket & {
@@ -333,6 +354,32 @@ async function listInvoiceLinesWithExecutor(
   return rows.map(normalizeInvoiceLine);
 }
 
+function normalizeInvoiceTax(row: SalesInvoiceTaxRow): SalesInvoiceTax {
+  return {
+    id: Number(row.id),
+    invoice_id: Number(row.invoice_id),
+    tax_rate_id: Number(row.tax_rate_id),
+    amount: Number(row.amount)
+  };
+}
+
+async function listInvoiceTaxesWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  invoiceId: number
+): Promise<SalesInvoiceTax[]> {
+  const [rows] = await executor.execute<SalesInvoiceTaxRow[]>(
+    `SELECT id, invoice_id, tax_rate_id, amount
+     FROM sales_invoice_taxes
+     WHERE company_id = ?
+       AND invoice_id = ?
+     ORDER BY id ASC`,
+    [companyId, invoiceId]
+  );
+
+  return rows.map(normalizeInvoiceTax);
+}
+
 async function findInvoiceDetailWithExecutor(
   executor: QueryExecutor,
   companyId: number,
@@ -343,8 +390,11 @@ async function findInvoiceDetailWithExecutor(
     return null;
   }
 
-  const lines = await listInvoiceLinesWithExecutor(executor, companyId, invoiceId);
-  return { ...invoice, lines };
+  const [lines, taxes] = await Promise.all([
+    listInvoiceLinesWithExecutor(executor, companyId, invoiceId),
+    listInvoiceTaxesWithExecutor(executor, companyId, invoiceId)
+  ]);
+  return { ...invoice, lines, taxes };
 }
 
 function buildInvoiceWhereClause(companyId: number, filters: InvoiceListFilters) {
@@ -427,6 +477,7 @@ export async function createInvoice(
     invoice_date: string;
     tax_amount: number;
     lines: InvoiceLineInput[];
+    taxes?: InvoiceTaxInput[];
   },
   actor?: MutationActor
 ): Promise<SalesInvoiceDetail> {
@@ -437,7 +488,41 @@ export async function createInvoice(
     }
 
     const { lineRows, subtotal } = buildInvoiceLines(input.lines);
-    const taxAmount = normalizeMoney(input.tax_amount);
+    let taxAmount = normalizeMoney(input.tax_amount);
+    let taxLines: Array<{ tax_rate_id: number; amount: number }> = [];
+
+    if (input.taxes && input.taxes.length > 0) {
+      const taxRateIds = input.taxes.map((tax) => tax.tax_rate_id);
+      const placeholders = taxRateIds.map(() => "?").join(", ");
+      const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT id
+         FROM tax_rates
+         WHERE company_id = ?
+           AND is_active = 1
+           AND id IN (${placeholders})`,
+        [companyId, ...taxRateIds]
+      );
+
+      const matched = new Set((rows as Array<{ id?: number }>).map((row) => Number(row.id)));
+      if (matched.size !== taxRateIds.length) {
+        throw new DatabaseReferenceError("Invalid tax rate");
+      }
+
+      taxLines = input.taxes.map((tax) => ({
+        tax_rate_id: tax.tax_rate_id,
+        amount: normalizeMoney(tax.amount)
+      })).filter((tax) => tax.amount > 0);
+      taxAmount = normalizeMoney(taxLines.reduce((acc, tax) => acc + tax.amount, 0));
+    } else {
+      const defaultTaxRates = await listCompanyDefaultTaxRates(connection, companyId);
+      if (defaultTaxRates.length > 0) {
+        taxLines = calculateTaxLines({ grossAmount: subtotal, rates: defaultTaxRates }).filter(
+          (tax) => tax.amount > 0
+        );
+        taxAmount = normalizeMoney(taxLines.reduce((acc, tax) => acc + tax.amount, 0));
+      }
+    }
+
     const grandTotal = normalizeMoney(subtotal + taxAmount);
 
     try {
@@ -502,6 +587,28 @@ export async function createInvoice(
         );
       }
 
+      if (taxLines.length > 0) {
+        const placeholders = taxLines.map(() => "(?, ?, ?, ?, ?)").join(", ");
+        const values = taxLines.flatMap((tax) => [
+          invoiceId,
+          companyId,
+          input.outlet_id,
+          tax.tax_rate_id,
+          tax.amount
+        ]);
+
+        await connection.execute(
+          `INSERT INTO sales_invoice_taxes (
+             sales_invoice_id,
+             company_id,
+             outlet_id,
+             tax_rate_id,
+             amount
+           ) VALUES ${placeholders}`,
+          values
+        );
+      }
+
       const invoice = await findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
       if (!invoice) {
         throw new Error("Created invoice not found");
@@ -527,6 +634,7 @@ export async function updateInvoice(
     invoice_date?: string;
     tax_amount?: number;
     lines?: InvoiceLineInput[];
+    taxes?: InvoiceTaxInput[];
   },
   actor?: MutationActor
 ): Promise<SalesInvoiceDetail | null> {
@@ -576,10 +684,40 @@ export async function updateInvoice(
       subtotal = computed.subtotal;
     }
 
-    const taxAmount =
+    let taxAmount =
       typeof input.tax_amount === "number"
         ? normalizeMoney(input.tax_amount)
         : current.tax_amount;
+    let taxLines: Array<{ tax_rate_id: number; amount: number }> | null = null;
+
+    if (input.taxes !== undefined) {
+      if (input.taxes.length > 0) {
+        const taxRateIds = input.taxes.map((tax) => tax.tax_rate_id);
+        const placeholders = taxRateIds.map(() => "?").join(", ");
+        const [rows] = await connection.execute<RowDataPacket[]>(
+          `SELECT id
+           FROM tax_rates
+           WHERE company_id = ?
+             AND is_active = 1
+             AND id IN (${placeholders})`,
+          [companyId, ...taxRateIds]
+        );
+
+        const matched = new Set((rows as Array<{ id?: number }>).map((row) => Number(row.id)));
+        if (matched.size !== taxRateIds.length) {
+          throw new DatabaseReferenceError("Invalid tax rate");
+        }
+
+        taxLines = input.taxes.map((tax) => ({
+          tax_rate_id: tax.tax_rate_id,
+          amount: normalizeMoney(tax.amount)
+        })).filter((tax) => tax.amount > 0);
+        taxAmount = normalizeMoney(taxLines.reduce((acc, tax) => acc + tax.amount, 0));
+      } else {
+        taxLines = [];
+        taxAmount = 0;
+      }
+    }
     const grandTotal = normalizeMoney(subtotal + taxAmount);
 
     if (lineRows) {
@@ -654,6 +792,37 @@ export async function updateInvoice(
          ) VALUES ${placeholders}`,
         values
       );
+    }
+
+    if (taxLines !== null) {
+      await connection.execute<ResultSetHeader>(
+        `DELETE FROM sales_invoice_taxes
+         WHERE company_id = ?
+           AND invoice_id = ?`,
+        [companyId, invoiceId]
+      );
+
+      if (taxLines.length > 0) {
+        const placeholders = taxLines.map(() => "(?, ?, ?, ?, ?)").join(", ");
+        const values = taxLines.flatMap((tax) => [
+          invoiceId,
+          companyId,
+          nextOutletId,
+          tax.tax_rate_id,
+          tax.amount
+        ]);
+
+        await connection.execute(
+          `INSERT INTO sales_invoice_taxes (
+             sales_invoice_id,
+             company_id,
+             outlet_id,
+             tax_rate_id,
+             amount
+           ) VALUES ${placeholders}`,
+          values
+        );
+      }
     }
 
     return findInvoiceDetailWithExecutor(connection, companyId, invoiceId);

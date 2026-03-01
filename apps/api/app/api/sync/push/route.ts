@@ -7,6 +7,12 @@ import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getRequestCorrelationId } from "../../../../src/lib/correlation-id";
 import { getDbPool } from "../../../../src/lib/db";
 import {
+  calculateTaxLines,
+  listCompanyDefaultTaxRates,
+  listCompanyTaxRates,
+  type TaxRateRecord
+} from "../../../../src/lib/taxes";
+import {
   SyncPushPostingHookError,
   type SyncPushPostingHookResult,
   runSyncPushPostingHook
@@ -88,6 +94,10 @@ type SyncPushTransactionPayload = {
     method: string;
     amount: number;
   }>;
+  taxes?: Array<{
+    tax_rate_id: number;
+    amount: number;
+  }>;
 };
 
 type ExistingIdempotencyRecord = {
@@ -167,6 +177,58 @@ function toMysqlDateTime(value: string): string {
   return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
+function normalizeMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+type TaxLineInput = {
+  tax_rate_id: number;
+  amount: number;
+};
+
+function sumGrossSales(items: Array<{ qty: number; price_snapshot: number }>): number {
+  const total = items.reduce((acc, item) => acc + item.qty * item.price_snapshot, 0);
+  return normalizeMoney(total);
+}
+
+function buildTaxLinesForTransaction(params: {
+  taxes: TaxLineInput[] | undefined;
+  grossSales: number;
+  defaultTaxRates: TaxRateRecord[];
+  taxRateById: Map<number, TaxRateRecord>;
+}): TaxLineInput[] {
+  const { taxes, grossSales, defaultTaxRates, taxRateById } = params;
+  if (taxes && taxes.length > 0) {
+    const normalized = taxes.map((tax) => ({
+      tax_rate_id: Number(tax.tax_rate_id),
+      amount: normalizeMoney(Number(tax.amount))
+    }));
+
+    for (const tax of normalized) {
+      if (!Number.isFinite(tax.tax_rate_id) || tax.tax_rate_id <= 0) {
+        throw new Error("INVALID_TAX_RATE_ID");
+      }
+      if (!Number.isFinite(tax.amount) || tax.amount < 0) {
+        throw new Error("INVALID_TAX_AMOUNT");
+      }
+      if (!taxRateById.has(tax.tax_rate_id)) {
+        throw new Error("UNKNOWN_TAX_RATE");
+      }
+    }
+
+    return normalized.filter((tax) => tax.amount > 0);
+  }
+
+  if (defaultTaxRates.length === 0) {
+    return [];
+  }
+
+  return calculateTaxLines({
+    grossAmount: grossSales,
+    rates: defaultTaxRates
+  }).filter((tax) => tax.amount > 0);
+}
+
 function toErrorResult(clientTxId: string, message: string): SyncPushResultItem {
   return {
     client_tx_id: clientTxId,
@@ -200,6 +262,10 @@ function canonicalizeTransactionForHash(tx: {
     method: string;
     amount: number;
   }>;
+  taxes?: Array<{
+    tax_rate_id: number;
+    amount: number;
+  }>;
 }): string {
   return JSON.stringify({
     client_tx_id: tx.client_tx_id,
@@ -217,7 +283,13 @@ function canonicalizeTransactionForHash(tx: {
     payments: tx.payments.map((payment) => ({
       method: payment.method,
       amount: payment.amount
-    }))
+    })),
+    taxes: (tx.taxes ?? [])
+      .map((tax) => ({
+        tax_rate_id: tax.tax_rate_id,
+        amount: tax.amount
+      }))
+      .sort((a, b) => a.tax_rate_id - b.tax_rate_id)
   });
 }
 
@@ -757,6 +829,13 @@ export const POST = withAuth(
       const dbConnection = await dbPool.getConnection();
       const results: SyncPushResultItem[] = [];
       try {
+        const [companyTaxRates, defaultTaxRates] = await Promise.all([
+          listCompanyTaxRates(dbConnection, auth.companyId),
+          listCompanyDefaultTaxRates(dbConnection, auth.companyId)
+        ]);
+        const activeTaxRates = companyTaxRates.filter((rate) => rate.is_active);
+        const taxRateById = new Map(activeTaxRates.map((rate) => [rate.id, rate]));
+
         for (const [txIndex, tx] of input.transactions.entries()) {
           const attempt = txIndex + 1;
           const startedAtMs = Date.now();
@@ -872,6 +951,36 @@ export const POST = withAuth(
                    amount
                  ) VALUES ${paymentPlaceholders}`,
                 paymentValues
+              );
+            }
+
+            const grossSales = sumGrossSales(tx.items);
+            const taxLines = buildTaxLinesForTransaction({
+              taxes: tx.taxes,
+              grossSales,
+              defaultTaxRates,
+              taxRateById
+            });
+
+            if (taxLines.length > 0) {
+              const taxPlaceholders = taxLines.map(() => "(?, ?, ?, ?, ?)").join(", ");
+              const taxValues = taxLines.flatMap((tax) => [
+                posTransactionId,
+                tx.company_id,
+                tx.outlet_id,
+                tax.tax_rate_id,
+                tax.amount
+              ]);
+
+              await dbConnection.execute(
+                `INSERT INTO pos_transaction_taxes (
+                   pos_transaction_id,
+                   company_id,
+                   outlet_id,
+                   tax_rate_id,
+                   amount
+                 ) VALUES ${taxPlaceholders}`,
+                taxValues
               );
             }
 
