@@ -3,7 +3,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { createHash } from "node:crypto";
 import { SyncPushRequestSchema, SyncPushResponseSchema, type SyncPushResultItem } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
-import { requireOutletAccess, requireRole, withAuth } from "../../../../src/lib/auth-guard";
+import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getRequestCorrelationId } from "../../../../src/lib/correlation-id";
 import { getDbPool } from "../../../../src/lib/db";
 import {
@@ -1079,7 +1079,9 @@ export const POST = withAuth(
     }
   },
   [
-    requireRole(["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"]),
-    requireOutletAccess((request) => parseOutletIdForGuard(request))
+    requireAccess({
+      roles: ["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"],
+      outletId: (request) => parseOutletIdForGuard(request)
+    })
   ]
 );

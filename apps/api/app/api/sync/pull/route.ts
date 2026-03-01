@@ -4,11 +4,7 @@ import {
   SyncPullResponseSchema
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
-import {
-  requireOutletAccess,
-  requireRole,
-  withAuth
-} from "../../../../src/lib/auth-guard";
+import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { buildSyncPullPayload } from "../../../../src/lib/master-data";
 
 const INVALID_REQUEST_RESPONSE = {
@@ -61,7 +57,9 @@ export const GET = withAuth(
     }
   },
   [
-    requireRole(["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"]),
-    requireOutletAccess((request) => parseOutletIdForGuard(request))
+    requireAccess({
+      roles: ["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"],
+      outletId: (request) => parseOutletIdForGuard(request)
+    })
   ]
 );
