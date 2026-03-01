@@ -20,11 +20,11 @@
 - [x] Seed roles: OWNER/ADMIN/CASHIER/ACCOUNTANT
 - [x] Seed company + outlet default
 - [x] Seed user owner (password hash)
-- [x] Seed feature flags:
-  - [x] `pos.enabled`
-  - [x] `sales.enabled`
-  - [x] `inventory.enabled` (level 0)
-  - [x] `purchasing.enabled` (off)
+- [x] Seed modules + company modules:
+  - [x] `pos` (enabled)
+  - [x] `sales` (enabled)
+  - [x] `inventory` (enabled, level 0)
+  - [x] `purchasing` (disabled)
 
 **Acceptance criteria**
 - [x] Schema dapat di-run dari nol

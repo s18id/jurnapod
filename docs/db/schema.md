@@ -66,13 +66,14 @@ Override via env:
 
 Seed behavior:
 
-- Idempotent upsert for company, outlet, roles, owner user, user-role relation, user-outlet relation, and feature flags.
+- Idempotent upsert for company, outlet, roles, owner user, user-role relation, user-outlet relation, modules, and company modules.
 - Owner password hash follows env-driven password policy (default `argon2id`; configurable to `bcrypt`).
-- Feature flags seeded:
-  - `pos.enabled` = true
-  - `sales.enabled` = true
-  - `inventory.enabled` = true with `{"level":0}`
-  - `purchasing.enabled` = false
+- Company modules seeded:
+  - `pos` = enabled, config `{"payment_methods":["CASH"]}`
+  - `sales` = enabled
+  - `inventory` = enabled with `{"level":0}`
+  - `purchasing` = disabled
+  - `platform`, `reports`, `settings`, `accounts`, `journals` = enabled
 
 ## Smoke checks
 
@@ -89,12 +90,12 @@ Checks:
 - Configured owner password compare succeeds against stored hash (bcrypt or argon2id).
 - `user_roles` contains `OWNER` role relation.
 - `user_outlets` contains default outlet relation.
-- Required seeded feature flags exist with expected values:
-  - `pos.enabled` = true
-  - `sales.enabled` = true
-  - `inventory.enabled` = true and `config_json.level = 0`
-  - `purchasing.enabled` = false
-- Additional feature flags are allowed.
+- Required seeded modules exist with expected values:
+  - `pos` = enabled
+  - `sales` = enabled
+  - `inventory` = enabled and `config_json.level = 0`
+  - `purchasing` = disabled
+- Additional modules and config keys are allowed.
 - Transaction/write prerequisites are validated before checks:
   - Required tables (`companies`, `outlets`, `items`, `item_prices`) must exist with `InnoDB` engine.
   - DB user must be able to perform transactional write probe (`INSERT` + rollback) on `companies`.

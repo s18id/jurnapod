@@ -132,12 +132,16 @@ Password hashing policy is controlled by server env (`AUTH_PASSWORD_ALGO_DEFAULT
 - **Idempotent sync**: POS uses `client_tx_id` (UUID v4) to prevent duplicate entries.
 - **Consistent document status**: `DRAFT -> POSTED -> VOID`, POS: `COMPLETED -> VOID/REFUND`.
 - **Multi-company/outlet**: All operational data is bound to `company_id` and `outlet_id`.
+- **Module enablement & settings**: Modules are configured per company in `modules` + `company_modules`; outlet settings live in `company_settings` (seedable from env).
+- **Tax rates**: `tax_rates` + `company_tax_defaults` drive default POS/sales tax, with optional per-transaction tax lines.
 - **Database**: MySQL 8.0.44 (InnoDB), monetary values use `DECIMAL(18,2)`.
 - **Type safety**: Module contracts use Zod schemas in `packages/shared`.
 
 ## Modules
 
-- `platform`: Auth, organization, outlet, audit, numbering, feature flags
+Module enablement is per company, with module configs stored in `company_modules` (ex: POS payment methods).
+
+- `platform`: Auth, organization, outlet, audit, numbering, module enablement
 - `accounting`: COA, journal posting, reports (GL, P&L, Balance Sheet), ODS/Excel import
 - `sales`: Service invoices, payment in, light AR
 - `pos`: Offline-first transaction sync, posting rules
@@ -172,6 +176,16 @@ Jurnapod supports four item types for flexible catalog management:
 - `POST /api/sales/invoices` - Create service invoice
 - `POST /api/sales/invoices/:id/post` - Post invoice to GL
 - `GET /api/sales/invoices/:id/pdf` - Generate PDF invoice
+
+### Settings
+- `GET /api/settings/config?outlet_id=...&keys=...` - Read outlet settings (with env fallback)
+- `PUT /api/settings/config` - Update outlet settings
+- `GET /api/settings/modules` - List module enablement and configs
+- `PUT /api/settings/modules` - Update module enablement and configs
+- `GET /api/settings/tax-rates` - List tax rates
+- `POST /api/settings/tax-rates` - Create tax rate
+- `GET /api/settings/tax-defaults` - List default tax rates
+- `PUT /api/settings/tax-defaults` - Update default tax rates
 
 ### Reports
 - `GET /api/reports/general-ledger` - General ledger report
@@ -288,6 +302,9 @@ This will create all required tables with proper InnoDB engine, indexes, and con
 ```bash
 # Seed initial company, outlet, and owner user
 npm run db:seed
+
+# Seed company/outlet settings from env defaults
+npm run db:seed:settings
 ```
 
 This creates:
@@ -752,7 +769,7 @@ After deployment, test PWA functionality:
 The POS uses IndexedDB (via Dexie) for offline storage:
 - **Transactions**: Stored locally with `client_tx_id` (UUID v4)
 - **Sync queue**: Outbox pattern (`PENDING -> SENT -> FAILED`)
-- **Master data cache**: Items, prices, tax config per outlet
+- **Master data cache**: Items, prices, tax rates + defaults per outlet
 
 No additional configuration needed - handled by application code.
 
