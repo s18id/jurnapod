@@ -60,45 +60,35 @@ type PaymentMethodConfig = z.infer<typeof paymentMethodConfigSchema>;
 async function readPaymentMethods(companyId: number): Promise<PaymentMethodConfig[]> {
   const pool = getDbPool();
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT \`key\`, enabled, config_json
-     FROM feature_flags
-     WHERE company_id = ?
-       AND \`key\` IN ('pos.payment_methods', 'pos.config')`,
+    `SELECT cm.enabled, cm.config_json
+     FROM company_modules cm
+     INNER JOIN modules m ON m.id = cm.module_id
+     WHERE cm.company_id = ?
+       AND m.code = 'pos'
+     LIMIT 1`,
     [companyId]
   );
 
   let paymentMethods: Array<string | PaymentMethodConfig> = ["CASH"];
 
-  for (const row of rows as Array<{ key?: string; enabled?: number; config_json?: string }>) {
-    if (row.enabled !== 1 || typeof row.key !== "string") {
-      continue;
-    }
-
+  const posRow = (rows as Array<{ enabled?: number; config_json?: string }>)[0];
+  if (posRow && posRow.enabled === 1) {
     let parsed: unknown = null;
     try {
-      parsed = typeof row.config_json === "string" ? JSON.parse(row.config_json) : null;
+      parsed = typeof posRow.config_json === "string" ? JSON.parse(posRow.config_json) : null;
     } catch {
       parsed = null;
     }
 
-    if (row.key === "pos.payment_methods") {
-      const methodsConfig = paymentMethodsSchema.safeParse(parsed);
-      if (methodsConfig.success) {
-        paymentMethods = Array.isArray(methodsConfig.data)
-          ? methodsConfig.data
-          : methodsConfig.data?.methods ?? paymentMethods;
-      }
-      continue;
-    }
-
-    if (row.key === "pos.config" && parsed && typeof parsed === "object") {
-      const configObject = parsed as Record<string, unknown>;
-      const methodsConfig = paymentMethodsSchema.safeParse(configObject.payment_methods);
-      if (methodsConfig.success) {
-        paymentMethods = Array.isArray(methodsConfig.data)
-          ? methodsConfig.data
-          : methodsConfig.data?.methods ?? paymentMethods;
-      }
+    const candidate =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>).payment_methods ?? parsed
+        : parsed;
+    const methodsConfig = paymentMethodsSchema.safeParse(candidate);
+    if (methodsConfig.success) {
+      paymentMethods = Array.isArray(methodsConfig.data)
+        ? methodsConfig.data
+        : methodsConfig.data?.methods ?? paymentMethods;
     }
   }
 
