@@ -260,7 +260,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
       const query =
         typeof filter === "number" ? `?outlet_id=${filter}` : "";
       const response = await apiRequest<{ ok: true; assets: FixedAsset[] }>(
-        `/fixed-assets${query}`,
+        `/accounts/fixed-assets${query}`,
         {},
         props.accessToken
       );
@@ -310,7 +310,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       setError(null);
       await apiRequest(
-        "/fixed-assets",
+        "/accounts/fixed-assets",
         {
           method: "POST",
           body: JSON.stringify({
@@ -343,7 +343,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       setError(null);
       await apiRequest(
-        `/fixed-assets/${item.id}`,
+        `/accounts/fixed-assets/${item.id}`,
         {
           method: "PATCH",
           body: JSON.stringify({
@@ -376,7 +376,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
 
     try {
       setError(null);
-      await apiRequest(`/fixed-assets/${assetId}`, { method: "DELETE" }, props.accessToken);
+      await apiRequest(`/accounts/fixed-assets/${assetId}`, { method: "DELETE" }, props.accessToken);
       await refreshFixedAsset(outletFilter);
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {
@@ -489,7 +489,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       setError(null);
       const response = await apiRequest<{ ok: true; plan: DepreciationPlan }>(
-        `/fixed-assets/${assetId}/depreciation-plan`,
+        `/accounts/fixed-assets/${assetId}/depreciation-plan`,
         {},
         props.accessToken
       );
@@ -588,7 +588,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
       setError(null);
       if (depreciationPlan.id) {
         await apiRequest(
-          `/fixed-assets/${assetId}/depreciation-plan`,
+          `/accounts/fixed-assets/${assetId}/depreciation-plan`,
           {
             method: "PATCH",
             body: JSON.stringify({
@@ -604,7 +604,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
         );
       } else {
         await apiRequest(
-          `/fixed-assets/${assetId}/depreciation-plan`,
+          `/accounts/fixed-assets/${assetId}/depreciation-plan`,
           {
             method: "POST",
             body: JSON.stringify({
@@ -647,7 +647,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
       setError(null);
       setRunLoading(true);
       const response = await apiRequest<{ ok: true; duplicate: boolean; run: DepreciationRun }>(
-        `/depreciation/run`,
+        `/accounts/depreciation/run`,
         {
           method: "POST",
           body: JSON.stringify({

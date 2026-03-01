@@ -49,10 +49,10 @@ export default defineConfig(({ mode }) => {
               }
             },
             {
-              urlPattern: ({ url }) => url.pathname.startsWith("/api/account-types"),
+              urlPattern: ({ url }) => url.pathname.startsWith("/api/accounts/types"),
               handler: "NetworkFirst",
               options: {
-                cacheName: "api-account-types",
+                cacheName: "api-accounts-types",
                 expiration: {
                   maxEntries: 50,
                   maxAgeSeconds: 24 * 60 * 60
@@ -60,10 +60,10 @@ export default defineConfig(({ mode }) => {
               }
             },
             {
-              urlPattern: ({ url }) => url.pathname.startsWith("/api/items"),
+              urlPattern: ({ url }) => url.pathname.startsWith("/api/inventory/items"),
               handler: "NetworkFirst",
               options: {
-                cacheName: "api-items",
+                cacheName: "api-inventory-items",
                 expiration: {
                   maxEntries: 50,
                   maxAgeSeconds: 12 * 60 * 60
@@ -71,10 +71,10 @@ export default defineConfig(({ mode }) => {
               }
             },
             {
-              urlPattern: ({ url }) => url.pathname.startsWith("/api/item-prices"),
+              urlPattern: ({ url }) => url.pathname.startsWith("/api/inventory/item-prices"),
               handler: "NetworkFirst",
               options: {
-                cacheName: "api-item-prices",
+                cacheName: "api-inventory-item-prices",
                 expiration: {
                   maxEntries: 50,
                   maxAgeSeconds: 12 * 60 * 60

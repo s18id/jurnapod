@@ -106,7 +106,7 @@ export function useAccountTypes(companyId: number, accessToken: string) {
         });
 
         const response = await apiRequest<AccountTypesListResponse>(
-          `/account-types?${params.toString()}`,
+          `/accounts/types?${params.toString()}`,
           {},
           accessToken
         );
@@ -495,7 +495,7 @@ export async function createAccountType(
   accessToken: string
 ): Promise<AccountTypeResponse> {
   const response = await apiRequest<{ success: true; data: AccountTypeResponse }>(
-    `/account-types`,
+    `/accounts/types`,
     {
       method: "POST",
       body: JSON.stringify(data)
@@ -515,7 +515,7 @@ export async function updateAccountType(
   accessToken: string
 ): Promise<AccountTypeResponse> {
   const response = await apiRequest<{ success: true; data: AccountTypeResponse }>(
-    `/account-types/${accountTypeId}`,
+    `/accounts/types/${accountTypeId}`,
     {
       method: "PUT",
       body: JSON.stringify(data)
@@ -534,7 +534,7 @@ export async function deactivateAccountType(
   accessToken: string
 ): Promise<void> {
   await apiRequest<{ ok: true }>(
-    `/account-types/${accountTypeId}`,
+    `/accounts/types/${accountTypeId}`,
     {
       method: "DELETE"
     },
