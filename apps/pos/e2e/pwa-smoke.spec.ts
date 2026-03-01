@@ -40,7 +40,7 @@ test("login + sync pull works with mocked API", async ({ page }) => {
     });
   });
 
-  await page.route("**/api/me", async (route) => {
+  await page.route("**/api/users/me", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

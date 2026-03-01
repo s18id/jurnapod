@@ -194,7 +194,7 @@ function App() {
 
   const applyAuthenticatedSession = React.useCallback(
     async (accessToken: string, options?: { message?: string }) => {
-      const meResponse = await fetch(`${API_ORIGIN}/api/me`, {
+      const meResponse = await fetch(`${API_ORIGIN}/api/users/me`, {
         headers: {
           authorization: `Bearer ${accessToken}`,
           accept: "application/json"
