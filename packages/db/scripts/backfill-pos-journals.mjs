@@ -4,7 +4,6 @@ import mysql from "mysql2/promise"
 const POS_SALE_DOC_TYPE = "POS_SALE"
 const JOURNAL_BATCH_DOC_UNIQUE_KEY = "uq_journal_batches_company_doc"
 const MYSQL_DUPLICATE_ERROR_CODE = 1062
-const TAX_FLAG_KEYS = ["pos.tax", "pos.config"]
 const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "SALES_TAX", "AR"]
 const MONEY_SCALE = 100
 const MAX_LIMIT = 10000
@@ -304,48 +303,24 @@ async function readMissingCompletedPosTransactions(connection, filters) {
 }
 
 async function readCompanyPosTaxConfig(connection, companyId) {
-  const placeholders = TAX_FLAG_KEYS.map(() => "?").join(", ")
   const [rows] = await connection.execute(
-    `SELECT \`key\`, enabled, config_json
-     FROM feature_flags
-     WHERE company_id = ?
-       AND \`key\` IN (${placeholders})`,
-    [companyId, ...TAX_FLAG_KEYS]
+    `SELECT tr.rate_percent, tr.is_inclusive
+     FROM company_tax_defaults ctd
+     INNER JOIN tax_rates tr ON tr.id = ctd.tax_rate_id
+     WHERE ctd.company_id = ?
+       AND tr.is_active = 1
+     ORDER BY tr.id ASC`,
+    [companyId]
   )
 
-  let rate = 0
-  let inclusive = false
-
-  for (const row of rows) {
-    if (Number(row.enabled) !== 1 || typeof row.key !== "string" || typeof row.config_json !== "string") {
-      continue
-    }
-
-    let parsed = null
-    try {
-      parsed = JSON.parse(row.config_json)
-    } catch {
-      parsed = null
-    }
-
-    if (!parsed || typeof parsed !== "object") {
-      continue
-    }
-
-    if (row.key === "pos.tax") {
-      rate = normalizeTaxRate(parsed.rate)
-      inclusive = parsed.inclusive === true
-      continue
-    }
-
-    if (row.key === "pos.config" && parsed.tax && typeof parsed.tax === "object") {
-      rate = normalizeTaxRate(parsed.tax.rate)
-      inclusive = parsed.tax.inclusive === true
-    }
+  if (!rows || rows.length === 0) {
+    return { rate: 0, inclusive: false }
   }
 
+  const inclusive = Number(rows[0].is_inclusive) === 1
+  const rate = rows.reduce((acc, row) => acc + normalizeTaxRate(row.rate_percent), 0)
   return {
-    rate,
+    rate: normalizeMoney(rate),
     inclusive
   }
 }

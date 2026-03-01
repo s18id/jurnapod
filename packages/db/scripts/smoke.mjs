@@ -31,7 +31,7 @@ function smokeConfigFromEnv() {
   };
 }
 
-function parseConfigJson(rawValue, flagKey) {
+function parseConfigJson(rawValue, moduleCode) {
   if (rawValue == null) {
     return {};
   }
@@ -43,7 +43,7 @@ function parseConfigJson(rawValue, flagKey) {
   try {
     return JSON.parse(rawValue);
   } catch {
-    throw new Error(`feature flag ${flagKey} has invalid config_json`);
+    throw new Error(`module ${moduleCode} has invalid config_json`);
   }
 }
 
@@ -321,42 +321,43 @@ async function main() {
       throw new Error("user_outlets relation missing default outlet membership");
     }
 
-    const [featureFlagRows] = await connection.execute(
-      `SELECT \`key\` AS flag_key, enabled, config_json
-       FROM feature_flags
-       WHERE company_id = ?`,
+    const [moduleRows] = await connection.execute(
+      `SELECT m.code, cm.enabled, cm.config_json
+       FROM company_modules cm
+       INNER JOIN modules m ON m.id = cm.module_id
+       WHERE cm.company_id = ?`,
       [owner.company_id]
     );
 
-    const flagsByKey = new Map(
-      featureFlagRows.map((row) => [row.flag_key, row])
+    const modulesByCode = new Map(
+      moduleRows.map((row) => [row.code, row])
     );
-    const requiredFlags = [
-      ["pos.enabled", true],
-      ["sales.enabled", true],
-      ["inventory.enabled", true],
-      ["purchasing.enabled", false]
+    const requiredModules = [
+      ["pos", true],
+      ["sales", true],
+      ["inventory", true],
+      ["purchasing", false]
     ];
 
-    for (const [flagKey, expectedEnabled] of requiredFlags) {
-      const row = flagsByKey.get(flagKey);
+    for (const [moduleCode, expectedEnabled] of requiredModules) {
+      const row = modulesByCode.get(moduleCode);
       if (!row) {
-        throw new Error(`required feature flag missing: ${flagKey}`);
+        throw new Error(`required module missing: ${moduleCode}`);
       }
 
       if (Boolean(row.enabled) !== expectedEnabled) {
-        throw new Error(`feature flag ${flagKey} must be ${expectedEnabled}`);
+        throw new Error(`module ${moduleCode} must be ${expectedEnabled}`);
       }
     }
 
-    const inventoryFlag = flagsByKey.get("inventory.enabled");
+    const inventoryModule = modulesByCode.get("inventory");
     const inventoryConfig = parseConfigJson(
-      inventoryFlag.config_json,
-      "inventory.enabled"
+      inventoryModule.config_json,
+      "inventory"
     );
 
     if (inventoryConfig.level !== 0) {
-      throw new Error("feature flag inventory.enabled config_json.level must be 0");
+      throw new Error("module inventory config_json.level must be 0");
     }
 
     await assertItemPricesCompanyScopedForeignKeys(connection);

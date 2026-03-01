@@ -186,15 +186,51 @@ async function upsertOwner(connection, companyId, ownerEmail, passwordHash) {
   return Number(result.insertId);
 }
 
-async function upsertFeatureFlag(connection, companyId, flagKey, enabled, configJson) {
+async function upsertModule(connection, code, name, description) {
+  const [result] = await connection.execute(
+    `INSERT INTO modules (code, name, description)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       id = LAST_INSERT_ID(id),
+       name = VALUES(name),
+       description = VALUES(description),
+       updated_at = CURRENT_TIMESTAMP`,
+    [code, name, description]
+  );
+
+  return Number(result.insertId);
+}
+
+async function upsertCompanyModule(
+  connection,
+  companyId,
+  moduleId,
+  enabled,
+  configJson,
+  userId
+) {
   await connection.execute(
-    `INSERT INTO feature_flags (company_id, \`key\`, enabled, config_json)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO company_modules (
+       company_id,
+       module_id,
+       enabled,
+       config_json,
+       created_by_user_id,
+       updated_by_user_id
+     ) VALUES (?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        enabled = VALUES(enabled),
        config_json = VALUES(config_json),
+       updated_by_user_id = VALUES(updated_by_user_id),
        updated_at = CURRENT_TIMESTAMP`,
-    [companyId, flagKey, enabled ? 1 : 0, configJson]
+    [
+      companyId,
+      moduleId,
+      enabled ? 1 : 0,
+      configJson,
+      userId,
+      userId
+    ]
   );
 }
 
@@ -380,15 +416,91 @@ async function main() {
       }
     }
 
-    const featureFlags = [
-      ["pos.enabled", true, "{}"],
-      ["sales.enabled", true, "{}"],
-      ["inventory.enabled", true, "{\"level\":0}"],
-      ["purchasing.enabled", false, "{}"]
+    const moduleCatalog = [
+      {
+        code: "platform",
+        name: "Platform",
+        description: "Core platform services"
+      },
+      {
+        code: "pos",
+        name: "POS",
+        description: "Point of sale"
+      },
+      {
+        code: "sales",
+        name: "Sales",
+        description: "Sales invoices"
+      },
+      {
+        code: "inventory",
+        name: "Inventory",
+        description: "Stock movements and recipes"
+      },
+      {
+        code: "purchasing",
+        name: "Purchasing",
+        description: "Purchasing and payables"
+      },
+      {
+        code: "reports",
+        name: "Reports",
+        description: "Reporting and analytics"
+      },
+      {
+        code: "settings",
+        name: "Settings",
+        description: "Settings and configuration"
+      },
+      {
+        code: "accounts",
+        name: "Accounts",
+        description: "Chart of accounts"
+      },
+      {
+        code: "journals",
+        name: "Journals",
+        description: "Journal entries and posting"
+      }
     ];
 
-    for (const [flagKey, enabled, configJson] of featureFlags) {
-      await upsertFeatureFlag(connection, companyId, flagKey, enabled, configJson);
+    const moduleIds = {};
+    for (const moduleEntry of moduleCatalog) {
+      const moduleId = await upsertModule(
+        connection,
+        moduleEntry.code,
+        moduleEntry.name,
+        moduleEntry.description
+      );
+      moduleIds[moduleEntry.code] = moduleId;
+    }
+
+    const companyModules = [
+      { code: "platform", enabled: true, config: {} },
+      { code: "pos", enabled: true, config: { payment_methods: ["CASH"] } },
+      { code: "sales", enabled: true, config: {} },
+      { code: "inventory", enabled: true, config: { level: 0 } },
+      { code: "purchasing", enabled: false, config: {} },
+      { code: "reports", enabled: true, config: {} },
+      { code: "settings", enabled: true, config: {} },
+      { code: "accounts", enabled: true, config: {} },
+      { code: "journals", enabled: true, config: {} }
+    ];
+
+    for (const moduleEntry of companyModules) {
+      const moduleId = moduleIds[moduleEntry.code];
+      if (!moduleId) {
+        throw new Error(`module id not found for ${moduleEntry.code}`);
+      }
+
+      await upsertCompanyModule(
+        connection,
+        companyId,
+        moduleId,
+        moduleEntry.enabled,
+        JSON.stringify(moduleEntry.config ?? {}),
+        ownerUserId
+      );
     }
 
     await connection.commit();
