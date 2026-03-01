@@ -1,6 +1,6 @@
 import { jwtVerify } from "jose";
 import { z } from "zod";
-import { ROLE_CODES, userHasAnyRole, userHasOutletAccess, userHasModulePermission, type RoleCode, type ModulePermission } from "./auth";
+import { ROLE_CODES, checkUserAccess, type RoleCode, type ModulePermission } from "./auth";
 import { getAppEnv } from "./env";
 
 const BEARER_TOKEN_PATTERN = /^Bearer\s+(\S+)$/i;
@@ -64,6 +64,13 @@ export type AuthenticatedRouteGuard = (
 ) => Promise<Response | null> | Response | null;
 
 type OutletIdResolver = (request: Request, auth: AuthContext) => number | Promise<number>;
+
+type AccessGuardOptions = {
+  roles?: readonly RoleCode[];
+  module?: string;
+  permission?: ModulePermission;
+  outletId?: number | OutletIdResolver;
+};
 
 const roleCodeSet = new Set<string>(ROLE_CODES);
 
@@ -164,58 +171,86 @@ export function withAuth(
   };
 }
 
-export function requireRole(allowedRoles: readonly RoleCode[]): AuthenticatedRouteGuard {
-  const uniqueAllowedRoles = [...new Set(allowedRoles)].filter((role) => roleCodeSet.has(role));
+export function requireAccess(options: AccessGuardOptions): AuthenticatedRouteGuard {
+  const uniqueAllowedRoles = options.roles
+    ? [...new Set(options.roles)].filter((role) => roleCodeSet.has(role))
+    : [];
+  const needsRoleCheck = options.roles !== undefined;
+  const needsModuleCheck = Boolean(options.module && options.permission);
+  const needsOutletCheck = options.outletId !== undefined;
 
-  return async (_request, auth) => {
-    const hasRole = await userHasAnyRole(auth.userId, auth.companyId, uniqueAllowedRoles);
-    if (!hasRole) {
+  return async (request, auth) => {
+    if (needsRoleCheck && uniqueAllowedRoles.length === 0) {
+      return createForbiddenResponse();
+    }
+
+    let outletId: number | undefined;
+    if (needsOutletCheck) {
+      const outletSource = options.outletId;
+      if (outletSource === undefined) {
+        return createForbiddenResponse();
+      }
+
+      const resolvedOutletId =
+        typeof outletSource === "function"
+          ? await outletSource(request, auth)
+          : outletSource;
+
+      if (!Number.isSafeInteger(resolvedOutletId) || resolvedOutletId <= 0) {
+        return createForbiddenResponse();
+      }
+
+      outletId = resolvedOutletId;
+    }
+
+    if (!needsRoleCheck && !needsModuleCheck && !needsOutletCheck) {
+      return null;
+    }
+
+    const access = await checkUserAccess({
+      userId: auth.userId,
+      companyId: auth.companyId,
+      allowedRoles: needsRoleCheck ? uniqueAllowedRoles : undefined,
+      module: needsModuleCheck ? options.module : undefined,
+      permission: needsModuleCheck ? options.permission : undefined,
+      outletId: needsOutletCheck ? outletId : undefined
+    });
+
+    if (!access) {
+      return createForbiddenResponse();
+    }
+
+    if (needsRoleCheck && !access.hasRole) {
+      return createForbiddenResponse();
+    }
+
+    if (needsModuleCheck && !access.hasPermission && !access.isSuperAdmin) {
+      return createForbiddenResponse();
+    }
+
+    if (needsOutletCheck && !access.hasOutletAccess) {
       return createForbiddenResponse();
     }
 
     return null;
   };
+}
+
+export function requireRole(allowedRoles: readonly RoleCode[]): AuthenticatedRouteGuard {
+  return requireAccess({ roles: allowedRoles });
 }
 
 export function requireModulePermission(
   module: string,
   permission: ModulePermission
 ): AuthenticatedRouteGuard {
-  return async (_request, auth) => {
-    const hasPermission = await userHasModulePermission(
-      auth.userId,
-      auth.companyId,
-      module,
-      permission
-    );
-    if (!hasPermission) {
-      return createForbiddenResponse();
-    }
-
-    return null;
-  };
+  return requireAccess({ module, permission });
 }
 
 export function requireOutletAccess(
   outletIdOrResolver: number | OutletIdResolver
 ): AuthenticatedRouteGuard {
-  return async (request, auth) => {
-    const outletId =
-      typeof outletIdOrResolver === "function"
-        ? await outletIdOrResolver(request, auth)
-        : outletIdOrResolver;
-
-    if (!Number.isSafeInteger(outletId) || outletId <= 0) {
-      return createForbiddenResponse();
-    }
-
-    const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, outletId);
-    if (!hasAccess) {
-      return createForbiddenResponse();
-    }
-
-    return null;
-  };
+  return requireAccess({ outletId: outletIdOrResolver });
 }
 
 export function unauthorizedResponse(): Response {
