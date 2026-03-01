@@ -18,11 +18,15 @@ import { SalesPaymentsPage as SalesPaymentsManagementPage } from "./sales-paymen
 import { SuppliesPage as SuppliesManagementPage } from "./supplies-page";
 import { FixedAssetPage as FixedAssetsManagementPage } from "./fixed-assets-page";
 import { AccountMappingsPage as AccountMappingsSettingsPage } from "./account-mappings-page";
+import { FeatureSettingsPage as FeatureSettingsFeaturePage } from "./feature-settings-page";
+import { ModulesPage as ModulesFeaturePage } from "./modules-page";
+import { TaxRatesPage as TaxRatesFeaturePage } from "./tax-rates-page";
 import { StaticPagesPage as StaticPagesManagementPage } from "./static-pages-page";
 import { UsersPage as UsersManagementPage } from "./users-page";
 import { RolesPage as RolesManagementPage } from "./roles-page";
 import { CompaniesPage as CompaniesManagementPage } from "./companies-page";
 import { OutletsPage as OutletsManagementPage } from "./outlets-page";
+import { InventorySettingsPage as InventorySettingsFeaturePage } from "./inventory-settings-page";
 
 type PlaceholderProps = {
   title: string;
@@ -80,6 +84,14 @@ export const SalesInvoicesPage = SalesInvoicesManagementPage;
 export const SalesPaymentsPage = SalesPaymentsManagementPage;
 
 export const AccountMappingsPage = AccountMappingsSettingsPage;
+
+export const FeatureSettingsPage = FeatureSettingsFeaturePage;
+
+export const ModulesPage = ModulesFeaturePage;
+
+export const TaxRatesPage = TaxRatesFeaturePage;
+
+export const InventorySettingsPage = InventorySettingsFeaturePage;
 
 export const StaticPagesPage = StaticPagesManagementPage;
 

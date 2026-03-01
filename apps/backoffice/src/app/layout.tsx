@@ -34,38 +34,42 @@ type RuntimeConfig = {
 
 const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   {
-    label: "Platform",
-    paths: ["/users", "/roles", "/companies", "/outlets"]
-  },
-  {
     label: "Core",
     paths: ["/daily-sales", "/profit-loss", "/general-ledger", "/journals", "/accounting-worksheet"]
   },
   {
-    label: "Operations",
-    paths: [
-      "/transactions",
-      "/transaction-templates",
-      "/sales-invoices",
-      "/sales-payments",
-      "/pos-transactions",
-      "/pos-payments"
-    ]
-  },
-  {
-    label: "Assets",
-    paths: ["/items-prices", "/supplies", "/fixed-assets"]
-  },
-  {
-    label: "Admin",
+    label: "Accounting",
     paths: [
       "/chart-of-accounts",
       "/account-types",
-      "/account-mappings",
-      "/static-pages",
-      "/sync-queue",
-      "/sync-history",
-      "/pwa-settings"
+      "/transactions",
+      "/transaction-templates",
+      "/account-mappings"
+    ]
+  },
+  {
+    label: "Sales",
+    paths: ["/sales-invoices", "/sales-payments"]
+  },
+  {
+    label: "POS",
+    paths: ["/pos-transactions", "/pos-payments", "/sync-queue", "/sync-history", "/pwa-settings"]
+  },
+  {
+    label: "Inventory",
+    paths: ["/items-prices", "/supplies", "/fixed-assets", "/inventory-settings"]
+  },
+  {
+    label: "Settings",
+    paths: [
+      "/outlet-settings",
+      "/modules",
+      "/tax-rates",
+      "/users",
+      "/roles",
+      "/companies",
+      "/outlets",
+      "/static-pages"
     ]
   }
 ];

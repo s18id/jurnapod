@@ -39,6 +39,10 @@ import {
   SalesPaymentsPage,
   SuppliesPage,
   AccountMappingsPage,
+  FeatureSettingsPage,
+  ModulesPage,
+  TaxRatesPage,
+  InventorySettingsPage,
   StaticPagesPage,
   UsersPage,
   RolesPage,
@@ -148,6 +152,18 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/account-mappings") {
     return <AccountMappingsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/outlet-settings" || props.path === "/feature-settings") {
+    return <FeatureSettingsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/modules" || props.path === "/feature-flags") {
+    return <ModulesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/tax-rates") {
+    return <TaxRatesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/inventory-settings") {
+    return <InventorySettingsPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/static-pages") {
     return <StaticPagesPage user={props.user} accessToken={props.accessToken} />;
