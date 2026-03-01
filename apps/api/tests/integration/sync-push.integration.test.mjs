@@ -447,6 +447,18 @@ async function restoreCompanyDefaultTaxRate(db, companyId, previous) {
 
   if (Number.isFinite(previous.taxRateId)) {
     await db.execute(
+      `DELETE FROM pos_transaction_taxes
+       WHERE company_id = ?
+         AND tax_rate_id = ?`,
+      [companyId, previous.taxRateId]
+    );
+    await db.execute(
+      `DELETE FROM sales_invoice_taxes
+       WHERE company_id = ?
+         AND tax_rate_id = ?`,
+      [companyId, previous.taxRateId]
+    );
+    await db.execute(
       `DELETE FROM tax_rates WHERE id = ? AND company_id = ?`,
       [previous.taxRateId, companyId]
     );

@@ -57,6 +57,48 @@ function errorResponse(code: string, message: string, status: number) {
 
 type PaymentMethodConfig = z.infer<typeof paymentMethodConfigSchema>;
 
+async function readLegacyPaymentMethods(
+  companyId: number
+): Promise<Array<string | PaymentMethodConfig> | null> {
+  const pool = getDbPool();
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT \`key\`, enabled, config_json
+     FROM feature_flags
+     WHERE company_id = ?
+       AND \`key\` IN ('pos.payment_methods', 'pos.config')`,
+    [companyId]
+  );
+
+  let resolved: Array<string | PaymentMethodConfig> | null = null;
+
+  for (const row of rows as Array<{ key?: string; enabled?: number; config_json?: string }>) {
+    if (row.enabled !== 1 || typeof row.key !== "string") {
+      continue;
+    }
+
+    let parsed: unknown = null;
+    try {
+      parsed = typeof row.config_json === "string" ? JSON.parse(row.config_json) : null;
+    } catch {
+      parsed = null;
+    }
+
+    let candidate = parsed;
+    if (row.key === "pos.config" && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      candidate = (parsed as Record<string, unknown>).payment_methods ?? parsed;
+    }
+
+    const methodsConfig = paymentMethodsSchema.safeParse(candidate);
+    if (methodsConfig.success) {
+      resolved = Array.isArray(methodsConfig.data)
+        ? methodsConfig.data
+        : methodsConfig.data?.methods ?? resolved;
+    }
+  }
+
+  return resolved;
+}
+
 async function readPaymentMethods(companyId: number): Promise<PaymentMethodConfig[]> {
   const pool = getDbPool();
   const [rows] = await pool.execute<RowDataPacket[]>(
@@ -70,6 +112,7 @@ async function readPaymentMethods(companyId: number): Promise<PaymentMethodConfi
   );
 
   let paymentMethods: Array<string | PaymentMethodConfig> = ["CASH"];
+  let resolvedFromModules = false;
 
   const posRow = (rows as Array<{ enabled?: number; config_json?: string }>)[0];
   if (posRow && posRow.enabled === 1) {
@@ -89,6 +132,14 @@ async function readPaymentMethods(companyId: number): Promise<PaymentMethodConfi
       paymentMethods = Array.isArray(methodsConfig.data)
         ? methodsConfig.data
         : methodsConfig.data?.methods ?? paymentMethods;
+      resolvedFromModules = true;
+    }
+  }
+
+  if (!posRow || (posRow.enabled === 1 && !resolvedFromModules)) {
+    const legacy = await readLegacyPaymentMethods(companyId);
+    if (legacy && legacy.length > 0) {
+      paymentMethods = legacy;
     }
   }
 

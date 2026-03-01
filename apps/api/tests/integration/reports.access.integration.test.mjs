@@ -215,7 +215,7 @@ test(
         });
         assert.equal(response.status, 403);
         const body = await response.json();
-        assert.equal(body.ok, false);
+        assert.equal(body.success, false);
         assert.equal(body.error.code, "FORBIDDEN");
       }
     } finally {

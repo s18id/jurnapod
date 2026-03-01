@@ -369,10 +369,10 @@ async function listInvoiceTaxesWithExecutor(
   invoiceId: number
 ): Promise<SalesInvoiceTax[]> {
   const [rows] = await executor.execute<SalesInvoiceTaxRow[]>(
-    `SELECT id, invoice_id, tax_rate_id, amount
+    `SELECT id, sales_invoice_id AS invoice_id, tax_rate_id, amount
      FROM sales_invoice_taxes
      WHERE company_id = ?
-       AND invoice_id = ?
+       AND sales_invoice_id = ?
      ORDER BY id ASC`,
     [companyId, invoiceId]
   );
@@ -798,7 +798,7 @@ export async function updateInvoice(
       await connection.execute<ResultSetHeader>(
         `DELETE FROM sales_invoice_taxes
          WHERE company_id = ?
-           AND invoice_id = ?`,
+           AND sales_invoice_id = ?`,
         [companyId, invoiceId]
       );
 

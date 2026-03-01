@@ -152,6 +152,45 @@ function normalizePaymentMethods(value: unknown): string[] | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+async function readLegacyPaymentMethods(
+  executor: QueryExecutor,
+  companyId: number
+): Promise<string[] | null> {
+  const [rows] = await executor.execute<RowDataPacket[]>(
+    `SELECT \`key\`, enabled, config_json
+     FROM feature_flags
+     WHERE company_id = ?
+       AND \`key\` IN ('pos.payment_methods', 'pos.config')`,
+    [companyId]
+  );
+
+  let resolved: string[] | null = null;
+  for (const row of rows as Array<{ key?: string; enabled?: number; config_json?: string }>) {
+    if (row.enabled !== 1 || typeof row.key !== "string") {
+      continue;
+    }
+
+    let parsed: unknown = null;
+    try {
+      parsed = typeof row.config_json === "string" ? JSON.parse(row.config_json) : null;
+    } catch {
+      parsed = null;
+    }
+
+    let candidate = parsed;
+    if (row.key === "pos.config" && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      candidate = (parsed as Record<string, unknown>).payment_methods ?? parsed;
+    }
+
+    const normalized = normalizePaymentMethods(candidate);
+    if (normalized) {
+      resolved = normalized;
+    }
+  }
+
+  return resolved;
+}
+
 function isMysqlError(error: unknown): error is { errno?: number } {
   return typeof error === "object" && error !== null && "errno" in error;
 }
@@ -1664,6 +1703,7 @@ async function readSyncConfig(companyId: number): Promise<SyncPullResponse["conf
   let taxRate = combinedTax.rate;
   let taxInclusive = combinedTax.inclusive;
   let paymentMethods: Array<string | z.infer<typeof paymentMethodConfigSchema>> = ["CASH"];
+  let resolvedPaymentMethods = false;
 
   const posRow = rows[0];
   if (posRow && posRow.enabled === 1) {
@@ -1681,6 +1721,14 @@ async function readSyncConfig(companyId: number): Promise<SyncPullResponse["conf
     const normalized = normalizePaymentMethods(candidate);
     if (normalized) {
       paymentMethods = normalized;
+      resolvedPaymentMethods = true;
+    }
+  }
+
+  if ((!posRow || (posRow.enabled === 1 && !resolvedPaymentMethods)) && !resolvedPaymentMethods) {
+    const legacyPaymentMethods = await readLegacyPaymentMethods(pool, companyId);
+    if (legacyPaymentMethods) {
+      paymentMethods = legacyPaymentMethods;
     }
   }
 
