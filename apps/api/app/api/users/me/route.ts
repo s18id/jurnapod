@@ -1,5 +1,5 @@
 import { findActiveUserById } from "../../../../src/lib/auth";
-import { requireAccess, unauthorizedResponse, withAuth } from "../../../../src/lib/auth-guard";
+import { unauthorizedResponse, withAuth } from "../../../../src/lib/auth-guard";
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
   ok: false,
@@ -22,6 +22,5 @@ export const GET = withAuth(
       console.error("GET /api/users/me failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
-  },
-  [requireAccess({ module: "users", permission: "read" })]
+  }
 );

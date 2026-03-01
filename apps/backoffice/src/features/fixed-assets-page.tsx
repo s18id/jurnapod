@@ -279,7 +279,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
   async function refreshCategories() {
     try {
       const response = await apiRequest<{ ok: true; categories: FixedAssetCategory[] }>(
-        "/fixed-asset-categories",
+        "/accounts/fixed-asset-categories",
         {},
         props.accessToken
       );
@@ -401,7 +401,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       setError(null);
       await apiRequest(
-        "/fixed-asset-categories",
+        "/accounts/fixed-asset-categories",
         {
           method: "POST",
           body: JSON.stringify({
@@ -436,7 +436,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       setError(null);
       await apiRequest(
-        `/fixed-asset-categories/${category.id}`,
+        `/accounts/fixed-asset-categories/${category.id}`,
         {
           method: "PATCH",
           body: JSON.stringify({
@@ -470,7 +470,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       setError(null);
       await apiRequest(
-        `/fixed-asset-categories/${categoryId}`,
+        `/accounts/fixed-asset-categories/${categoryId}`,
         { method: "DELETE" },
         props.accessToken
       );

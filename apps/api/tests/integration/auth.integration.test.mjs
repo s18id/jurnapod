@@ -394,6 +394,18 @@ test(
       assert.equal(viewerLoginBody.ok, true);
       const viewerAccessToken = viewerLoginBody.access_token;
 
+      const viewerMeResponse = await fetch(`${baseUrl}/api/users/me`, {
+        headers: {
+          authorization: `Bearer ${viewerAccessToken}`
+        }
+      });
+      assert.equal(viewerMeResponse.status, 200);
+      const viewerMeBody = await viewerMeResponse.json();
+      assert.equal(viewerMeBody.ok, true);
+      assert.equal(viewerMeBody.user.id, viewerUserId);
+      assert.equal(viewerMeBody.user.company_id, companyId);
+      assert.equal(viewerMeBody.user.email, viewerEmail);
+
       const viewerOutletResponse = await fetch(
         `${baseUrl}/api/outlets/access?outlet_id=${allowedOutletId}`,
         {

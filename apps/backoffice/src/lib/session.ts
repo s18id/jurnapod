@@ -95,6 +95,6 @@ export async function loginWithGoogle(
 }
 
 export async function fetchCurrentUser(accessToken: string): Promise<SessionUser> {
-  const response = await apiRequest<MeResponse>("/me", {}, accessToken);
+  const response = await apiRequest<MeResponse>("/users/me", {}, accessToken);
   return response.user;
 }
