@@ -1,8 +1,26 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  Badge,
+  Box,
+  Button,
+  Group,
+  ScrollArea,
+  Select,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import type { ColumnDef } from "@tanstack/react-table";
 import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 import { useOnlineStatus } from "../lib/connection";
+import { DataTable } from "../components/DataTable";
+import { FilterBar } from "../components/FilterBar";
 import { OfflinePage } from "../components/offline-page";
+import { PageCard } from "../components/PageCard";
+import { StatTiles } from "../components/StatTiles";
 import { useAccounts, useAccountTypes } from "../hooks/use-accounts";
 
 type ReportsProps = {
@@ -205,63 +223,6 @@ type ProfitLossResponse = {
   rows: ProfitLossRow[];
 };
 
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const numberCellStyle = {
-  ...cellStyle,
-  textAlign: "right" as const,
-  fontVariantNumeric: "tabular-nums" as const
-};
-
-const sectionHeaderStyle = {
-  ...cellStyle,
-  fontWeight: "bold" as const,
-  backgroundColor: "#f5f1ea",
-  textTransform: "uppercase" as const
-};
-
-const totalRowStyle = {
-  ...cellStyle,
-  fontWeight: "bold" as const,
-  borderTop: "2px solid #e2ddd2"
-};
-
-const inputStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 8px"
-} as const;
-
-const summaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "10px",
-  marginBottom: "12px"
-} as const;
-
-const summaryCardStyle = {
-  border: "1px solid #e6e0d6",
-  borderRadius: "10px",
-  padding: "10px 12px",
-  backgroundColor: "#fff"
-} as const;
-
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -306,10 +267,6 @@ function formatPeriod(dateFrom: string, dateTo: string): string {
   return `PERIODE ${fromMonth} ${fromYear} - ${toMonth} ${toYear}`;
 }
 
-function formatMoney(value: number): string {
-  return value.toFixed(2);
-}
-
 const moneyFormatter = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
@@ -319,14 +276,90 @@ function formatMoneyDisplay(value: number): string {
   return moneyFormatter.format(value);
 }
 
+function buildOutletOptions(outlets: SessionUser["outlets"], includeAll = false) {
+  const items = outlets.map((outlet) => ({
+    value: String(outlet.id),
+    label: `${outlet.code} - ${outlet.name}`
+  }));
+  if (!includeAll) {
+    return items;
+  }
+  return [{ value: "0", label: "All Outlets" }, ...items];
+}
+
+function renderStatusBadge(status: string) {
+  const normalized = status.toUpperCase();
+  const color =
+    normalized === "COMPLETED"
+      ? "green"
+      : normalized === "VOID"
+        ? "red"
+        : normalized === "REFUND"
+          ? "orange"
+          : "gray";
+
+  return (
+    <Badge color={color} variant="light" size="sm">
+      {status}
+    </Badge>
+  );
+}
+
 export function PosTransactionsPage(props: ReportsProps) {
   const isOnline = useOnlineStatus();
-  const [outletId, setOutletId] = useState<number>(0);
+  const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
   const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(7));
   const [dateTo, setDateTo] = useState<string>(todayIso());
   const [rows, setRows] = useState<PosTransaction[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const columns = useMemo<ColumnDef<PosTransaction>[]>(
+    () => [
+      {
+        header: "TX ID",
+        accessorKey: "client_tx_id"
+      },
+      {
+        header: "Status",
+        accessorKey: "status",
+        cell: ({ getValue }) => renderStatusBadge(String(getValue()))
+      },
+      {
+        header: "Date",
+        accessorKey: "trx_at",
+        cell: ({ getValue }) => new Date(String(getValue())).toLocaleString()
+      },
+      {
+        header: "Items",
+        accessorKey: "item_count",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {Number(getValue())}
+          </Text>
+        )
+      },
+      {
+        header: "Gross",
+        accessorKey: "gross_total",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      },
+      {
+        header: "Paid",
+        accessorKey: "paid_total",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      }
+    ],
+    []
+  );
 
   async function loadRows() {
     setError(null);
@@ -363,49 +396,43 @@ export function PosTransactionsPage(props: ReportsProps) {
   }
 
   return (
-    <section style={boxStyle}>
-      <h2 style={{ marginTop: 0 }}>POS Transactions</h2>
-      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
-        <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
-          {props.user.outlets.map((outlet) => (
-            <option key={outlet.id} value={outlet.id}>
-              {outlet.code} - {outlet.name}
-            </option>
-          ))}
-        </select>
-        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
-        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
-        <button type="button" onClick={() => loadRows()}>
-          Refresh
-        </button>
-      </div>
-      {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
-      <p>Total rows: {total}</p>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            <th style={cellStyle}>TX ID</th>
-            <th style={cellStyle}>Status</th>
-            <th style={cellStyle}>Date</th>
-            <th style={cellStyle}>Items</th>
-            <th style={cellStyle}>Gross</th>
-            <th style={cellStyle}>Paid</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td style={cellStyle}>{row.client_tx_id}</td>
-              <td style={cellStyle}>{row.status}</td>
-              <td style={cellStyle}>{new Date(row.trx_at).toLocaleString()}</td>
-              <td style={cellStyle}>{row.item_count}</td>
-              <td style={cellStyle}>{row.gross_total.toFixed(2)}</td>
-              <td style={cellStyle}>{row.paid_total.toFixed(2)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
+    <PageCard title="POS Transactions" description="View POS transactions by outlet and date range.">
+      <Stack gap="sm">
+        <FilterBar>
+          <Select
+            label="Outlet"
+            data={buildOutletOptions(props.user.outlets)}
+            value={String(outletId)}
+            onChange={(value) => setOutletId(Number(value))}
+          />
+          <TextInput
+            label="From"
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+          />
+          <TextInput
+            label="To"
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+          />
+          <Button onClick={() => loadRows()}>Refresh</Button>
+        </FilterBar>
+
+        {error ? (
+          <Text c="red" size="sm">
+            {error}
+          </Text>
+        ) : null}
+
+        <Text size="sm" c="dimmed">
+          Total rows: {total}
+        </Text>
+
+        <DataTable columns={columns} data={rows} minWidth={720} stickyHeader />
+      </Stack>
+    </PageCard>
   );
 }
 
@@ -416,6 +443,48 @@ export function DailySalesPage(props: ReportsProps) {
   const [dateTo, setDateTo] = useState<string>(todayIso());
   const [rows, setRows] = useState<DailySalesRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const columns = useMemo<ColumnDef<DailySalesRow>[]>(
+    () => [
+      {
+        header: "Date",
+        accessorKey: "trx_date"
+      },
+      {
+        header: "Outlet",
+        accessorKey: "outlet_name",
+        cell: ({ row }) => row.original.outlet_name ?? `#${row.original.outlet_id}`
+      },
+      {
+        header: "Transactions",
+        accessorKey: "tx_count",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {Number(getValue())}
+          </Text>
+        )
+      },
+      {
+        header: "Gross",
+        accessorKey: "gross_total",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      },
+      {
+        header: "Paid",
+        accessorKey: "paid_total",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      }
+    ],
+    []
+  );
 
   async function loadRows() {
     setError(null);
@@ -464,49 +533,47 @@ export function DailySalesPage(props: ReportsProps) {
   }
 
   return (
-    <section style={boxStyle}>
-      <h2 style={{ marginTop: 0 }}>Daily Sales Summary</h2>
-      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
-        <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
-          {props.user.outlets.map((outlet) => (
-            <option key={outlet.id} value={outlet.id}>
-              {outlet.code} - {outlet.name}
-            </option>
-          ))}
-        </select>
-        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
-        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
-        <button type="button" onClick={() => loadRows()}>
-          Refresh
-        </button>
-      </div>
-      {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
-      <p>
-        Total tx: {totals.tx_count} | Gross: {totals.gross_total.toFixed(2)} | Paid: {totals.paid_total.toFixed(2)}
-      </p>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            <th style={cellStyle}>Date</th>
-            <th style={cellStyle}>Outlet</th>
-            <th style={cellStyle}>Transactions</th>
-            <th style={cellStyle}>Gross</th>
-            <th style={cellStyle}>Paid</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={`${row.trx_date}:${row.outlet_id}`}>
-              <td style={cellStyle}>{row.trx_date}</td>
-              <td style={cellStyle}>{row.outlet_name ?? `#${row.outlet_id}`}</td>
-              <td style={cellStyle}>{row.tx_count}</td>
-              <td style={cellStyle}>{row.gross_total.toFixed(2)}</td>
-              <td style={cellStyle}>{row.paid_total.toFixed(2)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
+    <PageCard title="Daily Sales Summary" description="Daily performance by outlet.">
+      <Stack gap="sm">
+        <FilterBar>
+          <Select
+            label="Outlet"
+            data={buildOutletOptions(props.user.outlets)}
+            value={String(outletId)}
+            onChange={(value) => setOutletId(Number(value))}
+          />
+          <TextInput
+            label="From"
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+          />
+          <TextInput
+            label="To"
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+          />
+          <Button onClick={() => loadRows()}>Refresh</Button>
+        </FilterBar>
+
+        {error ? (
+          <Text c="red" size="sm">
+            {error}
+          </Text>
+        ) : null}
+
+        <StatTiles
+          items={[
+            { label: "Transactions", value: totals.tx_count },
+            { label: "Gross", value: formatMoneyDisplay(totals.gross_total) },
+            { label: "Paid", value: formatMoneyDisplay(totals.paid_total) }
+          ]}
+        />
+
+        <DataTable columns={columns} data={rows} minWidth={680} stickyHeader />
+      </Stack>
+    </PageCard>
   );
 }
 
@@ -526,6 +593,58 @@ export function GeneralLedgerPage(props: ReportsProps) {
     props.accessToken
   );
   const activeAccounts = useMemo(() => accounts.filter((account) => account.is_active), [accounts]);
+  const accountOptions = useMemo(
+    () =>
+      activeAccounts.map((account) => ({
+        value: String(account.id),
+        label: `${account.code} - ${account.name}`
+      })),
+    [activeAccounts]
+  );
+  const columns = useMemo<ColumnDef<GeneralLedgerLine>[]>(
+    () => [
+      { header: "Date", accessorKey: "line_date" },
+      { header: "Description", accessorKey: "description" },
+      {
+        header: "Outlet",
+        accessorKey: "outlet_name",
+        cell: ({ row }) => row.original.outlet_name ?? "ALL"
+      },
+      {
+        header: "Debit",
+        accessorKey: "debit",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      },
+      {
+        header: "Credit",
+        accessorKey: "credit",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      },
+      {
+        header: "Balance",
+        accessorKey: "balance",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      },
+      {
+        header: "Doc",
+        accessorKey: "doc_id",
+        cell: ({ row }) => `${row.original.doc_type} #${row.original.doc_id}`
+      }
+    ],
+    []
+  );
 
   async function loadRows() {
     if (!accountId) {
@@ -577,126 +696,119 @@ export function GeneralLedgerPage(props: ReportsProps) {
   const canPageNext = row ? row.lines.length === lineLimit : false;
 
   return (
-    <section style={boxStyle}>
-      <h2 style={{ marginTop: 0 }}>General Ledger</h2>
-      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
-        <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
-          {props.user.outlets.map((outlet) => (
-            <option key={outlet.id} value={outlet.id}>
-              {outlet.code} - {outlet.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={accountId}
-          onChange={(event) => setAccountId(Number(event.target.value))}
-          style={inputStyle}
-        >
-          <option value={0}>Select account</option>
-          {activeAccounts.map((account) => (
-            <option key={account.id} value={account.id}>
-              {account.code} - {account.name}
-            </option>
-          ))}
-        </select>
-        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
-        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
-        <select value={lineLimit} onChange={(event) => setLineLimit(Number(event.target.value))} style={inputStyle}>
-          <option value={25}>25 lines</option>
-          <option value={50}>50 lines</option>
-          <option value={100}>100 lines</option>
-          <option value={200}>200 lines</option>
-        </select>
-        <button type="button" onClick={() => loadRows()} disabled={loading}>
-          {loading ? "Loading..." : "Refresh"}
-        </button>
-      </div>
-      {accountsLoading ? <p>Loading accounts...</p> : null}
-      {accountsError ? <p style={{ color: "#8d2626" }}>{accountsError}</p> : null}
-      {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
+    <PageCard title="General Ledger" description="Account movements within a selected period.">
+      <Stack gap="sm">
+        <FilterBar>
+          <Select
+            label="Outlet"
+            data={buildOutletOptions(props.user.outlets)}
+            value={String(outletId)}
+            onChange={(value) => setOutletId(Number(value))}
+          />
+          <Select
+            label="Account"
+            data={accountOptions}
+            value={accountId ? String(accountId) : null}
+            onChange={(value) => setAccountId(value ? Number(value) : 0)}
+            placeholder="Select account"
+            searchable
+          />
+          <TextInput
+            label="From"
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+          />
+          <TextInput
+            label="To"
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+          />
+          <Select
+            label="Lines"
+            data={[
+              { value: "25", label: "25 lines" },
+              { value: "50", label: "50 lines" },
+              { value: "100", label: "100 lines" },
+              { value: "200", label: "200 lines" }
+            ]}
+            value={String(lineLimit)}
+            onChange={(value) => setLineLimit(Number(value))}
+          />
+          <Button onClick={() => loadRows()} loading={loading}>
+            Refresh
+          </Button>
+        </FilterBar>
 
-      {row ? (
-        <div style={summaryGridStyle}>
-          <div style={summaryCardStyle}>
-            <strong>Account</strong>
-            <div>{row.account_code}</div>
-            <div>{row.account_name}</div>
-          </div>
-          <div style={summaryCardStyle}>
-            <strong>Opening Balance</strong>
-            <div>{formatMoney(row.opening_balance)}</div>
-            <div style={{ fontSize: "12px", color: "#5b6664" }}>
-              Debit {formatMoney(row.opening_debit)} | Credit {formatMoney(row.opening_credit)}
-            </div>
-          </div>
-          <div style={summaryCardStyle}>
-            <strong>Period Movement</strong>
-            <div style={{ fontSize: "12px", color: "#5b6664" }}>
-              Debit {formatMoney(row.period_debit)} | Credit {formatMoney(row.period_credit)}
-            </div>
-          </div>
-          <div style={summaryCardStyle}>
-            <strong>Ending Balance</strong>
-            <div>{formatMoney(row.ending_balance)}</div>
-          </div>
-        </div>
-      ) : (
-        <p style={{ color: "#5b6664" }}>Select an account to view its ledger lines.</p>
-      )}
+        {accountsLoading ? <Text size="sm">Loading accounts...</Text> : null}
+        {accountsError ? (
+          <Text c="red" size="sm">
+            {accountsError}
+          </Text>
+        ) : null}
+        {error ? (
+          <Text c="red" size="sm">
+            {error}
+          </Text>
+        ) : null}
 
-      {row ? (
-        <div style={{ marginBottom: "10px", display: "flex", gap: "8px", alignItems: "center" }}>
-          <button
-            type="button"
-            onClick={() => setLineOffset(Math.max(0, lineOffset - lineLimit))}
-            disabled={!canPageBack}
-          >
-            Prev
-          </button>
-          <button
-            type="button"
-            onClick={() => setLineOffset(lineOffset + lineLimit)}
-            disabled={!canPageNext}
-          >
-            Next
-          </button>
-          <span style={{ color: "#5b6664", fontSize: "12px" }}>
-            Showing {lineOffset + 1}-{lineOffset + row.lines.length}
-          </span>
-        </div>
-      ) : null}
+        {row ? (
+          <StatTiles
+            items={[
+              {
+                label: "Account",
+                value: `${row.account_code} - ${row.account_name}`
+              },
+              {
+                label: "Opening Balance",
+                value: formatMoneyDisplay(row.opening_balance),
+                helper: `Debit ${formatMoneyDisplay(row.opening_debit)} | Credit ${formatMoneyDisplay(row.opening_credit)}`
+              },
+              {
+                label: "Period Movement",
+                value: `${formatMoneyDisplay(row.period_debit)} / ${formatMoneyDisplay(row.period_credit)}`,
+                helper: "Debit / Credit"
+              },
+              {
+                label: "Ending Balance",
+                value: formatMoneyDisplay(row.ending_balance)
+              }
+            ]}
+          />
+        ) : (
+          <Text c="dimmed" size="sm">
+            Select an account to view its ledger lines.
+          </Text>
+        )}
 
-      {row ? (
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={cellStyle}>Date</th>
-              <th style={cellStyle}>Description</th>
-              <th style={cellStyle}>Outlet</th>
-              <th style={cellStyle}>Debit</th>
-              <th style={cellStyle}>Credit</th>
-              <th style={cellStyle}>Balance</th>
-              <th style={cellStyle}>Doc</th>
-            </tr>
-          </thead>
-          <tbody>
-            {row.lines.map((line) => (
-              <tr key={line.line_id}>
-                <td style={cellStyle}>{line.line_date}</td>
-                <td style={cellStyle}>{line.description}</td>
-                <td style={cellStyle}>{line.outlet_name ?? "ALL"}</td>
-                <td style={cellStyle}>{formatMoney(line.debit)}</td>
-                <td style={cellStyle}>{formatMoney(line.credit)}</td>
-                <td style={cellStyle}>{formatMoney(line.balance)}</td>
-                <td style={cellStyle}>
-                  {line.doc_type} #{line.doc_id}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : null}
-    </section>
+        {row ? (
+          <Group gap="sm" align="center" wrap="wrap">
+            <Button
+              variant="light"
+              size="xs"
+              onClick={() => setLineOffset(Math.max(0, lineOffset - lineLimit))}
+              disabled={!canPageBack}
+            >
+              Prev
+            </Button>
+            <Button
+              variant="light"
+              size="xs"
+              onClick={() => setLineOffset(lineOffset + lineLimit)}
+              disabled={!canPageNext}
+            >
+              Next
+            </Button>
+            <Text size="xs" c="dimmed">
+              Showing {lineOffset + 1}-{lineOffset + row.lines.length}
+            </Text>
+          </Group>
+        ) : null}
+
+        {row ? <DataTable columns={columns} data={row.lines} minWidth={900} stickyHeader /> : null}
+      </Stack>
+    </PageCard>
   );
 }
 
@@ -708,6 +820,36 @@ export function PosPaymentsPage(props: ReportsProps) {
   const [status, setStatus] = useState<string>("COMPLETED");
   const [rows, setRows] = useState<PosPaymentRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const columns = useMemo<ColumnDef<PosPaymentRow>[]>(
+    () => [
+      {
+        header: "Outlet",
+        accessorKey: "outlet_name",
+        cell: ({ row }) => row.original.outlet_name ?? `#${row.original.outlet_id}`
+      },
+      { header: "Method", accessorKey: "method" },
+      {
+        header: "Payment Count",
+        accessorKey: "payment_count",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {Number(getValue())}
+          </Text>
+        )
+      },
+      {
+        header: "Total Amount",
+        accessorKey: "total_amount",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      }
+    ],
+    []
+  );
 
   async function loadRows() {
     setError(null);
@@ -755,52 +897,56 @@ export function PosPaymentsPage(props: ReportsProps) {
   }
 
   return (
-    <section style={boxStyle}>
-      <h2 style={{ marginTop: 0 }}>POS Payment Summary</h2>
-      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
-        <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
-          {props.user.outlets.map((outlet) => (
-            <option key={outlet.id} value={outlet.id}>
-              {outlet.code} - {outlet.name}
-            </option>
-          ))}
-        </select>
-        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
-        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
-        <select value={status} onChange={(event) => setStatus(event.target.value)} style={inputStyle}>
-          <option value="COMPLETED">COMPLETED</option>
-          <option value="VOID">VOID</option>
-          <option value="REFUND">REFUND</option>
-        </select>
-        <button type="button" onClick={() => loadRows()}>
-          Refresh
-        </button>
-      </div>
-      {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
-      <p>
-        Total payments: {totals.payment_count} | Total amount: {totals.total_amount.toFixed(2)}
-      </p>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            <th style={cellStyle}>Outlet</th>
-            <th style={cellStyle}>Method</th>
-            <th style={cellStyle}>Payment Count</th>
-            <th style={cellStyle}>Total Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={`${row.outlet_id}:${row.method}`}>
-              <td style={cellStyle}>{row.outlet_name ?? `#${row.outlet_id}`}</td>
-              <td style={cellStyle}>{row.method}</td>
-              <td style={cellStyle}>{row.payment_count}</td>
-              <td style={cellStyle}>{row.total_amount.toFixed(2)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
+    <PageCard title="POS Payment Summary" description="Payment methods by outlet and date range.">
+      <Stack gap="sm">
+        <FilterBar>
+          <Select
+            label="Outlet"
+            data={buildOutletOptions(props.user.outlets)}
+            value={String(outletId)}
+            onChange={(value) => setOutletId(Number(value))}
+          />
+          <TextInput
+            label="From"
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+          />
+          <TextInput
+            label="To"
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+          />
+          <Select
+            label="Status"
+            data={[
+              { value: "COMPLETED", label: "COMPLETED" },
+              { value: "VOID", label: "VOID" },
+              { value: "REFUND", label: "REFUND" }
+            ]}
+            value={status}
+            onChange={(value) => setStatus(value ?? "COMPLETED")}
+          />
+          <Button onClick={() => loadRows()}>Refresh</Button>
+        </FilterBar>
+
+        {error ? (
+          <Text c="red" size="sm">
+            {error}
+          </Text>
+        ) : null}
+
+        <StatTiles
+          items={[
+            { label: "Payments", value: totals.payment_count },
+            { label: "Total Amount", value: formatMoneyDisplay(totals.total_amount) }
+          ]}
+        />
+
+        <DataTable columns={columns} data={rows} minWidth={640} stickyHeader />
+      </Stack>
+    </PageCard>
   );
 }
 
@@ -817,6 +963,89 @@ export function JournalsPage(props: ReportsProps) {
     balance: 0
   });
   const [error, setError] = useState<string | null>(null);
+
+  const journalColumns = useMemo<ColumnDef<JournalRow>[]>(
+    () => [
+      {
+        header: "Posted At",
+        accessorKey: "posted_at",
+        cell: ({ getValue }) => new Date(String(getValue())).toLocaleString()
+      },
+      {
+        header: "Doc",
+        accessorKey: "doc_id",
+        cell: ({ row }) => `${row.original.doc_type} #${row.original.doc_id}`
+      },
+      {
+        header: "Outlet",
+        accessorKey: "outlet_name",
+        cell: ({ row }) => row.original.outlet_name ?? "ALL"
+      },
+      {
+        header: "Lines",
+        accessorKey: "line_count",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {Number(getValue())}
+          </Text>
+        )
+      },
+      {
+        header: "Debit",
+        accessorKey: "total_debit",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      },
+      {
+        header: "Credit",
+        accessorKey: "total_credit",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      }
+    ],
+    []
+  );
+
+  const trialColumns = useMemo<ColumnDef<TrialBalanceRow>[]>(
+    () => [
+      { header: "Account", accessorKey: "account_code" },
+      { header: "Name", accessorKey: "account_name" },
+      {
+        header: "Debit",
+        accessorKey: "total_debit",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      },
+      {
+        header: "Credit",
+        accessorKey: "total_credit",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      },
+      {
+        header: "Balance",
+        accessorKey: "balance",
+        cell: ({ getValue }) => (
+          <Text size="sm" ta="right">
+            {formatMoneyDisplay(Number(getValue()))}
+          </Text>
+        )
+      }
+    ],
+    []
+  );
 
   async function loadRows() {
     setError(null);
@@ -863,82 +1092,52 @@ export function JournalsPage(props: ReportsProps) {
   }
 
   return (
-    <div>
-      <section style={boxStyle}>
-        <h2 style={{ marginTop: 0 }}>Journal List</h2>
-        <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
-          <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
-            {props.user.outlets.map((outlet) => (
-              <option key={outlet.id} value={outlet.id}>
-                {outlet.code} - {outlet.name}
-              </option>
-            ))}
-          </select>
-          <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
-          <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
-          <button type="button" onClick={() => loadRows()}>
-            Refresh
-          </button>
-        </div>
-        {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={cellStyle}>Posted At</th>
-              <th style={cellStyle}>Doc</th>
-              <th style={cellStyle}>Outlet</th>
-              <th style={cellStyle}>Lines</th>
-              <th style={cellStyle}>Debit</th>
-              <th style={cellStyle}>Credit</th>
-            </tr>
-          </thead>
-          <tbody>
-            {journals.map((row) => (
-              <tr key={row.id}>
-                <td style={cellStyle}>{new Date(row.posted_at).toLocaleString()}</td>
-                <td style={cellStyle}>
-                  {row.doc_type} #{row.doc_id}
-                </td>
-                <td style={cellStyle}>{row.outlet_name ?? "ALL"}</td>
-                <td style={cellStyle}>{row.line_count}</td>
-                <td style={cellStyle}>{row.total_debit.toFixed(2)}</td>
-                <td style={cellStyle}>{row.total_credit.toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+    <Stack gap="md">
+      <PageCard title="Journal List" description="Posted journal batches for the selected period.">
+        <Stack gap="sm">
+          <FilterBar>
+            <Select
+              label="Outlet"
+              data={buildOutletOptions(props.user.outlets)}
+              value={String(outletId)}
+              onChange={(value) => setOutletId(Number(value))}
+            />
+            <TextInput
+              label="From"
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+            />
+            <TextInput
+              label="To"
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+            />
+            <Button onClick={() => loadRows()}>Refresh</Button>
+          </FilterBar>
+          {error ? (
+            <Text c="red" size="sm">
+              {error}
+            </Text>
+          ) : null}
+          <DataTable columns={journalColumns} data={journals} minWidth={760} stickyHeader />
+        </Stack>
+      </PageCard>
 
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Trial Balance</h3>
-        <p>
-          Debit: {trialTotals.total_debit.toFixed(2)} | Credit: {trialTotals.total_credit.toFixed(2)} | Balance: {" "}
-          {trialTotals.balance.toFixed(2)}
-        </p>
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={cellStyle}>Account</th>
-              <th style={cellStyle}>Name</th>
-              <th style={cellStyle}>Debit</th>
-              <th style={cellStyle}>Credit</th>
-              <th style={cellStyle}>Balance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {trialRows.map((row) => (
-              <tr key={row.account_id}>
-                <td style={cellStyle}>{row.account_code}</td>
-                <td style={cellStyle}>{row.account_name}</td>
-                <td style={cellStyle}>{row.total_debit.toFixed(2)}</td>
-                <td style={cellStyle}>{row.total_credit.toFixed(2)}</td>
-                <td style={cellStyle}>{row.balance.toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-    </div>
+      <PageCard title="Trial Balance" description="Summary balances for the selected period.">
+        <Stack gap="sm">
+          <StatTiles
+            items={[
+              { label: "Debit", value: formatMoneyDisplay(trialTotals.total_debit) },
+              { label: "Credit", value: formatMoneyDisplay(trialTotals.total_credit) },
+              { label: "Balance", value: formatMoneyDisplay(trialTotals.balance) }
+            ]}
+          />
+          <DataTable columns={trialColumns} data={trialRows} minWidth={640} stickyHeader />
+        </Stack>
+      </PageCard>
+    </Stack>
   );
 }
 
@@ -1079,127 +1278,192 @@ export function ProfitLossPage(props: ReportsProps) {
   const taxNet = taxGroups.reduce((acc, group) => acc + group.netTotal, 0);
   const netBeforeTax = totals.net - taxNet;
 
+  const sectionRowStyle = { backgroundColor: "var(--mantine-color-gray-1)" };
+  const totalRowStyle = { fontWeight: 700 } as const;
+
   function renderGroupRows(group: ProfitLossGroup) {
     return (
       <>
-        <tr>
-          <td style={sectionHeaderStyle} colSpan={3}>
-            {group.label}
-          </td>
-        </tr>
+        <Table.Tr style={sectionRowStyle}>
+          <Table.Td colSpan={3}>
+            <Text fw={700} tt="uppercase" size="sm">
+              {group.label}
+            </Text>
+          </Table.Td>
+        </Table.Tr>
         {group.rows.map((row) => (
-          <tr key={row.account_id}>
-            <td style={cellStyle}>{row.account_code}</td>
-            <td style={cellStyle}>{row.account_name}</td>
-            <td style={numberCellStyle}>{formatMoneyDisplay(row.displayNet)}</td>
-          </tr>
+          <Table.Tr key={row.account_id}>
+            <Table.Td>{row.account_code}</Table.Td>
+            <Table.Td>{row.account_name}</Table.Td>
+            <Table.Td>
+              <Text ta="right" size="sm">
+                {formatMoneyDisplay(row.displayNet)}
+              </Text>
+            </Table.Td>
+          </Table.Tr>
         ))}
-        <tr>
-          <td style={totalRowStyle} colSpan={2}>
+        <Table.Tr>
+          <Table.Td colSpan={2} style={totalRowStyle}>
             TOTAL {group.label}
-          </td>
-          <td style={numberCellStyle}>{formatMoneyDisplay(group.displayTotal)}</td>
-        </tr>
+          </Table.Td>
+          <Table.Td>
+            <Text ta="right" size="sm" fw={700}>
+              {formatMoneyDisplay(group.displayTotal)}
+            </Text>
+          </Table.Td>
+        </Table.Tr>
       </>
     );
   }
 
   return (
-    <section style={boxStyle}>
-      <div style={{ textAlign: "center", marginBottom: "12px" }}>
-        <h2 style={{ marginTop: 0, marginBottom: "4px" }}>LAPORAN LABA RUGI</h2>
-        <div style={{ fontSize: "12px", color: "#5b6664", letterSpacing: "0.08em" }}>
-          {formatPeriod(dateFrom, dateTo)}
-        </div>
-      </div>
+    <PageCard title="Profit & Loss" description="Income statement for the selected period.">
+      <Stack gap="sm">
+        <Box ta="center">
+          <Title order={3} mb={4}>
+            LAPORAN LABA RUGI
+          </Title>
+          <Text size="xs" c="dimmed" tt="uppercase" style={{ letterSpacing: "0.08em" }}>
+            {formatPeriod(dateFrom, dateTo)}
+          </Text>
+        </Box>
 
-      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
-        <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
-          <option value={0}>ALL OUTLETS</option>
-          {props.user.outlets.map((outlet) => (
-            <option key={outlet.id} value={outlet.id}>
-              {outlet.code} - {outlet.name}
-            </option>
-          ))}
-        </select>
-        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
-        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
-        <button type="button" onClick={() => loadRows()} disabled={loading}>
-          {loading ? "Loading..." : "Refresh"}
-        </button>
-      </div>
+        <FilterBar>
+          <Select
+            label="Outlet"
+            data={buildOutletOptions(props.user.outlets, true)}
+            value={String(outletId)}
+            onChange={(value) => setOutletId(Number(value))}
+          />
+          <TextInput
+            label="From"
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+          />
+          <TextInput
+            label="To"
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+          />
+          <Button onClick={() => loadRows()} loading={loading}>
+            Refresh
+          </Button>
+        </FilterBar>
 
-      {accountsLoading || accountTypesLoading ? <p>Loading account mappings...</p> : null}
-      {accountsError ? <p style={{ color: "#8d2626" }}>{accountsError}</p> : null}
-      {accountTypesError ? <p style={{ color: "#8d2626" }}>{accountTypesError}</p> : null}
-      {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
+        {accountsLoading || accountTypesLoading ? <Text size="sm">Loading account mappings...</Text> : null}
+        {accountsError ? (
+          <Text c="red" size="sm">
+            {accountsError}
+          </Text>
+        ) : null}
+        {accountTypesError ? (
+          <Text c="red" size="sm">
+            {accountTypesError}
+          </Text>
+        ) : null}
+        {error ? (
+          <Text c="red" size="sm">
+            {error}
+          </Text>
+        ) : null}
 
-      {rows.length === 0 ? (
-        <p style={{ color: "#5b6664" }}>No P/L data available for the selected period.</p>
-      ) : (
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={cellStyle}>KODE</th>
-              <th style={cellStyle}>KETERANGAN</th>
-              <th style={numberCellStyle}>SALDO</th>
-            </tr>
-          </thead>
-          <tbody>
-            {revenueGroups.map((group) => (
-              <Fragment key={group.key}>{renderGroupRows(group)}</Fragment>
-            ))}
+        {rows.length === 0 ? (
+          <Text c="dimmed" size="sm">
+            No P/L data available for the selected period.
+          </Text>
+        ) : (
+          <ScrollArea type="auto" scrollbarSize={8} offsetScrollbars>
+            <Table style={{ minWidth: 640 }}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>KODE</Table.Th>
+                  <Table.Th>KETERANGAN</Table.Th>
+                  <Table.Th>
+                    <Text ta="right" size="sm">
+                      SALDO
+                    </Text>
+                  </Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {revenueGroups.map((group) => (
+                  <Fragment key={group.key}>{renderGroupRows(group)}</Fragment>
+                ))}
 
-            <tr>
-              <td style={totalRowStyle} colSpan={2}>
-                TOTAL PENDAPATAN
-              </td>
-              <td style={numberCellStyle}>{formatMoneyDisplay(totalRevenue)}</td>
-            </tr>
+                <Table.Tr>
+                  <Table.Td colSpan={2} style={totalRowStyle}>
+                    TOTAL PENDAPATAN
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm" fw={700}>
+                      {formatMoneyDisplay(totalRevenue)}
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
 
-            {expenseGroups.map((group) => (
-              <Fragment key={group.key}>{renderGroupRows(group)}</Fragment>
-            ))}
+                {expenseGroups.map((group) => (
+                  <Fragment key={group.key}>{renderGroupRows(group)}</Fragment>
+                ))}
 
-            <tr>
-              <td style={totalRowStyle} colSpan={2}>
-                TOTAL BEBAN
-              </td>
-              <td style={numberCellStyle}>{formatMoneyDisplay(totalExpense)}</td>
-            </tr>
+                <Table.Tr>
+                  <Table.Td colSpan={2} style={totalRowStyle}>
+                    TOTAL BEBAN
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm" fw={700}>
+                      {formatMoneyDisplay(totalExpense)}
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
 
-            {taxGroups.length > 0 ? (
-              <tr>
-                <td style={totalRowStyle} colSpan={2}>
-                  LABA BERSIH SEBELUM PAJAK
-                </td>
-                <td style={numberCellStyle}>{formatMoneyDisplay(netBeforeTax)}</td>
-              </tr>
-            ) : null}
+                {taxGroups.length > 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={2} style={totalRowStyle}>
+                      LABA BERSIH SEBELUM PAJAK
+                    </Table.Td>
+                    <Table.Td>
+                      <Text ta="right" size="sm" fw={700}>
+                        {formatMoneyDisplay(netBeforeTax)}
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : null}
 
-            {taxGroups.map((group) => (
-              <Fragment key={group.key}>{renderGroupRows(group)}</Fragment>
-            ))}
+                {taxGroups.map((group) => (
+                  <Fragment key={group.key}>{renderGroupRows(group)}</Fragment>
+                ))}
 
-            {taxGroups.length > 0 ? (
-              <tr>
-                <td style={totalRowStyle} colSpan={2}>
-                  TOTAL BEBAN PAJAK PERUSAHAAN
-                </td>
-                <td style={numberCellStyle}>{formatMoneyDisplay(totalTax)}</td>
-              </tr>
-            ) : null}
+                {taxGroups.length > 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={2} style={totalRowStyle}>
+                      TOTAL BEBAN PAJAK PERUSAHAAN
+                    </Table.Td>
+                    <Table.Td>
+                      <Text ta="right" size="sm" fw={700}>
+                        {formatMoneyDisplay(totalTax)}
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : null}
 
-            <tr>
-              <td style={totalRowStyle} colSpan={2}>
-                {taxGroups.length > 0 ? "LABA BERSIH SETELAH PAJAK" : "LABA BERSIH"}
-              </td>
-              <td style={numberCellStyle}>{formatMoneyDisplay(totals.net)}</td>
-            </tr>
-          </tbody>
-        </table>
-      )}
-    </section>
+                <Table.Tr>
+                  <Table.Td colSpan={2} style={totalRowStyle}>
+                    {taxGroups.length > 0 ? "LABA BERSIH SETELAH PAJAK" : "LABA BERSIH"}
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm" fw={700}>
+                      {formatMoneyDisplay(totals.net)}
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        )}
+      </Stack>
+    </PageCard>
   );
 }
 
@@ -1270,83 +1534,215 @@ export function AccountingWorksheetPage(props: ReportsProps) {
   const profitLabel = profit >= 0 ? "PROFIT" : "LOSS";
 
   return (
-    <section style={boxStyle}>
-      <h2 style={{ marginTop: 0 }}>Accounting Worksheet</h2>
-      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
-        <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
-          {props.user.outlets.map((outlet) => (
-            <option key={outlet.id} value={outlet.id}>
-              {outlet.code} - {outlet.name}
-            </option>
-          ))}
-        </select>
-        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} style={inputStyle} />
-        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} style={inputStyle} />
-        <button type="button" onClick={() => loadRows()} disabled={loading}>
-          {loading ? "Loading..." : "Refresh"}
-        </button>
-      </div>
-      {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
+    <PageCard title="Accounting Worksheet" description="Trial balance and adjustments in one view.">
+      <Stack gap="sm">
+        <FilterBar>
+          <Select
+            label="Outlet"
+            data={buildOutletOptions(props.user.outlets)}
+            value={String(outletId)}
+            onChange={(value) => setOutletId(Number(value))}
+          />
+          <TextInput
+            label="From"
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+          />
+          <TextInput
+            label="To"
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+          />
+          <Button onClick={() => loadRows()} loading={loading}>
+            Refresh
+          </Button>
+        </FilterBar>
+        {error ? (
+          <Text c="red" size="sm">
+            {error}
+          </Text>
+        ) : null}
 
-      <div style={{ overflowX: "auto" }}>
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={cellStyle}>Code</th>
-              <th style={cellStyle}>Account Name</th>
-              <th style={numberCellStyle}>Opening Debit</th>
-              <th style={numberCellStyle}>Opening Credit</th>
-              <th style={numberCellStyle}>Movement Debit</th>
-              <th style={numberCellStyle}>Movement Credit</th>
-              <th style={numberCellStyle}>Ending Debit</th>
-              <th style={numberCellStyle}>Ending Credit</th>
-              <th style={numberCellStyle}>P/L Debit</th>
-              <th style={numberCellStyle}>P/L Credit</th>
-              <th style={numberCellStyle}>BS Debit</th>
-              <th style={numberCellStyle}>BS Credit</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.account_id}>
-                <td style={cellStyle}>{row.account_code}</td>
-                <td style={cellStyle}>{row.account_name}</td>
-                <td style={numberCellStyle}>{formatMoney(row.opening_debit)}</td>
-                <td style={numberCellStyle}>{formatMoney(row.opening_credit)}</td>
-                <td style={numberCellStyle}>{formatMoney(row.period_debit)}</td>
-                <td style={numberCellStyle}>{formatMoney(row.period_credit)}</td>
-                <td style={numberCellStyle}>{formatMoney(row.ending_debit)}</td>
-                <td style={numberCellStyle}>{formatMoney(row.ending_credit)}</td>
-                <td style={numberCellStyle}>{formatMoney(row.pl_debit)}</td>
-                <td style={numberCellStyle}>{formatMoney(row.pl_credit)}</td>
-                <td style={numberCellStyle}>{formatMoney(row.bs_debit)}</td>
-                <td style={numberCellStyle}>{formatMoney(row.bs_credit)}</td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              <th style={cellStyle} colSpan={2}>
-                Total
-              </th>
-              <th style={numberCellStyle}>{formatMoney(summary.opening_debit)}</th>
-              <th style={numberCellStyle}>{formatMoney(summary.opening_credit)}</th>
-              <th style={numberCellStyle}>{formatMoney(summary.period_debit)}</th>
-              <th style={numberCellStyle}>{formatMoney(summary.period_credit)}</th>
-              <th style={numberCellStyle}>{formatMoney(summary.ending_debit)}</th>
-              <th style={numberCellStyle}>{formatMoney(summary.ending_credit)}</th>
-              <th style={numberCellStyle}>{formatMoney(summary.pl_debit)}</th>
-              <th style={numberCellStyle}>{formatMoney(summary.pl_credit)}</th>
-              <th style={numberCellStyle}>{formatMoney(summary.bs_debit)}</th>
-              <th style={numberCellStyle}>{formatMoney(summary.bs_credit)}</th>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+        <ScrollArea type="auto" scrollbarSize={8} offsetScrollbars>
+          <Table stickyHeader style={{ minWidth: 980 }}>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Code</Table.Th>
+                <Table.Th>Account Name</Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    Opening Debit
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    Opening Credit
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    Movement Debit
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    Movement Credit
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    Ending Debit
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    Ending Credit
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    P/L Debit
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    P/L Credit
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    BS Debit
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    BS Credit
+                  </Text>
+                </Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {rows.map((row) => (
+                <Table.Tr key={row.account_id}>
+                  <Table.Td>{row.account_code}</Table.Td>
+                  <Table.Td>{row.account_name}</Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm">
+                      {formatMoneyDisplay(row.opening_debit)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm">
+                      {formatMoneyDisplay(row.opening_credit)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm">
+                      {formatMoneyDisplay(row.period_debit)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm">
+                      {formatMoneyDisplay(row.period_credit)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm">
+                      {formatMoneyDisplay(row.ending_debit)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm">
+                      {formatMoneyDisplay(row.ending_credit)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm">
+                      {formatMoneyDisplay(row.pl_debit)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm">
+                      {formatMoneyDisplay(row.pl_credit)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm">
+                      {formatMoneyDisplay(row.bs_debit)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text ta="right" size="sm">
+                      {formatMoneyDisplay(row.bs_credit)}
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+            <Table.Tfoot>
+              <Table.Tr>
+                <Table.Th colSpan={2}>Total</Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    {formatMoneyDisplay(summary.opening_debit)}
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    {formatMoneyDisplay(summary.opening_credit)}
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    {formatMoneyDisplay(summary.period_debit)}
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    {formatMoneyDisplay(summary.period_credit)}
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    {formatMoneyDisplay(summary.ending_debit)}
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    {formatMoneyDisplay(summary.ending_credit)}
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    {formatMoneyDisplay(summary.pl_debit)}
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    {formatMoneyDisplay(summary.pl_credit)}
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    {formatMoneyDisplay(summary.bs_debit)}
+                  </Text>
+                </Table.Th>
+                <Table.Th>
+                  <Text ta="right" size="sm">
+                    {formatMoneyDisplay(summary.bs_credit)}
+                  </Text>
+                </Table.Th>
+              </Table.Tr>
+            </Table.Tfoot>
+          </Table>
+        </ScrollArea>
 
-      <p style={{ marginTop: "10px", marginBottom: 0 }}>
-        Final P/L ({profitLabel}): {formatMoney(Math.abs(profit))} | Balance Sheet: {formatMoney(summary.bs_debit)} / {formatMoney(summary.bs_credit)} | {balanceLabel}
-      </p>
-    </section>
+        <Text size="sm" c="dimmed">
+          Final P/L ({profitLabel}): {formatMoneyDisplay(Math.abs(profit))} | Balance Sheet: {formatMoneyDisplay(summary.bs_debit)} / {formatMoneyDisplay(summary.bs_credit)} | {balanceLabel}
+        </Text>
+      </Stack>
+    </PageCard>
   );
 }

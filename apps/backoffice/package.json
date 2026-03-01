@@ -11,6 +11,11 @@
     "lint": "echo 'lint not configured yet for @jurnapod/backoffice'"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-sans": "^5.2.6",
+    "@fontsource/newsreader": "^5.2.6",
+    "@mantine/core": "^7.17.1",
+    "@mantine/hooks": "^7.17.1",
+    "@tanstack/react-table": "^8.21.3",
     "dexie": "^4.0.4",
     "dompurify": "^3.2.4",
     "marked": "^12.0.2",

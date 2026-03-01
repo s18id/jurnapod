@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Paper, Text, useMantineTheme } from "@mantine/core";
 import { SyncService, type SyncResult } from "../lib/sync-service";
 
 type SyncNotificationProps = {
@@ -8,6 +9,7 @@ type SyncNotificationProps = {
 export function SyncNotification({ accessToken }: SyncNotificationProps) {
   const [syncing, setSyncing] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
+  const theme = useMantineTheme();
 
   useEffect(() => {
     let timeoutId: number | null = null;
@@ -40,32 +42,36 @@ export function SyncNotification({ accessToken }: SyncNotificationProps) {
     return null;
   }
 
+  const backgroundColor = syncing ? theme.colors.yellow[1] : theme.colors.green[1];
+  const borderColor = syncing ? theme.colors.yellow[3] : theme.colors.green[3];
+  const textColor = syncing ? theme.colors.yellow[9] : theme.colors.green[9];
+
   return (
-    <div
+    <Paper
+      withBorder
+      shadow="md"
+      p="sm"
       style={{
         position: "fixed",
-        bottom: "24px",
-        right: "24px",
-        backgroundColor: syncing ? "#fff3cd" : "#d4edda",
-        color: syncing ? "#856404" : "#155724",
-        border: `1px solid ${syncing ? "#ffeeba" : "#c3e6cb"}`,
-        padding: "12px 16px",
-        borderRadius: "10px",
-        boxShadow: "0 8px 20px rgba(0,0,0,0.12)",
+        bottom: 24,
+        right: 24,
+        backgroundColor,
+        borderColor,
+        color: textColor,
         zIndex: 9999,
-        minWidth: "240px",
-        fontSize: "13px",
-        fontWeight: 600
+        minWidth: 240
       }}
     >
-      {syncing && "Syncing queued transactions..."}
-      {!syncing && result && (
-        <span>
-          Sync complete: {result.success} synced
-          {result.conflicts > 0 ? `, ${result.conflicts} conflicts` : ""}
-          {result.failed > 0 ? `, ${result.failed} failed` : ""}
-        </span>
-      )}
-    </div>
+      <Text size="sm" fw={600} style={{ color: textColor }}>
+        {syncing && "Syncing queued transactions..."}
+        {!syncing && result && (
+          <span>
+            Sync complete: {result.success} synced
+            {result.conflicts > 0 ? `, ${result.conflicts} conflicts` : ""}
+            {result.failed > 0 ? `, ${result.failed} failed` : ""}
+          </span>
+        )}
+      </Text>
+    </Paper>
   );
 }
