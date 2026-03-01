@@ -211,7 +211,7 @@ test(
       assert.equal(loginBody.ok, true);
       const accessToken = loginBody.access_token;
 
-      const invalidSlugResponse = await fetch(`${baseUrl}/api/admin/pages`, {
+      const invalidSlugResponse = await fetch(`${baseUrl}/api/settings/pages`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -229,7 +229,7 @@ test(
       assert.equal(invalidSlugBody.error.code, "INVALID_SLUG");
 
       const slug = `privacy-test-${runId}`;
-      const createResponse = await fetch(`${baseUrl}/api/admin/pages`, {
+      const createResponse = await fetch(`${baseUrl}/api/settings/pages`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -247,7 +247,7 @@ test(
       createdPageId = Number(createBody.page.id);
       assert.ok(createdPageId > 0);
 
-      const listResponse = await fetch(`${baseUrl}/api/admin/pages?q=${encodeURIComponent(runId)}`, {
+      const listResponse = await fetch(`${baseUrl}/api/settings/pages?q=${encodeURIComponent(runId)}`, {
         headers: {
           authorization: `Bearer ${accessToken}`
         }
@@ -258,7 +258,7 @@ test(
       const listed = listBody.pages.find((page) => Number(page.id) === createdPageId);
       assert.equal(Boolean(listed), true);
 
-      const duplicateResponse = await fetch(`${baseUrl}/api/admin/pages`, {
+      const duplicateResponse = await fetch(`${baseUrl}/api/settings/pages`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -282,7 +282,7 @@ test(
       assert.equal(publicBeforeBody.error.code, "NOT_FOUND");
 
       const newSlug = `${slug}-v2`;
-      const patchResponse = await fetch(`${baseUrl}/api/admin/pages/${createdPageId}`, {
+      const patchResponse = await fetch(`${baseUrl}/api/settings/pages/${createdPageId}`, {
         method: "PATCH",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -299,7 +299,7 @@ test(
       assert.equal(patchBody.ok, true);
       assert.equal(patchBody.page.slug, newSlug);
 
-      const publishResponse = await fetch(`${baseUrl}/api/admin/pages/${createdPageId}/publish`, {
+      const publishResponse = await fetch(`${baseUrl}/api/settings/pages/${createdPageId}/publish`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`
@@ -318,7 +318,7 @@ test(
       assert.equal(publicBody.page.content_html.includes("<script"), false);
       assert.equal(publicBody.page.content_html.includes("Policy"), true);
 
-      const unpublishResponse = await fetch(`${baseUrl}/api/admin/pages/${createdPageId}/unpublish`, {
+      const unpublishResponse = await fetch(`${baseUrl}/api/settings/pages/${createdPageId}/unpublish`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`

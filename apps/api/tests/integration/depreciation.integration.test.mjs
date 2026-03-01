@@ -170,7 +170,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
     accessToken = await authenticate(port, companyCode, email, password);
 
     // Get user info to find outlet
-    const meResponse = await fetch(`${baseUrl}/api/me`, {
+    const meResponse = await fetch(`${baseUrl}/api/users/me`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     const meData = await meResponse.json();
@@ -182,7 +182,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
     await t.test("Create fixed asset and depreciation plan", async () => {
       // Create fixed asset
       const assetTag = `TEST-ASSET-${randomUUID().substring(0, 8)}`;
-      const createAssetResponse = await fetch(`${baseUrl}/api/fixed-assets`, {
+      const createAssetResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -220,7 +220,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const accumAccount = accountsData.data[1]?.id ?? 2;
 
       // Create depreciation plan
-      const createPlanResponse = await fetch(`${baseUrl}/api/fixed-assets/${assetId}/depreciation-plan`, {
+      const createPlanResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${assetId}/depreciation-plan`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -250,7 +250,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
     await t.test("Run depreciation for a period posts journal batch", async () => {
       // Create a new asset and plan for this test
       const assetTag = `TEST-ASSET-${randomUUID().substring(0, 8)}`;
-      const createAssetResponse = await fetch(`${baseUrl}/api/fixed-assets`, {
+      const createAssetResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -276,7 +276,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const expenseAccount = accountsData.data[0]?.id ?? 1;
       const accumAccount = accountsData.data[1]?.id ?? 2;
 
-      const createPlanResponse = await fetch(`${baseUrl}/api/fixed-assets/${assetId}/depreciation-plan`, {
+      const createPlanResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${assetId}/depreciation-plan`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -297,7 +297,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const planId = planData.plan.id;
 
       // Run depreciation for a period
-      const runResponse = await fetch(`${baseUrl}/api/depreciation/run`, {
+      const runResponse = await fetch(`${baseUrl}/api/accounts/depreciation/run`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -347,7 +347,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
     await t.test("Duplicate run returns duplicate status without new journal", async () => {
       // Create asset and plan
       const assetTag = `TEST-ASSET-${randomUUID().substring(0, 8)}`;
-      const createAssetResponse = await fetch(`${baseUrl}/api/fixed-assets`, {
+      const createAssetResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -373,7 +373,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const expenseAccount = accountsData.data[0]?.id ?? 1;
       const accumAccount = accountsData.data[1]?.id ?? 2;
 
-      const createPlanResponse = await fetch(`${baseUrl}/api/fixed-assets/${assetId}/depreciation-plan`, {
+      const createPlanResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${assetId}/depreciation-plan`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -394,7 +394,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const planId = planData.plan.id;
 
       // First run
-      const firstRunResponse = await fetch(`${baseUrl}/api/depreciation/run`, {
+      const firstRunResponse = await fetch(`${baseUrl}/api/accounts/depreciation/run`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -412,7 +412,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const firstJournalBatchId = firstRunData.run.journal_batch_id;
 
       // Second run (duplicate)
-      const secondRunResponse = await fetch(`${baseUrl}/api/depreciation/run`, {
+      const secondRunResponse = await fetch(`${baseUrl}/api/accounts/depreciation/run`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -444,7 +444,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
     await t.test("Plan update blocked after posted runs", async () => {
       // Create asset and plan
       const assetTag = `TEST-ASSET-${randomUUID().substring(0, 8)}`;
-      const createAssetResponse = await fetch(`${baseUrl}/api/fixed-assets`, {
+      const createAssetResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -470,7 +470,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const expenseAccount = accountsData.data[0]?.id ?? 1;
       const accumAccount = accountsData.data[1]?.id ?? 2;
 
-      const createPlanResponse = await fetch(`${baseUrl}/api/fixed-assets/${assetId}/depreciation-plan`, {
+      const createPlanResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${assetId}/depreciation-plan`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -491,7 +491,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const planId = planData.plan.id;
 
       // Post a run
-      await fetch(`${baseUrl}/api/depreciation/run`, {
+      await fetch(`${baseUrl}/api/accounts/depreciation/run`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -505,7 +505,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       });
 
       // Try to update the plan (should fail)
-      const updateResponse = await fetch(`${baseUrl}/api/fixed-assets/${assetId}/depreciation-plan`, {
+      const updateResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${assetId}/depreciation-plan`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",

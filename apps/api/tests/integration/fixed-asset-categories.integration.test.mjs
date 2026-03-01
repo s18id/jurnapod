@@ -213,7 +213,7 @@ test(
       assert.equal(loginBody.ok, true);
       const accessToken = loginBody.access_token;
 
-      const createCategoryResponse = await fetch(`${baseUrl}/api/fixed-asset-categories`, {
+      const createCategoryResponse = await fetch(`${baseUrl}/api/accounts/fixed-asset-categories`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -233,7 +233,7 @@ test(
       assert.equal(createCategoryBody.ok, true);
       createdCategoryId = Number(createCategoryBody.category.id);
 
-      const listCategoryResponse = await fetch(`${baseUrl}/api/fixed-asset-categories`, {
+      const listCategoryResponse = await fetch(`${baseUrl}/api/accounts/fixed-asset-categories`, {
         headers: {
           authorization: `Bearer ${accessToken}`
         }
@@ -248,7 +248,7 @@ test(
       assert.equal(listedCategory.name, `Furniture ${runId}`);
 
       const patchCategoryResponse = await fetch(
-        `${baseUrl}/api/fixed-asset-categories/${createdCategoryId}`,
+        `${baseUrl}/api/accounts/fixed-asset-categories/${createdCategoryId}`,
         {
           method: "PATCH",
           headers: {
@@ -267,7 +267,7 @@ test(
       assert.equal(patchCategoryBody.ok, true);
       assert.equal(patchCategoryBody.category.name, `Furniture Updated ${runId}`);
 
-      const createAssetResponse = await fetch(`${baseUrl}/api/fixed-assets`, {
+      const createAssetResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -287,7 +287,7 @@ test(
       createdAssetId = Number(createAssetBody.asset.id);
       assert.equal(Number(createAssetBody.asset.category_id), createdCategoryId);
 
-      const listAssetsResponse = await fetch(`${baseUrl}/api/fixed-assets`, {
+      const listAssetsResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets`, {
         headers: {
           authorization: `Bearer ${accessToken}`
         }
@@ -299,7 +299,7 @@ test(
       assert.equal(Boolean(listedAsset), true);
       assert.equal(Number(listedAsset.category_id), createdCategoryId);
 
-      const deleteAssetResponse = await fetch(`${baseUrl}/api/fixed-assets/${createdAssetId}`, {
+      const deleteAssetResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId}`, {
         method: "DELETE",
         headers: {
           authorization: `Bearer ${accessToken}`
@@ -308,7 +308,7 @@ test(
       assert.equal(deleteAssetResponse.status, 200);
 
       const deleteCategoryResponse = await fetch(
-        `${baseUrl}/api/fixed-asset-categories/${createdCategoryId}`,
+        `${baseUrl}/api/accounts/fixed-asset-categories/${createdCategoryId}`,
         {
           method: "DELETE",
           headers: {

@@ -228,7 +228,7 @@ test(
       assert.equal(baselinePullBody.ok, true);
       const baselineVersion = Number(baselinePullBody.data_version);
 
-      const createItemResponse = await fetch(`${baseUrl}/api/items`, {
+      const createItemResponse = await fetch(`${baseUrl}/api/inventory/items`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -246,7 +246,7 @@ test(
       assert.equal(createItemBody.ok, true);
       createdItemId = Number(createItemBody.item.id);
 
-      const createPriceResponse = await fetch(`${baseUrl}/api/item-prices`, {
+      const createPriceResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -289,7 +289,7 @@ test(
       assert.equal(Number(pullPrice.price), 32000);
 
       const activePricesResponse = await fetch(
-        `${baseUrl}/api/item-prices/active?outlet_id=${outletId}`,
+        `${baseUrl}/api/inventory/item-prices/active?outlet_id=${outletId}`,
         {
           headers: {
             authorization: `Bearer ${accessToken}`
@@ -389,7 +389,7 @@ test(
       const accessToken = loginBody.access_token;
 
       const malformedGuardResponse = await fetch(
-        `${baseUrl}/api/item-prices/active?outlet_id=not-a-number`,
+        `${baseUrl}/api/inventory/item-prices/active?outlet_id=not-a-number`,
         {
           headers: {
             authorization: `Bearer ${accessToken}`
@@ -398,7 +398,7 @@ test(
       );
       assert.equal(malformedGuardResponse.status, 400);
       const malformedGuardBody = await malformedGuardResponse.json();
-      assert.equal(malformedGuardBody.ok, false);
+      assert.equal(malformedGuardBody.success, false);
       assert.equal(malformedGuardBody.error.code, "INVALID_REQUEST");
 
       const malformedSyncOutletResponse = await fetch(
@@ -411,7 +411,7 @@ test(
       );
       assert.equal(malformedSyncOutletResponse.status, 400);
       const malformedSyncOutletBody = await malformedSyncOutletResponse.json();
-      assert.equal(malformedSyncOutletBody.ok, false);
+      assert.equal(malformedSyncOutletBody.success, false);
       assert.equal(malformedSyncOutletBody.error.code, "INVALID_REQUEST");
 
       const malformedSyncVersionResponse = await fetch(
@@ -526,7 +526,7 @@ test(
       const accessToken = loginBody.access_token;
 
       const deniedListResponse = await fetch(
-        `${baseUrl}/api/item-prices?outlet_id=${deniedOutletId}`,
+        `${baseUrl}/api/inventory/item-prices?outlet_id=${deniedOutletId}`,
         {
           headers: {
             authorization: `Bearer ${accessToken}`
@@ -536,7 +536,7 @@ test(
       assert.equal(deniedListResponse.status, 403);
 
       const deniedActiveResponse = await fetch(
-        `${baseUrl}/api/item-prices/active?outlet_id=${deniedOutletId}`,
+        `${baseUrl}/api/inventory/item-prices/active?outlet_id=${deniedOutletId}`,
         {
           headers: {
             authorization: `Bearer ${accessToken}`
@@ -545,10 +545,10 @@ test(
       );
       assert.equal(deniedActiveResponse.status, 403);
       const deniedActiveBody = await deniedActiveResponse.json();
-      assert.equal(deniedActiveBody.ok, false);
+      assert.equal(deniedActiveBody.success, false);
       assert.equal(deniedActiveBody.error.code, "FORBIDDEN");
 
-      const deniedCreateResponse = await fetch(`${baseUrl}/api/item-prices`, {
+      const deniedCreateResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -566,14 +566,14 @@ test(
       assert.equal(deniedCreateBody.ok, false);
       assert.equal(deniedCreateBody.error.code, "FORBIDDEN");
 
-      const deniedGetByIdResponse = await fetch(`${baseUrl}/api/item-prices/${deniedPriceId}`, {
+      const deniedGetByIdResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${deniedPriceId}`, {
         headers: {
           authorization: `Bearer ${accessToken}`
         }
       });
       assert.equal(deniedGetByIdResponse.status, 403);
 
-      const deniedPatchResponse = await fetch(`${baseUrl}/api/item-prices/${deniedPriceId}`, {
+      const deniedPatchResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${deniedPriceId}`, {
         method: "PATCH",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -585,7 +585,7 @@ test(
       });
       assert.equal(deniedPatchResponse.status, 403);
 
-      const deniedDeleteResponse = await fetch(`${baseUrl}/api/item-prices/${deniedPriceId}`, {
+      const deniedDeleteResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${deniedPriceId}`, {
         method: "DELETE",
         headers: {
           authorization: `Bearer ${accessToken}`
@@ -593,7 +593,7 @@ test(
       });
       assert.equal(deniedDeleteResponse.status, 403);
 
-      const scopedListResponse = await fetch(`${baseUrl}/api/item-prices`, {
+      const scopedListResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
         headers: {
           authorization: `Bearer ${accessToken}`
         }
@@ -606,7 +606,7 @@ test(
       );
       assert.equal(deniedPriceVisible, false);
 
-      const createItemResponse = await fetch(`${baseUrl}/api/items`, {
+      const createItemResponse = await fetch(`${baseUrl}/api/inventory/items`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -632,7 +632,7 @@ test(
       };
 
       const [concurrentFirstResponse, concurrentSecondResponse] = await Promise.all([
-        fetch(`${baseUrl}/api/item-prices`, {
+        fetch(`${baseUrl}/api/inventory/item-prices`, {
           method: "POST",
           headers: {
             authorization: `Bearer ${accessToken}`,
@@ -640,7 +640,7 @@ test(
           },
           body: JSON.stringify(duplicatePayload)
         }),
-        fetch(`${baseUrl}/api/item-prices`, {
+        fetch(`${baseUrl}/api/inventory/item-prices`, {
           method: "POST",
           headers: {
             authorization: `Bearer ${accessToken}`,
@@ -842,7 +842,7 @@ test(
         [deniedOutletId, companyId, racePriceId]
       );
 
-      const patchResponse = await fetch(`${baseUrl}/api/item-prices/${racePriceId}`, {
+      const patchResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${racePriceId}`, {
         method: "PATCH",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -869,7 +869,7 @@ test(
       assert.equal(Number(afterPatchRows[0].outlet_id), deniedOutletId);
       assert.equal(Number(afterPatchRows[0].price), 41000);
 
-      const deleteResponse = await fetch(`${baseUrl}/api/item-prices/${racePriceId}`, {
+      const deleteResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${racePriceId}`, {
         method: "DELETE",
         headers: {
           authorization: `Bearer ${accessToken}`

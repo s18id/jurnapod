@@ -335,13 +335,13 @@ test(
       assert.equal(loginFailBody.ok, false);
       assert.equal(loginFailBody.error.code, "INVALID_CREDENTIALS");
 
-      const meWithoutTokenResponse = await fetch(`${baseUrl}/api/me`);
+      const meWithoutTokenResponse = await fetch(`${baseUrl}/api/users/me`);
       assert.equal(meWithoutTokenResponse.status, 401);
       const meWithoutTokenBody = await meWithoutTokenResponse.json();
-      assert.equal(meWithoutTokenBody.ok, false);
+      assert.equal(meWithoutTokenBody.success, false);
       assert.equal(meWithoutTokenBody.error.code, "UNAUTHORIZED");
 
-      const meWithTokenResponse = await fetch(`${baseUrl}/api/me`, {
+      const meWithTokenResponse = await fetch(`${baseUrl}/api/users/me`, {
         headers: {
           authorization: `Bearer ${ownerAccessToken}`
         }
@@ -356,7 +356,7 @@ test(
       assert.deepEqual(meWithTokenBody.user.outlets, expectedOwnerOutlets);
 
       const ownerAllowedOutletResponse = await fetch(
-        `${baseUrl}/api/outlet-access?outlet_id=${allowedOutletId}`,
+        `${baseUrl}/api/outlets/access?outlet_id=${allowedOutletId}`,
         {
           headers: {
             authorization: `Bearer ${ownerAccessToken}`
@@ -366,7 +366,7 @@ test(
       assert.equal(ownerAllowedOutletResponse.status, 200);
 
       const ownerDeniedOutletResponse = await fetch(
-        `${baseUrl}/api/outlet-access?outlet_id=${deniedOutletId}`,
+        `${baseUrl}/api/outlets/access?outlet_id=${deniedOutletId}`,
         {
           headers: {
             authorization: `Bearer ${ownerAccessToken}`
@@ -375,7 +375,7 @@ test(
       );
       assert.equal(ownerDeniedOutletResponse.status, 403);
       const ownerDeniedOutletBody = await ownerDeniedOutletResponse.json();
-      assert.equal(ownerDeniedOutletBody.ok, false);
+      assert.equal(ownerDeniedOutletBody.success, false);
       assert.equal(ownerDeniedOutletBody.error.code, "FORBIDDEN");
 
       const viewerLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
@@ -395,7 +395,7 @@ test(
       const viewerAccessToken = viewerLoginBody.access_token;
 
       const viewerOutletResponse = await fetch(
-        `${baseUrl}/api/outlet-access?outlet_id=${allowedOutletId}`,
+        `${baseUrl}/api/outlets/access?outlet_id=${allowedOutletId}`,
         {
           headers: {
             authorization: `Bearer ${viewerAccessToken}`
@@ -404,7 +404,7 @@ test(
       );
       assert.equal(viewerOutletResponse.status, 403);
       const viewerOutletBody = await viewerOutletResponse.json();
-      assert.equal(viewerOutletBody.ok, false);
+      assert.equal(viewerOutletBody.success, false);
       assert.equal(viewerOutletBody.error.code, "FORBIDDEN");
 
       const [auditRows] = await db.execute(
