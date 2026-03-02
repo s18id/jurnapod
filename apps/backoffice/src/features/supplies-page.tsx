@@ -88,7 +88,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiRequest<{ ok: true; supplies: Supply[] }>(
+      const response = await apiRequest<{ success: true; supplies: Supply[] }>(
         "/inventory/supplies",
         {},
         props.accessToken

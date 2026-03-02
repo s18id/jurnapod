@@ -17,7 +17,7 @@ export const POST = withAuth(
       const allocationsFile = form.get("allocations");
 
       if (!isFile(accountsFile) || !isFile(transactionsFile) || !isFile(allocationsFile)) {
-        return Response.json({ ok: false, error: { code: "INVALID_REQUEST", message: "Missing files" } }, { status: 400 });
+        return Response.json({ success: false, error: { code: "INVALID_REQUEST", message: "Missing files" } }, { status: 400 });
       }
 
       const [accountsText, transactionsText, allocationsText] = await Promise.all([
@@ -42,7 +42,7 @@ export const POST = withAuth(
 
       return Response.json(
         {
-          ok: true,
+          success: true,
           import_id: result.importId,
           duplicate: result.duplicate,
           totals: result.totals
@@ -52,7 +52,7 @@ export const POST = withAuth(
     } catch (error) {
       console.error("POST /api/accounts/imports failed", error);
       return Response.json(
-        { ok: false, error: { code: "INVALID_REQUEST", message: error instanceof Error ? error.message : "Invalid request" } },
+        { success: false, error: { code: "INVALID_REQUEST", message: error instanceof Error ? error.message : "Invalid request" } },
         { status: 400 }
       );
     }

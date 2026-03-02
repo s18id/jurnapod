@@ -7,7 +7,7 @@ import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
 import { listOutletsByCompany, listAllOutlets, createOutlet, OutletCodeExistsError } from "../../../src/lib/outlets";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -15,7 +15,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Outlets request failed"
@@ -58,14 +58,14 @@ export const POST = withAuth(
 
       if (!code || typeof code !== "string" || code.trim().length === 0) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "VALIDATION_ERROR", message: "Outlet code is required" }
         }, { status: 400 });
       }
 
       if (!name || typeof name !== "string" || name.trim().length === 0) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "VALIDATION_ERROR", message: "Outlet name is required" }
         }, { status: 400 });
       }
@@ -81,7 +81,7 @@ export const POST = withAuth(
       console.error("POST /api/outlets failed", error);
       if (error instanceof OutletCodeExistsError) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "DUPLICATE_OUTLET", message: error.message }
         }, { status: 409 });
       }

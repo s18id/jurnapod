@@ -4,5 +4,5 @@
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  return NextResponse.json({ ok: true, service: "jurnapod-api" });
+  return NextResponse.json({ success: true, service: "jurnapod-api" });
 }

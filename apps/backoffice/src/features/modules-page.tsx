@@ -25,7 +25,7 @@ type ModulesPageProps = {
 };
 
 type ModulesResponse = {
-  ok: true;
+  success: true;
   modules: Array<{
     code: string;
     name: string;
@@ -36,7 +36,7 @@ type ModulesResponse = {
 };
 
 type ModulesSaveResponse = {
-  ok: true;
+  success: true;
 };
 
 type ModuleRow = {

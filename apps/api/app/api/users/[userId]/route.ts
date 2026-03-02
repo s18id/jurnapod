@@ -13,7 +13,7 @@ import {
 } from "../../../../src/lib/users";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -21,7 +21,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "User not found"
@@ -29,7 +29,7 @@ const NOT_FOUND_RESPONSE = {
 };
 
 const DUPLICATE_EMAIL_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "DUPLICATE_EMAIL",
     message: "Email already exists"
@@ -37,7 +37,7 @@ const DUPLICATE_EMAIL_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "User request failed"
@@ -65,7 +65,7 @@ export const GET = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ ok: true, user }, { status: 200 });
+      return Response.json({ success: true, user }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -94,7 +94,7 @@ export const PATCH = withAuth(
         }
       });
 
-      return Response.json({ ok: true, user }, { status: 200 });
+      return Response.json({ success: true, user }, { status: 200 });
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

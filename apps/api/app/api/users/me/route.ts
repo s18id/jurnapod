@@ -5,7 +5,7 @@ import { findActiveUserById } from "../../../../src/lib/auth";
 import { unauthorizedResponse, withAuth } from "../../../../src/lib/auth-guard";
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Failed to load current user"
@@ -20,7 +20,7 @@ export const GET = withAuth(
         return unauthorizedResponse();
       }
 
-      return Response.json({ ok: true, user }, { status: 200 });
+      return Response.json({ success: true, user }, { status: 200 });
     } catch (error) {
       console.error("GET /api/users/me failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });

@@ -56,8 +56,8 @@ export type GoogleUserLookupResult = {
 };
 
 export type GoogleOAuthLinkResult =
-  | { ok: true; linked: boolean }
-  | { ok: false; reason: "linked_to_another_user" };
+  | { success: true; linked: boolean }
+  | { success: false; reason: "linked_to_another_user" };
 
 function requireGoogleOAuthConfig() {
   const env = getAppEnv();
@@ -190,10 +190,10 @@ export async function linkGoogleAccount(params: {
   const existing = existingRows[0];
   if (existing) {
     if (existing.user_id !== params.userId) {
-      return { ok: false, reason: "linked_to_another_user" };
+      return { success: false, reason: "linked_to_another_user" };
     }
 
-    return { ok: true, linked: false };
+    return { success: true, linked: false };
   }
 
   await pool.execute<ResultSetHeader>(
@@ -207,5 +207,5 @@ export async function linkGoogleAccount(params: {
     [params.companyId, params.userId, GOOGLE_PROVIDER, params.providerUserId, normalizedEmail]
   );
 
-  return { ok: true, linked: true };
+  return { success: true, linked: true };
 }

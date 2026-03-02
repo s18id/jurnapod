@@ -31,7 +31,7 @@ const loginRequestSchema = z
 type LoginRequest = z.infer<typeof loginRequestSchema>;
 
 type LoginSuccess = {
-  ok: true;
+  success: true;
   accessToken: string;
   expiresInSeconds: number;
   userId: number;
@@ -39,7 +39,7 @@ type LoginSuccess = {
 };
 
 type LoginFailure = {
-  ok: false;
+  success: false;
   userId: number | null;
   companyId: number | null;
 };
@@ -205,7 +205,7 @@ export async function authenticateLogin(request: LoginRequest): Promise<LoginRes
 
   if (!user || !user.is_active || !passwordMatches) {
     return {
-      ok: false,
+      success: false,
       userId: user?.id ?? null,
       companyId: user?.company_id ?? null
     };
@@ -217,7 +217,7 @@ export async function authenticateLogin(request: LoginRequest): Promise<LoginRes
   const env = getAppEnv();
 
   return {
-    ok: true,
+    success: true,
     accessToken,
     expiresInSeconds: env.auth.accessTokenTtlSeconds,
     userId: user.id,

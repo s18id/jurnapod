@@ -8,7 +8,7 @@ import { getInvoice } from "../../../../../../src/lib/sales";
 import { generateInvoiceHTML } from "../../../../../../src/lib/invoice-template";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -16,7 +16,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "Invoice not found"
@@ -24,7 +24,7 @@ const NOT_FOUND_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Invoice print request failed"

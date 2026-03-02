@@ -36,8 +36,8 @@ type InvoiceLine = {
 
 type InvoiceDetail = Invoice & { lines: InvoiceLine[] };
 
-type InvoicesResponse = { ok: true; total: number; invoices: Invoice[] };
-type InvoiceDetailResponse = { ok: true; invoice: InvoiceDetail };
+type InvoicesResponse = { success: true; total: number; invoices: Invoice[] };
+type InvoiceDetailResponse = { success: true; invoice: InvoiceDetail };
 
 const boxStyle = {
   border: "1px solid #e2ddd2",

@@ -14,7 +14,7 @@ import {
 } from "../../../src/lib/users";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -22,7 +22,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const DUPLICATE_EMAIL_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "DUPLICATE_EMAIL",
     message: "Email already exists"
@@ -30,7 +30,7 @@ const DUPLICATE_EMAIL_RESPONSE = {
 };
 
 const ROLE_NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "ROLE_NOT_FOUND",
     message: "Role not found"
@@ -38,7 +38,7 @@ const ROLE_NOT_FOUND_RESPONSE = {
 };
 
 const OUTLET_NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "OUTLET_NOT_FOUND",
     message: "Outlet not found"
@@ -46,7 +46,7 @@ const OUTLET_NOT_FOUND_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Users request failed"
@@ -96,7 +96,7 @@ export const GET = withAuth(
       const search = url.searchParams.get("search")?.trim() || undefined;
       const users = await listUsers(auth.companyId, { isActive, search });
 
-      return Response.json({ ok: true, users }, { status: 200 });
+      return Response.json({ success: true, users }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -133,7 +133,7 @@ export const POST = withAuth(
         }
       });
 
-      return Response.json({ ok: true, user }, { status: 201 });
+      return Response.json({ success: true, user }, { status: 201 });
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

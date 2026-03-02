@@ -8,7 +8,7 @@ import { readClientIp } from "../../../../../src/lib/request-meta";
 import { RoleNotFoundError, setUserRoles, UserNotFoundError } from "../../../../../src/lib/users";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -16,7 +16,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "User not found"
@@ -24,7 +24,7 @@ const NOT_FOUND_RESPONSE = {
 };
 
 const ROLE_NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "ROLE_NOT_FOUND",
     message: "Role not found"
@@ -32,7 +32,7 @@ const ROLE_NOT_FOUND_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "User roles update failed"
@@ -70,7 +70,7 @@ export const POST = withAuth(
         }
       });
 
-      return Response.json({ ok: true, user }, { status: 200 });
+      return Response.json({ success: true, user }, { status: 200 });
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

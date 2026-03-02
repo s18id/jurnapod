@@ -45,12 +45,12 @@ export type AuthContext = {
 };
 
 type AuthSuccess = {
-  ok: true;
+  success: true;
   auth: AuthContext;
 };
 
 type AuthFailure = {
-  ok: false;
+  success: false;
   response: Response;
 };
 
@@ -127,17 +127,17 @@ export async function authenticateRequest(request: Request): Promise<AuthResult>
   const accessToken = parseBearerToken(request.headers.get("authorization"));
   if (!accessToken) {
     return {
-      ok: false,
+      success: false,
       response: createUnauthorizedResponse()
     };
   }
 
   try {
     const auth = await verifyAccessToken(accessToken);
-    return { ok: true, auth };
+    return { success: true, auth };
   } catch {
     return {
-      ok: false,
+      success: false,
       response: createUnauthorizedResponse()
     };
   }

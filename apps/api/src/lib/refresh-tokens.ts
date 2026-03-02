@@ -33,7 +33,7 @@ export type RefreshTokenIssueResult = {
 
 export type RefreshTokenRotateResult =
   | {
-      ok: true;
+      success: true;
       token: string;
       expiresAt: Date;
       tokenId: number;
@@ -42,7 +42,7 @@ export type RefreshTokenRotateResult =
       rotatedFromId: number;
     }
   | {
-      ok: false;
+      success: false;
       reason: "not_found" | "revoked" | "expired";
     };
 
@@ -222,17 +222,17 @@ export async function rotateRefreshToken(
     const current = rows[0];
     if (!current) {
       await connection.rollback();
-      return { ok: false, reason: "not_found" };
+      return { success: false, reason: "not_found" };
     }
 
     if (current.revoked_at) {
       await connection.rollback();
-      return { ok: false, reason: "revoked" };
+      return { success: false, reason: "revoked" };
     }
 
     if (current.expires_at.getTime() <= Date.now()) {
       await connection.rollback();
-      return { ok: false, reason: "expired" };
+      return { success: false, reason: "expired" };
     }
 
     const revokeResult = await connection.execute<ResultSetHeader>(
@@ -245,7 +245,7 @@ export async function rotateRefreshToken(
     const updateResult = revokeResult[0];
     if (updateResult.affectedRows !== 1) {
       await connection.rollback();
-      return { ok: false, reason: "revoked" };
+      return { success: false, reason: "revoked" };
     }
 
     const nextToken = generateRefreshToken();
@@ -270,7 +270,7 @@ export async function rotateRefreshToken(
     await connection.commit();
 
     return {
-      ok: true,
+      success: true,
       token: nextToken,
       expiresAt,
       tokenId: Number(insertResult.insertId),

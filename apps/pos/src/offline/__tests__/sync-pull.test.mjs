@@ -11,7 +11,7 @@ import { ingestSyncPullIntoProductsCache, readSyncPullConfig, readSyncPullDataVe
 function createSyncPayload({ dataVersion, outletId, price }) {
   const timestamp = new Date().toISOString();
   return {
-    ok: true,
+    success: true,
     data_version: dataVersion,
     items: [
       {

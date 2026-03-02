@@ -13,7 +13,7 @@ import {
 } from "../../../../../src/lib/depreciation";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -21,7 +21,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const FORBIDDEN_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "FORBIDDEN",
     message: "Forbidden"
@@ -29,7 +29,7 @@ const FORBIDDEN_RESPONSE = {
 };
 
 const REFERENCE_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REFERENCE",
     message: "Invalid depreciation reference"
@@ -37,7 +37,7 @@ const REFERENCE_RESPONSE = {
 };
 
 const CONFLICT_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "CONFLICT",
     message: "Depreciation run conflict"
@@ -45,7 +45,7 @@ const CONFLICT_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Depreciation run failed"
@@ -63,7 +63,7 @@ export const POST = withAuth(
 
       return Response.json(
         {
-          ok: true,
+          success: true,
           duplicate: result.duplicate,
           run: result.run
         },

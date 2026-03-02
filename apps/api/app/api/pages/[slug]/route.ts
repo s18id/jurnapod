@@ -4,14 +4,14 @@
 import { getPublishedStaticPage } from "../../../../src/lib/static-pages";
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND"
   }
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR"
   }
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
 
     return Response.json(
       {
-        ok: true,
+        success: true,
         page
       },
       { status: 200 }

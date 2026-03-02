@@ -12,7 +12,7 @@ import {
 } from "../../../../../../src/lib/sales";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -20,7 +20,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "Payment not found"
@@ -28,7 +28,7 @@ const NOT_FOUND_RESPONSE = {
 };
 
 const FORBIDDEN_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "FORBIDDEN",
     message: "Forbidden"
@@ -36,7 +36,7 @@ const FORBIDDEN_RESPONSE = {
 };
 
 const INVALID_TRANSITION_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_TRANSITION",
     message: "Payment cannot be posted"
@@ -44,7 +44,7 @@ const INVALID_TRANSITION_RESPONSE = {
 };
 
 const ALLOCATION_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "ALLOCATION_ERROR",
     message: "Payment allocation failed"
@@ -52,7 +52,7 @@ const ALLOCATION_ERROR_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Payment post request failed"
@@ -81,7 +81,7 @@ export const POST = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ ok: true, payment }, { status: 200 });
+      return Response.json({ success: true, payment }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -94,7 +94,7 @@ export const POST = withAuth(
       if (error instanceof PaymentAllocationError) {
         return Response.json(
           {
-            ok: false,
+            success: false,
             error: {
               code: "ALLOCATION_ERROR",
               message: error.message

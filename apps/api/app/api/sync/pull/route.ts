@@ -11,7 +11,7 @@ import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { buildSyncPullPayload } from "../../../../src/lib/master-data";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -19,7 +19,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Sync pull failed"
@@ -45,7 +45,7 @@ export const GET = withAuth(
 
       return Response.json(
         {
-          ok: true,
+          success: true,
           ...response
         },
         { status: 200 }

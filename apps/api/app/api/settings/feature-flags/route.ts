@@ -13,7 +13,7 @@ const querySchema = z.object({
 function errorResponse(code: string, message: string, status: number) {
   return Response.json(
     {
-      ok: false,
+      success: false,
       error: {
         code,
         message
@@ -74,7 +74,7 @@ export const GET = withAuth(
         })
       );
 
-      return Response.json({ ok: true, flags }, { status: 200 });
+      return Response.json({ success: true, flags }, { status: 200 });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);

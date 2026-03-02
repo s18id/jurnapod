@@ -12,7 +12,7 @@ import {
 } from "../../../../src/lib/static-pages-admin";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -20,7 +20,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const DUPLICATE_SLUG_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "DUPLICATE_SLUG",
     message: "Slug already exists"
@@ -28,7 +28,7 @@ const DUPLICATE_SLUG_RESPONSE = {
 };
 
 const INVALID_SLUG_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_SLUG",
     message: "Slug is invalid"
@@ -36,7 +36,7 @@ const INVALID_SLUG_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Static pages request failed"
@@ -61,7 +61,7 @@ export const GET = withAuth(
       const url = new URL(request.url);
       const query = url.searchParams.get("q")?.trim();
       const pages = await listStaticPages(query || undefined);
-      return Response.json({ ok: true, pages }, { status: 200 });
+      return Response.json({ success: true, pages }, { status: 200 });
     } catch (error) {
       console.error("GET /api/settings/pages failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
@@ -88,7 +88,7 @@ export const POST = withAuth(
         }
       });
 
-      return Response.json({ ok: true, page }, { status: 201 });
+      return Response.json({ success: true, page }, { status: 201 });
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

@@ -15,7 +15,7 @@ import { getAppEnv } from "../../../../src/lib/env";
 import { createRefreshTokenCookie, issueRefreshToken } from "../../../../src/lib/refresh-tokens";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request body"
@@ -23,7 +23,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const INVALID_CREDENTIALS_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_CREDENTIALS",
     message: "Invalid credentials"
@@ -31,7 +31,7 @@ const INVALID_CREDENTIALS_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Login failed"
@@ -156,7 +156,7 @@ export async function POST(request: Request) {
     const env = getAppEnv();
     const response = Response.json(
       {
-        ok: true,
+        success: true,
         access_token: authResult.accessToken,
         token_type: "Bearer",
         expires_in: authResult.expiresInSeconds

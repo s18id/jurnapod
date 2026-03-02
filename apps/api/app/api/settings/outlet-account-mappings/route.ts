@@ -27,7 +27,7 @@ const bodySchema = z.object({
 function errorResponse(code: string, message: string, status: number) {
   return Response.json(
     {
-      ok: false,
+      success: false,
       error: {
         code,
         message
@@ -61,7 +61,7 @@ export const GET = withAuth(
 
       return Response.json(
         {
-          ok: true,
+          success: true,
           outlet_id: parsed.outlet_id,
           mappings: rows as Array<{ mapping_key: string; account_id: number }>
         },
@@ -112,7 +112,7 @@ export const PUT = withAuth(
         connection.release();
       }
 
-      return Response.json({ ok: true }, { status: 200 });
+      return Response.json({ success: true }, { status: 200 });
     } catch (error) {
       if (error instanceof z.ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);

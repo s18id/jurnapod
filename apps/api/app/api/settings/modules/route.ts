@@ -16,7 +16,7 @@ import { readClientIp } from "../../../../src/lib/request-meta";
 function errorResponse(code: string, message: string, status: number) {
   return Response.json(
     {
-      ok: false,
+      success: false,
       error: {
         code,
         message
@@ -92,7 +92,7 @@ export const GET = withAuth(
         config_json: typeof row.config_json === "string" ? row.config_json : "{}"
       }));
 
-      return Response.json({ ok: true, modules }, { status: 200 });
+      return Response.json({ success: true, modules }, { status: 200 });
     } catch (error) {
       console.error("GET /api/settings/modules failed", error);
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
@@ -199,7 +199,7 @@ export const PUT = withAuth(
         }
       );
 
-      return Response.json({ ok: true }, { status: 200 });
+      return Response.json({ success: true }, { status: 200 });
     } catch (error) {
       if (error instanceof z.ZodError || (error instanceof Error && error.message === "INVALID_JSON")) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);

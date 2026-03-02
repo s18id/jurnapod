@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 const ROUTE_MOVED_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "ROUTE_MOVED",
     new_path: "/api/accounts/fixed-asset-categories"

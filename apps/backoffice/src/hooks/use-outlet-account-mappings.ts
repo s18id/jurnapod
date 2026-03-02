@@ -12,13 +12,13 @@ export type OutletAccountMapping = {
 };
 
 type MappingResponse = {
-  ok: true;
+  success: true;
   outlet_id: number;
   mappings: OutletAccountMapping[];
 };
 
 type SaveResponse = {
-  ok: true;
+  success: true;
 };
 
 export function useOutletAccountMappings(outletId: number, accessToken: string) {

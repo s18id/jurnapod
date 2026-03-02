@@ -100,18 +100,18 @@ export class SyncService {
         },
         accessToken
       );
-      return { ok: true };
+      return { success: true };
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 409) {
-          return { ok: false, conflict: true, error: ERROR_MESSAGES.CONFLICT };
+          return { success: false, conflict: true, error: ERROR_MESSAGES.CONFLICT };
         }
         if (error.status >= 400 && error.status < 500) {
-          return { ok: false, conflict: false, error: ERROR_MESSAGES.VALIDATION_ERROR };
+          return { success: false, conflict: false, error: ERROR_MESSAGES.VALIDATION_ERROR };
         }
-        return { ok: false, conflict: false, error: ERROR_MESSAGES.SERVER_ERROR };
+        return { success: false, conflict: false, error: ERROR_MESSAGES.SERVER_ERROR };
       }
-      return { ok: false, conflict: false, error: ERROR_MESSAGES.NETWORK_ERROR };
+      return { success: false, conflict: false, error: ERROR_MESSAGES.NETWORK_ERROR };
     }
   }
 

@@ -8,7 +8,7 @@ test("sync badge changes to Offline when network goes down", async ({ context, p
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ ok: true })
+      body: JSON.stringify({ success: true })
     });
   });
 
@@ -26,7 +26,7 @@ test("login + sync pull works with mocked API", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ ok: true })
+      body: JSON.stringify({ success: true })
     });
   });
 
@@ -35,7 +35,7 @@ test("login + sync pull works with mocked API", async ({ page }) => {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        ok: true,
+        success: true,
         access_token: "test-token",
         token_type: "Bearer",
         expires_in: 3600
@@ -48,7 +48,7 @@ test("login + sync pull works with mocked API", async ({ page }) => {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        ok: true,
+        success: true,
         user: {
           id: 1,
           company_id: 1,
@@ -69,7 +69,7 @@ test("login + sync pull works with mocked API", async ({ page }) => {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        ok: true,
+        success: true,
         data_version: 10,
         items: [
           {

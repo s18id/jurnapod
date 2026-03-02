@@ -462,7 +462,7 @@ export async function deactivateAccount(
   accountId: number,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ ok: true }>(
+  await apiRequest<{ success: true }>(
     `/accounts/${accountId}`,
     {
       method: "DELETE"
@@ -536,7 +536,7 @@ export async function deactivateAccountType(
   accountTypeId: number,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ ok: true }>(
+  await apiRequest<{ success: true }>(
     `/accounts/types/${accountTypeId}`,
     {
       method: "DELETE"

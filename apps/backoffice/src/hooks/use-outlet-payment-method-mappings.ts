@@ -18,14 +18,14 @@ export type PaymentMethodMapping = {
 };
 
 type MappingResponse = {
-  ok: true;
+  success: true;
   outlet_id: number;
   payment_methods: PaymentMethodConfig[];
   mappings: PaymentMethodMapping[];
 };
 
 type SaveResponse = {
-  ok: true;
+  success: true;
 };
 
 export function useOutletPaymentMethodMappings(outletId: number, accessToken: string) {

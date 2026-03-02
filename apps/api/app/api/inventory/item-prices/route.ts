@@ -16,7 +16,7 @@ import {
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -24,7 +24,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "Item or outlet not found"
@@ -32,7 +32,7 @@ const NOT_FOUND_RESPONSE = {
 };
 
 const CONFLICT_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "CONFLICT",
     message: "Item price conflict"
@@ -40,7 +40,7 @@ const CONFLICT_RESPONSE = {
 };
 
 const FORBIDDEN_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "FORBIDDEN",
     message: "Forbidden"
@@ -48,7 +48,7 @@ const FORBIDDEN_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Item prices request failed"
@@ -106,7 +106,7 @@ export const GET = withAuth(
           isActive
         });
 
-        return Response.json({ ok: true, prices }, { status: 200 });
+        return Response.json({ success: true, prices }, { status: 200 });
       }
 
       const outletIds = await listUserOutletIds(auth.userId, auth.companyId);
@@ -115,7 +115,7 @@ export const GET = withAuth(
         isActive
       });
 
-      return Response.json({ ok: true, prices }, { status: 200 });
+      return Response.json({ success: true, prices }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -142,7 +142,7 @@ export const POST = withAuth(
         userId: auth.userId
       });
 
-      return Response.json({ ok: true, item_price: itemPrice }, { status: 201 });
+      return Response.json({ success: true, item_price: itemPrice }, { status: 201 });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

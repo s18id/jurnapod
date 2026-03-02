@@ -17,7 +17,7 @@ import {
 } from "../../../../src/lib/sales";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -25,7 +25,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "Resource not found"
@@ -33,7 +33,7 @@ const NOT_FOUND_RESPONSE = {
 };
 
 const CONFLICT_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "CONFLICT",
     message: "Payment conflict"
@@ -41,7 +41,7 @@ const CONFLICT_RESPONSE = {
 };
 
 const FORBIDDEN_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "FORBIDDEN",
     message: "Forbidden"
@@ -49,7 +49,7 @@ const FORBIDDEN_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Payments request failed"
@@ -91,7 +91,7 @@ export const GET = withAuth(
 
       return Response.json(
         {
-          ok: true,
+          success: true,
           total: report.total,
           payments: report.payments
         },
@@ -118,7 +118,7 @@ export const POST = withAuth(
         userId: auth.userId
       });
 
-      return Response.json({ ok: true, payment }, { status: 201 });
+      return Response.json({ success: true, payment }, { status: 201 });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

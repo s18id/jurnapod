@@ -30,7 +30,7 @@ Query:
 - `offset` (optional, default `0`)
 
 Response:
-- `ok: true`
+- `success: true`
 - `filters`: resolved filters + outlet ids used + `as_of` + `as_of_id`
 - `total`: total rows for pagination
 - `transactions[]`:
@@ -50,7 +50,7 @@ Query:
 - `status` (optional, default `COMPLETED`)
 
 Response:
-- `ok: true`
+- `success: true`
 - `filters`: resolved filters + outlet ids used
 - `rows[]`:
   - `trx_date`, `outlet_id`, `outlet_name`
@@ -72,7 +72,7 @@ Query:
 - `offset` (optional, default `0`)
 
 Response:
-- `ok: true`
+- `success: true`
 - `filters`: resolved filters + outlet ids used + `as_of` + `as_of_id`
 - `total`: total batches
 - `journals[]`:
@@ -92,7 +92,7 @@ Query:
 - `as_of` (optional ISO datetime with timezone; truncated to date boundary)
 
 Response:
-- `ok: true`
+- `success: true`
 - `filters`: resolved filters + outlet ids used + `as_of`
 - `totals`:
   - `total_debit`, `total_credit`, `balance`

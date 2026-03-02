@@ -18,7 +18,7 @@ function outletIdFromRequest(request: Request): number {
 }
 
 export const GET = withAuth(
-  async () => Response.json({ ok: true }, { status: 200 }),
+  async () => Response.json({ success: true }, { status: 200 }),
   [
     requireAccess({
       roles: ["OWNER", "ADMIN", "CASHIER", "ACCOUNTANT"],

@@ -43,7 +43,7 @@ type PosTransaction = {
 };
 
 type PosTransactionsResponse = {
-  ok: true;
+  success: true;
   total: number;
   transactions: PosTransaction[];
 };
@@ -58,7 +58,7 @@ type DailySalesRow = {
 };
 
 type DailySalesResponse = {
-  ok: true;
+  success: true;
   rows: DailySalesRow[];
 };
 
@@ -71,7 +71,7 @@ type PosPaymentRow = {
 };
 
 type PosPaymentsResponse = {
-  ok: true;
+  success: true;
   rows: PosPaymentRow[];
 };
 
@@ -88,7 +88,7 @@ type JournalRow = {
 };
 
 type JournalResponse = {
-  ok: true;
+  success: true;
   total: number;
   journals: JournalRow[];
 };
@@ -103,7 +103,7 @@ type TrialBalanceRow = {
 };
 
 type TrialBalanceResponse = {
-  ok: true;
+  success: true;
   totals: {
     total_debit: number;
     total_credit: number;
@@ -143,7 +143,7 @@ type GeneralLedgerRow = {
 };
 
 type GeneralLedgerResponse = {
-  ok: true;
+  success: true;
   filters: {
     outlet_ids: number[];
     account_id: number | null;
@@ -176,7 +176,7 @@ type WorksheetRow = {
 };
 
 type WorksheetResponse = {
-  ok: true;
+  success: true;
   filters: {
     outlet_ids: number[];
     date_from: string;
@@ -211,7 +211,7 @@ type ProfitLossRow = {
 };
 
 type ProfitLossResponse = {
-  ok: true;
+  success: true;
   filters: {
     outlet_ids: number[];
     date_from: string;

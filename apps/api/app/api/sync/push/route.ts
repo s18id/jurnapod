@@ -38,7 +38,7 @@ const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
 const PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT = 2;
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -46,7 +46,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Sync push failed"
@@ -772,7 +772,7 @@ async function recordSyncPushPostingHookFailure(
           client_tx_id: context.clientTxId,
           posting_mode: mode,
           journal_batch_id: null,
-          balance_ok: false,
+          balance_success: false,
           reason: message
         })
       ]
@@ -1164,7 +1164,7 @@ export const POST = withAuth(
 
       return Response.json(
         {
-          ok: true,
+          success: true,
           ...response
         },
         {

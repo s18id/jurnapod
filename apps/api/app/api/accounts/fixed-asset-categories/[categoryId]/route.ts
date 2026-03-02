@@ -15,7 +15,7 @@ import {
 } from "../../../../../src/lib/master-data";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -23,7 +23,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "Fixed asset category not found"
@@ -31,7 +31,7 @@ const NOT_FOUND_RESPONSE = {
 };
 
 const CONFLICT_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "CONFLICT",
     message: "Fixed asset category conflict"
@@ -39,7 +39,7 @@ const CONFLICT_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Fixed asset category request failed"
@@ -62,7 +62,7 @@ export const GET = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ ok: true, category }, { status: 200 });
+      return Response.json({ success: true, category }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -104,7 +104,7 @@ export const PATCH = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ ok: true, category }, { status: 200 });
+      return Response.json({ success: true, category }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -133,7 +133,7 @@ export const DELETE = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ ok: true }, { status: 200 });
+      return Response.json({ success: true }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

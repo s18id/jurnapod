@@ -19,12 +19,12 @@ type AccountTypesResponse = {
 };
 
 type ItemsResponse = {
-  ok: true;
+  success: true;
   items: unknown[];
 };
 
 type ItemPricesResponse = {
-  ok: true;
+  success: true;
   prices: unknown[];
 };
 

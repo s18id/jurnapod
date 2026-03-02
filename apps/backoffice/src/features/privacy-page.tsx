@@ -6,7 +6,7 @@ import DOMPurify from "dompurify";
 import { apiRequest, ApiError } from "../lib/api-client";
 
 type PublicPageResponse = {
-  ok: true;
+  success: true;
   page: {
     slug: string;
     title: string;

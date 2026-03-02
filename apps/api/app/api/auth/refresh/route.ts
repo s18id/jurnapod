@@ -12,7 +12,7 @@ import {
 } from "../../../../src/lib/refresh-tokens";
 
 const UNAUTHORIZED_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "UNAUTHORIZED",
     message: "Invalid refresh token"
@@ -20,7 +20,7 @@ const UNAUTHORIZED_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Refresh failed"
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
     const env = getAppEnv();
     const response = Response.json(
       {
-        ok: true,
+        success: true,
         access_token: tokenResult.accessToken,
         token_type: "Bearer",
         expires_in: tokenResult.expiresInSeconds

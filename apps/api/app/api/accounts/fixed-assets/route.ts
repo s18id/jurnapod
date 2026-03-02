@@ -15,7 +15,7 @@ import {
 } from "../../../../src/lib/master-data";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -23,7 +23,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Fixed asset request failed"
@@ -31,7 +31,7 @@ const INTERNAL_SERVER_ERROR_RESPONSE = {
 };
 
 const CONFLICT_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "CONFLICT",
     message: "Fixed asset conflict"
@@ -39,7 +39,7 @@ const CONFLICT_RESPONSE = {
 };
 
 const REFERENCE_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REFERENCE",
     message: "Invalid fixed asset reference"
@@ -80,7 +80,7 @@ export const GET = withAuth(
       const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
       const assets = await listFixedAssets(auth.companyId, { outletId, isActive });
 
-      return Response.json({ ok: true, assets }, { status: 200 });
+      return Response.json({ success: true, assets }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -111,7 +111,7 @@ export const POST = withAuth(
         userId: auth.userId
       });
 
-      return Response.json({ ok: true, asset }, { status: 201 });
+      return Response.json({ success: true, asset }, { status: 201 });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

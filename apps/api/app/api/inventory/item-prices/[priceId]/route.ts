@@ -18,7 +18,7 @@ import {
 import { userHasOutletAccess } from "../../../../../src/lib/auth";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -26,7 +26,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "Item price not found"
@@ -34,7 +34,7 @@ const NOT_FOUND_RESPONSE = {
 };
 
 const REFERENCE_NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "Item or outlet not found"
@@ -42,7 +42,7 @@ const REFERENCE_NOT_FOUND_RESPONSE = {
 };
 
 const CONFLICT_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "CONFLICT",
     message: "Item price conflict"
@@ -50,7 +50,7 @@ const CONFLICT_RESPONSE = {
 };
 
 const FORBIDDEN_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "FORBIDDEN",
     message: "Forbidden"
@@ -58,7 +58,7 @@ const FORBIDDEN_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Item prices request failed"
@@ -90,7 +90,7 @@ export const GET = withAuth(
         return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
       }
 
-      return Response.json({ ok: true, item_price: itemPrice }, { status: 200 });
+      return Response.json({ success: true, item_price: itemPrice }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -143,7 +143,7 @@ export const PATCH = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ ok: true, item_price: itemPrice }, { status: 200 });
+      return Response.json({ success: true, item_price: itemPrice }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -195,7 +195,7 @@ export const DELETE = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ ok: true }, { status: 200 });
+      return Response.json({ success: true }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

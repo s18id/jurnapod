@@ -35,7 +35,7 @@ const googleLoginRequestSchema = z
   });
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request body"
@@ -43,7 +43,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const INVALID_CREDENTIALS_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_CREDENTIALS",
     message: "Invalid credentials"
@@ -51,7 +51,7 @@ const INVALID_CREDENTIALS_RESPONSE = {
 };
 
 const LINK_CONFLICT_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "OAUTH_CONFLICT",
     message: "OAuth account is linked to another user"
@@ -59,7 +59,7 @@ const LINK_CONFLICT_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Login failed"
@@ -140,7 +140,7 @@ export async function POST(request: Request) {
 
     const response = Response.json(
       {
-        ok: true,
+        success: true,
         access_token: tokenResult.accessToken,
         token_type: "Bearer",
         expires_in: tokenResult.expiresInSeconds

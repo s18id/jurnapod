@@ -262,7 +262,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       const query =
         typeof filter === "number" ? `?outlet_id=${filter}` : "";
-      const response = await apiRequest<{ ok: true; assets: FixedAsset[] }>(
+      const response = await apiRequest<{ success: true; assets: FixedAsset[] }>(
         `/accounts/fixed-assets${query}`,
         {},
         props.accessToken
@@ -281,7 +281,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
 
   async function refreshCategories() {
     try {
-      const response = await apiRequest<{ ok: true; categories: FixedAssetCategory[] }>(
+      const response = await apiRequest<{ success: true; categories: FixedAssetCategory[] }>(
         "/accounts/fixed-asset-categories",
         {},
         props.accessToken
@@ -491,7 +491,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
   async function loadDepreciationPlan(assetId: number) {
     try {
       setError(null);
-      const response = await apiRequest<{ ok: true; plan: DepreciationPlan }>(
+      const response = await apiRequest<{ success: true; plan: DepreciationPlan }>(
         `/accounts/fixed-assets/${assetId}/depreciation-plan`,
         {},
         props.accessToken
@@ -509,7 +509,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
   async function loadAccounts() {
     try {
       const response = await apiRequest<
-        | { ok: true; accounts: Array<{ id: number; code: string; name: string }> }
+        | { success: true; accounts: Array<{ id: number; code: string; name: string }> }
         | { success: true; data: Array<{ id: number; code: string; name: string }> }
       >(
         `/accounts?company_id=${props.user.company_id}`,
@@ -649,7 +649,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       setError(null);
       setRunLoading(true);
-      const response = await apiRequest<{ ok: true; duplicate: boolean; run: DepreciationRun }>(
+      const response = await apiRequest<{ success: true; duplicate: boolean; run: DepreciationRun }>(
         `/accounts/depreciation/run`,
         {
           method: "POST",

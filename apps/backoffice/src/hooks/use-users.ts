@@ -331,7 +331,7 @@ export async function updateUserPassword(
   data: UserPasswordUpdateRequest,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ ok: true }>(
+  await apiRequest<{ success: true }>(
     `/users/${userId}/password`,
     {
       method: "POST",
@@ -424,7 +424,7 @@ export async function deleteRole(
   roleId: number,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ ok: true }>(
+  await apiRequest<{ success: true }>(
     `/roles/${roleId}`,
     {
       method: "DELETE"

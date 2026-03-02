@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const response = Response.json({ ok: true }, { status: 200 });
+  const response = Response.json({ success: true }, { status: 200 });
   response.headers.set("Set-Cookie", createRefreshTokenClearCookie());
   return response;
 }

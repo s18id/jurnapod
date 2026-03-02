@@ -41,7 +41,7 @@ export const GET = withAuth(
       if (typeof parsed.outlet_id === "number") {
         const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
         if (!hasAccess) {
-          return Response.json({ ok: false, error: { code: "FORBIDDEN", message: "Forbidden" } }, { status: 403 });
+          return Response.json({ success: false, error: { code: "FORBIDDEN", message: "Forbidden" } }, { status: 403 });
         }
         outletIds = [parsed.outlet_id];
       } else {
@@ -58,7 +58,7 @@ export const GET = withAuth(
 
       return Response.json(
         {
-          ok: true,
+          success: true,
           filters: {
             outlet_ids: outletIds,
             date_from: dateFrom,
@@ -71,12 +71,12 @@ export const GET = withAuth(
       );
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return Response.json({ ok: false, error: { code: "INVALID_REQUEST", message: "Invalid request" } }, { status: 400 });
+        return Response.json({ success: false, error: { code: "INVALID_REQUEST", message: "Invalid request" } }, { status: 400 });
       }
 
       console.error("GET /reports/pos-payments failed", error);
       return Response.json(
-        { ok: false, error: { code: "INTERNAL_SERVER_ERROR", message: "POS payments report failed" } },
+        { success: false, error: { code: "INTERNAL_SERVER_ERROR", message: "POS payments report failed" } },
         { status: 500 }
       );
     }

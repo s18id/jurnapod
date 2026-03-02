@@ -26,7 +26,7 @@ type InventorySettingsPageProps = {
 };
 
 type SettingsResponse = {
-  ok: true;
+  success: true;
   outlet_id: number;
   settings: Array<{
     key: string;
@@ -36,7 +36,7 @@ type SettingsResponse = {
 };
 
 type SettingsSaveResponse = {
-  ok: true;
+  success: true;
 };
 
 const SETTINGS_KEYS = [

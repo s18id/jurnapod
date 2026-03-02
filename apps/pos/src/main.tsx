@@ -209,7 +209,7 @@ function App() {
       }
 
       const mePayload = (await meResponse.json()) as {
-        ok: true;
+        success: true;
         user: {
           company_id: number;
           outlets: Array<{ id: number; code: string; name: string }>;
@@ -284,8 +284,8 @@ function App() {
         });
 
         const payload = (await response.json()) as
-          | { ok: true; access_token: string }
-          | { ok: false; error?: { message?: string } };
+          | { success: true; access_token: string }
+          | { success: false; error?: { message?: string } };
 
         if (!response.ok || !payload || payload.ok !== true || typeof payload.access_token !== "string") {
           const msg = payload && payload.ok === false ? payload.error?.message ?? "Login failed" : "Login failed";
@@ -699,8 +699,8 @@ function App() {
       });
 
       const payload = (await response.json()) as
-        | { ok: true; access_token: string }
-        | { ok: false; error?: { message?: string } };
+        | { success: true; access_token: string }
+        | { success: false; error?: { message?: string } };
 
       if (!response.ok || !payload || payload.ok !== true || typeof payload.access_token !== "string") {
         const msg = payload && payload.ok === false ? payload.error?.message ?? "Login failed" : "Login failed";

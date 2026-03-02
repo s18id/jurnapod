@@ -11,7 +11,7 @@ import {
 } from "../../../../../../src/lib/static-pages-admin";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -19,7 +19,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "Static page not found"
@@ -27,7 +27,7 @@ const NOT_FOUND_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Static page request failed"
@@ -54,7 +54,7 @@ export const POST = withAuth(
         }
       });
 
-      return Response.json({ ok: true, page }, { status: 200 });
+      return Response.json({ success: true, page }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

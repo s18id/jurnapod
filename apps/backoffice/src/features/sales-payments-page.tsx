@@ -24,7 +24,7 @@ type Payment = {
   updated_at: string;
 };
 
-type PaymentsResponse = { ok: true; total: number; payments: Payment[] };
+type PaymentsResponse = { success: true; total: number; payments: Payment[] };
 
 const boxStyle = {
   border: "1px solid #e2ddd2",

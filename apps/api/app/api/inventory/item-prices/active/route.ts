@@ -7,7 +7,7 @@ import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { listItemPrices } from "../../../../../src/lib/master-data";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -15,7 +15,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Item prices request failed"
@@ -36,7 +36,7 @@ export const GET = withAuth(
         isActive: true
       });
 
-      return Response.json({ ok: true, prices }, { status: 200 });
+      return Response.json({ success: true, prices }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

@@ -37,7 +37,7 @@ type TaxRateRow = {
 };
 
 type TaxRatesResponse = {
-  ok: true;
+  success: true;
   tax_rates: Array<{
     id: number;
     code: string;
@@ -49,7 +49,7 @@ type TaxRatesResponse = {
 };
 
 type TaxDefaultsResponse = {
-  ok: true;
+  success: true;
   tax_rate_ids: number[];
 };
 
@@ -149,7 +149,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
 
     try {
       if (rate.isNew || !rate.id) {
-        const response = await apiRequest<{ ok: true; id: number }>(
+        const response = await apiRequest<{ success: true; id: number }>(
           "/settings/tax-rates",
           {
             method: "POST",
@@ -165,7 +165,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
         );
         updateRate(index, { id: response.id, isNew: false });
       } else {
-        await apiRequest<{ ok: true }>(
+        await apiRequest<{ success: true }>(
           `/settings/tax-rates/${rate.id}`,
           {
             method: "PUT",
@@ -196,7 +196,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
       return;
     }
     try {
-      await apiRequest<{ ok: true }>(
+      await apiRequest<{ success: true }>(
         `/settings/tax-rates/${rate.id}`,
         { method: "DELETE" },
         accessToken
@@ -220,7 +220,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
     setDefaultSaved(false);
     setSavingDefaults(true);
     try {
-      await apiRequest<{ ok: true }>(
+      await apiRequest<{ success: true }>(
         "/settings/tax-defaults",
         {
           method: "PUT",

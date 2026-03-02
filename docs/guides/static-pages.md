@@ -26,7 +26,7 @@ Status:
 Public (no auth):
 - `GET /api/pages/:slug`
   - Returns only `PUBLISHED` pages.
-  - 404 with `{ ok: false, error: { code: "NOT_FOUND" } }` when missing/unpublished.
+  - 404 with `{ success: false, error: { code: "NOT_FOUND" } }` when missing/unpublished.
 
 Admin (OWNER/ADMIN):
 - `GET /api/settings/pages?q=`

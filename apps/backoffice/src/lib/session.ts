@@ -22,14 +22,14 @@ export type SessionUser = {
 };
 
 type LoginResponse = {
-  ok: true;
+  success: true;
   access_token: string;
   token_type: "Bearer";
   expires_in: number;
 };
 
 type MeResponse = {
-  ok: true;
+  success: true;
   user: SessionUser;
 };
 

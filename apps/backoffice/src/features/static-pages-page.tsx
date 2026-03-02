@@ -37,12 +37,12 @@ type StaticPageDetail = {
 };
 
 type StaticPagesListResponse = {
-  ok: true;
+  success: true;
   pages: StaticPageSummary[];
 };
 
 type StaticPageResponse = {
-  ok: true;
+  success: true;
   page: StaticPageDetail;
 };
 

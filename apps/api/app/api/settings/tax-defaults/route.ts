@@ -10,7 +10,7 @@ import { getAuditService } from "../../../../src/lib/audit";
 import { readClientIp } from "../../../../src/lib/request-meta";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -18,7 +18,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const NOT_FOUND_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "NOT_FOUND",
     message: "Tax rate not found"
@@ -26,7 +26,7 @@ const NOT_FOUND_RESPONSE = {
 };
 
 const INVALID_CONFIG_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_TAX_DEFAULTS",
     message: "Default tax rates must share the same inclusive setting"
@@ -34,7 +34,7 @@ const INVALID_CONFIG_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Tax defaults request failed"
@@ -54,7 +54,7 @@ export const GET = withAuth(
       );
 
       const taxRateIds = (rows as Array<{ tax_rate_id?: number }>).map((row) => Number(row.tax_rate_id));
-      return Response.json({ ok: true, tax_rate_ids: taxRateIds }, { status: 200 });
+      return Response.json({ success: true, tax_rate_ids: taxRateIds }, { status: 200 });
     } catch (error) {
       console.error("GET /settings/tax-defaults failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
@@ -76,7 +76,7 @@ export const PUT = withAuth(
           `DELETE FROM company_tax_defaults WHERE company_id = ?`,
           [auth.companyId]
         );
-        return Response.json({ ok: true }, { status: 200 });
+        return Response.json({ success: true }, { status: 200 });
       }
 
       const pool = getDbPool();
@@ -148,7 +148,7 @@ export const PUT = withAuth(
         }
       );
 
-      return Response.json({ ok: true }, { status: 200 });
+      return Response.json({ success: true }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

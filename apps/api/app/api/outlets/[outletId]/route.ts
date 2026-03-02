@@ -7,7 +7,7 @@ import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getOutlet, updateOutlet, deleteOutlet, OutletNotFoundError } from "../../../../src/lib/outlets";
 
 const INVALID_REQUEST_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
@@ -15,7 +15,7 @@ const INVALID_REQUEST_RESPONSE = {
 };
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
-  ok: false,
+  success: false,
   error: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Outlet request failed"
@@ -40,7 +40,7 @@ export const GET = withAuth(
       }
       if (error instanceof OutletNotFoundError) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "NOT_FOUND", message: error.message }
         }, { status: 404 });
       }
@@ -60,7 +60,7 @@ export const PATCH = withAuth(
 
       if (!name || typeof name !== "string" || name.trim().length === 0) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "VALIDATION_ERROR", message: "Outlet name is required" }
         }, { status: 400 });
       }
@@ -77,7 +77,7 @@ export const PATCH = withAuth(
       }
       if (error instanceof OutletNotFoundError) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "NOT_FOUND", message: error.message }
         }, { status: 404 });
       }
@@ -93,20 +93,20 @@ export const DELETE = withAuth(
     try {
       const outletId = parseOutletId(request);
       await deleteOutlet({ outletId });
-      return Response.json({ ok: true }, { status: 200 });
+      return Response.json({ success: true }, { status: 200 });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
       }
       if (error instanceof OutletNotFoundError) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "NOT_FOUND", message: error.message }
         }, { status: 404 });
       }
       if (error instanceof Error && error.message.includes("Cannot delete outlet")) {
         return Response.json({
-          ok: false,
+          success: false,
           error: { code: "OUTLET_IN_USE", message: error.message }
         }, { status: 409 });
       }
