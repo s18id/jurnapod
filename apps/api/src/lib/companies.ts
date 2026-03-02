@@ -11,6 +11,9 @@ export class CompanyCodeExistsError extends Error {}
 export class CompanyDeactivatedError extends Error {}
 export class CompanyAlreadyActiveError extends Error {}
 
+const DEFAULT_OUTLET_CODE = "MAIN";
+const DEFAULT_OUTLET_NAME = "Main Outlet";
+
 export type CompanyResponse = {
   id: number;
   code: string;
@@ -199,6 +202,11 @@ export async function createCompany(params: {
     );
 
     const companyId = Number(result.insertId);
+
+    await connection.execute<ResultSetHeader>(
+      `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
+      [companyId, DEFAULT_OUTLET_CODE, DEFAULT_OUTLET_NAME]
+    );
     const auditContext = buildAuditContext(companyId, params.actor);
 
     const [rows] = await connection.execute<CompanyRow[]>(
