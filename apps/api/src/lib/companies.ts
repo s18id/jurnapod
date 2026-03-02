@@ -14,6 +14,263 @@ export class CompanyAlreadyActiveError extends Error {}
 const DEFAULT_OUTLET_CODE = "MAIN";
 const DEFAULT_OUTLET_NAME = "Main Outlet";
 
+function parsePositiveInt(value: string | undefined, fallback: number, key: string): number {
+  if (value == null || value.length === 0) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${key} must be a non-negative integer`);
+  }
+
+  return parsed;
+}
+
+function parseMinInt(
+  value: string | undefined,
+  fallback: number,
+  key: string,
+  minValue: number
+): number {
+  const parsed = parsePositiveInt(value, fallback, key);
+  if (parsed < minValue) {
+    throw new Error(`${key} must be >= ${minValue}`);
+  }
+  return parsed;
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean, key: string): boolean {
+  if (value == null || value.length === 0) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") {
+    return true;
+  }
+  if (normalized === "false") {
+    return false;
+  }
+
+  throw new Error(`${key} must be "true" or "false"`);
+}
+
+function parseCostingMethod(
+  value: string | undefined,
+  fallback: string,
+  key: string
+): string {
+  if (value == null || value.length === 0) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "AVG" || normalized === "FIFO" || normalized === "LIFO") {
+    return normalized;
+  }
+
+  throw new Error(`${key} must be AVG, FIFO, or LIFO`);
+}
+
+const MODULE_DEFINITIONS = [
+  {
+    code: "platform",
+    name: "Platform",
+    description: "Core platform services"
+  },
+  {
+    code: "pos",
+    name: "POS",
+    description: "Point of sale"
+  },
+  {
+    code: "sales",
+    name: "Sales",
+    description: "Sales invoices"
+  },
+  {
+    code: "inventory",
+    name: "Inventory",
+    description: "Stock movements and recipes"
+  },
+  {
+    code: "purchasing",
+    name: "Purchasing",
+    description: "Purchasing and payables"
+  },
+  {
+    code: "reports",
+    name: "Reports",
+    description: "Reporting and analytics"
+  },
+  {
+    code: "settings",
+    name: "Settings",
+    description: "Settings and configuration"
+  },
+  {
+    code: "accounts",
+    name: "Accounts",
+    description: "Chart of accounts"
+  },
+  {
+    code: "journals",
+    name: "Journals",
+    description: "Journal entries and posting"
+  }
+] as const;
+
+const COMPANY_MODULE_DEFAULTS = [
+  { code: "platform", enabled: true, config: {} },
+  { code: "pos", enabled: true, config: { payment_methods: ["CASH"] } },
+  { code: "sales", enabled: true, config: {} },
+  { code: "inventory", enabled: true, config: { level: 0 } },
+  { code: "purchasing", enabled: false, config: {} },
+  { code: "reports", enabled: true, config: {} },
+  { code: "settings", enabled: true, config: {} },
+  { code: "accounts", enabled: true, config: {} },
+  { code: "journals", enabled: true, config: {} }
+] as const;
+
+const ROLE_DEFINITIONS = [
+  { code: "SUPER_ADMIN", name: "Super Admin" },
+  { code: "OWNER", name: "Owner" },
+  { code: "ADMIN", name: "Admin" },
+  { code: "CASHIER", name: "Cashier" },
+  { code: "ACCOUNTANT", name: "Accountant" }
+] as const;
+
+const MODULE_ROLE_DEFAULTS = [
+  { roleCode: "SUPER_ADMIN", module: "companies", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "users", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "roles", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "outlets", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "accounts", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "journals", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "sales", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "inventory", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "purchasing", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "reports", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "settings", permissionMask: 15 },
+  { roleCode: "OWNER", module: "companies", permissionMask: 15 },
+  { roleCode: "OWNER", module: "users", permissionMask: 15 },
+  { roleCode: "OWNER", module: "roles", permissionMask: 15 },
+  { roleCode: "OWNER", module: "outlets", permissionMask: 15 },
+  { roleCode: "OWNER", module: "accounts", permissionMask: 15 },
+  { roleCode: "OWNER", module: "journals", permissionMask: 15 },
+  { roleCode: "OWNER", module: "sales", permissionMask: 15 },
+  { roleCode: "OWNER", module: "inventory", permissionMask: 15 },
+  { roleCode: "OWNER", module: "purchasing", permissionMask: 15 },
+  { roleCode: "OWNER", module: "reports", permissionMask: 15 },
+  { roleCode: "OWNER", module: "settings", permissionMask: 15 },
+  { roleCode: "ADMIN", module: "companies", permissionMask: 2 },
+  { roleCode: "ADMIN", module: "users", permissionMask: 15 },
+  { roleCode: "ADMIN", module: "roles", permissionMask: 2 },
+  { roleCode: "ADMIN", module: "outlets", permissionMask: 15 },
+  { roleCode: "ADMIN", module: "accounts", permissionMask: 15 },
+  { roleCode: "ADMIN", module: "journals", permissionMask: 15 },
+  { roleCode: "ADMIN", module: "sales", permissionMask: 15 },
+  { roleCode: "ADMIN", module: "inventory", permissionMask: 15 },
+  { roleCode: "ADMIN", module: "purchasing", permissionMask: 15 },
+  { roleCode: "ADMIN", module: "reports", permissionMask: 2 },
+  { roleCode: "ADMIN", module: "settings", permissionMask: 6 },
+  { roleCode: "CASHIER", module: "companies", permissionMask: 0 },
+  { roleCode: "CASHIER", module: "users", permissionMask: 0 },
+  { roleCode: "CASHIER", module: "roles", permissionMask: 0 },
+  { roleCode: "CASHIER", module: "outlets", permissionMask: 2 },
+  { roleCode: "CASHIER", module: "accounts", permissionMask: 0 },
+  { roleCode: "CASHIER", module: "journals", permissionMask: 0 },
+  { roleCode: "CASHIER", module: "sales", permissionMask: 3 },
+  { roleCode: "CASHIER", module: "inventory", permissionMask: 2 },
+  { roleCode: "CASHIER", module: "purchasing", permissionMask: 0 },
+  { roleCode: "CASHIER", module: "reports", permissionMask: 2 },
+  { roleCode: "CASHIER", module: "settings", permissionMask: 0 },
+  { roleCode: "ACCOUNTANT", module: "companies", permissionMask: 0 },
+  { roleCode: "ACCOUNTANT", module: "users", permissionMask: 0 },
+  { roleCode: "ACCOUNTANT", module: "roles", permissionMask: 0 },
+  { roleCode: "ACCOUNTANT", module: "outlets", permissionMask: 2 },
+  { roleCode: "ACCOUNTANT", module: "accounts", permissionMask: 2 },
+  { roleCode: "ACCOUNTANT", module: "journals", permissionMask: 2 },
+  { roleCode: "ACCOUNTANT", module: "sales", permissionMask: 2 },
+  { roleCode: "ACCOUNTANT", module: "inventory", permissionMask: 0 },
+  { roleCode: "ACCOUNTANT", module: "purchasing", permissionMask: 2 },
+  { roleCode: "ACCOUNTANT", module: "reports", permissionMask: 2 },
+  { roleCode: "ACCOUNTANT", module: "settings", permissionMask: 0 }
+] as const;
+
+const SETTINGS_DEFINITIONS = [
+  {
+    key: "feature.pos.auto_sync_enabled",
+    valueType: "boolean",
+    envKey: "JP_FEATURE_POS_AUTO_SYNC_ENABLED",
+    parse: (value: string | undefined) => parseBoolean(value, true, "JP_FEATURE_POS_AUTO_SYNC_ENABLED")
+  },
+  {
+    key: "feature.pos.sync_interval_seconds",
+    valueType: "int",
+    envKey: "JP_FEATURE_POS_SYNC_INTERVAL_SECONDS",
+    parse: (value: string | undefined) =>
+      parseMinInt(value, 60, "JP_FEATURE_POS_SYNC_INTERVAL_SECONDS", 5)
+  },
+  {
+    key: "feature.sales.tax_included_default",
+    valueType: "boolean",
+    envKey: "JP_FEATURE_SALES_TAX_INCLUDED_DEFAULT",
+    parse: (value: string | undefined) =>
+      parseBoolean(value, false, "JP_FEATURE_SALES_TAX_INCLUDED_DEFAULT")
+  },
+  {
+    key: "feature.inventory.allow_backorder",
+    valueType: "boolean",
+    envKey: "JP_FEATURE_INVENTORY_ALLOW_BACKORDER",
+    parse: (value: string | undefined) =>
+      parseBoolean(value, false, "JP_FEATURE_INVENTORY_ALLOW_BACKORDER")
+  },
+  {
+    key: "feature.purchasing.require_approval",
+    valueType: "boolean",
+    envKey: "JP_FEATURE_PURCHASING_REQUIRE_APPROVAL",
+    parse: (value: string | undefined) =>
+      parseBoolean(value, true, "JP_FEATURE_PURCHASING_REQUIRE_APPROVAL")
+  },
+  {
+    key: "inventory.low_stock_threshold",
+    valueType: "int",
+    envKey: "JP_INVENTORY_LOW_STOCK_THRESHOLD",
+    parse: (value: string | undefined) =>
+      parsePositiveInt(value, 5, "JP_INVENTORY_LOW_STOCK_THRESHOLD")
+  },
+  {
+    key: "inventory.reorder_point",
+    valueType: "int",
+    envKey: "JP_INVENTORY_REORDER_POINT",
+    parse: (value: string | undefined) =>
+      parsePositiveInt(value, 10, "JP_INVENTORY_REORDER_POINT")
+  },
+  {
+    key: "inventory.allow_negative_stock",
+    valueType: "boolean",
+    envKey: "JP_INVENTORY_ALLOW_NEGATIVE_STOCK",
+    parse: (value: string | undefined) =>
+      parseBoolean(value, false, "JP_INVENTORY_ALLOW_NEGATIVE_STOCK")
+  },
+  {
+    key: "inventory.costing_method",
+    valueType: "enum",
+    envKey: "JP_INVENTORY_COSTING_METHOD",
+    parse: (value: string | undefined) =>
+      parseCostingMethod(value, "AVG", "JP_INVENTORY_COSTING_METHOD")
+  },
+  {
+    key: "inventory.warn_on_negative",
+    valueType: "boolean",
+    envKey: "JP_INVENTORY_WARN_ON_NEGATIVE",
+    parse: (value: string | undefined) =>
+      parseBoolean(value, true, "JP_INVENTORY_WARN_ON_NEGATIVE")
+  }
+] as const;
+
 export type CompanyResponse = {
   id: number;
   code: string;
@@ -93,6 +350,171 @@ function normalizeCompanyRow(row: CompanyRow): CompanyResponse {
     updated_at: row.updated_at.toISOString(),
     deleted_at: row.deleted_at ? row.deleted_at.toISOString() : null
   };
+}
+
+async function ensureDefaultOutlet(
+  connection: PoolConnection,
+  companyId: number
+): Promise<number> {
+  const [result] = await connection.execute<ResultSetHeader>(
+    `INSERT INTO outlets (company_id, code, name)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       id = LAST_INSERT_ID(id)`,
+    [companyId, DEFAULT_OUTLET_CODE, DEFAULT_OUTLET_NAME]
+  );
+
+  return Number(result.insertId);
+}
+
+async function upsertRole(
+  connection: PoolConnection,
+  roleCode: string,
+  roleName: string
+): Promise<number> {
+  const [result] = await connection.execute<ResultSetHeader>(
+    `INSERT INTO roles (code, name)
+     VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE
+       name = VALUES(name),
+       id = LAST_INSERT_ID(id),
+       updated_at = CURRENT_TIMESTAMP`,
+    [roleCode, roleName]
+  );
+
+  return Number(result.insertId);
+}
+
+async function ensureRoles(connection: PoolConnection): Promise<Record<string, number>> {
+  const roleIds: Record<string, number> = {};
+  for (const role of ROLE_DEFINITIONS) {
+    roleIds[role.code] = await upsertRole(connection, role.code, role.name);
+  }
+  return roleIds;
+}
+
+async function upsertModule(
+  connection: PoolConnection,
+  moduleCode: string,
+  moduleName: string,
+  moduleDescription: string | null
+): Promise<number> {
+  const [result] = await connection.execute<ResultSetHeader>(
+    `INSERT INTO modules (code, name, description)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       name = VALUES(name),
+       description = VALUES(description),
+       id = LAST_INSERT_ID(id),
+       updated_at = CURRENT_TIMESTAMP`,
+    [moduleCode, moduleName, moduleDescription]
+  );
+
+  return Number(result.insertId);
+}
+
+async function ensureModules(connection: PoolConnection): Promise<Record<string, number>> {
+  const moduleIds: Record<string, number> = {};
+  for (const moduleEntry of MODULE_DEFINITIONS) {
+    moduleIds[moduleEntry.code] = await upsertModule(
+      connection,
+      moduleEntry.code,
+      moduleEntry.name,
+      moduleEntry.description
+    );
+  }
+  return moduleIds;
+}
+
+async function ensureCompanyModules(
+  connection: PoolConnection,
+  companyId: number,
+  moduleIds: Record<string, number>,
+  actorUserId: number
+): Promise<void> {
+  for (const moduleEntry of COMPANY_MODULE_DEFAULTS) {
+    const moduleId = moduleIds[moduleEntry.code];
+    if (!moduleId) {
+      throw new Error(`module id not found for ${moduleEntry.code}`);
+    }
+
+    await connection.execute(
+      `INSERT IGNORE INTO company_modules (
+         company_id,
+         module_id,
+         enabled,
+         config_json,
+         created_by_user_id,
+         updated_by_user_id
+       ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        companyId,
+        moduleId,
+        moduleEntry.enabled ? 1 : 0,
+        JSON.stringify(moduleEntry.config ?? {}),
+        actorUserId,
+        actorUserId
+      ]
+    );
+  }
+}
+
+async function ensureModuleRoles(
+  connection: PoolConnection,
+  companyId: number,
+  roleIds: Record<string, number>
+): Promise<void> {
+  for (const roleEntry of MODULE_ROLE_DEFAULTS) {
+    const roleId = roleIds[roleEntry.roleCode];
+    if (!roleId) {
+      throw new Error(`role id not found for ${roleEntry.roleCode}`);
+    }
+
+    await connection.execute(
+      `INSERT IGNORE INTO module_roles (company_id, role_id, module, permission_mask)
+       VALUES (?, ?, ?, ?)`,
+      [companyId, roleId, roleEntry.module, roleEntry.permissionMask]
+    );
+  }
+}
+
+async function ensureCompanySettings(
+  connection: PoolConnection,
+  companyId: number,
+  outletId: number,
+  actorUserId: number
+): Promise<void> {
+  for (const setting of SETTINGS_DEFINITIONS) {
+    const rawValue = process.env[setting.envKey];
+    const parsedValue = setting.parse(rawValue);
+    const valueJson = JSON.stringify(parsedValue);
+
+    await connection.execute(
+      `INSERT IGNORE INTO company_settings (
+         company_id,
+         outlet_id,
+         \`key\`,
+         value_type,
+         value_json,
+         created_by_user_id,
+         updated_by_user_id
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [companyId, outletId, setting.key, setting.valueType, valueJson, actorUserId, actorUserId]
+    );
+  }
+}
+
+async function bootstrapCompanyDefaults(
+  connection: PoolConnection,
+  params: { companyId: number; actor: CompanyActor }
+): Promise<void> {
+  const outletId = await ensureDefaultOutlet(connection, params.companyId);
+  const roleIds = await ensureRoles(connection);
+  const moduleIds = await ensureModules(connection);
+
+  await ensureCompanyModules(connection, params.companyId, moduleIds, params.actor.userId);
+  await ensureModuleRoles(connection, params.companyId, roleIds);
+  await ensureCompanySettings(connection, params.companyId, outletId, params.actor.userId);
 }
 
 async function ensureCompanyExists(
@@ -203,10 +625,10 @@ export async function createCompany(params: {
 
     const companyId = Number(result.insertId);
 
-    await connection.execute<ResultSetHeader>(
-      `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
-      [companyId, DEFAULT_OUTLET_CODE, DEFAULT_OUTLET_NAME]
-    );
+    await bootstrapCompanyDefaults(connection, {
+      companyId,
+      actor: params.actor
+    });
     const auditContext = buildAuditContext(companyId, params.actor);
 
     const [rows] = await connection.execute<CompanyRow[]>(
