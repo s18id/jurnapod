@@ -72,7 +72,8 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
       "/roles",
       "/companies",
       "/outlets",
-      "/static-pages"
+      "/static-pages",
+      "/platform-settings"
     ]
   }
 ];
