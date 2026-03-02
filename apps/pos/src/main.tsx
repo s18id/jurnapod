@@ -204,30 +204,30 @@ function App() {
         }
       });
 
-      if (!meResponse.success) {
+      if (!meResponse.ok) {
         throw new Error("Login succeeded but failed to load user outlets");
       }
 
       const mePayload = (await meResponse.json()) as {
         success: true;
-        user: {
+        data: {
           company_id: number;
           outlets: Array<{ id: number; code: string; name: string }>;
         };
       };
 
-      if (!mePayload?.success || !Array.isArray(mePayload.user?.outlets) || mePayload.user.outlets.length === 0) {
+      if (!mePayload?.success || !Array.isArray(mePayload.data?.outlets) || mePayload.data.outlets.length === 0) {
         throw new Error("No outlet access found for this user");
       }
 
-      const nextOutlets = mePayload.user.outlets.map((outlet) => ({
+      const nextOutlets = mePayload.data.outlets.map((outlet) => ({
         outlet_id: Number(outlet.id),
         label: `${outlet.code} - ${outlet.name}`
       }));
 
       setOutletOptions(nextOutlets);
       setScope({
-        company_id: Number(mePayload.user.company_id),
+        company_id: Number(mePayload.data.company_id),
         outlet_id: nextOutlets[0].outlet_id
       });
       setAuthToken(accessToken);
@@ -287,7 +287,7 @@ function App() {
           | { success: true; access_token: string }
           | { success: false; error?: { message?: string } };
 
-        if (!response.success || !payload || payload.success !== true || typeof payload.access_token !== "string") {
+        if (!response.ok || !payload || payload.success !== true || typeof payload.access_token !== "string") {
           const msg = payload && payload.success === false ? payload.error?.message ?? "Login failed" : "Login failed";
           throw new Error(msg);
         }
@@ -702,7 +702,7 @@ function App() {
         | { success: true; access_token: string }
         | { success: false; error?: { message?: string } };
 
-      if (!response.success || !payload || payload.success !== true || typeof payload.access_token !== "string") {
+      if (!response.ok || !payload || payload.success !== true || typeof payload.access_token !== "string") {
         const msg = payload && payload.success === false ? payload.error?.message ?? "Login failed" : "Login failed";
         throw new Error(msg);
       }

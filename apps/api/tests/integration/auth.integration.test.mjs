@@ -352,11 +352,11 @@ test(
       assert.equal(meWithTokenResponse.status, 200);
       const meWithTokenBody = await meWithTokenResponse.json();
       assert.equal(meWithTokenBody.success, true);
-      assert.equal(meWithTokenBody.user.id, ownerUserId);
-      assert.equal(meWithTokenBody.user.company_id, companyId);
-      assert.equal(meWithTokenBody.user.email, ownerEmail);
-      assert.deepEqual(meWithTokenBody.user.roles, expectedOwnerRoles);
-      assert.deepEqual(meWithTokenBody.user.outlets, expectedOwnerOutlets);
+      assert.equal(meWithTokenBody.data.id, ownerUserId);
+      assert.equal(meWithTokenBody.data.company_id, companyId);
+      assert.equal(meWithTokenBody.data.email, ownerEmail);
+      assert.deepEqual(meWithTokenBody.data.roles, expectedOwnerRoles);
+      assert.deepEqual(meWithTokenBody.data.outlets, expectedOwnerOutlets);
 
       const ownerAllowedOutletResponse = await fetch(
         `${baseUrl}/api/outlets/access?outlet_id=${allowedOutletId}`,
@@ -405,9 +405,9 @@ test(
       assert.equal(viewerMeResponse.status, 200);
       const viewerMeBody = await viewerMeResponse.json();
       assert.equal(viewerMeBody.success, true);
-      assert.equal(viewerMeBody.user.id, viewerUserId);
-      assert.equal(viewerMeBody.user.company_id, companyId);
-      assert.equal(viewerMeBody.user.email, viewerEmail);
+      assert.equal(viewerMeBody.data.id, viewerUserId);
+      assert.equal(viewerMeBody.data.company_id, companyId);
+      assert.equal(viewerMeBody.data.email, viewerEmail);
 
       const viewerOutletResponse = await fetch(
         `${baseUrl}/api/outlets/access?outlet_id=${allowedOutletId}`,

@@ -5,6 +5,7 @@ import { NumericIdSchema, RoleSchema } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
 import { readClientIp } from "../../../src/lib/request-meta";
+import { successResponse } from "../../../src/lib/response";
 import {
   createUser,
   listUsers,
@@ -96,7 +97,7 @@ export const GET = withAuth(
       const search = url.searchParams.get("search")?.trim() || undefined;
       const users = await listUsers(auth.companyId, { isActive, search });
 
-      return Response.json({ success: true, users }, { status: 200 });
+      return successResponse(users);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -133,7 +134,7 @@ export const POST = withAuth(
         }
       });
 
-      return Response.json({ success: true, user }, { status: 201 });
+      return successResponse(user, 201);
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

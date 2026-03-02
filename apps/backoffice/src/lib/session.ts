@@ -30,7 +30,7 @@ type LoginResponse = {
 
 type MeResponse = {
   success: true;
-  user: SessionUser;
+  data: SessionUser;
 };
 
 export type LoginInput = {
@@ -99,5 +99,5 @@ export async function loginWithGoogle(
 
 export async function fetchCurrentUser(accessToken: string): Promise<SessionUser> {
   const response = await apiRequest<MeResponse>("/users/me", {}, accessToken);
-  return response.user;
+  return response.data;
 }

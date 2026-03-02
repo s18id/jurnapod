@@ -331,7 +331,7 @@ export async function updateUserPassword(
   data: UserPasswordUpdateRequest,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ success: true }>(
+  await apiRequest<{ success: true; data: null }>(
     `/users/${userId}/password`,
     {
       method: "POST",

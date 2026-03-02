@@ -3,6 +3,7 @@
 
 import { findActiveUserById } from "../../../../src/lib/auth";
 import { unauthorizedResponse, withAuth } from "../../../../src/lib/auth-guard";
+import { successResponse } from "../../../../src/lib/response";
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
   success: false,
@@ -20,7 +21,7 @@ export const GET = withAuth(
         return unauthorizedResponse();
       }
 
-      return Response.json({ success: true, user }, { status: 200 });
+      return successResponse(user);
     } catch (error) {
       console.error("GET /api/users/me failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });

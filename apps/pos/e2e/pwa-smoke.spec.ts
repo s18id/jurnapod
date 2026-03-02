@@ -49,7 +49,7 @@ test("login + sync pull works with mocked API", async ({ page }) => {
       contentType: "application/json",
       body: JSON.stringify({
         success: true,
-        user: {
+        data: {
           id: 1,
           company_id: 1,
           outlets: [

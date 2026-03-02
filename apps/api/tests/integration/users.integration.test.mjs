@@ -271,7 +271,7 @@ test(
       assert.equal(createResponse.status, 201);
       const createBody = await createResponse.json();
       assert.equal(createBody.success, true);
-      const userId = Number(createBody.user.id);
+      const userId = Number(createBody.data.id);
       assert.success(userId > 0);
 
       const getResponse = await fetch(`${baseUrl}/api/users/${userId}`, {
@@ -326,7 +326,7 @@ test(
 
       assert.equal(deactivateResponse.status, 200);
       const deactivateBody = await deactivateResponse.json();
-      assert.equal(deactivateBody.user.is_active, false);
+      assert.equal(deactivateBody.data.is_active, false);
 
       const reactivateResponse = await fetch(`${baseUrl}/api/users/${userId}/reactivate`, {
         method: "POST",
@@ -335,7 +335,7 @@ test(
 
       assert.equal(reactivateResponse.status, 200);
       const reactivateBody = await reactivateResponse.json();
-      assert.equal(reactivateBody.user.is_active, true);
+      assert.equal(reactivateBody.data.is_active, true);
 
       const [auditRows] = await db.execute(
         `SELECT action, ip_address

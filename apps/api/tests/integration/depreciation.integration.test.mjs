@@ -177,8 +177,8 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     const meData = await meResponse.json();
-    const outletId = meData.user?.outlets?.[0]?.id ?? 1;
-    const companyId = meData.user?.company_id ?? 1;
+    const outletId = meData.data?.outlets?.[0]?.id ?? 1;
+    const companyId = meData.data?.company_id ?? 1;
 
     t.diagnostic(`Using companyId: ${companyId}, outletId: ${outletId}`);
 
