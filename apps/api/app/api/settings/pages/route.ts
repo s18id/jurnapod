@@ -68,7 +68,7 @@ export const GET = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN"], module: "settings", permission: "read" })]
+  [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "read" })]
 );
 
 export const POST = withAuth(
@@ -107,5 +107,5 @@ export const POST = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN"], module: "settings", permission: "create" })]
+  [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "create" })]
 );

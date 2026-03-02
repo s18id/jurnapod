@@ -69,5 +69,5 @@ export const POST = withAuth(
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN"], module: "settings", permission: "update" })]
+  [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "update" })]
 );

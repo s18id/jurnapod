@@ -14,10 +14,15 @@ const DEFAULT_BCRYPT_ROUNDS = 12;
 const DEFAULT_ARGON2_MEMORY_KB = 65536;
 const DEFAULT_ARGON2_TIME_COST = 3;
 const DEFAULT_ARGON2_PARALLELISM = 1;
+const DEFAULT_MAILER_DRIVER = "disabled";
+const DEFAULT_MAILER_SMTP_PORT = 587;
+const DEFAULT_MAILER_SMTP_SECURE = false;
+const DEFAULT_MAILER_SMTP_TLS_REJECT_UNAUTHORIZED = true;
 const ENV_VALIDATION_PREFIX = "Invalid API environment configuration:";
 const REPO_ROOT_ENV_AUTOLOAD_DISABLE_KEY = "JP_DISABLE_REPO_ROOT_ENV_AUTOLOAD";
 
 export type PasswordHashAlgorithm = "argon2id" | "bcrypt";
+export type MailerDriver = "smtp" | "log" | "disabled";
 
 function parsePositiveInt(
   value: string | undefined,
@@ -97,6 +102,22 @@ function parsePasswordHashAlgorithm(
   throw new Error(`${key} must be \"argon2id\" or \"bcrypt\"`);
 }
 
+function parseMailerDriver(
+  value: string | undefined,
+  fallback: MailerDriver,
+  key: string
+): MailerDriver {
+  if (value == null || value.length === 0) {
+    return fallback;
+  }
+
+  if (value === "smtp" || value === "log" || value === "disabled") {
+    return value;
+  }
+
+  throw new Error(`${key} must be \"smtp\", \"log\", or \"disabled\"`);
+}
+
 function createEnvValidationError(cause: unknown): Error {
   const message = cause instanceof Error ? cause.message : "unknown configuration error";
   return new Error(
@@ -139,6 +160,19 @@ export type AppEnv = {
     clientId: string | null;
     clientSecret: string | null;
     redirectUris: string[];
+  };
+  mailer: {
+    driver: MailerDriver;
+    fromName: string;
+    fromEmail: string;
+    smtp: {
+      host: string;
+      port: number;
+      user: string;
+      password: string;
+      secure: boolean;
+      tlsRejectUnauthorized: boolean;
+    };
   };
 };
 
@@ -268,6 +302,47 @@ export function getAppEnv(): AppEnv {
       throw new Error("AUTH_LOGIN_THROTTLE_MAX_MS must be >= AUTH_LOGIN_THROTTLE_BASE_MS");
     }
 
+    const mailerDriver = parseMailerDriver(
+      process.env.MAILER_DRIVER,
+      DEFAULT_MAILER_DRIVER,
+      "MAILER_DRIVER"
+    );
+    const mailerFromName = process.env.MAILER_FROM_NAME ?? "Jurnapod";
+    const mailerFromEmail = process.env.MAILER_FROM_EMAIL ?? "";
+    const mailerSmtpHost = process.env.MAILER_SMTP_HOST ?? "";
+    const mailerSmtpPort = parsePositiveInt(
+      process.env.MAILER_SMTP_PORT,
+      DEFAULT_MAILER_SMTP_PORT,
+      "MAILER_SMTP_PORT"
+    );
+    const mailerSmtpUser = process.env.MAILER_SMTP_USER ?? "";
+    const mailerSmtpPass = process.env.MAILER_SMTP_PASS ?? "";
+    const mailerSmtpSecure = parseBooleanString(
+      process.env.MAILER_SMTP_SECURE,
+      DEFAULT_MAILER_SMTP_SECURE,
+      "MAILER_SMTP_SECURE"
+    );
+    const mailerSmtpTlsRejectUnauthorized = parseBooleanString(
+      process.env.MAILER_SMTP_TLS_REJECT_UNAUTHORIZED,
+      DEFAULT_MAILER_SMTP_TLS_REJECT_UNAUTHORIZED,
+      "MAILER_SMTP_TLS_REJECT_UNAUTHORIZED"
+    );
+
+    if (mailerDriver === "smtp") {
+      if (!mailerFromEmail || mailerFromEmail.trim().length === 0) {
+        throw new Error("MAILER_FROM_EMAIL is required when MAILER_DRIVER=smtp");
+      }
+      if (!mailerSmtpHost || mailerSmtpHost.trim().length === 0) {
+        throw new Error("MAILER_SMTP_HOST is required when MAILER_DRIVER=smtp");
+      }
+      if (!mailerSmtpUser || mailerSmtpUser.trim().length === 0) {
+        throw new Error("MAILER_SMTP_USER is required when MAILER_DRIVER=smtp");
+      }
+      if (!mailerSmtpPass || mailerSmtpPass.trim().length === 0) {
+        throw new Error("MAILER_SMTP_PASS is required when MAILER_DRIVER=smtp");
+      }
+    }
+
     cachedEnv = Object.freeze({
       db: {
         host: process.env.DB_HOST ?? "127.0.0.1",
@@ -313,6 +388,19 @@ export function getAppEnv(): AppEnv {
         clientId: googleClientId,
         clientSecret: googleClientSecret,
         redirectUris: googleRedirectUris
+      },
+      mailer: {
+        driver: mailerDriver,
+        fromName: mailerFromName,
+        fromEmail: mailerFromEmail,
+        smtp: {
+          host: mailerSmtpHost,
+          port: mailerSmtpPort,
+          user: mailerSmtpUser,
+          password: mailerSmtpPass,
+          secure: mailerSmtpSecure,
+          tlsRejectUnauthorized: mailerSmtpTlsRejectUnauthorized
+        }
       }
     });
   } catch (error) {
