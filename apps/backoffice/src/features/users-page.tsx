@@ -15,6 +15,7 @@ import {
   deactivateUser,
   reactivateUser
 } from "../hooks/use-users";
+import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
 import type { UserResponse, RoleResponse, OutletResponse } from "@jurnapod/shared";
 
@@ -26,6 +27,7 @@ type UsersPageProps = {
 type DialogMode = "create" | "edit" | "roles" | "outlets" | "password" | null;
 
 type UserFormData = {
+  company_id?: number | null;
   email: string;
   password: string;
   role_codes: string[];
@@ -34,6 +36,7 @@ type UserFormData = {
 };
 
 const emptyForm: UserFormData = {
+  company_id: null,
   email: "",
   password: "",
   role_codes: [],
@@ -172,7 +175,11 @@ export function UsersPage(props: UsersPageProps) {
   });
   
   const rolesQuery = useRoles(accessToken);
-  const outletsQuery = useOutlets(user.company_id, accessToken);
+  const companiesQuery = useCompanies(accessToken, { enabled: isSuperAdmin });
+  const outletCompanyId = isSuperAdmin && dialogMode === "create"
+    ? (formData.company_id ?? user.company_id)
+    : user.company_id;
+  const outletsQuery = useOutlets(outletCompanyId, accessToken);
   const availableRoles = (rolesQuery.data || []).filter((role) =>
     isSuperAdmin ? true : role.code !== "SUPER_ADMIN"
   );
@@ -190,7 +197,10 @@ export function UsersPage(props: UsersPageProps) {
   
   // Handlers
   const openCreateDialog = () => {
-    setFormData(emptyForm);
+    setFormData({
+      ...emptyForm,
+      company_id: isSuperAdmin ? user.company_id : null
+    });
     setFormErrors({});
     setEditingUser(null);
     setDialogMode("create");
@@ -257,6 +267,9 @@ export function UsersPage(props: UsersPageProps) {
     const errors: Partial<Record<keyof UserFormData, string>> = {};
     
     if (dialogMode === "create" || dialogMode === "edit") {
+      if (dialogMode === "create" && isSuperAdmin && !formData.company_id) {
+        errors.company_id = "Company is required";
+      }
       if (!formData.email.trim()) {
         errors.email = "Email is required";
       } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
@@ -293,8 +306,11 @@ export function UsersPage(props: UsersPageProps) {
     
     try {
       if (dialogMode === "create") {
+        const targetCompanyId = isSuperAdmin
+          ? (formData.company_id ?? user.company_id)
+          : user.company_id;
         await createUser({
-          company_id: user.company_id,
+          company_id: targetCompanyId,
           email: formData.email,
           password: formData.password,
           role_codes: formData.role_codes.length > 0 ? formData.role_codes as any : undefined,
@@ -566,6 +582,41 @@ export function UsersPage(props: UsersPageProps) {
                 
                 {dialogMode === "create" && (
                   <>
+                    {isSuperAdmin && (
+                      <div style={{ marginBottom: "16px" }}>
+                        <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+                          Company <span style={{ color: "#8d2626" }}>*</span>
+                        </label>
+                        <select
+                          value={formData.company_id ?? ""}
+                          onChange={(e) => {
+                            const value = e.target.value ? Number(e.target.value) : null;
+                            setFormData({
+                              ...formData,
+                              company_id: value,
+                              outlet_ids: []
+                            });
+                          }}
+                          style={{ ...inputStyle, width: "100%" }}
+                        >
+                          <option value="">Select company...</option>
+                          {companiesQuery.data.map(company => (
+                            <option key={company.id} value={company.id}>
+                              {company.name} ({company.code})
+                            </option>
+                          ))}
+                        </select>
+                        {companiesQuery.loading && (
+                          <small style={{ color: "#7a6c58", fontSize: "11px" }}>Loading companies...</small>
+                        )}
+                        {companiesQuery.error && (
+                          <small style={{ color: "#8d2626", fontSize: "11px" }}>{companiesQuery.error}</small>
+                        )}
+                        {formErrors.company_id && (
+                          <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.company_id}</small>
+                        )}
+                      </div>
+                    )}
                     <div style={{ marginBottom: "16px" }}>
                       <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
                         Password <span style={{ color: "#8d2626" }}>*</span>
