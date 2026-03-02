@@ -122,7 +122,7 @@ test(
       );
       assert.equal(response.status, 200);
       const body = await response.json();
-      assert.equal(body.ok, true);
+      assert.equal(body.success, true);
 
       const row = body.rows.find((entry) => Number(entry.outlet_id) === outletId);
       assert.equal(Boolean(row), true);
@@ -275,7 +275,7 @@ test(
       );
       assert.equal(response.status, 200);
       const body = await response.json();
-      assert.equal(body.ok, true);
+      assert.equal(body.success, true);
 
       const row = body.rows.find((entry) => Number(entry.outlet_id) === outletId);
       assert.equal(Boolean(row), true);

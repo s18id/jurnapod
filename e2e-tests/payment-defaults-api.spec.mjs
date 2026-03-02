@@ -40,7 +40,7 @@ async function login() {
     })
   });
 
-  if (!response.ok || !data.access_token) {
+  if (!response.success || !data.access_token) {
     throw new Error(`Login failed: ${data.error?.message || response.statusText}`);
   }
 
@@ -81,7 +81,7 @@ async function testFetchMappings(token, outletId) {
     token
   );
 
-  if (!response.ok) {
+  if (!response.success) {
     throw new Error(`Failed to fetch mappings: ${data.error?.message}`);
   }
 
@@ -126,7 +126,7 @@ async function testSetInvoiceDefault(token, outletId, mappings) {
     token
   );
 
-  if (!response.ok) {
+  if (!response.success) {
     throw new Error(`Failed to save mappings: ${data.error?.message}`);
   }
 }
@@ -170,7 +170,7 @@ async function testMultipleDefaultsValidation(token, outletId, mappings) {
     token
   );
 
-  if (response.ok) {
+  if (response.success) {
     throw new Error('API should have rejected multiple defaults but didn\'t');
   }
 
@@ -203,7 +203,7 @@ async function testUnsetDefault(token, outletId, mappings) {
     token
   );
 
-  if (!response.ok) {
+  if (!response.success) {
     throw new Error(`Failed to unset defaults: ${data.error?.message}`);
   }
 
@@ -243,7 +243,7 @@ async function testChangeDefault(token, outletId, mappings) {
     token
   );
 
-  if (!response.ok) {
+  if (!response.success) {
     throw new Error(`Failed to change default: ${data.error?.message}`);
   }
 

@@ -121,7 +121,7 @@ export async function POST(request: Request) {
       emailSnapshot: profile.email
     });
 
-    if (!linkResult.ok) {
+    if (!linkResult.success) {
       return Response.json(LINK_CONFLICT_RESPONSE, { status: 409 });
     }
 

@@ -300,7 +300,7 @@ async function fetchSyncPullPayload(input: {
     throw new Error("sync pull response is not valid JSON");
   }
 
-  if (!response.ok) {
+  if (!response.success) {
     throw new Error(normalizeServerErrorMessage(response.status, payload));
   }
 

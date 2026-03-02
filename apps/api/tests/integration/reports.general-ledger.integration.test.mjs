@@ -150,7 +150,7 @@ test(
       );
       assert.equal(ledgerResponse.status, 200);
       const ledgerBody = await ledgerResponse.json();
-      assert.equal(ledgerBody.ok, true);
+      assert.equal(ledgerBody.success, true);
       assert.equal(Array.isArray(ledgerBody.rows), true);
       assert.equal(ledgerBody.rows.length, 1);
       assert.equal(Number(ledgerBody.rows[0].account_id), accountId);
@@ -169,7 +169,7 @@ test(
       );
       assert.equal(ledgerPage2Response.status, 200);
       const ledgerPage2Body = await ledgerPage2Response.json();
-      assert.equal(ledgerPage2Body.ok, true);
+      assert.equal(ledgerPage2Body.success, true);
       assert.equal(ledgerPage2Body.rows.length, 1);
       assert.equal(ledgerPage2Body.rows[0].lines.length, 1);
       assert.equal(Number(ledgerPage2Body.rows[0].lines[0].line_id), page2LineId);

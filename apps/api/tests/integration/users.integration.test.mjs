@@ -237,8 +237,8 @@ test(
 
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
-      assert.ok(loginBody.access_token);
+      assert.equal(loginBody.success, true);
+      assert.success(loginBody.access_token);
 
       const authHeader = {
         authorization: `Bearer ${loginBody.access_token}`,
@@ -270,9 +270,9 @@ test(
 
       assert.equal(createResponse.status, 201);
       const createBody = await createResponse.json();
-      assert.equal(createBody.ok, true);
+      assert.equal(createBody.success, true);
       const userId = Number(createBody.user.id);
-      assert.ok(userId > 0);
+      assert.success(userId > 0);
 
       const getResponse = await fetch(`${baseUrl}/api/users/${userId}`, {
         headers: authHeader
@@ -346,8 +346,8 @@ test(
         [String(userId)]
       );
 
-      assert.ok(auditRows.length >= 4);
-      assert.ok(auditRows.some((row) => row.ip_address === auditIp));
+      assert.success(auditRows.length >= 4);
+      assert.success(auditRows.some((row) => row.ip_address === auditIp));
     } finally {
       await stopApiServer(childProcess);
       await db.end();

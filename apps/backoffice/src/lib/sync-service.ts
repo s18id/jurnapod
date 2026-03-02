@@ -62,7 +62,7 @@ export class SyncService {
         try {
           await db.outbox.update(item.id, { status: "syncing" });
           const result = await this.syncOne(item, accessToken);
-          if (result.ok) {
+          if (result.success) {
             await db.outbox.delete(item.id);
             success += 1;
           } else if (result.conflict) {

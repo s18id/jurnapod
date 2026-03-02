@@ -158,7 +158,7 @@ test(
       );
       assert.equal(posResponse.status, 200);
       const posBody = await posResponse.json();
-      assert.equal(posBody.ok, true);
+      assert.equal(posBody.success, true);
       assert.equal(Array.isArray(posBody.transactions), true);
       assert.equal(typeof posBody.total, "number");
 
@@ -172,7 +172,7 @@ test(
       );
       assert.equal(dailySalesResponse.status, 200);
       const dailySalesBody = await dailySalesResponse.json();
-      assert.equal(dailySalesBody.ok, true);
+      assert.equal(dailySalesBody.success, true);
       assert.equal(dailySalesBody.rows.length > 0, true);
 
       const journalsResponse = await fetch(
@@ -185,7 +185,7 @@ test(
       );
       assert.equal(journalsResponse.status, 200);
       const journalsBody = await journalsResponse.json();
-      assert.equal(journalsBody.ok, true);
+      assert.equal(journalsBody.success, true);
       assert.equal(
         journalsBody.journals.some((row) => row.id === journalBatchId && row.doc_type === "IT_REPORT"),
         true
@@ -201,7 +201,7 @@ test(
       );
       assert.equal(trialBalanceResponse.status, 200);
       const trialBalanceBody = await trialBalanceResponse.json();
-      assert.equal(trialBalanceBody.ok, true);
+      assert.equal(trialBalanceBody.success, true);
       assert.equal(
         trialBalanceBody.rows.some((row) => Number(row.account_id) === accountId),
         true

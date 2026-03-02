@@ -53,7 +53,7 @@ async function apiLogin() {
     })
   });
 
-  if (!response.ok || !data.access_token) {
+  if (!response.success || !data.access_token) {
     throw new Error(`API login failed: ${data.error?.message || response.statusText}`);
   }
 
@@ -71,7 +71,7 @@ async function ensureBackofficeReady() {
       const isJs = contentType.includes("javascript") || body.startsWith("import ");
       const isHtml = body.includes("<!DOCTYPE html>") || body.includes("<html");
 
-      if (response.ok && isJs && !isHtml) {
+      if (response.success && isJs && !isHtml) {
         return;
       }
     } catch {
@@ -93,7 +93,7 @@ async function ensurePaymentMethods() {
     token
   );
 
-  if (!accountsResponse.ok || !Array.isArray(accountsData.data) || accountsData.data.length === 0) {
+  if (!accountsResponse.success || !Array.isArray(accountsData.data) || accountsData.data.length === 0) {
     throw new Error("No payable accounts found for payment mappings");
   }
 
@@ -127,7 +127,7 @@ async function ensurePaymentMethods() {
     token
   );
 
-  if (!saveResponse.ok) {
+  if (!saveResponse.success) {
     throw new Error(`Failed to seed payment methods: ${saveData.error?.message || "unknown"}`);
   }
 }

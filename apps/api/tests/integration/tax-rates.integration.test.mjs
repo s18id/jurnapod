@@ -221,7 +221,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const createResponse = await fetch(`${baseUrl}/api/settings/tax-rates`, {
@@ -239,7 +239,7 @@ test(
       });
       assert.equal(createResponse.status, 201);
       const createBody = await createResponse.json();
-      assert.equal(createBody.ok, true);
+      assert.equal(createBody.success, true);
 
       const listResponse = await fetch(`${baseUrl}/api/settings/tax-rates`, {
         headers: {
@@ -248,9 +248,9 @@ test(
       });
       assert.equal(listResponse.status, 200);
       const listBody = await listResponse.json();
-      assert.equal(listBody.ok, true);
+      assert.equal(listBody.success, true);
       const createdRate = listBody.tax_rates.find((rate) => rate.code === rateCode);
-      assert.ok(createdRate);
+      assert.success(createdRate);
 
       const defaultsResponse = await fetch(`${baseUrl}/api/settings/tax-defaults`, {
         method: "PUT",
@@ -264,7 +264,7 @@ test(
       });
       assert.equal(defaultsResponse.status, 200);
       const defaultsBody = await defaultsResponse.json();
-      assert.equal(defaultsBody.ok, true);
+      assert.equal(defaultsBody.success, true);
 
       const getDefaultsResponse = await fetch(`${baseUrl}/api/settings/tax-defaults`, {
         headers: {
@@ -273,7 +273,7 @@ test(
       });
       assert.equal(getDefaultsResponse.status, 200);
       const getDefaultsBody = await getDefaultsResponse.json();
-      assert.equal(getDefaultsBody.ok, true);
+      assert.equal(getDefaultsBody.success, true);
       assert.equal(getDefaultsBody.tax_rate_ids.includes(createdRate.id), true);
     } finally {
       try {

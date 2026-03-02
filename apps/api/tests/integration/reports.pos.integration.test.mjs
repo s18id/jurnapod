@@ -110,7 +110,7 @@ test(
       );
       assert.equal(response.status, 200);
       const body = await response.json();
-      assert.equal(body.ok, true);
+      assert.equal(body.success, true);
 
       const cashRow = body.rows.find((row) => row.method === "CASH");
       const qrisRow = body.rows.find((row) => row.method === "QRIS");
@@ -221,7 +221,7 @@ test(
       );
       assert.equal(response.status, 200);
       const body = await response.json();
-      assert.equal(body.ok, true);
+      assert.equal(body.success, true);
 
       const returnedClientTxIds = body.transactions.map((row) => row.client_tx_id);
       assert.equal(returnedClientTxIds.includes(txInsideClientId), true);
@@ -307,7 +307,7 @@ test(
       );
       assert.equal(page1Response.status, 200);
       const page1Body = await page1Response.json();
-      assert.equal(page1Body.ok, true);
+      assert.equal(page1Body.success, true);
       assert.equal(typeof page1Body.filters.as_of, "string");
       assert.equal(typeof page1Body.filters.as_of_id, "number");
       assert.equal(page1Body.total, 2);
@@ -336,7 +336,7 @@ test(
       );
       assert.equal(page2Response.status, 200);
       const page2Body = await page2Response.json();
-      assert.equal(page2Body.ok, true);
+      assert.equal(page2Body.success, true);
       assert.equal(page2Body.total, 2);
 
       const returnedPage2Ids = page2Body.transactions.map((row) => row.client_tx_id);

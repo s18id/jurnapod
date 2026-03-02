@@ -394,7 +394,7 @@ async function autoSync() {
       // Attempt to sync
       const response = await syncTransaction(item);
 
-      if (response.ok) {
+      if (response.success) {
         // Success - remove from queue
         await outbox.delete(item.id);
         await syncHistory.add({
@@ -740,7 +740,7 @@ async function refreshMasterDataCache() {
           headers: { Authorization: `Bearer ${token}` }
         });
         
-        if (response.ok) {
+        if (response.success) {
           const { data } = await response.json();
           
           // Update cache
@@ -1577,7 +1577,7 @@ function MasterDataList({ data, lastSync }) {
          body: JSON.stringify(item.payload)
        });
 
-       if (response.ok) {
+       if (response.success) {
          return { success: true };
        } else if (response.status === 409) {
          return { success: false, conflict: true, error: await response.text() };

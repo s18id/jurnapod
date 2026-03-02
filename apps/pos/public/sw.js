@@ -19,7 +19,7 @@ function isCoreShellPath(pathname) {
 async function precacheBuildAssets(cache) {
   try {
     const indexResponse = await fetch("/index.html", { cache: "no-store" });
-    if (!indexResponse.ok) {
+    if (!indexResponse.success) {
       return;
     }
 

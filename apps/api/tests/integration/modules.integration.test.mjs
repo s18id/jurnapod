@@ -210,7 +210,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const updateResponse = await fetch(`${baseUrl}/api/settings/modules`, {
@@ -231,7 +231,7 @@ test(
       });
       assert.equal(updateResponse.status, 200);
       const updateBody = await updateResponse.json();
-      assert.equal(updateBody.ok, true);
+      assert.equal(updateBody.success, true);
 
       const listResponse = await fetch(`${baseUrl}/api/settings/modules`, {
         headers: {
@@ -240,9 +240,9 @@ test(
       });
       assert.equal(listResponse.status, 200);
       const listBody = await listResponse.json();
-      assert.equal(listBody.ok, true);
+      assert.equal(listBody.success, true);
       const posModule = listBody.modules.find((mod) => mod.code === moduleCode);
-      assert.ok(posModule);
+      assert.success(posModule);
       assert.equal(posModule.enabled, true);
       const config = JSON.parse(posModule.config_json);
       assert.deepEqual(config.payment_methods, ["CASH", "QRIS"]);

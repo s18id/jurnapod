@@ -217,7 +217,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const keys = [
@@ -243,7 +243,7 @@ test(
       );
       assert.equal(initialResponse.status, 200);
       const initialBody = await initialResponse.json();
-      assert.equal(initialBody.ok, true);
+      assert.equal(initialBody.success, true);
       assert.equal(initialBody.settings.length, keys.length);
 
       const updatePayload = {
@@ -272,7 +272,7 @@ test(
       });
       assert.equal(updateResponse.status, 200);
       const updateBody = await updateResponse.json();
-      assert.equal(updateBody.ok, true);
+      assert.equal(updateBody.success, true);
 
       const updatedResponse = await fetch(
         `${baseUrl}/api/settings/config?outlet_id=${outletId}&keys=${encodeURIComponent(keys.join(","))}`,
@@ -284,7 +284,7 @@ test(
       );
       assert.equal(updatedResponse.status, 200);
       const updatedBody = await updatedResponse.json();
-      assert.equal(updatedBody.ok, true);
+      assert.equal(updatedBody.success, true);
 
       const updatedMap = new Map(updatedBody.settings.map((setting) => [setting.key, setting.value]));
       assert.equal(updatedMap.get("feature.pos.auto_sync_enabled"), false);

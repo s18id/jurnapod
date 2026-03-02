@@ -213,7 +213,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const createCategoryResponse = await fetch(`${baseUrl}/api/accounts/fixed-asset-categories`, {
@@ -233,7 +233,7 @@ test(
       });
       assert.equal(createCategoryResponse.status, 201);
       const createCategoryBody = await createCategoryResponse.json();
-      assert.equal(createCategoryBody.ok, true);
+      assert.equal(createCategoryBody.success, true);
       createdCategoryId = Number(createCategoryBody.category.id);
 
       const listCategoryResponse = await fetch(`${baseUrl}/api/accounts/fixed-asset-categories`, {
@@ -243,7 +243,7 @@ test(
       });
       assert.equal(listCategoryResponse.status, 200);
       const listCategoryBody = await listCategoryResponse.json();
-      assert.equal(listCategoryBody.ok, true);
+      assert.equal(listCategoryBody.success, true);
       const listedCategory = listCategoryBody.categories.find(
         (category) => Number(category.id) === createdCategoryId
       );
@@ -267,7 +267,7 @@ test(
       );
       assert.equal(patchCategoryResponse.status, 200);
       const patchCategoryBody = await patchCategoryResponse.json();
-      assert.equal(patchCategoryBody.ok, true);
+      assert.equal(patchCategoryBody.success, true);
       assert.equal(patchCategoryBody.category.name, `Furniture Updated ${runId}`);
 
       const createAssetResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets`, {
@@ -286,7 +286,7 @@ test(
       });
       assert.equal(createAssetResponse.status, 201);
       const createAssetBody = await createAssetResponse.json();
-      assert.equal(createAssetBody.ok, true);
+      assert.equal(createAssetBody.success, true);
       createdAssetId = Number(createAssetBody.asset.id);
       assert.equal(Number(createAssetBody.asset.category_id), createdCategoryId);
 
@@ -297,7 +297,7 @@ test(
       });
       assert.equal(listAssetsResponse.status, 200);
       const listAssetsBody = await listAssetsResponse.json();
-      assert.equal(listAssetsBody.ok, true);
+      assert.equal(listAssetsBody.success, true);
       const listedAsset = listAssetsBody.assets.find((asset) => Number(asset.id) === createdAssetId);
       assert.equal(Boolean(listedAsset), true);
       assert.equal(Number(listedAsset.category_id), createdCategoryId);

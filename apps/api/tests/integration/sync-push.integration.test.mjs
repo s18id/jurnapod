@@ -672,7 +672,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const forcedErrnoIgnoredClientTxId = randomUUID();
@@ -698,7 +698,7 @@ test(
       });
       assert.equal(forcedErrnoIgnoredResponse.status, 200);
       const forcedErrnoIgnoredBody = await forcedErrnoIgnoredResponse.json();
-      assert.equal(forcedErrnoIgnoredBody.ok, true);
+      assert.equal(forcedErrnoIgnoredBody.success, true);
       assert.deepEqual(forcedErrnoIgnoredBody.results, [
         {
           client_tx_id: forcedErrnoIgnoredClientTxId,
@@ -730,7 +730,7 @@ test(
       });
       assert.equal(rollbackHeaderIgnoredResponse.status, 200);
       const rollbackHeaderIgnoredBody = await rollbackHeaderIgnoredResponse.json();
-      assert.equal(rollbackHeaderIgnoredBody.ok, true);
+      assert.equal(rollbackHeaderIgnoredBody.success, true);
       assert.deepEqual(rollbackHeaderIgnoredBody.results, [
         {
           client_tx_id: rollbackHeaderIgnoredClientTxId,
@@ -831,7 +831,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const firstClientTxId = randomUUID();
@@ -858,7 +858,7 @@ test(
       });
       assert.equal(firstResponse.status, 200);
       const firstBody = await firstResponse.json();
-      assert.equal(firstBody.ok, true);
+      assert.equal(firstBody.success, true);
       assertSyncPushResponseShape(firstBody);
       assert.deepEqual(firstBody.results, [
         {
@@ -892,7 +892,7 @@ test(
       });
       assert.equal(replayResponse.status, 200);
       const replayBody = await replayResponse.json();
-      assert.equal(replayBody.ok, true);
+      assert.equal(replayBody.success, true);
       assertSyncPushResponseShape(replayBody);
       assert.deepEqual(replayBody.results, [
         {
@@ -942,7 +942,7 @@ test(
       });
       assert.equal(timestampFormattingFirstResponse.status, 200);
       const timestampFormattingFirstBody = await timestampFormattingFirstResponse.json();
-      assert.equal(timestampFormattingFirstBody.ok, true);
+      assert.equal(timestampFormattingFirstBody.success, true);
       assert.deepEqual(timestampFormattingFirstBody.results, [
         {
           client_tx_id: timestampFormattingClientTxId,
@@ -972,7 +972,7 @@ test(
       });
       assert.equal(timestampFormattingReplayResponse.status, 200);
       const timestampFormattingReplayBody = await timestampFormattingReplayResponse.json();
-      assert.equal(timestampFormattingReplayBody.ok, true);
+      assert.equal(timestampFormattingReplayBody.success, true);
       assert.deepEqual(timestampFormattingReplayBody.results, [
         {
           client_tx_id: timestampFormattingClientTxId,
@@ -1070,7 +1070,7 @@ test(
       });
       assert.equal(legacyReplayResponse.status, 200);
       const legacyReplayBody = await legacyReplayResponse.json();
-      assert.equal(legacyReplayBody.ok, true);
+      assert.equal(legacyReplayBody.success, true);
       assertSyncPushResponseShape(legacyReplayBody);
       assert.deepEqual(legacyReplayBody.results, [
         {
@@ -1177,7 +1177,7 @@ test(
       });
       assert.equal(legacyV1ReplayResponse.status, 200);
       const legacyV1ReplayBody = await legacyV1ReplayResponse.json();
-      assert.equal(legacyV1ReplayBody.ok, true);
+      assert.equal(legacyV1ReplayBody.success, true);
       assertSyncPushResponseShape(legacyV1ReplayBody);
       assert.deepEqual(legacyV1ReplayBody.results, [
         {
@@ -1205,7 +1205,7 @@ test(
       });
       assert.equal(legacyV1ExactReplayResponse.status, 200);
       const legacyV1ExactReplayBody = await legacyV1ExactReplayResponse.json();
-      assert.equal(legacyV1ExactReplayBody.ok, true);
+      assert.equal(legacyV1ExactReplayBody.success, true);
       assertSyncPushResponseShape(legacyV1ExactReplayBody);
       assert.deepEqual(legacyV1ExactReplayBody.results, [
         {
@@ -1238,7 +1238,7 @@ test(
       });
       assert.equal(legacyV1CashierMismatchResponse.status, 200);
       const legacyV1CashierMismatchBody = await legacyV1CashierMismatchResponse.json();
-      assert.equal(legacyV1CashierMismatchBody.ok, true);
+      assert.equal(legacyV1CashierMismatchBody.success, true);
       assertSyncPushResponseShape(legacyV1CashierMismatchBody);
       assert.deepEqual(legacyV1CashierMismatchBody.results, [
         {
@@ -1347,7 +1347,7 @@ test(
       });
       assert.equal(legacyV1OffsetReplayResponse.status, 200);
       const legacyV1OffsetReplayBody = await legacyV1OffsetReplayResponse.json();
-      assert.equal(legacyV1OffsetReplayBody.ok, true);
+      assert.equal(legacyV1OffsetReplayBody.success, true);
       assertSyncPushResponseShape(legacyV1OffsetReplayBody);
       assert.deepEqual(legacyV1OffsetReplayBody.results, [
         {
@@ -1456,7 +1456,7 @@ test(
       });
       assert.equal(legacyV1OffsetMirrorReplayResponse.status, 200);
       const legacyV1OffsetMirrorReplayBody = await legacyV1OffsetMirrorReplayResponse.json();
-      assert.equal(legacyV1OffsetMirrorReplayBody.ok, true);
+      assert.equal(legacyV1OffsetMirrorReplayBody.success, true);
       assertSyncPushResponseShape(legacyV1OffsetMirrorReplayBody);
       assert.deepEqual(legacyV1OffsetMirrorReplayBody.results, [
         {
@@ -1501,7 +1501,7 @@ test(
         });
         assert.equal(forcedErrnoResponse.status, 200);
         const forcedErrnoBody = await forcedErrnoResponse.json();
-        assert.equal(forcedErrnoBody.ok, true);
+        assert.equal(forcedErrnoBody.success, true);
         assertSyncPushResponseShape(forcedErrnoBody);
         assert.deepEqual(forcedErrnoBody.results, [
           {
@@ -1571,7 +1571,7 @@ test(
       });
       assert.equal(mixedResponse.status, 200);
       const mixedBody = await mixedResponse.json();
-      assert.equal(mixedBody.ok, true);
+      assert.equal(mixedBody.success, true);
       assertSyncPushResponseShape(mixedBody);
       assert.deepEqual(mixedBody.results, [
         {
@@ -1659,7 +1659,7 @@ test(
       });
       assert.equal(sameRequestDuplicateResponse.status, 200);
       const sameRequestDuplicateBody = await sameRequestDuplicateResponse.json();
-      assert.equal(sameRequestDuplicateBody.ok, true);
+      assert.equal(sameRequestDuplicateBody.success, true);
       assertSyncPushResponseShape(sameRequestDuplicateBody);
       assert.deepEqual(sameRequestDuplicateBody.results, [
         {
@@ -1813,8 +1813,8 @@ test(
       ];
       const okItem = conflictItems.find((item) => item?.result === "OK");
       const errorItem = conflictItems.find((item) => item?.result === "ERROR");
-      assert.ok(okItem);
-      assert.ok(errorItem);
+      assert.success(okItem);
+      assert.success(errorItem);
       assert.equal(errorItem.message, IDEMPOTENCY_CONFLICT_MESSAGE);
       createdClientTxIds.push(conflictClientTxId);
 
@@ -1850,7 +1850,7 @@ test(
       });
       assert.equal(rollbackResponse.status, 200);
       const rollbackBody = await rollbackResponse.json();
-      assert.equal(rollbackBody.ok, true);
+      assert.equal(rollbackBody.success, true);
       assert.deepEqual(rollbackBody.results, [
         {
           client_tx_id: rollbackClientTxId,
@@ -1994,7 +1994,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const cardClientTxId = randomUUID();
@@ -2027,7 +2027,7 @@ test(
       });
       assert.equal(cardPolicyResponse.status, 200);
       const cardPolicyBody = await cardPolicyResponse.json();
-      assert.equal(cardPolicyBody.ok, true);
+      assert.equal(cardPolicyBody.success, true);
       assert.deepEqual(cardPolicyBody.results, [
         {
           client_tx_id: cardClientTxId,
@@ -2087,7 +2087,7 @@ test(
       });
       assert.equal(taxedResponse.status, 200);
       const taxedBody = await taxedResponse.json();
-      assert.equal(taxedBody.ok, true);
+      assert.equal(taxedBody.success, true);
       assert.deepEqual(taxedBody.results, [
         {
           client_tx_id: taxedClientTxId,
@@ -2140,7 +2140,7 @@ test(
       });
       assert.equal(firstDuplicateResponse.status, 200);
       const firstDuplicateBody = await firstDuplicateResponse.json();
-      assert.equal(firstDuplicateBody.ok, true);
+      assert.equal(firstDuplicateBody.success, true);
       assert.deepEqual(firstDuplicateBody.results, [
         {
           client_tx_id: duplicateClientTxId,
@@ -2164,7 +2164,7 @@ test(
       });
       assert.equal(replayDuplicateResponse.status, 200);
       const replayDuplicateBody = await replayDuplicateResponse.json();
-      assert.equal(replayDuplicateBody.ok, true);
+      assert.equal(replayDuplicateBody.success, true);
       assert.deepEqual(replayDuplicateBody.results, [
         {
           client_tx_id: duplicateClientTxId,
@@ -2254,7 +2254,7 @@ test(
       });
       assert.equal(concurrentDuplicateReplayResponse.status, 200);
       const concurrentDuplicateReplayBody = await concurrentDuplicateReplayResponse.json();
-      assert.equal(concurrentDuplicateReplayBody.ok, true);
+      assert.equal(concurrentDuplicateReplayBody.success, true);
       assert.deepEqual(concurrentDuplicateReplayBody.results, [
         {
           client_tx_id: concurrentDuplicateClientTxId,
@@ -2341,8 +2341,8 @@ test(
       ];
       const concurrentConflictOk = concurrentConflictResults.find((item) => item?.result === "OK");
       const concurrentConflictError = concurrentConflictResults.find((item) => item?.result === "ERROR");
-      assert.ok(concurrentConflictOk);
-      assert.ok(concurrentConflictError);
+      assert.success(concurrentConflictOk);
+      assert.success(concurrentConflictError);
       assert.equal(concurrentConflictError.message, IDEMPOTENCY_CONFLICT_MESSAGE);
       createdClientTxIds.push(concurrentConflictClientTxId);
 
@@ -2444,7 +2444,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const unbalancedClientTxId = randomUUID();
@@ -2469,7 +2469,7 @@ test(
       });
       assert.equal(unbalancedResponse.status, 200);
       const unbalancedBody = await unbalancedResponse.json();
-      assert.equal(unbalancedBody.ok, true);
+      assert.equal(unbalancedBody.success, true);
       assert.deepEqual(unbalancedBody.results, [
         {
           client_tx_id: unbalancedClientTxId,

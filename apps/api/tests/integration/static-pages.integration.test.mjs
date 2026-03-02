@@ -211,7 +211,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const invalidSlugResponse = await fetch(`${baseUrl}/api/settings/pages`, {
@@ -228,7 +228,7 @@ test(
       });
       assert.equal(invalidSlugResponse.status, 400);
       const invalidSlugBody = await invalidSlugResponse.json();
-      assert.equal(invalidSlugBody.ok, false);
+      assert.equal(invalidSlugBody.success, false);
       assert.equal(invalidSlugBody.error.code, "INVALID_SLUG");
 
       const slug = `privacy-test-${runId}`;
@@ -246,9 +246,9 @@ test(
       });
       assert.equal(createResponse.status, 201);
       const createBody = await createResponse.json();
-      assert.equal(createBody.ok, true);
+      assert.equal(createBody.success, true);
       createdPageId = Number(createBody.page.id);
-      assert.ok(createdPageId > 0);
+      assert.success(createdPageId > 0);
 
       const listResponse = await fetch(`${baseUrl}/api/settings/pages?q=${encodeURIComponent(runId)}`, {
         headers: {
@@ -257,7 +257,7 @@ test(
       });
       assert.equal(listResponse.status, 200);
       const listBody = await listResponse.json();
-      assert.equal(listBody.ok, true);
+      assert.equal(listBody.success, true);
       const listed = listBody.pages.find((page) => Number(page.id) === createdPageId);
       assert.equal(Boolean(listed), true);
 
@@ -275,13 +275,13 @@ test(
       });
       assert.equal(duplicateResponse.status, 409);
       const duplicateBody = await duplicateResponse.json();
-      assert.equal(duplicateBody.ok, false);
+      assert.equal(duplicateBody.success, false);
       assert.equal(duplicateBody.error.code, "DUPLICATE_SLUG");
 
       const publicBeforePublish = await fetch(`${baseUrl}/api/pages/${slug}`);
       assert.equal(publicBeforePublish.status, 404);
       const publicBeforeBody = await publicBeforePublish.json();
-      assert.equal(publicBeforeBody.ok, false);
+      assert.equal(publicBeforeBody.success, false);
       assert.equal(publicBeforeBody.error.code, "NOT_FOUND");
 
       const newSlug = `${slug}-v2`;
@@ -299,7 +299,7 @@ test(
       });
       assert.equal(patchResponse.status, 200);
       const patchBody = await patchResponse.json();
-      assert.equal(patchBody.ok, true);
+      assert.equal(patchBody.success, true);
       assert.equal(patchBody.page.slug, newSlug);
 
       const publishResponse = await fetch(`${baseUrl}/api/settings/pages/${createdPageId}/publish`, {
@@ -310,13 +310,13 @@ test(
       });
       assert.equal(publishResponse.status, 200);
       const publishBody = await publishResponse.json();
-      assert.equal(publishBody.ok, true);
+      assert.equal(publishBody.success, true);
       assert.equal(publishBody.page.status, "PUBLISHED");
 
       const publicAfterPublish = await fetch(`${baseUrl}/api/pages/${newSlug}`);
       assert.equal(publicAfterPublish.status, 200);
       const publicBody = await publicAfterPublish.json();
-      assert.equal(publicBody.ok, true);
+      assert.equal(publicBody.success, true);
       assert.equal(publicBody.page.slug, newSlug);
       assert.equal(publicBody.page.content_html.includes("<script"), false);
       assert.equal(publicBody.page.content_html.includes("Policy"), true);
@@ -329,13 +329,13 @@ test(
       });
       assert.equal(unpublishResponse.status, 200);
       const unpublishBody = await unpublishResponse.json();
-      assert.equal(unpublishBody.ok, true);
+      assert.equal(unpublishBody.success, true);
       assert.equal(unpublishBody.page.status, "DRAFT");
 
       const publicAfterUnpublish = await fetch(`${baseUrl}/api/pages/${newSlug}`);
       assert.equal(publicAfterUnpublish.status, 404);
       const publicAfterBody = await publicAfterUnpublish.json();
-      assert.equal(publicAfterBody.ok, false);
+      assert.equal(publicAfterBody.success, false);
       assert.equal(publicAfterBody.error.code, "NOT_FOUND");
     } finally {
       await stopApiServer(childProcess);

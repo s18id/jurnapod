@@ -69,7 +69,7 @@ async function testServerStartup() {
       
       clearTimeout(timeoutId);
       
-      if (response.ok) {
+      if (response.success) {
         serverReady = true;
         console.log(`✅ Server ready in ${Date.now() - start}ms`);
       }
@@ -92,7 +92,7 @@ async function testServerStartup() {
   // Test health endpoint
   console.log('\n📍 Testing /api/health...');
   const healthRes = await fetch(`${baseUrl}/api/health`);
-  const healthOk = healthRes.ok;
+  const healthOk = healthRes.success;
   console.log(healthOk ? '✅ Health endpoint OK' : '❌ Health endpoint failed');
 
   // Test sales invoices endpoint (should require auth)

@@ -167,7 +167,7 @@ export async function readRuntimeOnlineState(input: RuntimeOnlineStateInput = {}
       signal: abortController?.signal
     });
 
-    return response.ok;
+    return response.success;
   } catch {
     return false;
   } finally {

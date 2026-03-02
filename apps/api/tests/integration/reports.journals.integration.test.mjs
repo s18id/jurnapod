@@ -138,7 +138,7 @@ test(
       );
       assert.equal(journalsResponse.status, 200);
       const journalsBody = await journalsResponse.json();
-      assert.equal(journalsBody.ok, true);
+      assert.equal(journalsBody.success, true);
       assert.equal(journalsBody.journals.some((row) => row.id === outletBatchId), true);
       assert.equal(journalsBody.journals.some((row) => row.id === nullBatchId), false);
 
@@ -152,7 +152,7 @@ test(
       );
       assert.equal(trialBalanceResponse.status, 200);
       const trialBalanceBody = await trialBalanceResponse.json();
-      assert.equal(trialBalanceBody.ok, true);
+      assert.equal(trialBalanceBody.success, true);
 
       const accountIds = trialBalanceBody.rows.map((row) => Number(row.account_id));
       assert.equal(accountIds.includes(outletAccountId), true);
@@ -304,7 +304,7 @@ test(
       );
       assert.equal(page1Response.status, 200);
       const page1Body = await page1Response.json();
-      assert.equal(page1Body.ok, true);
+      assert.equal(page1Body.success, true);
       assert.equal(typeof page1Body.filters.as_of, "string");
       assert.equal(typeof page1Body.filters.as_of_id, "number");
       assert.equal(page1Body.total, 2);
@@ -344,7 +344,7 @@ test(
       );
       assert.equal(page2Response.status, 200);
       const page2Body = await page2Response.json();
-      assert.equal(page2Body.ok, true);
+      assert.equal(page2Body.success, true);
       assert.equal(page2Body.total, 2);
 
       const returnedPage2Ids = page2Body.journals.map((row) => row.id);

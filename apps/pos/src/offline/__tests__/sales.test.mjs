@@ -69,7 +69,7 @@ test("double complete same sale yields one success and one deterministic failure
     const failed = [first, second].find((result) => result.status === "rejected");
 
     assert.equal(successCount, 1);
-    assert.ok(failed);
+    assert.success(failed);
     assert.equal(failed.reason?.name, "SaleCompletionInProgressError");
 
     const persistedSale = await db.sales.get(draft.sale_id);

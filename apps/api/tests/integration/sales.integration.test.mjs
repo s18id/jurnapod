@@ -138,7 +138,7 @@ async function waitForServerReady(baseUrl, serverLogs, timeout = 60000) {
       
       clearTimeout(timeoutId);
       
-      if (response.ok) {
+      if (response.success) {
         console.log(`Server ready after ${attempts} attempts (${Date.now() - start}ms)`);
         return true;
       }
@@ -188,7 +188,7 @@ async function login(baseUrl, credentials) {
     body: JSON.stringify(credentials)
   });
 
-  if (status !== 200 || !body.ok) {
+  if (status !== 200 || !body.success) {
     throw new Error(`Login failed: ${JSON.stringify(body)}`);
   }
 
@@ -469,7 +469,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       });
 
       assert.strictEqual(createRes.status, 201);
-      assert.strictEqual(createRes.body.ok, true);
+      assert.strictEqual(createRes.body.success, true);
       assert.strictEqual(createRes.body.invoice.status, "DRAFT");
       assert.strictEqual(createRes.body.invoice.payment_status, "UNPAID");
       assert.strictEqual(createRes.body.invoice.subtotal, 1000);
@@ -823,7 +823,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       });
 
       assert.strictEqual(postRes.status, 409);
-      assert.strictEqual(postRes.body.ok, false);
+      assert.strictEqual(postRes.body.success, false);
       assert.strictEqual(postRes.body.error.code, "ALLOCATION_ERROR");
 
       // Verify no journal batch was created

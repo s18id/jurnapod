@@ -195,7 +195,7 @@ export async function loginUser(baseUrl, companyCode, email, password) {
     throw new Error(`login failed: status=${loginResponse.status}`);
   }
   const loginBody = await loginResponse.json();
-  if (loginBody.ok !== true) {
+  if (loginBody.success !== true) {
     throw new Error("login failed: response not ok");
   }
   return loginBody.access_token;

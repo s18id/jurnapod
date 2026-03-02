@@ -113,7 +113,7 @@ async function waitForServerReady(port, maxWaitMs = 30000) {
   while (Date.now() - startTime < maxWaitMs) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/health`);
-      if (response.ok) {
+      if (response.success) {
         return;
       }
     } catch {
@@ -133,13 +133,13 @@ async function authenticate(port, companyCode, email, password) {
     body: JSON.stringify({ company_code: companyCode, email, password })
   });
 
-  if (!response.ok) {
+  if (!response.success) {
     const text = await response.text();
     throw new Error(`Authentication failed: ${response.status} ${text}`);
   }
 
   const json = await response.json();
-  if (!json.ok || !json.access_token) {
+  if (!json.success || !json.access_token) {
     throw new Error("Authentication response missing access_token");
   }
 
@@ -203,13 +203,13 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
 
       const assetData = await createAssetResponse.json();
       
-      if (!createAssetResponse.ok) {
+      if (!createAssetResponse.success) {
         t.diagnostic(`Failed to create fixed asset. Status: ${createAssetResponse.status}, Response: ${JSON.stringify(assetData)}`);
       }
       
-      assert.strictEqual(createAssetResponse.ok, true, "Failed to create fixed asset");
-      assert.strictEqual(assetData.ok, true);
-      assert.ok(assetData.asset, "Response should contain asset object");
+      assert.strictEqual(createAssetResponse.success, true, "Failed to create fixed asset");
+      assert.strictEqual(assetData.success, true);
+      assert.success(assetData.asset, "Response should contain asset object");
       const assetId = assetData.asset.id;
 
       // Get accounts for depreciation
@@ -240,9 +240,9 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
         })
       });
 
-      assert.strictEqual(createPlanResponse.ok, true, "Failed to create depreciation plan");
+      assert.strictEqual(createPlanResponse.success, true, "Failed to create depreciation plan");
       const planData = await createPlanResponse.json();
-      assert.strictEqual(planData.ok, true);
+      assert.strictEqual(planData.success, true);
       assert.strictEqual(planData.plan.asset_id, assetId);
       assert.strictEqual(planData.plan.useful_life_months, 60);
       assert.strictEqual(planData.plan.status, "ACTIVE");
@@ -313,13 +313,13 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
         })
       });
 
-      assert.strictEqual(runResponse.ok, true, "Failed to run depreciation");
+      assert.strictEqual(runResponse.success, true, "Failed to run depreciation");
       const runData = await runResponse.json();
-      assert.strictEqual(runData.ok, true);
+      assert.strictEqual(runData.success, true);
       assert.strictEqual(runData.duplicate, false);
       assert.strictEqual(runData.run.period_year, 2024);
       assert.strictEqual(runData.run.period_month, 2);
-      assert.ok(runData.run.journal_batch_id, "Journal batch ID should be set");
+      assert.success(runData.run.journal_batch_id, "Journal batch ID should be set");
 
       // Verify journal batch was created
       const [journalRows] = await connection.execute(
@@ -341,8 +341,8 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const totalDebit = lineRows.reduce((sum, row) => sum + Number(row.debit), 0);
       const totalCredit = lineRows.reduce((sum, row) => sum + Number(row.credit), 0);
       
-      assert.ok(Math.abs(totalDebit - totalCredit) < 0.01, "Journal lines should be balanced");
-      assert.ok(totalDebit > 0, "Total debit should be positive");
+      assert.success(Math.abs(totalDebit - totalCredit) < 0.01, "Journal lines should be balanced");
+      assert.success(totalDebit > 0, "Total debit should be positive");
 
       t.diagnostic(`Run posted journal batch ${runData.run.journal_batch_id} with balanced lines`);
     });
@@ -428,7 +428,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
         })
       });
 
-      assert.strictEqual(secondRunResponse.ok, true);
+      assert.strictEqual(secondRunResponse.success, true);
       const secondRunData = await secondRunResponse.json();
       assert.strictEqual(secondRunData.duplicate, true, "Second run should be marked as duplicate");
       assert.strictEqual(secondRunData.run.journal_batch_id, firstJournalBatchId, "Should return same journal batch ID");

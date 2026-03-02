@@ -313,7 +313,7 @@ test(
       });
       assert.equal(loginSuccessResponse.status, 200);
       const loginSuccessBody = await loginSuccessResponse.json();
-      assert.equal(loginSuccessBody.ok, true);
+      assert.equal(loginSuccessBody.success, true);
       assert.equal(loginSuccessBody.token_type, "Bearer");
       assert.equal(typeof loginSuccessBody.access_token, "string");
       assert.equal(typeof loginSuccessBody.expires_in, "number");
@@ -335,7 +335,7 @@ test(
       });
       assert.equal(loginFailResponse.status, 401);
       const loginFailBody = await loginFailResponse.json();
-      assert.equal(loginFailBody.ok, false);
+      assert.equal(loginFailBody.success, false);
       assert.equal(loginFailBody.error.code, "INVALID_CREDENTIALS");
 
       const meWithoutTokenResponse = await fetch(`${baseUrl}/api/users/me`);
@@ -351,7 +351,7 @@ test(
       });
       assert.equal(meWithTokenResponse.status, 200);
       const meWithTokenBody = await meWithTokenResponse.json();
-      assert.equal(meWithTokenBody.ok, true);
+      assert.equal(meWithTokenBody.success, true);
       assert.equal(meWithTokenBody.user.id, ownerUserId);
       assert.equal(meWithTokenBody.user.company_id, companyId);
       assert.equal(meWithTokenBody.user.email, ownerEmail);
@@ -394,7 +394,7 @@ test(
       });
       assert.equal(viewerLoginResponse.status, 200);
       const viewerLoginBody = await viewerLoginResponse.json();
-      assert.equal(viewerLoginBody.ok, true);
+      assert.equal(viewerLoginBody.success, true);
       const viewerAccessToken = viewerLoginBody.access_token;
 
       const viewerMeResponse = await fetch(`${baseUrl}/api/users/me`, {
@@ -404,7 +404,7 @@ test(
       });
       assert.equal(viewerMeResponse.status, 200);
       const viewerMeBody = await viewerMeResponse.json();
-      assert.equal(viewerMeBody.ok, true);
+      assert.equal(viewerMeBody.success, true);
       assert.equal(viewerMeBody.user.id, viewerUserId);
       assert.equal(viewerMeBody.user.company_id, companyId);
       assert.equal(viewerMeBody.user.email, viewerEmail);
@@ -658,7 +658,7 @@ test(
       });
       assert.equal(unknownHashResponse.status, 401);
       const unknownHashBody = await unknownHashResponse.json();
-      assert.equal(unknownHashBody.ok, false);
+      assert.equal(unknownHashBody.success, false);
       assert.equal(unknownHashBody.error.code, "INVALID_CREDENTIALS");
 
       await stopApiServer(childProcess);
@@ -850,7 +850,7 @@ test(
 
       assert.equal(response.status, 500);
       const body = await response.json();
-      assert.equal(body.ok, false);
+      assert.equal(body.success, false);
       assert.equal(body.error.code, "INTERNAL_SERVER_ERROR");
       assert.equal(Object.hasOwn(body, "access_token"), false);
 

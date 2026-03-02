@@ -58,7 +58,7 @@ export async function POST(request: Request) {
 
   try {
     const rotation = await rotateRefreshToken(refreshToken, { ipAddress, userAgent });
-    if (!rotation.ok) {
+    if (!rotation.success) {
       const response = Response.json(UNAUTHORIZED_RESPONSE, { status: 401 });
       response.headers.set("Set-Cookie", createRefreshTokenClearCookie());
       return response;

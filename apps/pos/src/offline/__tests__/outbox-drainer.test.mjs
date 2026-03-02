@@ -122,7 +122,7 @@ test("drain attempt log includes lease token context", { concurrency: false }, a
     );
 
     assert.equal(result.sent_count, 1);
-    assert.ok(attemptLog);
+    assert.success(attemptLog);
     assert.equal(typeof attemptLog[1].lease_token, "string");
     assert.match(attemptLog[1].lease_token, /^\*\*\*.{8}$/);
   } finally {
@@ -170,7 +170,7 @@ test("drain attempt log masks short lease tokens", { concurrency: false }, async
     );
 
     assert.equal(result.sent_count, 1);
-    assert.ok(attemptLog);
+    assert.success(attemptLog);
     assert.equal(attemptLog[1].lease_token, `***${shortLeaseToken}`);
     assert.notEqual(attemptLog[1].lease_token, shortLeaseToken);
   } finally {

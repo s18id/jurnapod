@@ -97,7 +97,7 @@ export async function POST(request: Request) {
     }
     const authResult = await authenticateLogin(credentials);
 
-    if (!authResult.ok) {
+    if (!authResult.success) {
       try {
         await recordLoginFailure({
           keys: throttleKeys,

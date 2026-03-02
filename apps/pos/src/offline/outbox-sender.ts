@@ -336,7 +336,7 @@ export async function sendOutboxJobToSyncPush(
     }
   }
 
-  if (!response.ok) {
+  if (!response.success) {
     throw classifyHttpStatusError(response.status);
   }
 

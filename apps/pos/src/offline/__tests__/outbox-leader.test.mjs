@@ -177,7 +177,7 @@ test("localStorage fallback settles near-simultaneous contenders to one winner",
     return "A";
   });
 
-  assert.ok(contenderPromise);
+  assert.success(contenderPromise);
 
   const [firstResult, secondResult] = await Promise.all([firstPromise, contenderPromise]);
   const winners = [firstResult, secondResult].filter((result) => result.acquired === true);
@@ -222,7 +222,7 @@ test("localStorage fallback maintains single winner across deterministic content
       return "A";
     });
 
-    assert.ok(contenderPromise);
+    assert.success(contenderPromise);
 
     const [firstResult, secondResult] = await Promise.all([firstPromise, contenderPromise]);
     const winners = [firstResult, secondResult].filter((result) => result.acquired === true);

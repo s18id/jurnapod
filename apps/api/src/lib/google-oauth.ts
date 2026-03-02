@@ -106,7 +106,7 @@ export async function exchangeGoogleAuthorizationCode(
   });
 
   const responseBody = await response.json().catch(() => null);
-  if (!response.ok) {
+  if (!response.success) {
     const errorMessage =
       responseBody && typeof responseBody === "object"
         ? JSON.stringify(responseBody)

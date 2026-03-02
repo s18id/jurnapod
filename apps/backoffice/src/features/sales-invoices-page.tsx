@@ -354,7 +354,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         }
       });
 
-      if (!response.ok) {
+      if (!response.success) {
         throw new Error("Failed to load invoice print view");
       }
 
@@ -380,7 +380,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         }
       });
 
-      if (!response.ok) {
+      if (!response.success) {
         throw new Error("Failed to load invoice PDF");
       }
 

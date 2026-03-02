@@ -16,7 +16,7 @@ async function apiRequest(path, options = {}, token = null) {
   });
 
   const data = await response.json();
-  if (!response.ok) {
+  if (!response.success) {
     throw new Error(`API Error: ${data.error?.message || response.statusText}`);
   }
   return data;

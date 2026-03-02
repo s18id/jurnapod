@@ -149,7 +149,7 @@ export function withAuth(
 ) {
   return async function authenticatedRoute(request: Request): Promise<Response> {
     const authResult = await authenticateRequest(request);
-    if (!authResult.ok) {
+    if (!authResult.success) {
       return authResult.response;
     }
 

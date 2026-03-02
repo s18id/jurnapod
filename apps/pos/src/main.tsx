@@ -204,7 +204,7 @@ function App() {
         }
       });
 
-      if (!meResponse.ok) {
+      if (!meResponse.success) {
         throw new Error("Login succeeded but failed to load user outlets");
       }
 
@@ -216,7 +216,7 @@ function App() {
         };
       };
 
-      if (!mePayload?.ok || !Array.isArray(mePayload.user?.outlets) || mePayload.user.outlets.length === 0) {
+      if (!mePayload?.success || !Array.isArray(mePayload.user?.outlets) || mePayload.user.outlets.length === 0) {
         throw new Error("No outlet access found for this user");
       }
 
@@ -287,8 +287,8 @@ function App() {
           | { success: true; access_token: string }
           | { success: false; error?: { message?: string } };
 
-        if (!response.ok || !payload || payload.ok !== true || typeof payload.access_token !== "string") {
-          const msg = payload && payload.ok === false ? payload.error?.message ?? "Login failed" : "Login failed";
+        if (!response.success || !payload || payload.success !== true || typeof payload.access_token !== "string") {
+          const msg = payload && payload.success === false ? payload.error?.message ?? "Login failed" : "Login failed";
           throw new Error(msg);
         }
 
@@ -702,8 +702,8 @@ function App() {
         | { success: true; access_token: string }
         | { success: false; error?: { message?: string } };
 
-      if (!response.ok || !payload || payload.ok !== true || typeof payload.access_token !== "string") {
-        const msg = payload && payload.ok === false ? payload.error?.message ?? "Login failed" : "Login failed";
+      if (!response.success || !payload || payload.success !== true || typeof payload.access_token !== "string") {
+        const msg = payload && payload.success === false ? payload.error?.message ?? "Login failed" : "Login failed";
         throw new Error(msg);
       }
 

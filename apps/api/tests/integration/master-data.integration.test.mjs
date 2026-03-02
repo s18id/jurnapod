@@ -215,7 +215,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const baselinePullResponse = await fetch(
@@ -228,7 +228,7 @@ test(
       );
       assert.equal(baselinePullResponse.status, 200);
       const baselinePullBody = await baselinePullResponse.json();
-      assert.equal(baselinePullBody.ok, true);
+      assert.equal(baselinePullBody.success, true);
       const baselineVersion = Number(baselinePullBody.data_version);
 
       const createItemResponse = await fetch(`${baseUrl}/api/inventory/items`, {
@@ -246,7 +246,7 @@ test(
       });
       assert.equal(createItemResponse.status, 201);
       const createItemBody = await createItemResponse.json();
-      assert.equal(createItemBody.ok, true);
+      assert.equal(createItemBody.success, true);
       createdItemId = Number(createItemBody.item.id);
 
       const createPriceResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
@@ -264,7 +264,7 @@ test(
       });
       assert.equal(createPriceResponse.status, 201);
       const createPriceBody = await createPriceResponse.json();
-      assert.equal(createPriceBody.ok, true);
+      assert.equal(createPriceBody.success, true);
       createdPriceId = Number(createPriceBody.item_price.id);
 
       const deltaPullResponse = await fetch(
@@ -277,7 +277,7 @@ test(
       );
       assert.equal(deltaPullResponse.status, 200);
       const deltaPullBody = await deltaPullResponse.json();
-      assert.equal(deltaPullBody.ok, true);
+      assert.equal(deltaPullBody.success, true);
       assert.equal(Number(deltaPullBody.data_version) > baselineVersion, true);
 
       const pullItem = deltaPullBody.items.find((item) => Number(item.id) === createdItemId);
@@ -301,7 +301,7 @@ test(
       );
       assert.equal(activePricesResponse.status, 200);
       const activePricesBody = await activePricesResponse.json();
-      assert.equal(activePricesBody.ok, true);
+      assert.equal(activePricesBody.success, true);
 
       const activePrice = activePricesBody.prices.find((price) => Number(price.id) === createdPriceId);
       assert.equal(Boolean(activePrice), true);
@@ -388,7 +388,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const malformedGuardResponse = await fetch(
@@ -427,7 +427,7 @@ test(
       );
       assert.equal(malformedSyncVersionResponse.status, 400);
       const malformedSyncVersionBody = await malformedSyncVersionResponse.json();
-      assert.equal(malformedSyncVersionBody.ok, false);
+      assert.equal(malformedSyncVersionBody.success, false);
       assert.equal(malformedSyncVersionBody.error.code, "INVALID_REQUEST");
     } finally {
       await stopApiServer(childProcess);
@@ -525,7 +525,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       const deniedListResponse = await fetch(
@@ -566,7 +566,7 @@ test(
       });
       assert.equal(deniedCreateResponse.status, 403);
       const deniedCreateBody = await deniedCreateResponse.json();
-      assert.equal(deniedCreateBody.ok, false);
+      assert.equal(deniedCreateBody.success, false);
       assert.equal(deniedCreateBody.error.code, "FORBIDDEN");
 
       const deniedGetByIdResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${deniedPriceId}`, {
@@ -603,7 +603,7 @@ test(
       });
       assert.equal(scopedListResponse.status, 200);
       const scopedListBody = await scopedListResponse.json();
-      assert.equal(scopedListBody.ok, true);
+      assert.equal(scopedListBody.success, true);
       const deniedPriceVisible = scopedListBody.prices.some(
         (price) => Number(price.id) === deniedPriceId
       );
@@ -624,7 +624,7 @@ test(
       });
       assert.equal(createItemResponse.status, 201);
       const createItemBody = await createItemResponse.json();
-      assert.equal(createItemBody.ok, true);
+      assert.equal(createItemBody.success, true);
       duplicateItemId = Number(createItemBody.item.id);
 
       const duplicatePayload = {
@@ -662,8 +662,8 @@ test(
         concurrentFirstResponse.json(),
         concurrentSecondResponse.json()
       ]);
-      const successfulCreateBody = concurrentBodies.find((body) => body.ok === true);
-      const conflictCreateBody = concurrentBodies.find((body) => body.ok === false);
+      const successfulCreateBody = concurrentBodies.find((body) => body.success === true);
+      const conflictCreateBody = concurrentBodies.find((body) => body.success === false);
 
       assert.equal(Boolean(successfulCreateBody), true);
       assert.equal(Boolean(conflictCreateBody), true);
@@ -834,7 +834,7 @@ test(
       });
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
-      assert.equal(loginBody.ok, true);
+      assert.equal(loginBody.success, true);
       const accessToken = loginBody.access_token;
 
       await db.execute(
@@ -857,7 +857,7 @@ test(
       });
       assert.equal(patchResponse.status, 403);
       const patchBody = await patchResponse.json();
-      assert.equal(patchBody.ok, false);
+      assert.equal(patchBody.success, false);
       assert.equal(patchBody.error.code, "FORBIDDEN");
 
       const [afterPatchRows] = await db.execute(
@@ -880,7 +880,7 @@ test(
       });
       assert.equal(deleteResponse.status, 403);
       const deleteBody = await deleteResponse.json();
-      assert.equal(deleteBody.ok, false);
+      assert.equal(deleteBody.success, false);
       assert.equal(deleteBody.error.code, "FORBIDDEN");
 
       const [afterDeleteRows] = await db.execute(

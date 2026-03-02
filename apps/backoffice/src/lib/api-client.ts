@@ -56,7 +56,7 @@ export async function apiRequest<TResponse>(
   });
 
   const payload = (await response.json().catch(() => null)) as ApiErrorPayload | TResponse | null;
-  if (!response.ok) {
+  if (!response.success) {
     const errorPayload = (payload ?? {}) as ApiErrorPayload;
     throw new ApiError(
       response.status,
