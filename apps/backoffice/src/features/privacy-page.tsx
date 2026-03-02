@@ -145,7 +145,7 @@ export function PublicStaticPage({ slug, fallbackTitle }: PublicStaticPageProps)
   return (
     <main style={shellStyle}>
       <section style={cardStyle}>
-        {state === "loading" ? <p>Loading privacy policy...</p> : null}
+        {state === "loading" ? <p>Loading {fallbackTitle || "page"}...</p> : null}
         {state === "error" ? (
           <div>
             <h2 style={titleStyle}>{fallbackTitle}</h2>

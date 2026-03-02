@@ -52,7 +52,7 @@ import {
   CompaniesPage,
   OutletsPage
 } from "../features/pages";
-import { PrivacyPage, TermsPage } from "../features/privacy-page";
+import { PublicStaticPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
 import { SyncHistoryPage } from "../features/sync-history-page";
 import { PWASettingsPage } from "../features/pwa-settings-page";
@@ -62,13 +62,11 @@ type SessionStatus = "loading" | "anonymous" | "authenticated";
 const OAUTH_STATE_KEY = "jurnapod.backoffice.oauth.state";
 const OAUTH_COMPANY_KEY = "jurnapod.backoffice.oauth.company";
 const GOOGLE_OAUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const STATIC_SLUG_PATTERN = /^[a-z0-9-]+$/;
 
 function ensureHash(path: string): void {
-  if (
-    (path === "/privacy" || path === "/terms") &&
-    globalThis.location.pathname === path &&
-    globalThis.location.hash.length === 0
-  ) {
+  const publicSlug = getPublicStaticSlugFromLocation(globalThis.location);
+  if (publicSlug && globalThis.location.pathname === `/${publicSlug}`) {
     return;
   }
 
@@ -82,11 +80,42 @@ function resolvePathFromLocation(): string {
     return normalizeHashPath(globalThis.location.hash);
   }
 
-  if (globalThis.location.pathname === "/privacy" || globalThis.location.pathname === "/terms") {
-    return globalThis.location.pathname;
+  const publicSlug = getPublicStaticSlugFromLocation(globalThis.location);
+  if (publicSlug) {
+    return `/${publicSlug}`;
   }
 
   return DEFAULT_ROUTE_PATH;
+}
+
+function getPublicStaticSlugFromLocation(location: Location): string | null {
+  if (location.hash.length > 0) {
+    return null;
+  }
+
+  const trimmedPath = location.pathname.replace(/\/+$/, "");
+  if (trimmedPath.length === 0 || trimmedPath === "/") {
+    return null;
+  }
+
+  if (trimmedPath === "/auth/callback") {
+    return null;
+  }
+
+  const slug = trimmedPath.replace(/^\/+/, "");
+  if (!STATIC_SLUG_PATTERN.test(slug)) {
+    return null;
+  }
+
+  return slug;
+}
+
+function toTitleCaseSlug(slug: string): string {
+  return slug
+    .split("-")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment[0]!.toUpperCase() + segment.slice(1))
+    .join(" ");
 }
 
 function RouteScreen(props: { path: string; user: SessionUser; accessToken: string }) {
@@ -219,9 +248,12 @@ export function AppRouter() {
       setUser(session.user);
       setSessionStatus("authenticated");
 
-      const firstPath = APP_ROUTES.find((item) => userCanAccessRoute(session.user.roles, item))?.path;
-      ensureHash(firstPath ?? DEFAULT_ROUTE_PATH);
-      globalThis.history.replaceState({}, "", `/${globalThis.location.hash}`);
+      const publicSlug = getPublicStaticSlugFromLocation(globalThis.location);
+      if (!publicSlug) {
+        const firstPath = APP_ROUTES.find((item) => userCanAccessRoute(session.user.roles, item))?.path;
+        ensureHash(firstPath ?? DEFAULT_ROUTE_PATH);
+        globalThis.history.replaceState({}, "", `/${globalThis.location.hash}`);
+      }
     }
 
     async function handleGoogleCallback(): Promise<boolean> {
@@ -333,19 +365,12 @@ export function AppRouter() {
     return APP_ROUTES.filter((route) => userCanAccessRoute(user.roles, route));
   }, [user]);
 
-  const isPublicPrivacy =
-    activePath === "/privacy" ||
-    (typeof window !== "undefined" && window.location.pathname === "/privacy");
-  const isPublicTerms =
-    activePath === "/terms" ||
-    (typeof window !== "undefined" && window.location.pathname === "/terms");
+  const publicSlug =
+    typeof window !== "undefined" ? getPublicStaticSlugFromLocation(globalThis.location) : null;
 
-  if (isPublicPrivacy) {
-    return <PrivacyPage />;
-  }
-
-  if (isPublicTerms) {
-    return <TermsPage />;
+  if (publicSlug) {
+    const fallbackTitle = toTitleCaseSlug(publicSlug) || "Page";
+    return <PublicStaticPage slug={publicSlug} fallbackTitle={fallbackTitle} />;
   }
 
   const route = findRoute(activePath);
