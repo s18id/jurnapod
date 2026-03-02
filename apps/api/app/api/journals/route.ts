@@ -4,27 +4,13 @@
 import { ManualJournalEntryCreateRequestSchema, JournalListQuerySchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../src/lib/auth-guard";
+import { errorResponse, successResponse } from "../../../src/lib/response";
 import {
   createManualJournalEntry,
   listJournalBatches,
   JournalNotBalancedError,
   InvalidJournalLineError
 } from "../../../src/lib/journals";
-
-/**
- * Helper: Create standardized error response
- */
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
 
 /**
  * GET /api/journals
@@ -65,13 +51,7 @@ export const GET = withAuth(
 
       const batches = await listJournalBatches(query);
 
-      return Response.json(
-        {
-          success: true,
-          data: batches
-        },
-        { status: 200 }
-      );
+      return successResponse(batches);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
@@ -120,13 +100,7 @@ export const POST = withAuth(
 
       const batch = await createManualJournalEntry(input, auth.userId);
 
-      return Response.json(
-        {
-          success: true,
-          data: batch
-        },
-        { status: 201 }
-      );
+      return successResponse(batch, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request body", 400);

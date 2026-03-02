@@ -36,8 +36,8 @@ type InvoiceLine = {
 
 type InvoiceDetail = Invoice & { lines: InvoiceLine[] };
 
-type InvoicesResponse = { success: true; total: number; invoices: Invoice[] };
-type InvoiceDetailResponse = { success: true; invoice: InvoiceDetail };
+type InvoicesResponse = { success: true; data: { total: number; invoices: Invoice[] } };
+type InvoiceDetailResponse = { success: true; data: InvoiceDetail };
 
 const boxStyle = {
   border: "1px solid #e2ddd2",
@@ -161,7 +161,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         {},
         props.accessToken
       );
-      setInvoices(response.invoices);
+      setInvoices(response.data.invoices);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -257,11 +257,11 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         props.accessToken
       );
       setEditingInvoice({
-        id: response.invoice.id,
-        invoice_no: response.invoice.invoice_no,
-        invoice_date: response.invoice.invoice_date,
-        tax_amount: String(response.invoice.tax_amount ?? 0),
-        lines: response.invoice.lines.map((line) => ({
+        id: response.data.id,
+        invoice_no: response.data.invoice_no,
+        invoice_date: response.data.invoice_date,
+        tax_amount: String(response.data.tax_amount ?? 0),
+        lines: response.data.lines.map((line) => ({
           description: line.description,
           qty: String(line.qty),
           unit_price: String(line.unit_price)
@@ -354,7 +354,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         }
       });
 
-      if (!response.success) {
+      if (!response.ok) {
         throw new Error("Failed to load invoice print view");
       }
 
@@ -380,7 +380,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         }
       });
 
-      if (!response.success) {
+      if (!response.ok) {
         throw new Error("Failed to load invoice PDF");
       }
 

@@ -4,6 +4,7 @@
 import { NumericIdSchema, SupplyUpdateRequestSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
+import { successResponse } from "../../../../../src/lib/response";
 import {
   DatabaseConflictError,
   deleteSupply,
@@ -59,7 +60,7 @@ export const GET = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ success: true, supply }, { status: 200 });
+      return successResponse(supply);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -92,7 +93,7 @@ export const PATCH = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ success: true, supply }, { status: 200 });
+      return successResponse(supply);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -121,7 +122,7 @@ export const DELETE = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ success: true }, { status: 200 });
+      return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

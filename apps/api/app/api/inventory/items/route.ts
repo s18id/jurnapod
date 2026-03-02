@@ -8,6 +8,7 @@ import {
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { createItem, DatabaseConflictError, listItems } from "../../../../src/lib/master-data";
+import { successResponse } from "../../../../src/lib/response";
 
 const INVALID_REQUEST_RESPONSE = {
   success: false,
@@ -65,7 +66,7 @@ export const GET = withAuth(
       const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
       const items = await listItems(auth.companyId, { isActive });
 
-      return Response.json({ success: true, items }, { status: 200 });
+      return successResponse(items);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -92,7 +93,7 @@ export const POST = withAuth(
         userId: auth.userId
       });
 
-      return Response.json({ success: true, item }, { status: 201 });
+      return successResponse(item, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

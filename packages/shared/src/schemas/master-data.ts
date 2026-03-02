@@ -225,12 +225,18 @@ export const SyncPullConfigSchema = z.object({
     .default(["CASH"])
 });
 
-export const SyncPullResponseSchema = z.object({
+export const SyncPullPayloadSchema = z.object({
   data_version: z.coerce.number().int().min(0),
   items: z.array(SyncPullItemSchema),
   prices: z.array(SyncPullPriceSchema),
   config: SyncPullConfigSchema
 });
 
+export const SyncPullResponseSchema = z.object({
+  success: z.literal(true),
+  data: SyncPullPayloadSchema
+});
+
 export type ItemType = z.infer<typeof ItemTypeSchema>;
+export type SyncPullPayload = z.infer<typeof SyncPullPayloadSchema>;
 export type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;

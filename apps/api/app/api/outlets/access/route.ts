@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
+import { successResponse } from "../../../../src/lib/response";
 
 function outletIdFromRequest(request: Request): number {
   const outletIdRaw = new URL(request.url).searchParams.get("outlet_id");
@@ -18,7 +19,7 @@ function outletIdFromRequest(request: Request): number {
 }
 
 export const GET = withAuth(
-  async () => Response.json({ success: true }, { status: 200 }),
+  async () => successResponse(null),
   [
     requireAccess({
       roles: ["OWNER", "ADMIN", "CASHIER", "ACCOUNTANT"],

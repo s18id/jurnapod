@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import { importAccountingCsv, parseImportFiles } from "../../../../src/lib/accounting-import";
 
 function isFile(value: unknown): value is File {
@@ -17,7 +18,7 @@ export const POST = withAuth(
       const allocationsFile = form.get("allocations");
 
       if (!isFile(accountsFile) || !isFile(transactionsFile) || !isFile(allocationsFile)) {
-        return Response.json({ success: false, error: { code: "INVALID_REQUEST", message: "Missing files" } }, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Missing files", 400);
       }
 
       const [accountsText, transactionsText, allocationsText] = await Promise.all([
@@ -40,20 +41,17 @@ export const POST = withAuth(
         ...parsed
       });
 
-      return Response.json(
-        {
-          success: true,
-          import_id: result.importId,
-          duplicate: result.duplicate,
-          totals: result.totals
-        },
-        { status: 200 }
-      );
+      return successResponse({
+        import_id: result.importId,
+        duplicate: result.duplicate,
+        totals: result.totals
+      });
     } catch (error) {
       console.error("POST /api/accounts/imports failed", error);
-      return Response.json(
-        { success: false, error: { code: "INVALID_REQUEST", message: error instanceof Error ? error.message : "Invalid request" } },
-        { status: 400 }
+      return errorResponse(
+        "INVALID_REQUEST",
+        error instanceof Error ? error.message : "Invalid request",
+        400
       );
     }
   },

@@ -27,16 +27,19 @@ type FeatureSettingsPageProps = {
 
 type SettingsResponse = {
   success: true;
-  outlet_id: number;
-  settings: Array<{
-    key: string;
-    value: number | boolean | string;
-    value_type: string;
-  }>;
+  data: {
+    outlet_id: number;
+    settings: Array<{
+      key: string;
+      value: number | boolean | string;
+      value_type: string;
+    }>;
+  };
 };
 
 type SettingsSaveResponse = {
   success: true;
+  data: null;
 };
 
 const SETTINGS_KEYS = [
@@ -92,7 +95,7 @@ export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPagePr
           accessToken
         );
         const nextState: Record<string, number | boolean | string> = { ...DEFAULT_SETTINGS };
-        response.settings.forEach((setting) => {
+        response.data.settings.forEach((setting) => {
           nextState[setting.key] = setting.value;
         });
         setFormState(nextState);

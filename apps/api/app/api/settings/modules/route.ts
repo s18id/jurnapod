@@ -12,6 +12,7 @@ import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getDbPool } from "../../../../src/lib/db";
 import { getAuditService } from "../../../../src/lib/audit";
 import { readClientIp } from "../../../../src/lib/request-meta";
+import { successResponse } from "../../../../src/lib/response";
 
 function errorResponse(code: string, message: string, status: number) {
   return Response.json(
@@ -92,7 +93,7 @@ export const GET = withAuth(
         config_json: typeof row.config_json === "string" ? row.config_json : "{}"
       }));
 
-      return Response.json({ success: true, modules }, { status: 200 });
+      return successResponse(modules);
     } catch (error) {
       console.error("GET /api/settings/modules failed", error);
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
@@ -199,7 +200,7 @@ export const PUT = withAuth(
         }
       );
 
-      return Response.json({ success: true }, { status: 200 });
+      return successResponse(null);
     } catch (error) {
       if (error instanceof z.ZodError || (error instanceof Error && error.message === "INVALID_JSON")) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);

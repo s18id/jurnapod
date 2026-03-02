@@ -44,8 +44,10 @@ type PosTransaction = {
 
 type PosTransactionsResponse = {
   success: true;
-  total: number;
-  transactions: PosTransaction[];
+  data: {
+    total: number;
+    transactions: PosTransaction[];
+  };
 };
 
 type DailySalesRow = {
@@ -59,7 +61,9 @@ type DailySalesRow = {
 
 type DailySalesResponse = {
   success: true;
-  rows: DailySalesRow[];
+  data: {
+    rows: DailySalesRow[];
+  };
 };
 
 type PosPaymentRow = {
@@ -72,7 +76,9 @@ type PosPaymentRow = {
 
 type PosPaymentsResponse = {
   success: true;
-  rows: PosPaymentRow[];
+  data: {
+    rows: PosPaymentRow[];
+  };
 };
 
 type JournalRow = {
@@ -89,8 +95,10 @@ type JournalRow = {
 
 type JournalResponse = {
   success: true;
-  total: number;
-  journals: JournalRow[];
+  data: {
+    total: number;
+    journals: JournalRow[];
+  };
 };
 
 type TrialBalanceRow = {
@@ -104,12 +112,14 @@ type TrialBalanceRow = {
 
 type TrialBalanceResponse = {
   success: true;
-  totals: {
-    total_debit: number;
-    total_credit: number;
-    balance: number;
+  data: {
+    totals: {
+      total_debit: number;
+      total_credit: number;
+      balance: number;
+    };
+    rows: TrialBalanceRow[];
   };
-  rows: TrialBalanceRow[];
 };
 
 type GeneralLedgerLine = {
@@ -144,16 +154,18 @@ type GeneralLedgerRow = {
 
 type GeneralLedgerResponse = {
   success: true;
-  filters: {
-    outlet_ids: number[];
-    account_id: number | null;
-    date_from: string;
-    date_to: string;
-    round: number;
-    line_limit: number | null;
-    line_offset: number | null;
+  data: {
+    filters: {
+      outlet_ids: number[];
+      account_id: number | null;
+      date_from: string;
+      date_to: string;
+      round: number;
+      line_limit: number | null;
+      line_offset: number | null;
+    };
+    rows: GeneralLedgerRow[];
   };
-  rows: GeneralLedgerRow[];
 };
 
 type WorksheetRow = {
@@ -177,28 +189,30 @@ type WorksheetRow = {
 
 type WorksheetResponse = {
   success: true;
-  filters: {
-    outlet_ids: number[];
-    date_from: string;
-    date_to: string;
-    round: number;
+  data: {
+    filters: {
+      outlet_ids: number[];
+      date_from: string;
+      date_to: string;
+      round: number;
+    };
+    summary: {
+      opening_debit: number;
+      opening_credit: number;
+      period_debit: number;
+      period_credit: number;
+      ending_debit: number;
+      ending_credit: number;
+      total_debit: number;
+      total_credit: number;
+      balance: number;
+      bs_debit: number;
+      bs_credit: number;
+      pl_debit: number;
+      pl_credit: number;
+    };
+    rows: WorksheetRow[];
   };
-  summary: {
-    opening_debit: number;
-    opening_credit: number;
-    period_debit: number;
-    period_credit: number;
-    ending_debit: number;
-    ending_credit: number;
-    total_debit: number;
-    total_credit: number;
-    balance: number;
-    bs_debit: number;
-    bs_credit: number;
-    pl_debit: number;
-    pl_credit: number;
-  };
-  rows: WorksheetRow[];
 };
 
 type ProfitLossRow = {
@@ -212,18 +226,20 @@ type ProfitLossRow = {
 
 type ProfitLossResponse = {
   success: true;
-  filters: {
-    outlet_ids: number[];
-    date_from: string;
-    date_to: string;
-    round: number;
+  data: {
+    filters: {
+      outlet_ids: number[];
+      date_from: string;
+      date_to: string;
+      round: number;
+    };
+    totals: {
+      total_debit: number;
+      total_credit: number;
+      net: number;
+    };
+    rows: ProfitLossRow[];
   };
-  totals: {
-    total_debit: number;
-    total_credit: number;
-    net: number;
-  };
-  rows: ProfitLossRow[];
 };
 
 function todayIso(): string {
@@ -372,8 +388,8 @@ export function PosTransactionsPage(props: ReportsProps) {
         {},
         props.accessToken
       );
-      setRows(response.transactions);
-      setTotal(response.total);
+      setRows(response.data.transactions);
+      setTotal(response.data.total);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -497,7 +513,7 @@ export function DailySalesPage(props: ReportsProps) {
         {},
         props.accessToken
       );
-      setRows(response.rows);
+      setRows(response.data.rows);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -663,7 +679,7 @@ export function GeneralLedgerPage(props: ReportsProps) {
         {},
         props.accessToken
       );
-      setRows(response.rows);
+      setRows(response.data.rows);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -862,7 +878,7 @@ export function PosPaymentsPage(props: ReportsProps) {
         {},
         props.accessToken
       );
-      setRows(response.rows);
+      setRows(response.data.rows);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -1067,9 +1083,9 @@ export function JournalsPage(props: ReportsProps) {
         )
       ]);
 
-      setJournals(journalResponse.journals);
-      setTrialRows(trialResponse.rows);
-      setTrialTotals(trialResponse.totals);
+      setJournals(journalResponse.data.journals);
+      setTrialRows(trialResponse.data.rows);
+      setTrialTotals(trialResponse.data.totals);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -1150,7 +1166,7 @@ export function ProfitLossPage(props: ReportsProps) {
   const [dateFrom, setDateFrom] = useState<string>(startOfYearIso());
   const [dateTo, setDateTo] = useState<string>(todayIso());
   const [rows, setRows] = useState<ProfitLossRow[]>([]);
-  const [totals, setTotals] = useState<ProfitLossResponse["totals"]>({
+  const [totals, setTotals] = useState<ProfitLossResponse["data"]["totals"]>({
     total_debit: 0,
     total_credit: 0,
     net: 0
@@ -1185,8 +1201,8 @@ export function ProfitLossPage(props: ReportsProps) {
         {},
         props.accessToken
       );
-      setRows(response.rows);
-      setTotals(response.totals);
+      setRows(response.data.rows);
+      setTotals(response.data.totals);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -1476,7 +1492,7 @@ export function AccountingWorksheetPage(props: ReportsProps) {
   const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(30));
   const [dateTo, setDateTo] = useState<string>(todayIso());
   const [rows, setRows] = useState<WorksheetRow[]>([]);
-  const [summary, setSummary] = useState<WorksheetResponse["summary"]>({
+  const [summary, setSummary] = useState<WorksheetResponse["data"]["summary"]>({
     opening_debit: 0,
     opening_credit: 0,
     period_debit: 0,
@@ -1503,8 +1519,8 @@ export function AccountingWorksheetPage(props: ReportsProps) {
         {},
         props.accessToken
       );
-      setRows(response.rows);
-      setSummary(response.summary);
+      setRows(response.data.rows);
+      setSummary(response.data.summary);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);

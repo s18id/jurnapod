@@ -88,12 +88,12 @@ export function SuppliesPage(props: SuppliesPageProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiRequest<{ success: true; supplies: Supply[] }>(
+      const response = await apiRequest<{ success: true; data: Supply[] }>(
         "/inventory/supplies",
         {},
         props.accessToken
       );
-      setSupplies(response.supplies);
+      setSupplies(response.data);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);

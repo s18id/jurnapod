@@ -7,6 +7,7 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
+import { successResponse } from "../../../../src/lib/response";
 import {
   createFixedAsset,
   DatabaseConflictError,
@@ -80,7 +81,7 @@ export const GET = withAuth(
       const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
       const assets = await listFixedAssets(auth.companyId, { outletId, isActive });
 
-      return Response.json({ success: true, assets }, { status: 200 });
+      return successResponse(assets);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -111,7 +112,7 @@ export const POST = withAuth(
         userId: auth.userId
       });
 
-      return Response.json({ success: true, asset }, { status: 201 });
+      return successResponse(asset, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

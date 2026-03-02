@@ -4,23 +4,8 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import { getOutlet, updateOutlet, deleteOutlet, OutletNotFoundError } from "../../../../src/lib/outlets";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Outlet request failed"
-  }
-};
 
 function parseOutletId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -33,19 +18,16 @@ export const GET = withAuth(
     try {
       const outletId = parseOutletId(request);
       const outlet = await getOutlet(outletId);
-      return Response.json({ success: true, data: outlet }, { status: 200 });
+      return successResponse(outlet);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       if (error instanceof OutletNotFoundError) {
-        return Response.json({
-          success: false,
-          error: { code: "NOT_FOUND", message: error.message }
-        }, { status: 404 });
+        return errorResponse("NOT_FOUND", error.message, 404);
       }
       console.error("GET /api/outlets/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Outlet request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "read" })]
@@ -59,10 +41,7 @@ export const PATCH = withAuth(
       const { name } = body;
 
       if (!name || typeof name !== "string" || name.trim().length === 0) {
-        return Response.json({
-          success: false,
-          error: { code: "VALIDATION_ERROR", message: "Outlet name is required" }
-        }, { status: 400 });
+        return errorResponse("VALIDATION_ERROR", "Outlet name is required", 400);
       }
 
       const outlet = await updateOutlet({
@@ -70,19 +49,16 @@ export const PATCH = withAuth(
         name: name.trim()
       });
 
-      return Response.json({ success: true, data: outlet }, { status: 200 });
+      return successResponse(outlet);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       if (error instanceof OutletNotFoundError) {
-        return Response.json({
-          success: false,
-          error: { code: "NOT_FOUND", message: error.message }
-        }, { status: 404 });
+        return errorResponse("NOT_FOUND", error.message, 404);
       }
       console.error("PATCH /api/outlets/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Outlet request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "update" })]
@@ -93,25 +69,19 @@ export const DELETE = withAuth(
     try {
       const outletId = parseOutletId(request);
       await deleteOutlet({ outletId });
-      return Response.json({ success: true }, { status: 200 });
+      return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       if (error instanceof OutletNotFoundError) {
-        return Response.json({
-          success: false,
-          error: { code: "NOT_FOUND", message: error.message }
-        }, { status: 404 });
+        return errorResponse("NOT_FOUND", error.message, 404);
       }
       if (error instanceof Error && error.message.includes("Cannot delete outlet")) {
-        return Response.json({
-          success: false,
-          error: { code: "OUTLET_IN_USE", message: error.message }
-        }, { status: 409 });
+        return errorResponse("OUTLET_IN_USE", error.message, 409);
       }
       console.error("DELETE /api/outlets/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Outlet request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "delete" })]

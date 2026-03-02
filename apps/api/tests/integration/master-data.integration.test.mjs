@@ -216,7 +216,7 @@ test(
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
       assert.equal(loginBody.success, true);
-      const accessToken = loginBody.access_token;
+      const accessToken = loginBody.data.access_token;
 
       const baselinePullResponse = await fetch(
         `${baseUrl}/api/sync/pull?outlet_id=${outletId}&since_version=0`,
@@ -229,7 +229,7 @@ test(
       assert.equal(baselinePullResponse.status, 200);
       const baselinePullBody = await baselinePullResponse.json();
       assert.equal(baselinePullBody.success, true);
-      const baselineVersion = Number(baselinePullBody.data_version);
+      const baselineVersion = Number(baselinePullBody.data.data_version);
 
       const createItemResponse = await fetch(`${baseUrl}/api/inventory/items`, {
         method: "POST",
@@ -247,7 +247,7 @@ test(
       assert.equal(createItemResponse.status, 201);
       const createItemBody = await createItemResponse.json();
       assert.equal(createItemBody.success, true);
-      createdItemId = Number(createItemBody.item.id);
+      createdItemId = Number(createItemBody.data.id);
 
       const createPriceResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
         method: "POST",
@@ -265,7 +265,7 @@ test(
       assert.equal(createPriceResponse.status, 201);
       const createPriceBody = await createPriceResponse.json();
       assert.equal(createPriceBody.success, true);
-      createdPriceId = Number(createPriceBody.item_price.id);
+      createdPriceId = Number(createPriceBody.data.id);
 
       const deltaPullResponse = await fetch(
         `${baseUrl}/api/sync/pull?outlet_id=${outletId}&since_version=${baselineVersion}`,
@@ -278,14 +278,14 @@ test(
       assert.equal(deltaPullResponse.status, 200);
       const deltaPullBody = await deltaPullResponse.json();
       assert.equal(deltaPullBody.success, true);
-      assert.equal(Number(deltaPullBody.data_version) > baselineVersion, true);
+      assert.equal(Number(deltaPullBody.data.data_version) > baselineVersion, true);
 
-      const pullItem = deltaPullBody.items.find((item) => Number(item.id) === createdItemId);
+      const pullItem = deltaPullBody.data.items.find((item) => Number(item.id) === createdItemId);
       assert.equal(Boolean(pullItem), true);
       assert.equal(pullItem.name, `Cafe Latte ${runId}`);
       assert.equal(pullItem.type, "PRODUCT");
 
-      const pullPrice = deltaPullBody.prices.find((price) => Number(price.id) === createdPriceId);
+      const pullPrice = deltaPullBody.data.prices.find((price) => Number(price.id) === createdPriceId);
       assert.equal(Boolean(pullPrice), true);
       assert.equal(Number(pullPrice.item_id), createdItemId);
       assert.equal(Number(pullPrice.outlet_id), outletId);
@@ -303,7 +303,7 @@ test(
       const activePricesBody = await activePricesResponse.json();
       assert.equal(activePricesBody.success, true);
 
-      const activePrice = activePricesBody.prices.find((price) => Number(price.id) === createdPriceId);
+      const activePrice = activePricesBody.data.find((price) => Number(price.id) === createdPriceId);
       assert.equal(Boolean(activePrice), true);
 
       const [dbVersionRows] = await db.execute(
@@ -313,7 +313,7 @@ test(
          LIMIT 1`,
         [companyId]
       );
-      assert.equal(Number(dbVersionRows[0].current_version), Number(deltaPullBody.data_version));
+      assert.equal(Number(dbVersionRows[0].current_version), Number(deltaPullBody.data.data_version));
     } finally {
       await stopApiServer(childProcess);
 
@@ -389,7 +389,7 @@ test(
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
       assert.equal(loginBody.success, true);
-      const accessToken = loginBody.access_token;
+      const accessToken = loginBody.data.access_token;
 
       const malformedGuardResponse = await fetch(
         `${baseUrl}/api/inventory/item-prices/active?outlet_id=not-a-number`,
@@ -526,7 +526,7 @@ test(
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
       assert.equal(loginBody.success, true);
-      const accessToken = loginBody.access_token;
+      const accessToken = loginBody.data.access_token;
 
       const deniedListResponse = await fetch(
         `${baseUrl}/api/inventory/item-prices?outlet_id=${deniedOutletId}`,
@@ -604,7 +604,7 @@ test(
       assert.equal(scopedListResponse.status, 200);
       const scopedListBody = await scopedListResponse.json();
       assert.equal(scopedListBody.success, true);
-      const deniedPriceVisible = scopedListBody.prices.some(
+      const deniedPriceVisible = scopedListBody.data.some(
         (price) => Number(price.id) === deniedPriceId
       );
       assert.equal(deniedPriceVisible, false);
@@ -625,7 +625,7 @@ test(
       assert.equal(createItemResponse.status, 201);
       const createItemBody = await createItemResponse.json();
       assert.equal(createItemBody.success, true);
-      duplicateItemId = Number(createItemBody.item.id);
+      duplicateItemId = Number(createItemBody.data.id);
 
       const duplicatePayload = {
         item_id: duplicateItemId,
@@ -668,7 +668,7 @@ test(
       assert.equal(Boolean(successfulCreateBody), true);
       assert.equal(Boolean(conflictCreateBody), true);
       assert.equal(conflictCreateBody.error.code, "CONFLICT");
-      duplicatePriceId = Number(successfulCreateBody.item_price.id);
+      duplicatePriceId = Number(successfulCreateBody.data.id);
 
       const [duplicatePriceCountRows] = await db.execute(
         `SELECT COUNT(*) AS total
@@ -835,7 +835,7 @@ test(
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
       assert.equal(loginBody.success, true);
-      const accessToken = loginBody.access_token;
+      const accessToken = loginBody.data.access_token;
 
       await db.execute(
         `UPDATE item_prices

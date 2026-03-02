@@ -8,6 +8,7 @@ import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getDbPool } from "../../../../src/lib/db";
 import { getAuditService } from "../../../../src/lib/audit";
 import { readClientIp } from "../../../../src/lib/request-meta";
+import { successResponse } from "../../../../src/lib/response";
 
 const INVALID_REQUEST_RESPONSE = {
   success: false,
@@ -54,7 +55,7 @@ export const GET = withAuth(
       );
 
       const taxRateIds = (rows as Array<{ tax_rate_id?: number }>).map((row) => Number(row.tax_rate_id));
-      return Response.json({ success: true, tax_rate_ids: taxRateIds }, { status: 200 });
+      return successResponse(taxRateIds);
     } catch (error) {
       console.error("GET /settings/tax-defaults failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
@@ -76,7 +77,7 @@ export const PUT = withAuth(
           `DELETE FROM company_tax_defaults WHERE company_id = ?`,
           [auth.companyId]
         );
-        return Response.json({ success: true }, { status: 200 });
+        return successResponse(null);
       }
 
       const pool = getDbPool();
@@ -148,7 +149,7 @@ export const PUT = withAuth(
         }
       );
 
-      return Response.json({ success: true }, { status: 200 });
+      return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { RowDataPacket } from "mysql2";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getDbPool } from "../../../../src/lib/db";
+import { successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
   keys: z.string().optional()
@@ -74,7 +75,7 @@ export const GET = withAuth(
         })
       );
 
-      return Response.json({ success: true, flags }, { status: 200 });
+      return successResponse(flags);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);

@@ -262,12 +262,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       const query =
         typeof filter === "number" ? `?outlet_id=${filter}` : "";
-      const response = await apiRequest<{ success: true; assets: FixedAsset[] }>(
+      const response = await apiRequest<{ success: true; data: FixedAsset[] }>(
         `/accounts/fixed-assets${query}`,
         {},
         props.accessToken
       );
-      setFixedAsset(response.assets);
+      setFixedAsset(response.data);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -281,12 +281,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
 
   async function refreshCategories() {
     try {
-      const response = await apiRequest<{ success: true; categories: FixedAssetCategory[] }>(
+      const response = await apiRequest<{ success: true; data: FixedAssetCategory[] }>(
         "/accounts/fixed-asset-categories",
         {},
         props.accessToken
       );
-      setCategories(response.categories);
+      setCategories(response.data);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -491,12 +491,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
   async function loadDepreciationPlan(assetId: number) {
     try {
       setError(null);
-      const response = await apiRequest<{ success: true; plan: DepreciationPlan }>(
+      const response = await apiRequest<{ success: true; data: DepreciationPlan }>(
         `/accounts/fixed-assets/${assetId}/depreciation-plan`,
         {},
         props.accessToken
       );
-      setDepreciationPlan(response.plan);
+      setDepreciationPlan(response.data);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -508,23 +508,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
 
   async function loadAccounts() {
     try {
-      const response = await apiRequest<
-        | { success: true; accounts: Array<{ id: number; code: string; name: string }> }
-        | { success: true; data: Array<{ id: number; code: string; name: string }> }
-      >(
+      const response = await apiRequest<{ success: true; data: Array<{ id: number; code: string; name: string }> }>(
         `/accounts?company_id=${props.user.company_id}`,
         {},
         props.accessToken
       );
-      if ("accounts" in response && Array.isArray(response.accounts)) {
-        setAccounts(response.accounts);
-        return;
-      }
-      if ("data" in response && Array.isArray(response.data)) {
-        setAccounts(response.data);
-        return;
-      }
-      setAccounts([]);
+      setAccounts(response.data);
     } catch (err) {
       console.error("Failed to load accounts", err);
       setAccounts([]);
@@ -649,7 +638,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       setError(null);
       setRunLoading(true);
-      const response = await apiRequest<{ success: true; duplicate: boolean; run: DepreciationRun }>(
+      const response = await apiRequest<{ success: true; data: { duplicate: boolean; run: DepreciationRun } }>(
         `/accounts/depreciation/run`,
         {
           method: "POST",
@@ -661,11 +650,11 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
         },
         props.accessToken
       );
-      if (response.duplicate) {
+      if (response.data.duplicate) {
         setError("Run already exists for this period");
       } else {
         setError(null);
-        alert(`Depreciation run posted. Journal batch ID: ${response.run.journal_batch_id}`);
+        alert(`Depreciation run posted. Journal batch ID: ${response.data.run.journal_batch_id}`);
       }
     } catch (runError) {
       if (runError instanceof ApiError) {

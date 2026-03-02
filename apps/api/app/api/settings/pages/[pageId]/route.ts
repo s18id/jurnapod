@@ -5,6 +5,7 @@ import { NumericIdSchema } from "@jurnapod/shared";
 import { z, ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../../src/lib/request-meta";
+import { successResponse } from "../../../../../src/lib/response";
 import {
   getStaticPageDetail,
   StaticPageNotFoundError,
@@ -96,7 +97,7 @@ export const PATCH = withAuth(
         }
       });
 
-      return Response.json({ success: true, page }, { status: 200 });
+      return successResponse(page);
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -130,7 +131,7 @@ export const GET = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ success: true, page }, { status: 200 });
+      return successResponse(page);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

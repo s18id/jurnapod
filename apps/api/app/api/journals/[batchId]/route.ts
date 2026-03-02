@@ -5,21 +5,7 @@ import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
 import { getJournalBatch, JournalNotFoundError } from "../../../../src/lib/journals";
-
-/**
- * Helper: Create standardized error response
- */
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 /**
  * Helper: Parse batch ID from URL pathname
@@ -42,13 +28,7 @@ export const GET = withAuth(
       const batchId = parseBatchId(request);
       const batch = await getJournalBatch(batchId, auth.companyId);
 
-      return Response.json(
-        {
-          success: true,
-          data: batch
-        },
-        { status: 200 }
-      );
+      return successResponse(batch);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_ID", "Invalid batch ID", 400);

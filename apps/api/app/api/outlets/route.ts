@@ -4,23 +4,8 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
-import { listOutletsByCompany, listAllOutlets, createOutlet, OutletCodeExistsError } from "../../../src/lib/outlets";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Outlets request failed"
-  }
-};
+import { errorResponse, successResponse } from "../../../src/lib/response";
+import { listOutletsByCompany, createOutlet, OutletCodeExistsError } from "../../../src/lib/outlets";
 
 export const GET = withAuth(
   async (request, auth) => {
@@ -34,14 +19,14 @@ export const GET = withAuth(
         : auth.companyId;
       
       const outlets = await listOutletsByCompany(companyId);
-      return Response.json({ success: true, data: outlets }, { status: 200 });
+      return successResponse(outlets);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /api/outlets failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Outlets request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "read" })]
@@ -57,17 +42,11 @@ export const POST = withAuth(
       const targetCompanyId = company_id ?? auth.companyId;
 
       if (!code || typeof code !== "string" || code.trim().length === 0) {
-        return Response.json({
-          success: false,
-          error: { code: "VALIDATION_ERROR", message: "Outlet code is required" }
-        }, { status: 400 });
+        return errorResponse("VALIDATION_ERROR", "Outlet code is required", 400);
       }
 
       if (!name || typeof name !== "string" || name.trim().length === 0) {
-        return Response.json({
-          success: false,
-          error: { code: "VALIDATION_ERROR", message: "Outlet name is required" }
-        }, { status: 400 });
+        return errorResponse("VALIDATION_ERROR", "Outlet name is required", 400);
       }
 
       const outlet = await createOutlet({
@@ -76,16 +55,13 @@ export const POST = withAuth(
         name: name.trim()
       });
 
-      return Response.json({ success: true, data: outlet }, { status: 201 });
+      return successResponse(outlet, 201);
     } catch (error) {
       console.error("POST /api/outlets failed", error);
       if (error instanceof OutletCodeExistsError) {
-        return Response.json({
-          success: false,
-          error: { code: "DUPLICATE_OUTLET", message: error.message }
-        }, { status: 409 });
+        return errorResponse("DUPLICATE_OUTLET", error.message, 409);
       }
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Outlets request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "create" })]

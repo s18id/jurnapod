@@ -39,18 +39,18 @@ export const TaxRateUpdateRequestSchema = z
   });
 
 export const TaxRateListResponseSchema = z.object({
-  ok: z.literal(true),
-  tax_rates: z.array(TaxRateSchema)
+  success: z.literal(true),
+  data: z.array(TaxRateSchema)
 });
 
 export const TaxRateResponseSchema = z.object({
-  ok: z.literal(true),
-  tax_rate: TaxRateSchema
+  success: z.literal(true),
+  data: TaxRateSchema
 });
 
 export const TaxDefaultsResponseSchema = z.object({
-  ok: z.literal(true),
-  tax_rate_ids: z.array(NumericIdSchema)
+  success: z.literal(true),
+  data: z.array(NumericIdSchema)
 });
 
 export const TaxDefaultsUpdateSchema = z.object({

@@ -24,7 +24,7 @@ type Payment = {
   updated_at: string;
 };
 
-type PaymentsResponse = { success: true; total: number; payments: Payment[] };
+type PaymentsResponse = { success: true; data: { total: number; payments: Payment[] } };
 
 const boxStyle = {
   border: "1px solid #e2ddd2",
@@ -141,7 +141,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
         {},
         props.accessToken
       );
-      setPayments(response.payments);
+      setPayments(response.data.payments);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);

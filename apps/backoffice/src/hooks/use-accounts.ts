@@ -17,14 +17,14 @@ import type {
 /**
  * Account Usage Check Response
  */
-type AccountUsageResponse = {
-  ok: boolean;
+type AccountUsagePayload = {
+  account_id: number;
   in_use: boolean;
-  usage_count?: number;
-  details?: {
-    journal_lines?: number;
-    child_accounts?: number;
-  };
+};
+
+type AccountUsageResponse = {
+  success: true;
+  data: AccountUsagePayload;
 };
 
 /**
@@ -374,7 +374,7 @@ export function useAccountUsage(
   companyId: number,
   accessToken: string
 ) {
-  const [data, setData] = useState<AccountUsageResponse | null>(null);
+  const [data, setData] = useState<AccountUsagePayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -395,7 +395,7 @@ export function useAccountUsage(
         {},
         accessToken
       );
-      setData(response);
+      setData(response.data);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -462,7 +462,7 @@ export async function deactivateAccount(
   accountId: number,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ success: true }>(
+  await apiRequest<{ success: true; data: AccountResponse }>(
     `/accounts/${accountId}`,
     {
       method: "DELETE"
@@ -536,7 +536,7 @@ export async function deactivateAccountType(
   accountTypeId: number,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ success: true }>(
+  await apiRequest<{ success: true; data: AccountTypeResponse }>(
     `/accounts/types/${accountTypeId}`,
     {
       method: "DELETE"

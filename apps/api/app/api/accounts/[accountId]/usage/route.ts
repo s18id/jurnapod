@@ -5,6 +5,7 @@ import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../../src/lib/auth-guard";
 import { isAccountInUse, AccountNotFoundError } from "../../../../../src/lib/accounts";
+import { errorResponse, successResponse } from "../../../../../src/lib/response";
 
 /**
  * Helper: Parse account ID from URL pathname
@@ -30,45 +31,21 @@ export const GET = withAuth(
       const accountId = parseAccountId(request);
       const inUse = await isAccountInUse(accountId, auth.companyId);
 
-      return Response.json(
-        {
-          success: true,
-          data: {
-            account_id: accountId,
-            in_use: inUse
-          }
-        },
-        { status: 200 }
-      );
+      return successResponse({
+        account_id: accountId,
+        in_use: inUse
+      });
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(
-          {
-            success: false,
-            error: "Invalid account ID"
-          },
-          { status: 400 }
-        );
+        return errorResponse("INVALID_ID", "Invalid account ID", 400);
       }
 
       if (error instanceof AccountNotFoundError) {
-        return Response.json(
-          {
-            success: false,
-            error: "Account not found"
-          },
-          { status: 404 }
-        );
+        return errorResponse("NOT_FOUND", "Account not found", 404);
       }
 
       console.error("GET /api/accounts/:accountId/usage failed", error);
-      return Response.json(
-        {
-          success: false,
-          error: "Internal server error"
-        },
-        { status: 500 }
-      );
+      return errorResponse("INTERNAL_SERVER_ERROR", "Internal server error", 500);
     }
   },
   [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]

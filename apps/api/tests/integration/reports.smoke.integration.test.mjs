@@ -159,8 +159,8 @@ test(
       assert.equal(posResponse.status, 200);
       const posBody = await posResponse.json();
       assert.equal(posBody.success, true);
-      assert.equal(Array.isArray(posBody.transactions), true);
-      assert.equal(typeof posBody.total, "number");
+      assert.equal(Array.isArray(posBody.data.transactions), true);
+      assert.equal(typeof posBody.data.total, "number");
 
       const dailySalesResponse = await fetch(
         `${baseUrl}/api/reports/daily-sales?outlet_id=${outletId}&date_from=${dateFromIso}&date_to=${dateToIso}`,
@@ -173,7 +173,7 @@ test(
       assert.equal(dailySalesResponse.status, 200);
       const dailySalesBody = await dailySalesResponse.json();
       assert.equal(dailySalesBody.success, true);
-      assert.equal(dailySalesBody.rows.length > 0, true);
+      assert.equal(dailySalesBody.data.rows.length > 0, true);
 
       const journalsResponse = await fetch(
         `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${dateFromIso}&date_to=${dateToIso}`,
@@ -187,7 +187,7 @@ test(
       const journalsBody = await journalsResponse.json();
       assert.equal(journalsBody.success, true);
       assert.equal(
-        journalsBody.journals.some((row) => row.id === journalBatchId && row.doc_type === "IT_REPORT"),
+        journalsBody.data.journals.some((row) => row.id === journalBatchId && row.doc_type === "IT_REPORT"),
         true
       );
 
@@ -203,11 +203,11 @@ test(
       const trialBalanceBody = await trialBalanceResponse.json();
       assert.equal(trialBalanceBody.success, true);
       assert.equal(
-        trialBalanceBody.rows.some((row) => Number(row.account_id) === accountId),
+        trialBalanceBody.data.rows.some((row) => Number(row.account_id) === accountId),
         true
       );
       assert.equal(
-        Number(trialBalanceBody.totals.total_debit) >= Number(trialBalanceBody.totals.total_credit),
+        Number(trialBalanceBody.data.totals.total_debit) >= Number(trialBalanceBody.data.totals.total_credit),
         true
       );
     } finally {

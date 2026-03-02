@@ -5,21 +5,7 @@ import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../../src/lib/auth-guard";
 import { reactivateAccount, AccountNotFoundError } from "../../../../../src/lib/accounts";
-
-/**
- * Helper: Create standardized error response
- */
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
+import { errorResponse, successResponse } from "../../../../../src/lib/response";
 
 /**
  * Helper: Parse account ID from URL pathname
@@ -45,13 +31,7 @@ export const POST = withAuth(
       const accountId = parseAccountId(request);
       const account = await reactivateAccount(accountId, auth.companyId, auth.userId);
 
-      return Response.json(
-        {
-          success: true,
-          data: account
-        },
-        { status: 200 }
-      );
+      return successResponse(account);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_ID", "Invalid account ID", 400);

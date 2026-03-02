@@ -112,9 +112,9 @@ test(
       const body = await response.json();
       assert.equal(body.success, true);
 
-      const cashRow = body.rows.find((row) => row.method === "CASH");
-      const qrisRow = body.rows.find((row) => row.method === "QRIS");
-      const cardRow = body.rows.find((row) => row.method === "CARD");
+      const cashRow = body.data.rows.find((row) => row.method === "CASH");
+      const qrisRow = body.data.rows.find((row) => row.method === "QRIS");
+      const cardRow = body.data.rows.find((row) => row.method === "CARD");
 
       assert.equal(Boolean(cashRow), true);
       assert.equal(Boolean(qrisRow), true);
@@ -223,7 +223,7 @@ test(
       const body = await response.json();
       assert.equal(body.success, true);
 
-      const returnedClientTxIds = body.transactions.map((row) => row.client_tx_id);
+      const returnedClientTxIds = body.data.transactions.map((row) => row.client_tx_id);
       assert.equal(returnedClientTxIds.includes(txInsideClientId), true);
       assert.equal(returnedClientTxIds.includes(txOutsideClientId), false);
     } finally {
@@ -308,10 +308,10 @@ test(
       assert.equal(page1Response.status, 200);
       const page1Body = await page1Response.json();
       assert.equal(page1Body.success, true);
-      assert.equal(typeof page1Body.filters.as_of, "string");
-      assert.equal(typeof page1Body.filters.as_of_id, "number");
-      assert.equal(page1Body.total, 2);
-      const firstPageClientTxId = page1Body.transactions[0]?.client_tx_id;
+      assert.equal(typeof page1Body.data.filters.as_of, "string");
+      assert.equal(typeof page1Body.data.filters.as_of_id, "number");
+      assert.equal(page1Body.data.total, 2);
+      const firstPageClientTxId = page1Body.data.transactions[0]?.client_tx_id;
 
       await db.execute(
         `INSERT INTO pos_transactions (
@@ -327,7 +327,7 @@ test(
       );
 
       const page2Response = await fetch(
-        `${baseUrl}/api/reports/pos-transactions?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&status=VOID&limit=1&offset=1&as_of=${encodeURIComponent(page1Body.filters.as_of)}&as_of_id=${page1Body.filters.as_of_id}`,
+        `${baseUrl}/api/reports/pos-transactions?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&status=VOID&limit=1&offset=1&as_of=${encodeURIComponent(page1Body.data.filters.as_of)}&as_of_id=${page1Body.data.filters.as_of_id}`,
         {
           headers: {
             authorization: `Bearer ${accessToken}`
@@ -337,9 +337,9 @@ test(
       assert.equal(page2Response.status, 200);
       const page2Body = await page2Response.json();
       assert.equal(page2Body.success, true);
-      assert.equal(page2Body.total, 2);
+      assert.equal(page2Body.data.total, 2);
 
-      const returnedPage2Ids = page2Body.transactions.map((row) => row.client_tx_id);
+      const returnedPage2Ids = page2Body.data.transactions.map((row) => row.client_tx_id);
       assert.equal(returnedPage2Ids.includes(txIds[2]), false);
       assert.equal(returnedPage2Ids.includes(firstPageClientTxId), false);
     } finally {

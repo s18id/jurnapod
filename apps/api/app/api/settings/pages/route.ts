@@ -4,6 +4,7 @@
 import { z, ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../src/lib/request-meta";
+import { successResponse } from "../../../../src/lib/response";
 import {
   createStaticPage,
   listStaticPages,
@@ -61,7 +62,7 @@ export const GET = withAuth(
       const url = new URL(request.url);
       const query = url.searchParams.get("q")?.trim();
       const pages = await listStaticPages(query || undefined);
-      return Response.json({ success: true, pages }, { status: 200 });
+      return successResponse(pages);
     } catch (error) {
       console.error("GET /api/settings/pages failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
@@ -88,7 +89,7 @@ export const POST = withAuth(
         }
       });
 
-      return Response.json({ success: true, page }, { status: 201 });
+      return successResponse(page, 201);
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

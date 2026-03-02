@@ -16,6 +16,7 @@ import { userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
 import { getAuditService } from "../../../../src/lib/audit";
 import { readClientIp } from "../../../../src/lib/request-meta";
+import { successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive(),
@@ -127,14 +128,10 @@ export const GET = withAuth(
         };
       });
 
-      return Response.json(
-        {
-          success: true,
-          outlet_id: parsed.outlet_id,
-          settings
-        },
-        { status: 200 }
-      );
+      return successResponse({
+        outlet_id: parsed.outlet_id,
+        settings
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
@@ -231,7 +228,7 @@ export const PUT = withAuth(
         }
       );
 
-      return Response.json({ success: true }, { status: 200 });
+      return successResponse(null);
     } catch (error) {
       if (error instanceof z.ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);

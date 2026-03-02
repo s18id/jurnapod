@@ -8,6 +8,7 @@ import {
 import { ZodError } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
+import { successResponse } from "../../../../src/lib/response";
 import {
   createInvoice,
   DatabaseConflictError,
@@ -91,14 +92,10 @@ export const GET = withAuth(
         offset: parsed.offset
       });
 
-      return Response.json(
-        {
-          success: true,
-          total: report.total,
-          invoices: report.invoices
-        },
-        { status: 200 }
-      );
+      return successResponse({
+        total: report.total,
+        invoices: report.invoices
+      });
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -120,7 +117,7 @@ export const POST = withAuth(
         userId: auth.userId
       });
 
-      return Response.json({ success: true, invoice }, { status: 201 });
+      return successResponse(invoice, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

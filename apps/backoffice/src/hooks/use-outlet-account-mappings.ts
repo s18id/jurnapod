@@ -13,12 +13,15 @@ export type OutletAccountMapping = {
 
 type MappingResponse = {
   success: true;
-  outlet_id: number;
-  mappings: OutletAccountMapping[];
+  data: {
+    outlet_id: number;
+    mappings: OutletAccountMapping[];
+  };
 };
 
 type SaveResponse = {
   success: true;
+  data: null;
 };
 
 export function useOutletAccountMappings(outletId: number, accessToken: string) {
@@ -42,7 +45,7 @@ export function useOutletAccountMappings(outletId: number, accessToken: string) 
         {},
         accessToken
       );
-      setData(response.mappings);
+      setData(response.data.mappings);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);

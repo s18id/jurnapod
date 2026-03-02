@@ -8,6 +8,7 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
+import { successResponse } from "../../../../../../src/lib/response";
 import {
   createDepreciationPlan,
   DatabaseForbiddenError,
@@ -78,7 +79,7 @@ export const GET = withAuth(
       const assetId = parseAssetId(request);
       const plan = await getDepreciationPlanForFixedAsset(auth.companyId, assetId);
 
-      return Response.json({ success: true, plan }, { status: 200 });
+      return successResponse(plan);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -106,7 +107,7 @@ export const POST = withAuth(
         userId: auth.userId
       });
 
-      return Response.json({ success: true, plan }, { status: 201 });
+      return successResponse(plan, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -151,7 +152,7 @@ export const PATCH = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ success: true, plan }, { status: 200 });
+      return successResponse(plan);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

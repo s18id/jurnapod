@@ -159,7 +159,7 @@ export async function deleteOutlet(
   outletId: number,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ success: true }>(
+  await apiRequest<{ success: true; data: null }>(
     `/outlets/${outletId}`,
     {
       method: "DELETE"

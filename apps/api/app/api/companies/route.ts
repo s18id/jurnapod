@@ -7,14 +7,7 @@ import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
 import { userHasAnyRole } from "../../../src/lib/auth";
 import { listCompanies, createCompany, CompanyCodeExistsError } from "../../../src/lib/companies";
 import { readClientIp } from "../../../src/lib/request-meta";
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Companies request failed"
-  }
-};
+import { errorResponse, successResponse } from "../../../src/lib/response";
 
 export const GET = withAuth(
   async (_request, auth) => {
@@ -28,10 +21,10 @@ export const GET = withAuth(
           ? { includeDeleted }
           : { companyId: auth.companyId }
       );
-      return Response.json({ success: true, data: companies }, { status: 200 });
+      return successResponse(companies);
     } catch (error) {
       console.error("GET /api/companies failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Companies request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN", "OWNER"], module: "companies", permission: "read" })]
@@ -55,22 +48,16 @@ export const POST = withAuth(
         }
       });
 
-      return Response.json({ success: true, data: company }, { status: 201 });
+      return successResponse(company, 201);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json({
-          success: false,
-          error: { code: "VALIDATION_ERROR", message: "Invalid company payload" }
-        }, { status: 400 });
+        return errorResponse("VALIDATION_ERROR", "Invalid company payload", 400);
       }
       console.error("POST /api/companies failed", error);
       if (error instanceof CompanyCodeExistsError) {
-        return Response.json({
-          success: false,
-          error: { code: "DUPLICATE_COMPANY", message: error.message }
-        }, { status: 409 });
+        return errorResponse("DUPLICATE_COMPANY", error.message, 409);
       }
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Companies request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN"], module: "companies", permission: "create" })]

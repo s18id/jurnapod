@@ -5,6 +5,7 @@ import { ModuleSchema, NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { listModuleRoles } from "../../../../src/lib/users";
+import { successResponse } from "../../../../src/lib/response";
 
 const INVALID_REQUEST_RESPONSE = {
   success: false,
@@ -37,7 +38,7 @@ export const GET = withAuth(
         roleId,
         module: moduleName
       });
-      return Response.json({ success: true, data: moduleRoles }, { status: 200 });
+      return successResponse(moduleRoles);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

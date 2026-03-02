@@ -11,6 +11,7 @@ import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getDbPool } from "../../../../src/lib/db";
 import { getAuditService } from "../../../../src/lib/audit";
 import { readClientIp } from "../../../../src/lib/request-meta";
+import { successResponse } from "../../../../src/lib/response";
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 
@@ -66,10 +67,10 @@ export const GET = withAuth(
 
       const response = TaxRateListResponseSchema.parse({
         success: true,
-        tax_rates: taxRates
+        data: taxRates
       });
 
-      return Response.json(response, { status: 200 });
+      return successResponse(response.data);
     } catch (error) {
       console.error("GET /settings/tax-rates failed", error);
       return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
@@ -128,7 +129,7 @@ export const POST = withAuth(
         }
       );
 
-      return Response.json({ success: true, id: taxRateId }, { status: 201 });
+      return successResponse(taxRateId, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

@@ -43,14 +43,13 @@ const SyncPullResponseSchema = z.object({
 
 type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;
 
-const SyncPullSuccessEnvelopeSchema = z
-  .object({
-    ok: z.literal(true)
-  })
-  .and(SyncPullResponseSchema);
+const SyncPullSuccessEnvelopeSchema = z.object({
+  success: z.literal(true),
+  data: SyncPullResponseSchema
+});
 
 const SyncPullErrorEnvelopeSchema = z.object({
-  ok: z.literal(false),
+  success: z.literal(false),
   error: z.object({
     code: z.string(),
     message: z.string()
@@ -158,12 +157,7 @@ function normalizeServerErrorMessage(status: number, payload: unknown): string {
 function parsePullPayload(payload: unknown): SyncPullResponse {
   const successEnvelope = SyncPullSuccessEnvelopeSchema.safeParse(payload);
   if (successEnvelope.success) {
-    return {
-      data_version: successEnvelope.data.data_version,
-      items: successEnvelope.data.items,
-      prices: successEnvelope.data.prices,
-      config: successEnvelope.data.config
-    };
+    return successEnvelope.data.data;
   }
 
   const directPayload = SyncPullResponseSchema.safeParse(payload);
@@ -300,7 +294,7 @@ async function fetchSyncPullPayload(input: {
     throw new Error("sync pull response is not valid JSON");
   }
 
-  if (!response.success) {
+  if (!response.ok) {
     throw new Error(normalizeServerErrorMessage(response.status, payload));
   }
 

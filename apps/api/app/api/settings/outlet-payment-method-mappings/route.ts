@@ -6,6 +6,7 @@ import type { RowDataPacket } from "mysql2";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
+import { successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive()
@@ -221,15 +222,11 @@ export const GET = withAuth(
         }
       });
 
-      return Response.json(
-        {
-          success: true,
-          outlet_id: parsed.outlet_id,
-          payment_methods: mergedPaymentMethods,
-          mappings
-        },
-        { status: 200 }
-      );
+      return successResponse({
+        outlet_id: parsed.outlet_id,
+        payment_methods: mergedPaymentMethods,
+        mappings
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
@@ -315,7 +312,7 @@ export const PUT = withAuth(
         connection.release();
       }
 
-      return Response.json({ success: true }, { status: 200 });
+      return successResponse(null);
     } catch (error) {
       if (error instanceof z.ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);

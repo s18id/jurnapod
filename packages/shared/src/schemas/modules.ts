@@ -68,8 +68,8 @@ export const CompanyModuleEntrySchema = z.object({
 });
 
 export const CompanyModulesResponseSchema = z.object({
-  ok: z.literal(true),
-  modules: z.array(CompanyModuleEntrySchema)
+  success: z.literal(true),
+  data: z.array(CompanyModuleEntrySchema)
 });
 
 export const CompanyModuleUpdateEntrySchema = z.object({

@@ -34,7 +34,7 @@ async function waitForPreview(url, timeoutMs = 30_000) {
   while (Date.now() - start < timeoutMs) {
     try {
       const response = await fetch(url, { cache: "no-store" });
-      if (response.success) {
+      if (response.ok) {
         return;
       }
     } catch {

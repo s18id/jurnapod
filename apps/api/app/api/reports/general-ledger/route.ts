@@ -5,6 +5,7 @@ import { z } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
 import { getGeneralLedgerDetail } from "../../../../src/lib/reports";
+import { successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive().optional(),
@@ -87,22 +88,18 @@ export const GET = withAuth(
         }))
       }));
 
-      return Response.json(
-        {
-          success: true,
-          filters: {
-            outlet_ids: outletIds,
-            account_id: parsed.account_id ?? null,
-            date_from: dateFrom,
-            date_to: dateTo,
-            round: roundDecimals,
-            line_limit: parsed.account_id ? (parsed.line_limit ?? 200) : null,
-            line_offset: parsed.account_id ? parsed.line_offset ?? 0 : null
-          },
-          rows: roundedRows
+      return successResponse({
+        filters: {
+          outlet_ids: outletIds,
+          account_id: parsed.account_id ?? null,
+          date_from: dateFrom,
+          date_to: dateTo,
+          round: roundDecimals,
+          line_limit: parsed.account_id ? (parsed.line_limit ?? 200) : null,
+          line_offset: parsed.account_id ? parsed.line_offset ?? 0 : null
         },
-        { status: 200 }
-      );
+        rows: roundedRows
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return Response.json({ success: false, error: { code: "INVALID_REQUEST", message: "Invalid request" } }, { status: 400 });

@@ -135,15 +135,17 @@ export const SettingsConfigUpdateSchema = z.object({
 });
 
 export const SettingsConfigResponseSchema = z.object({
-  ok: z.literal(true),
-  outlet_id: NumericIdSchema,
-  settings: z.array(
-    z.object({
-      key: SettingKeySchema,
-      value: z.unknown(),
-      value_type: SettingValueTypeSchema
-    })
-  )
+  success: z.literal(true),
+  data: z.object({
+    outlet_id: NumericIdSchema,
+    settings: z.array(
+      z.object({
+        key: SettingKeySchema,
+        value: z.unknown(),
+        value_type: SettingValueTypeSchema
+      })
+    )
+  })
 });
 
 export type SettingsConfigQuery = z.infer<typeof SettingsConfigQuerySchema>;

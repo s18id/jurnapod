@@ -314,11 +314,11 @@ test(
       assert.equal(loginSuccessResponse.status, 200);
       const loginSuccessBody = await loginSuccessResponse.json();
       assert.equal(loginSuccessBody.success, true);
-      assert.equal(loginSuccessBody.token_type, "Bearer");
-      assert.equal(typeof loginSuccessBody.access_token, "string");
-      assert.equal(typeof loginSuccessBody.expires_in, "number");
+      assert.equal(loginSuccessBody.data.token_type, "Bearer");
+      assert.equal(typeof loginSuccessBody.data.access_token, "string");
+      assert.equal(typeof loginSuccessBody.data.expires_in, "number");
 
-      const ownerAccessToken = loginSuccessBody.access_token;
+      const ownerAccessToken = loginSuccessBody.data.access_token;
 
       const loginFailResponse = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
@@ -395,7 +395,7 @@ test(
       assert.equal(viewerLoginResponse.status, 200);
       const viewerLoginBody = await viewerLoginResponse.json();
       assert.equal(viewerLoginBody.success, true);
-      const viewerAccessToken = viewerLoginBody.access_token;
+      const viewerAccessToken = viewerLoginBody.data.access_token;
 
       const viewerMeResponse = await fetch(`${baseUrl}/api/users/me`, {
         headers: {

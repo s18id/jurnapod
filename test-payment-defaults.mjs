@@ -16,7 +16,7 @@ async function apiRequest(path, options = {}, token = null) {
   });
 
   const data = await response.json();
-  if (!response.success) {
+  if (!data.success) {
     throw new Error(`API Error: ${data.error?.message || response.statusText}`);
   }
   return data;
@@ -31,7 +31,7 @@ async function login() {
       password: "ChangeMe123!"
     })
   });
-  return data.access_token;
+  return data.data.access_token;
 }
 
 async function main() {
@@ -50,20 +50,20 @@ async function main() {
     {},
     token
   );
-  console.log(`✅ Found ${mappingsResp.mappings.length} payment method mappings`);
-  console.log("Current mappings:", JSON.stringify(mappingsResp.mappings, null, 2));
+  console.log(`✅ Found ${mappingsResp.data.mappings.length} payment method mappings`);
+  console.log("Current mappings:", JSON.stringify(mappingsResp.data.mappings, null, 2));
 
   // Check for invoice_default
-  const invoiceDefault = mappingsResp.mappings.find((m) => m.is_invoice_default);
+  const invoiceDefault = mappingsResp.data.mappings.find((m) => m.is_invoice_default);
   
   console.log("\n📌 Default payment method:");
   console.log("  Invoice default:", invoiceDefault?.method_code || "None");
 
   // Test updating with defaults
-  if (mappingsResp.mappings.length > 0) {
+  if (mappingsResp.data.mappings.length > 0) {
     console.log("\n🔄 Testing update with invoice default flag...");
-    const firstMapping = mappingsResp.mappings[0];
-    const updatedMappings = mappingsResp.mappings.map((m, idx) => ({
+    const firstMapping = mappingsResp.data.mappings[0];
+    const updatedMappings = mappingsResp.data.mappings.map((m, idx) => ({
       method_code: m.method_code,
       account_id: m.account_id,
       label: m.label,
@@ -89,7 +89,7 @@ async function main() {
       {},
       token
     );
-    const newInvoiceDefault = verifyResp.mappings.find((m) => m.is_invoice_default);
+    const newInvoiceDefault = verifyResp.data.mappings.find((m) => m.is_invoice_default);
 
     console.log("\n✅ Verification:");
     console.log("  Invoice default:", newInvoiceDefault?.method_code);
@@ -101,10 +101,10 @@ async function main() {
   }
 
   // Test validation: try to set multiple invoice defaults (should fail)
-  if (mappingsResp.mappings.length >= 2) {
+  if (mappingsResp.data.mappings.length >= 2) {
     console.log("\n🧪 Testing validation: multiple invoice defaults (should fail)...");
     try {
-      const invalidMappings = mappingsResp.mappings.map((m) => ({
+      const invalidMappings = mappingsResp.data.mappings.map((m) => ({
         method_code: m.method_code,
         account_id: m.account_id,
         label: m.label,

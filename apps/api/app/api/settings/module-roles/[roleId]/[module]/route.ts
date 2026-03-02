@@ -5,6 +5,7 @@ import { NumericIdSchema, ModuleSchema, ModuleRoleUpdateRequestSchema } from "@j
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { listModuleRoles, setModuleRolePermission, ModuleRoleNotFoundError } from "../../../../../../src/lib/users";
+import { successResponse } from "../../../../../../src/lib/response";
 
 const INVALID_REQUEST_RESPONSE = {
   success: false,
@@ -48,7 +49,7 @@ export const GET = withAuth(
           error: { code: "NOT_FOUND", message: "Module role not found" }
         }, { status: 404 });
       }
-      return Response.json({ success: true, data: moduleRoles[0] }, { status: 200 });
+      return successResponse(moduleRoles[0]);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -80,7 +81,7 @@ export const PUT = withAuth(
         permissionMask: input.permission_mask
       });
 
-      return Response.json({ success: true, data: moduleRole }, { status: 200 });
+      return successResponse(moduleRole);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

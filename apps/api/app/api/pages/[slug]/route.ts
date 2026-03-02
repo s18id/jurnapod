@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { getPublishedStaticPage } from "../../../../src/lib/static-pages";
+import { successResponse } from "../../../../src/lib/response";
 
 const NOT_FOUND_RESPONSE = {
   success: false,
@@ -36,13 +37,7 @@ export async function GET(request: Request) {
       return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
     }
 
-    return Response.json(
-      {
-        success: true,
-        page
-      },
-      { status: 200 }
-    );
+    return successResponse(page);
   } catch (error) {
     console.error("GET /api/pages/:slug failed", error);
     return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });

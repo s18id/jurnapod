@@ -238,10 +238,10 @@ test(
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
       assert.equal(loginBody.success, true);
-      assert.success(loginBody.access_token);
+      assert.success(loginBody.data.access_token);
 
       const authHeader = {
-        authorization: `Bearer ${loginBody.access_token}`,
+        authorization: `Bearer ${loginBody.data.access_token}`,
         "content-type": "application/json",
         "x-forwarded-for": auditIp
       };

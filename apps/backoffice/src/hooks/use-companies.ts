@@ -164,7 +164,7 @@ export async function deleteCompany(
   companyId: number,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ success: true }>(
+  await apiRequest<{ success: true; data: null }>(
     `/companies/${companyId}`,
     {
       method: "DELETE"

@@ -4,6 +4,7 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../../../src/lib/auth-guard";
+import { successResponse } from "../../../../../../src/lib/response";
 import {
   DatabaseForbiddenError,
   PaymentAllocationError,
@@ -81,7 +82,7 @@ export const POST = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ success: true, payment }, { status: 200 });
+      return successResponse(payment);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

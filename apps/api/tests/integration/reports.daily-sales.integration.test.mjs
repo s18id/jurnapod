@@ -124,7 +124,7 @@ test(
       const body = await response.json();
       assert.equal(body.success, true);
 
-      const row = body.rows.find((entry) => Number(entry.outlet_id) === outletId);
+      const row = body.data.rows.find((entry) => Number(entry.outlet_id) === outletId);
       assert.equal(Boolean(row), true);
       assert.equal(Number(row.tx_count) >= 1, true);
       assert.equal(Number(row.gross_total) >= 30000, true);
@@ -277,7 +277,7 @@ test(
       const body = await response.json();
       assert.equal(body.success, true);
 
-      const row = body.rows.find((entry) => Number(entry.outlet_id) === outletId);
+      const row = body.data.rows.find((entry) => Number(entry.outlet_id) === outletId);
       assert.equal(Boolean(row), true);
       assert.equal(Number(row.tx_count) >= 1, true);
       assert.equal(Number(row.gross_total) >= 35000, true);

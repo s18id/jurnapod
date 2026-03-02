@@ -23,9 +23,11 @@ export type SessionUser = {
 
 type LoginResponse = {
   success: true;
-  access_token: string;
-  token_type: "Bearer";
-  expires_in: number;
+  data: {
+    access_token: string;
+    token_type: "Bearer";
+    expires_in: number;
+  };
 };
 
 type MeResponse = {
@@ -68,10 +70,10 @@ export async function login(input: LoginInput): Promise<{ token: string; user: S
     })
   });
 
-  storeAccessToken(auth.access_token);
-  const user = await fetchCurrentUser(auth.access_token);
+  storeAccessToken(auth.data.access_token);
+  const user = await fetchCurrentUser(auth.data.access_token);
   return {
-    token: auth.access_token,
+    token: auth.data.access_token,
     user
   };
 }
@@ -89,10 +91,10 @@ export async function loginWithGoogle(
     })
   });
 
-  storeAccessToken(auth.access_token);
-  const user = await fetchCurrentUser(auth.access_token);
+  storeAccessToken(auth.data.access_token);
+  const user = await fetchCurrentUser(auth.data.access_token);
   return {
-    token: auth.access_token,
+    token: auth.data.access_token,
     user
   };
 }

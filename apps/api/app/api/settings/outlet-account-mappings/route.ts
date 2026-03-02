@@ -6,6 +6,7 @@ import type { RowDataPacket } from "mysql2";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
+import { successResponse } from "../../../../src/lib/response";
 
 const mappingKeys = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
 const mappingKeySchema = z.enum(mappingKeys);
@@ -59,14 +60,10 @@ export const GET = withAuth(
         [auth.companyId, parsed.outlet_id]
       );
 
-      return Response.json(
-        {
-          success: true,
-          outlet_id: parsed.outlet_id,
-          mappings: rows as Array<{ mapping_key: string; account_id: number }>
-        },
-        { status: 200 }
-      );
+      return successResponse({
+        outlet_id: parsed.outlet_id,
+        mappings: rows as Array<{ mapping_key: string; account_id: number }>
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
@@ -112,7 +109,7 @@ export const PUT = withAuth(
         connection.release();
       }
 
-      return Response.json({ success: true }, { status: 200 });
+      return successResponse(null);
     } catch (error) {
       if (error instanceof z.ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);

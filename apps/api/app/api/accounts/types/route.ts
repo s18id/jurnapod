@@ -4,26 +4,12 @@
 import { AccountTypeCreateRequestSchema, AccountTypeListQuerySchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createAccountType,
   listAccountTypes,
   AccountTypeNameExistsError
 } from "../../../../src/lib/account-types";
-
-/**
- * Helper: Create standardized error response
- */
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
 
 /**
  * GET /api/accounts/types
@@ -53,13 +39,7 @@ export const GET = withAuth(
 
       const accountTypes = await listAccountTypes(query);
 
-      return Response.json(
-        {
-          success: true,
-          data: accountTypes
-        },
-        { status: 200 }
-      );
+      return successResponse(accountTypes);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
@@ -93,13 +73,7 @@ export const POST = withAuth(
 
       const accountType = await createAccountType(input, auth.userId);
 
-      return Response.json(
-        {
-          success: true,
-          data: accountType
-        },
-        { status: 201 }
-      );
+      return successResponse(accountType, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request body", 400);

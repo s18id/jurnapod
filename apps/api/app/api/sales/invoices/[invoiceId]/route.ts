@@ -7,6 +7,7 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../../src/lib/auth-guard";
+import { successResponse } from "../../../../../src/lib/response";
 import {
   DatabaseConflictError,
   DatabaseForbiddenError,
@@ -81,7 +82,7 @@ export const GET = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ success: true, invoice }, { status: 200 });
+      return successResponse(invoice);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -112,7 +113,7 @@ export const PATCH = withAuth(
         return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
       }
 
-      return Response.json({ success: true, invoice }, { status: 200 });
+      return successResponse(invoice);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

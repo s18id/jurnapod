@@ -11,6 +11,7 @@ import {
   verifyGoogleIdToken
 } from "../../../../src/lib/google-oauth";
 import { createRefreshTokenCookie, issueRefreshToken } from "../../../../src/lib/refresh-tokens";
+import { successResponse } from "../../../../src/lib/response";
 
 const googleLoginRequestSchema = z
   .object({
@@ -121,7 +122,7 @@ export async function POST(request: Request) {
       emailSnapshot: profile.email
     });
 
-    if (!linkResult.success) {
+    if ("reason" in linkResult) {
       return Response.json(LINK_CONFLICT_RESPONSE, { status: 409 });
     }
 
@@ -138,14 +139,13 @@ export async function POST(request: Request) {
     });
     const env = getAppEnv();
 
-    const response = Response.json(
+    const response = successResponse(
       {
-        success: true,
         access_token: tokenResult.accessToken,
         token_type: "Bearer",
         expires_in: tokenResult.expiresInSeconds
       },
-      { status: 200 }
+      200
     );
 
     response.headers.set(

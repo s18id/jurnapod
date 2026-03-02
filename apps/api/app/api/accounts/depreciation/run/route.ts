@@ -4,6 +4,7 @@
 import { DepreciationRunCreateRequestSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
+import { successResponse } from "../../../../../src/lib/response";
 import {
   DatabaseForbiddenError,
   DatabaseReferenceError,
@@ -61,14 +62,10 @@ export const POST = withAuth(
         userId: auth.userId
       });
 
-      return Response.json(
-        {
-          success: true,
-          duplicate: result.duplicate,
-          run: result.run
-        },
-        { status: 200 }
-      );
+      return successResponse({
+        duplicate: result.duplicate,
+        run: result.run
+      });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

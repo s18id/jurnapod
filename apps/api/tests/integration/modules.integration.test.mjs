@@ -211,7 +211,7 @@ test(
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
       assert.equal(loginBody.success, true);
-      const accessToken = loginBody.access_token;
+      const accessToken = loginBody.data.access_token;
 
       const updateResponse = await fetch(`${baseUrl}/api/settings/modules`, {
         method: "PUT",
@@ -241,7 +241,7 @@ test(
       assert.equal(listResponse.status, 200);
       const listBody = await listResponse.json();
       assert.equal(listBody.success, true);
-      const posModule = listBody.modules.find((mod) => mod.code === moduleCode);
+      const posModule = listBody.data.find((mod) => mod.code === moduleCode);
       assert.success(posModule);
       assert.equal(posModule.enabled, true);
       const config = JSON.parse(posModule.config_json);

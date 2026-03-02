@@ -4,6 +4,7 @@
 import { AccountTypeUpdateRequestSchema, NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
+import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
   getAccountTypeById,
   updateAccountType,
@@ -12,21 +13,6 @@ import {
   AccountTypeNotFoundError,
   AccountTypeInUseError
 } from "../../../../../src/lib/account-types";
-
-/**
- * Helper: Create standardized error response
- */
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
 
 /**
  * Helper: Parse account type ID from URL pathname
@@ -49,13 +35,7 @@ export const GET = withAuth(
       const accountTypeId = parseAccountTypeId(request);
       const accountType = await getAccountTypeById(accountTypeId, auth.companyId);
 
-      return Response.json(
-        {
-          success: true,
-          data: accountType
-        },
-        { status: 200 }
-      );
+      return successResponse(accountType);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_ID", "Invalid account type ID", 400);
@@ -89,13 +69,7 @@ export const PUT = withAuth(
 
       const accountType = await updateAccountType(accountTypeId, input, auth.companyId, auth.userId);
 
-      return Response.json(
-        {
-          success: true,
-          data: accountType
-        },
-        { status: 200 }
-      );
+      return successResponse(accountType);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
@@ -128,13 +102,7 @@ export const DELETE = withAuth(
       const accountTypeId = parseAccountTypeId(request);
       const accountType = await deactivateAccountType(accountTypeId, auth.companyId, auth.userId);
 
-      return Response.json(
-        {
-          success: true,
-          data: accountType
-        },
-        { status: 200 }
-      );
+      return successResponse(accountType);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_ID", "Invalid account type ID", 400);

@@ -151,13 +151,13 @@ test(
       assert.equal(ledgerResponse.status, 200);
       const ledgerBody = await ledgerResponse.json();
       assert.equal(ledgerBody.success, true);
-      assert.equal(Array.isArray(ledgerBody.rows), true);
-      assert.equal(ledgerBody.rows.length, 1);
-      assert.equal(Number(ledgerBody.rows[0].account_id), accountId);
-      assert.equal(ledgerBody.rows[0].lines.length, 2);
-      assert.equal(Number(ledgerBody.rows[0].opening_balance), 200);
-      assert.equal(Number(ledgerBody.rows[0].lines[0].balance), 300);
-      assert.equal(Number(ledgerBody.rows[0].lines[1].balance), 260);
+      assert.equal(Array.isArray(ledgerBody.data.rows), true);
+      assert.equal(ledgerBody.data.rows.length, 1);
+      assert.equal(Number(ledgerBody.data.rows[0].account_id), accountId);
+      assert.equal(ledgerBody.data.rows[0].lines.length, 2);
+      assert.equal(Number(ledgerBody.data.rows[0].opening_balance), 200);
+      assert.equal(Number(ledgerBody.data.rows[0].lines[0].balance), 300);
+      assert.equal(Number(ledgerBody.data.rows[0].lines[1].balance), 260);
 
       const ledgerPage2Response = await fetch(
         `${baseUrl}/api/reports/general-ledger?outlet_id=${outletId}&account_id=${accountId}&date_from=${reportDate}&date_to=${reportDate}&line_limit=2&line_offset=2`,
@@ -170,10 +170,10 @@ test(
       assert.equal(ledgerPage2Response.status, 200);
       const ledgerPage2Body = await ledgerPage2Response.json();
       assert.equal(ledgerPage2Body.success, true);
-      assert.equal(ledgerPage2Body.rows.length, 1);
-      assert.equal(ledgerPage2Body.rows[0].lines.length, 1);
-      assert.equal(Number(ledgerPage2Body.rows[0].lines[0].line_id), page2LineId);
-      assert.equal(Number(ledgerPage2Body.rows[0].lines[0].balance), 270);
+      assert.equal(ledgerPage2Body.data.rows.length, 1);
+      assert.equal(ledgerPage2Body.data.rows[0].lines.length, 1);
+      assert.equal(Number(ledgerPage2Body.data.rows[0].lines[0].line_id), page2LineId);
+      assert.equal(Number(ledgerPage2Body.data.rows[0].lines[0].balance), 270);
     } finally {
       await stopApiServer(childProcess);
 

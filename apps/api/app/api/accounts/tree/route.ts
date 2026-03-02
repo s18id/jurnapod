@@ -5,6 +5,7 @@ import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
 import { getAccountTree } from "../../../../src/lib/accounts";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 /**
  * GET /api/accounts/tree
@@ -26,13 +27,7 @@ export const GET = withAuth(
       if (companyIdRaw != null) {
         const companyId = NumericIdSchema.parse(companyIdRaw);
         if (companyId !== auth.companyId) {
-          return Response.json(
-            {
-              success: false,
-              error: "Company ID mismatch"
-            },
-            { status: 400 }
-          );
+          return errorResponse("COMPANY_MISMATCH", "Company ID mismatch", 400);
         }
       }
 
@@ -40,32 +35,14 @@ export const GET = withAuth(
 
       const tree = await getAccountTree(auth.companyId, includeInactive);
 
-      return Response.json(
-        {
-          success: true,
-          data: tree
-        },
-        { status: 200 }
-      );
+      return successResponse(tree);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(
-          {
-            success: false,
-            error: "Invalid request parameters"
-          },
-          { status: 400 }
-        );
+        return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
       }
 
       console.error("GET /api/accounts/tree failed", error);
-      return Response.json(
-        {
-          success: false,
-          error: "Internal server error"
-        },
-        { status: 500 }
-      );
+      return errorResponse("INTERNAL_SERVER_ERROR", "Internal server error", 500);
     }
   },
   [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]

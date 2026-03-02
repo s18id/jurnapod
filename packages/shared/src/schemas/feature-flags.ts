@@ -12,8 +12,8 @@ export const FeatureFlagEntrySchema = z.object({
 });
 
 export const FeatureFlagsResponseSchema = z.object({
-  ok: z.literal(true),
-  flags: z.array(FeatureFlagEntrySchema)
+  success: z.literal(true),
+  data: z.array(FeatureFlagEntrySchema)
 });
 
 export const FeatureFlagsUpdateSchema = z.object({

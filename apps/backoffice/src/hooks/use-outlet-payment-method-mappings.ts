@@ -19,13 +19,16 @@ export type PaymentMethodMapping = {
 
 type MappingResponse = {
   success: true;
-  outlet_id: number;
-  payment_methods: PaymentMethodConfig[];
-  mappings: PaymentMethodMapping[];
+  data: {
+    outlet_id: number;
+    payment_methods: PaymentMethodConfig[];
+    mappings: PaymentMethodMapping[];
+  };
 };
 
 type SaveResponse = {
   success: true;
+  data: null;
 };
 
 export function useOutletPaymentMethodMappings(outletId: number, accessToken: string) {
@@ -51,8 +54,8 @@ export function useOutletPaymentMethodMappings(outletId: number, accessToken: st
         {},
         accessToken
       );
-      setPaymentMethods(response.payment_methods);
-      setMappings(response.mappings);
+      setPaymentMethods(response.data.payment_methods);
+      setMappings(response.data.mappings);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);

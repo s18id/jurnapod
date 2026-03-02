@@ -10,6 +10,7 @@ import {
   revokeRefreshToken,
   rotateRefreshToken
 } from "../../../../src/lib/refresh-tokens";
+import { successResponse } from "../../../../src/lib/response";
 
 const UNAUTHORIZED_RESPONSE = {
   success: false,
@@ -58,7 +59,7 @@ export async function POST(request: Request) {
 
   try {
     const rotation = await rotateRefreshToken(refreshToken, { ipAddress, userAgent });
-    if (!rotation.success) {
+    if (!("token" in rotation)) {
       const response = Response.json(UNAUTHORIZED_RESPONSE, { status: 401 });
       response.headers.set("Set-Cookie", createRefreshTokenClearCookie());
       return response;
@@ -74,14 +75,13 @@ export async function POST(request: Request) {
 
     const tokenResult = await issueAccessTokenForUser(user);
     const env = getAppEnv();
-    const response = Response.json(
+    const response = successResponse(
       {
-        success: true,
         access_token: tokenResult.accessToken,
         token_type: "Bearer",
         expires_in: tokenResult.expiresInSeconds
       },
-      { status: 200 }
+      200
     );
 
     response.headers.set(

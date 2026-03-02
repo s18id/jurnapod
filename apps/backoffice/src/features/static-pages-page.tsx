@@ -38,12 +38,12 @@ type StaticPageDetail = {
 
 type StaticPagesListResponse = {
   success: true;
-  pages: StaticPageSummary[];
+  data: StaticPageSummary[];
 };
 
 type StaticPageResponse = {
   success: true;
-  page: StaticPageDetail;
+  data: StaticPageDetail;
 };
 
 type FormState = {
@@ -214,7 +214,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
           accessToken
         );
         if (!cancelled) {
-          setPages(response.pages);
+          setPages(response.data);
         }
       } catch (fetchError) {
         if (!cancelled) {
@@ -325,11 +325,11 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
         accessToken
       );
       setForm({
-        slug: response.page.slug,
-        title: response.page.title,
-        content_md: response.page.content_md
+        slug: response.data.slug,
+        title: response.data.title,
+        content_md: response.data.content_md
       });
-      setStatus(response.page.status);
+      setStatus(response.data.status);
       setFormError(null);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
@@ -374,11 +374,11 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
           accessToken
         );
         setForm({
-          slug: response.page.slug,
-          title: response.page.title,
-          content_md: response.page.content_md
+          slug: response.data.slug,
+          title: response.data.title,
+          content_md: response.data.content_md
         });
-        setStatus(response.page.status);
+        setStatus(response.data.status);
         await refreshList();
       } else {
         const response = await apiRequest<StaticPageResponse>(
@@ -394,8 +394,8 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
           },
           accessToken
         );
-        setSelectedId(response.page.id);
-        setStatus(response.page.status);
+        setSelectedId(response.data.id);
+        setStatus(response.data.status);
         await refreshList();
       }
     } catch (submitError) {
@@ -433,7 +433,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
           { method: "POST" },
           accessToken
         );
-        setStatus(response.page.status);
+        setStatus(response.data.status);
         await refreshList();
       } else {
         const response = await apiRequest<StaticPageResponse>(
@@ -449,8 +449,8 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
           },
           accessToken
         );
-        setSelectedId(response.page.id);
-        setStatus(response.page.status);
+        setSelectedId(response.data.id);
+        setStatus(response.data.status);
         await refreshList();
       }
     } catch (submitError) {
@@ -476,7 +476,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
         { method: "POST" },
         accessToken
       );
-      setStatus(response.page.status);
+      setStatus(response.data.status);
       await refreshList();
     } catch (submitError) {
       if (submitError instanceof ApiError) {
@@ -496,7 +496,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
       {},
       accessToken
     );
-    setPages(response.pages);
+    setPages(response.data);
   }
 
   return (

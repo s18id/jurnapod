@@ -26,7 +26,7 @@ type ModulesPageProps = {
 
 type ModulesResponse = {
   success: true;
-  modules: Array<{
+  data: Array<{
     code: string;
     name: string;
     description?: string | null;
@@ -37,6 +37,7 @@ type ModulesResponse = {
 
 type ModulesSaveResponse = {
   success: true;
+  data: null;
 };
 
 type ModuleRow = {
@@ -189,7 +190,7 @@ const DEFAULT_CONFIG_PAIRS: Record<string, Array<{ key: string; value: string }>
   inventory: [{ key: "level", value: "0" }]
 };
 
-function createRow(moduleEntry: ModulesResponse["modules"][number]): ModuleRow {
+function createRow(moduleEntry: ModulesResponse["data"][number]): ModuleRow {
   return {
     id: crypto.randomUUID(),
     code: moduleEntry.code,
@@ -262,7 +263,7 @@ export function ModulesPage({ accessToken }: ModulesPageProps) {
           {},
           accessToken
         );
-        const nextRows = response.modules.map((moduleEntry) => createRow(moduleEntry));
+        const nextRows = response.data.map((moduleEntry) => createRow(moduleEntry));
         setRows(nextRows);
         setRowErrors({});
       } catch (fetchError) {

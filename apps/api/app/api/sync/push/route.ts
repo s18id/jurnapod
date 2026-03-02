@@ -4,11 +4,12 @@
 import { type ResultSetHeader } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { createHash } from "node:crypto";
-import { SyncPushRequestSchema, SyncPushResponseSchema, type SyncPushResultItem } from "@jurnapod/shared";
+import { SyncPushPayloadSchema, SyncPushRequestSchema, type SyncPushResultItem } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getRequestCorrelationId } from "../../../../src/lib/correlation-id";
 import { getDbPool } from "../../../../src/lib/db";
+import { successResponse } from "../../../../src/lib/response";
 import {
   calculateTaxLines,
   listCompanyDefaultTaxRates,
@@ -1160,18 +1161,9 @@ export const POST = withAuth(
         dbConnection.release();
       }
 
-      const response = SyncPushResponseSchema.parse({ results });
+      const response = SyncPushPayloadSchema.parse({ results });
 
-      return Response.json(
-        {
-          success: true,
-          ...response
-        },
-        {
-          status: 200,
-          headers: withCorrelationHeaders(correlationId)
-        }
-      );
+      return successResponse(response, 200, withCorrelationHeaders(correlationId));
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, {

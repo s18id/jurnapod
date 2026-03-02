@@ -113,7 +113,7 @@ async function waitForServerReady(port, maxWaitMs = 30000) {
   while (Date.now() - startTime < maxWaitMs) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/health`);
-      if (response.success) {
+      if (response.ok) {
         return;
       }
     } catch {
@@ -133,17 +133,17 @@ async function authenticate(port, companyCode, email, password) {
     body: JSON.stringify({ company_code: companyCode, email, password })
   });
 
-  if (!response.success) {
+  if (!response.ok) {
     const text = await response.text();
     throw new Error(`Authentication failed: ${response.status} ${text}`);
   }
 
   const json = await response.json();
-  if (!json.success || !json.access_token) {
+  if (!json.success || !json.data?.access_token) {
     throw new Error("Authentication response missing access_token");
   }
 
-  return json.access_token;
+  return json.data.access_token;
 }
 
 test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
@@ -203,14 +203,14 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
 
       const assetData = await createAssetResponse.json();
       
-      if (!createAssetResponse.success) {
+      if (!createAssetResponse.ok) {
         t.diagnostic(`Failed to create fixed asset. Status: ${createAssetResponse.status}, Response: ${JSON.stringify(assetData)}`);
       }
-      
-      assert.strictEqual(createAssetResponse.success, true, "Failed to create fixed asset");
+
+      assert.strictEqual(createAssetResponse.ok, true, "Failed to create fixed asset");
       assert.strictEqual(assetData.success, true);
-      assert.success(assetData.asset, "Response should contain asset object");
-      const assetId = assetData.asset.id;
+      assert.ok(assetData.data, "Response should contain asset object");
+      const assetId = assetData.data.id;
 
       // Get accounts for depreciation
       const accountsResponse = await fetch(`${baseUrl}/api/accounts?company_id=${companyId}`, {
@@ -240,14 +240,14 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
         })
       });
 
-      assert.strictEqual(createPlanResponse.success, true, "Failed to create depreciation plan");
+      assert.strictEqual(createPlanResponse.ok, true, "Failed to create depreciation plan");
       const planData = await createPlanResponse.json();
       assert.strictEqual(planData.success, true);
-      assert.strictEqual(planData.plan.asset_id, assetId);
-      assert.strictEqual(planData.plan.useful_life_months, 60);
-      assert.strictEqual(planData.plan.status, "ACTIVE");
+      assert.strictEqual(planData.data.asset_id, assetId);
+      assert.strictEqual(planData.data.useful_life_months, 60);
+      assert.strictEqual(planData.data.status, "ACTIVE");
 
-      t.diagnostic(`Created fixed asset ${assetId} with depreciation plan ${planData.plan.id}`);
+      t.diagnostic(`Created fixed asset ${assetId} with depreciation plan ${planData.data.id}`);
     });
 
     await t.test("Run depreciation for a period posts journal batch", async () => {
@@ -270,7 +270,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       });
 
       const assetData = await createAssetResponse.json();
-      const assetId = assetData.asset.id;
+      const assetId = assetData.data.id;
 
       const accountsResponse = await fetch(`${baseUrl}/api/accounts?company_id=${companyId}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -297,7 +297,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       });
 
       const planData = await createPlanResponse.json();
-      const planId = planData.plan.id;
+      const planId = planData.data.id;
 
       // Run depreciation for a period
       const runResponse = await fetch(`${baseUrl}/api/accounts/depreciation/run`, {
@@ -313,27 +313,27 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
         })
       });
 
-      assert.strictEqual(runResponse.success, true, "Failed to run depreciation");
+      assert.strictEqual(runResponse.ok, true, "Failed to run depreciation");
       const runData = await runResponse.json();
       assert.strictEqual(runData.success, true);
-      assert.strictEqual(runData.duplicate, false);
-      assert.strictEqual(runData.run.period_year, 2024);
-      assert.strictEqual(runData.run.period_month, 2);
-      assert.success(runData.run.journal_batch_id, "Journal batch ID should be set");
+      assert.strictEqual(runData.data.duplicate, false);
+      assert.strictEqual(runData.data.run.period_year, 2024);
+      assert.strictEqual(runData.data.run.period_month, 2);
+      assert.ok(runData.data.run.journal_batch_id, "Journal batch ID should be set");
 
       // Verify journal batch was created
       const [journalRows] = await connection.execute(
         `SELECT * FROM journal_batches WHERE id = ? AND doc_type = ?`,
-        [runData.run.journal_batch_id, DEPRECIATION_DOC_TYPE]
+        [runData.data.run.journal_batch_id, DEPRECIATION_DOC_TYPE]
       );
 
       assert.strictEqual(journalRows.length, 1, "Journal batch should exist");
-      assert.strictEqual(Number(journalRows[0].doc_id), runData.run.id);
+      assert.strictEqual(Number(journalRows[0].doc_id), runData.data.run.id);
 
       // Verify journal lines are balanced
       const [lineRows] = await connection.execute(
         `SELECT debit, credit FROM journal_lines WHERE journal_batch_id = ?`,
-        [runData.run.journal_batch_id]
+        [runData.data.run.journal_batch_id]
       );
 
       assert.strictEqual(lineRows.length, 2, "Should have 2 journal lines");
@@ -341,10 +341,10 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const totalDebit = lineRows.reduce((sum, row) => sum + Number(row.debit), 0);
       const totalCredit = lineRows.reduce((sum, row) => sum + Number(row.credit), 0);
       
-      assert.success(Math.abs(totalDebit - totalCredit) < 0.01, "Journal lines should be balanced");
-      assert.success(totalDebit > 0, "Total debit should be positive");
+      assert.ok(Math.abs(totalDebit - totalCredit) < 0.01, "Journal lines should be balanced");
+      assert.ok(totalDebit > 0, "Total debit should be positive");
 
-      t.diagnostic(`Run posted journal batch ${runData.run.journal_batch_id} with balanced lines`);
+      t.diagnostic(`Run posted journal batch ${runData.data.run.journal_batch_id} with balanced lines`);
     });
 
     await t.test("Duplicate run returns duplicate status without new journal", async () => {
@@ -367,7 +367,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       });
 
       const assetData = await createAssetResponse.json();
-      const assetId = assetData.asset.id;
+      const assetId = assetData.data.id;
 
       const accountsResponse = await fetch(`${baseUrl}/api/accounts?company_id=${companyId}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -394,7 +394,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       });
 
       const planData = await createPlanResponse.json();
-      const planId = planData.plan.id;
+      const planId = planData.data.id;
 
       // First run
       const firstRunResponse = await fetch(`${baseUrl}/api/accounts/depreciation/run`, {
@@ -411,8 +411,8 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       });
 
       const firstRunData = await firstRunResponse.json();
-      assert.strictEqual(firstRunData.duplicate, false);
-      const firstJournalBatchId = firstRunData.run.journal_batch_id;
+      assert.strictEqual(firstRunData.data.duplicate, false);
+      const firstJournalBatchId = firstRunData.data.run.journal_batch_id;
 
       // Second run (duplicate)
       const secondRunResponse = await fetch(`${baseUrl}/api/accounts/depreciation/run`, {
@@ -428,15 +428,19 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
         })
       });
 
-      assert.strictEqual(secondRunResponse.success, true);
+      assert.strictEqual(secondRunResponse.ok, true);
       const secondRunData = await secondRunResponse.json();
-      assert.strictEqual(secondRunData.duplicate, true, "Second run should be marked as duplicate");
-      assert.strictEqual(secondRunData.run.journal_batch_id, firstJournalBatchId, "Should return same journal batch ID");
+      assert.strictEqual(secondRunData.data.duplicate, true, "Second run should be marked as duplicate");
+      assert.strictEqual(
+        secondRunData.data.run.journal_batch_id,
+        firstJournalBatchId,
+        "Should return same journal batch ID"
+      );
 
       // Verify only one journal batch exists for this period
       const [journalRows] = await connection.execute(
         `SELECT COUNT(*) as count FROM journal_batches WHERE doc_type = ? AND doc_id = ?`,
-        [DEPRECIATION_DOC_TYPE, secondRunData.run.id]
+        [DEPRECIATION_DOC_TYPE, secondRunData.data.run.id]
       );
 
       assert.strictEqual(Number(journalRows[0].count), 1, "Should have exactly one journal batch");
@@ -464,7 +468,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       });
 
       const assetData = await createAssetResponse.json();
-      const assetId = assetData.asset.id;
+      const assetId = assetData.data.id;
 
       const accountsResponse = await fetch(`${baseUrl}/api/accounts?company_id=${companyId}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -491,7 +495,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       });
 
       const planData = await createPlanResponse.json();
-      const planId = planData.plan.id;
+      const planId = planData.data.id;
 
       // Post a run
       await fetch(`${baseUrl}/api/accounts/depreciation/run`, {

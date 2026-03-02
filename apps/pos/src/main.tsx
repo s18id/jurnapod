@@ -284,16 +284,21 @@ function App() {
         });
 
         const payload = (await response.json()) as
-          | { success: true; access_token: string }
+          | { success: true; data: { access_token: string } }
           | { success: false; error?: { message?: string } };
 
-        if (!response.ok || !payload || payload.success !== true || typeof payload.access_token !== "string") {
+        if (
+          !response.ok ||
+          !payload ||
+          payload.success !== true ||
+          typeof payload.data?.access_token !== "string"
+        ) {
           const msg = payload && payload.success === false ? payload.error?.message ?? "Login failed" : "Login failed";
           throw new Error(msg);
         }
 
-        writeAccessToken(payload.access_token);
-        await applyAuthenticatedSession(payload.access_token, {
+        writeAccessToken(payload.data.access_token);
+        await applyAuthenticatedSession(payload.data.access_token, {
           message: "Authenticated. Sync pull and push are now authorized."
         });
         globalThis.history.replaceState({}, "", "/");
@@ -699,16 +704,21 @@ function App() {
       });
 
       const payload = (await response.json()) as
-        | { success: true; access_token: string }
+        | { success: true; data: { access_token: string } }
         | { success: false; error?: { message?: string } };
 
-      if (!response.ok || !payload || payload.success !== true || typeof payload.access_token !== "string") {
+      if (
+        !response.ok ||
+        !payload ||
+        payload.success !== true ||
+        typeof payload.data?.access_token !== "string"
+      ) {
         const msg = payload && payload.success === false ? payload.error?.message ?? "Login failed" : "Login failed";
         throw new Error(msg);
       }
 
-      writeAccessToken(payload.access_token);
-      await applyAuthenticatedSession(payload.access_token, {
+      writeAccessToken(payload.data.access_token);
+      await applyAuthenticatedSession(payload.data.access_token, {
         message: "Authenticated. Sync pull and push are now authorized."
       });
     } catch (error) {

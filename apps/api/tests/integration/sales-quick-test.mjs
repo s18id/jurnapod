@@ -1,7 +1,6 @@
+#!/usr/bin/env node
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
-
-#!/usr/bin/env node
 /**
  * Quick smoke test for sales endpoints - validates server can start and endpoints respond
  * This is a lightweight test to ensure the full test suite won't hang
@@ -69,7 +68,7 @@ async function testServerStartup() {
       
       clearTimeout(timeoutId);
       
-      if (response.success) {
+      if (response.ok) {
         serverReady = true;
         console.log(`✅ Server ready in ${Date.now() - start}ms`);
       }
@@ -92,7 +91,8 @@ async function testServerStartup() {
   // Test health endpoint
   console.log('\n📍 Testing /api/health...');
   const healthRes = await fetch(`${baseUrl}/api/health`);
-  const healthOk = healthRes.success;
+  const healthPayload = await healthRes.json().catch(() => null);
+  const healthOk = Boolean(healthPayload && healthPayload.success === true);
   console.log(healthOk ? '✅ Health endpoint OK' : '❌ Health endpoint failed');
 
   // Test sales invoices endpoint (should require auth)

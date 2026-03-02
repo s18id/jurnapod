@@ -5,6 +5,7 @@ import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { listItemPrices } from "../../../../../src/lib/master-data";
+import { successResponse } from "../../../../../src/lib/response";
 
 const INVALID_REQUEST_RESPONSE = {
   success: false,
@@ -36,7 +37,7 @@ export const GET = withAuth(
         isActive: true
       });
 
-      return Response.json({ success: true, prices }, { status: 200 });
+      return successResponse(prices);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

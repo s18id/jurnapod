@@ -254,10 +254,24 @@ function classifySyncResultError(clientTxId: string, message: string | undefined
 }
 
 function asSyncResultItems(payload: unknown): SyncPushResultItem[] {
-  const rawItems = Array.isArray(payload)
-    ? payload
-    : payload && typeof payload === "object" && Array.isArray((payload as Partial<SyncPushResponse>).results)
-      ? (payload as Partial<SyncPushResponse>).results
+  if (payload && typeof payload === "object" && "success" in payload) {
+    const envelope = payload as { success?: boolean; error?: { message?: string } };
+    if (envelope.success === false) {
+      throw new OutboxSenderError(
+        "RETRYABLE",
+        "SYNC_RESPONSE_ERROR",
+        envelope.error?.message ?? "Sync push responded with error"
+      );
+    }
+  }
+
+  const resolved =
+    payload && typeof payload === "object" && "data" in payload ? (payload as { data?: unknown }).data : payload;
+
+  const rawItems = Array.isArray(resolved)
+    ? resolved
+    : resolved && typeof resolved === "object" && Array.isArray((resolved as Partial<SyncPushResponse>).results)
+      ? (resolved as Partial<SyncPushResponse>).results
       : null;
 
   if (!rawItems) {
@@ -336,7 +350,7 @@ export async function sendOutboxJobToSyncPush(
     }
   }
 
-  if (!response.success) {
+  if (!response.ok) {
     throw classifyHttpStatusError(response.status);
   }
 

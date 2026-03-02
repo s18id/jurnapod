@@ -4,6 +4,7 @@
 import { AccountUpdateRequestSchema, NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   getAccountById,
   updateAccount,
@@ -15,21 +16,6 @@ import {
   ParentAccountCompanyMismatchError,
   AccountTypeCompanyMismatchError
 } from "../../../../src/lib/accounts";
-
-/**
- * Helper: Create standardized error response
- */
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
 
 /**
  * Helper: Parse account ID from URL pathname
@@ -52,13 +38,7 @@ export const GET = withAuth(
       const accountId = parseAccountId(request);
       const account = await getAccountById(accountId, auth.companyId);
 
-      return Response.json(
-        {
-          success: true,
-          data: account
-        },
-        { status: 200 }
-      );
+      return successResponse(account);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_ID", "Invalid account ID", 400);
@@ -92,13 +72,7 @@ export const PUT = withAuth(
 
       const account = await updateAccount(accountId, input, auth.companyId, auth.userId);
 
-      return Response.json(
-        {
-          success: true,
-          data: account
-        },
-        { status: 200 }
-      );
+      return successResponse(account);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
@@ -143,13 +117,7 @@ export const DELETE = withAuth(
       const accountId = parseAccountId(request);
       const account = await deactivateAccount(accountId, auth.companyId, auth.userId);
 
-      return Response.json(
-        {
-          success: true,
-          data: account
-        },
-        { status: 200 }
-      );
+      return successResponse(account);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_ID", "Invalid account ID", 400);

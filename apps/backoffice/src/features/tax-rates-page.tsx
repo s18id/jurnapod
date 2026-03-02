@@ -38,7 +38,7 @@ type TaxRateRow = {
 
 type TaxRatesResponse = {
   success: true;
-  tax_rates: Array<{
+  data: Array<{
     id: number;
     code: string;
     name: string;
@@ -50,7 +50,7 @@ type TaxRatesResponse = {
 
 type TaxDefaultsResponse = {
   success: true;
-  tax_rate_ids: number[];
+  data: number[];
 };
 
 function buildNewRow(): TaxRateRow {
@@ -96,7 +96,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
           apiRequest<TaxDefaultsResponse>("/settings/tax-defaults", {}, accessToken)
         ]);
         setRates(
-          ratesResponse.tax_rates.map((row) => ({
+          ratesResponse.data.map((row) => ({
             id: row.id,
             code: row.code,
             name: row.name,
@@ -105,7 +105,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
             is_active: row.is_active
           }))
         );
-        setDefaultIds(defaultsResponse.tax_rate_ids.map(String));
+        setDefaultIds(defaultsResponse.data.map(String));
       } catch (fetchError) {
         if (fetchError instanceof ApiError) {
           setError(fetchError.message);
@@ -149,7 +149,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
 
     try {
       if (rate.isNew || !rate.id) {
-        const response = await apiRequest<{ success: true; id: number }>(
+        const response = await apiRequest<{ success: true; data: number }>(
           "/settings/tax-rates",
           {
             method: "POST",
@@ -163,9 +163,9 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
           },
           accessToken
         );
-        updateRate(index, { id: response.id, isNew: false });
+        updateRate(index, { id: response.data, isNew: false });
       } else {
-        await apiRequest<{ success: true }>(
+        await apiRequest<{ success: true; data: null }>(
           `/settings/tax-rates/${rate.id}`,
           {
             method: "PUT",
@@ -196,7 +196,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
       return;
     }
     try {
-      await apiRequest<{ success: true }>(
+      await apiRequest<{ success: true; data: null }>(
         `/settings/tax-rates/${rate.id}`,
         { method: "DELETE" },
         accessToken
@@ -220,7 +220,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
     setDefaultSaved(false);
     setSavingDefaults(true);
     try {
-      await apiRequest<{ success: true }>(
+      await apiRequest<{ success: true; data: null }>(
         "/settings/tax-defaults",
         {
           method: "PUT",

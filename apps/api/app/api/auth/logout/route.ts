@@ -6,6 +6,7 @@ import {
   readRefreshTokenFromRequest,
   revokeRefreshToken
 } from "../../../../src/lib/refresh-tokens";
+import { successResponse } from "../../../../src/lib/response";
 
 export async function POST(request: Request) {
   const refreshToken = readRefreshTokenFromRequest(request);
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const response = Response.json({ success: true }, { status: 200 });
+  const response = successResponse(null);
   response.headers.set("Set-Cookie", createRefreshTokenClearCookie());
   return response;
 }

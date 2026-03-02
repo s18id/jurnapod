@@ -12,33 +12,35 @@ function createSyncPayload({ dataVersion, outletId, price }) {
   const timestamp = new Date().toISOString();
   return {
     success: true,
-    data_version: dataVersion,
-    items: [
-      {
-        id: 1001,
-        sku: "AMERICANO",
-        name: "Americano",
-        type: "PRODUCT",
-        is_active: true,
-        updated_at: timestamp
+    data: {
+      data_version: dataVersion,
+      items: [
+        {
+          id: 1001,
+          sku: "AMERICANO",
+          name: "Americano",
+          type: "PRODUCT",
+          is_active: true,
+          updated_at: timestamp
+        }
+      ],
+      prices: [
+        {
+          id: 8001,
+          item_id: 1001,
+          outlet_id: outletId,
+          price,
+          is_active: true,
+          updated_at: timestamp
+        }
+      ],
+      config: {
+        tax: {
+          rate: 0,
+          inclusive: false
+        },
+        payment_methods: ["CASH", "QRIS"]
       }
-    ],
-    prices: [
-      {
-        id: 8001,
-        item_id: 1001,
-        outlet_id: outletId,
-        price,
-        is_active: true,
-        updated_at: timestamp
-      }
-    ],
-    config: {
-      tax: {
-        rate: 0,
-        inclusive: false
-      },
-      payment_methods: ["CASH", "QRIS"]
     }
   };
 }

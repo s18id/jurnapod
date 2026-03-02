@@ -139,8 +139,8 @@ test(
       assert.equal(journalsResponse.status, 200);
       const journalsBody = await journalsResponse.json();
       assert.equal(journalsBody.success, true);
-      assert.equal(journalsBody.journals.some((row) => row.id === outletBatchId), true);
-      assert.equal(journalsBody.journals.some((row) => row.id === nullBatchId), false);
+      assert.equal(journalsBody.data.journals.some((row) => row.id === outletBatchId), true);
+      assert.equal(journalsBody.data.journals.some((row) => row.id === nullBatchId), false);
 
       const trialBalanceResponse = await fetch(
         `${baseUrl}/api/reports/trial-balance?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}`,
@@ -154,7 +154,7 @@ test(
       const trialBalanceBody = await trialBalanceResponse.json();
       assert.equal(trialBalanceBody.success, true);
 
-      const accountIds = trialBalanceBody.rows.map((row) => Number(row.account_id));
+      const accountIds = trialBalanceBody.data.rows.map((row) => Number(row.account_id));
       assert.equal(accountIds.includes(outletAccountId), true);
       assert.equal(accountIds.includes(nullAccountId), false);
     } finally {
@@ -305,10 +305,10 @@ test(
       assert.equal(page1Response.status, 200);
       const page1Body = await page1Response.json();
       assert.equal(page1Body.success, true);
-      assert.equal(typeof page1Body.filters.as_of, "string");
-      assert.equal(typeof page1Body.filters.as_of_id, "number");
-      assert.equal(page1Body.total, 2);
-      const firstPageBatchId = page1Body.journals[0]?.id;
+      assert.equal(typeof page1Body.data.filters.as_of, "string");
+      assert.equal(typeof page1Body.data.filters.as_of_id, "number");
+      assert.equal(page1Body.data.total, 2);
+      const firstPageBatchId = page1Body.data.journals[0]?.id;
 
       const [batch3Insert] = await db.execute(
         `INSERT INTO journal_batches (company_id, outlet_id, doc_type, doc_id, posted_at)
@@ -335,7 +335,7 @@ test(
       );
 
       const page2Response = await fetch(
-        `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&limit=1&offset=1&as_of=${encodeURIComponent(page1Body.filters.as_of)}&as_of_id=${page1Body.filters.as_of_id}`,
+        `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&limit=1&offset=1&as_of=${encodeURIComponent(page1Body.data.filters.as_of)}&as_of_id=${page1Body.data.filters.as_of_id}`,
         {
           headers: {
             authorization: `Bearer ${accessToken}`
@@ -345,9 +345,9 @@ test(
       assert.equal(page2Response.status, 200);
       const page2Body = await page2Response.json();
       assert.equal(page2Body.success, true);
-      assert.equal(page2Body.total, 2);
+      assert.equal(page2Body.data.total, 2);
 
-      const returnedPage2Ids = page2Body.journals.map((row) => row.id);
+      const returnedPage2Ids = page2Body.data.journals.map((row) => row.id);
       assert.equal(returnedPage2Ids.includes(concurrentBatchId), false);
       assert.equal(returnedPage2Ids.includes(firstPageBatchId), false);
     } finally {

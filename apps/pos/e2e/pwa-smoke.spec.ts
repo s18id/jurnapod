@@ -8,7 +8,7 @@ test("sync badge changes to Offline when network goes down", async ({ context, p
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true })
+      body: JSON.stringify({ success: true, data: { service: "jurnapod-api" } })
     });
   });
 
@@ -26,7 +26,7 @@ test("login + sync pull works with mocked API", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true })
+      body: JSON.stringify({ success: true, data: { service: "jurnapod-api" } })
     });
   });
 
@@ -36,9 +36,11 @@ test("login + sync pull works with mocked API", async ({ page }) => {
       contentType: "application/json",
       body: JSON.stringify({
         success: true,
-        access_token: "test-token",
-        token_type: "Bearer",
-        expires_in: 3600
+        data: {
+          access_token: "test-token",
+          token_type: "Bearer",
+          expires_in: 3600
+        }
       })
     });
   });
@@ -70,33 +72,35 @@ test("login + sync pull works with mocked API", async ({ page }) => {
       contentType: "application/json",
       body: JSON.stringify({
         success: true,
-        data_version: 10,
-        items: [
-          {
-            id: 100,
-            sku: "AMER",
-            name: "Americano",
-            type: "PRODUCT",
-            is_active: true,
-            updated_at: new Date().toISOString()
+        data: {
+          data_version: 10,
+          items: [
+            {
+              id: 100,
+              sku: "AMER",
+              name: "Americano",
+              type: "PRODUCT",
+              is_active: true,
+              updated_at: new Date().toISOString()
+            }
+          ],
+          prices: [
+            {
+              id: 200,
+              item_id: 100,
+              outlet_id: 10,
+              price: 18000,
+              is_active: true,
+              updated_at: new Date().toISOString()
+            }
+          ],
+          config: {
+            tax: {
+              rate: 0,
+              inclusive: false
+            },
+            payment_methods: ["CASH", "QRIS"]
           }
-        ],
-        prices: [
-          {
-            id: 200,
-            item_id: 100,
-            outlet_id: 10,
-            price: 18000,
-            is_active: true,
-            updated_at: new Date().toISOString()
-          }
-        ],
-        config: {
-          tax: {
-            rate: 0,
-            inclusive: false
-          },
-          payment_methods: ["CASH", "QRIS"]
         }
       })
     });

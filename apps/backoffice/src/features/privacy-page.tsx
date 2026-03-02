@@ -7,7 +7,7 @@ import { apiRequest, ApiError } from "../lib/api-client";
 
 type PublicPageResponse = {
   success: true;
-  page: {
+  data: {
     slug: string;
     title: string;
     content_html: string;
@@ -84,9 +84,9 @@ export function PublicStaticPage({ slug, fallbackTitle }: PublicStaticPageProps)
         if (cancelled) {
           return;
         }
-        setTitle(response.page.title || fallbackTitle);
-        setContentHtml(response.page.content_html || "");
-        setPublishedAt(response.page.published_at ?? response.page.updated_at ?? null);
+        setTitle(response.data.title || fallbackTitle);
+        setContentHtml(response.data.content_html || "");
+        setPublishedAt(response.data.published_at ?? response.data.updated_at ?? null);
         setState("ready");
       } catch (error) {
         if (cancelled) {

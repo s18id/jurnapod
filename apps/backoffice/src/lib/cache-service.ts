@@ -20,12 +20,12 @@ type AccountTypesResponse = {
 
 type ItemsResponse = {
   success: true;
-  items: unknown[];
+  data: unknown[];
 };
 
 type ItemPricesResponse = {
   success: true;
-  prices: unknown[];
+  data: unknown[];
 };
 
 type CachedPayload<T> = {
@@ -116,8 +116,8 @@ export class CacheService {
 
   static async refreshItems(accessToken: string): Promise<unknown[]> {
     const response = await apiRequest<ItemsResponse>("/inventory/items", {}, accessToken);
-    await upsertCache("items", response.items, HALF_DAY_MS);
-    return response.items;
+    await upsertCache("items", response.data, HALF_DAY_MS);
+    return response.data;
   }
 
   static async getCachedItemPrices(
@@ -138,12 +138,12 @@ export class CacheService {
     const cacheKey = `item_prices:${outletId}`;
     await db.masterDataCache.put({
       type: cacheKey as "item_prices",
-      data: response.prices,
+      data: response.data,
       lastSync: new Date(),
       expiresAt: new Date(Date.now() + HALF_DAY_MS),
       version: 1
     });
-    return response.prices;
+    return response.data;
   }
 }
 

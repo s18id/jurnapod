@@ -2,24 +2,17 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
+import { errorResponse, successResponse } from "../../../src/lib/response";
 import { listRoles, createRole } from "../../../src/lib/users";
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Roles request failed"
-  }
-};
 
 export const GET = withAuth(
   async (_request, _auth) => {
     try {
       const roles = await listRoles();
-      return Response.json({ success: true, data: roles }, { status: 200 });
+      return successResponse(roles);
     } catch (error) {
       console.error("GET /api/roles failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Roles request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN", "OWNER", "ADMIN"], module: "roles", permission: "read" })]
@@ -32,17 +25,11 @@ export const POST = withAuth(
       const { code, name } = body;
 
       if (!code || typeof code !== "string" || code.trim().length === 0) {
-        return Response.json({
-          success: false,
-          error: { code: "VALIDATION_ERROR", message: "Role code is required" }
-        }, { status: 400 });
+        return errorResponse("VALIDATION_ERROR", "Role code is required", 400);
       }
 
       if (!name || typeof name !== "string" || name.trim().length === 0) {
-        return Response.json({
-          success: false,
-          error: { code: "VALIDATION_ERROR", message: "Role name is required" }
-        }, { status: 400 });
+        return errorResponse("VALIDATION_ERROR", "Role name is required", 400);
       }
 
       const role = await createRole({
@@ -50,16 +37,13 @@ export const POST = withAuth(
         name: name.trim()
       });
 
-      return Response.json({ success: true, data: role }, { status: 201 });
+      return successResponse(role, 201);
     } catch (error) {
       console.error("POST /api/roles failed", error);
       if (error instanceof Error && error.message.includes("already exists")) {
-        return Response.json({
-          success: false,
-          error: { code: "DUPLICATE_ROLE", message: error.message }
-        }, { status: 409 });
+        return errorResponse("DUPLICATE_ROLE", error.message, 409);
       }
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Roles request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN", "OWNER"], module: "roles", permission: "create" })]

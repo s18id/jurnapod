@@ -4,6 +4,7 @@
 import { AccountCreateRequestSchema, AccountListQuerySchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../src/lib/auth-guard";
+import { errorResponse, successResponse } from "../../../src/lib/response";
 import {
   createAccount,
   listAccounts,
@@ -12,21 +13,6 @@ import {
   ParentAccountCompanyMismatchError,
   AccountTypeCompanyMismatchError
 } from "../../../src/lib/accounts";
-
-/**
- * Helper: Create standardized error response
- */
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
 
 /**
  * GET /api/accounts
@@ -62,13 +48,7 @@ export const GET = withAuth(
 
       const accounts = await listAccounts(query);
 
-      return Response.json(
-        {
-          success: true,
-          data: accounts
-        },
-        { status: 200 }
-      );
+      return successResponse(accounts);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
@@ -102,13 +82,7 @@ export const POST = withAuth(
 
       const account = await createAccount(input, auth.userId);
 
-      return Response.json(
-        {
-          success: true,
-          data: account
-        },
-        { status: 201 }
-      );
+      return successResponse(account, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request body", 400);

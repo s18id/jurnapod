@@ -138,7 +138,7 @@ async function waitForServerReady(baseUrl, serverLogs, timeout = 60000) {
       
       clearTimeout(timeoutId);
       
-      if (response.success) {
+      if (response.ok) {
         console.log(`Server ready after ${attempts} attempts (${Date.now() - start}ms)`);
         return true;
       }
@@ -192,7 +192,7 @@ async function login(baseUrl, credentials) {
     throw new Error(`Login failed: ${JSON.stringify(body)}`);
   }
 
-  return body.access_token;
+  return body.data.access_token;
 }
 
 async function ensureOutletAccountMappingConstraint(db) {
@@ -470,12 +470,12 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
 
       assert.strictEqual(createRes.status, 201);
       assert.strictEqual(createRes.body.success, true);
-      assert.strictEqual(createRes.body.invoice.status, "DRAFT");
-      assert.strictEqual(createRes.body.invoice.payment_status, "UNPAID");
-      assert.strictEqual(createRes.body.invoice.subtotal, 1000);
-      assert.strictEqual(createRes.body.invoice.grand_total, 1100);
+      assert.strictEqual(createRes.body.data.status, "DRAFT");
+      assert.strictEqual(createRes.body.data.payment_status, "UNPAID");
+      assert.strictEqual(createRes.body.data.subtotal, 1000);
+      assert.strictEqual(createRes.body.data.grand_total, 1100);
 
-      const invoiceId = createRes.body.invoice.id;
+      const invoiceId = createRes.body.data.id;
 
       // Update draft invoice
       const updateRes = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}`, {
@@ -487,7 +487,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       });
 
       assert.strictEqual(updateRes.status, 200);
-      assert.strictEqual(updateRes.body.invoice.grand_total, 1110);
+      assert.strictEqual(updateRes.body.data.grand_total, 1110);
 
       // Check no journal batch exists yet
       const [prePostBatches] = await db.execute(
@@ -504,7 +504,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       });
 
       assert.strictEqual(postRes.status, 200);
-      assert.strictEqual(postRes.body.invoice.status, "POSTED");
+      assert.strictEqual(postRes.body.data.status, "POSTED");
 
       // Verify exactly one journal batch created
       const [batches] = await db.execute(
@@ -551,7 +551,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         })
       });
 
-      const invoiceId = invoiceRes.body.invoice.id;
+      const invoiceId = invoiceRes.body.data.id;
 
       await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
         method: "POST",
@@ -574,9 +574,9 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       });
 
       assert.strictEqual(createRes.status, 201);
-      assert.strictEqual(createRes.body.payment.status, "DRAFT");
+      assert.strictEqual(createRes.body.data.status, "DRAFT");
 
-      const paymentId = createRes.body.payment.id;
+      const paymentId = createRes.body.data.id;
 
       // Post payment
       const postRes = await apiRequest(baseUrl, `/api/sales/payments/${paymentId}/post`, {
@@ -585,7 +585,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       });
 
       assert.strictEqual(postRes.status, 200);
-      assert.strictEqual(postRes.body.payment.status, "POSTED");
+      assert.strictEqual(postRes.body.data.status, "POSTED");
 
       // Verify exactly one journal batch created
       const [batches] = await db.execute(
@@ -631,7 +631,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         })
       });
 
-      const invoiceId = invoiceRes.body.invoice.id;
+      const invoiceId = invoiceRes.body.data.id;
 
       await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
         method: "POST",
@@ -643,9 +643,9 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         headers: authHeaders
       });
 
-      assert.strictEqual(getRes.body.invoice.grand_total, 1000);
-      assert.strictEqual(getRes.body.invoice.paid_total, 0);
-      assert.strictEqual(getRes.body.invoice.payment_status, "UNPAID");
+      assert.strictEqual(getRes.body.data.grand_total, 1000);
+      assert.strictEqual(getRes.body.data.paid_total, 0);
+      assert.strictEqual(getRes.body.data.payment_status, "UNPAID");
 
       // Create and post payment for 1000
       const paymentRes = await apiRequest(baseUrl, "/api/sales/payments", {
@@ -662,7 +662,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         })
       });
 
-      const paymentId = paymentRes.body.payment.id;
+      const paymentId = paymentRes.body.data.id;
 
       await apiRequest(baseUrl, `/api/sales/payments/${paymentId}/post`, {
         method: "POST",
@@ -674,8 +674,8 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         headers: authHeaders
       });
 
-      assert.strictEqual(getRes.body.invoice.paid_total, 1000);
-      assert.strictEqual(getRes.body.invoice.payment_status, "PAID");
+      assert.strictEqual(getRes.body.data.paid_total, 1000);
+      assert.strictEqual(getRes.body.data.payment_status, "PAID");
     });
 
     await t.test("Partial payment transitions UNPAID -> PARTIAL -> PAID", { timeout: 30000 }, async () => {
@@ -698,7 +698,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         })
       });
 
-      const invoiceId = invoiceRes.body.invoice.id;
+      const invoiceId = invoiceRes.body.data.id;
 
       await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
         method: "POST",
@@ -709,7 +709,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       let getRes = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}`, {
         headers: authHeaders
       });
-      assert.strictEqual(getRes.body.invoice.payment_status, "UNPAID");
+      assert.strictEqual(getRes.body.data.payment_status, "UNPAID");
 
       // First payment: 400
       const payment1Res = await apiRequest(baseUrl, "/api/sales/payments", {
@@ -726,7 +726,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         })
       });
 
-      await apiRequest(baseUrl, `/api/sales/payments/${payment1Res.body.payment.id}/post`, {
+      await apiRequest(baseUrl, `/api/sales/payments/${payment1Res.body.data.id}/post`, {
         method: "POST",
         headers: authHeaders
       });
@@ -735,8 +735,8 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       getRes = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}`, {
         headers: authHeaders
       });
-      assert.strictEqual(getRes.body.invoice.paid_total, 400);
-      assert.strictEqual(getRes.body.invoice.payment_status, "PARTIAL");
+      assert.strictEqual(getRes.body.data.paid_total, 400);
+      assert.strictEqual(getRes.body.data.payment_status, "PARTIAL");
 
       // Second payment: 600
       const payment2Res = await apiRequest(baseUrl, "/api/sales/payments", {
@@ -753,7 +753,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         })
       });
 
-      await apiRequest(baseUrl, `/api/sales/payments/${payment2Res.body.payment.id}/post`, {
+      await apiRequest(baseUrl, `/api/sales/payments/${payment2Res.body.data.id}/post`, {
         method: "POST",
         headers: authHeaders
       });
@@ -762,8 +762,8 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       getRes = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}`, {
         headers: authHeaders
       });
-      assert.strictEqual(getRes.body.invoice.paid_total, 1000);
-      assert.strictEqual(getRes.body.invoice.payment_status, "PAID");
+      assert.strictEqual(getRes.body.data.paid_total, 1000);
+      assert.strictEqual(getRes.body.data.payment_status, "PAID");
     });
 
     await t.test("Overpayment rejected with no journal side effects", { timeout: 30000 }, async () => {
@@ -785,7 +785,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         })
       });
 
-      const invoiceId = invoiceRes.body.invoice.id;
+      const invoiceId = invoiceRes.body.data.id;
 
       await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
         method: "POST",
@@ -807,7 +807,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         })
       });
 
-      const paymentId = paymentRes.body.payment.id;
+      const paymentId = paymentRes.body.data.id;
 
       // Count journal batches before post attempt
       const [beforeBatches] = await db.execute(
@@ -840,8 +840,8 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         headers: authHeaders
       });
 
-      assert.strictEqual(getRes.body.invoice.paid_total, 0);
-      assert.strictEqual(getRes.body.invoice.payment_status, "UNPAID");
+      assert.strictEqual(getRes.body.data.paid_total, 0);
+      assert.strictEqual(getRes.body.data.payment_status, "UNPAID");
     });
 
     await t.test("Duplicate post calls are idempotent", { timeout: 30000 }, async () => {
@@ -861,7 +861,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         })
       });
 
-      const invoiceId = createRes.body.invoice.id;
+      const invoiceId = createRes.body.data.id;
 
       // First post
       const post1Res = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
@@ -870,7 +870,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       });
 
       assert.strictEqual(post1Res.status, 200);
-      assert.strictEqual(post1Res.body.invoice.status, "POSTED");
+      assert.strictEqual(post1Res.body.data.status, "POSTED");
 
       // Count journal batches after first post
       const [batches1] = await db.execute(
@@ -889,7 +889,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       });
 
       assert.strictEqual(post2Res.status, 200);
-      assert.strictEqual(post2Res.body.invoice.status, "POSTED");
+      assert.strictEqual(post2Res.body.data.status, "POSTED");
 
       // Verify still only one journal batch exists
       const [batches2] = await db.execute(

@@ -44,12 +44,18 @@ export const SyncPushResultItemSchema = z.object({
   message: z.string().optional()
 });
 
-export const SyncPushResponseSchema = z.object({
+export const SyncPushPayloadSchema = z.object({
   results: z.array(SyncPushResultItemSchema)
+});
+
+export const SyncPushResponseSchema = z.object({
+  success: z.literal(true),
+  data: SyncPushPayloadSchema
 });
 
 export type PosTransaction = z.infer<typeof PosTransactionSchema>;
 export type PosTaxLine = z.infer<typeof PosTaxLineSchema>;
 export type SyncPushRequest = z.infer<typeof SyncPushRequestSchema>;
 export type SyncPushResultItem = z.infer<typeof SyncPushResultItemSchema>;
+export type SyncPushPayload = z.infer<typeof SyncPushPayloadSchema>;
 export type SyncPushResponse = z.infer<typeof SyncPushResponseSchema>;

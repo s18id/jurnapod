@@ -4,11 +4,12 @@
 import {
   NumericIdSchema,
   SyncPullRequestQuerySchema,
-  SyncPullResponseSchema
+  SyncPullPayloadSchema
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { buildSyncPullPayload } from "../../../../src/lib/master-data";
+import { successResponse } from "../../../../src/lib/response";
 
 const INVALID_REQUEST_RESPONSE = {
   success: false,
@@ -41,15 +42,9 @@ export const GET = withAuth(
       });
 
       const payload = await buildSyncPullPayload(auth.companyId, input.outlet_id, input.since_version);
-      const response = SyncPullResponseSchema.parse(payload);
+      const response = SyncPullPayloadSchema.parse(payload);
 
-      return Response.json(
-        {
-          success: true,
-          ...response
-        },
-        { status: 200 }
-      );
+      return successResponse(response);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

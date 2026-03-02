@@ -7,6 +7,7 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
+import { successResponse } from "../../../../src/lib/response";
 import {
   createItemPrice,
   DatabaseConflictError,
@@ -106,7 +107,7 @@ export const GET = withAuth(
           isActive
         });
 
-        return Response.json({ success: true, prices }, { status: 200 });
+        return successResponse(prices);
       }
 
       const outletIds = await listUserOutletIds(auth.userId, auth.companyId);
@@ -115,7 +116,7 @@ export const GET = withAuth(
         isActive
       });
 
-      return Response.json({ success: true, prices }, { status: 200 });
+      return successResponse(prices);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -142,7 +143,7 @@ export const POST = withAuth(
         userId: auth.userId
       });
 
-      return Response.json({ success: true, item_price: itemPrice }, { status: 201 });
+      return successResponse(itemPrice, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

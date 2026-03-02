@@ -8,6 +8,7 @@ import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { getDbPool } from "../../../../../src/lib/db";
 import { getAuditService } from "../../../../../src/lib/audit";
 import { readClientIp } from "../../../../../src/lib/request-meta";
+import { successResponse } from "../../../../../src/lib/response";
 
 const idSchema = z.coerce.number().int().positive();
 
@@ -122,7 +123,7 @@ export const PUT = withAuth(
         }
       );
 
-      return Response.json({ success: true }, { status: 200 });
+      return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
@@ -182,7 +183,7 @@ export const DELETE = withAuth(
         }
       );
 
-      return Response.json({ success: true }, { status: 200 });
+      return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError) {
         return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });

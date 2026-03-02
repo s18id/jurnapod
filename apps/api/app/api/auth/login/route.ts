@@ -13,6 +13,7 @@ import {
 } from "../../../../src/lib/auth-throttle";
 import { getAppEnv } from "../../../../src/lib/env";
 import { createRefreshTokenCookie, issueRefreshToken } from "../../../../src/lib/refresh-tokens";
+import { successResponse } from "../../../../src/lib/response";
 
 const INVALID_REQUEST_RESPONSE = {
   success: false,
@@ -97,7 +98,7 @@ export async function POST(request: Request) {
     }
     const authResult = await authenticateLogin(credentials);
 
-    if (!authResult.success) {
+    if (!("accessToken" in authResult)) {
       try {
         await recordLoginFailure({
           keys: throttleKeys,
@@ -154,14 +155,13 @@ export async function POST(request: Request) {
       userAgent
     });
     const env = getAppEnv();
-    const response = Response.json(
+    const response = successResponse(
       {
-        success: true,
         access_token: authResult.accessToken,
         token_type: "Bearer",
         expires_in: authResult.expiresInSeconds
       },
-      { status: 200 }
+      200
     );
 
     response.headers.set(

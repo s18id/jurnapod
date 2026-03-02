@@ -198,7 +198,7 @@ export async function loginUser(baseUrl, companyCode, email, password) {
   if (loginBody.success !== true) {
     throw new Error("login failed: response not ok");
   }
-  return loginBody.access_token;
+  return loginBody.data.access_token;
 }
 
 export async function loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword) {

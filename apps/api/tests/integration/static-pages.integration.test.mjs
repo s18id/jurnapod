@@ -212,7 +212,7 @@ test(
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
       assert.equal(loginBody.success, true);
-      const accessToken = loginBody.access_token;
+      const accessToken = loginBody.data.access_token;
 
       const invalidSlugResponse = await fetch(`${baseUrl}/api/settings/pages`, {
         method: "POST",
@@ -247,7 +247,7 @@ test(
       assert.equal(createResponse.status, 201);
       const createBody = await createResponse.json();
       assert.equal(createBody.success, true);
-      createdPageId = Number(createBody.page.id);
+      createdPageId = Number(createBody.data.id);
       assert.success(createdPageId > 0);
 
       const listResponse = await fetch(`${baseUrl}/api/settings/pages?q=${encodeURIComponent(runId)}`, {
@@ -258,7 +258,7 @@ test(
       assert.equal(listResponse.status, 200);
       const listBody = await listResponse.json();
       assert.equal(listBody.success, true);
-      const listed = listBody.pages.find((page) => Number(page.id) === createdPageId);
+      const listed = listBody.data.find((page) => Number(page.id) === createdPageId);
       assert.equal(Boolean(listed), true);
 
       const duplicateResponse = await fetch(`${baseUrl}/api/settings/pages`, {
@@ -300,7 +300,7 @@ test(
       assert.equal(patchResponse.status, 200);
       const patchBody = await patchResponse.json();
       assert.equal(patchBody.success, true);
-      assert.equal(patchBody.page.slug, newSlug);
+      assert.equal(patchBody.data.slug, newSlug);
 
       const publishResponse = await fetch(`${baseUrl}/api/settings/pages/${createdPageId}/publish`, {
         method: "POST",
@@ -311,15 +311,15 @@ test(
       assert.equal(publishResponse.status, 200);
       const publishBody = await publishResponse.json();
       assert.equal(publishBody.success, true);
-      assert.equal(publishBody.page.status, "PUBLISHED");
+      assert.equal(publishBody.data.status, "PUBLISHED");
 
       const publicAfterPublish = await fetch(`${baseUrl}/api/pages/${newSlug}`);
       assert.equal(publicAfterPublish.status, 200);
       const publicBody = await publicAfterPublish.json();
       assert.equal(publicBody.success, true);
-      assert.equal(publicBody.page.slug, newSlug);
-      assert.equal(publicBody.page.content_html.includes("<script"), false);
-      assert.equal(publicBody.page.content_html.includes("Policy"), true);
+      assert.equal(publicBody.data.slug, newSlug);
+      assert.equal(publicBody.data.content_html.includes("<script"), false);
+      assert.equal(publicBody.data.content_html.includes("Policy"), true);
 
       const unpublishResponse = await fetch(`${baseUrl}/api/settings/pages/${createdPageId}/unpublish`, {
         method: "POST",
@@ -330,7 +330,7 @@ test(
       assert.equal(unpublishResponse.status, 200);
       const unpublishBody = await unpublishResponse.json();
       assert.equal(unpublishBody.success, true);
-      assert.equal(unpublishBody.page.status, "DRAFT");
+      assert.equal(unpublishBody.data.status, "DRAFT");
 
       const publicAfterUnpublish = await fetch(`${baseUrl}/api/pages/${newSlug}`);
       assert.equal(publicAfterUnpublish.status, 404);

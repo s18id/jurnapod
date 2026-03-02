@@ -6,6 +6,7 @@ import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { userHasAnyRole } from "../../../../src/lib/auth";
 import { readClientIp } from "../../../../src/lib/request-meta";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   getCompany,
   updateCompany,
@@ -14,22 +15,6 @@ import {
   CompanyDeactivatedError,
   CompanyAlreadyActiveError
 } from "../../../../src/lib/companies";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Company request failed"
-  }
-};
 
 async function isSuperAdmin(auth: { userId: number; companyId: number }) {
   return userHasAnyRole(auth.userId, auth.companyId, ["SUPER_ADMIN"]);
@@ -47,25 +32,19 @@ export const GET = withAuth(
       const companyId = parseCompanyId(request);
       const superAdmin = await isSuperAdmin(auth);
       if (!superAdmin && companyId !== auth.companyId) {
-        return Response.json({
-          success: false,
-          error: { code: "NOT_FOUND", message: "Company not found" }
-        }, { status: 404 });
+        return errorResponse("NOT_FOUND", "Company not found", 404);
       }
       const company = await getCompany(companyId, { includeDeleted: superAdmin });
-      return Response.json({ success: true, data: company }, { status: 200 });
+      return successResponse(company);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       if (error instanceof CompanyNotFoundError) {
-        return Response.json({
-          success: false,
-          error: { code: "NOT_FOUND", message: error.message }
-        }, { status: 404 });
+        return errorResponse("NOT_FOUND", error.message, 404);
       }
       console.error("GET /api/companies/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Company request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN", "OWNER"], module: "companies", permission: "read" })]
@@ -77,10 +56,7 @@ export const PATCH = withAuth(
       const companyId = parseCompanyId(request);
       const superAdmin = await isSuperAdmin(auth);
       if (!superAdmin && companyId !== auth.companyId) {
-        return Response.json({
-          success: false,
-          error: { code: "NOT_FOUND", message: "Company not found" }
-        }, { status: 404 });
+        return errorResponse("NOT_FOUND", "Company not found", 404);
       }
       const body = await request.json();
       const input = CompanyUpdateRequestSchema.parse({
@@ -96,25 +72,19 @@ export const PATCH = withAuth(
         }
       });
 
-      return Response.json({ success: true, data: company }, { status: 200 });
+      return successResponse(company);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       if (error instanceof CompanyNotFoundError) {
-        return Response.json({
-          success: false,
-          error: { code: "NOT_FOUND", message: error.message }
-        }, { status: 404 });
+        return errorResponse("NOT_FOUND", error.message, 404);
       }
       if (error instanceof CompanyDeactivatedError) {
-        return Response.json({
-          success: false,
-          error: { code: "COMPANY_DEACTIVATED", message: error.message }
-        }, { status: 409 });
+        return errorResponse("COMPANY_DEACTIVATED", error.message, 409);
       }
       console.error("PATCH /api/companies/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Company request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN", "OWNER"], module: "companies", permission: "update" })]
@@ -126,10 +96,7 @@ export const DELETE = withAuth(
       const companyId = parseCompanyId(request);
       const superAdmin = await isSuperAdmin(auth);
       if (!superAdmin) {
-        return Response.json({
-          success: false,
-          error: { code: "FORBIDDEN", message: "Forbidden" }
-        }, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
       await deleteCompany({
         companyId,
@@ -138,37 +105,25 @@ export const DELETE = withAuth(
           ipAddress: readClientIp(request)
         }
       });
-      return Response.json({ success: true }, { status: 200 });
+      return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       if (error instanceof CompanyNotFoundError) {
-        return Response.json({
-          success: false,
-          error: { code: "NOT_FOUND", message: error.message }
-        }, { status: 404 });
+        return errorResponse("NOT_FOUND", error.message, 404);
       }
       if (error instanceof CompanyDeactivatedError) {
-        return Response.json({
-          success: false,
-          error: { code: "COMPANY_DEACTIVATED", message: error.message }
-        }, { status: 409 });
+        return errorResponse("COMPANY_DEACTIVATED", error.message, 409);
       }
       if (error instanceof CompanyAlreadyActiveError) {
-        return Response.json({
-          success: false,
-          error: { code: "COMPANY_ALREADY_ACTIVE", message: error.message }
-        }, { status: 409 });
+        return errorResponse("COMPANY_ALREADY_ACTIVE", error.message, 409);
       }
       if (error instanceof Error && error.message.includes("Cannot delete company")) {
-        return Response.json({
-          success: false,
-          error: { code: "COMPANY_IN_USE", message: error.message }
-        }, { status: 409 });
+        return errorResponse("COMPANY_IN_USE", error.message, 409);
       }
       console.error("DELETE /api/companies/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Company request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN", "OWNER"], module: "companies", permission: "delete" })]

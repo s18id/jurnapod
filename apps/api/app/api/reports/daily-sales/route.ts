@@ -5,6 +5,7 @@ import { z } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
 import { listDailySalesSummary } from "../../../../src/lib/reports";
+import { successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive().optional(),
@@ -56,19 +57,15 @@ export const GET = withAuth(
         status: parsed.status
       });
 
-      return Response.json(
-        {
-          success: true,
-          filters: {
-            outlet_ids: outletIds,
-            date_from: dateFrom,
-            date_to: dateTo,
-            status: parsed.status
-          },
-          rows
-        },
-        { status: 200 }
-      );
+       return successResponse({
+         filters: {
+           outlet_ids: outletIds,
+           date_from: dateFrom,
+           date_to: dateTo,
+           status: parsed.status
+         },
+         rows
+       });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return Response.json({ success: false, error: { code: "INVALID_REQUEST", message: "Invalid request" } }, { status: 400 });

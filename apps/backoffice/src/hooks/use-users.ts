@@ -424,7 +424,7 @@ export async function deleteRole(
   roleId: number,
   accessToken: string
 ): Promise<void> {
-  await apiRequest<{ success: true }>(
+  await apiRequest<{ success: true; data: null }>(
     `/roles/${roleId}`,
     {
       method: "DELETE"

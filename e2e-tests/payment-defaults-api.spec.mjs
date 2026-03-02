@@ -40,11 +40,11 @@ async function login() {
     })
   });
 
-  if (!response.success || !data.access_token) {
+  if (!data.success || !data.data?.access_token) {
     throw new Error(`Login failed: ${data.error?.message || response.statusText}`);
   }
 
-  return data.access_token;
+  return data.data.access_token;
 }
 
 async function test(name, fn) {
@@ -81,23 +81,23 @@ async function testFetchMappings(token, outletId) {
     token
   );
 
-  if (!response.success) {
+  if (!data.success) {
     throw new Error(`Failed to fetch mappings: ${data.error?.message}`);
   }
 
-  if (!data.mappings || !Array.isArray(data.mappings)) {
+  if (!data.data?.mappings || !Array.isArray(data.data.mappings)) {
     throw new Error('Invalid response format');
   }
 
   // Check for is_invoice_default field
-  if (data.mappings.length > 0) {
-    const hasDefaultField = 'is_invoice_default' in data.mappings[0];
+  if (data.data.mappings.length > 0) {
+    const hasDefaultField = 'is_invoice_default' in data.data.mappings[0];
     if (!hasDefaultField) {
       throw new Error('is_invoice_default field not present in response');
     }
   }
 
-  return data.mappings;
+  return data.data.mappings;
 }
 
 // Test 3: Set Invoice Default
@@ -126,7 +126,7 @@ async function testSetInvoiceDefault(token, outletId, mappings) {
     token
   );
 
-  if (!response.success) {
+  if (!data.success) {
     throw new Error(`Failed to save mappings: ${data.error?.message}`);
   }
 }
@@ -170,7 +170,7 @@ async function testMultipleDefaultsValidation(token, outletId, mappings) {
     token
   );
 
-  if (response.success) {
+  if (data.success) {
     throw new Error('API should have rejected multiple defaults but didn\'t');
   }
 
@@ -203,7 +203,7 @@ async function testUnsetDefault(token, outletId, mappings) {
     token
   );
 
-  if (!response.success) {
+  if (!data.success) {
     throw new Error(`Failed to unset defaults: ${data.error?.message}`);
   }
 
@@ -243,7 +243,7 @@ async function testChangeDefault(token, outletId, mappings) {
     token
   );
 
-  if (!response.success) {
+  if (!data.success) {
     throw new Error(`Failed to change default: ${data.error?.message}`);
   }
 

@@ -222,7 +222,7 @@ test(
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
       assert.equal(loginBody.success, true);
-      const accessToken = loginBody.access_token;
+      const accessToken = loginBody.data.access_token;
 
       const createResponse = await fetch(`${baseUrl}/api/settings/tax-rates`, {
         method: "POST",
@@ -249,7 +249,7 @@ test(
       assert.equal(listResponse.status, 200);
       const listBody = await listResponse.json();
       assert.equal(listBody.success, true);
-      const createdRate = listBody.tax_rates.find((rate) => rate.code === rateCode);
+      const createdRate = listBody.data.find((rate) => rate.code === rateCode);
       assert.success(createdRate);
 
       const defaultsResponse = await fetch(`${baseUrl}/api/settings/tax-defaults`, {
@@ -274,7 +274,7 @@ test(
       assert.equal(getDefaultsResponse.status, 200);
       const getDefaultsBody = await getDefaultsResponse.json();
       assert.equal(getDefaultsBody.success, true);
-      assert.equal(getDefaultsBody.tax_rate_ids.includes(createdRate.id), true);
+      assert.equal(getDefaultsBody.data.includes(createdRate.id), true);
     } finally {
       try {
         await db.execute(

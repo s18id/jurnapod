@@ -218,7 +218,7 @@ test(
       assert.equal(loginResponse.status, 200);
       const loginBody = await loginResponse.json();
       assert.equal(loginBody.success, true);
-      const accessToken = loginBody.access_token;
+      const accessToken = loginBody.data.access_token;
 
       const keys = [
         "feature.pos.auto_sync_enabled",
@@ -244,7 +244,7 @@ test(
       assert.equal(initialResponse.status, 200);
       const initialBody = await initialResponse.json();
       assert.equal(initialBody.success, true);
-      assert.equal(initialBody.settings.length, keys.length);
+      assert.equal(initialBody.data.settings.length, keys.length);
 
       const updatePayload = {
         outlet_id: outletId,
@@ -286,7 +286,7 @@ test(
       const updatedBody = await updatedResponse.json();
       assert.equal(updatedBody.success, true);
 
-      const updatedMap = new Map(updatedBody.settings.map((setting) => [setting.key, setting.value]));
+      const updatedMap = new Map(updatedBody.data.settings.map((setting) => [setting.key, setting.value]));
       assert.equal(updatedMap.get("feature.pos.auto_sync_enabled"), false);
       assert.equal(updatedMap.get("feature.pos.sync_interval_seconds"), 75);
       assert.equal(updatedMap.get("feature.sales.tax_included_default"), true);
