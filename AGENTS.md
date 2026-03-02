@@ -114,6 +114,14 @@ All posting processes must be executed in **1 DB transaction**.
   - push POS transactions (header + items + payments)
   - response per transaction: OK / DUPLICATE / ERROR
   - idempotent by `client_tx_id`
+  
+**POS Sync Journal Posting Configuration:**
+- Environment variable: `SYNC_PUSH_POSTING_MODE`
+- Values:
+  - `disabled` (default): No journal posting, transactions stored only
+  - `shadow`: Posts to GL but failures do NOT block sync (for testing)
+  - `active`: Posts to GL, failures block sync (production mode)
+- When enabled, POS transactions automatically create journal entries via outlet account mappings (SALES_REVENUE, SALES_TAX, AR, payment methods)
 
 ### Accounting Import (ODS/Excel)
 - Upload file (.ods/.xlsx)
@@ -146,6 +154,11 @@ All posting processes must be executed in **1 DB transaction**.
 - Always show sync status (e.g., badge: Offline / Pending / Synced).
 - Cache master data per outlet (prices may differ by outlet).
 - Avoid "editing final transactions"; use void/refund flow.
+
+**Note on Backoffice Sync:**
+- The backoffice app has a separate sync service (`apps/backoffice/src/lib/sync-service.ts`) for syncing **journals, invoices, and payments** from backoffice operations.
+- This is **independent** from POS sync (`/sync/push` and `/sync/pull`).
+- POS sync handles cashier transactions; backoffice sync handles accounting documents.
 
 ---
 

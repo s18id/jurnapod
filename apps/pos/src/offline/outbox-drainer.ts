@@ -252,8 +252,9 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
     const sendStartedAtMs = now();
 
     const heartbeatIntervalMs = Math.max(1_000, Math.floor(leaseMs / 3));
+    let consecutiveRenewalFailures = 0;
     const heartbeatId = globalThis.setInterval(() => {
-      void renewOutboxAttemptLease(
+      renewOutboxAttemptLease(
         {
           job_id: job.job_id,
           attempt_token: attempt.attempt,
@@ -263,7 +264,29 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
           now
         },
         db
-      );
+      ).catch((error) => {
+        consecutiveRenewalFailures++;
+        console.error("[outbox-drainer] Lease renewal failed", {
+          job_id: job.job_id,
+          attempt: attempt.attempt,
+          consecutive_failures: consecutiveRenewalFailures,
+          error
+        });
+        
+        // If renewal fails repeatedly, the lease may have expired.
+        // Log a warning but allow the send to continue - the final
+        // status update will fail with stale token if lease actually expired.
+        if (consecutiveRenewalFailures >= 3) {
+          console.warn("[outbox-drainer] Multiple consecutive lease renewal failures", {
+            job_id: job.job_id,
+            attempt: attempt.attempt,
+            consecutive_failures: consecutiveRenewalFailures
+          });
+        }
+      }).then(() => {
+        // Reset failure counter on successful renewal
+        consecutiveRenewalFailures = 0;
+      });
     }, heartbeatIntervalMs);
 
     try {

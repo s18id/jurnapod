@@ -302,7 +302,21 @@ function asSyncResultItems(payload: unknown): SyncPushResultItem[] {
   return normalized;
 }
 
+/**
+ * Classifies any error that occurs during outbox sending into a structured OutboxSenderError.
+ * This is the primary exported API for error classification.
+ * 
+ * @param error - The error to classify (can be transport, HTTP, or already classified)
+ * @returns A structured OutboxSenderError with category (RETRYABLE/NON_RETRYABLE)
+ */
 export function classifyOutboxSenderError(error: unknown): OutboxSenderError {
+  // Already classified errors pass through
+  if (error instanceof OutboxSenderError) {
+    return error;
+  }
+  
+  // For now, only transport errors are exposed through this API.
+  // HTTP status and sync result errors are handled internally in sendOutboxJobToSyncPush.
   return classifyTransportError(error);
 }
 
