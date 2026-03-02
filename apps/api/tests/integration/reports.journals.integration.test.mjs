@@ -126,7 +126,7 @@ test(
       childProcess = server.childProcess;
       await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
 
-      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
+      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, server.serverLogs);
 
       const journalsResponse = await fetch(
         `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&limit=200`,
@@ -292,7 +292,21 @@ test(
       childProcess = server.childProcess;
       await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
 
-      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
+      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, server.serverLogs);
+
+      const asOfIso = `${reportDate}T23:59:59.999Z`;
+      const asOfResponse = await fetch(
+        `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&as_of=${encodeURIComponent(asOfIso)}&limit=50&offset=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(asOfResponse.status, 200);
+      const asOfBody = await asOfResponse.json();
+      assert.equal(asOfBody.success, true);
+      assert.equal(asOfBody.data.total, 2);
 
       const page1Response = await fetch(
         `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&limit=1&offset=0`,

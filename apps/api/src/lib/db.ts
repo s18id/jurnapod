@@ -8,6 +8,20 @@ const globalForDb = globalThis as typeof globalThis & {
   __jurnapodApiDbPool?: Pool;
 };
 
+function normalizeDbCharset(collation: string | null): string | undefined {
+  if (!collation) {
+    return undefined;
+  }
+
+  const trimmed = collation.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  const baseCharset = trimmed.split("_")[0];
+  return baseCharset.length > 0 ? baseCharset : undefined;
+}
+
 export function getDbPool(): Pool {
   if (globalForDb.__jurnapodApiDbPool) {
     return globalForDb.__jurnapodApiDbPool;
@@ -20,7 +34,7 @@ export function getDbPool(): Pool {
     user: env.db.user,
     password: env.db.password,
     database: env.db.database,
-    charset: env.db.collation ?? undefined,
+    charset: normalizeDbCharset(env.db.collation),
     waitForConnections: true,
     connectionLimit: env.db.connectionLimit,
     queueLimit: 0

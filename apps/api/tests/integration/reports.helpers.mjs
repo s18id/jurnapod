@@ -179,7 +179,7 @@ export async function ensureDailySalesView(db) {
   await db.execute(DAILY_SALES_VIEW_SQL);
 }
 
-export async function loginUser(baseUrl, companyCode, email, password) {
+export async function loginUser(baseUrl, companyCode, email, password, serverLogs = null) {
   const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: {
@@ -192,7 +192,18 @@ export async function loginUser(baseUrl, companyCode, email, password) {
     })
   });
   if (loginResponse.status !== 200) {
-    throw new Error(`login failed: status=${loginResponse.status}`);
+    let responseBody = "";
+    try {
+      responseBody = await loginResponse.text();
+    } catch {
+      responseBody = "";
+    }
+    const logsSuffix = Array.isArray(serverLogs)
+      ? `\nServer logs (tail):\n${serverLogs.slice(-40).join("")}`
+      : "";
+    throw new Error(
+      `login failed: status=${loginResponse.status}${responseBody ? ` body=${responseBody}` : ""}${logsSuffix}`
+    );
   }
   const loginBody = await loginResponse.json();
   if (loginBody.success !== true) {
@@ -201,6 +212,6 @@ export async function loginUser(baseUrl, companyCode, email, password) {
   return loginBody.data.access_token;
 }
 
-export async function loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword) {
-  return loginUser(baseUrl, companyCode, ownerEmail, ownerPassword);
+export async function loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, serverLogs = null) {
+  return loginUser(baseUrl, companyCode, ownerEmail, ownerPassword, serverLogs);
 }

@@ -146,7 +146,7 @@ test(
       childProcess = server.childProcess;
       await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
 
-      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
+      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, server.serverLogs);
 
       const posResponse = await fetch(
         `${baseUrl}/api/reports/pos-transactions?outlet_id=${outletId}&date_from=${dateFromIso}&date_to=${dateToIso}`,

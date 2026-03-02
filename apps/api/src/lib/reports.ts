@@ -175,6 +175,15 @@ function toIsoDate(value: Date): string {
   return new Date(value).toISOString().slice(0, 10);
 }
 
+function toMysqlDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString().slice(0, 19).replace("T", " ");
+  }
+
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
 function toDateTimeRange(dateFrom: string, dateTo: string): { fromStart: string; nextDayStart: string } {
   const fromStart = `${dateFrom} 00:00:00`;
   const [year, month, day] = dateTo.split("-").map((value) => Number(value));
@@ -226,12 +235,13 @@ export async function listPosTransactions(filter: PosTransactionFilter) {
   const outletClause = buildOutletInClause(filter.outletIds);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo);
   const asOf = filter.asOf ?? new Date().toISOString();
+  const asOfSql = toMysqlDateTime(asOf);
 
   const coreValues: Array<number | string> = [
     filter.companyId,
     range.fromStart,
     range.nextDayStart,
-    asOf
+    asOfSql
   ];
   const scopeValues: Array<number | string> = [...outletClause.values];
   let statusClause = "";
@@ -488,11 +498,12 @@ export async function listJournalBatches(filter: JournalFilter) {
   const outletClause = buildOutletInClauseForJournals(filter.outletIds, filter.includeUnassignedOutlet ?? true);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo);
   const asOf = filter.asOf ?? new Date().toISOString();
+  const asOfSql = toMysqlDateTime(asOf);
   const coreValues: Array<number | string> = [
     filter.companyId,
     range.fromStart,
     range.nextDayStart,
-    asOf
+    asOfSql
   ];
   const scopeValues: Array<number | string> = [...outletClause.values];
   const connection = await pool.getConnection();
