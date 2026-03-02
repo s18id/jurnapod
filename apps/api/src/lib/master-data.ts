@@ -9,7 +9,7 @@ import {
   listCompanyTaxRates,
   resolveCombinedTaxConfig
 } from "./taxes";
-import type { SyncPullResponse } from "@jurnapod/shared";
+import type { SyncPullPayload, SyncPullResponse } from "@jurnapod/shared";
 import { SyncPullConfigSchema } from "@jurnapod/shared";
 import { getDbPool } from "./db";
 
@@ -1682,7 +1682,7 @@ export async function getCompanyDataVersion(companyId: number): Promise<number> 
   return Number(rows[0]?.current_version ?? 0);
 }
 
-async function readSyncConfig(companyId: number): Promise<SyncPullResponse["config"]> {
+async function readSyncConfig(companyId: number): Promise<SyncPullResponse["data"]["config"]> {
   const pool = getDbPool();
   const [rows] = await pool.execute<CompanyModuleRow[]>(
     `SELECT cm.enabled, cm.config_json
@@ -1757,7 +1757,7 @@ export async function buildSyncPullPayload(
   companyId: number,
   outletId: number,
   sinceVersion: number
-): Promise<SyncPullResponse> {
+): Promise<SyncPullPayload> {
   const currentVersion = await getCompanyDataVersion(companyId);
   const config = await readSyncConfig(companyId);
 
