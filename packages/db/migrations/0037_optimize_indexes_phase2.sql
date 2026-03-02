@@ -12,6 +12,8 @@
 -- Use EXPLAIN to check query plans before dropping indexes.
 -- ====================================================================
 
+-- MySQL does not support DROP INDEX IF EXISTS; use conditional drops.
+
 -- 1. ACCOUNTS: Remove indexes now covered by idx_accounts_company_payable_active
 -- NOTE: idx_accounts_company_id_id CANNOT be dropped!
 -- It's required by foreign keys that reference accounts(company_id, id):
@@ -22,39 +24,184 @@
 -- idx_accounts_company_payable_active (company_id, is_payable, is_active, id),
 -- we'll keep idx_accounts_company_id_id for FK support.
 
--- DROP INDEX IF EXISTS idx_accounts_company_id_id ON accounts; -- KEEP for FK
-DROP INDEX IF EXISTS idx_accounts_active ON accounts;
-DROP INDEX IF EXISTS idx_accounts_payable ON accounts;
+-- DROP INDEX idx_accounts_company_id_id ON accounts; -- KEEP for FK
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'accounts'
+    AND index_name = 'idx_accounts_active'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_accounts_active` ON `accounts`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'accounts'
+    AND index_name = 'idx_accounts_payable'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_accounts_payable` ON `accounts`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 2. ACCOUNT_TYPES: Remove index covered by category index
-DROP INDEX IF EXISTS idx_account_types_company_active ON account_types;
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'account_types'
+    AND index_name = 'idx_account_types_company_active'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_account_types_company_active` ON `account_types`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 3. POS_TRANSACTIONS: Remove indexes covered by new compound indexes
-DROP INDEX IF EXISTS idx_pos_transactions_company_status ON pos_transactions;
-DROP INDEX IF EXISTS idx_pos_transactions_company_trx_at ON pos_transactions;
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'pos_transactions'
+    AND index_name = 'idx_pos_transactions_company_status'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_pos_transactions_company_status` ON `pos_transactions`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'pos_transactions'
+    AND index_name = 'idx_pos_transactions_company_trx_at'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_pos_transactions_company_trx_at` ON `pos_transactions`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 4. JOURNAL_LINES: Remove indexes covered by new compound indexes
-DROP INDEX IF EXISTS idx_journal_lines_company_date ON journal_lines;
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'journal_lines'
+    AND index_name = 'idx_journal_lines_company_date'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_journal_lines_company_date` ON `journal_lines`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 -- NOTE: idx_journal_lines_outlet_date CANNOT be dropped!
 -- It's required by FK: fk_journal_lines_outlet (outlet_id) REFERENCES outlets (id)
 -- MySQL requires an index starting with outlet_id for this FK.
 -- Our new idx_journal_lines_company_date_outlet starts with company_id, not outlet_id.
--- DROP INDEX IF EXISTS idx_journal_lines_outlet_date ON journal_lines; -- KEEP for FK
+-- DROP INDEX idx_journal_lines_outlet_date ON journal_lines; -- KEEP for FK
 
 -- 5. AUDIT_LOGS: Remove index replaced by better compound index
-DROP INDEX IF EXISTS idx_audit_logs_company_entity ON audit_logs;
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'audit_logs'
+    AND index_name = 'idx_audit_logs_company_entity'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_audit_logs_company_entity` ON `audit_logs`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 6. SALES_INVOICES: Remove index covered by date+status compound
-DROP INDEX IF EXISTS idx_sales_invoices_company_status ON sales_invoices;
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'sales_invoices'
+    AND index_name = 'idx_sales_invoices_company_status'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_sales_invoices_company_status` ON `sales_invoices`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 7. OUTLETS: Remove index redundant with UNIQUE constraint prefix
-DROP INDEX IF EXISTS idx_outlets_company ON outlets;
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'outlets'
+    AND index_name = 'idx_outlets_company'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_outlets_company` ON `outlets`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 8. ITEM_PRICES: Remove index redundant with UNIQUE constraint prefix
-DROP INDEX IF EXISTS idx_item_prices_outlet ON item_prices;
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'item_prices'
+    AND index_name = 'idx_item_prices_outlet'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_item_prices_outlet` ON `item_prices`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 9. ASSET_DEPRECIATION_PLANS: Remove index covered by compound
-DROP INDEX IF EXISTS idx_depr_plans_company_status ON asset_depreciation_plans;
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'asset_depreciation_plans'
+    AND index_name = 'idx_depr_plans_company_status'
+);
+SET @sql := IF(@idx_exists > 0,
+  'DROP INDEX `idx_depr_plans_company_status` ON `asset_depreciation_plans`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ====================================================================
 -- SUMMARY:
