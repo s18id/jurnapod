@@ -50,7 +50,8 @@ import {
   UsersPage,
   RolesPage,
   CompaniesPage,
-  OutletsPage
+  OutletsPage,
+  PlatformSettingsPage
 } from "../features/pages";
 import { PublicStaticPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
@@ -199,6 +200,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/static-pages") {
     return <StaticPagesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/platform-settings") {
+    return <PlatformSettingsPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/journals") {
     return <JournalsPage user={props.user} accessToken={props.accessToken} />;

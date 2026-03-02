@@ -164,7 +164,12 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/static-pages",
     label: "Static Pages",
-    allowedRoles: ["OWNER", "ADMIN"]
+    allowedRoles: ["SUPER_ADMIN"]
+  },
+  {
+    path: "/platform-settings",
+    label: "Platform Settings",
+    allowedRoles: ["SUPER_ADMIN"]
   }
 ];
 

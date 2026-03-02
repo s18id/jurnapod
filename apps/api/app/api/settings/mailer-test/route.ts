@@ -81,7 +81,7 @@ export const POST = withAuth(
       const payload = await request.json();
       const input = testMailSchema.parse(payload);
 
-      const mailer = getMailer();
+      const mailer = await getMailer();
       await mailer.sendMail({
         to: input.to,
         subject: input.subject,

@@ -30,6 +30,7 @@ import { RolesPage as RolesManagementPage } from "./roles-page";
 import { CompaniesPage as CompaniesManagementPage } from "./companies-page";
 import { OutletsPage as OutletsManagementPage } from "./outlets-page";
 import { InventorySettingsPage as InventorySettingsFeaturePage } from "./inventory-settings-page";
+import { PlatformSettingsPage as PlatformSettingsManagementPage } from "./platform-settings-page";
 
 type PlaceholderProps = {
   title: string;
@@ -105,6 +106,8 @@ export const RolesPage = RolesManagementPage;
 export const CompaniesPage = CompaniesManagementPage;
 
 export const OutletsPage = OutletsManagementPage;
+
+export const PlatformSettingsPage = PlatformSettingsManagementPage;
 
 export function ForbiddenPage() {
   return (

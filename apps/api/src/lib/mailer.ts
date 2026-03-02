@@ -3,7 +3,8 @@
 
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
-import { getAppEnv } from "./env";
+import { getAppEnv, type MailerDriver } from "./env";
+import { getPlatformSetting } from "./platform-settings";
 
 export class MailerError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -51,23 +52,29 @@ class SmtpMailer implements Mailer {
   private fromName: string;
   private fromEmail: string;
 
-  constructor() {
-    const env = getAppEnv();
-    const smtpConfig = env.mailer.smtp;
-
-    this.fromName = env.mailer.fromName;
-    this.fromEmail = env.mailer.fromEmail;
+  constructor(config: {
+    fromName: string;
+    fromEmail: string;
+    host: string;
+    port: number;
+    user: string;
+    password: string;
+    secure: boolean;
+    tlsRejectUnauthorized: boolean;
+  }) {
+    this.fromName = config.fromName;
+    this.fromEmail = config.fromEmail;
 
     this.transporter = nodemailer.createTransport({
-      host: smtpConfig.host,
-      port: smtpConfig.port,
-      secure: smtpConfig.secure,
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
       auth: {
-        user: smtpConfig.user,
-        pass: smtpConfig.password
+        user: config.user,
+        pass: config.password
       },
       tls: {
-        rejectUnauthorized: smtpConfig.tlsRejectUnauthorized
+        rejectUnauthorized: config.tlsRejectUnauthorized
       }
     });
   }
@@ -107,16 +114,57 @@ class SmtpMailer implements Mailer {
 
 let mailerInstance: Mailer | null = null;
 
-export function getMailer(): Mailer {
+/**
+ * Resolve mailer configuration from DB (overrides env) or env defaults
+ */
+async function resolveMailerConfig() {
+  const env = getAppEnv();
+
+  // Try to load from DB first
+  const driver = (await getPlatformSetting("mailer.driver")) as MailerDriver | null;
+  const fromName = await getPlatformSetting("mailer.from_name");
+  const fromEmail = await getPlatformSetting("mailer.from_email");
+  const smtpHost = await getPlatformSetting("mailer.smtp.host");
+  const smtpPort = await getPlatformSetting("mailer.smtp.port");
+  const smtpUser = await getPlatformSetting("mailer.smtp.user");
+  const smtpPass = await getPlatformSetting("mailer.smtp.pass");
+  const smtpSecure = await getPlatformSetting("mailer.smtp.secure");
+  const smtpTlsReject = await getPlatformSetting("mailer.smtp.tls_reject_unauthorized");
+
+  return {
+    driver: driver ?? env.mailer.driver,
+    fromName: fromName ?? env.mailer.fromName,
+    fromEmail: fromEmail ?? env.mailer.fromEmail,
+    smtp: {
+      host: smtpHost ?? env.mailer.smtp.host,
+      port: smtpPort ? parseInt(smtpPort, 10) : env.mailer.smtp.port,
+      user: smtpUser ?? env.mailer.smtp.user,
+      password: smtpPass ?? env.mailer.smtp.password,
+      secure: smtpSecure !== null ? smtpSecure === "true" : env.mailer.smtp.secure,
+      tlsRejectUnauthorized: smtpTlsReject !== null ? smtpTlsReject === "true" : env.mailer.smtp.tlsRejectUnauthorized
+    }
+  };
+}
+
+export async function getMailer(): Promise<Mailer> {
   if (mailerInstance) {
     return mailerInstance;
   }
 
-  const env = getAppEnv();
+  const config = await resolveMailerConfig();
 
-  switch (env.mailer.driver) {
+  switch (config.driver) {
     case "smtp":
-      mailerInstance = new SmtpMailer();
+      mailerInstance = new SmtpMailer({
+        fromName: config.fromName,
+        fromEmail: config.fromEmail,
+        host: config.smtp.host,
+        port: config.smtp.port,
+        user: config.smtp.user,
+        password: config.smtp.password,
+        secure: config.smtp.secure,
+        tlsRejectUnauthorized: config.smtp.tlsRejectUnauthorized
+      });
       break;
     case "log":
       mailerInstance = new LogMailer();
@@ -125,7 +173,7 @@ export function getMailer(): Mailer {
       mailerInstance = new DisabledMailer();
       break;
     default:
-      throw new MailerError(`Unknown mailer driver: ${env.mailer.driver}`);
+      throw new MailerError(`Unknown mailer driver: ${config.driver}`);
   }
 
   return mailerInstance;

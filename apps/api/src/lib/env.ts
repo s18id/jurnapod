@@ -174,6 +174,9 @@ export type AppEnv = {
       tlsRejectUnauthorized: boolean;
     };
   };
+  platformSettings: {
+    encryptionKey: string;
+  };
 };
 
 let cachedEnv: AppEnv | null = null;
@@ -343,6 +346,11 @@ export function getAppEnv(): AppEnv {
       }
     }
 
+    const platformSettingsEncryptionKey = requiredEnv(
+      process.env.PLATFORM_SETTINGS_ENCRYPTION_KEY,
+      "PLATFORM_SETTINGS_ENCRYPTION_KEY"
+    );
+
     cachedEnv = Object.freeze({
       db: {
         host: process.env.DB_HOST ?? "127.0.0.1",
@@ -401,6 +409,9 @@ export function getAppEnv(): AppEnv {
           secure: mailerSmtpSecure,
           tlsRejectUnauthorized: mailerSmtpTlsRejectUnauthorized
         }
+      },
+      platformSettings: {
+        encryptionKey: platformSettingsEncryptionKey
       }
     });
   } catch (error) {
