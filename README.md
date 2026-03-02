@@ -238,7 +238,7 @@ Create a production-ready MySQL configuration. Add to `/etc/mysql/mysql.conf.d/j
 [mysqld]
 # Character set and collation
 character-set-server = utf8mb4
-collation-server = utf8mb4_unicode_ci
+collation-server = utf8mb4_uca1400_ai_ci
 
 # InnoDB settings (required)
 default-storage-engine = InnoDB
@@ -280,7 +280,7 @@ sudo systemctl restart mysql
 mysql -u root -p
 
 # In MySQL prompt:
-CREATE DATABASE jurnapod CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE jurnapod CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci;
 
 CREATE USER 'jurnapod_user'@'localhost' IDENTIFIED BY 'STRONG_PASSWORD_HERE';
 
@@ -338,6 +338,7 @@ DB_PORT=3306
 DB_USER=jurnapod_user
 DB_PASSWORD=STRONG_PASSWORD_HERE
 DB_NAME=jurnapod
+DB_COLLATION=utf8mb4_uca1400_ai_ci
 DB_MIGRATE_LOCK_TIMEOUT=60
 
 # Company & Outlet Setup (for initial seed)
@@ -1185,6 +1186,7 @@ const pool = mysql.createPool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
+  charset: process.env.DB_COLLATION,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0

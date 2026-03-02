@@ -20,6 +20,7 @@ export function getDbPool(): Pool {
     user: env.db.user,
     password: env.db.password,
     database: env.db.database,
+    charset: env.db.collation ?? undefined,
     waitForConnections: true,
     connectionLimit: env.db.connectionLimit,
     queueLimit: 0

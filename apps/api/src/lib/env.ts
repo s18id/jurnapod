@@ -111,6 +111,7 @@ export type AppEnv = {
     user: string;
     password: string;
     database: string;
+    collation: string | null;
     connectionLimit: number;
   };
   auth: {
@@ -194,6 +195,7 @@ export function getAppEnv(): AppEnv {
       DEFAULT_DB_CONNECTION_LIMIT,
       "DB_CONNECTION_LIMIT"
     );
+    const dbCollation = parseOptionalString(process.env.DB_COLLATION);
     const passwordDefaultAlgorithm = parsePasswordHashAlgorithm(
       process.env.AUTH_PASSWORD_ALGO_DEFAULT,
       DEFAULT_PASSWORD_ALGO,
@@ -273,6 +275,7 @@ export function getAppEnv(): AppEnv {
         user: process.env.DB_USER ?? "root",
         password: process.env.DB_PASSWORD ?? "",
         database: process.env.DB_NAME ?? "jurnapod",
+        collation: dbCollation,
         connectionLimit: dbConnectionLimit
       },
       auth: {

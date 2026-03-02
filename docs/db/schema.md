@@ -14,6 +14,7 @@ This milestone uses one SQL migration file with BIGINT internal IDs and UUID onl
   - `DB_USER`
   - `DB_PASSWORD`
   - `DB_NAME`
+  - `DB_COLLATION` (recommended: `utf8mb4_uca1400_ai_ci`)
 - DB scripts auto-load repo-root `.env` (if present) and keep already-exported env values (`override: false`).
 
 ## Apply migration

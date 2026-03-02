@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS account_types (
   
   CONSTRAINT fk_account_types_company FOREIGN KEY (company_id) 
     REFERENCES companies(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB
 COMMENT='Account type definitions with normal balance and report group';
 
 -- Add account_type_id column to accounts table
@@ -98,7 +98,7 @@ ON DUPLICATE KEY UPDATE
 -- Update accounts to reference account_types
 UPDATE accounts a
 INNER JOIN account_types at ON a.company_id = at.company_id 
-  AND CONVERT(a.type_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = at.name
+  AND CONVERT(a.type_name USING utf8mb4) = at.name
 SET a.account_type_id = at.id
 WHERE a.type_name IS NOT NULL AND a.type_name != '';
 
