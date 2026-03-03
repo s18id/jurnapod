@@ -34,6 +34,7 @@ export const SETTINGS_KEYS = [
   "feature.sales.tax_included_default",
   "feature.inventory.allow_backorder",
   "feature.purchasing.require_approval",
+  "accounting.allow_multiple_open_fiscal_years",
   "inventory.low_stock_threshold",
   "inventory.reorder_point",
   "inventory.allow_negative_stock",
@@ -78,6 +79,11 @@ export const SETTINGS_REGISTRY: Record<SettingKey, SettingsRegistryEntry> = {
   "feature.purchasing.require_approval": {
     valueType: "boolean",
     defaultValue: true,
+    schema: BooleanInputSchema
+  },
+  "accounting.allow_multiple_open_fiscal_years": {
+    valueType: "boolean",
+    defaultValue: false,
     schema: BooleanInputSchema
   },
   "inventory.low_stock_threshold": {

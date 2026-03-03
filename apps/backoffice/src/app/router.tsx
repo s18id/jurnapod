@@ -52,7 +52,8 @@ import {
   RolesPage,
   CompaniesPage,
   OutletsPage,
-  PlatformSettingsPage
+  PlatformSettingsPage,
+  FiscalYearsPage
 } from "../features/pages";
 import { PublicStaticPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
@@ -172,6 +173,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/chart-of-accounts") {
     return <AccountsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/fiscal-years") {
+    return <FiscalYearsPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/account-types") {
     return <AccountTypesPage user={props.user} accessToken={props.accessToken} />;

@@ -247,6 +247,59 @@ async function ensureDepreciationAccounts(baseUrl, accessToken, companyId, t) {
   };
 }
 
+async function ensureFiscalYearExists(connection, companyId, year, t) {
+  const [rows] = await connection.execute(
+    `SELECT id, status
+     FROM fiscal_years
+     WHERE company_id = ?
+       AND YEAR(start_date) = ?
+     LIMIT 1`,
+    [companyId, year]
+  );
+
+  if (rows.length > 0) {
+    const existingStatus = rows[0].status;
+    if (t) {
+      t.diagnostic(`Fiscal year ${year} already exists with status ${existingStatus}`);
+    }
+    if (existingStatus === "CLOSED") {
+      await connection.execute(
+        `UPDATE fiscal_years
+         SET status = 'OPEN'
+         WHERE company_id = ?
+           AND YEAR(start_date) = ?`,
+        [companyId, year]
+      );
+      if (t) {
+        t.diagnostic(`Updated fiscal year ${year} status from CLOSED to OPEN`);
+      }
+    }
+    return;
+  }
+
+  await connection.execute(
+    `INSERT INTO fiscal_years (
+       company_id,
+       code,
+       name,
+       start_date,
+       end_date,
+       status
+     ) VALUES (?, ?, ?, ?, ?, 'OPEN')`,
+    [
+      companyId,
+      `FY${year}`,
+      `Fiscal Year ${year}`,
+      `${year}-01-01`,
+      `${year}-12-31`
+    ]
+  );
+
+  if (t) {
+    t.diagnostic(`Created fiscal year ${year} for company ${companyId}`);
+  }
+}
+
 test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   if (typeof loadEnvFile === "function") {
     try {
@@ -282,6 +335,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
     const companyId = meData.data?.company_id ?? 1;
 
     t.diagnostic(`Using companyId: ${companyId}, outletId: ${outletId}`);
+    await ensureFiscalYearExists(connection, companyId, 2024, t);
 
     await t.test("Create fixed asset and depreciation plan", async () => {
       // Create fixed asset
@@ -350,6 +404,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
     });
 
     await t.test("Run depreciation for a period posts journal batch", async () => {
+      await ensureFiscalYearExists(connection, companyId, 2024, t);
       // Create a new asset and plan for this test
       const assetTag = `TEST-ASSET-${randomUUID().substring(0, 8)}`;
       const createAssetResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets`, {
@@ -447,6 +502,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
     });
 
     await t.test("Duplicate run returns duplicate status without new journal", async () => {
+      await ensureFiscalYearExists(connection, companyId, 2024, t);
       // Create asset and plan
       const assetTag = `TEST-ASSET-${randomUUID().substring(0, 8)}`;
       const createAssetResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets`, {
@@ -548,6 +604,7 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
     });
 
     await t.test("Plan update blocked after posted runs", async () => {
+      await ensureFiscalYearExists(connection, companyId, 2024, t);
       // Create asset and plan
       const assetTag = `TEST-ASSET-${randomUUID().substring(0, 8)}`;
       const createAssetResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets`, {

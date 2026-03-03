@@ -4,6 +4,7 @@
 import { createHash } from "crypto";
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { getDbPool } from "./db";
+import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 
 type ParsedFile = {
   fileName: string;
@@ -702,13 +703,18 @@ export async function importAccountingCsv(input: {
     }
   }
 
+  const uniqueDates = Array.from(new Set(trnsRows.map((row) => row.date)));
+  const pool = getDbPool();
+  for (const date of uniqueDates) {
+    await ensureDateWithinOpenFiscalYearWithExecutor(pool, input.companyId, date);
+  }
+
   const fileHash = createFileHash([
     Buffer.from(input.accountsFile.text, "utf8"),
     Buffer.from(input.transactionsFile.text, "utf8"),
     Buffer.from(input.allocationsFile.text, "utf8")
   ]);
 
-  const pool = getDbPool();
   const [existingRows] = await pool.execute<RowDataPacket[]>(
     `SELECT id, status
      FROM data_imports

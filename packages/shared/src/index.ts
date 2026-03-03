@@ -7,6 +7,7 @@ export * from "./schemas/audit-logs";
 export * from "./schemas/common";
 export * from "./schemas/companies";
 export * from "./schemas/depreciation";
+export * from "./schemas/fiscal-years";
 export * from "./schemas/feature-flags";
 export * from "./schemas/journals";
 export * from "./schemas/master-data";

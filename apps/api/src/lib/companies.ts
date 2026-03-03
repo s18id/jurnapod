@@ -249,6 +249,13 @@ const SETTINGS_DEFINITIONS = [
       parsePositiveInt(value, 10, "JP_INVENTORY_REORDER_POINT")
   },
   {
+    key: "accounting.allow_multiple_open_fiscal_years",
+    valueType: "boolean",
+    envKey: "JP_ACCOUNTING_ALLOW_MULTIPLE_OPEN_FISCAL_YEARS",
+    parse: (value: string | undefined) =>
+      parseBoolean(value, false, "JP_ACCOUNTING_ALLOW_MULTIPLE_OPEN_FISCAL_YEARS")
+  },
+  {
     key: "inventory.allow_negative_stock",
     valueType: "boolean",
     envKey: "JP_INVENTORY_ALLOW_NEGATIVE_STOCK",
@@ -504,6 +511,45 @@ async function ensureCompanySettings(
   }
 }
 
+async function ensureDefaultFiscalYear(
+  connection: PoolConnection,
+  companyId: number,
+  actorUserId: number
+): Promise<void> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT id
+     FROM fiscal_years
+     WHERE company_id = ?
+     LIMIT 1`,
+    [companyId]
+  );
+
+  if (rows.length > 0) {
+    return;
+  }
+
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const startDate = `${year}-01-01`;
+  const endDate = `${year}-12-31`;
+  const code = `FY${year}`;
+  const name = `Fiscal Year ${year}`;
+
+  await connection.execute(
+    `INSERT INTO fiscal_years (
+       company_id,
+       code,
+       name,
+       start_date,
+       end_date,
+       status,
+       created_by_user_id,
+       updated_by_user_id
+     ) VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?)`,
+    [companyId, code, name, startDate, endDate, actorUserId, actorUserId]
+  );
+}
+
 async function bootstrapCompanyDefaults(
   connection: PoolConnection,
   params: { companyId: number; actor: CompanyActor }
@@ -515,6 +561,7 @@ async function bootstrapCompanyDefaults(
   await ensureCompanyModules(connection, params.companyId, moduleIds, params.actor.userId);
   await ensureModuleRoles(connection, params.companyId, roleIds);
   await ensureCompanySettings(connection, params.companyId, outletId, params.actor.userId);
+  await ensureDefaultFiscalYear(connection, params.companyId, params.actor.userId);
 }
 
 async function ensureCompanyExists(

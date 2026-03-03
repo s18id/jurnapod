@@ -5,6 +5,7 @@ import { PostingService, type PostingMapper, type PostingRepository } from "@jur
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
 import type { ResultSetHeader } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
+import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 import { listCompanyDefaultTaxRates, resolveCombinedTaxConfig } from "./taxes";
 
 const DEFAULT_SYNC_PUSH_POSTING_MODE = "disabled" as const;
@@ -131,6 +132,15 @@ function toMysqlDateTime(value: string): string {
   }
 
   return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
+function toDateOnly(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid trx_at");
+  }
+
+  return date.toISOString().slice(0, 10);
 }
 
 function toMinorUnits(value: number): number {
@@ -465,6 +475,12 @@ async function runActivePostingHook(
       reason: "STATUS_NOT_COMPLETED"
     };
   }
+
+  await ensureDateWithinOpenFiscalYearWithExecutor(
+    dbExecutor,
+    context.companyId,
+    toDateOnly(context.trxAt)
+  );
 
   const postingRequest: PostingRequest = {
     doc_type: POS_SALE_DOC_TYPE,

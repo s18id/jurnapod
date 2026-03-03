@@ -4,6 +4,7 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../../../src/lib/auth-guard";
+import { FiscalYearNotOpenError } from "../../../../../../src/lib/fiscal-years";
 import { errorResponse, successResponse } from "../../../../../../src/lib/response";
 import {
   DatabaseForbiddenError,
@@ -50,6 +51,14 @@ export const POST = withAuth(
 
       if (error instanceof DatabaseForbiddenError) {
         return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+
+      if (error instanceof FiscalYearNotOpenError) {
+        return errorResponse(
+          "FISCAL_YEAR_CLOSED",
+          "Payment date is outside any open fiscal year",
+          400
+        );
       }
 
       console.error("POST /sales/payments/:id/post failed", error);

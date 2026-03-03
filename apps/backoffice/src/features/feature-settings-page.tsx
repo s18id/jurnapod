@@ -46,6 +46,7 @@ const SETTINGS_KEYS = [
   "feature.pos.auto_sync_enabled",
   "feature.pos.sync_interval_seconds",
   "feature.sales.tax_included_default",
+  "accounting.allow_multiple_open_fiscal_years",
   "feature.inventory.allow_backorder",
   "feature.purchasing.require_approval"
 ] as const;
@@ -54,6 +55,7 @@ const DEFAULT_SETTINGS: Record<(typeof SETTINGS_KEYS)[number], number | boolean 
   "feature.pos.auto_sync_enabled": true,
   "feature.pos.sync_interval_seconds": 60,
   "feature.sales.tax_included_default": false,
+  "accounting.allow_multiple_open_fiscal_years": false,
   "feature.inventory.allow_backorder": false,
   "feature.purchasing.require_approval": true
 };
@@ -238,6 +240,27 @@ export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPagePr
                 setFormState((prev) => ({
                   ...prev,
                   "feature.sales.tax_included_default": event.currentTarget.checked
+                }))
+              }
+            />
+          </Stack>
+        </Card>
+
+        <Card>
+          <Stack gap="md">
+            <div>
+              <Title order={4}>Accounting</Title>
+              <Text c="dimmed" size="sm">
+                Control fiscal year constraints for postings.
+              </Text>
+            </div>
+            <Switch
+              label="Allow multiple open fiscal years"
+              checked={Boolean(formState["accounting.allow_multiple_open_fiscal_years"])}
+              onChange={(event) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  "accounting.allow_multiple_open_fiscal_years": event.currentTarget.checked
                 }))
               }
             />

@@ -43,6 +43,13 @@ export class InvalidJournalLineError extends Error {
   }
 }
 
+export class JournalOutsideFiscalYearError extends Error {
+  constructor(entryDate: string) {
+    super(`Journal entry date ${entryDate} is outside any open fiscal year`);
+    this.name = "JournalOutsideFiscalYearError";
+  }
+}
+
 /**
  * Import audit service interface from accounts-service
  */
@@ -65,6 +72,8 @@ export class JournalsService {
     data: ManualJournalEntryCreateRequest,
     userId?: number
   ): Promise<JournalBatchResponse> {
+    await this.ensureEntryDateInOpenFiscalYear(data.company_id, data.entry_date);
+
     // Validate balance
     const totalDebit = data.lines.reduce((sum, line) => sum + line.debit, 0);
     const totalCredit = data.lines.reduce((sum, line) => sum + line.credit, 0);
@@ -162,6 +171,23 @@ export class JournalsService {
         await this.db.rollback!();
       }
       throw error;
+    }
+  }
+
+  private async ensureEntryDateInOpenFiscalYear(companyId: number, entryDate: string): Promise<void> {
+    const rows = await this.db.query<{ id: number }>(
+      `SELECT id
+       FROM fiscal_years
+       WHERE company_id = ?
+         AND status = 'OPEN'
+         AND start_date <= ?
+         AND end_date >= ?
+       LIMIT 1`,
+      [companyId, entryDate, entryDate]
+    );
+
+    if (rows.length === 0) {
+      throw new JournalOutsideFiscalYearError(entryDate);
     }
   }
 

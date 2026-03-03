@@ -49,6 +49,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {
+    path: "/fiscal-years",
+    label: "Fiscal Years",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
     path: "/account-mappings",
     label: "Account Mappings",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]

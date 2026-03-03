@@ -6,6 +6,7 @@ import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/share
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import type { SalesInvoiceDetail, SalesPayment } from "./sales";
+import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 
 const SALES_INVOICE_DOC_TYPE = "SALES_INVOICE";
 const SALES_PAYMENT_IN_DOC_TYPE = "SALES_PAYMENT_IN";
@@ -275,10 +276,25 @@ function toMysqlDateTime(value: string): string {
   return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
+function toDateOnly(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid datetime");
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
 export async function postSalesInvoiceToJournal(
   dbExecutor: QueryExecutor,
   invoice: SalesInvoiceDetail
 ): Promise<PostingResult> {
+  await ensureDateWithinOpenFiscalYearWithExecutor(
+    dbExecutor,
+    invoice.company_id,
+    invoice.invoice_date
+  );
+
   const postingRequest: PostingRequest = {
     doc_type: SALES_INVOICE_DOC_TYPE,
     doc_id: invoice.id,
@@ -303,6 +319,12 @@ export async function postSalesPaymentToJournal(
   payment: SalesPayment,
   invoiceNo: string
 ): Promise<PostingResult> {
+  await ensureDateWithinOpenFiscalYearWithExecutor(
+    dbExecutor,
+    payment.company_id,
+    toDateOnly(payment.payment_at)
+  );
+
   const postingRequest: PostingRequest = {
     doc_type: SALES_PAYMENT_IN_DOC_TYPE,
     doc_id: payment.id,

@@ -6,6 +6,7 @@ import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/share
 import type { ResultSetHeader } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import type { DepreciationPlan, DepreciationRun } from "./depreciation";
+import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 
 const DEPRECIATION_DOC_TYPE = "DEPRECIATION";
 
@@ -125,6 +126,8 @@ export async function postDepreciationRunToJournal(
   plan: DepreciationPlan,
   run: DepreciationRun
 ): Promise<PostingResult> {
+  await ensureDateWithinOpenFiscalYearWithExecutor(dbExecutor, run.company_id, run.run_date);
+
   const postingRequest: PostingRequest = {
     doc_type: DEPRECIATION_DOC_TYPE,
     doc_id: run.id,

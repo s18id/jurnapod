@@ -29,6 +29,7 @@ const SETTINGS_ENV_KEYS: Record<SettingKey, string> = {
   "feature.sales.tax_included_default": "JP_FEATURE_SALES_TAX_INCLUDED_DEFAULT",
   "feature.inventory.allow_backorder": "JP_FEATURE_INVENTORY_ALLOW_BACKORDER",
   "feature.purchasing.require_approval": "JP_FEATURE_PURCHASING_REQUIRE_APPROVAL",
+  "accounting.allow_multiple_open_fiscal_years": "JP_ACCOUNTING_ALLOW_MULTIPLE_OPEN_FISCAL_YEARS",
   "inventory.low_stock_threshold": "JP_INVENTORY_LOW_STOCK_THRESHOLD",
   "inventory.reorder_point": "JP_INVENTORY_REORDER_POINT",
   "inventory.allow_negative_stock": "JP_INVENTORY_ALLOW_NEGATIVE_STOCK",

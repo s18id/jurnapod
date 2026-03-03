@@ -31,6 +31,20 @@ type ReportsProps = {
   accessToken: string;
 };
 
+type FiscalYear = {
+  id: number;
+  code: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  status: "OPEN" | "CLOSED";
+};
+
+type FiscalYearsResponse = {
+  success: true;
+  data: FiscalYear[];
+};
+
 type PosTransaction = {
   id: number;
   outlet_id: number;
@@ -293,6 +307,57 @@ const moneyFormatter = new Intl.NumberFormat("en-US", {
 
 function formatMoneyDisplay(value: number): string {
   return moneyFormatter.format(value);
+}
+
+function buildFiscalYearOptions(fiscalYears: FiscalYear[]) {
+  return fiscalYears.map((year) => ({
+    value: String(year.id),
+    label: `${year.code} - ${year.name} (${year.start_date} - ${year.end_date})`
+  }));
+}
+
+function resolveDefaultOpenFiscalYear(fiscalYears: FiscalYear[]): FiscalYear | null {
+  const today = todayIso();
+  const matches = fiscalYears.filter(
+    (year) => year.status === "OPEN" && year.start_date <= today && year.end_date >= today
+  );
+  if (matches.length === 1) {
+    return matches[0];
+  }
+  return null;
+}
+
+function useFiscalYears(accessToken: string, companyId: number) {
+  const [data, setData] = useState<FiscalYear[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchFiscalYears() {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await apiRequest<FiscalYearsResponse>(
+          `/accounts/fiscal-years?company_id=${companyId}&include_closed=1`,
+          {},
+          accessToken
+        );
+        setData(response.data);
+      } catch (fetchError) {
+        if (fetchError instanceof ApiError) {
+          setError(fetchError.message);
+        } else {
+          setError("Failed to load fiscal years");
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchFiscalYears().catch(() => setError("Failed to load fiscal years"));
+  }, [accessToken, companyId]);
+
+  return { data, loading, error };
 }
 
 function buildOutletOptions(outlets: SessionUser["outlets"], includeAll = false) {
@@ -602,11 +667,18 @@ export function GeneralLedgerPage(props: ReportsProps) {
   const [accountId, setAccountId] = useState<number>(0);
   const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(30));
   const [dateTo, setDateTo] = useState<string>(todayIso());
+  const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
+  const [fiscalDefaultApplied, setFiscalDefaultApplied] = useState(false);
   const [lineLimit, setLineLimit] = useState<number>(50);
   const [lineOffset, setLineOffset] = useState<number>(0);
   const [rows, setRows] = useState<GeneralLedgerRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const {
+    data: fiscalYears,
+    loading: fiscalYearsLoading,
+    error: fiscalYearsError
+  } = useFiscalYears(props.accessToken, props.user.company_id);
   const { data: accounts, loading: accountsLoading, error: accountsError } = useAccounts(
     props.user.company_id,
     props.accessToken
@@ -620,6 +692,7 @@ export function GeneralLedgerPage(props: ReportsProps) {
       })),
     [activeAccounts]
   );
+  const fiscalYearOptions = useMemo(() => buildFiscalYearOptions(fiscalYears), [fiscalYears]);
   const columns = useMemo<ColumnDef<GeneralLedgerLine>[]>(
     () => [
       { header: "Date", accessorKey: "line_date" },
@@ -696,6 +769,19 @@ export function GeneralLedgerPage(props: ReportsProps) {
   }, [outletId, accountId, dateFrom, dateTo, lineLimit]);
 
   useEffect(() => {
+    if (fiscalDefaultApplied) {
+      return;
+    }
+    const defaultYear = resolveDefaultOpenFiscalYear(fiscalYears);
+    if (defaultYear) {
+      setDateFrom(defaultYear.start_date);
+      setDateTo(defaultYear.end_date);
+      setFiscalYearId(String(defaultYear.id));
+      setFiscalDefaultApplied(true);
+    }
+  }, [fiscalYears, fiscalDefaultApplied]);
+
+  useEffect(() => {
     if (accountId > 0) {
       loadRows().catch(() => undefined);
     }
@@ -732,17 +818,38 @@ export function GeneralLedgerPage(props: ReportsProps) {
             placeholder="Select account"
             searchable
           />
+          <Select
+            label="Fiscal year"
+            data={fiscalYearOptions}
+            value={fiscalYearId}
+            onChange={(value) => {
+              setFiscalYearId(value);
+              const selected = fiscalYears.find((year) => String(year.id) === value);
+              if (selected) {
+                setDateFrom(selected.start_date);
+                setDateTo(selected.end_date);
+              }
+            }}
+            placeholder="Select fiscal year"
+            clearable
+          />
           <TextInput
             label="From"
             type="date"
             value={dateFrom}
-            onChange={(event) => setDateFrom(event.target.value)}
+            onChange={(event) => {
+              setDateFrom(event.target.value);
+              setFiscalYearId(null);
+            }}
           />
           <TextInput
             label="To"
             type="date"
             value={dateTo}
-            onChange={(event) => setDateTo(event.target.value)}
+            onChange={(event) => {
+              setDateTo(event.target.value);
+              setFiscalYearId(null);
+            }}
           />
           <Select
             label="Lines"
@@ -764,6 +871,12 @@ export function GeneralLedgerPage(props: ReportsProps) {
         {accountsError ? (
           <Text c="red" size="sm">
             {accountsError}
+          </Text>
+        ) : null}
+        {fiscalYearsLoading ? <Text size="sm">Loading fiscal years...</Text> : null}
+        {fiscalYearsError ? (
+          <Text c="red" size="sm">
+            {fiscalYearsError}
           </Text>
         ) : null}
         {error ? (
@@ -974,6 +1087,8 @@ export function JournalsPage(props: ReportsProps) {
   const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
   const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(7));
   const [dateTo, setDateTo] = useState<string>(todayIso());
+  const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
+  const [fiscalDefaultApplied, setFiscalDefaultApplied] = useState(false);
   const [journals, setJournals] = useState<JournalRow[]>([]);
   const [trialRows, setTrialRows] = useState<TrialBalanceRow[]>([]);
   const [trialTotals, setTrialTotals] = useState<{ total_debit: number; total_credit: number; balance: number }>({
@@ -982,6 +1097,12 @@ export function JournalsPage(props: ReportsProps) {
     balance: 0
   });
   const [error, setError] = useState<string | null>(null);
+  const {
+    data: fiscalYears,
+    loading: fiscalYearsLoading,
+    error: fiscalYearsError
+  } = useFiscalYears(props.accessToken, props.user.company_id);
+  const fiscalYearOptions = useMemo(() => buildFiscalYearOptions(fiscalYears), [fiscalYears]);
 
   const journalColumns = useMemo<ColumnDef<JournalRow>[]>(
     () => [
@@ -1101,6 +1222,19 @@ export function JournalsPage(props: ReportsProps) {
     }
   }, [outletId, dateFrom, dateTo]);
 
+  useEffect(() => {
+    if (fiscalDefaultApplied) {
+      return;
+    }
+    const defaultYear = resolveDefaultOpenFiscalYear(fiscalYears);
+    if (defaultYear) {
+      setDateFrom(defaultYear.start_date);
+      setDateTo(defaultYear.end_date);
+      setFiscalYearId(String(defaultYear.id));
+      setFiscalDefaultApplied(true);
+    }
+  }, [fiscalYears, fiscalDefaultApplied]);
+
   if (!isOnline) {
     return (
       <OfflinePage
@@ -1121,20 +1255,47 @@ export function JournalsPage(props: ReportsProps) {
               value={String(outletId)}
               onChange={(value) => setOutletId(Number(value))}
             />
+            <Select
+              label="Fiscal year"
+              data={fiscalYearOptions}
+              value={fiscalYearId}
+              onChange={(value) => {
+                setFiscalYearId(value);
+                const selected = fiscalYears.find((year) => String(year.id) === value);
+                if (selected) {
+                  setDateFrom(selected.start_date);
+                  setDateTo(selected.end_date);
+                }
+              }}
+              placeholder="Select fiscal year"
+              clearable
+            />
             <TextInput
               label="From"
               type="date"
               value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
+              onChange={(event) => {
+                setDateFrom(event.target.value);
+                setFiscalYearId(null);
+              }}
             />
             <TextInput
               label="To"
               type="date"
               value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
+              onChange={(event) => {
+                setDateTo(event.target.value);
+                setFiscalYearId(null);
+              }}
             />
             <Button onClick={() => loadRows()}>Refresh</Button>
           </FilterBar>
+          {fiscalYearsLoading ? <Text size="sm">Loading fiscal years...</Text> : null}
+          {fiscalYearsError ? (
+            <Text c="red" size="sm">
+              {fiscalYearsError}
+            </Text>
+          ) : null}
           {error ? (
             <Text c="red" size="sm">
               {error}
@@ -1165,6 +1326,8 @@ export function ProfitLossPage(props: ReportsProps) {
   const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
   const [dateFrom, setDateFrom] = useState<string>(startOfYearIso());
   const [dateTo, setDateTo] = useState<string>(todayIso());
+  const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
+  const [fiscalDefaultApplied, setFiscalDefaultApplied] = useState(false);
   const [rows, setRows] = useState<ProfitLossRow[]>([]);
   const [totals, setTotals] = useState<ProfitLossResponse["data"]["totals"]>({
     total_debit: 0,
@@ -1174,6 +1337,12 @@ export function ProfitLossPage(props: ReportsProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const accountFilters = useMemo(() => ({ report_group: "LR" as const, is_active: true }), []);
+  const {
+    data: fiscalYears,
+    loading: fiscalYearsLoading,
+    error: fiscalYearsError
+  } = useFiscalYears(props.accessToken, props.user.company_id);
+  const fiscalYearOptions = useMemo(() => buildFiscalYearOptions(fiscalYears), [fiscalYears]);
   const { data: accounts, loading: accountsLoading, error: accountsError } = useAccounts(
     props.user.company_id,
     props.accessToken,
@@ -1217,6 +1386,19 @@ export function ProfitLossPage(props: ReportsProps) {
   useEffect(() => {
     loadRows().catch(() => undefined);
   }, [outletId, dateFrom, dateTo]);
+
+  useEffect(() => {
+    if (fiscalDefaultApplied) {
+      return;
+    }
+    const defaultYear = resolveDefaultOpenFiscalYear(fiscalYears);
+    if (defaultYear) {
+      setDateFrom(defaultYear.start_date);
+      setDateTo(defaultYear.end_date);
+      setFiscalYearId(String(defaultYear.id));
+      setFiscalDefaultApplied(true);
+    }
+  }, [fiscalYears, fiscalDefaultApplied]);
 
   if (!isOnline) {
     return (
@@ -1354,22 +1536,50 @@ export function ProfitLossPage(props: ReportsProps) {
             value={String(outletId)}
             onChange={(value) => setOutletId(Number(value))}
           />
+          <Select
+            label="Fiscal year"
+            data={fiscalYearOptions}
+            value={fiscalYearId}
+            onChange={(value) => {
+              setFiscalYearId(value);
+              const selected = fiscalYears.find((year) => String(year.id) === value);
+              if (selected) {
+                setDateFrom(selected.start_date);
+                setDateTo(selected.end_date);
+              }
+            }}
+            placeholder="Select fiscal year"
+            clearable
+          />
           <TextInput
             label="From"
             type="date"
             value={dateFrom}
-            onChange={(event) => setDateFrom(event.target.value)}
+            onChange={(event) => {
+              setDateFrom(event.target.value);
+              setFiscalYearId(null);
+            }}
           />
           <TextInput
             label="To"
             type="date"
             value={dateTo}
-            onChange={(event) => setDateTo(event.target.value)}
+            onChange={(event) => {
+              setDateTo(event.target.value);
+              setFiscalYearId(null);
+            }}
           />
           <Button onClick={() => loadRows()} loading={loading}>
             Refresh
           </Button>
         </FilterBar>
+
+        {fiscalYearsLoading ? <Text size="sm">Loading fiscal years...</Text> : null}
+        {fiscalYearsError ? (
+          <Text c="red" size="sm">
+            {fiscalYearsError}
+          </Text>
+        ) : null}
 
         {accountsLoading || accountTypesLoading ? <Text size="sm">Loading account mappings...</Text> : null}
         {accountsError ? (
@@ -1491,6 +1701,8 @@ export function AccountingWorksheetPage(props: ReportsProps) {
   const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
   const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(30));
   const [dateTo, setDateTo] = useState<string>(todayIso());
+  const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
+  const [fiscalDefaultApplied, setFiscalDefaultApplied] = useState(false);
   const [rows, setRows] = useState<WorksheetRow[]>([]);
   const [summary, setSummary] = useState<WorksheetResponse["data"]["summary"]>({
     opening_debit: 0,
@@ -1509,6 +1721,12 @@ export function AccountingWorksheetPage(props: ReportsProps) {
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const {
+    data: fiscalYears,
+    loading: fiscalYearsLoading,
+    error: fiscalYearsError
+  } = useFiscalYears(props.accessToken, props.user.company_id);
+  const fiscalYearOptions = useMemo(() => buildFiscalYearOptions(fiscalYears), [fiscalYears]);
 
   async function loadRows() {
     setLoading(true);
@@ -1538,6 +1756,19 @@ export function AccountingWorksheetPage(props: ReportsProps) {
     }
   }, [outletId, dateFrom, dateTo]);
 
+  useEffect(() => {
+    if (fiscalDefaultApplied) {
+      return;
+    }
+    const defaultYear = resolveDefaultOpenFiscalYear(fiscalYears);
+    if (defaultYear) {
+      setDateFrom(defaultYear.start_date);
+      setDateTo(defaultYear.end_date);
+      setFiscalYearId(String(defaultYear.id));
+      setFiscalDefaultApplied(true);
+    }
+  }, [fiscalYears, fiscalDefaultApplied]);
+
   if (!isOnline) {
     return (
       <OfflinePage
@@ -1562,22 +1793,49 @@ export function AccountingWorksheetPage(props: ReportsProps) {
             value={String(outletId)}
             onChange={(value) => setOutletId(Number(value))}
           />
+          <Select
+            label="Fiscal year"
+            data={fiscalYearOptions}
+            value={fiscalYearId}
+            onChange={(value) => {
+              setFiscalYearId(value);
+              const selected = fiscalYears.find((year) => String(year.id) === value);
+              if (selected) {
+                setDateFrom(selected.start_date);
+                setDateTo(selected.end_date);
+              }
+            }}
+            placeholder="Select fiscal year"
+            clearable
+          />
           <TextInput
             label="From"
             type="date"
             value={dateFrom}
-            onChange={(event) => setDateFrom(event.target.value)}
+            onChange={(event) => {
+              setDateFrom(event.target.value);
+              setFiscalYearId(null);
+            }}
           />
           <TextInput
             label="To"
             type="date"
             value={dateTo}
-            onChange={(event) => setDateTo(event.target.value)}
+            onChange={(event) => {
+              setDateTo(event.target.value);
+              setFiscalYearId(null);
+            }}
           />
           <Button onClick={() => loadRows()} loading={loading}>
             Refresh
           </Button>
         </FilterBar>
+        {fiscalYearsLoading ? <Text size="sm">Loading fiscal years...</Text> : null}
+        {fiscalYearsError ? (
+          <Text c="red" size="sm">
+            {fiscalYearsError}
+          </Text>
+        ) : null}
         {error ? (
           <Text c="red" size="sm">
             {error}

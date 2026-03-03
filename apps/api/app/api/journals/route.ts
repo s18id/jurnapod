@@ -114,6 +114,14 @@ export const POST = withAuth(
         return errorResponse("INVALID_LINE", error.message, 400);
       }
 
+      if (error instanceof Error && error.name === "JournalOutsideFiscalYearError") {
+        return errorResponse(
+          "FISCAL_YEAR_CLOSED",
+          "Entry date is outside any open fiscal year",
+          400
+        );
+      }
+
       console.error("POST /api/journals failed", error);
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }

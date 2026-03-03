@@ -32,6 +32,7 @@ import { CompaniesPage as CompaniesManagementPage } from "./companies-page";
 import { OutletsPage as OutletsManagementPage } from "./outlets-page";
 import { InventorySettingsPage as InventorySettingsFeaturePage } from "./inventory-settings-page";
 import { PlatformSettingsPage as PlatformSettingsManagementPage } from "./platform-settings-page";
+import { FiscalYearsPage as FiscalYearsManagementPage } from "./fiscal-years-page";
 
 type PlaceholderProps = {
   title: string;
@@ -111,6 +112,8 @@ export const CompaniesPage = CompaniesManagementPage;
 export const OutletsPage = OutletsManagementPage;
 
 export const PlatformSettingsPage = PlatformSettingsManagementPage;
+
+export const FiscalYearsPage = FiscalYearsManagementPage;
 
 export function ForbiddenPage() {
   return (

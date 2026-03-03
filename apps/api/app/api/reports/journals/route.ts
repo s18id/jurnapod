@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
+import { resolveDefaultFiscalYearDateRange, FiscalYearSelectionError } from "../../../../src/lib/fiscal-years";
 import { listJournalBatches } from "../../../../src/lib/reports";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 
@@ -26,6 +27,21 @@ function getDefaultDateRange(): { dateFrom: string; dateTo: string } {
   return { dateFrom: from, dateTo: to };
 }
 
+async function resolveDateRange(
+  companyId: number,
+  parsed: { date_from?: string; date_to?: string }
+): Promise<{ dateFrom: string; dateTo: string }> {
+  if (parsed.date_from || parsed.date_to) {
+    const defaults = getDefaultDateRange();
+    return {
+      dateFrom: parsed.date_from ?? defaults.dateFrom,
+      dateTo: parsed.date_to ?? defaults.dateTo
+    };
+  }
+
+  return resolveDefaultFiscalYearDateRange(companyId);
+}
+
 export const GET = withAuth(
   async (request, auth) => {
     try {
@@ -40,9 +56,7 @@ export const GET = withAuth(
         offset: url.searchParams.get("offset") ?? undefined
       });
 
-      const defaults = getDefaultDateRange();
-      const dateFrom = parsed.date_from ?? defaults.dateFrom;
-      const dateTo = parsed.date_to ?? defaults.dateTo;
+      const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
 
       let outletIds: number[];
       if (typeof parsed.outlet_id === "number") {
@@ -83,6 +97,10 @@ export const GET = withAuth(
     } catch (error) {
       if (error instanceof z.ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+      }
+
+      if (error instanceof FiscalYearSelectionError) {
+        return errorResponse("FISCAL_YEAR_REQUIRED", error.message, 400);
       }
 
       console.error("GET /reports/journals failed", error);
