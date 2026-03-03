@@ -57,6 +57,9 @@ import { PublicStaticPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
 import { SyncHistoryPage } from "../features/sync-history-page";
 import { PWASettingsPage } from "../features/pwa-settings-page";
+import { ResetPasswordPage } from "../features/reset-password-page";
+import { InvitePage } from "../features/invite-page";
+import { VerifyEmailPage } from "../features/verify-email-page";
 
 type SessionStatus = "loading" | "anonymous" | "authenticated";
 
@@ -375,6 +378,22 @@ export function AppRouter() {
   if (publicSlug) {
     const fallbackTitle = toTitleCaseSlug(publicSlug) || "Page";
     return <PublicStaticPage slug={publicSlug} fallbackTitle={fallbackTitle} />;
+  }
+
+  // Public unauthenticated routes
+  const urlParams = typeof window !== "undefined" ? new URLSearchParams(globalThis.location.search) : null;
+  const token = urlParams?.get("token") ?? "";
+
+  if (activePath === "/reset-password" && token) {
+    return <ResetPasswordPage token={token} />;
+  }
+
+  if (activePath === "/invite" && token) {
+    return <InvitePage token={token} />;
+  }
+
+  if (activePath === "/verify-email" && token) {
+    return <VerifyEmailPage token={token} />;
   }
 
   const route = findRoute(activePath);

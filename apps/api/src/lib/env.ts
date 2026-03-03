@@ -177,6 +177,23 @@ export type AppEnv = {
   platformSettings: {
     encryptionKey: string;
   };
+  email: {
+    tokenTtl: {
+      passwordResetMinutes: number;
+      inviteMinutes: number;
+      verifyEmailMinutes: number;
+    };
+    outbox: {
+      retryMaxAttempts: number;
+      retryBackoffSeconds: number;
+    };
+  };
+  app: {
+    publicUrl: string;
+  };
+  cron: {
+    emailOutboxSecret: string;
+  };
 };
 
 let cachedEnv: AppEnv | null = null;
@@ -351,6 +368,44 @@ export function getAppEnv(): AppEnv {
       "PLATFORM_SETTINGS_ENCRYPTION_KEY"
     );
 
+    const DEFAULT_EMAIL_TOKEN_TTL_PASSWORD_RESET_MINUTES = 60;
+    const DEFAULT_EMAIL_TOKEN_TTL_INVITE_MINUTES = 10080; // 7 days
+    const DEFAULT_EMAIL_TOKEN_TTL_VERIFY_EMAIL_MINUTES = 1440; // 24 hours
+    const DEFAULT_EMAIL_OUTBOX_RETRY_MAX_ATTEMPTS = 5;
+    const DEFAULT_EMAIL_OUTBOX_RETRY_BACKOFF_SECONDS = 60;
+
+    const emailTokenTtlPasswordResetMinutes = parsePositiveInt(
+      process.env.EMAIL_TOKEN_TTL_RESET_MIN,
+      DEFAULT_EMAIL_TOKEN_TTL_PASSWORD_RESET_MINUTES,
+      "EMAIL_TOKEN_TTL_RESET_MIN"
+    );
+    const emailTokenTtlInviteMinutes = parsePositiveInt(
+      process.env.EMAIL_TOKEN_TTL_INVITE_MIN,
+      DEFAULT_EMAIL_TOKEN_TTL_INVITE_MINUTES,
+      "EMAIL_TOKEN_TTL_INVITE_MIN"
+    );
+    const emailTokenTtlVerifyEmailMinutes = parsePositiveInt(
+      process.env.EMAIL_TOKEN_TTL_VERIFY_MIN,
+      DEFAULT_EMAIL_TOKEN_TTL_VERIFY_EMAIL_MINUTES,
+      "EMAIL_TOKEN_TTL_VERIFY_MIN"
+    );
+    const emailOutboxRetryMaxAttempts = parsePositiveInt(
+      process.env.EMAIL_OUTBOX_RETRY_MAX,
+      DEFAULT_EMAIL_OUTBOX_RETRY_MAX_ATTEMPTS,
+      "EMAIL_OUTBOX_RETRY_MAX"
+    );
+    const emailOutboxRetryBackoffSeconds = parsePositiveInt(
+      process.env.EMAIL_OUTBOX_RETRY_BACKOFF,
+      DEFAULT_EMAIL_OUTBOX_RETRY_BACKOFF_SECONDS,
+      "EMAIL_OUTBOX_RETRY_BACKOFF"
+    );
+
+    const appPublicUrl = requiredEnv(process.env.APP_PUBLIC_URL, "APP_PUBLIC_URL");
+    const cronEmailOutboxSecret = requiredEnv(
+      process.env.CRON_EMAIL_OUTBOX_SECRET,
+      "CRON_EMAIL_OUTBOX_SECRET"
+    );
+
     cachedEnv = Object.freeze({
       db: {
         host: process.env.DB_HOST ?? "127.0.0.1",
@@ -412,6 +467,23 @@ export function getAppEnv(): AppEnv {
       },
       platformSettings: {
         encryptionKey: platformSettingsEncryptionKey
+      },
+      email: {
+        tokenTtl: {
+          passwordResetMinutes: emailTokenTtlPasswordResetMinutes,
+          inviteMinutes: emailTokenTtlInviteMinutes,
+          verifyEmailMinutes: emailTokenTtlVerifyEmailMinutes
+        },
+        outbox: {
+          retryMaxAttempts: emailOutboxRetryMaxAttempts,
+          retryBackoffSeconds: emailOutboxRetryBackoffSeconds
+        }
+      },
+      app: {
+        publicUrl: appPublicUrl
+      },
+      cron: {
+        emailOutboxSecret: cronEmailOutboxSecret
       }
     });
   } catch (error) {
