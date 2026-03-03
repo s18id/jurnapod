@@ -255,12 +255,12 @@ function classifySyncResultError(clientTxId: string, message: string | undefined
 
 function asSyncResultItems(payload: unknown): SyncPushResultItem[] {
   if (payload && typeof payload === "object" && "success" in payload) {
-    const envelope = payload as { success?: boolean; error?: { message?: string } };
+    const envelope = payload as { success?: boolean; data?: { message?: string } };
     if (envelope.success === false) {
       throw new OutboxSenderError(
         "RETRYABLE",
         "SYNC_RESPONSE_ERROR",
-        envelope.error?.message ?? "Sync push responded with error"
+        envelope.data?.message ?? "Sync push responded with error"
       );
     }
   }

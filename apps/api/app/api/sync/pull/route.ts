@@ -13,7 +13,7 @@ import { successResponse } from "../../../../src/lib/response";
 
 const INVALID_REQUEST_RESPONSE = {
   success: false,
-  error: {
+  data: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
   }
@@ -21,7 +21,7 @@ const INVALID_REQUEST_RESPONSE = {
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
   success: false,
-  error: {
+  data: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Sync pull failed"
   }

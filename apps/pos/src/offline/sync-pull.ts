@@ -50,7 +50,7 @@ const SyncPullSuccessEnvelopeSchema = z.object({
 
 const SyncPullErrorEnvelopeSchema = z.object({
   success: z.literal(false),
-  error: z.object({
+  data: z.object({
     code: z.string(),
     message: z.string()
   })
@@ -148,7 +148,7 @@ function resolvePullUrl(
 function normalizeServerErrorMessage(status: number, payload: unknown): string {
   const parsedError = SyncPullErrorEnvelopeSchema.safeParse(payload);
   if (parsedError.success) {
-    return `${parsedError.data.error.code}: ${parsedError.data.error.message}`;
+    return `${parsedError.data.data.code}: ${parsedError.data.data.message}`;
   }
 
   return `sync pull request failed with HTTP ${status}`;

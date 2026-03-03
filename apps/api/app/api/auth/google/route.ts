@@ -37,7 +37,7 @@ const googleLoginRequestSchema = z
 
 const INVALID_REQUEST_RESPONSE = {
   success: false,
-  error: {
+  data: {
     code: "INVALID_REQUEST",
     message: "Invalid request body"
   }
@@ -45,7 +45,7 @@ const INVALID_REQUEST_RESPONSE = {
 
 const INVALID_CREDENTIALS_RESPONSE = {
   success: false,
-  error: {
+  data: {
     code: "INVALID_CREDENTIALS",
     message: "Invalid credentials"
   }
@@ -53,7 +53,7 @@ const INVALID_CREDENTIALS_RESPONSE = {
 
 const LINK_CONFLICT_RESPONSE = {
   success: false,
-  error: {
+  data: {
     code: "OAUTH_CONFLICT",
     message: "OAuth account is linked to another user"
   }
@@ -61,7 +61,7 @@ const LINK_CONFLICT_RESPONSE = {
 
 const INTERNAL_SERVER_ERROR_RESPONSE = {
   success: false,
-  error: {
+  data: {
     code: "INTERNAL_SERVER_ERROR",
     message: "Login failed"
   }

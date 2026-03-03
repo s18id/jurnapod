@@ -2,6 +2,10 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 type ApiErrorPayload = {
+  data?: {
+    code?: string;
+    message?: string;
+  };
   error?: {
     code?: string;
     message?: string;
@@ -58,10 +62,11 @@ export async function apiRequest<TResponse>(
   const payload = (await response.json().catch(() => null)) as ApiErrorPayload | TResponse | null;
   if (!response.ok) {
     const errorPayload = (payload ?? {}) as ApiErrorPayload;
+    const errorData = errorPayload.data ?? errorPayload.error ?? {};
     throw new ApiError(
       response.status,
-      errorPayload.error?.code ?? "HTTP_ERROR",
-      errorPayload.error?.message ?? `Request failed with status ${response.status}`
+      errorData.code ?? "HTTP_ERROR",
+      errorData.message ?? `Request failed with status ${response.status}`
     );
   }
 

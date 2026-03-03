@@ -285,7 +285,7 @@ function App() {
 
         const payload = (await response.json()) as
           | { success: true; data: { access_token: string } }
-          | { success: false; error?: { message?: string } };
+          | { success: false; data?: { message?: string } };
 
         if (
           !response.ok ||
@@ -293,7 +293,7 @@ function App() {
           payload.success !== true ||
           typeof payload.data?.access_token !== "string"
         ) {
-          const msg = payload && payload.success === false ? payload.error?.message ?? "Login failed" : "Login failed";
+          const msg = payload && payload.success === false ? payload.data?.message ?? "Login failed" : "Login failed";
           throw new Error(msg);
         }
 
@@ -705,7 +705,7 @@ function App() {
 
       const payload = (await response.json()) as
         | { success: true; data: { access_token: string } }
-        | { success: false; error?: { message?: string } };
+        | { success: false; data?: { message?: string } };
 
       if (
         !response.ok ||
@@ -713,7 +713,7 @@ function App() {
         payload.success !== true ||
         typeof payload.data?.access_token !== "string"
       ) {
-        const msg = payload && payload.success === false ? payload.error?.message ?? "Login failed" : "Login failed";
+        const msg = payload && payload.success === false ? payload.data?.message ?? "Login failed" : "Login failed";
         throw new Error(msg);
       }
 

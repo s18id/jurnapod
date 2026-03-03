@@ -12,7 +12,7 @@ export type SyncResult = {
 };
 
 type SyncResponse = {
-  ok: boolean;
+  success: boolean;
   conflict?: boolean;
   error?: string;
 };
