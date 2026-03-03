@@ -392,7 +392,7 @@ export function AppRouter() {
     return <InvitePage token={token} />;
   }
 
-  if (activePath === "/verify-email" && token) {
+  if (activePath === "/verify-email") {
     return <VerifyEmailPage token={token} />;
   }
 
