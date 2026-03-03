@@ -39,18 +39,18 @@ export const APP_ROUTES: readonly AppRoute[] = [
 
   // === ACCOUNTING ===
   {
-    path: "/chart-of-accounts",
-    label: "Chart of Accounts",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
-  },
-  {
     path: "/account-types",
     label: "Account Types",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {
-    path: "/transactions",
-    label: "Transaction Input",
+    path: "/chart-of-accounts",
+    label: "Chart of Accounts",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/account-mappings",
+    label: "Account Mappings",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {
@@ -59,8 +59,8 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {
-    path: "/account-mappings",
-    label: "Account Mappings",
+    path: "/transactions",
+    label: "Transaction Input",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
 
@@ -127,19 +127,14 @@ export const APP_ROUTES: readonly AppRoute[] = [
 
   // === SETTINGS ===
   {
-    path: "/outlet-settings",
-    label: "Outlet Settings",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    path: "/companies",
+    label: "Companies",
+    allowedRoles: ["SUPER_ADMIN", "OWNER"]
   },
   {
-    path: "/modules",
-    label: "Modules",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
-  },
-  {
-    path: "/tax-rates",
-    label: "Tax Rates",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    path: "/outlets",
+    label: "Outlets",
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "ADMIN"]
   },
   {
     path: "/users",
@@ -152,14 +147,19 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["SUPER_ADMIN", "OWNER"]
   },
   {
-    path: "/companies",
-    label: "Companies",
-    allowedRoles: ["SUPER_ADMIN", "OWNER"]
+    path: "/modules",
+    label: "Modules",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {
-    path: "/outlets",
-    label: "Outlets",
-    allowedRoles: ["SUPER_ADMIN", "OWNER", "ADMIN"]
+    path: "/tax-rates",
+    label: "Tax Rates",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/outlet-settings",
+    label: "Outlet Settings",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/static-pages",

@@ -43,11 +43,11 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   {
     label: "Accounting",
     paths: [
-      "/chart-of-accounts",
       "/account-types",
-      "/transactions",
+      "/chart-of-accounts",
+      "/account-mappings",
       "/transaction-templates",
-      "/account-mappings"
+      "/transactions"
     ]
   },
   {
@@ -65,13 +65,13 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   {
     label: "Settings",
     paths: [
-      "/outlet-settings",
-      "/modules",
-      "/tax-rates",
-      "/users",
-      "/roles",
       "/companies",
       "/outlets",
+      "/users",
+      "/roles",
+      "/modules",
+      "/tax-rates",
+      "/outlet-settings",
       "/static-pages",
       "/platform-settings"
     ]
