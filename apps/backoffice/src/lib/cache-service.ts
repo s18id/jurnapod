@@ -23,6 +23,11 @@ type ItemsResponse = {
   data: unknown[];
 };
 
+type ItemGroupsResponse = {
+  success: true;
+  data: unknown[];
+};
+
 type ItemPricesResponse = {
   success: true;
   data: unknown[];
@@ -35,7 +40,11 @@ type CachedPayload<T> = {
   version: number;
 };
 
-async function upsertCache<T>(type: "accounts" | "account_types" | "items" | "item_prices", payload: T[], ttlMs: number) {
+async function upsertCache<T>(
+  type: "accounts" | "account_types" | "items" | "item_groups" | "item_prices",
+  payload: T[],
+  ttlMs: number
+) {
   const cached = await db.masterDataCache.get(type);
   const version = cached?.version ? cached.version + 1 : 1;
   const now = new Date();
@@ -120,6 +129,20 @@ export class CacheService {
     return response.data;
   }
 
+  static async getCachedItemGroups(accessToken: string, options: CacheOptions = {}): Promise<unknown[]> {
+    const cached = await db.masterDataCache.get("item_groups");
+    if (cached && (isCacheValid(cached) || options.allowStale)) {
+      return cached.data as unknown[];
+    }
+    return this.refreshItemGroups(accessToken);
+  }
+
+  static async refreshItemGroups(accessToken: string): Promise<unknown[]> {
+    const response = await apiRequest<ItemGroupsResponse>("/inventory/item-groups", {}, accessToken);
+    await upsertCache("item_groups", response.data, HALF_DAY_MS);
+    return response.data;
+  }
+
   static async getCachedItemPrices(
     outletId: number,
     accessToken: string,
@@ -161,6 +184,7 @@ export function setupMasterDataRefresh(options: MasterDataRefreshOptions): () =>
       CacheService.refreshAccounts(companyId, accessToken),
       CacheService.refreshAccountTypes(companyId, accessToken),
       CacheService.refreshItems(accessToken),
+      CacheService.refreshItemGroups(accessToken),
       outletId > 0 ? CacheService.refreshItemPrices(outletId, accessToken) : Promise.resolve([])
     ]);
   }

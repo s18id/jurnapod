@@ -101,6 +101,7 @@ export const ItemPriceUpdateRequestSchema = z
 export const ItemGroupCreateRequestSchema = z.object({
   code: optionalShortTextSchema(64),
   name: z.string().trim().min(1).max(191),
+  parent_id: NumericIdSchema.nullable().optional(),
   is_active: z.boolean().optional()
 });
 
@@ -108,6 +109,7 @@ export const ItemGroupUpdateRequestSchema = z
   .object({
     code: optionalShortTextSchema(64),
     name: z.string().trim().min(1).max(191).optional(),
+    parent_id: NumericIdSchema.nullable().optional(),
     is_active: z.boolean().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
@@ -207,6 +209,7 @@ export const SyncPullItemSchema = z.object({
 
 export const SyncPullItemGroupSchema = z.object({
   id: NumericIdSchema,
+  parent_id: NumericIdSchema.nullable(),
   code: z.string().nullable(),
   name: z.string(),
   is_active: z.boolean(),

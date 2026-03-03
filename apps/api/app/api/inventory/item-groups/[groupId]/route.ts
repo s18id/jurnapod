@@ -10,6 +10,7 @@ import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
   DatabaseConflictError,
+  DatabaseReferenceError,
   deleteItemGroup,
   findItemGroupById,
   updateItemGroup
@@ -51,14 +52,25 @@ export const PATCH = withAuth(
       const payload = await request.json();
       const input = ItemGroupUpdateRequestSchema.parse(payload);
 
+      const updatePayload: {
+        code?: string | null;
+        name?: string;
+        parent_id?: number | null;
+        is_active?: boolean;
+      } = {
+        code: input.code,
+        name: input.name,
+        is_active: input.is_active
+      };
+
+      if (Object.hasOwn(input, "parent_id")) {
+        updatePayload.parent_id = input.parent_id;
+      }
+
       const group = await updateItemGroup(
         auth.companyId,
         groupId,
-        {
-          code: input.code,
-          name: input.name,
-          is_active: input.is_active
-        },
+        updatePayload,
         {
           userId: auth.userId
         }
@@ -76,6 +88,10 @@ export const PATCH = withAuth(
 
       if (error instanceof DatabaseConflictError) {
         return errorResponse("CONFLICT", "Item group conflict", 409);
+      }
+
+      if (error instanceof DatabaseReferenceError) {
+        return errorResponse("NOT_FOUND", "Parent group not found", 404);
       }
 
       console.error("PATCH /api/inventory/item-groups/:id failed", error);
@@ -101,6 +117,10 @@ export const DELETE = withAuth(
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+      }
+
+      if (error instanceof DatabaseConflictError) {
+        return errorResponse("CONFLICT", "Item group has child groups", 409);
       }
 
       console.error("DELETE /api/inventory/item-groups/:id failed", error);

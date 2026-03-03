@@ -11,6 +11,7 @@ import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createItemGroup,
   DatabaseConflictError,
+  DatabaseReferenceError,
   listItemGroups
 } from "../../../../src/lib/master-data";
 
@@ -69,6 +70,7 @@ export const POST = withAuth(
         {
           code: input.code,
           name: input.name,
+          parent_id: input.parent_id,
           is_active: input.is_active
         },
         {
@@ -84,6 +86,10 @@ export const POST = withAuth(
 
       if (error instanceof DatabaseConflictError) {
         return errorResponse("CONFLICT", "Item group conflict", 409);
+      }
+
+      if (error instanceof DatabaseReferenceError) {
+        return errorResponse("NOT_FOUND", "Parent group not found", 404);
       }
 
       console.error("POST /api/inventory/item-groups failed", error);

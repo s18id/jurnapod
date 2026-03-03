@@ -31,6 +31,7 @@ import {
   TransactionTemplatesPage,
   DailySalesPage,
   ForbiddenPage,
+  ItemGroupsPage,
   ItemsPricesPage,
   JournalsPage,
   GeneralLedgerPage,
@@ -138,6 +139,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/items-prices") {
     return <ItemsPricesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/item-groups") {
+    return <ItemGroupsPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/supplies") {
     return <SuppliesPage user={props.user} accessToken={props.accessToken} />;

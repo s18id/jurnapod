@@ -105,6 +105,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
 
   // === INVENTORY ===
   {
+    path: "/item-groups",
+    label: "Item Groups",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
+  {
     path: "/items-prices",
     label: "Items & Prices",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]

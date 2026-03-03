@@ -11,12 +11,23 @@ import type { SessionUser } from "../lib/session";
 
 type ItemType = "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
 
+type ItemGroup = {
+  id: number;
+  company_id: number;
+  parent_id: number | null;
+  code: string | null;
+  name: string;
+  is_active: boolean;
+  updated_at: string;
+};
+
 type Item = {
   id: number;
   company_id: number;
   sku: string | null;
   name: string;
   type: ItemType;
+  item_group_id: number | null;
   is_active: boolean;
   updated_at: string;
 };
@@ -28,6 +39,8 @@ type ItemPrice = {
   item_id: number;
   price: number;
   is_active: boolean;
+  item_group_id: number | null;
+  item_group_name: string | null;
   updated_at: string;
 };
 
@@ -89,6 +102,7 @@ type ItemsPricesPageProps = {
 export function ItemsPricesPage(props: ItemsPricesPageProps) {
   const [items, setItems] = useState<Item[]>([]);
   const [prices, setPrices] = useState<ItemPrice[]>([]);
+  const [itemGroups, setItemGroups] = useState<ItemGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedOutletId, setSelectedOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
@@ -98,6 +112,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     sku: "",
     name: "",
     type: "PRODUCT" as ItemType,
+    item_group_id: null as number | null,
     is_active: true
   });
   const [newPrice, setNewPrice] = useState({
@@ -107,6 +122,38 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
   });
 
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  const groupMap = useMemo(() => new Map(itemGroups.map((group) => [group.id, group])), [itemGroups]);
+
+  function getGroupPath(groupId: number | null | undefined): string {
+    if (!groupId) {
+      return "Ungrouped";
+    }
+
+    const parts: string[] = [];
+    let currentId: number | null = groupId;
+    const visited = new Set<number>();
+
+    while (typeof currentId === "number") {
+      if (visited.has(currentId)) {
+        break;
+      }
+      visited.add(currentId);
+      const group = groupMap.get(currentId);
+      if (!group) {
+        break;
+      }
+      parts.unshift(group.name);
+      currentId = group.parent_id ?? null;
+    }
+
+    return parts.length > 0 ? parts.join(" > ") : "Ungrouped";
+  }
+
+  function formatGroupOption(group: ItemGroup): string {
+    const base = getGroupPath(group.id);
+    const label = group.code ? `${base} (${group.code})` : base;
+    return group.is_active ? label : `${label} (inactive)`;
+  }
 
   async function refreshData(outletId: number) {
     setLoading(true);
@@ -114,25 +161,31 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     try {
       let itemsData: Item[] = [];
       let pricesData: ItemPrice[] = [];
+      let groupsData: ItemGroup[] = [];
 
       if (isOnline) {
-        const [itemsResponse, pricesResponse] = await Promise.all([
+        const [itemsResponse, pricesResponse, groupsResponse] = await Promise.all([
           CacheService.refreshItems(props.accessToken),
-          CacheService.refreshItemPrices(outletId, props.accessToken)
+          CacheService.refreshItemPrices(outletId, props.accessToken),
+          CacheService.refreshItemGroups(props.accessToken)
         ]);
         itemsData = itemsResponse as Item[];
         pricesData = pricesResponse as ItemPrice[];
+        groupsData = groupsResponse as ItemGroup[];
       } else {
-        const [itemsResponse, pricesResponse] = await Promise.all([
+        const [itemsResponse, pricesResponse, groupsResponse] = await Promise.all([
           CacheService.getCachedItems(props.accessToken, { allowStale: true }),
-          CacheService.getCachedItemPrices(outletId, props.accessToken, { allowStale: true })
+          CacheService.getCachedItemPrices(outletId, props.accessToken, { allowStale: true }),
+          CacheService.getCachedItemGroups(props.accessToken, { allowStale: true })
         ]);
         itemsData = itemsResponse as Item[];
         pricesData = pricesResponse as ItemPrice[];
+        groupsData = groupsResponse as ItemGroup[];
       }
 
       setItems(itemsData);
       setPrices(pricesData);
+      setItemGroups(groupsData);
       setNewPrice((prev) => ({
         ...prev,
         item_id: prev.item_id > 0 ? prev.item_id : itemsData[0]?.id ?? 0
@@ -162,10 +215,11 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
           sku: newItem.sku.trim() || null,
           name: newItem.name.trim(),
           type: newItem.type,
+          item_group_id: newItem.item_group_id ?? null,
           is_active: newItem.is_active
         })
       }, props.accessToken);
-      setNewItem({ sku: "", name: "", type: "PRODUCT", is_active: true });
+      setNewItem({ sku: "", name: "", type: "PRODUCT", item_group_id: null, is_active: true });
       await refreshData(selectedOutletId);
     } catch (createError) {
       if (createError instanceof ApiError) {
@@ -182,6 +236,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
           sku: item.sku,
           name: item.name,
           type: item.type,
+          item_group_id: item.item_group_id,
           is_active: item.is_active
         })
       }, props.accessToken);
@@ -302,6 +357,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
           ))}
         </select>
         <StaleDataWarning cacheKey="items" label="items" />
+        <StaleDataWarning cacheKey="item_groups" label="item groups" />
         <StaleDataWarning
           cacheKey={`item_prices:${selectedOutletId}`}
           label={`prices for outlet #${selectedOutletId}`}
@@ -311,7 +367,15 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
       </section>
 
       <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Create Item</h3>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+          <h3 style={{ marginTop: 0 }}>Create Item</h3>
+          <a
+            href="#/item-groups"
+            style={{ color: "#2f5f4a", fontWeight: 600, textDecoration: "none" }}
+          >
+            Manage groups
+          </a>
+        </div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-start" }}>
           <input
             placeholder="SKU"
@@ -347,6 +411,28 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
               {itemTypeDescriptions[newItem.type]}
             </small>
           </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <select
+              value={newItem.item_group_id ?? ""}
+              onChange={(event) =>
+                setNewItem((prev) => ({
+                  ...prev,
+                  item_group_id: event.target.value ? Number(event.target.value) : null
+                }))
+              }
+              style={inputStyle}
+            >
+              <option value="">No group</option>
+              {itemGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {formatGroupOption(group)}
+                </option>
+              ))}
+            </select>
+            <small style={{ color: "#6b5d48", fontSize: "11px", maxWidth: "200px" }}>
+              Optional grouping for POS and reports.
+            </small>
+          </div>
           <label>
             <input
               type="checkbox"
@@ -377,6 +463,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
               <th style={cellStyle}>ID</th>
               <th style={cellStyle}>SKU</th>
               <th style={cellStyle}>Name</th>
+              <th style={cellStyle}>Group</th>
               <th style={cellStyle}>Type</th>
               <th style={cellStyle}>Active</th>
               <th style={cellStyle}>Actions</th>
@@ -411,6 +498,31 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
                     }
                     style={inputStyle}
                   />
+                </td>
+                <td style={cellStyle}>
+                  <select
+                    value={item.item_group_id ?? ""}
+                    onChange={(event) =>
+                      setItems((prev) =>
+                        prev.map((entry) =>
+                          entry.id === item.id
+                            ? {
+                              ...entry,
+                              item_group_id: event.target.value ? Number(event.target.value) : null
+                            }
+                            : entry
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  >
+                    <option value="">No group</option>
+                    {itemGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {formatGroupOption(group)}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td style={cellStyle}>
                   <select
@@ -476,11 +588,14 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             style={inputStyle}
           >
             <option value={0}>Select item</option>
-            {items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name} ({item.type})
-              </option>
-            ))}
+            {items.map((item) => {
+              const groupName = getGroupPath(item.item_group_id);
+              return (
+                <option key={item.id} value={item.id}>
+                  {groupName} - {item.name} ({item.type})
+                </option>
+              );
+            })}
           </select>
           <input
             placeholder="Price"
@@ -525,6 +640,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             <tr>
               <th style={cellStyle}>ID</th>
               <th style={cellStyle}>Item</th>
+              <th style={cellStyle}>Group</th>
               <th style={cellStyle}>Price</th>
               <th style={cellStyle}>Active</th>
               <th style={cellStyle}>Actions</th>
@@ -548,12 +664,22 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
                     }
                     style={inputStyle}
                   >
-                    {items.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
+                    {items.map((item) => {
+                      const groupName = getGroupPath(item.item_group_id);
+                      return (
+                        <option key={item.id} value={item.id}>
+                          {groupName} - {item.name}
+                        </option>
+                      );
+                    })}
                   </select>
+                </td>
+                <td style={cellStyle}>
+                  {(() => {
+                    const item = itemMap.get(price.item_id);
+                    if (!item) return "-";
+                    return getGroupPath(item.item_group_id);
+                  })()}
                 </td>
                 <td style={cellStyle}>
                   <input
@@ -603,8 +729,8 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
       <section style={boxStyle}>
         <strong>Quick checks</strong>
         <p style={{ marginBottom: 0 }}>
-          Loaded {items.length} items and {prices.length} prices for outlet #{selectedOutletId}. First
-          visible item: {itemMap.get(items[0]?.id ?? -1)?.name ?? "-"}
+          Loaded {items.length} items, {itemGroups.length} groups, and {prices.length} prices for outlet
+          #{selectedOutletId}. First visible item: {itemMap.get(items[0]?.id ?? -1)?.name ?? "-"}
         </p>
       </section>
     </div>
