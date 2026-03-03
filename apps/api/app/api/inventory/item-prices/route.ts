@@ -7,7 +7,7 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createItemPrice,
   DatabaseConflictError,
@@ -15,46 +15,6 @@ import {
   listItemPrices
 } from "../../../../src/lib/master-data";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Item or outlet not found"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Item price conflict"
-  }
-};
-
-const FORBIDDEN_RESPONSE = {
-  success: false,
-  error: {
-    code: "FORBIDDEN",
-    message: "Forbidden"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Item prices request failed"
-  }
-};
 
 function parseOptionalIsActive(value: string | null): boolean | undefined {
   if (value == null) {
@@ -89,7 +49,7 @@ export const GET = withAuth(
       if (companyIdRaw != null) {
         const companyId = NumericIdSchema.parse(companyIdRaw);
         if (companyId !== auth.companyId) {
-          return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+          return errorResponse("INVALID_REQUEST", "Invalid request", 400);
         }
       }
 
@@ -99,7 +59,7 @@ export const GET = withAuth(
       if (typeof outletId === "number") {
         const hasOutletAccess = await userHasOutletAccess(auth.userId, auth.companyId, outletId);
         if (!hasOutletAccess) {
-          return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+          return errorResponse("FORBIDDEN", "Forbidden", 403);
         }
 
         const prices = await listItemPrices(auth.companyId, {
@@ -119,11 +79,11 @@ export const GET = withAuth(
       return successResponse(prices);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /api/inventory/item-prices failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "read" })]
@@ -136,7 +96,7 @@ export const POST = withAuth(
       const input = ItemPriceCreateRequestSchema.parse(payload);
       const hasOutletAccess = await userHasOutletAccess(auth.userId, auth.companyId, input.outlet_id);
       if (!hasOutletAccess) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       const itemPrice = await createItemPrice(auth.companyId, input, {
@@ -146,19 +106,19 @@ export const POST = withAuth(
       return successResponse(itemPrice, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DatabaseReferenceError) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Item or outlet not found", 404);
       }
 
       if (error instanceof DatabaseConflictError) {
-        return Response.json(CONFLICT_RESPONSE, { status: 409 });
+        return errorResponse("CONFLICT", "Item price conflict", 409);
       }
 
       console.error("POST /api/inventory/item-prices failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "create" })]

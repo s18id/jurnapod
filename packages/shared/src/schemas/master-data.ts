@@ -64,6 +64,7 @@ export const ItemCreateRequestSchema = z.object({
   sku: optionalSkuSchema,
   name: z.string().trim().min(1).max(191),
   type: ItemTypeSchema,
+  item_group_id: NumericIdSchema.nullable().optional(),
   is_active: z.boolean().optional()
 });
 
@@ -72,6 +73,7 @@ export const ItemUpdateRequestSchema = z
     sku: optionalSkuSchema,
     name: z.string().trim().min(1).max(191).optional(),
     type: ItemTypeSchema.optional(),
+    item_group_id: NumericIdSchema.nullable().optional(),
     is_active: z.boolean().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
@@ -90,6 +92,22 @@ export const ItemPriceUpdateRequestSchema = z
     item_id: NumericIdSchema.optional(),
     outlet_id: NumericIdSchema.optional(),
     price: z.coerce.number().finite().nonnegative().optional(),
+    is_active: z.boolean().optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided"
+  });
+
+export const ItemGroupCreateRequestSchema = z.object({
+  code: optionalShortTextSchema(64),
+  name: z.string().trim().min(1).max(191),
+  is_active: z.boolean().optional()
+});
+
+export const ItemGroupUpdateRequestSchema = z
+  .object({
+    code: optionalShortTextSchema(64),
+    name: z.string().trim().min(1).max(191).optional(),
     is_active: z.boolean().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
@@ -182,6 +200,15 @@ export const SyncPullItemSchema = z.object({
   sku: z.string().nullable(),
   name: z.string(),
   type: ItemTypeSchema,
+  item_group_id: NumericIdSchema.nullable(),
+  is_active: z.boolean(),
+  updated_at: z.string().datetime()
+});
+
+export const SyncPullItemGroupSchema = z.object({
+  id: NumericIdSchema,
+  code: z.string().nullable(),
+  name: z.string(),
   is_active: z.boolean(),
   updated_at: z.string().datetime()
 });
@@ -228,6 +255,7 @@ export const SyncPullConfigSchema = z.object({
 export const SyncPullPayloadSchema = z.object({
   data_version: z.coerce.number().int().min(0),
   items: z.array(SyncPullItemSchema),
+  item_groups: z.array(SyncPullItemGroupSchema),
   prices: z.array(SyncPullPriceSchema),
   config: SyncPullConfigSchema
 });

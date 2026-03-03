@@ -19,6 +19,8 @@ export interface ProductCacheRow {
   sku: string | null;
   name: string;
   item_type: ProductItemType;
+  item_group_id?: number | null;
+  item_group_name?: string | null;
   price_snapshot: number;
   is_active: boolean;
   item_updated_at: string;

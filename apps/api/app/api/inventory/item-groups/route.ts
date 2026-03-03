@@ -2,18 +2,17 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import {
-  ItemCreateRequestSchema,
+  ItemGroupCreateRequestSchema,
   NumericIdSchema
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
-import {
-  createItem,
-  DatabaseConflictError,
-  DatabaseReferenceError,
-  listItems
-} from "../../../../src/lib/master-data";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
+import {
+  createItemGroup,
+  DatabaseConflictError,
+  listItemGroups
+} from "../../../../src/lib/master-data";
 
 function parseOptionalIsActive(value: string | null): boolean | undefined {
   if (value == null) {
@@ -45,16 +44,16 @@ export const GET = withAuth(
       }
 
       const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
-      const items = await listItems(auth.companyId, { isActive });
+      const groups = await listItemGroups(auth.companyId, { isActive });
 
-      return successResponse(items);
+      return successResponse(groups);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
-      console.error("GET /api/inventory/items failed", error);
-      return errorResponse("INTERNAL_SERVER_ERROR", "Items request failed", 500);
+      console.error("GET /api/inventory/item-groups failed", error);
+      return errorResponse("INTERNAL_SERVER_ERROR", "Item groups request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "read" })]
@@ -64,33 +63,31 @@ export const POST = withAuth(
   async (request, auth) => {
     try {
       const payload = await request.json();
-      const input = ItemCreateRequestSchema.parse(payload);
-      const item = await createItem(auth.companyId, {
-        sku: input.sku,
-        name: input.name,
-        type: input.type,
-        item_group_id: input.item_group_id,
-        is_active: input.is_active
-      }, {
-        userId: auth.userId
-      });
+      const input = ItemGroupCreateRequestSchema.parse(payload);
+      const group = await createItemGroup(
+        auth.companyId,
+        {
+          code: input.code,
+          name: input.name,
+          is_active: input.is_active
+        },
+        {
+          userId: auth.userId
+        }
+      );
 
-      return successResponse(item, 201);
+      return successResponse(group, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DatabaseConflictError) {
-        return errorResponse("CONFLICT", "Item conflict", 409);
+        return errorResponse("CONFLICT", "Item group conflict", 409);
       }
 
-      if (error instanceof DatabaseReferenceError) {
-        return errorResponse("NOT_FOUND", "Item group not found", 404);
-      }
-
-      console.error("POST /api/inventory/items failed", error);
-      return errorResponse("INTERNAL_SERVER_ERROR", "Items request failed", 500);
+      console.error("POST /api/inventory/item-groups failed", error);
+      return errorResponse("INTERNAL_SERVER_ERROR", "Item groups request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "create" })]

@@ -7,7 +7,7 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
-import { successResponse } from "../../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
   DatabaseConflictError,
   DatabaseForbiddenError,
@@ -17,54 +17,6 @@ import {
   updateItemPrice
 } from "../../../../../src/lib/master-data";
 import { userHasOutletAccess } from "../../../../../src/lib/auth";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Item price not found"
-  }
-};
-
-const REFERENCE_NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Item or outlet not found"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Item price conflict"
-  }
-};
-
-const FORBIDDEN_RESPONSE = {
-  success: false,
-  error: {
-    code: "FORBIDDEN",
-    message: "Forbidden"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Item prices request failed"
-  }
-};
 
 function parsePriceId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -79,7 +31,7 @@ export const GET = withAuth(
       const itemPrice = await findItemPriceById(auth.companyId, priceId);
 
       if (!itemPrice) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
       const hasOutletAccess = await userHasOutletAccess(
@@ -88,17 +40,17 @@ export const GET = withAuth(
         itemPrice.outlet_id
       );
       if (!hasOutletAccess) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
        return successResponse(itemPrice);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /api/inventory/item-prices/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "read" })]
@@ -113,7 +65,7 @@ export const PATCH = withAuth(
 
       const existingItemPrice = await findItemPriceById(auth.companyId, priceId);
       if (!existingItemPrice) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
       const hasCurrentOutletAccess = await userHasOutletAccess(
@@ -122,7 +74,7 @@ export const PATCH = withAuth(
         existingItemPrice.outlet_id
       );
       if (!hasCurrentOutletAccess) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       if (typeof input.outlet_id === "number") {
@@ -132,7 +84,7 @@ export const PATCH = withAuth(
           input.outlet_id
         );
         if (!hasTargetOutletAccess) {
-          return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+          return errorResponse("FORBIDDEN", "Forbidden", 403);
         }
       }
 
@@ -141,29 +93,29 @@ export const PATCH = withAuth(
       });
 
       if (!itemPrice) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
        return successResponse(itemPrice);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DatabaseForbiddenError) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       if (error instanceof DatabaseReferenceError) {
-        return Response.json(REFERENCE_NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Item or outlet not found", 404);
       }
 
       if (error instanceof DatabaseConflictError) {
-        return Response.json(CONFLICT_RESPONSE, { status: 409 });
+        return errorResponse("CONFLICT", "Item price conflict", 409);
       }
 
       console.error("PATCH /api/inventory/item-prices/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "update" })]
@@ -176,7 +128,7 @@ export const DELETE = withAuth(
 
       const existingItemPrice = await findItemPriceById(auth.companyId, priceId);
       if (!existingItemPrice) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
       const hasOutletAccess = await userHasOutletAccess(
@@ -185,7 +137,7 @@ export const DELETE = withAuth(
         existingItemPrice.outlet_id
       );
       if (!hasOutletAccess) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       const removed = await deleteItemPrice(auth.companyId, priceId, {
@@ -193,21 +145,21 @@ export const DELETE = withAuth(
       });
 
       if (!removed) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
        return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DatabaseForbiddenError) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       console.error("DELETE /api/inventory/item-prices/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "delete" })]

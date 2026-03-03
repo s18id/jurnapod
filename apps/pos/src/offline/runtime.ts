@@ -111,6 +111,8 @@ export interface RuntimeProductCatalogItem {
   sku: string | null;
   name: string;
   item_type: ProductCacheRow["item_type"];
+  item_group_id?: number | null;
+  item_group_name?: string | null;
   price_snapshot: number;
 }
 
@@ -245,6 +247,8 @@ export async function readRuntimeProductCatalog(
     sku: row.sku,
     name: row.name,
     item_type: row.item_type,
+    item_group_id: row.item_group_id ?? null,
+    item_group_name: row.item_group_name ?? null,
     price_snapshot: row.price_snapshot
   }));
 }

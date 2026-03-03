@@ -19,6 +19,16 @@ type ItemRow = RowDataPacket & {
   sku: string | null;
   name: string;
   item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+  item_group_id: number | null;
+  is_active: number;
+  updated_at: Date;
+};
+
+type ItemGroupRow = RowDataPacket & {
+  id: number;
+  company_id: number;
+  code: string | null;
+  name: string;
   is_active: number;
   updated_at: Date;
 };
@@ -31,6 +41,8 @@ type ItemPriceRow = RowDataPacket & {
   price: string | number;
   is_active: number;
   updated_at: Date;
+  item_group_id?: number | null;
+  item_group_name?: string | null;
 };
 
 type SupplyRow = RowDataPacket & {
@@ -87,6 +99,9 @@ const masterDataAuditActions = {
   itemCreate: "MASTER_DATA_ITEM_CREATE",
   itemUpdate: "MASTER_DATA_ITEM_UPDATE",
   itemDelete: "MASTER_DATA_ITEM_DELETE",
+  itemGroupCreate: "MASTER_DATA_ITEM_GROUP_CREATE",
+  itemGroupUpdate: "MASTER_DATA_ITEM_GROUP_UPDATE",
+  itemGroupDelete: "MASTER_DATA_ITEM_GROUP_DELETE",
   itemPriceCreate: "MASTER_DATA_ITEM_PRICE_CREATE",
   itemPriceUpdate: "MASTER_DATA_ITEM_PRICE_UPDATE",
   itemPriceDelete: "MASTER_DATA_ITEM_PRICE_DELETE",
@@ -252,6 +267,18 @@ function normalizeItem(row: ItemRow) {
     sku: row.sku,
     name: row.name,
     type: row.item_type,
+    item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
+    is_active: row.is_active === 1,
+    updated_at: new Date(row.updated_at).toISOString()
+  };
+}
+
+function normalizeItemGroup(row: ItemGroupRow) {
+  return {
+    id: Number(row.id),
+    company_id: Number(row.company_id),
+    code: row.code,
+    name: row.name,
     is_active: row.is_active === 1,
     updated_at: new Date(row.updated_at).toISOString()
   };
@@ -265,6 +292,8 @@ function normalizeItemPrice(row: ItemPriceRow) {
     item_id: Number(row.item_id),
     price: Number(row.price),
     is_active: row.is_active === 1,
+    item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
+    item_group_name: row.item_group_name ?? null,
     updated_at: new Date(row.updated_at).toISOString()
   };
 }
@@ -351,6 +380,25 @@ async function ensureCompanyItemExists(
   }
 }
 
+async function ensureCompanyItemGroupExists(
+  executor: QueryExecutor,
+  companyId: number,
+  groupId: number
+): Promise<void> {
+  const [rows] = await executor.execute<RowDataPacket[]>(
+    `SELECT id
+     FROM item_groups
+     WHERE id = ?
+       AND company_id = ?
+     LIMIT 1`,
+    [groupId, companyId]
+  );
+
+  if (rows.length === 0) {
+    throw new DatabaseReferenceError("Item group not found for company");
+  }
+}
+
 async function ensureCompanyOutletExists(
   executor: QueryExecutor,
   companyId: number,
@@ -422,7 +470,7 @@ async function findItemByIdWithExecutor(
 ) {
   const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
   const [rows] = await executor.execute<ItemRow[]>(
-    `SELECT id, company_id, sku, name, item_type, is_active, updated_at
+    `SELECT id, company_id, sku, name, item_type, item_group_id, is_active, updated_at
      FROM items
      WHERE company_id = ?
        AND id = ?
@@ -435,6 +483,29 @@ async function findItemByIdWithExecutor(
   }
 
   return normalizeItem(rows[0]);
+}
+
+async function findItemGroupByIdWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  groupId: number,
+  options?: { forUpdate?: boolean }
+) {
+  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
+  const [rows] = await executor.execute<ItemGroupRow[]>(
+    `SELECT id, company_id, code, name, is_active, updated_at
+     FROM item_groups
+     WHERE company_id = ?
+       AND id = ?
+     LIMIT 1${forUpdateClause}`,
+    [companyId, groupId]
+  );
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  return normalizeItemGroup(rows[0]);
 }
 
 async function findItemPriceByIdWithExecutor(
@@ -536,7 +607,25 @@ export async function listItems(companyId: number, filters?: { isActive?: boolea
   const values: Array<number> = [companyId];
 
   let sql =
-    "SELECT id, company_id, sku, name, item_type, is_active, updated_at FROM items WHERE company_id = ?";
+    "SELECT id, company_id, sku, name, item_type, item_group_id, is_active, updated_at FROM items WHERE company_id = ?";
+
+  if (typeof filters?.isActive === "boolean") {
+    sql += " AND is_active = ?";
+    values.push(filters.isActive ? 1 : 0);
+  }
+
+  sql += " ORDER BY ip.id ASC";
+
+  const [rows] = await pool.execute<ItemRow[]>(sql, values);
+  return rows.map(normalizeItem);
+}
+
+export async function listItemGroups(companyId: number, filters?: { isActive?: boolean }) {
+  const pool = getDbPool();
+  const values: Array<number> = [companyId];
+
+  let sql =
+    "SELECT id, company_id, code, name, is_active, updated_at FROM item_groups WHERE company_id = ?";
 
   if (typeof filters?.isActive === "boolean") {
     sql += " AND is_active = ?";
@@ -545,13 +634,176 @@ export async function listItems(companyId: number, filters?: { isActive?: boolea
 
   sql += " ORDER BY id ASC";
 
-  const [rows] = await pool.execute<ItemRow[]>(sql, values);
-  return rows.map(normalizeItem);
+  const [rows] = await pool.execute<ItemGroupRow[]>(sql, values);
+  return rows.map(normalizeItemGroup);
 }
 
 export async function findItemById(companyId: number, itemId: number) {
   const pool = getDbPool();
   return findItemByIdWithExecutor(pool, companyId, itemId);
+}
+
+export async function findItemGroupById(companyId: number, groupId: number) {
+  const pool = getDbPool();
+  return findItemGroupByIdWithExecutor(pool, companyId, groupId);
+}
+
+export async function createItemGroup(
+  companyId: number,
+  input: {
+    code?: string | null;
+    name: string;
+    is_active?: boolean;
+  },
+  actor?: MutationAuditActor
+) {
+  return withTransaction(async (connection) => {
+    try {
+      const [result] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO item_groups (company_id, code, name, is_active)
+         VALUES (?, ?, ?, ?)`,
+        [companyId, input.code ?? null, input.name, input.is_active === false ? 0 : 1]
+      );
+
+      const itemGroup = await findItemGroupByIdWithExecutor(connection, companyId, Number(result.insertId));
+      if (!itemGroup) {
+        throw new Error("Created item group not found");
+      }
+
+      await recordMasterDataAuditLog(connection, {
+        companyId,
+        outletId: null,
+        actor,
+        action: masterDataAuditActions.itemGroupCreate,
+        payload: {
+          item_group_id: itemGroup.id,
+          after: itemGroup
+        }
+      });
+
+      return itemGroup;
+    } catch (error) {
+      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        throw new DatabaseConflictError("Duplicate item group");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function updateItemGroup(
+  companyId: number,
+  groupId: number,
+  input: {
+    code?: string | null;
+    name?: string;
+    is_active?: boolean;
+  },
+  actor?: MutationAuditActor
+) {
+  const fields: string[] = [];
+  const values: Array<string | number | null> = [];
+
+  if (Object.hasOwn(input, "code")) {
+    fields.push("code = ?");
+    values.push(input.code ?? null);
+  }
+
+  if (typeof input.name === "string") {
+    fields.push("name = ?");
+    values.push(input.name);
+  }
+
+  if (typeof input.is_active === "boolean") {
+    fields.push("is_active = ?");
+    values.push(input.is_active ? 1 : 0);
+  }
+
+  return withTransaction(async (connection) => {
+    const before = await findItemGroupByIdWithExecutor(connection, companyId, groupId, {
+      forUpdate: true
+    });
+    if (!before) {
+      return null;
+    }
+
+    if (fields.length === 0) {
+      return before;
+    }
+
+    values.push(companyId, groupId);
+
+    try {
+      await connection.execute<ResultSetHeader>(
+        `UPDATE item_groups
+         SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
+         WHERE company_id = ?
+           AND id = ?`,
+        values
+      );
+
+      const itemGroup = await findItemGroupByIdWithExecutor(connection, companyId, groupId);
+      if (!itemGroup) {
+        return null;
+      }
+
+      await recordMasterDataAuditLog(connection, {
+        companyId,
+        outletId: null,
+        actor,
+        action: masterDataAuditActions.itemGroupUpdate,
+        payload: {
+          item_group_id: itemGroup.id,
+          before,
+          after: itemGroup
+        }
+      });
+
+      return itemGroup;
+    } catch (error) {
+      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        throw new DatabaseConflictError("Duplicate item group");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function deleteItemGroup(
+  companyId: number,
+  groupId: number,
+  actor?: MutationAuditActor
+): Promise<boolean> {
+  return withTransaction(async (connection) => {
+    const before = await findItemGroupByIdWithExecutor(connection, companyId, groupId, {
+      forUpdate: true
+    });
+    if (!before) {
+      return false;
+    }
+
+    await connection.execute<ResultSetHeader>(
+      `DELETE FROM item_groups
+       WHERE company_id = ?
+         AND id = ?`,
+      [companyId, groupId]
+    );
+
+    await recordMasterDataAuditLog(connection, {
+      companyId,
+      outletId: null,
+      actor,
+      action: masterDataAuditActions.itemGroupDelete,
+      payload: {
+        item_group_id: before.id,
+        before
+      }
+    });
+
+    return true;
+  });
 }
 
 export async function createItem(
@@ -560,16 +812,28 @@ export async function createItem(
     sku?: string | null;
     name: string;
     type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+    item_group_id?: number | null;
     is_active?: boolean;
   },
   actor?: MutationAuditActor
 ) {
   return withTransaction(async (connection) => {
     try {
+      if (typeof input.item_group_id === "number") {
+        await ensureCompanyItemGroupExists(connection, companyId, input.item_group_id);
+      }
+
       const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, sku, name, item_type, is_active)
-         VALUES (?, ?, ?, ?, ?)`,
-        [companyId, input.sku ?? null, input.name, input.type, input.is_active === false ? 0 : 1]
+        `INSERT INTO items (company_id, sku, name, item_type, item_group_id, is_active)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          companyId,
+          input.sku ?? null,
+          input.name,
+          input.type,
+          input.item_group_id ?? null,
+          input.is_active === false ? 0 : 1
+        ]
       );
 
       const item = await findItemByIdWithExecutor(connection, companyId, Number(result.insertId));
@@ -606,6 +870,7 @@ export async function updateItem(
     sku?: string | null;
     name?: string;
     type?: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+    item_group_id?: number | null;
     is_active?: boolean;
   },
   actor?: MutationAuditActor
@@ -628,6 +893,16 @@ export async function updateItem(
     values.push(input.type);
   }
 
+  if (Object.hasOwn(input, "item_group_id") && input.item_group_id !== undefined) {
+    if (typeof input.item_group_id === "number") {
+      fields.push("item_group_id = ?");
+      values.push(input.item_group_id);
+    } else {
+      fields.push("item_group_id = ?");
+      values.push(null);
+    }
+  }
+
   if (typeof input.is_active === "boolean") {
     fields.push("is_active = ?");
     values.push(input.is_active ? 1 : 0);
@@ -643,6 +918,14 @@ export async function updateItem(
 
     if (fields.length === 0) {
       return before;
+    }
+
+    if (
+      Object.hasOwn(input, "item_group_id") &&
+      input.item_group_id !== undefined &&
+      typeof input.item_group_id === "number"
+    ) {
+      await ensureCompanyItemGroupExists(connection, companyId, input.item_group_id);
     }
 
     values.push(companyId, itemId);
@@ -727,10 +1010,14 @@ export async function listItemPrices(
   const values: Array<number> = [companyId];
 
   let sql =
-    "SELECT id, company_id, outlet_id, item_id, price, is_active, updated_at FROM item_prices WHERE company_id = ?";
+    "SELECT ip.id, ip.company_id, ip.outlet_id, ip.item_id, ip.price, ip.is_active, ip.updated_at, i.item_group_id, ig.name AS item_group_name " +
+    "FROM item_prices ip " +
+    "INNER JOIN items i ON i.id = ip.item_id AND i.company_id = ip.company_id " +
+    "LEFT JOIN item_groups ig ON ig.id = i.item_group_id AND ig.company_id = ip.company_id " +
+    "WHERE ip.company_id = ?";
 
   if (typeof filters?.outletId === "number") {
-    sql += " AND outlet_id = ?";
+    sql += " AND ip.outlet_id = ?";
     values.push(filters.outletId);
   } else if (Array.isArray(filters?.outletIds)) {
     if (filters.outletIds.length === 0) {
@@ -738,12 +1025,12 @@ export async function listItemPrices(
     }
 
     const outletPlaceholders = filters.outletIds.map(() => "?").join(", ");
-    sql += ` AND outlet_id IN (${outletPlaceholders})`;
+    sql += ` AND ip.outlet_id IN (${outletPlaceholders})`;
     values.push(...filters.outletIds);
   }
 
   if (typeof filters?.isActive === "boolean") {
-    sql += " AND is_active = ?";
+    sql += " AND ip.is_active = ?";
     values.push(filters.isActive ? 1 : 0);
   }
 
@@ -1765,14 +2052,16 @@ export async function buildSyncPullPayload(
     return {
       data_version: currentVersion,
       items: [],
+      item_groups: [],
       prices: [],
       config
     };
   }
 
-  const [items, prices] = await Promise.all([
+  const [items, prices, itemGroups] = await Promise.all([
     listItems(companyId, { isActive: true }),
-    listItemPrices(companyId, { outletId, isActive: true })
+    listItemPrices(companyId, { outletId, isActive: true }),
+    listItemGroups(companyId)
   ]);
 
   return {
@@ -1782,8 +2071,16 @@ export async function buildSyncPullPayload(
       sku: item.sku,
       name: item.name,
       type: item.type,
+      item_group_id: item.item_group_id,
       is_active: item.is_active,
       updated_at: item.updated_at
+    })),
+    item_groups: itemGroups.map((group) => ({
+      id: group.id,
+      code: group.code,
+      name: group.name,
+      is_active: group.is_active,
+      updated_at: group.updated_at
     })),
     prices: prices.map((price) => ({
       id: price.id,

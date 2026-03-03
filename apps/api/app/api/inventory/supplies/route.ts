@@ -8,31 +8,7 @@ import {
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { createSupply, DatabaseConflictError, listSupplies } from "../../../../src/lib/master-data";
-import { successResponse } from "../../../../src/lib/response";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Supplies request failed"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Supply conflict"
-  }
-};
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 function parseOptionalIsActive(value: string | null): boolean | undefined {
   if (value == null) {
@@ -59,7 +35,7 @@ export const GET = withAuth(
       if (companyIdRaw != null) {
         const companyId = NumericIdSchema.parse(companyIdRaw);
         if (companyId !== auth.companyId) {
-          return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+          return errorResponse("INVALID_REQUEST", "Invalid request", 400);
         }
       }
 
@@ -69,11 +45,11 @@ export const GET = withAuth(
       return successResponse(supplies);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /api/inventory/supplies failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Supplies request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "read" })]
@@ -96,15 +72,15 @@ export const POST = withAuth(
       return successResponse(supply, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DatabaseConflictError) {
-        return Response.json(CONFLICT_RESPONSE, { status: 409 });
+        return errorResponse("CONFLICT", "Supply conflict", 409);
       }
 
       console.error("POST /api/inventory/supplies failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Supplies request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "create" })]

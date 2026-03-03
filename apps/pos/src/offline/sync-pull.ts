@@ -13,6 +13,15 @@ const SyncPullItemSchema = z.object({
   sku: z.string().nullable(),
   name: z.string().min(1),
   type: z.enum(["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"]),
+  item_group_id: z.number().int().positive().nullable(),
+  is_active: z.boolean(),
+  updated_at: z.string().datetime()
+});
+
+const SyncPullItemGroupSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  code: z.string().nullable(),
+  name: z.string().min(1),
   is_active: z.boolean(),
   updated_at: z.string().datetime()
 });
@@ -37,6 +46,7 @@ const SyncPullConfigSchema = z.object({
 const SyncPullResponseSchema = z.object({
   data_version: z.coerce.number().int().min(0),
   items: z.array(SyncPullItemSchema),
+  item_groups: z.array(SyncPullItemGroupSchema),
   prices: z.array(SyncPullPriceSchema),
   config: SyncPullConfigSchema
 });
@@ -48,13 +58,22 @@ const SyncPullSuccessEnvelopeSchema = z.object({
   data: SyncPullResponseSchema
 });
 
-const SyncPullErrorEnvelopeSchema = z.object({
-  success: z.literal(false),
-  data: z.object({
-    code: z.string(),
-    message: z.string()
+const SyncPullErrorEnvelopeSchema = z.union([
+  z.object({
+    success: z.literal(false),
+    error: z.object({
+      code: z.string(),
+      message: z.string()
+    })
+  }),
+  z.object({
+    success: z.literal(false),
+    data: z.object({
+      code: z.string(),
+      message: z.string()
+    })
   })
-});
+]);
 
 export interface SyncPullIngestInput {
   company_id: number;
@@ -148,7 +167,8 @@ function resolvePullUrl(
 function normalizeServerErrorMessage(status: number, payload: unknown): string {
   const parsedError = SyncPullErrorEnvelopeSchema.safeParse(payload);
   if (parsedError.success) {
-    return `${parsedError.data.data.code}: ${parsedError.data.data.message}`;
+    const errorPayload = "error" in parsedError.data ? parsedError.data.error : parsedError.data.data;
+    return `${errorPayload.code}: ${errorPayload.message}`;
   }
 
   return `sync pull request failed with HTTP ${status}`;
@@ -174,6 +194,7 @@ function mapSyncPullToProductRows(
   pulledAt: string
 ): ProductCacheRow[] {
   const itemsById = new Map(payload.items.map((item) => [item.id, item]));
+  const groupsById = new Map(payload.item_groups.map((group) => [group.id, group]));
   const rows: ProductCacheRow[] = [];
 
   for (const price of payload.prices) {
@@ -186,6 +207,9 @@ function mapSyncPullToProductRows(
       continue;
     }
 
+    const groupId = item.item_group_id ?? null;
+    const group = groupId ? groupsById.get(groupId) : null;
+
     rows.push({
       pk: `${scope.company_id}:${scope.outlet_id}:${item.id}`,
       company_id: scope.company_id,
@@ -194,6 +218,8 @@ function mapSyncPullToProductRows(
       sku: item.sku,
       name: item.name,
       item_type: item.type,
+      item_group_id: groupId,
+      item_group_name: group?.name ?? null,
       price_snapshot: price.price,
       is_active: item.is_active && price.is_active,
       item_updated_at: item.updated_at,
