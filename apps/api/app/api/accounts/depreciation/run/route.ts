@@ -4,7 +4,7 @@
 import { DepreciationRunCreateRequestSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
-import { successResponse } from "../../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
   DatabaseForbiddenError,
   DatabaseReferenceError,
@@ -12,46 +12,6 @@ import {
   DepreciationPlanValidationError,
   runDepreciationPlan
 } from "../../../../../src/lib/depreciation";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const FORBIDDEN_RESPONSE = {
-  success: false,
-  error: {
-    code: "FORBIDDEN",
-    message: "Forbidden"
-  }
-};
-
-const REFERENCE_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REFERENCE",
-    message: "Invalid depreciation reference"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Depreciation run conflict"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Depreciation run failed"
-  }
-};
 
 export const POST = withAuth(
   async (request, auth) => {
@@ -68,27 +28,27 @@ export const POST = withAuth(
       });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DepreciationPlanValidationError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DepreciationPlanStatusError) {
-        return Response.json(CONFLICT_RESPONSE, { status: 409 });
+        return errorResponse("CONFLICT", "Depreciation run conflict", 409);
       }
 
       if (error instanceof DatabaseReferenceError) {
-        return Response.json(REFERENCE_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REFERENCE", "Invalid depreciation reference", 400);
       }
 
       if (error instanceof DatabaseForbiddenError) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       console.error("POST /api/accounts/depreciation/run failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Depreciation run failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "update" })]

@@ -5,32 +5,8 @@ import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getMailer, MailerError } from "../../../../src/lib/mailer";
 import { readClientIp } from "../../../../src/lib/request-meta";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import { getAuditService } from "../../../../src/lib/audit";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const MAILER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "MAILER_ERROR",
-    message: "Failed to send test email"
-  }
-};
-
-const RATE_LIMIT_RESPONSE = {
-  success: false,
-  error: {
-    code: "RATE_LIMIT_EXCEEDED",
-    message: "Too many test emails. Please wait before trying again."
-  }
-};
 
 const testMailSchema = z
   .object({
@@ -75,7 +51,11 @@ export const POST = withAuth(
     try {
       // Rate limit check
       if (!checkRateLimit(auth.userId)) {
-        return Response.json(RATE_LIMIT_RESPONSE, { status: 429 });
+        return errorResponse(
+          "RATE_LIMIT_EXCEEDED",
+          "Too many test emails. Please wait before trying again.",
+          429
+        );
       }
 
       const payload = await request.json();
@@ -113,7 +93,7 @@ export const POST = withAuth(
       return successResponse({ message: "Test email sent successfully" });
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof MailerError) {
@@ -121,20 +101,11 @@ export const POST = withAuth(
           message: error.message,
           cause: error.cause
         });
-        return Response.json(
-          {
-            success: false,
-            error: {
-              code: "MAILER_ERROR",
-              message: error.message
-            }
-          },
-          { status: 500 }
-        );
+        return errorResponse("MAILER_ERROR", error.message, 500);
       }
 
       console.error("POST /api/settings/mailer-test failed", error);
-      return Response.json(MAILER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("MAILER_ERROR", "Failed to send test email", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "update" })]

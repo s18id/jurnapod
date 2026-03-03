@@ -8,7 +8,7 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
-import { successResponse } from "../../../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../../../src/lib/response";
 import {
   createDepreciationPlan,
   DatabaseForbiddenError,
@@ -18,54 +18,6 @@ import {
   getDepreciationPlanForFixedAsset,
   updateDepreciationPlan
 } from "../../../../../../src/lib/depreciation";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Depreciation plan not found"
-  }
-};
-
-const FORBIDDEN_RESPONSE = {
-  success: false,
-  error: {
-    code: "FORBIDDEN",
-    message: "Forbidden"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Depreciation plan conflict"
-  }
-};
-
-const REFERENCE_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REFERENCE",
-    message: "Invalid depreciation reference"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Depreciation plan request failed"
-  }
-};
 
 function parseAssetId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -82,11 +34,11 @@ export const GET = withAuth(
       return successResponse(plan);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /api/accounts/fixed-assets/:id/depreciation-plan failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Depreciation plan request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "read" })]
@@ -100,7 +52,7 @@ export const POST = withAuth(
       const input = DepreciationPlanCreateRequestSchema.parse(payload);
 
       if (input.asset_id !== assetId) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       const plan = await createDepreciationPlan(auth.companyId, input, {
@@ -110,23 +62,23 @@ export const POST = withAuth(
       return successResponse(plan, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DepreciationPlanValidationError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DatabaseReferenceError) {
-        return Response.json(REFERENCE_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REFERENCE", "Invalid depreciation reference", 400);
       }
 
       if (error instanceof DatabaseForbiddenError) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       console.error("POST /api/accounts/fixed-assets/:id/depreciation-plan failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Depreciation plan request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "create" })]
@@ -141,7 +93,7 @@ export const PATCH = withAuth(
       const current = await getDepreciationPlanForFixedAsset(auth.companyId, assetId);
 
       if (!current) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Depreciation plan not found", 404);
       }
 
       const plan = await updateDepreciationPlan(auth.companyId, current.id, input, {
@@ -149,33 +101,33 @@ export const PATCH = withAuth(
       });
 
       if (!plan) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Depreciation plan not found", 404);
       }
 
       return successResponse(plan);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DepreciationPlanValidationError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DepreciationPlanStatusError) {
-        return Response.json(CONFLICT_RESPONSE, { status: 409 });
+        return errorResponse("CONFLICT", "Depreciation plan conflict", 409);
       }
 
       if (error instanceof DatabaseReferenceError) {
-        return Response.json(REFERENCE_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REFERENCE", "Invalid depreciation reference", 400);
       }
 
       if (error instanceof DatabaseForbiddenError) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       console.error("PATCH /api/accounts/fixed-assets/:id/depreciation-plan failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Depreciation plan request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "update" })]

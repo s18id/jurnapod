@@ -5,24 +5,11 @@ import { z } from "zod";
 import type { RowDataPacket } from "mysql2";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getDbPool } from "../../../../src/lib/db";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
   keys: z.string().optional()
 });
-
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      success: false,
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
 
 function parseKeys(rawKeys: string | undefined): string[] {
   if (!rawKeys) {

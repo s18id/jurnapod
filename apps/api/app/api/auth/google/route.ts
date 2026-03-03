@@ -11,7 +11,7 @@ import {
   verifyGoogleIdToken
 } from "../../../../src/lib/google-oauth";
 import { createRefreshTokenCookie, issueRefreshToken } from "../../../../src/lib/refresh-tokens";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 const googleLoginRequestSchema = z
   .object({
@@ -34,38 +34,6 @@ const googleLoginRequestSchema = z
     message: "redirectUri is required",
     path: ["redirectUri"]
   });
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  data: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request body"
-  }
-};
-
-const INVALID_CREDENTIALS_RESPONSE = {
-  success: false,
-  data: {
-    code: "INVALID_CREDENTIALS",
-    message: "Invalid credentials"
-  }
-};
-
-const LINK_CONFLICT_RESPONSE = {
-  success: false,
-  data: {
-    code: "OAUTH_CONFLICT",
-    message: "OAuth account is linked to another user"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  data: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Login failed"
-  }
-};
 
 function readClientIp(request: Request): string | null {
   const forwardedFor = request.headers.get("x-forwarded-for");
@@ -100,19 +68,19 @@ export async function POST(request: Request) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (message.includes("redirect_uri")) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
       }
 
       if (message.includes("not configured")) {
-        return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+        return errorResponse("INTERNAL_SERVER_ERROR", "Login failed", 500);
       }
 
-      return Response.json(INVALID_CREDENTIALS_RESPONSE, { status: 401 });
+      return errorResponse("INVALID_CREDENTIALS", "Invalid credentials", 401);
     }
 
     const user = await findGoogleLoginUser(input.companyCode, profile.email);
     if (!user) {
-      return Response.json(INVALID_CREDENTIALS_RESPONSE, { status: 401 });
+      return errorResponse("INVALID_CREDENTIALS", "Invalid credentials", 401);
     }
 
     const linkResult = await linkGoogleAccount({
@@ -123,7 +91,7 @@ export async function POST(request: Request) {
     });
 
     if ("reason" in linkResult) {
-      return Response.json(LINK_CONFLICT_RESPONSE, { status: 409 });
+      return errorResponse("OAUTH_CONFLICT", "OAuth account is linked to another user", 409);
     }
 
     const tokenResult = await issueAccessTokenForUser({
@@ -156,10 +124,10 @@ export async function POST(request: Request) {
     return response;
   } catch (error) {
     if (error instanceof SyntaxError || error instanceof ZodError) {
-      return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
     console.error("POST /auth/google failed", error);
-    return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+    return errorResponse("INTERNAL_SERVER_ERROR", "Login failed", 500);
   }
 }

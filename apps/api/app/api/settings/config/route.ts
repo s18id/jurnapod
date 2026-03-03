@@ -16,7 +16,7 @@ import { userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
 import { getAuditService } from "../../../../src/lib/audit";
 import { readClientIp } from "../../../../src/lib/request-meta";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive(),
@@ -35,19 +35,6 @@ const SETTINGS_ENV_KEYS: Record<SettingKey, string> = {
   "inventory.costing_method": "JP_INVENTORY_COSTING_METHOD",
   "inventory.warn_on_negative": "JP_INVENTORY_WARN_ON_NEGATIVE"
 };
-
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      success: false,
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
 
 function parseKeys(rawKeys: string): SettingKey[] {
   const keys = rawKeys

@@ -8,7 +8,7 @@ import {
 import { ZodError } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createInvoice,
   DatabaseConflictError,
@@ -16,46 +16,6 @@ import {
   DatabaseReferenceError,
   listInvoices
 } from "../../../../src/lib/sales";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Outlet not found"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Invoice conflict"
-  }
-};
-
-const FORBIDDEN_RESPONSE = {
-  success: false,
-  error: {
-    code: "FORBIDDEN",
-    message: "Forbidden"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Invoices request failed"
-  }
-};
 
 export const GET = withAuth(
   async (request, auth) => {
@@ -75,7 +35,7 @@ export const GET = withAuth(
       if (typeof parsed.outlet_id === "number") {
         const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
         if (!hasAccess) {
-          return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+          return errorResponse("FORBIDDEN", "Forbidden", 403);
         }
         outletIds = [parsed.outlet_id];
       } else {
@@ -98,11 +58,11 @@ export const GET = withAuth(
       });
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /sales/invoices failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Invoices request failed", 500);
     }
   },
   [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
@@ -120,23 +80,23 @@ export const POST = withAuth(
       return successResponse(invoice, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DatabaseForbiddenError) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       if (error instanceof DatabaseReferenceError) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Outlet not found", 404);
       }
 
       if (error instanceof DatabaseConflictError) {
-        return Response.json(CONFLICT_RESPONSE, { status: 409 });
+        return errorResponse("CONFLICT", "Invoice conflict", 409);
       }
 
       console.error("POST /sales/invoices failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Invoices request failed", 500);
     }
   },
   [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]

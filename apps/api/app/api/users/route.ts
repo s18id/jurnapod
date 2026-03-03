@@ -6,7 +6,7 @@ import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
 import { userHasAnyRole } from "../../../src/lib/auth";
 import { readClientIp } from "../../../src/lib/request-meta";
-import { successResponse } from "../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../src/lib/response";
 import {
   createUser,
   listUsers,
@@ -14,46 +14,6 @@ import {
   RoleNotFoundError,
   UserEmailExistsError
 } from "../../../src/lib/users";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const DUPLICATE_EMAIL_RESPONSE = {
-  success: false,
-  error: {
-    code: "DUPLICATE_EMAIL",
-    message: "Email already exists"
-  }
-};
-
-const ROLE_NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "ROLE_NOT_FOUND",
-    message: "Role not found"
-  }
-};
-
-const OUTLET_NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "OUTLET_NOT_FOUND",
-    message: "Outlet not found"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Users request failed"
-  }
-};
 
 const createUserSchema = z
   .object({
@@ -90,7 +50,7 @@ export const GET = withAuth(
       if (companyIdRaw != null) {
         const companyId = NumericIdSchema.parse(companyIdRaw);
         if (companyId !== auth.companyId) {
-          return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+          return errorResponse("INVALID_REQUEST", "Invalid request", 400);
         }
       }
 
@@ -101,11 +61,11 @@ export const GET = withAuth(
       return successResponse(users);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /api/users failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Users request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "users", permission: "read" })]
@@ -121,12 +81,12 @@ export const POST = withAuth(
       if (companyId !== auth.companyId) {
         const isSuperAdmin = await userHasAnyRole(auth.userId, auth.companyId, ["SUPER_ADMIN"]);
         if (!isSuperAdmin) {
-          return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+          return errorResponse("INVALID_REQUEST", "Invalid request", 400);
         }
       }
 
       if (input.role_codes?.includes("SUPER_ADMIN")) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       const user = await createUser({
@@ -145,23 +105,23 @@ export const POST = withAuth(
       return successResponse(user, 201);
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof UserEmailExistsError) {
-        return Response.json(DUPLICATE_EMAIL_RESPONSE, { status: 409 });
+        return errorResponse("DUPLICATE_EMAIL", "Email already exists", 409);
       }
 
       if (error instanceof RoleNotFoundError) {
-        return Response.json(ROLE_NOT_FOUND_RESPONSE, { status: 400 });
+        return errorResponse("ROLE_NOT_FOUND", "Role not found", 400);
       }
 
       if (error instanceof OutletNotFoundError) {
-        return Response.json(OUTLET_NOT_FOUND_RESPONSE, { status: 400 });
+        return errorResponse("OUTLET_NOT_FOUND", "Outlet not found", 400);
       }
 
       console.error("POST /api/users failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Users request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "users", permission: "create" })]

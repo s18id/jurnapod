@@ -4,61 +4,13 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../../../src/lib/auth-guard";
-import { successResponse } from "../../../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../../../src/lib/response";
 import {
   DatabaseForbiddenError,
   PaymentAllocationError,
   PaymentStatusError,
   postPayment
 } from "../../../../../../src/lib/sales";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Payment not found"
-  }
-};
-
-const FORBIDDEN_RESPONSE = {
-  success: false,
-  error: {
-    code: "FORBIDDEN",
-    message: "Forbidden"
-  }
-};
-
-const INVALID_TRANSITION_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_TRANSITION",
-    message: "Payment cannot be posted"
-  }
-};
-
-const ALLOCATION_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "ALLOCATION_ERROR",
-    message: "Payment allocation failed"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Payment post request failed"
-  }
-};
 
 function parsePaymentId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -79,38 +31,29 @@ export const POST = withAuth(
       );
 
       if (!payment) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Payment not found", 404);
       }
 
       return successResponse(payment);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof PaymentStatusError) {
-        return Response.json(INVALID_TRANSITION_RESPONSE, { status: 409 });
+        return errorResponse("INVALID_TRANSITION", "Payment cannot be posted", 409);
       }
 
       if (error instanceof PaymentAllocationError) {
-        return Response.json(
-          {
-            success: false,
-            error: {
-              code: "ALLOCATION_ERROR",
-              message: error.message
-            }
-          },
-          { status: 409 }
-        );
+        return errorResponse("ALLOCATION_ERROR", error.message, 409);
       }
 
       if (error instanceof DatabaseForbiddenError) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       console.error("POST /sales/payments/:id/post failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Payment post request failed", 500);
     }
   },
   [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]

@@ -11,33 +11,9 @@ import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getDbPool } from "../../../../src/lib/db";
 import { getAuditService } from "../../../../src/lib/audit";
 import { readClientIp } from "../../../../src/lib/request-meta";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Tax rate already exists"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Tax rates request failed"
-  }
-};
 
 export const GET = withAuth(
   async (_request, auth) => {
@@ -73,7 +49,7 @@ export const GET = withAuth(
       return successResponse(response.data);
     } catch (error) {
       console.error("GET /settings/tax-rates failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Tax rates request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "read" })]
@@ -132,18 +108,18 @@ export const POST = withAuth(
       return successResponse(taxRateId, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (typeof error === "object" && error && "errno" in error) {
         const errno = (error as { errno?: number }).errno;
         if (errno === MYSQL_DUPLICATE_ERROR_CODE) {
-          return Response.json(CONFLICT_RESPONSE, { status: 409 });
+          return errorResponse("CONFLICT", "Tax rate already exists", 409);
         }
       }
 
       console.error("POST /settings/tax-rates failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Tax rates request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "create" })]

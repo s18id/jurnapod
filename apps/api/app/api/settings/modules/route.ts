@@ -12,20 +12,7 @@ import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getDbPool } from "../../../../src/lib/db";
 import { getAuditService } from "../../../../src/lib/audit";
 import { readClientIp } from "../../../../src/lib/request-meta";
-import { successResponse } from "../../../../src/lib/response";
-
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      success: false,
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 function sortJsonValue(value: unknown): unknown {
   if (Array.isArray(value)) {

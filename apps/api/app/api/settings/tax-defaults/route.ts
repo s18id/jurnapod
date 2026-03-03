@@ -8,39 +8,7 @@ import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getDbPool } from "../../../../src/lib/db";
 import { getAuditService } from "../../../../src/lib/audit";
 import { readClientIp } from "../../../../src/lib/request-meta";
-import { successResponse } from "../../../../src/lib/response";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Tax rate not found"
-  }
-};
-
-const INVALID_CONFIG_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_TAX_DEFAULTS",
-    message: "Default tax rates must share the same inclusive setting"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Tax defaults request failed"
-  }
-};
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 export const GET = withAuth(
   async (_request, auth) => {
@@ -58,7 +26,7 @@ export const GET = withAuth(
       return successResponse(taxRateIds);
     } catch (error) {
       console.error("GET /settings/tax-defaults failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Tax defaults request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "read" })]
@@ -93,14 +61,18 @@ export const PUT = withAuth(
 
       const matchedIds = new Set((rows as Array<{ id?: number }>).map((row) => Number(row.id)));
       if (matchedIds.size !== uniqueIds.length) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Tax rate not found", 404);
       }
 
       const inclusiveValues = new Set(
         (rows as Array<{ is_inclusive?: number }>).map((row) => row.is_inclusive === 1)
       );
       if (inclusiveValues.size > 1) {
-        return Response.json(INVALID_CONFIG_RESPONSE, { status: 400 });
+        return errorResponse(
+          "INVALID_TAX_DEFAULTS",
+          "Default tax rates must share the same inclusive setting",
+          400
+        );
       }
 
       const connection = await pool.getConnection();
@@ -152,11 +124,11 @@ export const PUT = withAuth(
       return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("PUT /settings/tax-defaults failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Tax defaults request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "update" })]

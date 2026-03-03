@@ -5,7 +5,7 @@ import { z } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
 import { listPosTransactions } from "../../../../src/lib/reports";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive().optional(),
@@ -50,7 +50,7 @@ export const GET = withAuth(
       if (typeof parsed.outlet_id === "number") {
         const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
         if (!hasAccess) {
-          return Response.json({ success: false, error: { code: "FORBIDDEN", message: "Forbidden" } }, { status: 403 });
+          return errorResponse("FORBIDDEN", "Forbidden", 403);
         }
         outletIds = [parsed.outlet_id];
       } else {
@@ -85,14 +85,11 @@ export const GET = withAuth(
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return Response.json({ success: false, error: { code: "INVALID_REQUEST", message: "Invalid request" } }, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /reports/pos-transactions failed", error);
-      return Response.json(
-        { success: false, error: { code: "INTERNAL_SERVER_ERROR", message: "POS report failed" } },
-        { status: 500 }
-      );
+      return errorResponse("INTERNAL_SERVER_ERROR", "POS report failed", 500);
     }
   },
   [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]

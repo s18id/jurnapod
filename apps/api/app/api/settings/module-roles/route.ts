@@ -5,23 +5,7 @@ import { ModuleSchema, NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { listModuleRoles } from "../../../../src/lib/users";
-import { successResponse } from "../../../../src/lib/response";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Module roles request failed"
-  }
-};
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 export const GET = withAuth(
   async (request, auth) => {
@@ -41,10 +25,10 @@ export const GET = withAuth(
       return successResponse(moduleRoles);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       console.error("GET /api/settings/module-roles failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Module roles request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN", "OWNER", "ADMIN"], module: "settings", permission: "read" })]

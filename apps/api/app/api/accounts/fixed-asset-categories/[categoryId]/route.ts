@@ -7,45 +7,13 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
-import { successResponse } from "../../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
   DatabaseConflictError,
   deleteFixedAssetCategory,
   findFixedAssetCategoryById,
   updateFixedAssetCategory
 } from "../../../../../src/lib/master-data";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Fixed asset category not found"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Fixed asset category conflict"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Fixed asset category request failed"
-  }
-};
 
 function parseCategoryId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -60,17 +28,17 @@ export const GET = withAuth(
       const category = await findFixedAssetCategoryById(auth.companyId, categoryId);
 
       if (!category) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
       }
 
       return successResponse(category);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /api/accounts/fixed-asset-categories/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Fixed asset category request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "read" })]
@@ -102,21 +70,21 @@ export const PATCH = withAuth(
       );
 
       if (!category) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
       }
 
       return successResponse(category);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DatabaseConflictError) {
-        return Response.json(CONFLICT_RESPONSE, { status: 409 });
+        return errorResponse("CONFLICT", "Fixed asset category conflict", 409);
       }
 
       console.error("PATCH /api/accounts/fixed-asset-categories/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Fixed asset category request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "update" })]
@@ -131,17 +99,17 @@ export const DELETE = withAuth(
       });
 
       if (!removed) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
       }
 
       return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("DELETE /api/accounts/fixed-asset-categories/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Fixed asset category request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "delete" })]

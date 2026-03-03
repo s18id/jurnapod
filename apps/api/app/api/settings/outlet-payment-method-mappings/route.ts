@@ -6,7 +6,7 @@ import type { RowDataPacket } from "mysql2";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive()
@@ -44,19 +44,6 @@ const paymentMethodsSchema = z
 
 function normalizeMethodCode(method: string): string {
   return method.trim().toUpperCase();
-}
-
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      success: false,
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
 }
 
 type PaymentMethodConfig = z.infer<typeof paymentMethodConfigSchema>;

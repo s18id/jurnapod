@@ -9,7 +9,7 @@ import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getRequestCorrelationId } from "../../../../src/lib/correlation-id";
 import { getDbPool } from "../../../../src/lib/db";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   calculateTaxLines,
   listCompanyDefaultTaxRates,
@@ -37,22 +37,6 @@ const TEST_FAIL_AFTER_HEADER_INSERT_HEADER = "x-jp-sync-push-fail-after-header";
 const TEST_FORCE_DB_ERRNO_HEADER = "x-jp-sync-push-force-db-errno";
 const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
 const PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT = 2;
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  data: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  data: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Sync push failed"
-  }
-};
 
 type MysqlError = {
   errno?: number;
@@ -1166,20 +1150,24 @@ export const POST = withAuth(
       return successResponse(response, 200, withCorrelationHeaders(correlationId));
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, {
-          status: 400,
-          headers: withCorrelationHeaders(correlationId)
-        });
+        return errorResponse(
+          "INVALID_REQUEST",
+          "Invalid request",
+          400,
+          withCorrelationHeaders(correlationId)
+        );
       }
 
       console.error("POST /sync/push failed", {
         correlation_id: correlationId,
         error
       });
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, {
-        status: 500,
-        headers: withCorrelationHeaders(correlationId)
-      });
+      return errorResponse(
+        "INTERNAL_SERVER_ERROR",
+        "Sync push failed",
+        500,
+        withCorrelationHeaders(correlationId)
+      );
     }
   },
   [

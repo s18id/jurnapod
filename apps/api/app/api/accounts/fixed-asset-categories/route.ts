@@ -7,36 +7,12 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createFixedAssetCategory,
   DatabaseConflictError,
   listFixedAssetCategories
 } from "../../../../src/lib/master-data";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Fixed asset category request failed"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Fixed asset category conflict"
-  }
-};
 
 function parseOptionalIsActive(value: string | null): boolean | undefined {
   if (value == null) {
@@ -63,7 +39,7 @@ export const GET = withAuth(
       if (companyIdRaw != null) {
         const companyId = NumericIdSchema.parse(companyIdRaw);
         if (companyId !== auth.companyId) {
-          return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+          return errorResponse("INVALID_REQUEST", "Invalid request", 400);
         }
       }
 
@@ -73,11 +49,11 @@ export const GET = withAuth(
       return successResponse(categories);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /api/accounts/fixed-asset-categories failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Fixed asset category request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "read" })]
@@ -108,15 +84,15 @@ export const POST = withAuth(
       return successResponse(category, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof DatabaseConflictError) {
-        return Response.json(CONFLICT_RESPONSE, { status: 409 });
+        return errorResponse("CONFLICT", "Fixed asset category conflict", 409);
       }
 
       console.error("POST /api/accounts/fixed-asset-categories failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Fixed asset category request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "create" })]

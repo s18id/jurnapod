@@ -8,7 +8,7 @@ export type SuccessPayload<T> = {
 
 export type ErrorPayload = {
   success: false;
-  data: {
+  error: {
     code: string;
     message: string;
   };
@@ -24,5 +24,5 @@ export function errorResponse(
   status = 400,
   headers?: HeadersInit
 ): Response {
-  return Response.json({ success: false, data: { code, message } }, { status, headers });
+  return Response.json({ success: false, error: { code, message } }, { status, headers });
 }

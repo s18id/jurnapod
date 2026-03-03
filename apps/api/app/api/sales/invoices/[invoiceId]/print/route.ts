@@ -6,30 +6,7 @@ import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../../../src/lib/auth-guard";
 import { getInvoice } from "../../../../../../src/lib/sales";
 import { generateInvoiceHTML } from "../../../../../../src/lib/invoice-template";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Invoice not found"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Invoice print request failed"
-  }
-};
+import { errorResponse } from "../../../../../../src/lib/response";
 
 function parseInvoiceId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -45,10 +22,7 @@ export const GET = withAuth(
       const invoice = await getInvoice(auth.companyId, invoiceId);
 
       if (!invoice) {
-        return new Response(JSON.stringify(NOT_FOUND_RESPONSE), {
-          status: 404,
-          headers: { "Content-Type": "application/json" }
-        });
+        return errorResponse("NOT_FOUND", "Invoice not found", 404);
       }
 
       const html = generateInvoiceHTML(invoice);
@@ -61,17 +35,11 @@ export const GET = withAuth(
       });
     } catch (error) {
       if (error instanceof ZodError) {
-        return new Response(JSON.stringify(INVALID_REQUEST_RESPONSE), {
-          status: 400,
-          headers: { "Content-Type": "application/json" }
-        });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /sales/invoices/:id/print failed", error);
-      return new Response(JSON.stringify(INTERNAL_SERVER_ERROR_RESPONSE), {
-        status: 500,
-        headers: { "Content-Type": "application/json" }
-      });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Invoice print request failed", 500);
     }
   },
   [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]

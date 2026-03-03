@@ -7,7 +7,7 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireRole, withAuth } from "../../../../../src/lib/auth-guard";
-import { successResponse } from "../../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
   DatabaseConflictError,
   DatabaseForbiddenError,
@@ -16,54 +16,6 @@ import {
   InvoiceStatusError,
   updateInvoice
 } from "../../../../../src/lib/sales";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Invoice not found"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Invoice conflict"
-  }
-};
-
-const FORBIDDEN_RESPONSE = {
-  success: false,
-  error: {
-    code: "FORBIDDEN",
-    message: "Forbidden"
-  }
-};
-
-const INVALID_TRANSITION_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_TRANSITION",
-    message: "Invoice is not editable"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Invoice request failed"
-  }
-};
 
 function parseInvoiceId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -79,17 +31,17 @@ export const GET = withAuth(
       const invoice = await getInvoice(auth.companyId, invoiceId);
 
       if (!invoice) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Invoice not found", 404);
       }
 
       return successResponse(invoice);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /sales/invoices/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Invoice request failed", 500);
     }
   },
   [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
@@ -110,33 +62,33 @@ export const PATCH = withAuth(
       );
 
       if (!invoice) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Invoice not found", 404);
       }
 
       return successResponse(invoice);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof InvoiceStatusError) {
-        return Response.json(INVALID_TRANSITION_RESPONSE, { status: 409 });
+        return errorResponse("INVALID_TRANSITION", "Invoice is not editable", 409);
       }
 
       if (error instanceof DatabaseForbiddenError) {
-        return Response.json(FORBIDDEN_RESPONSE, { status: 403 });
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       if (error instanceof DatabaseReferenceError) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Invoice not found", 404);
       }
 
       if (error instanceof DatabaseConflictError) {
-        return Response.json(CONFLICT_RESPONSE, { status: 409 });
+        return errorResponse("CONFLICT", "Invoice conflict", 409);
       }
 
       console.error("PATCH /sales/invoices/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Invoice request failed", 500);
     }
   },
   [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]

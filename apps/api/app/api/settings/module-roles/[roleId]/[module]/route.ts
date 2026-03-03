@@ -5,23 +5,7 @@ import { NumericIdSchema, ModuleSchema, ModuleRoleUpdateRequestSchema } from "@j
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { listModuleRoles, setModuleRolePermission, ModuleRoleNotFoundError } from "../../../../../../src/lib/users";
-import { successResponse } from "../../../../../../src/lib/response";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Module role permission update failed"
-  }
-};
+import { errorResponse, successResponse } from "../../../../../../src/lib/response";
 
 function parseParams(request: Request): { roleId: number; moduleName: string } {
   const pathname = new URL(request.url).pathname;
@@ -44,24 +28,18 @@ export const GET = withAuth(
         module: moduleName
       });
       if (moduleRoles.length === 0) {
-        return Response.json({
-          success: false,
-          error: { code: "NOT_FOUND", message: "Module role not found" }
-        }, { status: 404 });
+        return errorResponse("NOT_FOUND", "Module role not found", 404);
       }
       return successResponse(moduleRoles[0]);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       if (error instanceof ModuleRoleNotFoundError) {
-        return Response.json({
-          success: false,
-          error: { code: "NOT_FOUND", message: error.message }
-        }, { status: 404 });
+        return errorResponse("NOT_FOUND", error.message, 404);
       }
       console.error("GET /api/settings/module-roles/:roleId/:module failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Module role permission update failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN", "OWNER", "ADMIN"], module: "settings", permission: "read" })]
@@ -84,10 +62,10 @@ export const PUT = withAuth(
       return successResponse(moduleRole);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       console.error("PUT /api/settings/module-roles/:roleId/:module failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Module role permission update failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "update" })]

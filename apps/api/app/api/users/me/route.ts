@@ -3,15 +3,7 @@
 
 import { findActiveUserById } from "../../../../src/lib/auth";
 import { unauthorizedResponse, withAuth } from "../../../../src/lib/auth-guard";
-import { successResponse } from "../../../../src/lib/response";
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Failed to load current user"
-  }
-};
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 export const GET = withAuth(
   async (_request, auth) => {
@@ -24,7 +16,7 @@ export const GET = withAuth(
       return successResponse(user);
     } catch (error) {
       console.error("GET /api/users/me failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load current user", 500);
     }
   }
 );

@@ -4,45 +4,13 @@
 import { z, ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../src/lib/request-meta";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createStaticPage,
   listStaticPages,
   StaticPageSlugExistsError,
   StaticPageSlugInvalidError
 } from "../../../../src/lib/static-pages-admin";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const DUPLICATE_SLUG_RESPONSE = {
-  success: false,
-  error: {
-    code: "DUPLICATE_SLUG",
-    message: "Slug already exists"
-  }
-};
-
-const INVALID_SLUG_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_SLUG",
-    message: "Slug is invalid"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Static pages request failed"
-  }
-};
 
 const statusSchema = z.enum(["DRAFT", "PUBLISHED"]);
 
@@ -65,7 +33,7 @@ export const GET = withAuth(
       return successResponse(pages);
     } catch (error) {
       console.error("GET /api/settings/pages failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Static pages request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "read" })]
@@ -92,19 +60,19 @@ export const POST = withAuth(
       return successResponse(page, 201);
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof StaticPageSlugInvalidError) {
-        return Response.json(INVALID_SLUG_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_SLUG", "Slug is invalid", 400);
       }
 
       if (error instanceof StaticPageSlugExistsError) {
-        return Response.json(DUPLICATE_SLUG_RESPONSE, { status: 409 });
+        return errorResponse("DUPLICATE_SLUG", "Slug already exists", 409);
       }
 
       console.error("POST /api/settings/pages failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Static pages request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "create" })]

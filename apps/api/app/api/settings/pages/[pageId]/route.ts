@@ -5,7 +5,7 @@ import { NumericIdSchema } from "@jurnapod/shared";
 import { z, ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../../src/lib/request-meta";
-import { successResponse } from "../../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
   getStaticPageDetail,
   StaticPageNotFoundError,
@@ -13,46 +13,6 @@ import {
   StaticPageSlugInvalidError,
   updateStaticPage
 } from "../../../../../src/lib/static-pages-admin";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Static page not found"
-  }
-};
-
-const DUPLICATE_SLUG_RESPONSE = {
-  success: false,
-  error: {
-    code: "DUPLICATE_SLUG",
-    message: "Slug already exists"
-  }
-};
-
-const INVALID_SLUG_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_SLUG",
-    message: "Slug is invalid"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Static page request failed"
-  }
-};
 
 const updatePageSchema = z
   .object({
@@ -79,7 +39,7 @@ export const PATCH = withAuth(
       const hasPayload = Object.keys(input).length > 0;
 
       if (!hasPayload) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       const metaJsonProvided = Object.prototype.hasOwnProperty.call(payload, "meta_json");
@@ -100,23 +60,23 @@ export const PATCH = withAuth(
       return successResponse(page);
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof StaticPageNotFoundError) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Static page not found", 404);
       }
 
       if (error instanceof StaticPageSlugInvalidError) {
-        return Response.json(INVALID_SLUG_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_SLUG", "Slug is invalid", 400);
       }
 
       if (error instanceof StaticPageSlugExistsError) {
-        return Response.json(DUPLICATE_SLUG_RESPONSE, { status: 409 });
+        return errorResponse("DUPLICATE_SLUG", "Slug already exists", 409);
       }
 
       console.error("PATCH /api/settings/pages/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Static page request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "update" })]
@@ -128,17 +88,17 @@ export const GET = withAuth(
       const pageId = parsePageId(request);
       const page = await getStaticPageDetail(pageId);
       if (!page) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Static page not found", 404);
       }
 
       return successResponse(page);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /api/settings/pages/:id failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Static page request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "read" })]

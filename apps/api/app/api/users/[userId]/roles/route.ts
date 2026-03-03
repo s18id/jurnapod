@@ -5,45 +5,13 @@ import { NumericIdSchema, RoleSchema } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../../src/lib/request-meta";
-import { successResponse } from "../../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
   findUserById,
   RoleNotFoundError,
   setUserRoles,
   UserNotFoundError
 } from "../../../../../src/lib/users";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "User not found"
-  }
-};
-
-const ROLE_NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "ROLE_NOT_FOUND",
-    message: "Role not found"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "User roles update failed"
-  }
-};
 
 const updateRolesSchema = z
   .object({
@@ -69,10 +37,10 @@ export const POST = withAuth(
       if (input.roleCodes.includes("SUPER_ADMIN")) {
         const existing = await findUserById(auth.companyId, userId);
         if (!existing) {
-          return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+          return errorResponse("NOT_FOUND", "User not found", 404);
         }
         if (!existing.roles.includes("SUPER_ADMIN")) {
-          return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+          return errorResponse("INVALID_REQUEST", "Invalid request", 400);
         }
       }
       const user = await setUserRoles({
@@ -88,19 +56,19 @@ export const POST = withAuth(
       return successResponse(user);
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof UserNotFoundError) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "User not found", 404);
       }
 
       if (error instanceof RoleNotFoundError) {
-        return Response.json(ROLE_NOT_FOUND_RESPONSE, { status: 400 });
+        return errorResponse("ROLE_NOT_FOUND", "Role not found", 400);
       }
 
       console.error("POST /api/users/:userId/roles failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "User roles update failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "users", permission: "update" })]

@@ -8,41 +8,9 @@ import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { getDbPool } from "../../../../../src/lib/db";
 import { getAuditService } from "../../../../../src/lib/audit";
 import { readClientIp } from "../../../../../src/lib/request-meta";
-import { successResponse } from "../../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../../src/lib/response";
 
 const idSchema = z.coerce.number().int().positive();
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Tax rate not found"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Tax rate request failed"
-  }
-};
-
-const CONFLICT_RESPONSE = {
-  success: false,
-  error: {
-    code: "CONFLICT",
-    message: "Tax rate conflict"
-  }
-};
 
 async function findTaxRate(companyId: number, taxRateId: number) {
   const pool = getDbPool();
@@ -67,7 +35,7 @@ export const PUT = withAuth(
 
       const current = await findTaxRate(auth.companyId, taxRateId);
       if (!current) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Tax rate not found", 404);
       }
 
       const pool = getDbPool();
@@ -94,7 +62,7 @@ export const PUT = withAuth(
       );
 
       if (result.affectedRows === 0) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Tax rate not found", 404);
       }
 
       const auditService = getAuditService();
@@ -126,18 +94,18 @@ export const PUT = withAuth(
       return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (typeof error === "object" && error && "errno" in error) {
         const errno = (error as { errno?: number }).errno;
         if (errno === 1062) {
-          return Response.json(CONFLICT_RESPONSE, { status: 409 });
+          return errorResponse("CONFLICT", "Tax rate conflict", 409);
         }
       }
 
       console.error("PUT /settings/tax-rates/[taxRateId] failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Tax rate request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "update" })]
@@ -150,7 +118,7 @@ export const DELETE = withAuth(
       const taxRateId = idSchema.parse(url.pathname.split("/").pop());
       const current = await findTaxRate(auth.companyId, taxRateId);
       if (!current) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Tax rate not found", 404);
       }
 
       const pool = getDbPool();
@@ -164,7 +132,7 @@ export const DELETE = withAuth(
       );
 
       if (result.affectedRows === 0) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Tax rate not found", 404);
       }
 
       const auditService = getAuditService();
@@ -186,11 +154,11 @@ export const DELETE = withAuth(
       return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("DELETE /settings/tax-rates/[taxRateId] failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Tax rate request failed", 500);
     }
   },
   [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "delete" })]

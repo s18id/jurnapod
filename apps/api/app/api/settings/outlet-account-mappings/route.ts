@@ -6,7 +6,7 @@ import type { RowDataPacket } from "mysql2";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 const mappingKeys = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
 const mappingKeySchema = z.enum(mappingKeys);
@@ -24,19 +24,6 @@ const bodySchema = z.object({
     })
   )
 });
-
-function errorResponse(code: string, message: string, status: number) {
-  return Response.json(
-    {
-      success: false,
-      error: {
-        code,
-        message
-      }
-    },
-    { status }
-  );
-}
 
 export const GET = withAuth(
   async (request, auth) => {

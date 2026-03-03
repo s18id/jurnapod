@@ -5,35 +5,11 @@ import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../../../src/lib/request-meta";
-import { successResponse } from "../../../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../../../src/lib/response";
 import {
   publishStaticPage,
   StaticPageNotFoundError
 } from "../../../../../../src/lib/static-pages-admin";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const NOT_FOUND_RESPONSE = {
-  success: false,
-  error: {
-    code: "NOT_FOUND",
-    message: "Static page not found"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Static page request failed"
-  }
-};
 
 function parsePageId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -58,15 +34,15 @@ export const POST = withAuth(
       return successResponse(page);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       if (error instanceof StaticPageNotFoundError) {
-        return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        return errorResponse("NOT_FOUND", "Static page not found", 404);
       }
 
       console.error("POST /api/settings/pages/:id/publish failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Static page request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "update" })]

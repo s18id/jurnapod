@@ -13,31 +13,7 @@ import {
 } from "../../../../src/lib/auth-throttle";
 import { getAppEnv } from "../../../../src/lib/env";
 import { createRefreshTokenCookie, issueRefreshToken } from "../../../../src/lib/refresh-tokens";
-import { successResponse } from "../../../../src/lib/response";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  data: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request body"
-  }
-};
-
-const INVALID_CREDENTIALS_RESPONSE = {
-  success: false,
-  data: {
-    code: "INVALID_CREDENTIALS",
-    message: "Invalid credentials"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  data: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Login failed"
-  }
-};
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 function readClientIp(request: Request): string | null {
   const forwardedFor = request.headers.get("x-forwarded-for");
@@ -121,10 +97,10 @@ export async function POST(request: Request) {
       });
 
       if (!auditWritten) {
-        return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+        return errorResponse("INTERNAL_SERVER_ERROR", "Login failed", 500);
       }
 
-      return Response.json(INVALID_CREDENTIALS_RESPONSE, { status: 401 });
+      return errorResponse("INVALID_CREDENTIALS", "Invalid credentials", 401);
     }
 
     try {
@@ -145,7 +121,7 @@ export async function POST(request: Request) {
     });
 
     if (!auditWritten) {
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Login failed", 500);
     }
 
     const refreshToken = await issueRefreshToken({
@@ -184,10 +160,10 @@ export async function POST(request: Request) {
       });
 
       if (!auditWritten) {
-        return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+        return errorResponse("INTERNAL_SERVER_ERROR", "Login failed", 500);
       }
 
-      return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
     await writeLoginAuditRequired({
@@ -202,6 +178,6 @@ export async function POST(request: Request) {
     });
 
     console.error("POST /auth/login failed", error);
-    return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+    return errorResponse("INTERNAL_SERVER_ERROR", "Login failed", 500);
   }
 }

@@ -13,32 +13,8 @@ import {
   validateMailerDependencies
 } from "../../../../src/lib/platform-settings-schemas";
 import { readClientIp } from "../../../../src/lib/request-meta";
-import { successResponse } from "../../../../src/lib/response";
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 import { getAuditService } from "../../../../src/lib/audit";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  error: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const VALIDATION_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "VALIDATION_ERROR",
-    message: "Settings validation failed"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  error: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Platform settings request failed"
-  }
-};
 
 /**
  * GET /api/platform/settings
@@ -77,7 +53,7 @@ export const GET = withAuth(
       return successResponse({ settings: merged, metadata });
     } catch (error) {
       console.error("GET /api/platform/settings failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Platform settings request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "read" })]
@@ -96,16 +72,7 @@ export const PUT = withAuth(
       // Validate mailer dependencies
       const validationError = validateMailerDependencies(input.settings);
       if (validationError) {
-        return Response.json(
-          {
-            success: false,
-            error: {
-              code: "VALIDATION_ERROR",
-              message: validationError
-            }
-          },
-          { status: 400 }
-        );
+        return errorResponse("VALIDATION_ERROR", validationError, 400);
       }
 
       // Get current settings for audit log
@@ -141,11 +108,11 @@ export const PUT = withAuth(
       return successResponse({ settings: updated });
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("PUT /api/platform/settings failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Platform settings request failed", 500);
     }
   },
   [requireAccess({ roles: ["SUPER_ADMIN"], module: "settings", permission: "update" })]

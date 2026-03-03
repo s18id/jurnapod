@@ -9,23 +9,7 @@ import {
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { buildSyncPullPayload } from "../../../../src/lib/master-data";
-import { successResponse } from "../../../../src/lib/response";
-
-const INVALID_REQUEST_RESPONSE = {
-  success: false,
-  data: {
-    code: "INVALID_REQUEST",
-    message: "Invalid request"
-  }
-};
-
-const INTERNAL_SERVER_ERROR_RESPONSE = {
-  success: false,
-  data: {
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Sync pull failed"
-  }
-};
+import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 function parseOutletIdForGuard(request: Request): number {
   const outletIdRaw = new URL(request.url).searchParams.get("outlet_id");
@@ -47,11 +31,11 @@ export const GET = withAuth(
       return successResponse(response);
     } catch (error) {
       if (error instanceof ZodError) {
-        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
       console.error("GET /sync/pull failed", error);
-      return Response.json(INTERNAL_SERVER_ERROR_RESPONSE, { status: 500 });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Sync pull failed", 500);
     }
   },
   [

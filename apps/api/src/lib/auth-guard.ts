@@ -10,7 +10,7 @@ const BEARER_TOKEN_PATTERN = /^Bearer\s+(\S+)$/i;
 
 const unauthorizedResponseBody = {
   success: false,
-  data: {
+  error: {
     code: "UNAUTHORIZED",
     message: "Missing or invalid access token"
   }
@@ -18,7 +18,7 @@ const unauthorizedResponseBody = {
 
 const forbiddenResponseBody = {
   success: false,
-  data: {
+  error: {
     code: "FORBIDDEN",
     message: "Forbidden"
   }
@@ -26,7 +26,7 @@ const forbiddenResponseBody = {
 
 const invalidRequestResponseBody = {
   success: false,
-  data: {
+  error: {
     code: "INVALID_REQUEST",
     message: "Invalid request"
   }
