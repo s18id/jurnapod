@@ -12,7 +12,8 @@ import {
   Stack,
   Text,
   TextInput,
-  Title
+  Title,
+  Anchor
 } from "@mantine/core";
 
 type LoginPageProps = {
@@ -103,6 +104,12 @@ export function LoginPage(props: LoginPageProps) {
               autoComplete="current-password"
               required
             />
+
+            <Group justify="flex-end">
+              <Anchor component="a" href="#/forgot-password" size="sm">
+                Forgot password?
+              </Anchor>
+            </Group>
 
             <Button type="submit" loading={props.isLoading} fullWidth>
               {props.isLoading ? "Signing in..." : "Sign In"}

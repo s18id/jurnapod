@@ -60,6 +60,7 @@ import { PWASettingsPage } from "../features/pwa-settings-page";
 import { ResetPasswordPage } from "../features/reset-password-page";
 import { InvitePage } from "../features/invite-page";
 import { VerifyEmailPage } from "../features/verify-email-page";
+import { ForgotPasswordPage } from "../features/forgot-password-page";
 
 type SessionStatus = "loading" | "anonymous" | "authenticated";
 
@@ -386,6 +387,10 @@ export function AppRouter() {
 
   if (activePath === "/reset-password" && token) {
     return <ResetPasswordPage token={token} />;
+  }
+
+  if (activePath === "/forgot-password") {
+    return <ForgotPasswordPage />;
   }
 
   if (activePath === "/invite" && token) {
