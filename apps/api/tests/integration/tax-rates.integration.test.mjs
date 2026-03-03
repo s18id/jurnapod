@@ -250,7 +250,7 @@ test(
       const listBody = await listResponse.json();
       assert.equal(listBody.success, true);
       const createdRate = listBody.data.find((rate) => rate.code === rateCode);
-      assert.success(createdRate);
+      assert.ok(createdRate);
 
       const defaultsResponse = await fetch(`${baseUrl}/api/settings/tax-defaults`, {
         method: "PUT",

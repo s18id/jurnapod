@@ -242,7 +242,7 @@ test(
       const listBody = await listResponse.json();
       assert.equal(listBody.success, true);
       const posModule = listBody.data.find((mod) => mod.code === moduleCode);
-      assert.success(posModule);
+      assert.ok(posModule);
       assert.equal(posModule.enabled, true);
       const config = JSON.parse(posModule.config_json);
       assert.deepEqual(config.payment_methods, ["CASH", "QRIS"]);

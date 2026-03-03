@@ -757,7 +757,7 @@ async function recordSyncPushPostingHookFailure(
           client_tx_id: context.clientTxId,
           posting_mode: mode,
           journal_batch_id: null,
-          balance_success: false,
+          balance_ok: false,
           reason: message
         })
       ]

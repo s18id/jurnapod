@@ -1825,8 +1825,8 @@ test(
       ];
       const okItem = conflictItems.find((item) => item?.result === "OK");
       const errorItem = conflictItems.find((item) => item?.result === "ERROR");
-      assert.success(okItem);
-      assert.success(errorItem);
+      assert.ok(okItem);
+      assert.ok(errorItem);
       assert.equal(errorItem.message, IDEMPOTENCY_CONFLICT_MESSAGE);
       createdClientTxIds.push(conflictClientTxId);
 
@@ -2353,8 +2353,8 @@ test(
       ];
       const concurrentConflictOk = concurrentConflictResults.find((item) => item?.result === "OK");
       const concurrentConflictError = concurrentConflictResults.find((item) => item?.result === "ERROR");
-      assert.success(concurrentConflictOk);
-      assert.success(concurrentConflictError);
+      assert.ok(concurrentConflictOk);
+      assert.ok(concurrentConflictError);
       assert.equal(concurrentConflictError.message, IDEMPOTENCY_CONFLICT_MESSAGE);
       createdClientTxIds.push(concurrentConflictClientTxId);
 

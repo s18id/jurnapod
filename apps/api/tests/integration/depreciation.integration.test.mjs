@@ -146,6 +146,107 @@ async function authenticate(port, companyCode, email, password) {
   return json.data.access_token;
 }
 
+async function listAccounts(baseUrl, accessToken, companyId, t) {
+  const response = await fetch(`${baseUrl}/api/accounts?company_id=${companyId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    data = null;
+  }
+
+  if (!response.ok) {
+    if (t) {
+      t.diagnostic(
+        `Failed to list accounts. Status: ${response.status}, Response: ${JSON.stringify(data)}`
+      );
+    }
+    throw new Error("Failed to list accounts");
+  }
+
+  if (!data || !Array.isArray(data.data)) {
+    if (t) {
+      t.diagnostic(`Unexpected accounts response: ${JSON.stringify(data)}`);
+    }
+    throw new Error("Invalid accounts response");
+  }
+
+  return data.data;
+}
+
+async function createAccount(baseUrl, accessToken, payload, t) {
+  const response = await fetch(`${baseUrl}/api/accounts`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    data = null;
+  }
+
+  if (!response.ok) {
+    if (t) {
+      t.diagnostic(
+        `Failed to create account. Status: ${response.status}, Response: ${JSON.stringify(data)}`
+      );
+    }
+    throw new Error("Failed to create account");
+  }
+
+  return data?.data ?? null;
+}
+
+async function ensureDepreciationAccounts(baseUrl, accessToken, companyId, t) {
+  let accounts = await listAccounts(baseUrl, accessToken, companyId, t);
+
+  if (accounts.length < 2) {
+    const suffix = randomUUID().slice(0, 8).toUpperCase();
+    await createAccount(
+      baseUrl,
+      accessToken,
+      {
+        company_id: companyId,
+        code: `DEP_EXP_${suffix}`,
+        name: "Depreciation Expense"
+      },
+      t
+    );
+    await createAccount(
+      baseUrl,
+      accessToken,
+      {
+        company_id: companyId,
+        code: `ACC_DEP_${suffix}`,
+        name: "Accumulated Depreciation"
+      },
+      t
+    );
+    accounts = await listAccounts(baseUrl, accessToken, companyId, t);
+  }
+
+  if (accounts.length < 2) {
+    if (t) {
+      t.diagnostic(`Insufficient accounts found: ${accounts.length}`);
+    }
+    throw new Error("Not enough accounts for depreciation plan");
+  }
+
+  return {
+    expenseAccountId: accounts[0].id,
+    accumAccountId: accounts[1].id
+  };
+}
+
 test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   if (typeof loadEnvFile === "function") {
     try {
@@ -213,14 +314,12 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const assetId = assetData.data.id;
 
       // Get accounts for depreciation
-      const accountsResponse = await fetch(`${baseUrl}/api/accounts?company_id=${companyId}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      const accountsData = await accountsResponse.json();
-      
-      // Find expense and accumulated depreciation accounts (or use first two)
-      const expenseAccount = accountsData.data[0]?.id ?? 1;
-      const accumAccount = accountsData.data[1]?.id ?? 2;
+      const { expenseAccountId, accumAccountId } = await ensureDepreciationAccounts(
+        baseUrl,
+        accessToken,
+        companyId,
+        t
+      );
 
       // Create depreciation plan
       const createPlanResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${assetId}/depreciation-plan`, {
@@ -234,8 +333,8 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
           method: "STRAIGHT_LINE",
           useful_life_months: 60,
           salvage_value: 0,
-          expense_account_id: expenseAccount,
-          accum_depr_account_id: accumAccount,
+          expense_account_id: expenseAccountId,
+          accum_depr_account_id: accumAccountId,
           status: "ACTIVE"
         })
       });
@@ -272,12 +371,12 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const assetData = await createAssetResponse.json();
       const assetId = assetData.data.id;
 
-      const accountsResponse = await fetch(`${baseUrl}/api/accounts?company_id=${companyId}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      const accountsData = await accountsResponse.json();
-      const expenseAccount = accountsData.data[0]?.id ?? 1;
-      const accumAccount = accountsData.data[1]?.id ?? 2;
+      const { expenseAccountId, accumAccountId } = await ensureDepreciationAccounts(
+        baseUrl,
+        accessToken,
+        companyId,
+        t
+      );
 
       const createPlanResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${assetId}/depreciation-plan`, {
         method: "POST",
@@ -290,8 +389,8 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
           method: "STRAIGHT_LINE",
           useful_life_months: 60,
           salvage_value: 0,
-          expense_account_id: expenseAccount,
-          accum_depr_account_id: accumAccount,
+          expense_account_id: expenseAccountId,
+          accum_depr_account_id: accumAccountId,
           status: "ACTIVE"
         })
       });
@@ -369,12 +468,12 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const assetData = await createAssetResponse.json();
       const assetId = assetData.data.id;
 
-      const accountsResponse = await fetch(`${baseUrl}/api/accounts?company_id=${companyId}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      const accountsData = await accountsResponse.json();
-      const expenseAccount = accountsData.data[0]?.id ?? 1;
-      const accumAccount = accountsData.data[1]?.id ?? 2;
+      const { expenseAccountId, accumAccountId } = await ensureDepreciationAccounts(
+        baseUrl,
+        accessToken,
+        companyId,
+        t
+      );
 
       const createPlanResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${assetId}/depreciation-plan`, {
         method: "POST",
@@ -387,8 +486,8 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
           method: "STRAIGHT_LINE",
           useful_life_months: 60,
           salvage_value: 0,
-          expense_account_id: expenseAccount,
-          accum_depr_account_id: accumAccount,
+          expense_account_id: expenseAccountId,
+          accum_depr_account_id: accumAccountId,
           status: "ACTIVE"
         })
       });
@@ -470,12 +569,12 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
       const assetData = await createAssetResponse.json();
       const assetId = assetData.data.id;
 
-      const accountsResponse = await fetch(`${baseUrl}/api/accounts?company_id=${companyId}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      const accountsData = await accountsResponse.json();
-      const expenseAccount = accountsData.data[0]?.id ?? 1;
-      const accumAccount = accountsData.data[1]?.id ?? 2;
+      const { expenseAccountId, accumAccountId } = await ensureDepreciationAccounts(
+        baseUrl,
+        accessToken,
+        companyId,
+        t
+      );
 
       const createPlanResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${assetId}/depreciation-plan`, {
         method: "POST",
@@ -488,8 +587,8 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
           method: "STRAIGHT_LINE",
           useful_life_months: 60,
           salvage_value: 0,
-          expense_account_id: expenseAccount,
-          accum_depr_account_id: accumAccount,
+          expense_account_id: expenseAccountId,
+          accum_depr_account_id: accumAccountId,
           status: "ACTIVE"
         })
       });

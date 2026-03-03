@@ -165,33 +165,11 @@ test(
     let createdPageId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
-    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
-    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
-    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const superAdminEmail = readEnv("JP_SUPER_ADMIN_EMAIL").toLowerCase();
+    const superAdminPassword = readEnv("JP_SUPER_ADMIN_PASSWORD");
     const runId = Date.now().toString(36);
 
     try {
-      const [ownerRows] = await db.execute(
-        `SELECT u.company_id, o.id AS outlet_id
-         FROM users u
-         INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
-           AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
-      const owner = ownerRows[0];
-
-      if (!owner) {
-        throw new Error(
-          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
-        );
-      }
-
       const port = await getFreePort();
       const baseUrl = `http://127.0.0.1:${port}`;
       const server = startApiServer(port);
@@ -205,8 +183,8 @@ test(
         },
         body: JSON.stringify({
           companyCode,
-          email: ownerEmail,
-          password: ownerPassword
+          email: superAdminEmail,
+          password: superAdminPassword
         })
       });
       assert.equal(loginResponse.status, 200);
@@ -248,7 +226,7 @@ test(
       const createBody = await createResponse.json();
       assert.equal(createBody.success, true);
       createdPageId = Number(createBody.data.id);
-      assert.success(createdPageId > 0);
+      assert.ok(createdPageId > 0);
 
       const listResponse = await fetch(`${baseUrl}/api/settings/pages?q=${encodeURIComponent(runId)}`, {
         headers: {
