@@ -45,6 +45,7 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
     paths: [
       "/account-types",
       "/chart-of-accounts",
+      "/fiscal-years",
       "/account-mappings",
       "/transaction-templates",
       "/transactions"
