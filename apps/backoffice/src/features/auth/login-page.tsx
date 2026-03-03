@@ -80,6 +80,7 @@ export function LoginPage(props: LoginPageProps) {
               value={companyCode}
               onChange={(event) => setCompanyCode(event.target.value)}
               data-testid="login-company-code"
+              name="company_code"
               autoComplete="organization"
               required
             />
