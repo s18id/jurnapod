@@ -125,6 +125,10 @@ export const POST = withAuth(
         }
       }
 
+      if (input.role_codes?.includes("SUPER_ADMIN")) {
+        return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+      }
+
       const user = await createUser({
         companyId,
         email: input.email,

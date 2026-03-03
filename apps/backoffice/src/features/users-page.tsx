@@ -180,9 +180,7 @@ export function UsersPage(props: UsersPageProps) {
     ? (formData.company_id ?? user.company_id)
     : user.company_id;
   const outletsQuery = useOutlets(outletCompanyId, accessToken);
-  const availableRoles = (rolesQuery.data || []).filter((role) =>
-    isSuperAdmin ? true : role.code !== "SUPER_ADMIN"
-  );
+  const availableRoles = (rolesQuery.data || []).filter((role) => role.code !== "SUPER_ADMIN");
   
   // Filtered users
   const filteredUsers = useMemo(() => {

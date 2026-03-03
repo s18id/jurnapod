@@ -6,7 +6,12 @@ import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../../src/lib/request-meta";
 import { successResponse } from "../../../../../src/lib/response";
-import { RoleNotFoundError, setUserRoles, UserNotFoundError } from "../../../../../src/lib/users";
+import {
+  findUserById,
+  RoleNotFoundError,
+  setUserRoles,
+  UserNotFoundError
+} from "../../../../../src/lib/users";
 
 const INVALID_REQUEST_RESPONSE = {
   success: false,
@@ -61,6 +66,15 @@ export const POST = withAuth(
       const userId = parseUserId(request);
       const payload = await request.json();
       const input = updateRolesSchema.parse(payload);
+      if (input.roleCodes.includes("SUPER_ADMIN")) {
+        const existing = await findUserById(auth.companyId, userId);
+        if (!existing) {
+          return Response.json(NOT_FOUND_RESPONSE, { status: 404 });
+        }
+        if (!existing.roles.includes("SUPER_ADMIN")) {
+          return Response.json(INVALID_REQUEST_RESPONSE, { status: 400 });
+        }
+      }
       const user = await setUserRoles({
         companyId: auth.companyId,
         userId,
