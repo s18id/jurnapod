@@ -45,16 +45,18 @@ CREATE INDEX idx_outlet_payment_invoice_default
 **Example Response:**
 ```json
 {
-  "ok": true,
-  "outlet_id": 1,
-  "mappings": [
-    {
-      "method_code": "CASH",
-      "account_id": 160,
-      "label": "Cash",
-      "is_invoice_default": true
-    }
-  ]
+  "success": true,
+  "data": {
+    "outlet_id": 1,
+    "mappings": [
+      {
+        "method_code": "CASH",
+        "account_id": 160,
+        "label": "Cash",
+        "is_invoice_default": true
+      }
+    ]
+  }
 }
 ```
 

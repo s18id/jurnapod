@@ -555,6 +555,7 @@ async function createJournalEntry(req, res) {
   for (const validation of validations) {
     if (!validation.check) {
       return res.status(400).json({
+        success: false,
         error: {
           code: 'VALIDATION_ERROR',
           message: validation.error
@@ -567,6 +568,7 @@ async function createJournalEntry(req, res) {
   const conflicts = await checkConflicts(lines);
   if (conflicts.length > 0) {
     return res.status(409).json({
+      success: false,
       error: {
         code: 'CONFLICT',
         message: 'Data changed while offline',
@@ -1577,13 +1579,22 @@ function MasterDataList({ data, lastSync }) {
          body: JSON.stringify(item.payload)
        });
 
-       if (response.success) {
-         return { success: true };
-       } else if (response.status === 409) {
-         return { success: false, conflict: true, error: await response.text() };
-       } else {
-         return { success: false, conflict: false, error: await response.text() };
-       }
+        const payload = await response.json();
+        if (response.ok && payload.success) {
+          return { success: true, data: payload.data };
+        }
+        if (response.status === 409) {
+          return {
+            success: false,
+            conflict: true,
+            error: payload.error?.message ?? await response.text()
+          };
+        }
+        return {
+          success: false,
+          conflict: false,
+          error: payload.error?.message ?? await response.text()
+        };
      }
    }
    ```

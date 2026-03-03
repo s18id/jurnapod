@@ -9,13 +9,14 @@ Standardize all API responses to a consistent `{ success: true, data: ... }` env
 - Use a shared helper for responses to avoid redeclaring envelopes.
 - Keep success envelope `{ success: true, data: ... }`, use HTTP status codes normally (201 for created), and return `{ success: true, data: null }` for empty success.
 - Continue auditing all API routes; add todo list items per module and update clients/tests accordingly.
+- Run `npm run lint:docs:responses` to validate response envelopes in docs.
 
 ## Discoveries
 
-- Users API originally returned `{ ok: true, users/user }`; backoffice expected `{ success: true, data }` causing list not to render.
+- Users API originally returned a non-standard envelope; backoffice expected `{ success: true, data }` causing list not to render.
 - Response helper added at `apps/api/src/lib/response.ts`.
-- Existing shared schemas used `ok: true` in `packages/shared/src/schemas/*` and were updated to success/data in: `feature-flags.ts`, `modules.ts`, `settings.ts`, `taxes.ts`, `master-data.ts`, `pos-sync.ts`.
-- Sync pull/push and POS offline clients expected `ok` and raw payload; updated to new envelope.
+- Existing shared schemas used a non-standard envelope and were updated to success/data in: `feature-flags.ts`, `modules.ts`, `settings.ts`, `taxes.ts`, `master-data.ts`, `pos-sync.ts`.
+- Sync pull/push and POS offline clients expected legacy envelopes and raw payload; updated to new envelope.
 - Several tests/scripts used `response.success` on fetch Response; fixed to `response.ok` where needed.
 
 ## Accomplished

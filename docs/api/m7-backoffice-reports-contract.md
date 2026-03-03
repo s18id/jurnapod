@@ -31,11 +31,12 @@ Query:
 
 Response:
 - `success: true`
-- `filters`: resolved filters + outlet ids used + `as_of` + `as_of_id`
-- `total`: total rows for pagination
-- `transactions[]`:
-  - `id`, `outlet_id`, `client_tx_id`, `status`, `trx_at`
-  - `gross_total`, `paid_total`, `item_count`
+- `data`:
+  - `filters`: resolved filters + outlet ids used + `as_of` + `as_of_id`
+  - `total`: total rows for pagination
+  - `transactions[]`:
+    - `id`, `outlet_id`, `client_tx_id`, `status`, `trx_at`
+    - `gross_total`, `paid_total`, `item_count`
 
 Pagination consistency notes:
 - First page should be requested without `as_of`/`as_of_id`.
@@ -51,10 +52,11 @@ Query:
 
 Response:
 - `success: true`
-- `filters`: resolved filters + outlet ids used
-- `rows[]`:
-  - `trx_date`, `outlet_id`, `outlet_name`
-  - `tx_count`, `gross_total`, `paid_total`
+- `data`:
+  - `filters`: resolved filters + outlet ids used
+  - `rows[]`:
+    - `trx_date`, `outlet_id`, `outlet_name`
+    - `tx_count`, `gross_total`, `paid_total`
 
 Implementation notes:
 - Uses view `v_pos_daily_totals` when available.
@@ -73,12 +75,13 @@ Query:
 
 Response:
 - `success: true`
-- `filters`: resolved filters + outlet ids used + `as_of` + `as_of_id`
-- `total`: total batches
-- `journals[]`:
-  - `id`, `outlet_id`, `outlet_name`
-  - `doc_type`, `doc_id`, `posted_at`
-  - `line_count`, `total_debit`, `total_credit`
+- `data`:
+  - `filters`: resolved filters + outlet ids used + `as_of` + `as_of_id`
+  - `total`: total batches
+  - `journals[]`:
+    - `id`, `outlet_id`, `outlet_name`
+    - `doc_type`, `doc_id`, `posted_at`
+    - `line_count`, `total_debit`, `total_credit`
 
 Scoping note:
 - When `outlet_id` is provided, results are strictly outlet-scoped (unassigned `NULL` outlet rows are excluded).
@@ -93,12 +96,13 @@ Query:
 
 Response:
 - `success: true`
-- `filters`: resolved filters + outlet ids used + `as_of`
-- `totals`:
-  - `total_debit`, `total_credit`, `balance`
-- `rows[]`:
-  - `account_id`, `account_code`, `account_name`
-  - `total_debit`, `total_credit`, `balance`
+- `data`:
+  - `filters`: resolved filters + outlet ids used + `as_of`
+  - `totals`:
+    - `total_debit`, `total_credit`, `balance`
+  - `rows[]`:
+    - `account_id`, `account_code`, `account_name`
+    - `total_debit`, `total_credit`, `balance`
 
 Scoping note:
 - When `outlet_id` is provided, trial balance is strictly outlet-scoped (unassigned `NULL` outlet rows are excluded).
@@ -110,3 +114,4 @@ Common errors:
 - `403 FORBIDDEN` for missing role or inaccessible outlet.
 - `400 INVALID_REQUEST` for malformed query params.
 - `500 INTERNAL_SERVER_ERROR` for unexpected failures.
+All errors return `{ success: false, error: { code, message } }`.

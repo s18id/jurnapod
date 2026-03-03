@@ -118,16 +118,18 @@ LIMIT 1;
 ### API Response
 ```json
 {
-  "ok": true,
-  "outlet_id": 1,
-  "mappings": [
-    {
-      "method_code": "CASH",
-      "account_id": 160,
-      "label": "Cash",
-      "is_invoice_default": true  ← Flag indicates default
-    }
-  ]
+  "success": true,
+  "data": {
+    "outlet_id": 1,
+    "mappings": [
+      {
+        "method_code": "CASH",
+        "account_id": 160,
+        "label": "Cash",
+        "is_invoice_default": true  ← Flag indicates default
+      }
+    ]
+  }
 }
 ```
 
@@ -177,7 +179,7 @@ User Action: Admin tries to check 2 invoice defaults
 
 API Response:
 {
-  "ok": false,
+  "success": false,
   "error": {
     "code": "MULTIPLE_INVOICE_DEFAULTS",
     "message": "Only one payment method can be set as invoice default"

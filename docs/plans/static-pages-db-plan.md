@@ -52,8 +52,8 @@ Slug rules:
 Public (no auth):
 - `GET /api/pages/:slug`
   - Returns only PUBLISHED pages.
-  - Response shape: `{ success: true, page: { slug, title, content_html, updated_at, published_at } }`.
-  - If not found or not published: `404` with `{ success: false, error: { code: "NOT_FOUND" } }`.
+  - Response shape: `{ success: true, data: { slug, title, content_html, updated_at, published_at } }`.
+  - If not found or not published: `404` with `{ success: false, error: { code: "NOT_FOUND", message: "Not found" } }`.
 
 Admin (OWNER/ADMIN):
 - `GET /api/settings/pages`

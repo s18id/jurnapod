@@ -147,7 +147,7 @@ Implementation of a complete email-based authentication system for Jurnapod ERP:
 
 7. **Error response standardization** - Unified format
    - All endpoints use `errorResponse()` helper
-   - Consistent `{ success: false, data: { code, message } }` format
+   - Consistent `{ success: false, error: { code, message } }` format
    - Removed duplicate error constant definitions
 
 8. **Token reuse race condition** - Fixed

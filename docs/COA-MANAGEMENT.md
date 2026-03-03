@@ -295,7 +295,10 @@ GET /api/accounts/1/usage?company_id=1
 ```json
 {
   "success": false,
-  "error": "Validation error",
+  "error": {
+    "code": "INVALID_REQUEST",
+    "message": "Validation error"
+  },
   "details": {
     "code": ["Account code is required"]
   }
@@ -306,7 +309,10 @@ GET /api/accounts/1/usage?company_id=1
 ```json
 {
   "success": false,
-  "error": "Account not found"
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Account not found"
+  }
 }
 ```
 
@@ -314,7 +320,10 @@ GET /api/accounts/1/usage?company_id=1
 ```json
 {
   "success": false,
-  "error": "Account code already exists"
+  "error": {
+    "code": "CONFLICT",
+    "message": "Account code already exists"
+  }
 }
 ```
 
@@ -322,7 +331,10 @@ GET /api/accounts/1/usage?company_id=1
 ```json
 {
   "success": false,
-  "error": "Circular reference detected: cannot set parent to descendant"
+  "error": {
+    "code": "CONFLICT",
+    "message": "Circular reference detected: cannot set parent to descendant"
+  }
 }
 ```
 
@@ -330,7 +342,10 @@ GET /api/accounts/1/usage?company_id=1
 ```json
 {
   "success": false,
-  "error": "Account is in use and cannot be deactivated"
+  "error": {
+    "code": "CONFLICT",
+    "message": "Account is in use and cannot be deactivated"
+  }
 }
 ```
 

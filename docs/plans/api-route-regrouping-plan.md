@@ -18,7 +18,7 @@ Regroup API routes by module prefix to align path structure with `module_roles`,
 
 ## Decisions
 - Keep global roles; company-scoped `module_roles` remains enforced.
-- Use 410 compatibility responses with `{ error: { code: "ROUTE_MOVED", new_path } }` for one release cycle.
+- Use 410 compatibility responses with `{ success: false, error: { code: "ROUTE_MOVED", new_path } }` for one release cycle.
 - Map admin/system routes to `settings` module.
 
 ## Route Moves (Old -> New)
@@ -72,7 +72,7 @@ Regroup API routes by module prefix to align path structure with `module_roles`,
 
 ## Compatibility Layer
 - Old routes return 410 for one release cycle:
-  - `{ "ok": false, "error": { "code": "ROUTE_MOVED", "new_path": "/api/new/path" } }`
+- `{ "success": false, "error": { "code": "ROUTE_MOVED", "new_path": "/api/new/path" } }`
 - Remove old routes after the deprecation window.
 
 ## Implementation Steps
