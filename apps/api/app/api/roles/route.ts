@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
+import { readClientIp } from "../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../src/lib/response";
 import { listRoles, createRole } from "../../../src/lib/users";
 
@@ -33,8 +34,13 @@ export const POST = withAuth(
       }
 
       const role = await createRole({
+        companyId: _auth.companyId,
         code: code.trim().toUpperCase(),
-        name: name.trim()
+        name: name.trim(),
+        actor: {
+          userId: _auth.userId,
+          ipAddress: readClientIp(request)
+        }
       });
 
       return successResponse(role, 201);

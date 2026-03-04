@@ -5,6 +5,7 @@ const ROUTE_MOVED_RESPONSE = {
   success: false,
   error: {
     code: "ROUTE_MOVED",
+    message: "Route moved",
     new_path: "/api/accounts/imports"
   }
 };

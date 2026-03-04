@@ -4,6 +4,8 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
+import { userHasAnyRole } from "../../../src/lib/auth";
+import { readClientIp } from "../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../src/lib/response";
 import { listOutletsByCompany, createOutlet, OutletCodeExistsError } from "../../../src/lib/outlets";
 
@@ -12,11 +14,14 @@ export const GET = withAuth(
     try {
       const url = new URL(request.url);
       const companyIdRaw = url.searchParams.get("company_id");
-      
-      // If company_id specified, use it; otherwise use auth.companyId
-      const companyId = companyIdRaw 
-        ? NumericIdSchema.parse(companyIdRaw)
-        : auth.companyId;
+      const companyId = companyIdRaw ? NumericIdSchema.parse(companyIdRaw) : auth.companyId;
+
+      if (companyId !== auth.companyId) {
+        const isSuperAdmin = await userHasAnyRole(auth.userId, auth.companyId, ["SUPER_ADMIN"]);
+        if (!isSuperAdmin) {
+          return errorResponse("COMPANY_MISMATCH", "Company ID mismatch", 400);
+        }
+      }
       
       const outlets = await listOutletsByCompany(companyId);
       return successResponse(outlets);
@@ -39,7 +44,14 @@ export const POST = withAuth(
       const { company_id, code, name } = body;
 
       // Use provided company_id or default to auth.companyId
-      const targetCompanyId = company_id ?? auth.companyId;
+      const targetCompanyId = company_id != null ? NumericIdSchema.parse(company_id) : auth.companyId;
+
+      if (targetCompanyId !== auth.companyId) {
+        const isSuperAdmin = await userHasAnyRole(auth.userId, auth.companyId, ["SUPER_ADMIN"]);
+        if (!isSuperAdmin) {
+          return errorResponse("COMPANY_MISMATCH", "Company ID mismatch", 400);
+        }
+      }
 
       if (!code || typeof code !== "string" || code.trim().length === 0) {
         return errorResponse("VALIDATION_ERROR", "Outlet code is required", 400);
@@ -52,11 +64,18 @@ export const POST = withAuth(
       const outlet = await createOutlet({
         company_id: targetCompanyId,
         code: code.trim().toUpperCase(),
-        name: name.trim()
+        name: name.trim(),
+        actor: {
+          userId: auth.userId,
+          ipAddress: readClientIp(request)
+        }
       });
 
       return successResponse(outlet, 201);
     } catch (error) {
+      if (error instanceof ZodError || error instanceof SyntaxError) {
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+      }
       console.error("POST /api/outlets failed", error);
       if (error instanceof OutletCodeExistsError) {
         return errorResponse("DUPLICATE_OUTLET", error.message, 409);

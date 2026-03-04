@@ -4,6 +4,7 @@
 import { NumericIdSchema, ModuleSchema, ModuleRoleUpdateRequestSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
+import { readClientIp } from "../../../../../../src/lib/request-meta";
 import { listModuleRoles, setModuleRolePermission, ModuleRoleNotFoundError } from "../../../../../../src/lib/users";
 import { errorResponse, successResponse } from "../../../../../../src/lib/response";
 
@@ -56,7 +57,11 @@ export const PUT = withAuth(
         companyId: auth.companyId,
         roleId,
         module: moduleName,
-        permissionMask: input.permission_mask
+        permissionMask: input.permission_mask,
+        actor: {
+          userId: auth.userId,
+          ipAddress: readClientIp(request)
+        }
       });
 
       return successResponse(moduleRole);

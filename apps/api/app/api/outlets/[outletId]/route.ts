@@ -4,6 +4,8 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
+import { userHasAnyRole } from "../../../../src/lib/auth";
+import { readClientIp } from "../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import { getOutlet, updateOutlet, deleteOutlet, OutletNotFoundError } from "../../../../src/lib/outlets";
 
@@ -13,15 +15,36 @@ function parseOutletId(request: Request): number {
   return NumericIdSchema.parse(outletIdRaw);
 }
 
+async function resolveCompanyId(request: Request, auth: { userId: number; companyId: number }): Promise<number> {
+  const companyIdRaw = new URL(request.url).searchParams.get("company_id");
+  if (!companyIdRaw) {
+    return auth.companyId;
+  }
+
+  const companyId = NumericIdSchema.parse(companyIdRaw);
+  if (companyId !== auth.companyId) {
+    const isSuperAdmin = await userHasAnyRole(auth.userId, auth.companyId, ["SUPER_ADMIN"]);
+    if (!isSuperAdmin) {
+      throw new Error("COMPANY_MISMATCH");
+    }
+  }
+
+  return companyId;
+}
+
 export const GET = withAuth(
   async (request, _auth) => {
     try {
       const outletId = parseOutletId(request);
-      const outlet = await getOutlet(outletId);
+      const companyId = await resolveCompanyId(request, _auth);
+      const outlet = await getOutlet(companyId, outletId);
       return successResponse(outlet);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+      }
+      if (error instanceof Error && error.message === "COMPANY_MISMATCH") {
+        return errorResponse("COMPANY_MISMATCH", "Company ID mismatch", 400);
       }
       if (error instanceof OutletNotFoundError) {
         return errorResponse("NOT_FOUND", error.message, 404);
@@ -37,6 +60,7 @@ export const PATCH = withAuth(
   async (request, _auth) => {
     try {
       const outletId = parseOutletId(request);
+      const companyId = await resolveCompanyId(request, _auth);
       const body = await request.json();
       const { name } = body;
 
@@ -45,14 +69,22 @@ export const PATCH = withAuth(
       }
 
       const outlet = await updateOutlet({
+        companyId,
         outletId,
-        name: name.trim()
+        name: name.trim(),
+        actor: {
+          userId: _auth.userId,
+          ipAddress: readClientIp(request)
+        }
       });
 
       return successResponse(outlet);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+      }
+      if (error instanceof Error && error.message === "COMPANY_MISMATCH") {
+        return errorResponse("COMPANY_MISMATCH", "Company ID mismatch", 400);
       }
       if (error instanceof OutletNotFoundError) {
         return errorResponse("NOT_FOUND", error.message, 404);
@@ -68,11 +100,22 @@ export const DELETE = withAuth(
   async (request, _auth) => {
     try {
       const outletId = parseOutletId(request);
-      await deleteOutlet({ outletId });
+      const companyId = await resolveCompanyId(request, _auth);
+      await deleteOutlet({
+        companyId,
+        outletId,
+        actor: {
+          userId: _auth.userId,
+          ipAddress: readClientIp(request)
+        }
+      });
       return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+      }
+      if (error instanceof Error && error.message === "COMPANY_MISMATCH") {
+        return errorResponse("COMPANY_MISMATCH", "Company ID mismatch", 400);
       }
       if (error instanceof OutletNotFoundError) {
         return errorResponse("NOT_FOUND", error.message, 404);

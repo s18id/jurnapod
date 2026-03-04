@@ -4,6 +4,7 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
+import { readClientIp } from "../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import { getRole, updateRole, deleteRole, RoleNotFoundError } from "../../../../src/lib/users";
 
@@ -34,7 +35,7 @@ export const GET = withAuth(
 );
 
 export const PATCH = withAuth(
-  async (request, _auth) => {
+  async (request, auth) => {
     try {
       const roleId = parseRoleId(request);
       const body = await request.json();
@@ -45,8 +46,13 @@ export const PATCH = withAuth(
       }
 
       const role = await updateRole({
+        companyId: auth.companyId,
         roleId,
-        name: name.trim()
+        name: name.trim(),
+        actor: {
+          userId: auth.userId,
+          ipAddress: readClientIp(request)
+        }
       });
 
       return successResponse(role);
@@ -65,10 +71,17 @@ export const PATCH = withAuth(
 );
 
 export const DELETE = withAuth(
-  async (request, _auth) => {
+  async (request, auth) => {
     try {
       const roleId = parseRoleId(request);
-      await deleteRole({ roleId });
+      await deleteRole({
+        companyId: auth.companyId,
+        roleId,
+        actor: {
+          userId: auth.userId,
+          ipAddress: readClientIp(request)
+        }
+      });
       return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError) {

@@ -715,11 +715,14 @@ export async function getRole(roleId: number): Promise<{ id: number; code: strin
 }
 
 export async function createRole(params: {
+  companyId: number;
   code: string;
   name: string;
+  actor: UserActor;
 }): Promise<{ id: number; code: string; name: string }> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
+  const auditService = createAuditServiceForConnection(connection);
 
   try {
     await connection.beginTransaction();
@@ -741,6 +744,13 @@ export async function createRole(params: {
     );
 
     const roleId = Number(result.insertId);
+    const auditContext = buildAuditContext(params.companyId, params.actor);
+
+    await auditService.logCreate(auditContext, "setting", roleId, {
+      type: "role",
+      code: params.code,
+      name: params.name
+    });
 
     await connection.commit();
 
@@ -758,11 +768,14 @@ export async function createRole(params: {
 }
 
 export async function updateRole(params: {
+  companyId: number;
   roleId: number;
   name?: string;
+  actor: UserActor;
 }): Promise<{ id: number; code: string; name: string }> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
+  const auditService = createAuditServiceForConnection(connection);
 
   try {
     await connection.beginTransaction();
@@ -780,10 +793,19 @@ export async function updateRole(params: {
     const currentRole = rows[0];
 
     // Build update
-    if (params.name) {
+    if (params.name && params.name !== currentRole.name) {
       await connection.execute(
         `UPDATE roles SET name = ? WHERE id = ?`,
         [params.name, params.roleId]
+      );
+
+      const auditContext = buildAuditContext(params.companyId, params.actor);
+      await auditService.logUpdate(
+        auditContext,
+        "setting",
+        params.roleId,
+        { name: currentRole.name },
+        { name: params.name }
       );
     }
 
@@ -803,10 +825,13 @@ export async function updateRole(params: {
 }
 
 export async function deleteRole(params: {
+  companyId: number;
   roleId: number;
+  actor: UserActor;
 }): Promise<void> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
+  const auditService = createAuditServiceForConnection(connection);
 
   try {
     await connection.beginTransaction();
@@ -838,6 +863,13 @@ export async function deleteRole(params: {
       `DELETE FROM roles WHERE id = ?`,
       [params.roleId]
     );
+
+    const auditContext = buildAuditContext(params.companyId, params.actor);
+    await auditService.logDelete(auditContext, "setting", params.roleId, {
+      type: "role",
+      code: role.code,
+      name: role.name
+    });
 
     await connection.commit();
   } catch (error) {
@@ -938,50 +970,85 @@ export async function setModuleRolePermission(params: {
   roleId: number;
   module: string;
   permissionMask: number;
+  actor: UserActor;
 }): Promise<ModuleRoleResponse> {
   const pool = getDbPool();
+  const connection = await pool.getConnection();
+  const auditService = createAuditServiceForConnection(connection);
 
-  const [existing] = await pool.execute<ModuleRoleRow[]>(
-    `SELECT id FROM module_roles WHERE company_id = ? AND role_id = ? AND module = ?`,
-    [params.companyId, params.roleId, params.module]
-  );
+  try {
+    await connection.beginTransaction();
 
-  if (existing.length > 0) {
-    await pool.execute(
-      `UPDATE module_roles
-       SET permission_mask = ?
+    const [existing] = await connection.execute<ModuleRoleRow[]>(
+      `SELECT id, permission_mask
+       FROM module_roles
        WHERE company_id = ? AND role_id = ? AND module = ?`,
-      [params.permissionMask, params.companyId, params.roleId, params.module]
+      [params.companyId, params.roleId, params.module]
     );
-  } else {
-    await pool.execute(
-      `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
-       VALUES (?, ?, ?, ?)`,
-      [params.companyId, params.roleId, params.module, params.permissionMask]
+
+    const auditContext = buildAuditContext(params.companyId, params.actor);
+    const entityId = `module-role:${params.roleId}:${params.module}`;
+    if (existing.length > 0) {
+      const currentMask = Number(existing[0].permission_mask ?? 0);
+      await connection.execute(
+        `UPDATE module_roles
+         SET permission_mask = ?
+         WHERE company_id = ? AND role_id = ? AND module = ?`,
+        [params.permissionMask, params.companyId, params.roleId, params.module]
+      );
+
+      if (currentMask !== params.permissionMask) {
+        await auditService.logUpdate(
+          auditContext,
+          "setting",
+          entityId,
+          { permission_mask: currentMask },
+          { permission_mask: params.permissionMask }
+        );
+      }
+    } else {
+      await connection.execute(
+        `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+         VALUES (?, ?, ?, ?)`,
+        [params.companyId, params.roleId, params.module, params.permissionMask]
+      );
+
+      await auditService.logCreate(auditContext, "setting", entityId, {
+        type: "module_role",
+        role_id: params.roleId,
+        module: params.module,
+        permission_mask: params.permissionMask
+      });
+    }
+
+    const [rows] = await connection.execute<ModuleRoleRow[]>(
+      `SELECT mr.id, mr.role_id, r.code as role_code, mr.module,
+              mr.permission_mask, mr.created_at, mr.updated_at
+       FROM module_roles mr
+       INNER JOIN roles r ON r.id = mr.role_id
+       WHERE mr.company_id = ? AND mr.role_id = ? AND mr.module = ?`,
+      [params.companyId, params.roleId, params.module]
     );
+
+    if (rows.length === 0) {
+      throw new ModuleRoleNotFoundError("Module role not found after update");
+    }
+
+    const row = rows[0];
+    await connection.commit();
+    return {
+      id: Number(row.id),
+      role_id: Number(row.role_id),
+      role_code: row.role_code,
+      module: row.module,
+      permission_mask: Number(row.permission_mask ?? 0),
+      created_at: row.created_at.toISOString(),
+      updated_at: row.updated_at.toISOString()
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
   }
-
-  const [rows] = await pool.execute<ModuleRoleRow[]>(
-    `SELECT mr.id, mr.role_id, r.code as role_code, mr.module,
-            mr.permission_mask, mr.created_at, mr.updated_at
-     FROM module_roles mr
-     INNER JOIN roles r ON r.id = mr.role_id
-     WHERE mr.company_id = ? AND mr.role_id = ? AND mr.module = ?`,
-    [params.companyId, params.roleId, params.module]
-  );
-
-  if (rows.length === 0) {
-    throw new ModuleRoleNotFoundError("Module role not found after update");
-  }
-
-  const row = rows[0];
-  return {
-    id: Number(row.id),
-    role_id: Number(row.role_id),
-    role_code: row.role_code,
-    module: row.module,
-    permission_mask: Number(row.permission_mask ?? 0),
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
-  };
 }

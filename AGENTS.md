@@ -2,7 +2,7 @@
 Ownership: Ahmad Faruk (Signal18 ID) -->
 
 # AGENTS.md
-Important: Use codex-* subagents if the invoker is from openai model, and use claude-* if the invoker is from anthropic model.
+Important: Use opencode-commit-agent for committing. Use codex-* subagents if the invoker is from openai model, and use claude-* if the invoker is from anthropic model. Never commit except asked to.
 
 **Product:** Jurnapod
 **Tagline:** From cashier to ledger.
