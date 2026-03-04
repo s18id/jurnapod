@@ -50,6 +50,7 @@ export const JournalBatchResponseSchema = z.object({
 export const ManualJournalEntryCreateRequestSchema = z.object({
   company_id: z.number().int().positive(),
   outlet_id: z.number().int().positive().nullable().optional(),
+  client_ref: z.string().uuid().optional(),
   entry_date: z.string(), // ISO date string
   reference: z.string().max(100).optional(),
   description: z.string().max(500),

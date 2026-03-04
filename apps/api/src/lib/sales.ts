@@ -44,6 +44,10 @@ type AccessCheckRow = RowDataPacket & {
   id: number;
 };
 
+type IdRow = RowDataPacket & {
+  id: number;
+};
+
 type QueryExecutor = {
   execute: PoolConnection["execute"];
 };
@@ -340,6 +344,27 @@ async function findInvoiceByIdWithExecutor(
   return normalizeInvoice(rows[0]);
 }
 
+async function findInvoiceByClientRefWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  clientRef: string
+): Promise<SalesInvoiceDetail | null> {
+  const [rows] = await executor.execute<IdRow[]>(
+    `SELECT id
+     FROM sales_invoices
+     WHERE company_id = ?
+       AND client_ref = ?
+     LIMIT 1`,
+    [companyId, clientRef]
+  );
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  return findInvoiceDetailWithExecutor(executor, companyId, Number(rows[0].id));
+}
+
 async function listInvoiceLinesWithExecutor(
   executor: QueryExecutor,
   companyId: number,
@@ -476,6 +501,7 @@ export async function createInvoice(
   companyId: number,
   input: {
     outlet_id: number;
+    client_ref?: string;
     invoice_no: string;
     invoice_date: string;
     tax_amount: number;
@@ -485,6 +511,20 @@ export async function createInvoice(
   actor?: MutationActor
 ): Promise<SalesInvoiceDetail> {
   return withTransaction(async (connection) => {
+    if (input.client_ref) {
+      const existing = await findInvoiceByClientRefWithExecutor(
+        connection,
+        companyId,
+        input.client_ref
+      );
+      if (existing) {
+        if (actor) {
+          await ensureUserHasOutletAccess(connection, actor.userId, companyId, existing.outlet_id);
+        }
+        return existing;
+      }
+    }
+
     await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
     if (actor) {
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
@@ -530,11 +570,12 @@ export async function createInvoice(
 
     try {
       const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO sales_invoices (
+         `INSERT INTO sales_invoices (
            company_id,
            outlet_id,
            invoice_no,
            invoice_date,
+           client_ref,
            status,
            payment_status,
            subtotal,
@@ -543,12 +584,13 @@ export async function createInvoice(
            paid_total,
            created_by_user_id,
            updated_by_user_id
-         ) VALUES (?, ?, ?, ?, 'DRAFT', 'UNPAID', ?, ?, ?, 0, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, 'DRAFT', 'UNPAID', ?, ?, ?, 0, ?, ?)`,
         [
           companyId,
           input.outlet_id,
           input.invoice_no,
           input.invoice_date,
+          input.client_ref ?? null,
           subtotal,
           taxAmount,
           grandTotal,
@@ -620,6 +662,24 @@ export async function createInvoice(
       return invoice;
     } catch (error) {
       if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        if (input.client_ref) {
+          const existing = await findInvoiceByClientRefWithExecutor(
+            connection,
+            companyId,
+            input.client_ref
+          );
+          if (existing) {
+            if (actor) {
+              await ensureUserHasOutletAccess(
+                connection,
+                actor.userId,
+                companyId,
+                existing.outlet_id
+              );
+            }
+            return existing;
+          }
+        }
         throw new DatabaseConflictError("Duplicate invoice");
       }
 
@@ -922,6 +982,27 @@ async function findPaymentByIdWithExecutor(
   return normalizePayment(rows[0]);
 }
 
+async function findPaymentByClientRefWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  clientRef: string
+): Promise<SalesPayment | null> {
+  const [rows] = await executor.execute<IdRow[]>(
+    `SELECT id
+     FROM sales_payments
+     WHERE company_id = ?
+       AND client_ref = ?
+     LIMIT 1`,
+    [companyId, clientRef]
+  );
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  return findPaymentByIdWithExecutor(executor, companyId, Number(rows[0].id));
+}
+
 function buildPaymentWhereClause(companyId: number, filters: PaymentListFilters) {
   const conditions: string[] = ["sp.company_id = ?"];
   const values: Array<string | number> = [companyId];
@@ -996,6 +1077,7 @@ export async function createPayment(
   input: {
     outlet_id: number;
     invoice_id: number;
+    client_ref?: string;
     payment_no: string;
     payment_at: string;
     account_id: number;
@@ -1005,6 +1087,20 @@ export async function createPayment(
   actor?: MutationActor
 ): Promise<SalesPayment> {
   return withTransaction(async (connection) => {
+    if (input.client_ref) {
+      const existing = await findPaymentByClientRefWithExecutor(
+        connection,
+        companyId,
+        input.client_ref
+      );
+      if (existing) {
+        if (actor) {
+          await ensureUserHasOutletAccess(connection, actor.userId, companyId, existing.outlet_id);
+        }
+        return existing;
+      }
+    }
+
     await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
     if (actor) {
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
@@ -1040,6 +1136,7 @@ export async function createPayment(
            outlet_id,
            invoice_id,
            payment_no,
+           client_ref,
            payment_at,
            account_id,
            method,
@@ -1047,12 +1144,13 @@ export async function createPayment(
            amount,
            created_by_user_id,
            updated_by_user_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?)`,
         [
           companyId,
           input.outlet_id,
           input.invoice_id,
           input.payment_no,
+          input.client_ref ?? null,
           paymentAt,
           input.account_id,
           input.method ?? null,
@@ -1071,6 +1169,24 @@ export async function createPayment(
       return payment;
     } catch (error) {
       if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        if (input.client_ref) {
+          const existing = await findPaymentByClientRefWithExecutor(
+            connection,
+            companyId,
+            input.client_ref
+          );
+          if (existing) {
+            if (actor) {
+              await ensureUserHasOutletAccess(
+                connection,
+                actor.userId,
+                companyId,
+                existing.outlet_id
+              );
+            }
+            return existing;
+          }
+        }
         throw new DatabaseConflictError("Duplicate payment");
       }
 

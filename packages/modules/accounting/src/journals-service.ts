@@ -72,6 +72,16 @@ export class JournalsService {
     data: ManualJournalEntryCreateRequest,
     userId?: number
   ): Promise<JournalBatchResponse> {
+    if (data.client_ref) {
+      const existingId = await this.findManualEntryIdByClientRef(
+        data.company_id,
+        data.client_ref
+      );
+      if (existingId) {
+        return this.getJournalBatch(existingId, data.company_id);
+      }
+    }
+
     await this.ensureEntryDateInOpenFiscalYear(data.company_id, data.entry_date);
 
     // Validate balance
@@ -103,9 +113,9 @@ export class JournalsService {
       // Create journal batch
       const batchSql = `
         INSERT INTO journal_batches (
-          company_id, outlet_id, doc_type, doc_id, posted_at, created_at, updated_at
+          company_id, outlet_id, doc_type, doc_id, client_ref, posted_at, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+        VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
       `;
 
       // For manual entries, we use a unique doc_id based on timestamp
@@ -116,6 +126,7 @@ export class JournalsService {
         data.outlet_id ?? null,
         "MANUAL",
         docId,
+        data.client_ref ?? null,
         data.entry_date
       ]);
 
@@ -170,8 +181,34 @@ export class JournalsService {
       if (useTransaction) {
         await this.db.rollback!();
       }
+      if (data.client_ref && isMysqlDuplicateError(error)) {
+        const existingId = await this.findManualEntryIdByClientRef(
+          data.company_id,
+          data.client_ref
+        );
+        if (existingId) {
+          return this.getJournalBatch(existingId, data.company_id);
+        }
+      }
       throw error;
     }
+  }
+
+  private async findManualEntryIdByClientRef(
+    companyId: number,
+    clientRef: string
+  ): Promise<number | null> {
+    const rows = await this.db.query<{ id: number }>(
+      `SELECT id
+       FROM journal_batches
+       WHERE company_id = ?
+         AND doc_type = 'MANUAL'
+         AND client_ref = ?
+       LIMIT 1`,
+      [companyId, clientRef]
+    );
+
+    return rows.length > 0 ? Number(rows[0].id) : null;
   }
 
   private async ensureEntryDateInOpenFiscalYear(companyId: number, entryDate: string): Promise<void> {
@@ -314,4 +351,15 @@ export class JournalsService {
 
     return results;
   }
+}
+
+const mysqlDuplicateErrorCode = 1062;
+
+function isMysqlDuplicateError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "errno" in error &&
+    (error as { errno?: number }).errno === mysqlDuplicateErrorCode
+  );
 }

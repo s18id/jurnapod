@@ -33,6 +33,7 @@ function resolveEndpoint(type: OutboxItem["type"]): string {
 export class SyncService {
   private static isSyncing = false;
   private static maxRetries = 3;
+  private static syncingTimeoutMs = 10 * 60 * 1000;
 
   static async syncAll(accessToken: string): Promise<SyncResult> {
     if (this.isSyncing) {
@@ -42,7 +43,10 @@ export class SyncService {
     this.isSyncing = true;
 
     try {
-      const pending = await db.outbox.where("status").equals("pending").toArray();
+      const [pending, syncing] = await Promise.all([
+        db.outbox.where("status").equals("pending").toArray(),
+        db.outbox.where("status").equals("syncing").toArray()
+      ]);
       const now = Date.now();
       const readyToSync = pending.filter((item) => {
         if (!item.nextRetryAt) {
@@ -50,6 +54,14 @@ export class SyncService {
         }
         return new Date(item.nextRetryAt).getTime() <= now;
       });
+
+      const staleSyncing = syncing.filter((item) => {
+        if (item.nextRetryAt) {
+          return new Date(item.nextRetryAt).getTime() <= now;
+        }
+        return new Date(item.timestamp).getTime() + this.syncingTimeoutMs <= now;
+      });
+      readyToSync.push(...staleSyncing);
       if (readyToSync.length === 0) {
         return { success: 0, failed: 0, conflicts: 0 };
       }
@@ -60,7 +72,10 @@ export class SyncService {
 
       for (const item of readyToSync) {
         try {
-          await db.outbox.update(item.id, { status: "syncing" });
+          await db.outbox.update(item.id, {
+            status: "syncing",
+            nextRetryAt: new Date(Date.now() + this.syncingTimeoutMs)
+          });
           const result = await this.syncOne(item, accessToken);
           if (result.success) {
             await db.outbox.delete(item.id);
@@ -83,7 +98,9 @@ export class SyncService {
         }
       }
 
-      return { success, failed, conflicts };
+      const result = { success, failed, conflicts };
+      await this.writeSyncHistory(result);
+      return result;
     } finally {
       this.isSyncing = false;
     }
@@ -92,11 +109,12 @@ export class SyncService {
   private static async syncOne(item: OutboxItem, accessToken: string): Promise<SyncResponse> {
     const endpoint = resolveEndpoint(item.type);
     try {
+      const payload = this.buildPayload(item);
       await apiRequest(
         endpoint,
         {
           method: "POST",
-          body: JSON.stringify(item.payload)
+          body: JSON.stringify(payload)
         },
         accessToken
       );
@@ -104,6 +122,9 @@ export class SyncService {
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 409) {
+          if (this.isDuplicateConflict(error)) {
+            return { success: true };
+          }
           return { success: false, conflict: true, error: ERROR_MESSAGES.CONFLICT };
         }
         if (error.status >= 400 && error.status < 500) {
@@ -133,5 +154,46 @@ export class SyncService {
       error: errorMessage,
       nextRetryAt: new Date(Date.now() + backoffMs)
     });
+  }
+
+  private static buildPayload(item: OutboxItem): unknown {
+    if (item.payload && typeof item.payload === "object") {
+      return { ...(item.payload as Record<string, unknown>), client_ref: item.id };
+    }
+
+    return item.payload;
+  }
+
+  private static isDuplicateConflict(error: ApiError): boolean {
+    const normalizedCode = error.code.toLowerCase();
+    const normalizedMessage = error.message.toLowerCase();
+
+    if (["duplicate", "already_exists", "idempotent"].includes(normalizedCode)) {
+      return true;
+    }
+
+    return normalizedMessage.includes("duplicate") || normalizedMessage.includes("already exists");
+  }
+
+  private static async writeSyncHistory(result: SyncResult): Promise<void> {
+    const total = result.success + result.failed + result.conflicts;
+    if (total === 0) {
+      return;
+    }
+
+    const action = result.failed > 0 || result.conflicts > 0 ? "sync_failed" : "sync_success";
+    const details = `Synced ${result.success}, conflicts ${result.conflicts}, failed ${result.failed}.`;
+
+    try {
+      await db.syncHistory.add({
+        id: crypto.randomUUID(),
+        action,
+        timestamp: new Date(),
+        itemCount: total,
+        details
+      });
+    } catch {
+      return;
+    }
   }
 }

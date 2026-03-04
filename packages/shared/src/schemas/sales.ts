@@ -38,6 +38,7 @@ export const SalesInvoiceTaxInputSchema = z.object({
 
 export const SalesInvoiceCreateRequestSchema = z.object({
   outlet_id: NumericIdSchema,
+  client_ref: z.string().uuid().optional(),
   invoice_no: z.string().trim().min(1).max(64),
   invoice_date: DateOnlySchema,
   tax_amount: MoneyInputNonNegativeSchema.default(0),
@@ -109,6 +110,7 @@ export const SalesInvoiceListQuerySchema = PaginationQuerySchema.extend({
 export const SalesPaymentCreateRequestSchema = z.object({
   outlet_id: NumericIdSchema,
   invoice_id: NumericIdSchema,
+  client_ref: z.string().uuid().optional(),
   payment_no: z.string().trim().min(1).max(64),
   payment_at: z.string().datetime(),
   account_id: NumericIdSchema,
