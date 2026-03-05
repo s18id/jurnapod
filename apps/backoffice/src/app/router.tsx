@@ -54,6 +54,7 @@ import {
   StaticPagesPage,
   UsersPage,
   RolesPage,
+  ModuleRolesPage,
   CompaniesPage,
   OutletsPage,
   PlatformSettingsPage,
@@ -136,6 +137,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/roles") {
     return <RolesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/module-roles") {
+    return <ModuleRolesPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/companies") {
     return <CompaniesPage user={props.user} accessToken={props.accessToken} />;

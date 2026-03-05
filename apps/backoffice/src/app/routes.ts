@@ -175,6 +175,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["SUPER_ADMIN", "OWNER"]
   },
   {
+    path: "/module-roles",
+    label: "Module Roles",
+    allowedRoles: ["SUPER_ADMIN", "OWNER"]
+  },
+  {
     path: "/modules",
     label: "Modules",
     allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]

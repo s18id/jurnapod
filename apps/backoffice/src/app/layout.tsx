@@ -70,6 +70,7 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
       "/outlets",
       "/users",
       "/roles",
+      "/module-roles",
       "/modules",
       "/tax-rates",
       "/outlet-settings",

@@ -28,6 +28,7 @@ import { TaxRatesPage as TaxRatesFeaturePage } from "./tax-rates-page";
 import { StaticPagesPage as StaticPagesManagementPage } from "./static-pages-page";
 import { UsersPage as UsersManagementPage } from "./users-page";
 import { RolesPage as RolesManagementPage } from "./roles-page";
+import { ModuleRolesPage as ModuleRolesManagementPage } from "./module-roles-page";
 import { CompaniesPage as CompaniesManagementPage } from "./companies-page";
 import { OutletsPage as OutletsManagementPage } from "./outlets-page";
 import { InventorySettingsPage as InventorySettingsFeaturePage } from "./inventory-settings-page";
@@ -107,6 +108,8 @@ export const StaticPagesPage = StaticPagesManagementPage;
 export const UsersPage = UsersManagementPage;
 
 export const RolesPage = RolesManagementPage;
+
+export const ModuleRolesPage = ModuleRolesManagementPage;
 
 export const CompaniesPage = CompaniesManagementPage;
 

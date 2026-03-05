@@ -1,7 +1,19 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Group,
+  Modal,
+  Stack,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
 import {
   useRoles,
@@ -10,6 +22,9 @@ import {
   deleteRole
 } from "../hooks/use-users";
 import { ApiError } from "../lib/api-client";
+import { DataTable } from "../components/DataTable";
+import { FilterBar } from "../components/FilterBar";
+import { PageCard } from "../components/PageCard";
 import type { RoleResponse } from "@jurnapod/shared";
 
 type RolesPageProps = {
@@ -29,85 +44,25 @@ const emptyForm: RoleFormData = {
   name: ""
 };
 
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const inputStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 8px",
-  width: "100%",
-  boxSizing: "border-box" as const
-} as const;
-
-const buttonStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 12px",
-  backgroundColor: "#fff",
-  cursor: "pointer",
-  marginRight: "8px"
-} as const;
-
-const primaryButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#2f5f4a",
-  color: "#fff",
-  border: "1px solid #2f5f4a"
-} as const;
-
-const dangerButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#8d2626",
-  color: "#fff",
-  border: "1px solid #8d2626"
-} as const;
-
-const dialogOverlayStyle = {
-  position: "fixed" as const,
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  backgroundColor: "rgba(0, 0, 0, 0.5)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000
-};
-
-const dialogStyle = {
-  backgroundColor: "#fff",
-  borderRadius: "10px",
-  padding: "24px",
-  maxWidth: "500px",
-  width: "90%"
-};
+const SYSTEM_ROLE_CODES = new Set([
+  "SUPER_ADMIN",
+  "OWNER",
+  "ADMIN",
+  "CASHIER",
+  "ACCOUNTANT"
+]);
 
 export function RolesPage(props: RolesPageProps) {
-  const { accessToken, user } = props;
-  const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
+  const { accessToken } = props;
   
   // Dialog state
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingRole, setEditingRole] = useState<RoleResponse | null>(null);
   const [formData, setFormData] = useState<RoleFormData>(emptyForm);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof RoleFormData, string>>>({});
+
+  const [confirmState, setConfirmState] = useState<RoleResponse | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
   
   // UI state
   const [submitting, setSubmitting] = useState(false);
@@ -116,6 +71,19 @@ export function RolesPage(props: RolesPageProps) {
   
   // API hooks
   const rolesQuery = useRoles(accessToken);
+
+  const filteredRoles = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    return (rolesQuery.data || []).filter((role) => {
+      if (!normalizedSearch) {
+        return true;
+      }
+      return (
+        role.code.toLowerCase().includes(normalizedSearch) ||
+        role.name.toLowerCase().includes(normalizedSearch)
+      );
+    });
+  }, [rolesQuery.data, searchTerm]);
   
   // Handlers
   const openCreateDialog = () => {
@@ -174,17 +142,24 @@ export function RolesPage(props: RolesPageProps) {
     
     try {
       if (dialogMode === "create") {
-        await createRole({
-          code: formData.code.trim().toUpperCase(),
-          name: formData.name.trim()
-        }, accessToken);
+        await createRole(
+          {
+            code: formData.code.trim().toUpperCase(),
+            name: formData.name.trim()
+          },
+          accessToken
+        );
         setSuccessMessage("Role created successfully");
         await rolesQuery.refetch();
         closeDialog();
       } else if (dialogMode === "edit" && editingRole) {
-        await updateRole(editingRole.id, {
-          name: formData.name.trim()
-        }, accessToken);
+        await updateRole(
+          editingRole.id,
+          {
+            name: formData.name.trim()
+          },
+          accessToken
+        );
         setSuccessMessage("Role updated successfully");
         await rolesQuery.refetch();
         closeDialog();
@@ -200,15 +175,76 @@ export function RolesPage(props: RolesPageProps) {
     }
   };
   
-  const handleDelete = async (role: RoleResponse) => {
-    if (!confirm(`Delete role "${role.name}"? This cannot be undone.`)) return;
-    
+  const columns = useMemo<ColumnDef<RoleResponse>[]>(() => {
+    return [
+      {
+        id: "code",
+        header: "Code",
+        cell: (info) => <Text fw={600}>{info.row.original.code}</Text>
+      },
+      {
+        id: "name",
+        header: "Name",
+        cell: (info) => <Text>{info.row.original.name}</Text>
+      },
+      {
+        id: "type",
+        header: "Type",
+        cell: (info) => {
+          const isSystem = SYSTEM_ROLE_CODES.has(info.row.original.code);
+          return (
+            <Badge variant="light" color={isSystem ? "blue" : "gray"}>
+              {isSystem ? "System" : "Custom"}
+            </Badge>
+          );
+        }
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        cell: (info) => {
+          const role = info.row.original;
+          const isSystem = SYSTEM_ROLE_CODES.has(role.code);
+          const systemTooltip = isSystem ? "System roles cannot be changed." : undefined;
+          return (
+            <Group gap="xs" justify="flex-end" wrap="wrap">
+              <Button
+                size="xs"
+                variant="light"
+                onClick={() => openEditDialog(role)}
+                disabled={isSystem}
+                title={systemTooltip}
+              >
+                Edit
+              </Button>
+              <Button
+                size="xs"
+                color="red"
+                variant="light"
+                onClick={() => setConfirmState(role)}
+                disabled={isSystem}
+                title={systemTooltip}
+              >
+                Delete
+              </Button>
+            </Group>
+          );
+        }
+      }
+    ];
+  }, [openEditDialog]);
+
+  async function handleConfirmDelete() {
+    if (!confirmState) {
+      return;
+    }
+
     setError(null);
     setSuccessMessage(null);
-    
+
     try {
-      await deleteRole(role.id, accessToken);
-      setSuccessMessage(`Role "${role.name}" deleted successfully`);
+      await deleteRole(confirmState.id, accessToken);
+      setSuccessMessage(`Role "${confirmState.name}" deleted successfully`);
       await rolesQuery.refetch();
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {
@@ -216,169 +252,148 @@ export function RolesPage(props: RolesPageProps) {
       } else {
         setError("Failed to delete role");
       }
+    } finally {
+      setConfirmState(null);
     }
-  };
+  }
   
   return (
     <>
-      <section style={boxStyle}>
-        <h2 style={{ marginTop: 0 }}>Role Management</h2>
-        <p>Manage system roles for access control.</p>
-        
-        <div style={{ marginTop: "16px" }}>
-          <button type="button" onClick={openCreateDialog} style={primaryButtonStyle}>
-            Create Role
-          </button>
-        </div>
-        
-        {rolesQuery.loading && <p>Loading roles...</p>}
-        {rolesQuery.error && <p style={{ color: "#8d2626" }}>{rolesQuery.error}</p>}
-        {error && <p style={{ color: "#8d2626" }}>{error}</p>}
-        {successMessage && (
-          <p style={{ color: "#155724", backgroundColor: "#d4edda", padding: "8px", borderRadius: "4px", marginTop: "8px" }}>
-            {successMessage}
-          </p>
-        )}
-      </section>
-      
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Roles ({(rolesQuery.data || []).length})</h3>
-        
-        {(rolesQuery.data || []).length === 0 && !rolesQuery.loading ? (
-          <p>No roles found</p>
-        ) : (
-          <table style={tableStyle}>
-            <thead>
-              <tr style={{ backgroundColor: "#f5f1e8" }}>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Code</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Name</th>
-                <th style={{ ...cellStyle, textAlign: "right" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(rolesQuery.data || []).map((role) => (
-                <tr key={role.id}>
-                  <td style={cellStyle}>
-                    <code style={{ backgroundColor: "#f5f1e8", padding: "2px 6px", borderRadius: "4px" }}>
-                      {role.code}
-                    </code>
-                  </td>
-                  <td style={cellStyle}>{role.name}</td>
-                  <td style={{ ...cellStyle, textAlign: "right" }}>
-                    <button
-                      type="button"
-                      onClick={() => openEditDialog(role)}
-                      style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(role)}
-                      style={{ ...dangerButtonStyle, fontSize: "12px", padding: "4px 8px" }}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-      
-      {/* Dialogs */}
-      {dialogMode && (
-        <div style={dialogOverlayStyle} onClick={closeDialog}>
-          <div style={dialogStyle} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>
-              {dialogMode === "create" && "Create New Role"}
-              {dialogMode === "edit" && "Edit Role"}
-            </h3>
-            
-            {dialogMode === "create" && (
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  Role Code <span style={{ color: "#8d2626" }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                  style={inputStyle}
-                  placeholder="e.g., MANAGER, SUPERVISOR"
-                  maxLength={64}
-                />
-                {formErrors.code && (
-                  <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.code}</small>
-                )}
-                <small style={{ display: "block", marginTop: "4px", color: "#6b5d48", fontSize: "11px" }}>
-                  Uppercase letters and underscores only
-                </small>
-              </div>
-            )}
-            
-            {dialogMode === "edit" && editingRole && (
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  Role Code
-                </label>
-                <input
-                  type="text"
-                  value={editingRole.code}
-                  disabled
-                  style={{ ...inputStyle, backgroundColor: "#f5f1e8", cursor: "not-allowed" }}
-                />
-                <small style={{ display: "block", marginTop: "4px", color: "#6b5d48", fontSize: "11px" }}>
-                  Code cannot be changed
-                </small>
-              </div>
-            )}
-            
-            <div style={{ marginBottom: "16px" }}>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                Role Name <span style={{ color: "#8d2626" }}>*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                style={inputStyle}
-                placeholder="e.g., Manager, Supervisor"
-                maxLength={191}
+      <Stack gap="md">
+        <PageCard
+          title="Role Management"
+          description="Manage system roles for access control."
+          actions={
+            <Button onClick={openCreateDialog}>Create Role</Button>
+          }
+        >
+          <Stack gap="sm">
+            <FilterBar>
+              <TextInput
+                label="Search"
+                placeholder="Search by code or name"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.currentTarget.value)}
+                style={{ minWidth: 220 }}
               />
-              {formErrors.name && (
-                <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.name}</small>
-              )}
-            </div>
-            
-            {error && (
-              <p style={{ color: "#8d2626", backgroundColor: "#f8d7da", padding: "8px", borderRadius: "4px" }}>
+            </FilterBar>
+
+            {rolesQuery.loading ? (
+              <Text size="sm" c="dimmed">
+                Loading roles...
+              </Text>
+            ) : null}
+            {rolesQuery.error ? (
+              <Alert color="red" title="Unable to load roles">
+                {rolesQuery.error}
+              </Alert>
+            ) : null}
+            {error ? (
+              <Alert color="red" title="Action failed">
                 {error}
-              </p>
-            )}
-            
-            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "16px" }}>
-              <button
-                type="button"
-                onClick={closeDialog}
-                style={buttonStyle}
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSubmit}
-                style={primaryButtonStyle}
-                disabled={submitting}
-              >
-                {submitting ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              </Alert>
+            ) : null}
+            {successMessage ? (
+              <Alert color="green" title="Success">
+                {successMessage}
+              </Alert>
+            ) : null}
+          </Stack>
+        </PageCard>
+
+        <PageCard title={`Roles (${filteredRoles.length})`}>
+          <DataTable
+            columns={columns}
+            data={filteredRoles}
+            emptyState={
+              searchTerm.trim().length > 0
+                ? "No roles match your search."
+                : "No roles found."
+            }
+          />
+        </PageCard>
+      </Stack>
+
+      <Modal
+        opened={dialogMode !== null}
+        onClose={closeDialog}
+        title={
+          <Title order={4}>
+            {dialogMode === "create" ? "Create New Role" : "Edit Role"}
+          </Title>
+        }
+        centered
+      >
+        <Stack gap="md">
+          {dialogMode === "create" ? (
+            <TextInput
+              label="Role Code"
+              placeholder="e.g., MANAGER, SUPERVISOR"
+              value={formData.code}
+              onChange={(event) =>
+                setFormData({ ...formData, code: event.currentTarget.value.toUpperCase() })
+              }
+              maxLength={64}
+              error={formErrors.code}
+              description="Uppercase letters and underscores only"
+              withAsterisk
+            />
+          ) : (
+            <TextInput
+              label="Role Code"
+              value={editingRole?.code ?? ""}
+              disabled
+              description="Code cannot be changed"
+            />
+          )}
+
+          <TextInput
+            label="Role Name"
+            placeholder="e.g., Manager, Supervisor"
+            value={formData.name}
+            onChange={(event) => setFormData({ ...formData, name: event.currentTarget.value })}
+            maxLength={191}
+            error={formErrors.name}
+            withAsterisk
+          />
+
+          {error ? (
+            <Alert color="red" title="Unable to save">
+              {error}
+            </Alert>
+          ) : null}
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeDialog} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} loading={submitting}>
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={confirmState !== null}
+        onClose={() => setConfirmState(null)}
+        title={<Title order={4}>Delete Role</Title>}
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Delete role "{confirmState?.name}"? This cannot be undone.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmState(null)}>
+              Cancel
+            </Button>
+            <Button color="red" onClick={handleConfirmDelete}>
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </>
   );
 }

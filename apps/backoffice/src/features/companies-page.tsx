@@ -1,7 +1,20 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Group,
+  Modal,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
 import {
   useCompanies,
@@ -11,6 +24,9 @@ import {
   reactivateCompany
 } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
+import { DataTable } from "../components/DataTable";
+import { FilterBar } from "../components/FilterBar";
+import { PageCard } from "../components/PageCard";
 import type { CompanyResponse } from "@jurnapod/shared";
 
 type CompaniesPageProps = {
@@ -19,6 +35,7 @@ type CompaniesPageProps = {
 };
 
 type DialogMode = "create" | "edit" | null;
+type CompanyStatusFilter = "active" | "archived" | "all";
 
 type CompanyFormData = {
   code: string;
@@ -30,75 +47,11 @@ const emptyForm: CompanyFormData = {
   name: ""
 };
 
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const inputStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 8px",
-  width: "100%",
-  boxSizing: "border-box" as const
-} as const;
-
-const buttonStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 12px",
-  backgroundColor: "#fff",
-  cursor: "pointer",
-  marginRight: "8px"
-} as const;
-
-const primaryButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#2f5f4a",
-  color: "#fff",
-  border: "1px solid #2f5f4a"
-} as const;
-
-const dangerButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#8d2626",
-  color: "#fff",
-  border: "1px solid #8d2626"
-} as const;
-
-const dialogOverlayStyle = {
-  position: "fixed" as const,
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  backgroundColor: "rgba(0, 0, 0, 0.5)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000
-};
-
-const dialogStyle = {
-  backgroundColor: "#fff",
-  borderRadius: "10px",
-  padding: "24px",
-  maxWidth: "500px",
-  width: "90%"
-};
+const statusOptions: Array<{ value: CompanyStatusFilter; label: string }> = [
+  { value: "active", label: "Active" },
+  { value: "archived", label: "Archived" },
+  { value: "all", label: "All" }
+];
 
 export function CompaniesPage(props: CompaniesPageProps) {
   const { accessToken, user } = props;
@@ -114,13 +67,41 @@ export function CompaniesPage(props: CompaniesPageProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  
-  const [showArchived, setShowArchived] = useState(false);
+
+  const [statusFilter, setStatusFilter] = useState<CompanyStatusFilter>("active");
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const [confirmState, setConfirmState] = useState<
+    { action: "deactivate" | "reactivate"; company: CompanyResponse } | null
+  >(null);
 
   // API hooks
   const companiesQuery = useCompanies(accessToken, {
-    includeDeleted: isSuperAdmin && showArchived
+    includeDeleted: isSuperAdmin && statusFilter !== "active"
   });
+
+  const filteredCompanies = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    return (companiesQuery.data || [])
+      .filter((company) => {
+        if (!isSuperAdmin || statusFilter === "active") {
+          return !company.deleted_at;
+        }
+        if (statusFilter === "archived") {
+          return !!company.deleted_at;
+        }
+        return true;
+      })
+      .filter((company) => {
+        if (!normalizedSearch) {
+          return true;
+        }
+        return (
+          company.code.toLowerCase().includes(normalizedSearch) ||
+          company.name.toLowerCase().includes(normalizedSearch)
+        );
+      });
+  }, [companiesQuery.data, isSuperAdmin, searchTerm, statusFilter]);
   
   // Handlers
   const openCreateDialog = () => {
@@ -179,17 +160,24 @@ export function CompaniesPage(props: CompaniesPageProps) {
     
     try {
       if (dialogMode === "create") {
-        await createCompany({
-          code: formData.code.trim().toUpperCase(),
-          name: formData.name.trim()
-        }, accessToken);
+        await createCompany(
+          {
+            code: formData.code.trim().toUpperCase(),
+            name: formData.name.trim()
+          },
+          accessToken
+        );
         setSuccessMessage("Company created successfully");
         await companiesQuery.refetch();
         closeDialog();
       } else if (dialogMode === "edit" && editingCompany) {
-        await updateCompany(editingCompany.id, {
-          name: formData.name.trim()
-        }, accessToken);
+        await updateCompany(
+          editingCompany.id,
+          {
+            name: formData.name.trim()
+          },
+          accessToken
+        );
         setSuccessMessage("Company updated successfully");
         await companiesQuery.refetch();
         closeDialog();
@@ -204,245 +192,262 @@ export function CompaniesPage(props: CompaniesPageProps) {
       setSubmitting(false);
     }
   };
-  
-  const handleDelete = async (company: CompanyResponse) => {
-    if (!confirm(`Deactivate company "${company.name}"? Users will lose access, but SUPER_ADMIN can still view archived data.`)) return;
-    
+
+  const columns = useMemo<ColumnDef<CompanyResponse>[]>(
+    () => [
+      {
+        id: "code",
+        header: "Code",
+        cell: (info) => <Text fw={600}>{info.row.original.code}</Text>
+      },
+      {
+        id: "name",
+        header: "Name",
+        cell: (info) => <Text>{info.row.original.name}</Text>
+      },
+      {
+        id: "status",
+        header: "Status",
+        cell: (info) => {
+          const isArchived = !!info.row.original.deleted_at;
+          return (
+            <Badge color={isArchived ? "red" : "green"} variant="light">
+              {isArchived ? "Archived" : "Active"}
+            </Badge>
+          );
+        }
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        cell: (info) => {
+          const company = info.row.original;
+          return (
+            <Group gap="xs" justify="flex-end" wrap="wrap">
+              {!company.deleted_at ? (
+                <Button
+                  size="xs"
+                  variant="light"
+                  onClick={() => openEditDialog(company)}
+                >
+                  Edit
+                </Button>
+              ) : null}
+              {isSuperAdmin && !company.deleted_at ? (
+                <Button
+                  size="xs"
+                  color="red"
+                  variant="light"
+                  onClick={() => setConfirmState({ action: "deactivate", company })}
+                >
+                  Deactivate
+                </Button>
+              ) : null}
+              {isSuperAdmin && company.deleted_at ? (
+                <Button
+                  size="xs"
+                  variant="light"
+                  onClick={() => setConfirmState({ action: "reactivate", company })}
+                >
+                  Reactivate
+                </Button>
+              ) : null}
+            </Group>
+          );
+        }
+      }
+    ],
+    [isSuperAdmin, openEditDialog]
+  );
+
+  async function handleConfirmAction() {
+    if (!confirmState) {
+      return;
+    }
+
     setError(null);
     setSuccessMessage(null);
-    
-    try {
-      await deleteCompany(company.id, accessToken);
-      setSuccessMessage(`Company "${company.name}" deactivated successfully`);
-      await companiesQuery.refetch();
-    } catch (deleteError) {
-      if (deleteError instanceof ApiError) {
-        setError(deleteError.message);
-      } else {
-        setError("Failed to deactivate company");
-      }
-    }
-  };
-
-  const handleReactivate = async (company: CompanyResponse) => {
-    if (!confirm(`Reactivate company "${company.name}"? This will restore access for its users.`)) return;
-
-    setError(null);
-    setSuccessMessage(null);
 
     try {
-      await reactivateCompany(company.id, accessToken);
-      setSuccessMessage(`Company "${company.name}" reactivated successfully`);
-      await companiesQuery.refetch();
-    } catch (reactivateError) {
-      if (reactivateError instanceof ApiError) {
-        setError(reactivateError.message);
+      if (confirmState.action === "deactivate") {
+        await deleteCompany(confirmState.company.id, accessToken);
+        setSuccessMessage(`Company "${confirmState.company.name}" deactivated successfully`);
       } else {
-        setError("Failed to reactivate company");
+        await reactivateCompany(confirmState.company.id, accessToken);
+        setSuccessMessage(`Company "${confirmState.company.name}" reactivated successfully`);
       }
+      await companiesQuery.refetch();
+    } catch (actionError) {
+      if (actionError instanceof ApiError) {
+        setError(actionError.message);
+      } else {
+        setError(
+          confirmState.action === "deactivate"
+            ? "Failed to deactivate company"
+            : "Failed to reactivate company"
+        );
+      }
+    } finally {
+      setConfirmState(null);
     }
-  };
+  }
   
   return (
     <>
-      <section style={boxStyle}>
-        <h2 style={{ marginTop: 0 }}>Company Management</h2>
-        <p>Manage companies in the system. Each company can have multiple users and outlets.</p>
+      <Stack gap="md">
+        <PageCard
+          title="Company Management"
+          description="Manage companies in the system. Each company can have multiple users and outlets."
+          actions={
+            isSuperAdmin ? (
+              <Button onClick={openCreateDialog}>Create Company</Button>
+            ) : null
+          }
+        >
+          <Stack gap="sm">
+            <FilterBar>
+              <TextInput
+                label="Search"
+                placeholder="Search by code or name"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.currentTarget.value)}
+                style={{ minWidth: 220 }}
+              />
+              {isSuperAdmin ? (
+                <Select
+                  label="Status"
+                  data={statusOptions}
+                  value={statusFilter}
+                  onChange={(value) => setStatusFilter((value as CompanyStatusFilter) || "active")}
+                  style={{ minWidth: 160 }}
+                />
+              ) : null}
+            </FilterBar>
 
-        {isSuperAdmin && (
-          <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <button type="button" onClick={openCreateDialog} style={primaryButtonStyle}>
-              Create Company
-            </button>
-            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px" }}>
-              <input
-                type="checkbox"
-                checked={showArchived}
-                onChange={(event) => setShowArchived(event.target.checked)}
-              />
-              Show archived
-            </label>
-          </div>
-        )}
-        
-        {companiesQuery.loading && <p>Loading companies...</p>}
-        {companiesQuery.error && <p style={{ color: "#8d2626" }}>{companiesQuery.error}</p>}
-        {error && <p style={{ color: "#8d2626" }}>{error}</p>}
-        {successMessage && (
-          <p style={{ color: "#155724", backgroundColor: "#d4edda", padding: "8px", borderRadius: "4px", marginTop: "8px" }}>
-            {successMessage}
-          </p>
-        )}
-      </section>
-      
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Companies ({(companiesQuery.data || []).length})</h3>
-        
-        {(companiesQuery.data || []).length === 0 && !companiesQuery.loading ? (
-          <p>No companies found</p>
-        ) : (
-          <table style={tableStyle}>
-            <thead>
-              <tr style={{ backgroundColor: "#f5f1e8" }}>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Code</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Name</th>
-                <th style={{ ...cellStyle, textAlign: "right" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(companiesQuery.data || []).map((company) => (
-                <tr key={company.id}>
-                  <td style={cellStyle}>
-                    <code style={{ backgroundColor: "#f5f1e8", padding: "2px 6px", borderRadius: "4px" }}>
-                      {company.code}
-                    </code>
-                  </td>
-                  <td style={cellStyle}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span>{company.name}</span>
-                      {company.deleted_at && (
-                        <span
-                          style={{
-                            backgroundColor: "#f8d7da",
-                            color: "#8d2626",
-                            borderRadius: "12px",
-                            padding: "2px 8px",
-                            fontSize: "11px"
-                          }}
-                        >
-                          Archived
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td style={{ ...cellStyle, textAlign: "right" }}>
-                    {!company.deleted_at && (
-                      <button
-                        type="button"
-                        onClick={() => openEditDialog(company)}
-                        style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
-                      >
-                        Edit
-                      </button>
-                    )}
-                    {isSuperAdmin && !company.deleted_at && (
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(company)}
-                        style={{ ...dangerButtonStyle, fontSize: "12px", padding: "4px 8px" }}
-                      >
-                        Deactivate
-                      </button>
-                    )}
-                    {isSuperAdmin && company.deleted_at && (
-                      <button
-                        type="button"
-                        onClick={() => handleReactivate(company)}
-                        style={{ ...primaryButtonStyle, fontSize: "12px", padding: "4px 8px" }}
-                      >
-                        Reactivate
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-      
-      {/* Dialogs */}
-      {dialogMode && (
-        <div style={dialogOverlayStyle} onClick={closeDialog}>
-          <div style={dialogStyle} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>
-              {dialogMode === "create" && "Create New Company"}
-              {dialogMode === "edit" && "Edit Company"}
-            </h3>
-            
-            {dialogMode === "create" && (
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  Company Code <span style={{ color: "#8d2626" }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                  style={inputStyle}
-                  placeholder="e.g., ACME, COMPANY1"
-                  maxLength={32}
-                />
-                {formErrors.code && (
-                  <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.code}</small>
-                )}
-                <small style={{ display: "block", marginTop: "4px", color: "#6b5d48", fontSize: "11px" }}>
-                  Uppercase letters, numbers, hyphens, and underscores only
-                </small>
-              </div>
-            )}
-            
-            {dialogMode === "edit" && editingCompany && (
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  Company Code
-                </label>
-                <input
-                  type="text"
-                  value={editingCompany.code}
-                  disabled
-                  style={{ ...inputStyle, backgroundColor: "#f5f1e8", cursor: "not-allowed" }}
-                />
-                <small style={{ display: "block", marginTop: "4px", color: "#6b5d48", fontSize: "11px" }}>
-                  Code cannot be changed
-                </small>
-              </div>
-            )}
-            
-            <div style={{ marginBottom: "16px" }}>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                Company Name <span style={{ color: "#8d2626" }}>*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                style={inputStyle}
-                placeholder="e.g., ACME Corporation"
-                maxLength={191}
-              />
-              {formErrors.name && (
-                <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.name}</small>
-              )}
-            </div>
-            
-            {error && (
-              <p style={{ color: "#8d2626", backgroundColor: "#f8d7da", padding: "8px", borderRadius: "4px" }}>
+            {companiesQuery.loading ? (
+              <Text size="sm" c="dimmed">
+                Loading companies...
+              </Text>
+            ) : null}
+
+            {companiesQuery.error ? (
+              <Alert color="red" title="Unable to load">
+                {companiesQuery.error}
+              </Alert>
+            ) : null}
+
+            {error ? (
+              <Alert color="red" title="Action failed">
                 {error}
-              </p>
-            )}
-            
-            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "16px" }}>
-              <button
-                type="button"
-                onClick={closeDialog}
-                style={buttonStyle}
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSubmit}
-                style={primaryButtonStyle}
-                disabled={submitting}
-              >
-                {submitting ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              </Alert>
+            ) : null}
+
+            {successMessage ? (
+              <Alert color="green" title="Success">
+                {successMessage}
+              </Alert>
+            ) : null}
+          </Stack>
+        </PageCard>
+
+        <PageCard title={`Companies (${filteredCompanies.length})`}>
+          <DataTable
+            columns={columns}
+            data={filteredCompanies}
+            emptyState={
+              searchTerm.trim().length > 0
+                ? "No companies match your search."
+                : "No companies available."
+            }
+          />
+        </PageCard>
+      </Stack>
+
+      <Modal
+        opened={dialogMode !== null}
+        onClose={closeDialog}
+        title={
+          <Title order={4}>
+            {dialogMode === "create" ? "Create New Company" : "Edit Company"}
+          </Title>
+        }
+        centered
+      >
+        <Stack gap="md">
+          {dialogMode === "create" ? (
+            <TextInput
+              label="Company Code"
+              placeholder="e.g., ACME, COMPANY1"
+              value={formData.code}
+              onChange={(event) =>
+                setFormData({ ...formData, code: event.currentTarget.value.toUpperCase() })
+              }
+              maxLength={32}
+              error={formErrors.code}
+              description="Uppercase letters, numbers, hyphens, and underscores only"
+              withAsterisk
+            />
+          ) : (
+            <TextInput
+              label="Company Code"
+              value={editingCompany?.code ?? ""}
+              disabled
+              description="Code cannot be changed"
+            />
+          )}
+
+          <TextInput
+            label="Company Name"
+            placeholder="e.g., ACME Corporation"
+            value={formData.name}
+            onChange={(event) => setFormData({ ...formData, name: event.currentTarget.value })}
+            maxLength={191}
+            error={formErrors.name}
+            withAsterisk
+          />
+
+          {error ? (
+            <Alert color="red" title="Unable to save">
+              {error}
+            </Alert>
+          ) : null}
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeDialog} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} loading={submitting}>
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={confirmState !== null}
+        onClose={() => setConfirmState(null)}
+        title={<Title order={4}>Confirm Action</Title>}
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            {confirmState?.action === "deactivate"
+              ? `Deactivate company "${confirmState.company.name}"? Users will lose access, but SUPER_ADMIN can still view archived data.`
+              : `Reactivate company "${confirmState?.company.name}"? This will restore access for its users.`}
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmState(null)}>
+              Cancel
+            </Button>
+            <Button
+              color={confirmState?.action === "deactivate" ? "red" : "blue"}
+              onClick={handleConfirmAction}
+            >
+              {confirmState?.action === "deactivate" ? "Deactivate" : "Reactivate"}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </>
   );
 }

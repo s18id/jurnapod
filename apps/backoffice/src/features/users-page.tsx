@@ -1,7 +1,22 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  Group,
+  Modal,
+  ScrollArea,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
 import {
   useUsers,
@@ -17,7 +32,10 @@ import {
 } from "../hooks/use-users";
 import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
-import type { UserResponse, RoleResponse, OutletResponse } from "@jurnapod/shared";
+import { DataTable } from "../components/DataTable";
+import { FilterBar } from "../components/FilterBar";
+import { PageCard } from "../components/PageCard";
+import type { UserResponse } from "@jurnapod/shared";
 
 type UsersPageProps = {
   user: SessionUser;
@@ -44,124 +62,26 @@ const emptyForm: UserFormData = {
   is_active: true
 };
 
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const inputStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 8px"
-} as const;
-
-const buttonStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 12px",
-  backgroundColor: "#fff",
-  cursor: "pointer",
-  marginRight: "8px"
-} as const;
-
-const primaryButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#2f5f4a",
-  color: "#fff",
-  border: "1px solid #2f5f4a"
-} as const;
-
-const dangerButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#8d2626",
-  color: "#fff",
-  border: "1px solid #8d2626"
-} as const;
-
-const badgeStyle = {
-  display: "inline-block",
-  padding: "2px 6px",
-  borderRadius: "4px",
-  fontSize: "11px",
-  fontWeight: "bold" as const,
-  marginRight: "4px",
-  marginBottom: "2px"
-};
-
-const activeBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#d4edda",
-  color: "#155724"
-} as const;
-
-const inactiveBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#f8d7da",
-  color: "#721c24"
-} as const;
-
-const roleBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#d1ecf1",
-  color: "#0c5460"
-} as const;
-
-const outletBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#fff3cd",
-  color: "#856404"
-} as const;
-
-const dialogOverlayStyle = {
-  position: "fixed" as const,
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  backgroundColor: "rgba(0, 0, 0, 0.5)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000
-};
-
-const dialogStyle = {
-  backgroundColor: "#fff",
-  borderRadius: "10px",
-  padding: "24px",
-  maxWidth: "600px",
-  width: "90%",
-  maxHeight: "90vh",
-  overflow: "auto"
-};
-
 export function UsersPage(props: UsersPageProps) {
   const { user, accessToken } = props;
   const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
   
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("active");
   const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [outletFilter, setOutletFilter] = useState<string>("all");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number>(user.company_id);
   
   // Dialog state
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingUser, setEditingUser] = useState<UserResponse | null>(null);
   const [formData, setFormData] = useState<UserFormData>(emptyForm);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof UserFormData, string>>>({});
+  const [confirmState, setConfirmState] = useState<
+    { action: "deactivate" | "reactivate"; user: UserResponse } | null
+  >(null);
   
   // UI state
   const [submitting, setSubmitting] = useState(false);
@@ -169,35 +89,75 @@ export function UsersPage(props: UsersPageProps) {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
   // API hooks
-  const usersQuery = useUsers(user.company_id, accessToken, {
+  const activeCompanyId = isSuperAdmin ? selectedCompanyId : user.company_id;
+
+  const usersQuery = useUsers(activeCompanyId, accessToken, {
     is_active: statusFilter === "all" ? undefined : statusFilter === "active",
-    search: searchTerm || undefined
+    search: searchQuery || undefined
   });
-  
+
   const rolesQuery = useRoles(accessToken);
   const companiesQuery = useCompanies(accessToken, { enabled: isSuperAdmin });
-  const outletCompanyId = isSuperAdmin && dialogMode === "create"
-    ? (formData.company_id ?? user.company_id)
-    : user.company_id;
+  const outletCompanyId =
+    isSuperAdmin && dialogMode === "create"
+      ? (formData.company_id ?? activeCompanyId)
+      : activeCompanyId;
   const outletsQuery = useOutlets(outletCompanyId, accessToken);
-  const availableRoles = (rolesQuery.data || []).filter((role) => role.code !== "SUPER_ADMIN");
+  const availableRoles = useMemo(
+    () => (rolesQuery.data || []).filter((role) => role.code !== "SUPER_ADMIN"),
+    [rolesQuery.data]
+  );
+
+  const companyOptions = useMemo(
+    () =>
+      (companiesQuery.data || []).map((company) => ({
+        value: String(company.id),
+        label: `${company.name} (${company.code})`
+      })),
+    [companiesQuery.data]
+  );
+
+  const roleOptions = useMemo(
+    () => [
+      { value: "all", label: "All Roles" },
+      ...availableRoles.map((role) => ({ value: role.code, label: role.name }))
+    ],
+    [availableRoles]
+  );
+
+  const outletOptions = useMemo(
+    () => [
+      { value: "all", label: "All Outlets" },
+      ...(outletsQuery.data || []).map((outlet) => ({
+        value: String(outlet.id),
+        label: outlet.name
+      }))
+    ],
+    [outletsQuery.data]
+  );
   
   // Filtered users
   const filteredUsers = useMemo(() => {
     let result = usersQuery.data || [];
-    
+
     if (roleFilter !== "all") {
-      result = result.filter(u => u.roles.includes(roleFilter as any));
+      result = result.filter((item) => item.roles.includes(roleFilter as any));
     }
-    
+
+    if (outletFilter !== "all") {
+      result = result.filter((item) =>
+        item.outlets.some((outlet) => String(outlet.id) === outletFilter)
+      );
+    }
+
     return result;
-  }, [usersQuery.data, roleFilter]);
+  }, [usersQuery.data, roleFilter, outletFilter]);
   
   // Handlers
   const openCreateDialog = () => {
     setFormData({
       ...emptyForm,
-      company_id: isSuperAdmin ? user.company_id : null
+      company_id: isSuperAdmin ? activeCompanyId : null
     });
     setFormErrors({});
     setEditingUser(null);
@@ -305,8 +265,8 @@ export function UsersPage(props: UsersPageProps) {
     try {
       if (dialogMode === "create") {
         const targetCompanyId = isSuperAdmin
-          ? (formData.company_id ?? user.company_id)
-          : user.company_id;
+          ? (formData.company_id ?? activeCompanyId)
+          : activeCompanyId;
         await createUser({
           company_id: targetCompanyId,
           email: formData.email,
@@ -326,6 +286,10 @@ export function UsersPage(props: UsersPageProps) {
         await usersQuery.refetch({ force: true });
         closeDialog();
       } else if (dialogMode === "roles" && editingUser) {
+        if (editingUser.id === user.id) {
+          setError("You cannot update your own roles.");
+          return;
+        }
         await updateUserRoles(editingUser.id, {
           role_codes: formData.role_codes as any
         }, accessToken);
@@ -333,6 +297,10 @@ export function UsersPage(props: UsersPageProps) {
         await usersQuery.refetch({ force: true });
         closeDialog();
       } else if (dialogMode === "outlets" && editingUser) {
+        if (editingUser.id === user.id) {
+          setError("You cannot update your own outlets.");
+          return;
+        }
         await updateUserOutlets(editingUser.id, {
           outlet_ids: formData.outlet_ids
         }, accessToken);
@@ -358,8 +326,11 @@ export function UsersPage(props: UsersPageProps) {
   };
   
   const handleDeactivate = async (targetUser: UserResponse) => {
-    if (!confirm(`Deactivate user ${targetUser.email}?`)) return;
-    
+    if (targetUser.id === user.id) {
+      setError("You cannot deactivate your own account.");
+      return;
+    }
+
     setError(null);
     setSuccessMessage(null);
     
@@ -377,8 +348,11 @@ export function UsersPage(props: UsersPageProps) {
   };
   
   const handleReactivate = async (targetUser: UserResponse) => {
-    if (!confirm(`Reactivate user ${targetUser.email}?`)) return;
-    
+    if (targetUser.id === user.id) {
+      setError("You cannot reactivate your own account.");
+      return;
+    }
+
     setError(null);
     setSuccessMessage(null);
     
@@ -394,403 +368,542 @@ export function UsersPage(props: UsersPageProps) {
       }
     }
   };
+
+  async function handleConfirmUserStatus() {
+    if (!confirmState) {
+      return;
+    }
+
+    try {
+      if (confirmState.action === "deactivate") {
+        await handleDeactivate(confirmState.user);
+      } else {
+        await handleReactivate(confirmState.user);
+      }
+    } finally {
+      setConfirmState(null);
+    }
+  }
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setSearchQuery(searchTerm.trim());
+    }, 300);
+
+    return () => {
+      window.clearTimeout(handle);
+    };
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (isSuperAdmin && companiesQuery.data && companiesQuery.data.length > 0) {
+      if (!companiesQuery.data.some((company) => company.id === selectedCompanyId)) {
+        setSelectedCompanyId(companiesQuery.data[0].id);
+      }
+    }
+  }, [companiesQuery.data, isSuperAdmin, selectedCompanyId]);
+
+  useEffect(() => {
+    setOutletFilter("all");
+  }, [selectedCompanyId]);
+
+  const columns = useMemo<ColumnDef<UserResponse>[]>(() => {
+    return [
+      {
+        id: "email",
+        header: "Email",
+        cell: (info) => <Text>{info.row.original.email}</Text>
+      },
+      {
+        id: "roles",
+        header: "Roles",
+        cell: (info) => {
+          const roles = info.row.original.roles;
+          if (roles.length === 0) {
+            return (
+              <Text size="sm" c="dimmed">
+                No roles
+              </Text>
+            );
+          }
+          return (
+            <Group gap="xs" wrap="wrap">
+              {roles.map((role) => (
+                <Badge key={role} variant="light" color="blue">
+                  {role}
+                </Badge>
+              ))}
+            </Group>
+          );
+        }
+      },
+      {
+        id: "outlets",
+        header: "Outlets",
+        cell: (info) => {
+          const outlets = info.row.original.outlets;
+          if (outlets.length === 0) {
+            return (
+              <Text size="sm" c="dimmed">
+                No outlets
+              </Text>
+            );
+          }
+          return (
+            <Group gap="xs" wrap="wrap">
+              {outlets.map((outlet) => (
+                <Badge key={outlet.id} variant="light" color="yellow">
+                  {outlet.name}
+                </Badge>
+              ))}
+            </Group>
+          );
+        }
+      },
+      {
+        id: "status",
+        header: "Status",
+        cell: (info) => (
+          <Badge variant="light" color={info.row.original.is_active ? "green" : "red"}>
+            {info.row.original.is_active ? "Active" : "Inactive"}
+          </Badge>
+        )
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        cell: (info) => {
+          const targetUser = info.row.original;
+          const isSelf = targetUser.id === user.id;
+          const disableSelfAction = isSelf;
+          const selfTooltip = isSelf ? "You cannot modify your own access." : undefined;
+          return (
+            <Group gap="xs" justify="flex-end" wrap="wrap">
+              <Button
+                size="xs"
+                variant="light"
+                onClick={() => openEditDialog(targetUser)}
+              >
+                Edit
+              </Button>
+              <Button
+                size="xs"
+                variant="light"
+                onClick={() => openRolesDialog(targetUser)}
+                disabled={disableSelfAction}
+                title={selfTooltip}
+              >
+                Roles
+              </Button>
+              <Button
+                size="xs"
+                variant="light"
+                onClick={() => openOutletsDialog(targetUser)}
+                disabled={disableSelfAction}
+                title={selfTooltip}
+              >
+                Outlets
+              </Button>
+              <Button
+                size="xs"
+                variant="light"
+                onClick={() => openPasswordDialog(targetUser)}
+              >
+                Password
+              </Button>
+              {targetUser.is_active ? (
+                <Button
+                  size="xs"
+                  color="red"
+                  variant="light"
+                  onClick={() => setConfirmState({ action: "deactivate", user: targetUser })}
+                  disabled={disableSelfAction}
+                  title={selfTooltip}
+                >
+                  Deactivate
+                </Button>
+              ) : (
+                <Button
+                  size="xs"
+                  variant="light"
+                  onClick={() => setConfirmState({ action: "reactivate", user: targetUser })}
+                  disabled={disableSelfAction}
+                  title={selfTooltip}
+                >
+                  Reactivate
+                </Button>
+              )}
+            </Group>
+          );
+        }
+      }
+    ];
+  }, [openEditDialog, openOutletsDialog, openPasswordDialog, openRolesDialog, user.id]);
   
   return (
     <>
-      <section style={boxStyle}>
-        <h2 style={{ marginTop: 0 }}>User Management</h2>
-        <p>Manage users, roles, and permissions for your organization.</p>
-        
-        <div style={{ marginTop: "16px" }}>
-          <button type="button" onClick={openCreateDialog} style={primaryButtonStyle}>
-            Create User
-          </button>
-        </div>
-        
-        {usersQuery.loading && <p>Loading users...</p>}
-        {usersQuery.error && <p style={{ color: "#8d2626" }}>{usersQuery.error}</p>}
-        {error && <p style={{ color: "#8d2626" }}>{error}</p>}
-        {successMessage && (
-          <p style={{ color: "#155724", backgroundColor: "#d4edda", padding: "8px", borderRadius: "4px", marginTop: "8px" }}>
-            {successMessage}
-          </p>
-        )}
-      </section>
-      
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Filters</h3>
-        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
-          <input
-            type="text"
-            placeholder="Search by email..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ ...inputStyle, minWidth: "250px" }}
-          />
-          
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
-            style={inputStyle}
-          >
-            <option value="all">All Status</option>
-            <option value="active">Active Only</option>
-            <option value="inactive">Inactive Only</option>
-          </select>
-          
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            style={inputStyle}
-          >
-            <option value="all">All Roles</option>
-          {availableRoles.map(role => (
-            <option key={role.code} value={role.code}>{role.name}</option>
-          ))}
-          </select>
-        </div>
-      </section>
-      
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Users ({filteredUsers.length})</h3>
-        
-        {filteredUsers.length === 0 && !usersQuery.loading ? (
-          <p>No users found</p>
-        ) : (
-          <table style={tableStyle}>
-            <thead>
-              <tr style={{ backgroundColor: "#f5f1e8" }}>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Email</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Roles</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Outlets</th>
-                <th style={{ ...cellStyle, textAlign: "center" }}>Status</th>
-                <th style={{ ...cellStyle, textAlign: "right" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredUsers.map((targetUser) => (
-                <tr key={targetUser.id}>
-                  <td style={cellStyle}>{targetUser.email}</td>
-                  <td style={cellStyle}>
-                    {targetUser.roles.length === 0 ? (
-                      <span style={{ color: "#999" }}>No roles</span>
-                    ) : (
-                      targetUser.roles.map(role => (
-                        <span key={role} style={roleBadgeStyle}>{role}</span>
-                      ))
-                    )}
-                  </td>
-                  <td style={cellStyle}>
-                    {targetUser.outlets.length === 0 ? (
-                      <span style={{ color: "#999" }}>No outlets</span>
-                    ) : (
-                      targetUser.outlets.map(outlet => (
-                        <span key={outlet.id} style={outletBadgeStyle}>{outlet.name}</span>
-                      ))
-                    )}
-                  </td>
-                  <td style={{ ...cellStyle, textAlign: "center" }}>
-                    <span style={targetUser.is_active ? activeBadgeStyle : inactiveBadgeStyle}>
-                      {targetUser.is_active ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td style={{ ...cellStyle, textAlign: "right" }}>
-                    <button
-                      type="button"
-                      onClick={() => openEditDialog(targetUser)}
-                      style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openRolesDialog(targetUser)}
-                      style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
-                    >
-                      Roles
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openOutletsDialog(targetUser)}
-                      style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
-                    >
-                      Outlets
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openPasswordDialog(targetUser)}
-                      style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
-                    >
-                      Password
-                    </button>
-                    {targetUser.is_active ? (
-                      <button
-                        type="button"
-                        onClick={() => handleDeactivate(targetUser)}
-                        style={{ ...dangerButtonStyle, fontSize: "12px", padding: "4px 8px" }}
-                      >
-                        Deactivate
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleReactivate(targetUser)}
-                        style={{ ...primaryButtonStyle, fontSize: "12px", padding: "4px 8px" }}
-                      >
-                        Reactivate
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-      
-      {/* Dialogs */}
-      {dialogMode && (
-        <div style={dialogOverlayStyle} onClick={closeDialog}>
-          <div style={dialogStyle} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>
-              {dialogMode === "create" && "Create New User"}
-              {dialogMode === "edit" && "Edit User"}
-              {dialogMode === "roles" && "Manage User Roles"}
-              {dialogMode === "outlets" && "Manage User Outlets"}
-              {dialogMode === "password" && "Change Password"}
-            </h3>
-            
-            {(dialogMode === "create" || dialogMode === "edit") && (
-              <>
-                <div style={{ marginBottom: "16px" }}>
-                  <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                    Email <span style={{ color: "#8d2626" }}>*</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    style={{ ...inputStyle, width: "100%" }}
-                    placeholder="user@example.com"
-                  />
-                  {formErrors.email && (
-                    <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.email}</small>
-                  )}
-                </div>
-                
-                {dialogMode === "create" && (
-                  <>
-                    {isSuperAdmin && (
-                      <div style={{ marginBottom: "16px" }}>
-                        <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                          Company <span style={{ color: "#8d2626" }}>*</span>
-                        </label>
-                        <select
-                          value={formData.company_id ?? ""}
-                          onChange={(e) => {
-                            const value = e.target.value ? Number(e.target.value) : null;
-                            setFormData({
-                              ...formData,
-                              company_id: value,
-                              outlet_ids: []
-                            });
-                          }}
-                          style={{ ...inputStyle, width: "100%" }}
-                        >
-                          <option value="">Select company...</option>
-                          {companiesQuery.data.map(company => (
-                            <option key={company.id} value={company.id}>
-                              {company.name} ({company.code})
-                            </option>
-                          ))}
-                        </select>
-                        {companiesQuery.loading && (
-                          <small style={{ color: "#7a6c58", fontSize: "11px" }}>Loading companies...</small>
-                        )}
-                        {companiesQuery.error && (
-                          <small style={{ color: "#8d2626", fontSize: "11px" }}>{companiesQuery.error}</small>
-                        )}
-                        {formErrors.company_id && (
-                          <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.company_id}</small>
-                        )}
-                      </div>
-                    )}
-                    <div style={{ marginBottom: "16px" }}>
-                      <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                        Password <span style={{ color: "#8d2626" }}>*</span>
-                      </label>
-                      <input
-                        type="password"
-                        value={formData.password}
-                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                        style={{ ...inputStyle, width: "100%" }}
-                        placeholder="Minimum 8 characters"
-                      />
-                      {formErrors.password && (
-                        <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.password}</small>
-                      )}
-                    </div>
-                    
-                    <div style={{ marginBottom: "16px" }}>
-                      <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                        Roles
-                      </label>
-                      <div style={{ border: "1px solid #cabfae", borderRadius: "6px", padding: "8px", maxHeight: "150px", overflow: "auto" }}>
-                        {availableRoles.map(role => (
-                          <label key={role.code} style={{ display: "block", marginBottom: "4px" }}>
-                            <input
-                              type="checkbox"
-                              checked={formData.role_codes.includes(role.code)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setFormData({ ...formData, role_codes: [...formData.role_codes, role.code] });
-                                } else {
-                                  setFormData({ ...formData, role_codes: formData.role_codes.filter(c => c !== role.code) });
-                                }
-                              }}
-                            />
-                            {" "}{role.name}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    <div style={{ marginBottom: "16px" }}>
-                      <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                        Outlets
-                      </label>
-                      <div style={{ border: "1px solid #cabfae", borderRadius: "6px", padding: "8px", maxHeight: "150px", overflow: "auto" }}>
-                        {(outletsQuery.data || []).map(outlet => (
-                          <label key={outlet.id} style={{ display: "block", marginBottom: "4px" }}>
-                            <input
-                              type="checkbox"
-                              checked={formData.outlet_ids.includes(outlet.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setFormData({ ...formData, outlet_ids: [...formData.outlet_ids, outlet.id] });
-                                } else {
-                                  setFormData({ ...formData, outlet_ids: formData.outlet_ids.filter(id => id !== outlet.id) });
-                                }
-                              }}
-                            />
-                            {" "}{outlet.name}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    <div style={{ marginBottom: "16px" }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                        <input
-                          type="checkbox"
-                          checked={formData.is_active}
-                          onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                        />
-                        Active
-                      </label>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-            
-            {dialogMode === "roles" && (
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  Select Roles
-                </label>
-                <div style={{ border: "1px solid #cabfae", borderRadius: "6px", padding: "8px", maxHeight: "300px", overflow: "auto" }}>
-                  {availableRoles.map(role => (
-                    <label key={role.code} style={{ display: "block", marginBottom: "4px" }}>
-                      <input
-                        type="checkbox"
-                        checked={formData.role_codes.includes(role.code)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setFormData({ ...formData, role_codes: [...formData.role_codes, role.code] });
-                          } else {
-                            setFormData({ ...formData, role_codes: formData.role_codes.filter(c => c !== role.code) });
-                          }
-                        }}
-                      />
-                      {" "}{role.name}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {dialogMode === "outlets" && (
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  Select Outlets
-                </label>
-                <div style={{ border: "1px solid #cabfae", borderRadius: "6px", padding: "8px", maxHeight: "300px", overflow: "auto" }}>
-                  {(outletsQuery.data || []).map(outlet => (
-                    <label key={outlet.id} style={{ display: "block", marginBottom: "4px" }}>
-                      <input
-                        type="checkbox"
-                        checked={formData.outlet_ids.includes(outlet.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setFormData({ ...formData, outlet_ids: [...formData.outlet_ids, outlet.id] });
-                          } else {
-                            setFormData({ ...formData, outlet_ids: formData.outlet_ids.filter(id => id !== outlet.id) });
-                          }
-                        }}
-                      />
-                      {" "}{outlet.name}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {dialogMode === "password" && (
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  New Password <span style={{ color: "#8d2626" }}>*</span>
-                </label>
-                <input
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  style={{ ...inputStyle, width: "100%" }}
-                  placeholder="Minimum 8 characters"
-                />
-                {formErrors.password && (
-                  <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.password}</small>
-                )}
-              </div>
-            )}
-            
-            {error && (
-              <p style={{ color: "#8d2626", backgroundColor: "#f8d7da", padding: "8px", borderRadius: "4px" }}>
+      <Stack gap="md">
+        <PageCard
+          title="User Management"
+          description="Manage users, roles, and permissions for your organization."
+          actions={
+            <Button
+              onClick={openCreateDialog}
+              disabled={isSuperAdmin && companyOptions.length === 0}
+            >
+              Create User
+            </Button>
+          }
+        >
+          <Stack gap="sm">
+            {usersQuery.loading ? (
+              <Text size="sm" c="dimmed">
+                Loading users...
+              </Text>
+            ) : null}
+            {usersQuery.error ? (
+              <Alert color="red" title="Unable to load users">
+                {usersQuery.error}
+              </Alert>
+            ) : null}
+            {error ? (
+              <Alert color="red" title="Action failed">
                 {error}
-              </p>
-            )}
-            
-            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "16px" }}>
-              <button
-                type="button"
-                onClick={closeDialog}
-                style={buttonStyle}
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSubmit}
-                style={primaryButtonStyle}
-                disabled={submitting}
-              >
-                {submitting ? "Saving..." : "Save"}
-              </button>
+              </Alert>
+            ) : null}
+            {successMessage ? (
+              <Alert color="green" title="Success">
+                {successMessage}
+              </Alert>
+            ) : null}
+          </Stack>
+        </PageCard>
+
+        <PageCard title="Filters">
+          <FilterBar>
+            {isSuperAdmin ? (
+              <Select
+                label="Company"
+                placeholder={companyOptions.length === 0 ? "No companies available" : "Select company"}
+                data={companyOptions}
+                value={companyOptions.length === 0 ? "" : String(selectedCompanyId)}
+                onChange={(value) => setSelectedCompanyId(Number(value ?? 0))}
+                disabled={companyOptions.length === 0}
+                style={{ minWidth: 240 }}
+              />
+            ) : null}
+
+            <TextInput
+              label="Search"
+              placeholder="Search by email"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.currentTarget.value)}
+              style={{ minWidth: 220 }}
+            />
+
+            <Select
+              label="Status"
+              data={[
+                { value: "all", label: "All Status" },
+                { value: "active", label: "Active Only" },
+                { value: "inactive", label: "Inactive Only" }
+              ]}
+              value={statusFilter}
+              onChange={(value) => setStatusFilter((value as any) || "active")}
+              style={{ minWidth: 170 }}
+            />
+
+            <Select
+              label="Role"
+              data={roleOptions}
+              value={roleFilter}
+              onChange={(value) => setRoleFilter(value || "all")}
+              style={{ minWidth: 170 }}
+            />
+
+            <Select
+              label="Outlet"
+              data={outletOptions}
+              value={outletFilter}
+              onChange={(value) => setOutletFilter(value || "all")}
+              style={{ minWidth: 170 }}
+            />
+          </FilterBar>
+        </PageCard>
+
+        <PageCard title={`Users (${filteredUsers.length})`}>
+          <DataTable
+            columns={columns}
+            data={filteredUsers}
+            minWidth={900}
+            emptyState={
+              searchTerm.trim().length > 0
+                ? "No users match your search."
+                : "No users found."
+            }
+          />
+        </PageCard>
+      </Stack>
+
+      <Modal
+        opened={dialogMode !== null}
+        onClose={closeDialog}
+        title={
+          <Title order={4}>
+            {dialogMode === "create" && "Create New User"}
+            {dialogMode === "edit" && "Edit User"}
+            {dialogMode === "roles" && "Manage User Roles"}
+            {dialogMode === "outlets" && "Manage User Outlets"}
+            {dialogMode === "password" && "Change Password"}
+          </Title>
+        }
+        centered
+        size="lg"
+      >
+        <Stack gap="md">
+          {(dialogMode === "create" || dialogMode === "edit") && (
+            <TextInput
+              label="Email"
+              placeholder="user@example.com"
+              value={formData.email}
+              onChange={(event) => setFormData({ ...formData, email: event.currentTarget.value })}
+              error={formErrors.email}
+              withAsterisk
+            />
+          )}
+
+          {dialogMode === "create" && isSuperAdmin ? (
+            <Select
+              label="Company"
+              placeholder="Select company"
+              data={companyOptions}
+              value={formData.company_id ? String(formData.company_id) : ""}
+              onChange={(value) => {
+                const nextValue = value ? Number(value) : null;
+                setFormData({
+                  ...formData,
+                  company_id: nextValue,
+                  outlet_ids: []
+                });
+              }}
+              error={formErrors.company_id}
+              disabled={companyOptions.length === 0}
+              withAsterisk
+            />
+          ) : null}
+
+          {dialogMode === "create" ? (
+            <TextInput
+              label="Password"
+              placeholder="Minimum 8 characters"
+              type="password"
+              value={formData.password}
+              onChange={(event) => setFormData({ ...formData, password: event.currentTarget.value })}
+              error={formErrors.password}
+              withAsterisk
+            />
+          ) : null}
+
+          {dialogMode === "create" ? (
+            <Stack gap="sm">
+              <div>
+                <Text fw={600} size="sm">
+                  Roles
+                </Text>
+                <ScrollArea h={160} type="auto">
+                  <Stack gap="xs">
+                    {availableRoles.length === 0 ? (
+                      <Text size="sm" c="dimmed">
+                        No roles available.
+                      </Text>
+                    ) : (
+                      availableRoles.map((role) => (
+                        <Checkbox
+                          key={role.code}
+                          label={role.name}
+                          checked={formData.role_codes.includes(role.code)}
+                          onChange={(event) => {
+                            if (event.currentTarget.checked) {
+                              setFormData({
+                                ...formData,
+                                role_codes: [...formData.role_codes, role.code]
+                              });
+                            } else {
+                              setFormData({
+                                ...formData,
+                                role_codes: formData.role_codes.filter((code) => code !== role.code)
+                              });
+                            }
+                          }}
+                        />
+                      ))
+                    )}
+                  </Stack>
+                </ScrollArea>
+              </div>
+
+              <div>
+                <Text fw={600} size="sm">
+                  Outlets
+                </Text>
+                <ScrollArea h={160} type="auto">
+                  <Stack gap="xs">
+                    {(outletsQuery.data || []).length === 0 ? (
+                      <Text size="sm" c="dimmed">
+                        No outlets available.
+                      </Text>
+                    ) : (
+                      (outletsQuery.data || []).map((outlet) => (
+                        <Checkbox
+                          key={outlet.id}
+                          label={outlet.name}
+                          checked={formData.outlet_ids.includes(outlet.id)}
+                          onChange={(event) => {
+                            if (event.currentTarget.checked) {
+                              setFormData({
+                                ...formData,
+                                outlet_ids: [...formData.outlet_ids, outlet.id]
+                              });
+                            } else {
+                              setFormData({
+                                ...formData,
+                                outlet_ids: formData.outlet_ids.filter((id) => id !== outlet.id)
+                              });
+                            }
+                          }}
+                        />
+                      ))
+                    )}
+                  </Stack>
+                </ScrollArea>
+              </div>
+
+              <Checkbox
+                label="Active"
+                checked={formData.is_active}
+                onChange={(event) => setFormData({ ...formData, is_active: event.currentTarget.checked })}
+              />
+            </Stack>
+          ) : null}
+
+          {dialogMode === "roles" ? (
+            <div>
+              <Text fw={600} size="sm" mb={6}>
+                Select Roles
+              </Text>
+              <ScrollArea h={260} type="auto">
+                <Stack gap="xs">
+                  {availableRoles.map((role) => (
+                    <Checkbox
+                      key={role.code}
+                      label={role.name}
+                      checked={formData.role_codes.includes(role.code)}
+                      onChange={(event) => {
+                        if (event.currentTarget.checked) {
+                          setFormData({
+                            ...formData,
+                            role_codes: [...formData.role_codes, role.code]
+                          });
+                        } else {
+                          setFormData({
+                            ...formData,
+                            role_codes: formData.role_codes.filter((code) => code !== role.code)
+                          });
+                        }
+                      }}
+                    />
+                  ))}
+                </Stack>
+              </ScrollArea>
             </div>
-          </div>
-        </div>
-      )}
+          ) : null}
+
+          {dialogMode === "outlets" ? (
+            <div>
+              <Text fw={600} size="sm" mb={6}>
+                Select Outlets
+              </Text>
+              <ScrollArea h={260} type="auto">
+                <Stack gap="xs">
+                  {(outletsQuery.data || []).map((outlet) => (
+                    <Checkbox
+                      key={outlet.id}
+                      label={outlet.name}
+                      checked={formData.outlet_ids.includes(outlet.id)}
+                      onChange={(event) => {
+                        if (event.currentTarget.checked) {
+                          setFormData({
+                            ...formData,
+                            outlet_ids: [...formData.outlet_ids, outlet.id]
+                          });
+                        } else {
+                          setFormData({
+                            ...formData,
+                            outlet_ids: formData.outlet_ids.filter((id) => id !== outlet.id)
+                          });
+                        }
+                      }}
+                    />
+                  ))}
+                </Stack>
+              </ScrollArea>
+            </div>
+          ) : null}
+
+          {dialogMode === "password" ? (
+            <TextInput
+              label="New Password"
+              placeholder="Minimum 8 characters"
+              type="password"
+              value={formData.password}
+              onChange={(event) => setFormData({ ...formData, password: event.currentTarget.value })}
+              error={formErrors.password}
+              withAsterisk
+            />
+          ) : null}
+
+          {error ? (
+            <Alert color="red" title="Unable to save">
+              {error}
+            </Alert>
+          ) : null}
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeDialog} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} loading={submitting}>
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={confirmState !== null}
+        onClose={() => setConfirmState(null)}
+        title={<Title order={4}>Confirm Action</Title>}
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            {confirmState?.action === "deactivate"
+              ? `Deactivate user ${confirmState?.user.email ?? ""}?`
+              : `Reactivate user ${confirmState?.user.email ?? ""}?`}
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmState(null)}>
+              Cancel
+            </Button>
+            <Button
+              color={confirmState?.action === "deactivate" ? "red" : "blue"}
+              onClick={handleConfirmUserStatus}
+            >
+              {confirmState?.action === "deactivate" ? "Deactivate" : "Reactivate"}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </>
   );
 }
