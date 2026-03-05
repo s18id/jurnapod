@@ -130,7 +130,11 @@ async function testServerStartup() {
   }
 }
 
-testServerStartup().catch((err) => {
-  console.error('💥 Smoke test failed:', err);
-  process.exit(1);
-});
+const isNodeTestRun = process.argv.includes("--test");
+
+if (!isNodeTestRun) {
+  testServerStartup().catch((err) => {
+    console.error('💥 Smoke test failed:', err);
+    process.exit(1);
+  });
+}

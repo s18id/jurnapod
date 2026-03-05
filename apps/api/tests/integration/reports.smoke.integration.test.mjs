@@ -4,27 +4,20 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import mysql from "mysql2/promise";
 import {
-  dbConfigFromEnv,
-  getFreePort,
-  loadEnvIfPresent,
   loginOwner,
   readEnv,
-  startApiServer,
-  stopApiServer,
-  TEST_TIMEOUT_MS,
-  waitForHealthcheck
-} from "./reports.helpers.mjs";
+  setupIntegrationTests,
+  TEST_TIMEOUT_MS
+} from "./integration-harness.mjs";
+
+const testContext = setupIntegrationTests(test);
 
 test(
   "reports integration: owner can view daily sales and journals",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    const db = testContext.db;
     let txClientId = "";
     let accountId = 0;
     let journalBatchId = 0;
@@ -140,13 +133,9 @@ test(
       const dateFromIso = dateFrom.toISOString().slice(0, 10);
       const dateToIso = new Date().toISOString().slice(0, 10);
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
-      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, server.serverLogs);
+      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, null);
 
       const posResponse = await fetch(
         `${baseUrl}/api/reports/pos-transactions?outlet_id=${outletId}&date_from=${dateFromIso}&date_to=${dateToIso}`,
@@ -211,8 +200,6 @@ test(
         true
       );
     } finally {
-      await stopApiServer(childProcess);
-
       if (journalBatchId > 0) {
         await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [journalBatchId]);
         await db.execute("DELETE FROM journal_batches WHERE id = ?", [journalBatchId]);
@@ -226,7 +213,6 @@ test(
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [txClientId]);
       }
 
-      await db.end();
     }
   }
 );

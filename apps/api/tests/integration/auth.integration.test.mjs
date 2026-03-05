@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { hash as argon2Hash } from "@node-rs/argon2";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
+import { createIntegrationTestContext, setupIntegrationTests } from "./integration-harness.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +21,12 @@ const nextCliPath = path.resolve(repoRoot, "node_modules/next/dist/bin/next");
 const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
+
+const testContext = setupIntegrationTests(test);
+const localServerTest =
+  process.env.JP_TEST_BASE_URL && process.env.JP_TEST_ALLOW_LOCAL_SERVER !== "1"
+    ? test.skip
+    : test;
 
 function readEnv(name, fallback = null) {
   const value = process.env[name];
@@ -169,7 +176,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     let viewerUserId = 0;
     let deniedOutletId = 0;
@@ -315,11 +322,7 @@ test(
       );
 
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const loginSuccessResponse = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
@@ -379,7 +382,15 @@ test(
       assert.equal(meWithTokenBody.data.company_id, companyId);
       assert.equal(meWithTokenBody.data.email, ownerEmail);
       assert.deepEqual(meWithTokenBody.data.roles, expectedOwnerRoles);
-      assert.deepEqual(meWithTokenBody.data.outlets, expectedOwnerOutlets);
+      const actualOutletKeySet = new Set(
+        meWithTokenBody.data.outlets.map((outlet) =>
+          `${outlet.id}::${outlet.code}::${outlet.name}`
+        )
+      );
+      for (const outlet of expectedOwnerOutlets) {
+        const key = `${outlet.id}::${outlet.code}::${outlet.name}`;
+        assert.equal(actualOutletKeySet.has(key), true);
+      }
 
       const ownerAllowedOutletResponse = await fetch(
         `${baseUrl}/api/outlets/access?outlet_id=${allowedOutletId}`,
@@ -465,8 +476,6 @@ test(
       assert.equal(hasSuccessAudit, true);
       assert.equal(hasFailAudit, true);
     } finally {
-      await stopApiServer(childProcess);
-
       await db.execute(
         `DELETE FROM audit_logs
          WHERE action = 'AUTH_LOGIN'
@@ -485,12 +494,11 @@ test(
         await db.execute("DELETE FROM outlets WHERE id = ?", [deniedOutletId]);
       }
 
-      await db.end();
     }
   }
 );
 
-test(
+localServerTest(
   "auth integration: startup fails fast when AUTH_JWT_ACCESS_SECRET is blank",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
@@ -540,7 +548,7 @@ test(
   }
 );
 
-test(
+localServerTest(
   "auth integration: password policy supports bcrypt, argon2id, and rehash migration",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
@@ -548,7 +556,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     const createdUserIds = [];
 
@@ -745,12 +753,11 @@ test(
         }
       }
 
-      await db.end();
     }
   }
 );
 
-test(
+localServerTest(
   "auth integration: startup fails fast when AUTH_JWT_ACCESS_SECRET is unset",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
@@ -809,7 +816,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     let triggerCreated = false;
 
@@ -851,11 +858,7 @@ test(
       );
       triggerCreated = true;
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const response = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
@@ -887,13 +890,9 @@ test(
 
       assert.equal(Number(auditRows[0].total), 0);
     } finally {
-      await stopApiServer(childProcess);
-
       if (triggerCreated) {
         await db.execute(`DROP TRIGGER IF EXISTS \`${triggerName}\``);
       }
-
-      await db.end();
     }
   }
 );

@@ -9,6 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
+import { setupIntegrationTests } from "./integration-harness.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,8 @@ const nextCliPath = path.resolve(repoRoot, "node_modules/next/dist/bin/next");
 const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
+
+const testContext = setupIntegrationTests(test);
 
 const DEPRECIATION_DOC_TYPE = "DEPRECIATION";
 
@@ -107,12 +110,12 @@ function startApiServer(port) {
   };
 }
 
-async function waitForServerReady(port, maxWaitMs = 30000) {
+async function waitForServerReady(baseUrl, maxWaitMs = 30000) {
   const startTime = Date.now();
 
   while (Date.now() - startTime < maxWaitMs) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/health`);
+      const response = await fetch(`${baseUrl}/api/health`);
       if (response.ok) {
         return;
       }
@@ -126,8 +129,8 @@ async function waitForServerReady(port, maxWaitMs = 30000) {
   throw new Error("Server did not become ready in time");
 }
 
-async function authenticate(port, companyCode, email, password) {
-  const response = await fetch(`http://127.0.0.1:${port}/api/auth/login`, {
+async function authenticate(baseUrl, companyCode, email, password) {
+  const response = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ company_code: companyCode, email, password })
@@ -313,18 +316,15 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
   const companyCode = readEnv("JP_COMPANY_CODE", "JP");
   const email = readEnv("JP_OWNER_EMAIL").toLowerCase();
   const password = readEnv("JP_OWNER_PASSWORD");
-  const port = await getFreePort();
-
-  const server = startApiServer(port);
-  const baseUrl = `http://127.0.0.1:${port}`;
+  const baseUrl = testContext.baseUrl;
 
   let connection;
   let accessToken;
 
   try {
-    await waitForServerReady(port, 45000);
-    connection = await mysql.createConnection(dbConfig);
-    accessToken = await authenticate(port, companyCode, email, password);
+    await waitForServerReady(baseUrl, 45000);
+    connection = testContext.db;
+    accessToken = await authenticate(baseUrl, companyCode, email, password);
 
     // Get user info to find outlet
     const meResponse = await fetch(`${baseUrl}/api/users/me`, {
@@ -686,15 +686,8 @@ test("Depreciation integration tests", { timeout: TEST_TIMEOUT_MS }, async (t) =
 
   } finally {
     if (connection) {
-      await connection.end();
     }
 
-    if (server.process) {
-      server.process.kill("SIGTERM");
-      await delay(1000);
-      if (!server.process.killed) {
-        server.process.kill("SIGKILL");
-      }
-    }
+    
   }
 });

@@ -9,6 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
+import { setupIntegrationTests } from "./integration-harness.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,8 @@ const nextCliPath = path.resolve(repoRoot, "node_modules/next/dist/bin/next");
 const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
+
+const testContext = setupIntegrationTests(test);
 
 function readEnv(name, fallback = null) {
   const value = process.env[name];
@@ -156,12 +159,7 @@ test(
   "static pages integration: admin CRUD, publish, public read",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
-      loadEnvFile(ENV_PATH);
-    }
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    const db = testContext.db;
     let createdPageId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
@@ -170,11 +168,7 @@ test(
     const runId = Date.now().toString(36);
 
     try {
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
@@ -316,8 +310,6 @@ test(
       assert.equal(publicAfterBody.success, false);
       assert.equal(publicAfterBody.error.code, "NOT_FOUND");
     } finally {
-      await stopApiServer(childProcess);
-      await db.end();
     }
   }
 );

@@ -3,27 +3,20 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import mysql from "mysql2/promise";
 import {
-  dbConfigFromEnv,
-  getFreePort,
-  loadEnvIfPresent,
   loginOwner,
   readEnv,
-  startApiServer,
-  stopApiServer,
-  TEST_TIMEOUT_MS,
-  waitForHealthcheck
-} from "./reports.helpers.mjs";
+  setupIntegrationTests,
+  TEST_TIMEOUT_MS
+} from "./integration-harness.mjs";
+
+const testContext = setupIntegrationTests(test);
 
 test(
   "reports integration: general-ledger account pagination returns lines with running balance",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    const db = testContext.db;
     let accountId = 0;
     let journalBatchId = 0;
     let page2LineId = 0;
@@ -132,11 +125,7 @@ test(
       );
       page2LineId = Number(line3Insert.insertId);
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
 
@@ -175,8 +164,6 @@ test(
       assert.equal(Number(ledgerPage2Body.data.rows[0].lines[0].line_id), page2LineId);
       assert.equal(Number(ledgerPage2Body.data.rows[0].lines[0].balance), 270);
     } finally {
-      await stopApiServer(childProcess);
-
       if (journalBatchId > 0) {
         await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [journalBatchId]);
         await db.execute("DELETE FROM journal_batches WHERE id = ?", [journalBatchId]);
@@ -186,7 +173,6 @@ test(
         await db.execute("DELETE FROM accounts WHERE id = ?", [accountId]);
       }
 
-      await db.end();
     }
   }
 );

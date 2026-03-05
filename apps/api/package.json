@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs"
+    "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
+    "test:integration:fast": "JP_TEST_BASE_URL=http://127.0.0.1:3005 node --test --test-concurrency=8 tests/integration/*.test.mjs",
+    "test:integration:local": "node --test --test-concurrency=1 tests/integration/auth.integration.test.mjs tests/integration/sync-push.integration.test.mjs"
   },
   "dependencies": {
     "@jurnapod/modules-accounting": "0.1.0",

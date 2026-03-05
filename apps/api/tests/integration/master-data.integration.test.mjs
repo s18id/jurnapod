@@ -9,6 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
+import { setupIntegrationTests } from "./integration-harness.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,8 @@ const nextCliPath = path.resolve(repoRoot, "node_modules/next/dist/bin/next");
 const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
+
+const testContext = setupIntegrationTests(test);
 
 function readEnv(name, fallback = null) {
   const value = process.env[name];
@@ -160,7 +163,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     let createdItemId = 0;
     let createdPriceId = 0;
@@ -264,11 +267,7 @@ test(
       const companyId = Number(owner.company_id);
       const outletId = Number(owner.outlet_id);
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
@@ -383,8 +382,6 @@ test(
       );
       assert.equal(Number(dbVersionRows[0].current_version), Number(deltaPullBody.data.data_version));
     } finally {
-      await stopApiServer(childProcess);
-
       if (createdPriceId > 0) {
         await db.execute("DELETE FROM item_prices WHERE id = ?", [createdPriceId]);
       }
@@ -393,7 +390,6 @@ test(
         await db.execute("DELETE FROM items WHERE id = ?", [createdItemId]);
       }
 
-      await db.end();
     }
   }
 );
@@ -406,7 +402,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
@@ -437,11 +433,7 @@ test(
       }
 
       const outletId = Number(owner.outlet_id);
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
@@ -498,8 +490,7 @@ test(
       assert.equal(malformedSyncVersionBody.success, false);
       assert.equal(malformedSyncVersionBody.error.code, "INVALID_REQUEST");
     } finally {
-      await stopApiServer(childProcess);
-      await db.end();
+      
     }
   }
 );
@@ -512,7 +503,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     let deniedOutletId = 0;
     let deniedItemId = 0;
@@ -632,11 +623,7 @@ test(
       );
       deniedPriceId = Number(deniedPriceResult.insertId);
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
@@ -817,7 +804,7 @@ test(
       );
       assert.equal(Number(duplicateAuditRows[0].total), 1);
     } finally {
-      await stopApiServer(childProcess);
+      
 
       if (duplicatePriceId > 0) {
         await db.execute("DELETE FROM item_prices WHERE id = ?", [duplicatePriceId]);
@@ -867,7 +854,7 @@ test(
         );
       }
 
-      await db.end();
+      
     }
   }
 );
@@ -880,7 +867,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     let deniedOutletId = 0;
     let adminUserId = 0;
@@ -993,11 +980,7 @@ test(
       );
       racePriceId = Number(racePriceResult.insertId);
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
@@ -1084,7 +1067,7 @@ test(
       );
       assert.equal(Number(forbiddenAuditRows[0].total), 0);
     } finally {
-      await stopApiServer(childProcess);
+      
 
       if (racePriceId > 0) {
         await db.execute("DELETE FROM item_prices WHERE id = ?", [racePriceId]);
@@ -1104,7 +1087,7 @@ test(
         await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
 
-      await db.end();
+      
     }
   }
 );

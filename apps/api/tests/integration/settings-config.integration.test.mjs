@@ -9,6 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
+import { setupIntegrationTests } from "./integration-harness.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,8 @@ const nextCliPath = path.resolve(repoRoot, "node_modules/next/dist/bin/next");
 const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
+
+const testContext = setupIntegrationTests(test);
 
 function readEnv(name, fallback = null) {
   const value = process.env[name];
@@ -160,7 +163,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
@@ -198,11 +201,7 @@ test(
         [companyId, outletId]
       );
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
@@ -298,8 +297,7 @@ test(
       assert.equal(updatedMap.get("inventory.costing_method"), "FIFO");
       assert.equal(updatedMap.get("inventory.warn_on_negative"), false);
     } finally {
-      await db.end();
-      await stopApiServer(childProcess);
+      
     }
   }
 );

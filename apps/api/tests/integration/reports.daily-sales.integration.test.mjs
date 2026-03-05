@@ -4,28 +4,21 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import mysql from "mysql2/promise";
 import {
-  dbConfigFromEnv,
   ensureDailySalesView,
-  getFreePort,
-  loadEnvIfPresent,
   loginOwner,
   readEnv,
-  startApiServer,
-  stopApiServer,
-  TEST_TIMEOUT_MS,
-  waitForHealthcheck
-} from "./reports.helpers.mjs";
+  setupIntegrationTests,
+  TEST_TIMEOUT_MS
+} from "./integration-harness.mjs";
+
+const testContext = setupIntegrationTests(test);
 
 test(
   "reports integration: daily-sales falls back to base tables when view is unavailable",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    const db = testContext.db;
     let txClientId = "";
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
@@ -102,11 +95,7 @@ test(
         [txId, companyId, outletId]
       );
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
 
@@ -130,14 +119,12 @@ test(
       assert.equal(Number(row.gross_total) >= 30000, true);
       assert.equal(Number(row.paid_total) >= 30000, true);
     } finally {
-      await stopApiServer(childProcess);
       await ensureDailySalesView(db);
 
       if (txClientId) {
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [txClientId]);
       }
 
-      await db.end();
     }
   }
 );
@@ -146,10 +133,7 @@ test(
   "reports integration: daily-sales falls back to base tables when view is invalid",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    const db = testContext.db;
     let txClientId = "";
     let invalidSourceTable = "";
 
@@ -257,11 +241,7 @@ test(
 
       await db.execute(`DROP TABLE \`${invalidSourceTable}\``);
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
 
@@ -283,7 +263,6 @@ test(
       assert.equal(Number(row.gross_total) >= 35000, true);
       assert.equal(Number(row.paid_total) >= 35000, true);
     } finally {
-      await stopApiServer(childProcess);
       await ensureDailySalesView(db);
 
       if (invalidSourceTable) {
@@ -294,7 +273,6 @@ test(
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [txClientId]);
       }
 
-      await db.end();
     }
   }
 );

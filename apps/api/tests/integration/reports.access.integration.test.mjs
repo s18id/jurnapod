@@ -3,28 +3,32 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import mysql from "mysql2/promise";
 import {
-  dbConfigFromEnv,
+  createIntegrationTestContext,
   ensureDailySalesView,
-  getFreePort,
-  loadEnvIfPresent,
   loginUser,
   readEnv,
-  startApiServer,
-  stopApiServer,
-  TEST_TIMEOUT_MS,
-  waitForHealthcheck
-} from "./reports.helpers.mjs";
+  TEST_TIMEOUT_MS
+} from "./integration-harness.mjs";
+
+const testContext = createIntegrationTestContext();
+let baseUrl = "";
+let db;
+
+test.before(async () => {
+  await testContext.start();
+  baseUrl = testContext.baseUrl;
+  db = testContext.db;
+});
+
+test.after(async () => {
+  await testContext.stop();
+});
 
 test(
   "reports integration: outlet filter denies inaccessible outlet",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
     let deniedOutletId = 0;
     let adminUserId = 0;
 
@@ -104,12 +108,6 @@ test(
       );
       deniedOutletId = Number(outletInsert.insertId);
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
-
       const accessToken = await loginUser(baseUrl, companyCode, adminEmail, ownerPassword);
 
       for (const reportPath of [
@@ -132,8 +130,6 @@ test(
         assert.equal(body.error.code, "FORBIDDEN");
       }
     } finally {
-      await stopApiServer(childProcess);
-
       if (deniedOutletId > 0) {
         await db.execute("DELETE FROM outlets WHERE id = ?", [deniedOutletId]);
       }
@@ -144,7 +140,6 @@ test(
         await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
 
-      await db.end();
     }
   }
 );
@@ -153,10 +148,7 @@ test(
   "reports integration: report endpoints enforce OWNER/ADMIN/ACCOUNTANT allow and CASHIER deny",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    
     const createdUserIds = [];
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
@@ -231,12 +223,6 @@ test(
 
       await ensureDailySalesView(db);
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
-
       const ownerToken = await loginUser(baseUrl, companyCode, ownerEmail, ownerPassword);
       const adminToken = await loginUser(baseUrl, companyCode, roleEmails.ADMIN, ownerPassword);
       const accountantToken = await loginUser(baseUrl, companyCode, roleEmails.ACCOUNTANT, ownerPassword);
@@ -274,15 +260,12 @@ test(
         assert.equal(body.error.code, "FORBIDDEN");
       }
     } finally {
-      await stopApiServer(childProcess);
-
       for (const userId of createdUserIds) {
         await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [userId]);
         await db.execute("DELETE FROM user_roles WHERE user_id = ?", [userId]);
         await db.execute("DELETE FROM users WHERE id = ?", [userId]);
       }
 
-      await db.end();
     }
   }
 );

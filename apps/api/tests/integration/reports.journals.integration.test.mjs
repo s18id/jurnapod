@@ -3,27 +3,20 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import mysql from "mysql2/promise";
 import {
-  dbConfigFromEnv,
-  getFreePort,
-  loadEnvIfPresent,
   loginOwner,
   readEnv,
-  startApiServer,
-  stopApiServer,
-  TEST_TIMEOUT_MS,
-  waitForHealthcheck
-} from "./reports.helpers.mjs";
+  setupIntegrationTests,
+  TEST_TIMEOUT_MS
+} from "./integration-harness.mjs";
+
+const testContext = setupIntegrationTests(test);
 
 test(
   "reports integration: journals/trial-balance outlet filter excludes null-outlet rows",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    const db = testContext.db;
     let outletBatchId = 0;
     let nullBatchId = 0;
     let outletAccountId = 0;
@@ -120,13 +113,9 @@ test(
         [nullBatchId, companyId, nullAccountId, reportDate]
       );
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
-      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, server.serverLogs);
+      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, null);
 
       const journalsResponse = await fetch(
         `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&limit=200`,
@@ -158,8 +147,6 @@ test(
       assert.equal(accountIds.includes(outletAccountId), true);
       assert.equal(accountIds.includes(nullAccountId), false);
     } finally {
-      await stopApiServer(childProcess);
-
       if (outletBatchId > 0) {
         await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [outletBatchId]);
         await db.execute("DELETE FROM journal_batches WHERE id = ?", [outletBatchId]);
@@ -178,7 +165,6 @@ test(
         await db.execute("DELETE FROM accounts WHERE id = ?", [nullAccountId]);
       }
 
-      await db.end();
     }
   }
 );
@@ -187,10 +173,7 @@ test(
   "reports integration: journals as_of keeps pagination snapshot stable across concurrent inserts",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    const db = testContext.db;
     let accountId = 0;
     const batchIds = [];
 
@@ -286,13 +269,9 @@ test(
         ]
       );
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
-      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, server.serverLogs);
+      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, null);
 
       const asOfIso = `${reportDate}T23:59:59.999Z`;
       const asOfResponse = await fetch(
@@ -365,8 +344,6 @@ test(
       assert.equal(returnedPage2Ids.includes(concurrentBatchId), false);
       assert.equal(returnedPage2Ids.includes(firstPageBatchId), false);
     } finally {
-      await stopApiServer(childProcess);
-
       if (batchIds.length > 0) {
         await db.execute(
           `DELETE FROM journal_lines WHERE journal_batch_id IN (${batchIds.map(() => "?").join(", ")})`,
@@ -382,7 +359,6 @@ test(
         await db.execute("DELETE FROM accounts WHERE id = ?", [accountId]);
       }
 
-      await db.end();
     }
   }
 );

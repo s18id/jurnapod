@@ -4,27 +4,20 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import mysql from "mysql2/promise";
 import {
-  dbConfigFromEnv,
-  getFreePort,
-  loadEnvIfPresent,
   loginOwner,
   readEnv,
-  startApiServer,
-  stopApiServer,
-  TEST_TIMEOUT_MS,
-  waitForHealthcheck
-} from "./reports.helpers.mjs";
+  setupIntegrationTests,
+  TEST_TIMEOUT_MS
+} from "./integration-harness.mjs";
+
+const testContext = setupIntegrationTests(test);
 
 test(
   "reports integration: POS payments summary groups by method",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    const db = testContext.db;
     let txClientId = "";
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
@@ -92,11 +85,7 @@ test(
       const dateFromIso = trxAt.toISOString().slice(0, 10);
       const dateToIso = dateFromIso;
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
 
@@ -123,13 +112,9 @@ test(
       assert.equal(Number(qrisRow.total_amount) >= 20000, true);
       assert.equal(Number(cardRow.total_amount) >= 30000, true);
     } finally {
-      await stopApiServer(childProcess);
-
       if (txClientId) {
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [txClientId]);
       }
-
-      await db.end();
     }
   }
 );
@@ -138,10 +123,7 @@ test(
   "reports integration: POS date boundary uses inclusive-exclusive DATETIME window",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    const db = testContext.db;
     const txInsideClientId = randomUUID();
     const txOutsideClientId = randomUUID();
 
@@ -203,11 +185,7 @@ test(
         [companyId, outletId, txOutsideClientId, outsideDateTime]
       );
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
 
@@ -227,9 +205,7 @@ test(
       assert.equal(returnedClientTxIds.includes(txInsideClientId), true);
       assert.equal(returnedClientTxIds.includes(txOutsideClientId), false);
     } finally {
-      await stopApiServer(childProcess);
       await db.execute("DELETE FROM pos_transactions WHERE client_tx_id IN (?, ?)", [txInsideClientId, txOutsideClientId]);
-      await db.end();
     }
   }
 );
@@ -238,10 +214,7 @@ test(
   "reports integration: POS as_of keeps pagination snapshot stable across concurrent inserts",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
-    let childProcess;
+    const db = testContext.db;
     const txIds = [randomUUID(), randomUUID(), randomUUID()];
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
@@ -289,11 +262,7 @@ test(
         [companyId, outletId, txIds[0], companyId, outletId, txIds[1]]
       );
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
 
@@ -343,9 +312,7 @@ test(
       assert.equal(returnedPage2Ids.includes(txIds[2]), false);
       assert.equal(returnedPage2Ids.includes(firstPageClientTxId), false);
     } finally {
-      await stopApiServer(childProcess);
       await db.execute("DELETE FROM pos_transactions WHERE client_tx_id IN (?, ?, ?)", txIds);
-      await db.end();
     }
   }
 );

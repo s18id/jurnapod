@@ -3,18 +3,14 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import mysql from "mysql2/promise";
 import {
-  dbConfigFromEnv,
-  getFreePort,
-  loadEnvIfPresent,
   loginOwner,
   readEnv,
-  startApiServer,
-  stopApiServer,
-  TEST_TIMEOUT_MS,
-  waitForHealthcheck
-} from "./reports.helpers.mjs";
+  setupIntegrationTests,
+  TEST_TIMEOUT_MS
+} from "./integration-harness.mjs";
+
+const testContext = setupIntegrationTests(test);
 
 const FISCAL_SETTING_KEY = "accounting.allow_multiple_open_fiscal_years";
 
@@ -33,9 +29,7 @@ test(
   "fiscal years integration: open-year conflict, overlap rules, and report defaults",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    loadEnvIfPresent();
-
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     let serverLogs = [];
     const createdFiscalYearIds = [];
@@ -119,14 +113,10 @@ test(
         seededFiscalYearId = Number(seedResult.insertId);
       }
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      serverLogs = server.serverLogs;
-      await waitForHealthcheck(baseUrl, childProcess, serverLogs);
+      const baseUrl = testContext.baseUrl;
+      serverLogs = [];
 
-      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, server.serverLogs);
+      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, serverLogs);
 
       await db.execute(
         `INSERT INTO company_settings (
@@ -287,8 +277,6 @@ test(
         assert.equal(reportBody.error.code, "FISCAL_YEAR_REQUIRED");
       }
     } finally {
-      await stopApiServer(childProcess);
-
       if (createdFiscalYearIds.length > 0) {
         await db.execute(
           `DELETE FROM fiscal_years
@@ -321,7 +309,6 @@ test(
         );
       }
 
-      await db.end();
     }
   }
 );

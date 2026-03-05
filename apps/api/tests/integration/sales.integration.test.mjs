@@ -10,6 +10,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
+import { setupIntegrationTests } from "./integration-harness.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +20,8 @@ const nextCliPath = path.resolve(repoRoot, "node_modules/next/dist/bin/next");
 const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
+
+const testContext = setupIntegrationTests(test);
 
 const SALES_INVOICE_DOC_TYPE = "SALES_INVOICE";
 const SALES_PAYMENT_IN_DOC_TYPE = "SALES_PAYMENT_IN";
@@ -450,11 +453,9 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
     }
   }
 
-  const port = await getFreePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-  const { childProcess, serverLogs } = startApiServer(port);
-
-  const db = await mysql.createConnection(dbConfigFromEnv());
+  const baseUrl = testContext.baseUrl;
+  const serverLogs = [];
+  const db = testContext.db;
   const testInvoiceNos = [];
   const testPaymentNos = [];
   const testJournalBatchIds = [];
@@ -463,7 +464,6 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   let mappingFixture = null;
 
   try {
-    console.log(`Starting test server on port ${port}...`);
     await waitForServerReady(baseUrl, serverLogs);
     console.log('Server ready, setting up test data...');
     const setupResult = await setupTestData(db);
@@ -1179,39 +1179,11 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           testJournalBatchIds
         );
       }
-      await db.end();
       console.log('Database cleanup complete');
     } catch (cleanupErr) {
       console.error('Cleanup error:', cleanupErr);
     }
 
-    console.log('Stopping test server...');
-    childProcess.kill("SIGTERM");
-
-    await new Promise((resolve) => {
-      let resolved = false;
-      
-      childProcess.once("exit", () => {
-        if (!resolved) {
-          resolved = true;
-          console.log('Server stopped gracefully');
-          resolve();
-        }
-      });
-      
-      setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          console.log('Forcing server stop with SIGKILL');
-          childProcess.kill("SIGKILL");
-          resolve();
-        }
-      }, 3000);
-    });
-
-    if (childProcess.exitCode !== 0 && childProcess.exitCode != null) {
-      console.error("Server exited with code:", childProcess.exitCode);
-      console.error("Server logs:\n" + serverLogs.slice(-20).join(""));
-    }
+    
   }
 });

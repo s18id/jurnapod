@@ -10,6 +10,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
+import { setupIntegrationTests } from "./integration-harness.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,6 +33,12 @@ const SYNC_PUSH_POSTING_MODE_ENV = "SYNC_PUSH_POSTING_MODE";
 const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
 const POS_SALE_DOC_TYPE = "POS_SALE";
 const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "SALES_TAX", "AR"];
+
+const testContext = setupIntegrationTests(test);
+const localServerTest =
+  process.env.JP_TEST_BASE_URL && process.env.JP_TEST_ALLOW_LOCAL_SERVER !== "1"
+    ? test.skip
+    : test;
 
 function readEnv(name, fallback = null) {
   const value = process.env[name];
@@ -647,7 +654,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     const createdClientTxIds = [];
 
@@ -681,11 +688,7 @@ test(
       const companyId = Number(owner.company_id);
       const outletId = Number(owner.outlet_id);
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const server = startApiServer(port);
-      childProcess = server.childProcess;
-      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
@@ -767,8 +770,6 @@ test(
       ]);
       createdClientTxIds.push(rollbackHeaderIgnoredClientTxId);
     } finally {
-      await stopApiServer(childProcess);
-
       for (const clientTxId of createdClientTxIds) {
         await db.execute(
           `DELETE FROM audit_logs
@@ -792,12 +793,12 @@ test(
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [clientTxId]);
       }
 
-      await db.end();
+      
     }
   }
 );
 
-test(
+localServerTest(
   "sync push integration: first insert, replay duplicate, mixed batch statuses",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
@@ -805,7 +806,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     const createdClientTxIds = [];
     let deniedOutletId = 0;
@@ -2014,12 +2015,12 @@ test(
         await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
 
-      await db.end();
+      
     }
   }
 );
 
-test(
+localServerTest(
   "sync push integration: active posting card policy, sales tax posting, and duplicate replay journal idempotency",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
@@ -2027,7 +2028,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     let companyId = 0;
     let outletId = 0;
@@ -2465,12 +2466,12 @@ test(
         await cleanupCreatedOutletAccountMappings(db, companyId, outletId, postingFixture);
       }
 
-      await db.end();
+      
     }
   }
 );
 
-test(
+localServerTest(
   "sync push integration: active posting unbalanced journal is rejected and rolled back",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
@@ -2478,7 +2479,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     let companyId = 0;
     let outletId = 0;
@@ -2602,7 +2603,7 @@ test(
         await cleanupCreatedOutletAccountMappings(db, companyId, outletId, postingFixture);
       }
 
-      await db.end();
+      
     }
   }
 );

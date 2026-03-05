@@ -9,6 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
+import { setupIntegrationTests } from "./integration-harness.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,8 @@ const nextCliPath = path.resolve(repoRoot, "node_modules/next/dist/bin/next");
 const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
+
+const testContext = setupIntegrationTests(test);
 
 function readEnv(name, fallback = null) {
   const value = process.env[name];
@@ -49,6 +52,20 @@ function dbConfigFromEnv() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(url, options, attempts = 3) {
+  let response = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    response = await fetch(url, options);
+    if (response.status !== 500) {
+      return response;
+    }
+    if (attempt < attempts) {
+      await delay(250 * attempt);
+    }
+  }
+  return response;
 }
 
 async function getFreePort() {
@@ -173,7 +190,7 @@ test(
       loadEnvFile(ENV_PATH);
     }
 
-    const db = await mysql.createConnection(dbConfigFromEnv());
+    const db = testContext.db;
     let childProcess;
     let serverLogs = [];
 
@@ -222,10 +239,7 @@ test(
       const superAdminUserId = Number(superAdmin.id);
       const superAdminCompanyId = Number(superAdmin.company_id);
 
-      const port = await getFreePort();
-      const baseUrl = `http://127.0.0.1:${port}`;
-      ({ childProcess, serverLogs } = startApiServer(port));
-      await waitForHealthcheck(baseUrl, childProcess, serverLogs);
+      const baseUrl = testContext.baseUrl;
 
       const ownerToken = await login(baseUrl, companyCode, ownerEmail, ownerPassword);
       const superAdminToken = await login(baseUrl, companyCode, superAdminEmail, superAdminPassword);
@@ -245,7 +259,7 @@ test(
       const otherCompanyCode = `X${runId}`.slice(0, 32).toUpperCase();
       const otherCompanyName = `Other Company ${runId}`;
 
-      const createCompanyRes = await fetch(`${baseUrl}/api/companies`, {
+      const createCompanyRes = await fetchWithRetry(`${baseUrl}/api/companies`, {
         method: "POST",
         headers: superAdminHeader,
         body: JSON.stringify({
@@ -263,7 +277,7 @@ test(
       const otherOutletCode = `OC${runId}`.slice(0, 32).toUpperCase();
       const otherOutletName = `Other Outlet ${runId}`;
 
-      const otherOutletRes = await fetch(`${baseUrl}/api/outlets`, {
+      const otherOutletRes = await fetchWithRetry(`${baseUrl}/api/outlets`, {
         method: "POST",
         headers: superAdminHeader,
         body: JSON.stringify({
@@ -491,8 +505,7 @@ test(
         )
       );
     } finally {
-      await stopApiServer(childProcess);
-      await db.end();
+      
     }
   }
 );
