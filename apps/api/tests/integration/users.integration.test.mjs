@@ -293,7 +293,8 @@ test(
         method: "POST",
         headers: authHeader,
         body: JSON.stringify({
-          role_codes: ["ACCOUNTANT"]
+          role_codes: ["ACCOUNTANT"],
+          outlet_id: allowedOutletId
         })
       });
 

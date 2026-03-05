@@ -13,6 +13,7 @@ export class UserNotFoundError extends Error {}
 export class UserEmailExistsError extends Error {}
 export class RoleNotFoundError extends Error {}
 export class RoleLevelViolationError extends Error {}
+export class RoleScopeViolationError extends Error {}
 export class OutletNotFoundError extends Error {}
 
 export type UserProfile = {
@@ -20,11 +21,12 @@ export type UserProfile = {
   company_id: number;
   email: string;
   is_active: boolean;
-  roles: string[];
-  outlets: {
-    id: number;
-    code: string;
-    name: string;
+  global_roles: string[];
+  outlet_role_assignments: {
+    outlet_id: number;
+    outlet_code: string;
+    outlet_name: string;
+    role_codes: string[];
   }[];
   created_at?: string;
   updated_at?: string;
@@ -75,6 +77,14 @@ type OutletJoinRow = RowDataPacket & {
   outlet_id: number;
   code: string;
   name: string;
+};
+
+type OutletRoleJoinRow = RowDataPacket & {
+  user_id: number;
+  outlet_id: number;
+  outlet_code: string;
+  outlet_name: string;
+  role_code: string;
 };
 
 class ConnectionAuditDbClient {
@@ -241,7 +251,31 @@ async function ensureOutletIdsExist(
   }
 }
 
-async function hydrateUserRoles(
+async function syncUserOutletsFromRoles(
+  connection: PoolConnection | ReturnType<typeof getDbPool>,
+  userId: number
+): Promise<void> {
+  await connection.execute<ResultSetHeader>(
+    `DELETE uo
+     FROM user_outlets uo
+     LEFT JOIN user_outlet_roles uor
+       ON uor.user_id = uo.user_id
+      AND uor.outlet_id = uo.outlet_id
+     WHERE uo.user_id = ?
+       AND uor.user_id IS NULL`,
+    [userId]
+  );
+
+  await connection.execute<ResultSetHeader>(
+    `INSERT IGNORE INTO user_outlets (user_id, outlet_id)
+     SELECT DISTINCT user_id, outlet_id
+     FROM user_outlet_roles
+     WHERE user_id = ?`,
+    [userId]
+  );
+}
+
+async function hydrateUserGlobalRoles(
   connection: PoolConnection | ReturnType<typeof getDbPool>,
   userIds: number[]
 ): Promise<Map<number, string[]>> {
@@ -256,6 +290,7 @@ async function hydrateUserRoles(
      FROM user_roles ur
      INNER JOIN roles r ON r.id = ur.role_id
      WHERE ur.user_id IN (${placeholders})
+       AND r.is_global = 1
      ORDER BY r.code ASC`,
     userIds
   );
@@ -270,40 +305,58 @@ async function hydrateUserRoles(
   return roleMap;
 }
 
-async function hydrateUserOutlets(
+async function hydrateUserOutletRoleAssignments(
   connection: PoolConnection | ReturnType<typeof getDbPool>,
   userIds: number[]
-): Promise<Map<number, UserProfile["outlets"]>> {
-  const outletMap = new Map<number, UserProfile["outlets"]>();
+): Promise<Map<number, UserProfile["outlet_role_assignments"]>> {
+  const assignmentMap = new Map<number, UserProfile["outlet_role_assignments"]>();
   if (userIds.length === 0) {
-    return outletMap;
+    return assignmentMap;
   }
 
   const placeholders = userIds.map(() => "?").join(", ");
-  const [rows] = await connection.execute<OutletJoinRow[]>(
-    `SELECT uo.user_id, o.id AS outlet_id, o.code, o.name
-     FROM user_outlets uo
-     INNER JOIN outlets o ON o.id = uo.outlet_id
-     WHERE uo.user_id IN (${placeholders})
-     ORDER BY o.id ASC`,
+  const [rows] = await connection.execute<OutletRoleJoinRow[]>(
+    `SELECT uor.user_id,
+            o.id AS outlet_id,
+            o.code AS outlet_code,
+            o.name AS outlet_name,
+            r.code AS role_code
+     FROM user_outlet_roles uor
+     INNER JOIN outlets o ON o.id = uor.outlet_id
+     INNER JOIN roles r ON r.id = uor.role_id
+     WHERE uor.user_id IN (${placeholders})
+     ORDER BY o.id ASC, r.code ASC`,
     userIds
   );
 
+  const userOutletMap = new Map<number, Map<number, UserProfile["outlet_role_assignments"][number]>>();
+
   for (const row of rows) {
     const userId = Number(row.user_id);
-    const list = outletMap.get(userId) ?? [];
-    list.push({
-      id: Number(row.outlet_id),
-      code: row.code,
-      name: row.name
-    });
-    outletMap.set(userId, list);
+    const outletId = Number(row.outlet_id);
+    const outletAssignments = userOutletMap.get(userId) ?? new Map();
+    let assignment = outletAssignments.get(outletId);
+    if (!assignment) {
+      assignment = {
+        outlet_id: outletId,
+        outlet_code: row.outlet_code,
+        outlet_name: row.outlet_name,
+        role_codes: []
+      };
+      outletAssignments.set(outletId, assignment);
+      userOutletMap.set(userId, outletAssignments);
+    }
+    assignment.role_codes.push(row.role_code);
   }
 
-  return outletMap;
+  for (const [userId, outletAssignments] of userOutletMap.entries()) {
+    assignmentMap.set(userId, [...outletAssignments.values()]);
+  }
+
+  return assignmentMap;
 }
 
-function normalizeUserRow(row: UserRow): Omit<UserProfile, "roles" | "outlets"> {
+function normalizeUserRow(row: UserRow): Omit<UserProfile, "global_roles" | "outlet_role_assignments"> {
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
@@ -336,15 +389,15 @@ export async function listUsers(companyId: number, filters?: { isActive?: boolea
   const baseUsers = rows.map((row) => normalizeUserRow(row));
   const userIds = baseUsers.map((user) => user.id);
 
-  const [rolesMap, outletsMap] = await Promise.all([
-    hydrateUserRoles(pool, userIds),
-    hydrateUserOutlets(pool, userIds)
+  const [globalRolesMap, outletRolesMap] = await Promise.all([
+    hydrateUserGlobalRoles(pool, userIds),
+    hydrateUserOutletRoleAssignments(pool, userIds)
   ]);
 
   return baseUsers.map((user) => ({
     ...user,
-    roles: rolesMap.get(user.id) ?? [],
-    outlets: outletsMap.get(user.id) ?? []
+    global_roles: globalRolesMap.get(user.id) ?? [],
+    outlet_role_assignments: outletRolesMap.get(user.id) ?? []
   }));
 }
 
@@ -355,15 +408,15 @@ export async function findUserById(companyId: number, userId: number): Promise<U
     return null;
   }
 
-  const [rolesMap, outletsMap] = await Promise.all([
-    hydrateUserRoles(pool, [user.id]),
-    hydrateUserOutlets(pool, [user.id])
+  const [globalRolesMap, outletRolesMap] = await Promise.all([
+    hydrateUserGlobalRoles(pool, [user.id]),
+    hydrateUserOutletRoleAssignments(pool, [user.id])
   ]);
 
   return {
     ...normalizeUserRow(user),
-    roles: rolesMap.get(user.id) ?? [],
-    outlets: outletsMap.get(user.id) ?? []
+    global_roles: globalRolesMap.get(user.id) ?? [],
+    outlet_role_assignments: outletRolesMap.get(user.id) ?? []
   };
 }
 
@@ -373,6 +426,7 @@ export async function createUser(params: {
   password: string;
   roleCodes?: string[];
   outletIds?: number[];
+  outletRoleAssignments?: Array<{ outletId: number; roleCodes: string[] }>;
   isActive?: boolean;
   actor: UserActor;
 }): Promise<UserProfile> {
@@ -406,24 +460,47 @@ export async function createUser(params: {
     const userId = Number(result.insertId);
     const roleCodes = (params.roleCodes ?? []).map((role) => RoleSchema.parse(role));
     const outletIds = (params.outletIds ?? []).map((outletId) => NumericIdSchema.parse(outletId));
+    const outletRoleAssignments = (params.outletRoleAssignments ?? []).map((assignment) => ({
+      outletId: NumericIdSchema.parse(assignment.outletId),
+      roleCodes: assignment.roleCodes.map((role) => RoleSchema.parse(role))
+    }));
 
-    if (roleCodes.length > 0) {
-      const roleMap = await ensureRoleCodesExist(connection, roleCodes);
-      const actorMaxLevel = await getUserMaxRoleLevelForConnection(
-        connection,
-        params.companyId,
-        params.actor.userId
-      );
-      const requestedMaxLevel = Math.max(
-        0,
-        ...roleCodes.map((code) => roleMap.get(code)?.role_level ?? 0)
-      );
-
-      if (requestedMaxLevel > actorMaxLevel) {
-        throw new RoleLevelViolationError("Insufficient role level to assign requested roles");
+    const combinedRoleCodes = new Set<string>(roleCodes);
+    for (const assignment of outletRoleAssignments) {
+      for (const roleCode of assignment.roleCodes) {
+        combinedRoleCodes.add(roleCode);
       }
+    }
 
-      const roleValues = roleCodes.map((code) => [userId, roleMap.get(code)?.id ?? 0]);
+    const roleMap = await ensureRoleCodesExist(connection, [...combinedRoleCodes]);
+    const actorMaxLevel = await getUserMaxRoleLevelForConnection(
+      connection,
+      params.companyId,
+      params.actor.userId
+    );
+    const requestedMaxLevel = Math.max(
+      0,
+      ...[...combinedRoleCodes].map((code) => roleMap.get(code)?.role_level ?? 0)
+    );
+
+    if (requestedMaxLevel > actorMaxLevel) {
+      throw new RoleLevelViolationError("Insufficient role level to assign requested roles");
+    }
+
+    const globalRoleCodes = roleCodes.filter((code) => roleMap.get(code)?.is_global === 1);
+    const nonGlobalRoleCodes = roleCodes.filter((code) => roleMap.get(code)?.is_global !== 1);
+
+    if (outletRoleAssignments.length === 0 && nonGlobalRoleCodes.length > 0) {
+      if (outletIds.length === 0) {
+        throw new RoleScopeViolationError("Outlet roles require outlet assignments");
+      }
+      for (const outletId of outletIds) {
+        outletRoleAssignments.push({ outletId, roleCodes: nonGlobalRoleCodes });
+      }
+    }
+
+    if (globalRoleCodes.length > 0) {
+      const roleValues = globalRoleCodes.map((code) => [userId, roleMap.get(code)?.id ?? 0]);
       await connection.query(
         `INSERT INTO user_roles (user_id, role_id) VALUES ${roleValues
           .map(() => "(?, ?)")
@@ -432,22 +509,41 @@ export async function createUser(params: {
       );
     }
 
-    if (outletIds.length > 0) {
-      await ensureOutletIdsExist(connection, params.companyId, outletIds);
-      const outletValues = outletIds.map((outletId) => [userId, outletId]);
-      await connection.query(
-        `INSERT INTO user_outlets (user_id, outlet_id) VALUES ${outletValues
-          .map(() => "(?, ?)")
-          .join(", ")}`,
-        outletValues.flat()
-      );
+    if (outletRoleAssignments.length > 0) {
+      const assignmentOutletIds = outletRoleAssignments.map((assignment) => assignment.outletId);
+      await ensureOutletIdsExist(connection, params.companyId, assignmentOutletIds);
+
+      const outletRoleValues: Array<Array<number>> = [];
+      for (const assignment of outletRoleAssignments) {
+        for (const roleCode of assignment.roleCodes) {
+          const roleSnapshot = roleMap.get(roleCode);
+          if (!roleSnapshot) {
+            throw new RoleNotFoundError("Role not found");
+          }
+          if (roleSnapshot.is_global === 1) {
+            throw new RoleScopeViolationError("Global roles cannot be assigned per outlet");
+          }
+          outletRoleValues.push([userId, assignment.outletId, roleSnapshot.id]);
+        }
+      }
+
+      if (outletRoleValues.length > 0) {
+        await connection.query(
+          `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id) VALUES ${outletRoleValues
+            .map(() => "(?, ?, ?)")
+            .join(", ")}`,
+          outletRoleValues.flat()
+        );
+      }
     }
+
+    await syncUserOutletsFromRoles(connection, userId);
 
     await auditService.logCreate(auditContext, "user", userId, {
       email,
       is_active: isActive,
-      role_codes: roleCodes,
-      outlet_ids: outletIds
+      global_roles: globalRoleCodes,
+      outlet_role_assignments: outletRoleAssignments
     });
 
     await connection.commit();
@@ -525,6 +621,7 @@ export async function setUserRoles(params: {
   companyId: number;
   userId: number;
   roleCodes: string[];
+  outletId?: number;
   actor: UserActor;
 }): Promise<UserProfile> {
   const pool = getDbPool();
@@ -535,7 +632,6 @@ export async function setUserRoles(params: {
   try {
     await connection.beginTransaction();
     await ensureUserExists(connection, params.companyId, params.userId);
-    const beforeRoles = (await hydrateUserRoles(connection, [params.userId])).get(params.userId) ?? [];
     const roleCodes = params.roleCodes.map((role) => RoleSchema.parse(role));
     const roleMap = await ensureRoleCodesExist(connection, roleCodes);
 
@@ -553,28 +649,87 @@ export async function setUserRoles(params: {
       throw new RoleLevelViolationError("Insufficient role level to assign requested roles");
     }
 
-    await connection.execute<ResultSetHeader>(
-      `DELETE FROM user_roles WHERE user_id = ?`,
-      [params.userId]
-    );
+    if (typeof params.outletId === "number") {
+      const outletId = NumericIdSchema.parse(params.outletId);
+      await ensureOutletIdsExist(connection, params.companyId, [outletId]);
 
-    if (roleCodes.length > 0) {
-      const roleValues = roleCodes.map((code) => [params.userId, roleMap.get(code)?.id ?? 0]);
-      await connection.query(
-        `INSERT INTO user_roles (user_id, role_id) VALUES ${roleValues
-          .map(() => "(?, ?)")
-          .join(", ")}`,
-        roleValues.flat()
+      for (const roleCode of roleCodes) {
+        if (roleMap.get(roleCode)?.is_global === 1) {
+          throw new RoleScopeViolationError("Global roles cannot be assigned per outlet");
+        }
+      }
+
+      const [beforeRows] = await connection.execute<RoleJoinRow[]>(
+        `SELECT r.code
+         FROM user_outlet_roles uor
+         INNER JOIN roles r ON r.id = uor.role_id
+         WHERE uor.user_id = ? AND uor.outlet_id = ?
+         ORDER BY r.code ASC`,
+        [params.userId, outletId]
+      );
+      const beforeRoles = beforeRows.map((row) => row.code);
+
+      await connection.execute<ResultSetHeader>(
+        `DELETE FROM user_outlet_roles WHERE user_id = ? AND outlet_id = ?`,
+        [params.userId, outletId]
+      );
+
+      if (roleCodes.length > 0) {
+        const roleValues = roleCodes.map((code) => [
+          params.userId,
+          outletId,
+          roleMap.get(code)?.id ?? 0
+        ]);
+        await connection.query(
+          `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id) VALUES ${roleValues
+            .map(() => "(?, ?, ?)")
+            .join(", ")}`,
+          roleValues.flat()
+        );
+      }
+
+      await syncUserOutletsFromRoles(connection, params.userId);
+
+      await auditService.logUpdate(
+        auditContext,
+        "user",
+        params.userId,
+        { outlet_id: outletId, role_codes: beforeRoles },
+        { outlet_id: outletId, role_codes: roleCodes }
+      );
+    } else {
+      for (const roleCode of roleCodes) {
+        if (roleMap.get(roleCode)?.is_global !== 1) {
+          throw new RoleScopeViolationError("Outlet roles require an outlet id");
+        }
+      }
+
+      const beforeRoles =
+        (await hydrateUserGlobalRoles(connection, [params.userId])).get(params.userId) ?? [];
+
+      await connection.execute<ResultSetHeader>(
+        `DELETE FROM user_roles WHERE user_id = ?`,
+        [params.userId]
+      );
+
+      if (roleCodes.length > 0) {
+        const roleValues = roleCodes.map((code) => [params.userId, roleMap.get(code)?.id ?? 0]);
+        await connection.query(
+          `INSERT INTO user_roles (user_id, role_id) VALUES ${roleValues
+            .map(() => "(?, ?)")
+            .join(", ")}`,
+          roleValues.flat()
+        );
+      }
+
+      await auditService.logUpdate(
+        auditContext,
+        "user",
+        params.userId,
+        { global_roles: beforeRoles },
+        { global_roles: roleCodes }
       );
     }
-
-    await auditService.logUpdate(
-      auditContext,
-      "user",
-      params.userId,
-      { roles: beforeRoles },
-      { roles: roleCodes }
-    );
 
     await connection.commit();
 
@@ -606,26 +761,33 @@ export async function setUserOutlets(params: {
   try {
     await connection.beginTransaction();
     await ensureUserExists(connection, params.companyId, params.userId);
-    const beforeOutlets =
-      (await hydrateUserOutlets(connection, [params.userId])).get(params.userId) ?? [];
-    const beforeOutletIds = beforeOutlets.map((outlet) => outlet.id);
-    const outletIds = params.outletIds.map((outletId) => NumericIdSchema.parse(outletId));
-    await ensureOutletIdsExist(connection, params.companyId, outletIds);
-
-    await connection.execute<ResultSetHeader>(
-      `DELETE FROM user_outlets WHERE user_id = ?`,
+    const [beforeRows] = await connection.execute<RowDataPacket[]>(
+      `SELECT DISTINCT outlet_id
+       FROM user_outlet_roles
+       WHERE user_id = ?`,
       [params.userId]
     );
-
+    const beforeOutletIds = beforeRows.map((row) => Number(row.outlet_id));
+    const outletIds = params.outletIds.map((outletId) => NumericIdSchema.parse(outletId));
     if (outletIds.length > 0) {
-      const outletValues = outletIds.map((outletId) => [params.userId, outletId]);
-      await connection.query(
-        `INSERT INTO user_outlets (user_id, outlet_id) VALUES ${outletValues
-          .map(() => "(?, ?)")
-          .join(", ")}`,
-        outletValues.flat()
+      await ensureOutletIdsExist(connection, params.companyId, outletIds);
+    }
+
+    if (outletIds.length === 0) {
+      await connection.execute<ResultSetHeader>(
+        `DELETE FROM user_outlet_roles WHERE user_id = ?`,
+        [params.userId]
+      );
+    } else {
+      const placeholders = outletIds.map(() => "?").join(", ");
+      await connection.execute<ResultSetHeader>(
+        `DELETE FROM user_outlet_roles
+         WHERE user_id = ? AND outlet_id NOT IN (${placeholders})`,
+        [params.userId, ...outletIds]
       );
     }
+
+    await syncUserOutletsFromRoles(connection, params.userId);
 
     await auditService.logUpdate(
       auditContext,

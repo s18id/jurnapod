@@ -12,6 +12,13 @@ export const UserOutletSchema = z.object({
   name: z.string().trim().min(1).max(191)
 });
 
+export const UserOutletRoleAssignmentSchema = z.object({
+  outlet_id: NumericIdSchema,
+  outlet_code: z.string().trim().min(1).max(32),
+  outlet_name: z.string().trim().min(1).max(191),
+  role_codes: z.array(RoleSchema)
+});
+
 export const RoleResponseSchema = z.object({
   id: NumericIdSchema,
   code: z.string().trim().min(1).max(64),
@@ -31,8 +38,8 @@ export const UserResponseSchema = z.object({
   company_id: NumericIdSchema,
   email: EmailSchema,
   is_active: z.boolean(),
-  roles: z.array(RoleSchema),
-  outlets: z.array(UserOutletSchema),
+  global_roles: z.array(RoleSchema),
+  outlet_role_assignments: z.array(UserOutletRoleAssignmentSchema),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime()
 });
@@ -43,6 +50,14 @@ export const UserCreateRequestSchema = z.object({
   password: z.string().min(8).max(255),
   role_codes: z.array(RoleSchema).optional(),
   outlet_ids: z.array(NumericIdSchema).optional(),
+  outlet_role_assignments: z
+    .array(
+      z.object({
+        outlet_id: NumericIdSchema,
+        role_codes: z.array(RoleSchema)
+      })
+    )
+    .optional(),
   is_active: z.boolean().optional()
 });
 
@@ -55,7 +70,8 @@ export const UserUpdateRequestSchema = z
   });
 
 export const UserRolesUpdateRequestSchema = z.object({
-  role_codes: z.array(RoleSchema)
+  role_codes: z.array(RoleSchema),
+  outlet_id: NumericIdSchema.optional()
 });
 
 export const UserOutletsUpdateRequestSchema = z.object({
@@ -73,6 +89,7 @@ export const UserListQuerySchema = z.object({
 });
 
 export type UserOutlet = z.infer<typeof UserOutletSchema>;
+export type UserOutletRoleAssignment = z.infer<typeof UserOutletRoleAssignmentSchema>;
 export type RoleResponse = z.infer<typeof RoleResponseSchema>;
 export type OutletResponse = z.infer<typeof OutletResponseSchema>;
 export type UserResponse = z.infer<typeof UserResponseSchema>;

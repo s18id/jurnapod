@@ -10,6 +10,7 @@ import {
   findUserById,
   RoleNotFoundError,
   RoleLevelViolationError,
+  RoleScopeViolationError,
   setUserRoles,
   UserNotFoundError
 } from "../../../../../src/lib/users";
@@ -17,10 +18,12 @@ import {
 const updateRolesSchema = z
   .object({
     roles: z.array(RoleSchema).optional(),
-    role_codes: z.array(RoleSchema).optional()
+    role_codes: z.array(RoleSchema).optional(),
+    outlet_id: NumericIdSchema.optional()
   })
   .transform((value) => ({
-    roleCodes: value.roles ?? value.role_codes ?? []
+    roleCodes: value.roles ?? value.role_codes ?? [],
+    outletId: value.outlet_id
   }));
 
 function parseUserId(request: Request): number {
@@ -40,7 +43,7 @@ export const POST = withAuth(
         if (!existing) {
           return errorResponse("NOT_FOUND", "User not found", 404);
         }
-        if (!existing.roles.includes("SUPER_ADMIN")) {
+        if (!existing.global_roles.includes("SUPER_ADMIN")) {
           return errorResponse("INVALID_REQUEST", "Invalid request", 400);
         }
       }
@@ -48,6 +51,7 @@ export const POST = withAuth(
         companyId: auth.companyId,
         userId,
         roleCodes: input.roleCodes,
+        outletId: input.outletId,
         actor: {
           userId: auth.userId,
           ipAddress: readClientIp(request)
@@ -70,6 +74,10 @@ export const POST = withAuth(
 
       if (error instanceof RoleLevelViolationError) {
         return errorResponse("FORBIDDEN", error.message, 403);
+      }
+
+      if (error instanceof RoleScopeViolationError) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
       }
 
       console.error("POST /api/users/:userId/roles failed", error);

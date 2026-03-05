@@ -332,7 +332,7 @@ export async function deleteOutlet(params: {
 
     // Check if outlet is in use (has users)
     const [users] = await connection.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM user_outlets WHERE outlet_id = ?`,
+      `SELECT COUNT(*) as count FROM user_outlet_roles WHERE outlet_id = ?`,
       [params.outletId]
     );
 

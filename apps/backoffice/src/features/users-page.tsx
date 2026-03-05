@@ -25,7 +25,6 @@ import {
   createUser,
   updateUser,
   updateUserRoles,
-  updateUserOutlets,
   updateUserPassword,
   deactivateUser,
   reactivateUser
@@ -48,8 +47,8 @@ type UserFormData = {
   company_id?: number | null;
   email: string;
   password: string;
-  role_codes: string[];
-  outlet_ids: number[];
+  global_role_codes: string[];
+  outlet_role_assignments: Array<{ outlet_id: number; role_codes: string[] }>;
   is_active: boolean;
 };
 
@@ -57,8 +56,8 @@ const emptyForm: UserFormData = {
   company_id: null,
   email: "",
   password: "",
-  role_codes: [],
-  outlet_ids: [],
+  global_role_codes: [],
+  outlet_role_assignments: [],
   is_active: true
 };
 
@@ -107,6 +106,14 @@ export function UsersPage(props: UsersPageProps) {
     () => (rolesQuery.data || []).filter((role) => role.code !== "SUPER_ADMIN"),
     [rolesQuery.data]
   );
+  const globalRoleOptions = useMemo(
+    () => availableRoles.filter((role) => role.is_global),
+    [availableRoles]
+  );
+  const outletRoleOptions = useMemo(
+    () => availableRoles.filter((role) => !role.is_global),
+    [availableRoles]
+  );
 
   const actorMaxRoleLevel = useMemo(() => {
     const roleLevels = new Map((rolesQuery.data || []).map((role) => [role.code, role.role_level]));
@@ -147,12 +154,20 @@ export function UsersPage(props: UsersPageProps) {
     let result = usersQuery.data || [];
 
     if (roleFilter !== "all") {
-      result = result.filter((item) => item.roles.includes(roleFilter as any));
+      result = result.filter((item) => {
+        const roleSet = new Set(item.global_roles);
+        item.outlet_role_assignments.forEach((assignment) => {
+          assignment.role_codes.forEach((code) => roleSet.add(code));
+        });
+        return roleSet.has(roleFilter as any);
+      });
     }
 
     if (outletFilter !== "all") {
       result = result.filter((item) =>
-        item.outlets.some((outlet) => String(outlet.id) === outletFilter)
+        item.outlet_role_assignments.some(
+          (assignment) => String(assignment.outlet_id) === outletFilter
+        )
       );
     }
 
@@ -176,8 +191,11 @@ export function UsersPage(props: UsersPageProps) {
     setFormData({
       email: targetUser.email,
       password: "",
-      role_codes: targetUser.roles,
-      outlet_ids: targetUser.outlets.map(o => o.id),
+      global_role_codes: targetUser.global_roles,
+      outlet_role_assignments: targetUser.outlet_role_assignments.map((assignment) => ({
+        outlet_id: assignment.outlet_id,
+        role_codes: assignment.role_codes
+      })),
       is_active: targetUser.is_active
     });
     setFormErrors({});
@@ -190,7 +208,7 @@ export function UsersPage(props: UsersPageProps) {
   const openRolesDialog = (targetUser: UserResponse) => {
     setFormData({
       ...emptyForm,
-      role_codes: targetUser.roles
+      global_role_codes: targetUser.global_roles
     });
     setFormErrors({});
     setEditingUser(targetUser);
@@ -202,7 +220,10 @@ export function UsersPage(props: UsersPageProps) {
   const openOutletsDialog = (targetUser: UserResponse) => {
     setFormData({
       ...emptyForm,
-      outlet_ids: targetUser.outlets.map(o => o.id)
+      outlet_role_assignments: targetUser.outlet_role_assignments.map((assignment) => ({
+        outlet_id: assignment.outlet_id,
+        role_codes: assignment.role_codes
+      }))
     });
     setFormErrors({});
     setEditingUser(targetUser);
@@ -277,8 +298,17 @@ export function UsersPage(props: UsersPageProps) {
           company_id: targetCompanyId,
           email: formData.email,
           password: formData.password,
-          role_codes: formData.role_codes.length > 0 ? formData.role_codes as any : undefined,
-          outlet_ids: formData.outlet_ids.length > 0 ? formData.outlet_ids : undefined,
+          role_codes:
+            formData.global_role_codes.length > 0
+              ? (formData.global_role_codes as any)
+              : undefined,
+          outlet_role_assignments:
+            formData.outlet_role_assignments.length > 0
+              ? formData.outlet_role_assignments.map((assignment) => ({
+                  outlet_id: assignment.outlet_id,
+                  role_codes: assignment.role_codes as any
+                }))
+              : undefined,
           is_active: formData.is_active
         }, accessToken);
         setSuccessMessage("User created successfully");
@@ -297,20 +327,40 @@ export function UsersPage(props: UsersPageProps) {
           return;
         }
         await updateUserRoles(editingUser.id, {
-          role_codes: formData.role_codes as any
+          role_codes: formData.global_role_codes as any
         }, accessToken);
         setSuccessMessage("User roles updated successfully");
         await usersQuery.refetch({ force: true });
         closeDialog();
       } else if (dialogMode === "outlets" && editingUser) {
         if (editingUser.id === user.id) {
-          setError("You cannot update your own outlets.");
+          setError("You cannot update your own outlet roles.");
           return;
         }
-        await updateUserOutlets(editingUser.id, {
-          outlet_ids: formData.outlet_ids
-        }, accessToken);
-        setSuccessMessage("User outlets updated successfully");
+        const existingOutletIds = new Set(
+          editingUser.outlet_role_assignments.map((assignment) => assignment.outlet_id)
+        );
+        const desiredOutletIds = new Set(
+          formData.outlet_role_assignments.map((assignment) => assignment.outlet_id)
+        );
+
+        for (const assignment of formData.outlet_role_assignments) {
+          await updateUserRoles(editingUser.id, {
+            outlet_id: assignment.outlet_id,
+            role_codes: assignment.role_codes as any
+          }, accessToken);
+        }
+
+        for (const outletId of existingOutletIds) {
+          if (!desiredOutletIds.has(outletId)) {
+            await updateUserRoles(editingUser.id, {
+              outlet_id: outletId,
+              role_codes: []
+            }, accessToken);
+          }
+        }
+
+        setSuccessMessage("User outlet roles updated successfully");
         await usersQuery.refetch({ force: true });
         closeDialog();
       } else if (dialogMode === "password" && editingUser) {
@@ -329,6 +379,48 @@ export function UsersPage(props: UsersPageProps) {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const outletRoleCodesFor = (outletId: number) =>
+    formData.outlet_role_assignments.find((assignment) => assignment.outlet_id === outletId)
+      ?.role_codes ?? [];
+
+  const updateOutletRoleCode = (outletId: number, roleCode: string, checked: boolean) => {
+    setFormData((prev) => {
+      const assignments = prev.outlet_role_assignments.map((assignment) => ({
+        ...assignment,
+        role_codes: [...assignment.role_codes]
+      }));
+      const index = assignments.findIndex((assignment) => assignment.outlet_id === outletId);
+      if (index === -1) {
+        if (!checked) {
+          return prev;
+        }
+        return {
+          ...prev,
+          outlet_role_assignments: [
+            ...assignments,
+            { outlet_id: outletId, role_codes: [roleCode] }
+          ]
+        };
+      }
+
+      const current = assignments[index];
+      const roleSet = new Set(current.role_codes);
+      if (checked) {
+        roleSet.add(roleCode);
+      } else {
+        roleSet.delete(roleCode);
+      }
+      const nextRoles = [...roleSet];
+      if (nextRoles.length === 0) {
+        assignments.splice(index, 1);
+      } else {
+        assignments[index] = { ...current, role_codes: nextRoles };
+      }
+
+      return { ...prev, outlet_role_assignments: assignments };
+    });
   };
   
   const handleDeactivate = async (targetUser: UserResponse) => {
@@ -424,8 +516,15 @@ export function UsersPage(props: UsersPageProps) {
         id: "roles",
         header: "Roles",
         cell: (info) => {
-          const roles = info.row.original.roles;
-          if (roles.length === 0) {
+          const globalRoles = info.row.original.global_roles;
+          const outletRoleSet = new Set<string>();
+          info.row.original.outlet_role_assignments.forEach((assignment) => {
+            assignment.role_codes.forEach((code) => outletRoleSet.add(code));
+          });
+          const outletRoles = [...outletRoleSet].filter(
+            (code) => !globalRoles.includes(code as any)
+          );
+          if (globalRoles.length === 0 && outletRoles.length === 0) {
             return (
               <Text size="sm" c="dimmed">
                 No roles
@@ -434,8 +533,13 @@ export function UsersPage(props: UsersPageProps) {
           }
           return (
             <Group gap="xs" wrap="wrap">
-              {roles.map((role) => (
-                <Badge key={role} variant="light" color="blue">
+              {globalRoles.map((role) => (
+                <Badge key={`global-${role}`} variant="light" color="blue">
+                  {role}
+                </Badge>
+              ))}
+              {outletRoles.map((role) => (
+                <Badge key={`outlet-${role}`} variant="light" color="teal">
                   {role}
                 </Badge>
               ))}
@@ -447,7 +551,7 @@ export function UsersPage(props: UsersPageProps) {
         id: "outlets",
         header: "Outlets",
         cell: (info) => {
-          const outlets = info.row.original.outlets;
+          const outlets = info.row.original.outlet_role_assignments;
           if (outlets.length === 0) {
             return (
               <Text size="sm" c="dimmed">
@@ -458,8 +562,8 @@ export function UsersPage(props: UsersPageProps) {
           return (
             <Group gap="xs" wrap="wrap">
               {outlets.map((outlet) => (
-                <Badge key={outlet.id} variant="light" color="yellow">
-                  {outlet.name}
+                <Badge key={outlet.outlet_id} variant="light" color="yellow">
+                  {outlet.outlet_name}
                 </Badge>
               ))}
             </Group>
@@ -508,7 +612,7 @@ export function UsersPage(props: UsersPageProps) {
                 disabled={disableSelfAction}
                 title={selfTooltip}
               >
-                Outlets
+                Outlet Roles
               </Button>
               <Button
                 size="xs"
@@ -659,7 +763,7 @@ export function UsersPage(props: UsersPageProps) {
             {dialogMode === "create" && "Create New User"}
             {dialogMode === "edit" && "Edit User"}
             {dialogMode === "roles" && "Manage User Roles"}
-            {dialogMode === "outlets" && "Manage User Outlets"}
+            {dialogMode === "outlets" && "Manage Outlet Roles"}
             {dialogMode === "password" && "Change Password"}
           </Title>
         }
@@ -689,7 +793,7 @@ export function UsersPage(props: UsersPageProps) {
                 setFormData({
                   ...formData,
                   company_id: nextValue,
-                  outlet_ids: []
+                  outlet_role_assignments: []
                 });
               }}
               error={formErrors.company_id}
@@ -714,31 +818,33 @@ export function UsersPage(props: UsersPageProps) {
             <Stack gap="sm">
               <div>
                 <Text fw={600} size="sm">
-                  Roles
+                  Global Roles
                 </Text>
-                <ScrollArea h={160} type="auto">
+                <ScrollArea h={140} type="auto">
                   <Stack gap="xs">
-                    {availableRoles.length === 0 ? (
+                    {globalRoleOptions.length === 0 ? (
                       <Text size="sm" c="dimmed">
-                        No roles available.
+                        No global roles available.
                       </Text>
                     ) : (
-                      availableRoles.map((role) => (
+                      globalRoleOptions.map((role) => (
                         <Checkbox
                           key={role.code}
                           label={role.name}
-                          checked={formData.role_codes.includes(role.code)}
+                          checked={formData.global_role_codes.includes(role.code)}
                           disabled={role.role_level > actorMaxRoleLevel}
                           onChange={(event) => {
                             if (event.currentTarget.checked) {
                               setFormData({
                                 ...formData,
-                                role_codes: [...formData.role_codes, role.code]
+                                global_role_codes: [...formData.global_role_codes, role.code]
                               });
                             } else {
                               setFormData({
                                 ...formData,
-                                role_codes: formData.role_codes.filter((code) => code !== role.code)
+                                global_role_codes: formData.global_role_codes.filter(
+                                  (code) => code !== role.code
+                                )
                               });
                             }
                           }}
@@ -751,34 +857,41 @@ export function UsersPage(props: UsersPageProps) {
 
               <div>
                 <Text fw={600} size="sm">
-                  Outlets
+                  Outlet Roles
                 </Text>
-                <ScrollArea h={160} type="auto">
-                  <Stack gap="xs">
+                <ScrollArea h={220} type="auto">
+                  <Stack gap="sm">
                     {(outletsQuery.data || []).length === 0 ? (
                       <Text size="sm" c="dimmed">
                         No outlets available.
                       </Text>
+                    ) : outletRoleOptions.length === 0 ? (
+                      <Text size="sm" c="dimmed">
+                        No outlet-scoped roles available.
+                      </Text>
                     ) : (
                       (outletsQuery.data || []).map((outlet) => (
-                        <Checkbox
-                          key={outlet.id}
-                          label={outlet.name}
-                          checked={formData.outlet_ids.includes(outlet.id)}
-                          onChange={(event) => {
-                            if (event.currentTarget.checked) {
-                              setFormData({
-                                ...formData,
-                                outlet_ids: [...formData.outlet_ids, outlet.id]
-                              });
-                            } else {
-                              setFormData({
-                                ...formData,
-                                outlet_ids: formData.outlet_ids.filter((id) => id !== outlet.id)
-                              });
-                            }
-                          }}
-                        />
+                        <Stack key={outlet.id} gap={4}>
+                          <Text size="xs" fw={600} c="dimmed">
+                            {outlet.name}
+                          </Text>
+                          <Group gap="xs" wrap="wrap">
+                            {outletRoleOptions.map((role) => {
+                              const checked = outletRoleCodesFor(outlet.id).includes(role.code);
+                              return (
+                                <Checkbox
+                                  key={`${outlet.id}-${role.code}`}
+                                  label={role.name}
+                                  checked={checked}
+                                  disabled={role.role_level > actorMaxRoleLevel}
+                                  onChange={(event) =>
+                                    updateOutletRoleCode(outlet.id, role.code, event.currentTarget.checked)
+                                  }
+                                />
+                              );
+                            })}
+                          </Group>
+                        </Stack>
                       ))
                     )}
                   </Stack>
@@ -796,31 +909,39 @@ export function UsersPage(props: UsersPageProps) {
           {dialogMode === "roles" ? (
             <div>
               <Text fw={600} size="sm" mb={6}>
-                Select Roles
+                Select Global Roles
               </Text>
               <ScrollArea h={260} type="auto">
                 <Stack gap="xs">
-                  {availableRoles.map((role) => (
-                    <Checkbox
-                      key={role.code}
-                      label={role.name}
-                      checked={formData.role_codes.includes(role.code)}
-                      disabled={role.role_level > actorMaxRoleLevel}
-                      onChange={(event) => {
-                        if (event.currentTarget.checked) {
-                          setFormData({
-                            ...formData,
-                            role_codes: [...formData.role_codes, role.code]
-                          });
-                        } else {
-                          setFormData({
-                            ...formData,
-                            role_codes: formData.role_codes.filter((code) => code !== role.code)
-                          });
-                        }
-                      }}
-                    />
-                  ))}
+                  {globalRoleOptions.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      No global roles available.
+                    </Text>
+                  ) : (
+                    globalRoleOptions.map((role) => (
+                      <Checkbox
+                        key={role.code}
+                        label={role.name}
+                        checked={formData.global_role_codes.includes(role.code)}
+                        disabled={role.role_level > actorMaxRoleLevel}
+                        onChange={(event) => {
+                          if (event.currentTarget.checked) {
+                            setFormData({
+                              ...formData,
+                              global_role_codes: [...formData.global_role_codes, role.code]
+                            });
+                          } else {
+                            setFormData({
+                              ...formData,
+                              global_role_codes: formData.global_role_codes.filter(
+                                (code) => code !== role.code
+                              )
+                            });
+                          }
+                        }}
+                      />
+                    ))
+                  )}
                 </Stack>
               </ScrollArea>
             </div>
@@ -829,30 +950,47 @@ export function UsersPage(props: UsersPageProps) {
           {dialogMode === "outlets" ? (
             <div>
               <Text fw={600} size="sm" mb={6}>
-                Select Outlets
+                Select Outlet Roles
               </Text>
               <ScrollArea h={260} type="auto">
-                <Stack gap="xs">
-                  {(outletsQuery.data || []).map((outlet) => (
-                    <Checkbox
-                      key={outlet.id}
-                      label={outlet.name}
-                      checked={formData.outlet_ids.includes(outlet.id)}
-                      onChange={(event) => {
-                        if (event.currentTarget.checked) {
-                          setFormData({
-                            ...formData,
-                            outlet_ids: [...formData.outlet_ids, outlet.id]
-                          });
-                        } else {
-                          setFormData({
-                            ...formData,
-                            outlet_ids: formData.outlet_ids.filter((id) => id !== outlet.id)
-                          });
-                        }
-                      }}
-                    />
-                  ))}
+                <Stack gap="sm">
+                  {(outletsQuery.data || []).length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      No outlets available.
+                    </Text>
+                  ) : outletRoleOptions.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      No outlet-scoped roles available.
+                    </Text>
+                  ) : (
+                    (outletsQuery.data || []).map((outlet) => (
+                      <Stack key={outlet.id} gap={4}>
+                        <Text size="xs" fw={600} c="dimmed">
+                          {outlet.name}
+                        </Text>
+                        <Group gap="xs" wrap="wrap">
+                          {outletRoleOptions.map((role) => {
+                            const checked = outletRoleCodesFor(outlet.id).includes(role.code);
+                            return (
+                              <Checkbox
+                                key={`${outlet.id}-${role.code}`}
+                                label={role.name}
+                                checked={checked}
+                                disabled={role.role_level > actorMaxRoleLevel}
+                                onChange={(event) =>
+                                  updateOutletRoleCode(
+                                    outlet.id,
+                                    role.code,
+                                    event.currentTarget.checked
+                                  )
+                                }
+                              />
+                            );
+                          })}
+                        </Group>
+                      </Stack>
+                    ))
+                  )}
                 </Stack>
               </ScrollArea>
             </div>

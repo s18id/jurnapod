@@ -180,12 +180,12 @@ async function ensureUserHasOutletAccess(
   const [rows] = await executor.execute<AccessCheckRow[]>(
     `SELECT u.id
      FROM users u
-     INNER JOIN user_outlets uo ON uo.user_id = u.id
-     INNER JOIN outlets o ON o.id = uo.outlet_id
+     INNER JOIN user_outlet_roles uor ON uor.user_id = u.id
+     INNER JOIN outlets o ON o.id = uor.outlet_id
      WHERE u.id = ?
        AND u.company_id = ?
        AND u.is_active = 1
-       AND uo.outlet_id = ?
+       AND uor.outlet_id = ?
        AND o.company_id = ?
      LIMIT 1`,
     [userId, companyId, outletId, companyId]

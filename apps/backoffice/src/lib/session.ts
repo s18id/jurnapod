@@ -20,11 +20,20 @@ export type UserOutlet = {
   name: string;
 };
 
+export type UserOutletRoleAssignment = {
+  outlet_id: number;
+  outlet_code: string;
+  outlet_name: string;
+  role_codes: RoleCode[];
+};
+
 export type SessionUser = {
   id: number;
   company_id: number;
   email: string;
   roles: RoleCode[];
+  global_roles: RoleCode[];
+  outlet_role_assignments: UserOutletRoleAssignment[];
   outlets: UserOutlet[];
 };
 

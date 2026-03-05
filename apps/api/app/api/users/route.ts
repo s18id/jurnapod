@@ -13,6 +13,7 @@ import {
   OutletNotFoundError,
   RoleNotFoundError,
   RoleLevelViolationError,
+  RoleScopeViolationError,
   UserEmailExistsError
 } from "../../../src/lib/users";
 
@@ -23,6 +24,14 @@ const createUserSchema = z
     password: z.string().min(8).max(255),
     role_codes: z.array(RoleSchema).optional(),
     outlet_ids: z.array(NumericIdSchema).optional(),
+    outlet_role_assignments: z
+      .array(
+        z.object({
+          outlet_id: NumericIdSchema,
+          role_codes: z.array(RoleSchema)
+        })
+      )
+      .optional(),
     is_active: z.boolean().optional()
   })
   .strict();
@@ -102,6 +111,10 @@ export const POST = withAuth(
         password: input.password,
         roleCodes: input.role_codes,
         outletIds: input.outlet_ids,
+        outletRoleAssignments: input.outlet_role_assignments?.map((assignment) => ({
+          outletId: assignment.outlet_id,
+          roleCodes: assignment.role_codes
+        })),
         isActive: input.is_active,
         actor: {
           userId: auth.userId,
@@ -129,6 +142,10 @@ export const POST = withAuth(
 
       if (error instanceof RoleLevelViolationError) {
         return errorResponse("FORBIDDEN", error.message, 403);
+      }
+
+      if (error instanceof RoleScopeViolationError) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
       }
 
       console.error("POST /api/users failed", error);

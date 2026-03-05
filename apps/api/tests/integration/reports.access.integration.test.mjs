@@ -53,6 +53,18 @@ test(
         );
       }
 
+      const [outletRows] = await db.execute(
+        `SELECT id
+         FROM outlets
+         WHERE company_id = ?
+         LIMIT 1`,
+        [Number(owner.company_id)]
+      );
+      const allowedOutletId = Number(outletRows[0]?.id ?? 0);
+      if (!allowedOutletId) {
+        throw new Error("outlet fixture not found; run database seed first");
+      }
+
       const [adminRoleRows] = await db.execute(
         `SELECT id
          FROM roles
@@ -76,6 +88,13 @@ test(
          VALUES (?, ?)`,
         [adminUserId, Number(adminRoleId)]
       );
+
+      await db.execute(
+        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+         VALUES (?, ?, ?)`,
+        [adminUserId, allowedOutletId, Number(adminRoleId)]
+      );
+
 
       const companyId = Number(owner.company_id);
       const [outletInsert] = await db.execute(
@@ -120,6 +139,7 @@ test(
       }
 
       if (adminUserId > 0) {
+        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [adminUserId]);
         await db.execute("DELETE FROM user_roles WHERE user_id = ?", [adminUserId]);
         await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
@@ -202,10 +222,11 @@ test(
         );
 
         await db.execute(
-          `INSERT INTO user_outlets (user_id, outlet_id)
-           VALUES (?, ?)`,
-          [userId, outletId]
+          `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+           VALUES (?, ?, ?)`,
+          [userId, outletId, roleIdByCode.get(roleCode)]
         );
+
       }
 
       await ensureDailySalesView(db);
@@ -256,7 +277,7 @@ test(
       await stopApiServer(childProcess);
 
       for (const userId of createdUserIds) {
-        await db.execute("DELETE FROM user_outlets WHERE user_id = ?", [userId]);
+        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [userId]);
         await db.execute("DELETE FROM user_roles WHERE user_id = ?", [userId]);
         await db.execute("DELETE FROM users WHERE id = ?", [userId]);
       }

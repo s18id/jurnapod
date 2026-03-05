@@ -226,18 +226,40 @@ test(
       );
       const expectedOwnerRoles = ownerRoleRows.map((row) => row.code);
 
-      const [ownerOutletRows] = await db.execute(
-        `SELECT o.id, o.code, o.name
-         FROM outlets o
-         INNER JOIN user_outlets uo ON uo.outlet_id = o.id
-         INNER JOIN users u ON u.id = uo.user_id
+      const [ownerGlobalRoleRows] = await db.execute(
+        `SELECT r.code
+         FROM roles r
+         INNER JOIN user_roles ur ON ur.role_id = r.id
+         INNER JOIN users u ON u.id = ur.user_id
          WHERE u.id = ?
            AND u.company_id = ?
            AND u.is_active = 1
-           AND o.company_id = ?
-         ORDER BY o.id ASC`,
-        [ownerUserId, companyId, companyId]
+           AND r.is_global = 1
+         LIMIT 1`,
+        [ownerUserId, companyId]
       );
+      const ownerHasGlobalRole = ownerGlobalRoleRows.length > 0;
+
+      const [ownerOutletRows] = ownerHasGlobalRole
+        ? await db.execute(
+          `SELECT o.id, o.code, o.name
+           FROM outlets o
+           WHERE o.company_id = ?
+           ORDER BY o.id ASC`,
+          [companyId]
+        )
+        : await db.execute(
+          `SELECT o.id, o.code, o.name
+           FROM outlets o
+           INNER JOIN user_outlets uo ON uo.outlet_id = o.id
+           INNER JOIN users u ON u.id = uo.user_id
+           WHERE u.id = ?
+             AND u.company_id = ?
+             AND u.is_active = 1
+             AND o.company_id = ?
+           ORDER BY o.id ASC`,
+          [ownerUserId, companyId, companyId]
+        );
       const expectedOwnerOutlets = ownerOutletRows.map((row) => ({
         id: Number(row.id),
         code: row.code,
@@ -286,11 +308,12 @@ test(
       );
 
       await db.execute(
-        `INSERT INTO user_outlets (user_id, outlet_id)
-         VALUES (?, ?)
+        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+         VALUES (?, ?, ?)
          ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)`,
-        [viewerUserId, allowedOutletId]
+        [viewerUserId, allowedOutletId, viewerRoleId]
       );
+
 
       const port = await getFreePort();
       const baseUrl = `http://127.0.0.1:${port}`;
@@ -453,7 +476,7 @@ test(
       );
 
       if (viewerUserId > 0) {
-        await db.execute("DELETE FROM user_outlets WHERE user_id = ?", [viewerUserId]);
+        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [viewerUserId]);
         await db.execute("DELETE FROM user_roles WHERE user_id = ?", [viewerUserId]);
         await db.execute("DELETE FROM users WHERE id = ?", [viewerUserId]);
       }
@@ -715,6 +738,7 @@ test(
 
       for (const userId of createdUserIds) {
         if (userId > 0) {
+          await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [userId]);
           await db.execute("DELETE FROM user_outlets WHERE user_id = ?", [userId]);
           await db.execute("DELETE FROM user_roles WHERE user_id = ?", [userId]);
           await db.execute("DELETE FROM users WHERE id = ?", [userId]);

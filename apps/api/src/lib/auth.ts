@@ -82,6 +82,13 @@ export type AuthenticatedUser = {
   company_id: number;
   email: string;
   roles: RoleCode[];
+  global_roles: RoleCode[];
+  outlet_role_assignments: {
+    outlet_id: number;
+    outlet_code: string;
+    outlet_name: string;
+    role_codes: RoleCode[];
+  }[];
   outlets: {
     id: number;
     code: string;
@@ -269,20 +276,34 @@ export async function findActiveUserTokenProfile(
 
 async function findUserRoleCodes(userId: number, companyId: number): Promise<RoleCode[]> {
   const pool = getDbPool();
-  const [rows] = await pool.execute<UserRoleRow[]>(
-    `SELECT r.code
-     FROM roles r
-     INNER JOIN user_roles ur ON ur.role_id = r.id
-     INNER JOIN users u ON u.id = ur.user_id
-     WHERE u.id = ?
-       AND u.company_id = ?
-       AND u.is_active = 1
-     ORDER BY r.code ASC`,
-    [userId, companyId]
-  );
+  const [globalRows, outletRows] = await Promise.all([
+    pool.execute<UserRoleRow[]>(
+      `SELECT r.code
+       FROM roles r
+       INNER JOIN user_roles ur ON ur.role_id = r.id
+       INNER JOIN users u ON u.id = ur.user_id
+       WHERE u.id = ?
+         AND u.company_id = ?
+         AND u.is_active = 1
+         AND r.is_global = 1
+       ORDER BY r.code ASC`,
+      [userId, companyId]
+    ),
+    pool.execute<UserRoleRow[]>(
+      `SELECT DISTINCT r.code
+       FROM roles r
+       INNER JOIN user_outlet_roles uor ON uor.role_id = r.id
+       INNER JOIN users u ON u.id = uor.user_id
+       WHERE u.id = ?
+         AND u.company_id = ?
+         AND u.is_active = 1
+       ORDER BY r.code ASC`,
+      [userId, companyId]
+    )
+  ]);
 
   const roles = new Set<RoleCode>();
-  for (const row of rows) {
+  for (const row of [...globalRows[0], ...outletRows[0]]) {
     if (roleCodeSet.has(row.code)) {
       roles.add(row.code as RoleCode);
     }
@@ -296,24 +317,113 @@ async function findUserOutlets(
   companyId: number
 ): Promise<AuthenticatedUser["outlets"]> {
   const pool = getDbPool();
-  const [rows] = await pool.execute<UserOutletRow[]>(
-    `SELECT o.id, o.code, o.name
-     FROM outlets o
-     INNER JOIN user_outlets uo ON uo.outlet_id = o.id
-     INNER JOIN users u ON u.id = uo.user_id
+  const [globalRows] = await pool.execute<AccessCheckRow[]>(
+    `SELECT u.id
+     FROM users u
+     INNER JOIN user_roles ur ON ur.user_id = u.id
+     INNER JOIN roles r ON r.id = ur.role_id
      WHERE u.id = ?
        AND u.company_id = ?
        AND u.is_active = 1
-       AND o.company_id = ?
-     ORDER BY o.id ASC`,
-    [userId, companyId, companyId]
+       AND r.is_global = 1
+     LIMIT 1`,
+    [userId, companyId]
   );
+
+  const [rows] = globalRows.length > 0
+    ? await pool.execute<UserOutletRow[]>(
+      `SELECT o.id, o.code, o.name
+       FROM outlets o
+       WHERE o.company_id = ?
+       ORDER BY o.id ASC`,
+      [companyId]
+    )
+    : await pool.execute<UserOutletRow[]>(
+      `SELECT DISTINCT o.id, o.code, o.name
+       FROM outlets o
+       INNER JOIN user_outlet_roles uor ON uor.outlet_id = o.id
+       INNER JOIN users u ON u.id = uor.user_id
+       WHERE u.id = ?
+         AND u.company_id = ?
+         AND u.is_active = 1
+         AND o.company_id = ?
+       ORDER BY o.id ASC`,
+      [userId, companyId, companyId]
+    );
 
   return rows.map((row) => ({
     id: row.id,
     code: row.code,
     name: row.name
   }));
+}
+
+async function findUserGlobalRoleCodes(
+  userId: number,
+  companyId: number
+): Promise<RoleCode[]> {
+  const pool = getDbPool();
+  const [rows] = await pool.execute<UserRoleRow[]>(
+    `SELECT r.code
+     FROM roles r
+     INNER JOIN user_roles ur ON ur.role_id = r.id
+     INNER JOIN users u ON u.id = ur.user_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND u.is_active = 1
+       AND r.is_global = 1
+     ORDER BY r.code ASC`,
+    [userId, companyId]
+  );
+
+  return rows
+    .map((row) => row.code)
+    .filter((code): code is RoleCode => roleCodeSet.has(code));
+}
+
+async function findUserOutletRoleAssignments(
+  userId: number,
+  companyId: number
+): Promise<AuthenticatedUser["outlet_role_assignments"]> {
+  const pool = getDbPool();
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT o.id AS outlet_id,
+            o.code AS outlet_code,
+            o.name AS outlet_name,
+            r.code AS role_code
+     FROM user_outlet_roles uor
+     INNER JOIN outlets o ON o.id = uor.outlet_id
+     INNER JOIN roles r ON r.id = uor.role_id
+     INNER JOIN users u ON u.id = uor.user_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND u.is_active = 1
+     ORDER BY o.id ASC, r.code ASC`,
+    [userId, companyId]
+  );
+
+  const outletMap = new Map<number, AuthenticatedUser["outlet_role_assignments"][number]>();
+
+  for (const row of rows) {
+    const roleCode = row.role_code as string;
+    if (!roleCodeSet.has(roleCode)) {
+      continue;
+    }
+    const outletId = Number(row.outlet_id);
+    let assignment = outletMap.get(outletId);
+    if (!assignment) {
+      assignment = {
+        outlet_id: outletId,
+        outlet_code: String(row.outlet_code),
+        outlet_name: String(row.outlet_name),
+        role_codes: []
+      };
+      outletMap.set(outletId, assignment);
+    }
+    assignment.role_codes.push(roleCode as RoleCode);
+  }
+
+  return [...outletMap.values()];
 }
 
 export async function findActiveUserById(
@@ -342,11 +452,18 @@ export async function findActiveUserById(
     findUserOutlets(user.id, user.company_id)
   ]);
 
+  const [globalRoles, outletRoleAssignments] = await Promise.all([
+    findUserGlobalRoleCodes(user.id, user.company_id),
+    findUserOutletRoleAssignments(user.id, user.company_id)
+  ]);
+
   return {
     id: user.id,
     company_id: user.company_id,
     email: user.email,
     roles,
+    global_roles: globalRoles,
+    outlet_role_assignments: outletRoleAssignments,
     outlets
   };
 }
@@ -471,13 +588,13 @@ export async function userHasOutletAccess(
     `SELECT u.id
      FROM users u
      INNER JOIN companies c ON c.id = u.company_id
-     INNER JOIN user_outlets uo ON uo.user_id = u.id
-     INNER JOIN outlets o ON o.id = uo.outlet_id
+     INNER JOIN user_outlet_roles uor ON uor.user_id = u.id
+     INNER JOIN outlets o ON o.id = uor.outlet_id
      WHERE u.id = ?
        AND u.company_id = ?
        AND u.is_active = 1
        AND c.deleted_at IS NULL
-       AND uo.outlet_id = ?
+       AND uor.outlet_id = ?
        AND o.company_id = ?
      LIMIT 1`,
     [userId, companyId, outletId, companyId]
@@ -560,43 +677,101 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
 
   if (allowedRoles && allowedRoles.length > 0) {
     const rolePlaceholders = allowedRoles.map(() => "?").join(", ");
-    selectParts.push(
-      `EXISTS(
-         SELECT 1
-         FROM user_roles ur
-         INNER JOIN roles r ON r.id = ur.role_id
-         WHERE ur.user_id = u.id
-           AND r.code IN (${rolePlaceholders})
-       ) AS has_role`
-    );
-    params.push(...allowedRoles);
+    if (typeof outletId === "number") {
+      selectParts.push(
+        `(
+           EXISTS(
+             SELECT 1
+             FROM user_roles ur
+             INNER JOIN roles r ON r.id = ur.role_id
+             WHERE ur.user_id = u.id
+               AND r.is_global = 1
+               AND r.code IN (${rolePlaceholders})
+           ) OR EXISTS(
+             SELECT 1
+             FROM user_outlet_roles uor
+             INNER JOIN roles r ON r.id = uor.role_id
+             INNER JOIN outlets o ON o.id = uor.outlet_id
+             WHERE uor.user_id = u.id
+               AND uor.outlet_id = ?
+               AND o.company_id = u.company_id
+               AND r.code IN (${rolePlaceholders})
+           )
+         ) AS has_role`
+      );
+      params.push(...allowedRoles, outletId, ...allowedRoles);
+    } else {
+      selectParts.push(
+        `EXISTS(
+           SELECT 1
+           FROM user_roles ur
+           INNER JOIN roles r ON r.id = ur.role_id
+           WHERE ur.user_id = u.id
+             AND r.is_global = 1
+             AND r.code IN (${rolePlaceholders})
+         ) AS has_role`
+      );
+      params.push(...allowedRoles);
+    }
   }
 
   if (module && permission) {
     const permissionBit = MODULE_PERMISSION_BITS[permission];
-    selectParts.push(
-      `EXISTS(
-         SELECT 1
-         FROM user_roles ur
-         INNER JOIN roles r ON r.id = ur.role_id
-         INNER JOIN module_roles mr ON mr.role_id = r.id
-         WHERE ur.user_id = u.id
-           AND mr.module = ?
-           AND mr.company_id = u.company_id
-           AND (mr.permission_mask & ?) <> 0
-       ) AS has_permission`
-    );
-    params.push(module, permissionBit);
+    if (typeof outletId === "number") {
+      selectParts.push(
+        `(
+           EXISTS(
+             SELECT 1
+             FROM user_roles ur
+             INNER JOIN roles r ON r.id = ur.role_id
+             INNER JOIN module_roles mr ON mr.role_id = r.id
+             WHERE ur.user_id = u.id
+               AND r.is_global = 1
+               AND mr.module = ?
+               AND mr.company_id = u.company_id
+               AND (mr.permission_mask & ?) <> 0
+           ) OR EXISTS(
+             SELECT 1
+             FROM user_outlet_roles uor
+             INNER JOIN roles r ON r.id = uor.role_id
+             INNER JOIN module_roles mr ON mr.role_id = r.id
+             INNER JOIN outlets o ON o.id = uor.outlet_id
+             WHERE uor.user_id = u.id
+               AND uor.outlet_id = ?
+               AND o.company_id = u.company_id
+               AND mr.module = ?
+               AND mr.company_id = u.company_id
+               AND (mr.permission_mask & ?) <> 0
+           )
+         ) AS has_permission`
+      );
+      params.push(module, permissionBit, outletId, module, permissionBit);
+    } else {
+      selectParts.push(
+        `EXISTS(
+           SELECT 1
+           FROM user_roles ur
+           INNER JOIN roles r ON r.id = ur.role_id
+           INNER JOIN module_roles mr ON mr.role_id = r.id
+           WHERE ur.user_id = u.id
+             AND r.is_global = 1
+             AND mr.module = ?
+             AND mr.company_id = u.company_id
+             AND (mr.permission_mask & ?) <> 0
+         ) AS has_permission`
+      );
+      params.push(module, permissionBit);
+    }
   }
 
   if (typeof outletId === "number") {
     selectParts.push(
       `EXISTS(
          SELECT 1
-         FROM user_outlets uo
-         INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE uo.user_id = u.id
-           AND uo.outlet_id = ?
+         FROM user_outlet_roles uor
+         INNER JOIN outlets o ON o.id = uor.outlet_id
+         WHERE uor.user_id = u.id
+           AND uor.outlet_id = ?
            AND o.company_id = u.company_id
        ) AS has_outlet_access`
     );

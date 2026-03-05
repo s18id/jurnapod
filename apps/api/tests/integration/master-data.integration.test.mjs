@@ -959,10 +959,11 @@ test(
       );
 
       await db.execute(
-        `INSERT INTO user_outlets (user_id, outlet_id)
-         VALUES (?, ?)`,
-        [adminUserId, allowedOutletId]
+        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+         VALUES (?, ?, ?)`,
+        [adminUserId, allowedOutletId, Number(adminRoleId)]
       );
+
 
       await db.execute(
         `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
@@ -1098,7 +1099,7 @@ test(
       }
 
       if (adminUserId > 0) {
-        await db.execute("DELETE FROM user_outlets WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [adminUserId]);
         await db.execute("DELETE FROM user_roles WHERE user_id = ?", [adminUserId]);
         await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
