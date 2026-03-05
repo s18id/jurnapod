@@ -289,6 +289,62 @@ export function requireRoleForOutletQuery(
   };
 }
 
+export function requireAccessForOutletQuery(
+  options: Omit<AccessGuardOptions, "outletId"> & { outletParam?: string }
+): AuthenticatedRouteGuard {
+  const uniqueAllowedRoles = options.roles
+    ? [...new Set(options.roles)].filter((role) => roleCodeSet.has(role))
+    : [];
+  const needsRoleCheck = options.roles !== undefined;
+  const needsModuleCheck = Boolean(options.module && options.permission);
+  const outletParam = options.outletParam ?? "outlet_id";
+
+  return async (request, auth) => {
+    if (needsRoleCheck && uniqueAllowedRoles.length === 0) {
+      return createForbiddenResponse();
+    }
+
+    const url = new URL(request.url);
+    const outletParamValue = url.searchParams.get(outletParam);
+    let outletId: number | undefined;
+    if (outletParamValue !== null && outletParamValue !== "") {
+      outletId = Number(outletParamValue);
+      if (!Number.isSafeInteger(outletId) || outletId <= 0) {
+        return createInvalidRequestResponse();
+      }
+    }
+
+    const access = await checkUserAccess({
+      userId: auth.userId,
+      companyId: auth.companyId,
+      allowedRoles: needsRoleCheck ? uniqueAllowedRoles : undefined,
+      module: needsModuleCheck ? options.module : undefined,
+      permission: needsModuleCheck ? options.permission : undefined,
+      outletId
+    });
+
+    if (!access) {
+      return createForbiddenResponse();
+    }
+
+    if (needsRoleCheck && !access.hasRole) {
+      return createForbiddenResponse();
+    }
+
+    if (needsModuleCheck && !access.hasPermission && !access.isSuperAdmin) {
+      return createForbiddenResponse();
+    }
+
+    if (typeof outletId === "number") {
+      if (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
+        return createForbiddenResponse();
+      }
+    }
+
+    return null;
+  };
+}
+
 export function requireModulePermission(
   module: string,
   permission: ModulePermission

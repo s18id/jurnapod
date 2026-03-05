@@ -3,7 +3,8 @@
 
 import { ManualJournalEntryCreateRequestSchema, JournalListQuerySchema } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
-import { requireRole, withAuth } from "../../../src/lib/auth-guard";
+import { checkUserAccess } from "../../../src/lib/auth";
+import { requireRoleForOutletQuery, withAuth } from "../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../src/lib/response";
 import {
   createManualJournalEntry,
@@ -61,7 +62,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  [requireRoleForOutletQuery(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );
 
 /**
@@ -102,6 +103,22 @@ export const POST = withAuth(
         clientRef = parsedClientRef.data;
       }
       const normalizedInput = clientRef ? { ...input, client_ref: clientRef } : input;
+      const outletId =
+        typeof normalizedInput.outlet_id === "number" ? normalizedInput.outlet_id : undefined;
+      const access = await checkUserAccess({
+        userId: auth.userId,
+        companyId: auth.companyId,
+        allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+        outletId
+      });
+      if (!access || !access.hasRole) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+      if (typeof outletId === "number") {
+        if (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
+          return errorResponse("FORBIDDEN", "Forbidden", 403);
+        }
+      }
 
       // Verify company_id matches authenticated user
       if (normalizedInput.company_id !== auth.companyId) {
@@ -136,5 +153,5 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  []
 );

@@ -3,8 +3,8 @@
 
 import { z } from "zod";
 import type { RowDataPacket } from "mysql2";
-import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
-import { userHasOutletAccess } from "../../../../src/lib/auth";
+import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
+import { checkUserAccess, userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 
@@ -60,7 +60,13 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "read" })]
+  [
+    requireAccessForOutletQuery({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "settings",
+      permission: "read"
+    })
+  ]
 );
 
 export const PUT = withAuth(
@@ -68,9 +74,21 @@ export const PUT = withAuth(
     try {
       const payload = await request.json();
       const parsed = bodySchema.parse(payload);
-
-      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
-      if (!hasAccess) {
+      const access = await checkUserAccess({
+        userId: auth.userId,
+        companyId: auth.companyId,
+        allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+        module: "settings",
+        permission: "update",
+        outletId: parsed.outlet_id
+      });
+      if (!access || !access.hasRole) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+      if (!access.hasPermission && !access.isSuperAdmin) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+      if (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
         return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
@@ -106,5 +124,5 @@ export const PUT = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "update" })]
+  []
 );

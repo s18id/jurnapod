@@ -6,7 +6,7 @@ import {
   NumericIdSchema
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
-import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
+import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createItemPrice,
@@ -14,7 +14,7 @@ import {
   DatabaseReferenceError,
   listItemPrices
 } from "../../../../src/lib/master-data";
-import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
+import { checkUserAccess, listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 
 function parseOptionalIsActive(value: string | null): boolean | undefined {
   if (value == null) {
@@ -86,7 +86,13 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "read" })]
+  [
+    requireAccessForOutletQuery({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "inventory",
+      permission: "read"
+    })
+  ]
 );
 
 export const POST = withAuth(
@@ -94,8 +100,21 @@ export const POST = withAuth(
     try {
       const payload = await request.json();
       const input = ItemPriceCreateRequestSchema.parse(payload);
-      const hasOutletAccess = await userHasOutletAccess(auth.userId, auth.companyId, input.outlet_id);
-      if (!hasOutletAccess) {
+      const access = await checkUserAccess({
+        userId: auth.userId,
+        companyId: auth.companyId,
+        allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+        module: "inventory",
+        permission: "create",
+        outletId: input.outlet_id
+      });
+      if (!access || !access.hasRole) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+      if (!access.hasPermission && !access.isSuperAdmin) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+      if (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
         return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
@@ -121,5 +140,5 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "create" })]
+  []
 );

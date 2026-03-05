@@ -6,8 +6,8 @@ import {
   SalesInvoiceListQuerySchema
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
-import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
-import { requireRole, withAuth } from "../../../../src/lib/auth-guard";
+import { checkUserAccess, listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
+import { requireRoleForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createInvoice,
@@ -65,7 +65,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Invoices request failed", 500);
     }
   },
-  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  [requireRoleForOutletQuery(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );
 
 export const POST = withAuth(
@@ -73,6 +73,18 @@ export const POST = withAuth(
     try {
       const payload = await request.json();
       const input = SalesInvoiceCreateRequestSchema.parse(payload);
+      const access = await checkUserAccess({
+        userId: auth.userId,
+        companyId: auth.companyId,
+        allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+        outletId: input.outlet_id
+      });
+      if (!access || !access.hasRole) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+      if (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
       const invoice = await createInvoice(auth.companyId, input, {
         userId: auth.userId
       });
@@ -99,5 +111,5 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Invoices request failed", 500);
     }
   },
-  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  []
 );
