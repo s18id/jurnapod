@@ -240,6 +240,17 @@ test(
       );
       const ownerHasGlobalRole = ownerGlobalRoleRows.length > 0;
 
+      const [deniedOutletResult] = await db.execute(
+        `INSERT INTO outlets (company_id, code, name)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           name = VALUES(name),
+           id = LAST_INSERT_ID(id),
+           updated_at = CURRENT_TIMESTAMP`,
+        [companyId, deniedOutletCode, `Denied Outlet ${runId}`]
+      );
+      deniedOutletId = Number(deniedOutletResult.insertId);
+
       const [ownerOutletRows] = ownerHasGlobalRole
         ? await db.execute(
           `SELECT o.id, o.code, o.name
@@ -265,17 +276,6 @@ test(
         code: row.code,
         name: row.name
       }));
-
-      const [deniedOutletResult] = await db.execute(
-        `INSERT INTO outlets (company_id, code, name)
-         VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           name = VALUES(name),
-           id = LAST_INSERT_ID(id),
-           updated_at = CURRENT_TIMESTAMP`,
-        [companyId, deniedOutletCode, `Denied Outlet ${runId}`]
-      );
-      deniedOutletId = Number(deniedOutletResult.insertId);
 
       const [viewerRoleResult] = await db.execute(
         `INSERT INTO roles (code, name)
