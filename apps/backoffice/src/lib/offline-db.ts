@@ -37,6 +37,7 @@ export type SyncHistory = {
   timestamp: Date;
   itemCount: number;
   details: string;
+  userId: number;
 };
 
 class OfflineDatabase extends Dexie {
@@ -52,6 +53,12 @@ class OfflineDatabase extends Dexie {
       masterDataCache: "type, expiresAt",
       formDrafts: "id, formType, userId",
       syncHistory: "id, timestamp, action"
+    });
+    this.version(2).stores({
+      outbox: "id, status, timestamp, userId",
+      masterDataCache: "type, expiresAt",
+      formDrafts: "id, formType, userId",
+      syncHistory: "id, timestamp, action, userId"
     });
   }
 }

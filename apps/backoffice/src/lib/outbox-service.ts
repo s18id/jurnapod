@@ -22,23 +22,44 @@ export class OutboxService {
     return id;
   }
 
-  static async getPendingCount(): Promise<number> {
-    return db.outbox.where("status").equals("pending").count();
+  static async getPendingCount(userId: number): Promise<number> {
+    return db.outbox
+      .where("userId")
+      .equals(userId)
+      .and((item) => item.status === "pending")
+      .count();
   }
 
-  static async getPendingItems(): Promise<OutboxItem[]> {
-    return db.outbox.where("status").equals("pending").toArray();
+  static async getPendingItems(userId: number): Promise<OutboxItem[]> {
+    return db.outbox
+      .where("userId")
+      .equals(userId)
+      .and((item) => item.status === "pending")
+      .toArray();
   }
 
-  static async getAllItems(): Promise<OutboxItem[]> {
-    return db.outbox.toArray();
+  static async getAllItems(userId: number): Promise<OutboxItem[]> {
+    return db.outbox.where("userId").equals(userId).toArray();
   }
 
-  static async deleteItem(id: string): Promise<void> {
+  static async deleteItem(id: string, userId: number): Promise<void> {
+    const item = await db.outbox.get(id);
+    if (!item || item.userId !== userId) {
+      return;
+    }
     await db.outbox.delete(id);
   }
 
-  static async updateStatus(id: string, status: OutboxItem["status"], error?: string) {
+  static async updateStatus(
+    id: string,
+    userId: number,
+    status: OutboxItem["status"],
+    error?: string
+  ) {
+    const item = await db.outbox.get(id);
+    if (!item || item.userId !== userId) {
+      return;
+    }
     await db.outbox.update(id, { status, error });
   }
 }

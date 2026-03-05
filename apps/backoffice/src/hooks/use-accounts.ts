@@ -114,7 +114,7 @@ export function useAccountTypes(companyId: number, accessToken: string) {
           accessToken
         );
         setData(response.data);
-        await CacheService.cacheAccountTypes(response.data);
+        await CacheService.cacheAccountTypes(companyId, response.data);
       } else {
         const cached = await CacheService.getCachedAccountTypes(companyId, accessToken, { allowStale: true });
         setData(cached);
@@ -225,7 +225,7 @@ export function useAccounts(
         );
         setData(response.data);
         if (filters?.is_active !== false) {
-          await CacheService.cacheAccounts(response.data);
+          await CacheService.cacheAccounts(companyId, response.data);
         }
       } else {
         const cached = await CacheService.getCachedAccounts(companyId, accessToken, { allowStale: true });
@@ -283,7 +283,7 @@ export function useAccountTree(
           accessToken
         );
         setData(response.data);
-        await CacheService.cacheAccounts(flattenTree(response.data));
+        await CacheService.cacheAccounts(companyId, flattenTree(response.data));
       } else {
         const cached = await CacheService.getCachedAccounts(companyId, accessToken, { allowStale: true });
         const filtered = includeInactive ? cached : cached.filter((account) => account.is_active);

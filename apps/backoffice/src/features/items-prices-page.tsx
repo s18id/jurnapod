@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
-import { CacheService } from "../lib/cache-service";
+import { CacheService, buildCacheKey } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
 import { StaleDataWarning } from "../components/stale-data-warning";
 import { OfflinePage } from "../components/offline-page";
@@ -165,18 +165,23 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
 
       if (isOnline) {
         const [itemsResponse, pricesResponse, groupsResponse] = await Promise.all([
-          CacheService.refreshItems(props.accessToken),
-          CacheService.refreshItemPrices(outletId, props.accessToken),
-          CacheService.refreshItemGroups(props.accessToken)
+          CacheService.refreshItems(props.user.company_id, props.accessToken),
+          CacheService.refreshItemPrices(props.user.company_id, outletId, props.accessToken),
+          CacheService.refreshItemGroups(props.user.company_id, props.accessToken)
         ]);
         itemsData = itemsResponse as Item[];
         pricesData = pricesResponse as ItemPrice[];
         groupsData = groupsResponse as ItemGroup[];
       } else {
         const [itemsResponse, pricesResponse, groupsResponse] = await Promise.all([
-          CacheService.getCachedItems(props.accessToken, { allowStale: true }),
-          CacheService.getCachedItemPrices(outletId, props.accessToken, { allowStale: true }),
-          CacheService.getCachedItemGroups(props.accessToken, { allowStale: true })
+          CacheService.getCachedItems(props.user.company_id, props.accessToken, { allowStale: true }),
+          CacheService.getCachedItemPrices(
+            props.user.company_id,
+            outletId,
+            props.accessToken,
+            { allowStale: true }
+          ),
+          CacheService.getCachedItemGroups(props.user.company_id, props.accessToken, { allowStale: true })
         ]);
         itemsData = itemsResponse as Item[];
         pricesData = pricesResponse as ItemPrice[];
@@ -356,10 +361,19 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             </option>
           ))}
         </select>
-        <StaleDataWarning cacheKey="items" label="items" />
-        <StaleDataWarning cacheKey="item_groups" label="item groups" />
         <StaleDataWarning
-          cacheKey={`item_prices:${selectedOutletId}`}
+          cacheKey={buildCacheKey("items", { companyId: props.user.company_id })}
+          label="items"
+        />
+        <StaleDataWarning
+          cacheKey={buildCacheKey("item_groups", { companyId: props.user.company_id })}
+          label="item groups"
+        />
+        <StaleDataWarning
+          cacheKey={buildCacheKey("item_prices", {
+            companyId: props.user.company_id,
+            outletId: selectedOutletId
+          })}
           label={`prices for outlet #${selectedOutletId}`}
         />
         {loading ? <p>Loading data...</p> : null}

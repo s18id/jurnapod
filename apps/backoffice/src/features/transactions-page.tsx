@@ -431,7 +431,7 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
       <div style={{ marginBottom: "20px" }}>
         <h1 style={{ marginBottom: "8px" }}>
           Transaction Input
-          <QueueStatusBadge accessToken={accessToken} />
+          <QueueStatusBadge accessToken={accessToken} userId={user.id} />
         </h1>
         <p style={{ color: "#666", margin: 0 }}>
           Create manual journal entries for expenses, transfers, and adjustments

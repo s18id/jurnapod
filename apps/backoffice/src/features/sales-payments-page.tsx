@@ -6,6 +6,8 @@ import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 import { useAccounts } from "../hooks/use-accounts";
 import { useOutletPaymentMethodMappings } from "../hooks/use-outlet-payment-method-mappings";
+import { useOnlineStatus } from "../lib/connection";
+import { OutboxService } from "../lib/outbox-service";
 
 type PaymentStatus = "DRAFT" | "POSTED" | "VOID";
 
@@ -117,6 +119,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     amount: "0"
   }));
   const [editingPayment, setEditingPayment] = useState<PaymentEditDraft | null>(null);
+  const isOnline = useOnlineStatus();
 
   // Fetch payable accounts for payment destination dropdown
   const accountFilter = useMemo(() => ({ is_payable: true }), []);
@@ -219,23 +222,31 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest(
-        "/sales/payments",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            outlet_id: selectedOutletId,
-            invoice_id: Number(newPayment.invoice_id),
-            payment_no: newPayment.payment_no.trim(),
-            payment_at: paymentAtIso,
-            account_id: Number(newPayment.account_id),
-            amount: Number(newPayment.amount)
-          })
-        },
-        props.accessToken
-      );
-      resetNewPayment();
-      await refreshData(selectedOutletId);
+      const payload = {
+        outlet_id: selectedOutletId,
+        invoice_id: Number(newPayment.invoice_id),
+        payment_no: newPayment.payment_no.trim(),
+        payment_at: paymentAtIso,
+        account_id: Number(newPayment.account_id),
+        amount: Number(newPayment.amount)
+      };
+
+      if (isOnline) {
+        await apiRequest(
+          "/sales/payments",
+          {
+            method: "POST",
+            body: JSON.stringify(payload)
+          },
+          props.accessToken
+        );
+        resetNewPayment();
+        await refreshData(selectedOutletId);
+      } else {
+        await OutboxService.queueTransaction("payment", payload, props.user.id);
+        resetNewPayment();
+        setError("Payment queued for sync (offline)");
+      }
     } catch (createError) {
       if (createError instanceof ApiError) {
         setError(createError.message);

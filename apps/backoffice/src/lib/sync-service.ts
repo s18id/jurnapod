@@ -35,7 +35,7 @@ export class SyncService {
   private static maxRetries = 3;
   private static syncingTimeoutMs = 10 * 60 * 1000;
 
-  static async syncAll(accessToken: string): Promise<SyncResult> {
+  static async syncAll(accessToken: string, userId: number): Promise<SyncResult> {
     if (this.isSyncing) {
       return { success: 0, failed: 0, conflicts: 0 };
     }
@@ -44,8 +44,16 @@ export class SyncService {
 
     try {
       const [pending, syncing] = await Promise.all([
-        db.outbox.where("status").equals("pending").toArray(),
-        db.outbox.where("status").equals("syncing").toArray()
+        db.outbox
+          .where("userId")
+          .equals(userId)
+          .and((item) => item.status === "pending")
+          .toArray(),
+        db.outbox
+          .where("userId")
+          .equals(userId)
+          .and((item) => item.status === "syncing")
+          .toArray()
       ]);
       const now = Date.now();
       const readyToSync = pending.filter((item) => {
@@ -99,7 +107,7 @@ export class SyncService {
       }
 
       const result = { success, failed, conflicts };
-      await this.writeSyncHistory(result);
+      await this.writeSyncHistory(result, userId);
       return result;
     } finally {
       this.isSyncing = false;
@@ -172,10 +180,17 @@ export class SyncService {
       return true;
     }
 
+    if (
+      normalizedCode === "conflict" &&
+      (normalizedMessage.includes("client_ref") || normalizedMessage.includes("idempotent"))
+    ) {
+      return true;
+    }
+
     return normalizedMessage.includes("duplicate") || normalizedMessage.includes("already exists");
   }
 
-  private static async writeSyncHistory(result: SyncResult): Promise<void> {
+  private static async writeSyncHistory(result: SyncResult, userId: number): Promise<void> {
     const total = result.success + result.failed + result.conflicts;
     if (total === 0) {
       return;
@@ -190,7 +205,8 @@ export class SyncService {
         action,
         timestamp: new Date(),
         itemCount: total,
-        details
+        details,
+        userId
       });
     } catch {
       return;

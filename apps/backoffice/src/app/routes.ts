@@ -7,6 +7,7 @@ export type AppRoute = {
   path: string;
   label: string;
   allowedRoles: readonly RoleCode[];
+  requiredModule?: string; // Module code that must be enabled
 };
 
 export const APP_ROUTES: readonly AppRoute[] = [
@@ -73,69 +74,86 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/sales-invoices",
     label: "Sales Invoices",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "sales"
   },
   {
     path: "/sales-payments",
     label: "Sales Payments",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "sales"
   },
 
   // === POS ===
   {
     path: "/pos-transactions",
     label: "POS Transactions",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "pos"
   },
   {
     path: "/pos-payments",
     label: "POS Payments",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "pos"
   },
   {
     path: "/sync-queue",
     label: "Sync Queue",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "pos"
   },
   {
     path: "/sync-history",
     label: "Sync History",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "pos"
   },
   {
     path: "/pwa-settings",
     label: "PWA Settings",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "pos"
   },
 
   // === INVENTORY ===
   {
     path: "/item-groups",
     label: "Item Groups",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "inventory"
   },
   {
     path: "/items-prices",
     label: "Items & Prices",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "inventory"
   },
   {
     path: "/supplies",
     label: "Supplies",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "inventory"
   },
   {
     path: "/fixed-assets",
     label: "Fixed Assets",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "inventory"
   },
   {
     path: "/inventory-settings",
     label: "Inventory Settings",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "inventory"
   },
 
   // === SETTINGS ===
+  {
+    path: "/audit-logs",
+    label: "Audit Logs",
+    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+  },
   {
     path: "/companies",
     label: "Companies",
@@ -199,4 +217,16 @@ export function findRoute(path: string): AppRoute | null {
 
 export function userCanAccessRoute(userRoles: readonly RoleCode[], route: AppRoute): boolean {
   return route.allowedRoles.some((role) => userRoles.includes(role));
+}
+
+export function filterRoutesByModules(
+  routes: readonly AppRoute[],
+  enabledModules: Record<string, boolean>
+): AppRoute[] {
+  return routes.filter((route) => {
+    if (!route.requiredModule) {
+      return true;
+    }
+    return enabledModules[route.requiredModule] === true;
+  });
 }

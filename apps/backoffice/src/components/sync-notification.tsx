@@ -7,9 +7,10 @@ import { SyncService, type SyncResult } from "../lib/sync-service";
 
 type SyncNotificationProps = {
   accessToken: string;
+  userId: number;
 };
 
-export function SyncNotification({ accessToken }: SyncNotificationProps) {
+export function SyncNotification({ accessToken, userId }: SyncNotificationProps) {
   const [syncing, setSyncing] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
   const theme = useMantineTheme();
@@ -19,7 +20,7 @@ export function SyncNotification({ accessToken }: SyncNotificationProps) {
 
     async function handleSync() {
       setSyncing(true);
-      const nextResult = await SyncService.syncAll(accessToken);
+      const nextResult = await SyncService.syncAll(accessToken, userId);
       setSyncing(false);
       if (nextResult.success > 0 || nextResult.failed > 0 || nextResult.conflicts > 0) {
         setResult(nextResult);
@@ -39,7 +40,7 @@ export function SyncNotification({ accessToken }: SyncNotificationProps) {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [accessToken]);
+  }, [accessToken, userId]);
 
   if (!syncing && !result) {
     return null;

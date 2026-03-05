@@ -8,9 +8,10 @@ import { useOnlineStatus } from "../lib/connection";
 
 type QueueStatusBadgeProps = {
   accessToken?: string | null;
+  userId: number;
 };
 
-export function QueueStatusBadge({ accessToken }: QueueStatusBadgeProps) {
+export function QueueStatusBadge({ accessToken, userId }: QueueStatusBadgeProps) {
   const isOnline = useOnlineStatus();
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -19,7 +20,7 @@ export function QueueStatusBadge({ accessToken }: QueueStatusBadgeProps) {
     let isMounted = true;
 
     async function refreshCount() {
-      const count = await OutboxService.getPendingCount();
+      const count = await OutboxService.getPendingCount(userId);
       if (isMounted) {
         setPendingCount(count);
       }
@@ -34,16 +35,16 @@ export function QueueStatusBadge({ accessToken }: QueueStatusBadgeProps) {
       isMounted = false;
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [userId]);
 
   async function handleManualSync() {
     if (!accessToken) {
       return;
     }
     setSyncing(true);
-    await SyncService.syncAll(accessToken).catch(() => undefined);
+    await SyncService.syncAll(accessToken, userId).catch(() => undefined);
     setSyncing(false);
-    const count = await OutboxService.getPendingCount();
+    const count = await OutboxService.getPendingCount(userId);
     setPendingCount(count);
   }
 

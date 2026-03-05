@@ -2,73 +2,73 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useEffect, useState } from "react";
+import { Stack, Table, Text, Badge } from "@mantine/core";
+import { PageCard } from "../components/PageCard";
 import { db, type SyncHistory } from "../lib/offline-db";
+import type { SessionUser } from "../lib/session";
 
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
+type SyncHistoryPageProps = {
+  user: SessionUser;
 };
 
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-export function SyncHistoryPage() {
+export function SyncHistoryPage({ user }: SyncHistoryPageProps) {
   const [history, setHistory] = useState<SyncHistory[]>([]);
 
   useEffect(() => {
     async function loadHistory() {
-      const logs = await db.syncHistory.orderBy("timestamp").reverse().limit(50).toArray();
-      setHistory(logs);
+      const logs = await db.syncHistory.where("userId").equals(user.id).toArray();
+      const sorted = logs.sort(
+        (left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime()
+      );
+      setHistory(sorted.slice(0, 50));
     }
 
     loadHistory().catch(() => undefined);
-  }, []);
+  }, [user.id]);
 
   return (
-    <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
-      <div style={{ marginBottom: "20px" }}>
-        <h1 style={{ marginBottom: "8px" }}>Sync History</h1>
-        <p style={{ color: "#666", margin: 0 }}>
-          Recent sync actions for offline transactions.
-        </p>
-      </div>
-
-      <div style={boxStyle}>
+    <Stack gap="md">
+      <PageCard
+        title="Sync History"
+        description="Recent sync actions for offline transactions"
+      >
         {history.length === 0 ? (
-          <p style={{ color: "#666" }}>No sync history yet.</p>
+          <Text c="dimmed">No sync history yet.</Text>
         ) : (
-          <table style={tableStyle}>
-            <thead>
-              <tr style={{ backgroundColor: "#f5f1ea" }}>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Time</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Action</th>
-                <th style={{ ...cellStyle, textAlign: "right" }}>Items</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Details</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Time</Table.Th>
+                <Table.Th>Action</Table.Th>
+                <Table.Th ta="right">Items</Table.Th>
+                <Table.Th>Details</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
               {history.map((log) => (
-                <tr key={log.id}>
-                  <td style={cellStyle}>{new Date(log.timestamp).toLocaleString("id-ID")}</td>
-                  <td style={cellStyle}>{log.action}</td>
-                  <td style={{ ...cellStyle, textAlign: "right" }}>{log.itemCount}</td>
-                  <td style={cellStyle}>{log.details}</td>
-                </tr>
+                <Table.Tr key={log.id}>
+                  <Table.Td>{new Date(log.timestamp).toLocaleString("id-ID")}</Table.Td>
+                  <Table.Td>
+                    <Badge
+                      color={
+                        log.action === "sync_success"
+                          ? "green"
+                          : log.action === "sync_failed"
+                            ? "red"
+                            : "blue"
+                      }
+                    >
+                      {log.action}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td ta="right">{log.itemCount}</Table.Td>
+                  <Table.Td>{log.details}</Table.Td>
+                </Table.Tr>
               ))}
-            </tbody>
-          </table>
+            </Table.Tbody>
+          </Table>
         )}
-      </div>
-    </div>
+      </PageCard>
+    </Stack>
   );
 }

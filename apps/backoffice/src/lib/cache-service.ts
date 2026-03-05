@@ -7,6 +7,15 @@ import { db } from "./offline-db";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HALF_DAY_MS = 12 * 60 * 60 * 1000;
+const MODULES_CACHE_TTL_MS = DAY_MS;
+
+export type CacheKeyType =
+  | "accounts"
+  | "account_types"
+  | "items"
+  | "item_groups"
+  | "item_prices"
+  | "modules";
 
 type AccountsResponse = {
   success: true;
@@ -33,6 +42,12 @@ type ItemPricesResponse = {
   data: unknown[];
 };
 
+export type CachedModuleConfig = {
+  code: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+};
+
 type CachedPayload<T> = {
   data: T[];
   lastSync: Date;
@@ -40,11 +55,42 @@ type CachedPayload<T> = {
   version: number;
 };
 
+let legacyCacheCleared = false;
+
+export function buildCacheKey(
+  type: CacheKeyType,
+  options: { companyId: number; outletId?: number }
+): string {
+  if (type === "item_prices") {
+    const outletId = options.outletId ?? 0;
+    return `item_prices:${options.companyId}:${outletId}`;
+  }
+  return `${type}:${options.companyId}`;
+}
+
+async function clearLegacyCacheKeys(): Promise<void> {
+  if (legacyCacheCleared) {
+    return;
+  }
+
+  const legacyKeys = ["accounts", "account_types", "items", "item_groups", "item_prices", "modules"];
+  await Promise.all(legacyKeys.map((key) => db.masterDataCache.delete(key)));
+
+  const allEntries = await db.masterDataCache.toArray();
+  const legacyItemPrices = allEntries.filter((entry) => {
+    return entry.type.startsWith("item_prices:") && entry.type.split(":").length === 2;
+  });
+
+  await Promise.all(legacyItemPrices.map((entry) => db.masterDataCache.delete(entry.type)));
+  legacyCacheCleared = true;
+}
+
 async function upsertCache<T>(
-  type: "accounts" | "account_types" | "items" | "item_groups" | "item_prices",
+  type: string,
   payload: T[],
   ttlMs: number
 ) {
+  await clearLegacyCacheKeys();
   const cached = await db.masterDataCache.get(type);
   const version = cached?.version ? cached.version + 1 : 1;
   const now = new Date();
@@ -69,12 +115,30 @@ type CacheOptions = {
 };
 
 export class CacheService {
+  static async getCachedModules(
+    companyId: number,
+    options: CacheOptions = {}
+  ): Promise<CachedModuleConfig[] | null> {
+    const cacheKey = buildCacheKey("modules", { companyId });
+    const cached = await db.masterDataCache.get(cacheKey);
+    if (cached && (isCacheValid(cached) || options.allowStale)) {
+      return cached.data as CachedModuleConfig[];
+    }
+    return null;
+  }
+
+  static async cacheModules(companyId: number, data: CachedModuleConfig[]): Promise<void> {
+    const cacheKey = buildCacheKey("modules", { companyId });
+    await upsertCache(cacheKey, data, MODULES_CACHE_TTL_MS);
+  }
+
   static async getCachedAccounts(
     companyId: number,
     accessToken: string,
     options: CacheOptions = {}
   ): Promise<AccountResponse[]> {
-    const cached = await db.masterDataCache.get("accounts");
+    const cacheKey = buildCacheKey("accounts", { companyId });
+    const cached = await db.masterDataCache.get(cacheKey);
     if (cached && (isCacheValid(cached) || options.allowStale)) {
       return cached.data as AccountResponse[];
     }
@@ -84,12 +148,14 @@ export class CacheService {
   static async refreshAccounts(companyId: number, accessToken: string): Promise<AccountResponse[]> {
     const params = new URLSearchParams({ company_id: String(companyId), is_active: "true" });
     const response = await apiRequest<AccountsResponse>(`/accounts?${params.toString()}`, {}, accessToken);
-    await upsertCache("accounts", response.data, DAY_MS);
+    const cacheKey = buildCacheKey("accounts", { companyId });
+    await upsertCache(cacheKey, response.data, DAY_MS);
     return response.data;
   }
 
-  static async cacheAccounts(data: AccountResponse[]): Promise<void> {
-    await upsertCache("accounts", data, DAY_MS);
+  static async cacheAccounts(companyId: number, data: AccountResponse[]): Promise<void> {
+    const cacheKey = buildCacheKey("accounts", { companyId });
+    await upsertCache(cacheKey, data, DAY_MS);
   }
 
   static async getCachedAccountTypes(
@@ -97,7 +163,8 @@ export class CacheService {
     accessToken: string,
     options: CacheOptions = {}
   ): Promise<AccountTypeResponse[]> {
-    const cached = await db.masterDataCache.get("account_types");
+    const cacheKey = buildCacheKey("account_types", { companyId });
+    const cached = await db.masterDataCache.get(cacheKey);
     if (cached && (isCacheValid(cached) || options.allowStale)) {
       return cached.data as AccountTypeResponse[];
     }
@@ -107,65 +174,78 @@ export class CacheService {
   static async refreshAccountTypes(companyId: number, accessToken: string): Promise<AccountTypeResponse[]> {
     const params = new URLSearchParams({ company_id: String(companyId), is_active: "true" });
     const response = await apiRequest<AccountTypesResponse>(`/accounts/types?${params.toString()}`, {}, accessToken);
-    await upsertCache("account_types", response.data, DAY_MS);
+    const cacheKey = buildCacheKey("account_types", { companyId });
+    await upsertCache(cacheKey, response.data, DAY_MS);
     return response.data;
   }
 
-  static async cacheAccountTypes(data: AccountTypeResponse[]): Promise<void> {
-    await upsertCache("account_types", data, DAY_MS);
+  static async cacheAccountTypes(companyId: number, data: AccountTypeResponse[]): Promise<void> {
+    const cacheKey = buildCacheKey("account_types", { companyId });
+    await upsertCache(cacheKey, data, DAY_MS);
   }
 
-  static async getCachedItems(accessToken: string, options: CacheOptions = {}): Promise<unknown[]> {
-    const cached = await db.masterDataCache.get("items");
+  static async getCachedItems(
+    companyId: number,
+    accessToken: string,
+    options: CacheOptions = {}
+  ): Promise<unknown[]> {
+    const cacheKey = buildCacheKey("items", { companyId });
+    const cached = await db.masterDataCache.get(cacheKey);
     if (cached && (isCacheValid(cached) || options.allowStale)) {
       return cached.data as unknown[];
     }
-    return this.refreshItems(accessToken);
+    return this.refreshItems(companyId, accessToken);
   }
 
-  static async refreshItems(accessToken: string): Promise<unknown[]> {
+  static async refreshItems(companyId: number, accessToken: string): Promise<unknown[]> {
     const response = await apiRequest<ItemsResponse>("/inventory/items", {}, accessToken);
-    await upsertCache("items", response.data, HALF_DAY_MS);
+    const cacheKey = buildCacheKey("items", { companyId });
+    await upsertCache(cacheKey, response.data, HALF_DAY_MS);
     return response.data;
   }
 
-  static async getCachedItemGroups(accessToken: string, options: CacheOptions = {}): Promise<unknown[]> {
-    const cached = await db.masterDataCache.get("item_groups");
+  static async getCachedItemGroups(
+    companyId: number,
+    accessToken: string,
+    options: CacheOptions = {}
+  ): Promise<unknown[]> {
+    const cacheKey = buildCacheKey("item_groups", { companyId });
+    const cached = await db.masterDataCache.get(cacheKey);
     if (cached && (isCacheValid(cached) || options.allowStale)) {
       return cached.data as unknown[];
     }
-    return this.refreshItemGroups(accessToken);
+    return this.refreshItemGroups(companyId, accessToken);
   }
 
-  static async refreshItemGroups(accessToken: string): Promise<unknown[]> {
+  static async refreshItemGroups(companyId: number, accessToken: string): Promise<unknown[]> {
     const response = await apiRequest<ItemGroupsResponse>("/inventory/item-groups", {}, accessToken);
-    await upsertCache("item_groups", response.data, HALF_DAY_MS);
+    const cacheKey = buildCacheKey("item_groups", { companyId });
+    await upsertCache(cacheKey, response.data, HALF_DAY_MS);
     return response.data;
   }
 
   static async getCachedItemPrices(
+    companyId: number,
     outletId: number,
     accessToken: string,
     options: CacheOptions = {}
   ): Promise<unknown[]> {
-    const cacheKey = `item_prices:${outletId}`;
-    const cached = await db.masterDataCache.get(cacheKey as "item_prices");
+    const cacheKey = buildCacheKey("item_prices", { companyId, outletId });
+    const cached = await db.masterDataCache.get(cacheKey);
     if (cached && (isCacheValid(cached) || options.allowStale)) {
       return cached.data as unknown[];
     }
-    return this.refreshItemPrices(outletId, accessToken);
+    return this.refreshItemPrices(companyId, outletId, accessToken);
   }
 
-  static async refreshItemPrices(outletId: number, accessToken: string): Promise<unknown[]> {
+  static async refreshItemPrices(
+    companyId: number,
+    outletId: number,
+    accessToken: string
+  ): Promise<unknown[]> {
     const response = await apiRequest<ItemPricesResponse>(`/inventory/item-prices?outlet_id=${outletId}`, {}, accessToken);
-    const cacheKey = `item_prices:${outletId}`;
-    await db.masterDataCache.put({
-      type: cacheKey as "item_prices",
-      data: response.data,
-      lastSync: new Date(),
-      expiresAt: new Date(Date.now() + HALF_DAY_MS),
-      version: 1
-    });
+    const cacheKey = buildCacheKey("item_prices", { companyId, outletId });
+    await upsertCache(cacheKey, response.data, HALF_DAY_MS);
     return response.data;
   }
 }
@@ -183,9 +263,11 @@ export function setupMasterDataRefresh(options: MasterDataRefreshOptions): () =>
     await Promise.all([
       CacheService.refreshAccounts(companyId, accessToken),
       CacheService.refreshAccountTypes(companyId, accessToken),
-      CacheService.refreshItems(accessToken),
-      CacheService.refreshItemGroups(accessToken),
-      outletId > 0 ? CacheService.refreshItemPrices(outletId, accessToken) : Promise.resolve([])
+      CacheService.refreshItems(companyId, accessToken),
+      CacheService.refreshItemGroups(companyId, accessToken),
+      outletId > 0
+        ? CacheService.refreshItemPrices(companyId, outletId, accessToken)
+        : Promise.resolve([])
     ]);
   }
 

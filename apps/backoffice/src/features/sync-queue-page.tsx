@@ -2,49 +2,22 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useEffect, useState } from "react";
+import { Stack, Table, Button, Group, Text, Badge, Alert } from "@mantine/core";
+import { PageCard } from "../components/PageCard";
 import { OutboxService } from "../lib/outbox-service";
+import type { SessionUser } from "../lib/session";
 import type { OutboxItem } from "../lib/offline-db";
 import { ConflictDialog } from "../components/conflict-dialog";
-
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const buttonStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 12px",
-  backgroundColor: "#fff",
-  cursor: "pointer",
-  marginRight: "8px"
-} as const;
-
-const dangerButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#d32f2f",
-  color: "#fff",
-  border: "1px solid #d32f2f"
-} as const;
 
 function formatDateTime(value: Date) {
   return new Date(value).toLocaleString("id-ID");
 }
 
-export function SyncQueuePage() {
+type SyncQueuePageProps = {
+  user: SessionUser;
+};
+
+export function SyncQueuePage({ user }: SyncQueuePageProps) {
   const [queue, setQueue] = useState<OutboxItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [conflictItem, setConflictItem] = useState<OutboxItem | null>(null);
@@ -52,7 +25,7 @@ export function SyncQueuePage() {
   async function loadQueue() {
     setLoading(true);
     try {
-      const items = await OutboxService.getAllItems();
+      const items = await OutboxService.getAllItems(user.id);
       setQueue(items);
     } finally {
       setLoading(false);
@@ -61,83 +34,106 @@ export function SyncQueuePage() {
 
   useEffect(() => {
     loadQueue().catch(() => undefined);
-  }, []);
+  }, [user.id]);
 
   async function handleDelete(id: string) {
     if (!window.confirm("Discard this queued transaction?")) {
       return;
     }
-    await OutboxService.deleteItem(id);
+    await OutboxService.deleteItem(id, user.id);
     await loadQueue();
   }
 
   return (
-    <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
-      <div style={{ marginBottom: "20px" }}>
-        <h1 style={{ marginBottom: "8px" }}>Sync Queue</h1>
-        <p style={{ color: "#666", margin: 0 }}>
-          Transactions saved offline and pending sync.
-        </p>
-      </div>
-
-      <div style={boxStyle}>
+    <Stack gap="md">
+      <PageCard
+        title="Sync Queue"
+        description="Transactions saved offline and pending sync"
+      >
         {loading ? (
-          <p>Loading queue...</p>
+          <Alert>Loading queue...</Alert>
         ) : queue.length === 0 ? (
-          <p style={{ color: "#666" }}>No queued transactions.</p>
+          <Text c="dimmed">No queued transactions.</Text>
         ) : (
-          <table style={tableStyle}>
-            <thead>
-              <tr style={{ backgroundColor: "#f5f1ea" }}>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Type</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Created</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Status</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Error</th>
-                <th style={{ ...cellStyle, textAlign: "center" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Type</Table.Th>
+                <Table.Th>Created</Table.Th>
+                <Table.Th>Status</Table.Th>
+                <Table.Th>Error</Table.Th>
+                <Table.Th ta="center">Actions</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
               {queue.map((item) => (
-                <tr key={item.id}>
-                  <td style={cellStyle}>{item.type}</td>
-                  <td style={cellStyle}>{formatDateTime(item.timestamp)}</td>
-                  <td style={cellStyle}>{item.status}</td>
-                  <td style={cellStyle}>{item.error ?? "-"}</td>
-                  <td style={{ ...cellStyle, textAlign: "center" }}>
-                    {item.status === "failed" ? (
-                      <button type="button" style={buttonStyle} onClick={() => setConflictItem(item)}>
-                        Review
-                      </button>
-                    ) : null}
-                    <button type="button" style={dangerButtonStyle} onClick={() => handleDelete(item.id)}>
-                      Delete
-                    </button>
-                  </td>
-                </tr>
+                <Table.Tr key={item.id}>
+                  <Table.Td>
+                    <Badge variant="light">{item.type}</Badge>
+                  </Table.Td>
+                  <Table.Td>{formatDateTime(item.timestamp)}</Table.Td>
+                  <Table.Td>
+                    <Badge
+                      color={
+                        item.status === "pending"
+                          ? "yellow"
+                          : item.status === "failed"
+                            ? "red"
+                            : "blue"
+                      }
+                    >
+                      {item.status}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>{item.error ?? "-"}</Table.Td>
+                  <Table.Td>
+                    <Group gap="xs" justify="center">
+                      {item.status === "failed" ? (
+                        <Button size="xs" variant="light" onClick={() => setConflictItem(item)}>
+                          Review
+                        </Button>
+                      ) : null}
+                      <Button size="xs" color="red" onClick={() => handleDelete(item.id)}>
+                        Delete
+                      </Button>
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
               ))}
-            </tbody>
-          </table>
+            </Table.Tbody>
+          </Table>
         )}
-      </div>
+      </PageCard>
       {conflictItem ? (
         <ConflictDialog
           item={conflictItem}
           onClose={() => setConflictItem(null)}
           onResolve={async (action) => {
             if (action === "discard") {
-              await OutboxService.deleteItem(conflictItem.id);
-            }
-            if (action === "keep") {
-              await OutboxService.updateStatus(conflictItem.id, "failed", conflictItem.error);
-            }
+                await OutboxService.deleteItem(conflictItem.id, user.id);
+              }
+              if (action === "keep") {
+                await OutboxService.updateStatus(
+                  conflictItem.id,
+                  user.id,
+                  "failed",
+                  conflictItem.error
+                );
+              }
             if (action === "edit") {
-              window.location.hash = "#/transactions";
+              if (conflictItem.type === "journal") {
+                window.location.hash = "#/transactions";
+              } else if (conflictItem.type === "invoice") {
+                window.location.hash = "#/sales-invoices";
+              } else if (conflictItem.type === "payment") {
+                window.location.hash = "#/sales-payments";
+              }
             }
             setConflictItem(null);
             await loadQueue();
           }}
         />
       ) : null}
-    </div>
+    </Stack>
   );
 }

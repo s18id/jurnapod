@@ -4,6 +4,8 @@
 import { useEffect, useState } from "react";
 import { apiRequest, ApiError, getApiBaseUrl } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
+import { useOnlineStatus } from "../lib/connection";
+import { OutboxService } from "../lib/outbox-service";
 
 type InvoiceStatus = "DRAFT" | "POSTED" | "VOID";
 type PaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
@@ -151,6 +153,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     lines: [{ ...emptyLineDraft }]
   }));
   const [editingInvoice, setEditingInvoice] = useState<InvoiceEditDraft | null>(null);
+  const isOnline = useOnlineStatus();
 
   async function refreshData(outletId: number) {
     setLoading(true);
@@ -220,22 +223,30 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest(
-        "/sales/invoices",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            outlet_id: selectedOutletId,
-            invoice_no: newInvoice.invoice_no.trim(),
-            invoice_date: newInvoice.invoice_date,
-            tax_amount: Number(newInvoice.tax_amount || "0"),
-            lines
-          })
-        },
-        props.accessToken
-      );
-      resetNewInvoice();
-      await refreshData(selectedOutletId);
+      const payload = {
+        outlet_id: selectedOutletId,
+        invoice_no: newInvoice.invoice_no.trim(),
+        invoice_date: newInvoice.invoice_date,
+        tax_amount: Number(newInvoice.tax_amount || "0"),
+        lines
+      };
+
+      if (isOnline) {
+        await apiRequest(
+          "/sales/invoices",
+          {
+            method: "POST",
+            body: JSON.stringify(payload)
+          },
+          props.accessToken
+        );
+        resetNewInvoice();
+        await refreshData(selectedOutletId);
+      } else {
+        await OutboxService.queueTransaction("invoice", payload, props.user.id);
+        resetNewInvoice();
+        setError("Invoice queued for sync (offline)");
+      }
     } catch (createError) {
       if (createError instanceof ApiError) {
         setError(createError.message);

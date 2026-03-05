@@ -8,18 +8,22 @@ import {
   DEFAULT_ROUTE_PATH,
   findRoute,
   normalizeHashPath,
-  userCanAccessRoute
+  userCanAccessRoute,
+  filterRoutesByModules
 } from "./routes";
+import { useModules } from "../hooks/use-modules";
 import { ApiError, getApiBaseUrl } from "../lib/api-client";
 import { setupMasterDataRefresh } from "../lib/cache-service";
 import { setupAutoSync } from "../lib/auto-sync";
 import { SyncNotification } from "../components/sync-notification";
+import { ModuleConfigWarning } from "../components/module-config-warning";
 import {
   clearAccessToken,
   fetchCurrentUser,
   getStoredAccessToken,
   login,
   loginWithGoogle,
+  refreshAccessToken,
   type SessionUser
 } from "../lib/session";
 import { LoginPage } from "../features/auth/login-page";
@@ -53,7 +57,8 @@ import {
   CompaniesPage,
   OutletsPage,
   PlatformSettingsPage,
-  FiscalYearsPage
+  FiscalYearsPage,
+  AuditLogsPage
 } from "../features/pages";
 import { PublicStaticPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
@@ -187,10 +192,10 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
     return <TransactionTemplatesPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/sync-queue") {
-    return <SyncQueuePage />;
+    return <SyncQueuePage user={props.user} />;
   }
   if (props.path === "/sync-history") {
-    return <SyncHistoryPage />;
+    return <SyncHistoryPage user={props.user} />;
   }
   if (props.path === "/pwa-settings") {
     return <PWASettingsPage />;
@@ -222,6 +227,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   if (props.path === "/accounting-worksheet") {
     return <AccountingWorksheetPage user={props.user} accessToken={props.accessToken} />;
   }
+  if (props.path === "/audit-logs") {
+    return <AuditLogsPage user={props.user} accessToken={props.accessToken} />;
+  }
   return <ItemsPricesPage user={props.user} accessToken={props.accessToken} />;
 }
 
@@ -234,6 +242,12 @@ export function AppRouter() {
   const [authLoading, setAuthLoading] = useState(false);
   const googleClientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
   const googleEnabled = googleClientId.length > 0;
+
+  const {
+    enabledByCode: enabledModules,
+    loading: modulesLoading,
+    source: modulesSource
+  } = useModules(accessToken, user?.company_id ?? null);
 
   useEffect(() => {
     const nextPath = resolvePathFromLocation();
@@ -326,7 +340,14 @@ export function AppRouter() {
         return;
       }
 
-      const token = getStoredAccessToken();
+      // Try to get token from memory first
+      let token = getStoredAccessToken();
+      
+      // If no token in memory, try refresh with httpOnly cookie
+      if (!token) {
+        token = await refreshAccessToken();
+      }
+      
       if (!token) {
         setSessionStatus("anonymous");
         return;
@@ -336,6 +357,17 @@ export function AppRouter() {
         const currentUser = await fetchCurrentUser(token);
         await applySession({ token, user: currentUser });
       } catch {
+        // If fetch fails, try refresh once more
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          try {
+            const currentUser = await fetchCurrentUser(refreshed);
+            await applySession({ token: refreshed, user: currentUser });
+            return;
+          } catch {
+            // Fall through to clear
+          }
+        }
         clearAccessToken();
         setSessionStatus("anonymous");
       }
@@ -367,19 +399,21 @@ export function AppRouter() {
   }, [user, accessToken]);
 
   useEffect(() => {
-    if (!accessToken) {
+    if (!accessToken || !user) {
       return;
     }
 
-    return setupAutoSync(accessToken);
-  }, [accessToken]);
+    return setupAutoSync(accessToken, user.id);
+  }, [accessToken, user]);
 
   const availableRoutes = useMemo(() => {
     if (!user) {
       return APP_ROUTES;
     }
-    return APP_ROUTES.filter((route) => userCanAccessRoute(user.roles, route));
-  }, [user]);
+    const roleFiltered = APP_ROUTES.filter((route) => userCanAccessRoute(user.roles, route));
+    const moduleFiltered = filterRoutesByModules(roleFiltered, enabledModules);
+    return moduleFiltered;
+  }, [user, enabledModules]);
 
   const publicSlug =
     typeof window !== "undefined" ? getPublicStaticSlugFromLocation(globalThis.location) : null;
@@ -410,7 +444,12 @@ export function AppRouter() {
   }
 
   const route = findRoute(activePath);
-  const canAccess = !!(user && route && userCanAccessRoute(user.roles, route));
+  const canAccess = !!(
+    user &&
+    route &&
+    userCanAccessRoute(user.roles, route) &&
+    (!route.requiredModule || enabledModules[route.requiredModule] === true)
+  );
 
   async function handleSignIn(input: { companyCode: string; email: string; password: string }) {
     setAuthError(null);
@@ -491,6 +530,9 @@ export function AppRouter() {
     );
   }
 
+  const warningSource: "cached" | "empty" | null =
+    !modulesLoading && modulesSource !== "live" ? modulesSource : null;
+
   return (
     <>
       <AppLayout
@@ -500,13 +542,14 @@ export function AppRouter() {
         onNavigate={ensureHash}
         onSignOut={handleSignOut}
       >
+        {warningSource ? <ModuleConfigWarning source={warningSource} /> : null}
         {canAccess && route ? (
           <RouteScreen path={route.path} user={user} accessToken={accessToken} />
         ) : (
           <ForbiddenPage />
         )}
       </AppLayout>
-      <SyncNotification accessToken={accessToken} />
+      <SyncNotification accessToken={accessToken} userId={user.id} />
     </>
   );
 }

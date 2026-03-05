@@ -12,6 +12,7 @@ import {
 } from "../hooks/use-accounts";
 import { ApiError } from "../lib/api-client";
 import { StaleDataWarning } from "../components/stale-data-warning";
+import { buildCacheKey } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
 import { OfflinePage } from "../components/offline-page";
 import type {
@@ -505,7 +506,10 @@ export function AccountsPage(props: AccountsPageProps) {
           </button>
         </div>
 
-        <StaleDataWarning cacheKey="accounts" label="accounts" />
+        <StaleDataWarning
+          cacheKey={buildCacheKey("accounts", { companyId: props.user.company_id })}
+          label="accounts"
+        />
 
         {loading && <p>Loading accounts...</p>}
         {treeError && <p style={{ color: "#8d2626" }}>{treeError}</p>}

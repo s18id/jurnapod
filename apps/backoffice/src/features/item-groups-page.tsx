@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
-import { CacheService } from "../lib/cache-service";
+import { CacheService, buildCacheKey } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
 import { StaleDataWarning } from "../components/stale-data-warning";
 import { OfflinePage } from "../components/offline-page";
@@ -168,8 +168,8 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
     setError(null);
     try {
       const groups = isOnline
-        ? await CacheService.refreshItemGroups(props.accessToken)
-        : await CacheService.getCachedItemGroups(props.accessToken, { allowStale: true });
+        ? await CacheService.refreshItemGroups(props.user.company_id, props.accessToken)
+        : await CacheService.getCachedItemGroups(props.user.company_id, props.accessToken, { allowStale: true });
       setItemGroups(groups as ItemGroup[]);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
@@ -270,7 +270,10 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
         <p style={{ marginTop: 0, color: "#6b5d48" }}>
           Organize items by optional groups for reporting and POS catalogs.
         </p>
-        <StaleDataWarning cacheKey="item_groups" label="item groups" />
+        <StaleDataWarning
+          cacheKey={buildCacheKey("item_groups", { companyId: props.user.company_id })}
+          label="item groups"
+        />
         {loading ? <p>Loading data...</p> : null}
         {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
       </section>
