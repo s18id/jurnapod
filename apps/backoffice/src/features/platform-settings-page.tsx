@@ -4,7 +4,6 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
-  Badge,
   Button,
   Card,
   Container,
@@ -33,7 +32,6 @@ type PlatformSettingsResponse = {
   success: true;
   data: {
     settings: Record<string, string>;
-    metadata: Record<string, { is_set_in_db: boolean; is_sensitive: boolean }>;
   };
 };
 
@@ -56,23 +54,24 @@ const cardStyle = {
   backgroundColor: "#fcfbf8"
 } as const;
 
+const initialFormState: Record<string, any> = {
+  "mailer.driver": "disabled",
+  "mailer.from_name": "",
+  "mailer.from_email": "",
+  "mailer.smtp.host": "",
+  "mailer.smtp.port": "587",
+  "mailer.smtp.user": "",
+  "mailer.smtp.pass": "",
+  "mailer.smtp.secure": "false",
+  "mailer.smtp.tls_reject_unauthorized": "true"
+};
+
 export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPageProps) {
   const isOnline = useOnlineStatus();
   
   // Form state
-  const [formState, setFormState] = useState<Record<string, any>>({
-    "mailer.driver": "disabled",
-    "mailer.from_name": "",
-    "mailer.from_email": "",
-    "mailer.smtp.host": "",
-    "mailer.smtp.port": "587",
-    "mailer.smtp.user": "",
-    "mailer.smtp.pass": "*****",
-    "mailer.smtp.secure": "false",
-    "mailer.smtp.tls_reject_unauthorized": "true"
-  });
+  const [formState, setFormState] = useState<Record<string, any>>(initialFormState);
   
-  const [metadata, setMetadata] = useState<Record<string, { is_set_in_db: boolean; is_sensitive: boolean }>>({});
   const [updatePassword, setUpdatePassword] = useState(false);
   
   // UI state
@@ -102,8 +101,11 @@ export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPage
           {},
           accessToken
         );
-        setFormState(response.data.settings);
-        setMetadata(response.data.metadata);
+        const normalizedSettings = { ...initialFormState, ...response.data.settings };
+        if (normalizedSettings["mailer.smtp.pass"] === "*****") {
+          normalizedSettings["mailer.smtp.pass"] = "";
+        }
+        setFormState(normalizedSettings);
       } catch (err) {
         if (err instanceof ApiError) {
           setError(err.message);
@@ -123,10 +125,12 @@ export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPage
     setSaveError(null);
     setSaveSuccess(false);
     try {
-      // Build settings object, exclude password if not updating
+      // Build settings object, exclude password unless updating
       const settingsToSave: Record<string, any> = { ...formState };
       if (!updatePassword) {
-        settingsToSave["mailer.smtp.pass"] = "*****";
+        delete settingsToSave["mailer.smtp.pass"];
+      } else {
+        settingsToSave["mailer.smtp.pass"] = formState["mailer.smtp.pass"];
       }
 
       await apiRequest(
@@ -140,14 +144,14 @@ export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPage
       setSaveSuccess(true);
       setUpdatePassword(false);
       
-      // Refresh settings to get updated metadata
+      // Refresh settings to get updated data
       const response = await apiRequest<PlatformSettingsResponse>(
         `/platform/settings`,
         {},
         accessToken
       );
-      setFormState(response.data.settings);
-      setMetadata(response.data.metadata);
+      const normalizedSettings = { ...initialFormState, ...response.data.settings };
+      setFormState(normalizedSettings);
     } catch (err) {
       if (err instanceof ApiError) {
         setSaveError(err.message);
@@ -267,17 +271,7 @@ export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPage
               ]}
               value={formState["mailer.driver"]}
               onChange={(value) => updateField("mailer.driver", value)}
-              rightSection={
-                metadata["mailer.driver"]?.is_set_in_db ? (
-                  <Badge size="xs" color="blue">
-                    DB
-                  </Badge>
-                ) : (
-                  <Badge size="xs" color="gray">
-                    ENV
-                  </Badge>
-                )
-              }
+              rightSection={null}
             />
 
             <TextInput
@@ -285,13 +279,7 @@ export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPage
               description="Display name for outgoing emails"
               value={formState["mailer.from_name"]}
               onChange={(e) => updateField("mailer.from_name", e.target.value)}
-              rightSection={
-                metadata["mailer.from_name"]?.is_set_in_db ? (
-                  <Badge size="xs" color="blue">
-                    DB
-                  </Badge>
-                ) : null
-              }
+              rightSection={null}
             />
 
             <TextInput
@@ -300,13 +288,7 @@ export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPage
               type="email"
               value={formState["mailer.from_email"]}
               onChange={(e) => updateField("mailer.from_email", e.target.value)}
-              rightSection={
-                metadata["mailer.from_email"]?.is_set_in_db ? (
-                  <Badge size="xs" color="blue">
-                    DB
-                  </Badge>
-                ) : null
-              }
+              rightSection={null}
             />
 
             {formState["mailer.driver"] === "smtp" && (
@@ -317,14 +299,8 @@ export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPage
                   label="SMTP Host"
                   value={formState["mailer.smtp.host"]}
                   onChange={(e) => updateField("mailer.smtp.host", e.target.value)}
-                  rightSection={
-                    metadata["mailer.smtp.host"]?.is_set_in_db ? (
-                      <Badge size="xs" color="blue">
-                        DB
-                      </Badge>
-                    ) : null
-                  }
-                />
+                    rightSection={null}
+                  />
 
                 <NumberInput
                   label="SMTP Port"
@@ -332,27 +308,15 @@ export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPage
                   onChange={(value) => updateField("mailer.smtp.port", String(value))}
                   min={1}
                   max={65535}
-                  rightSection={
-                    metadata["mailer.smtp.port"]?.is_set_in_db ? (
-                      <Badge size="xs" color="blue">
-                        DB
-                      </Badge>
-                    ) : null
-                  }
-                />
+                    rightSection={null}
+                  />
 
                 <TextInput
                   label="SMTP User"
                   value={formState["mailer.smtp.user"]}
                   onChange={(e) => updateField("mailer.smtp.user", e.target.value)}
-                  rightSection={
-                    metadata["mailer.smtp.user"]?.is_set_in_db ? (
-                      <Badge size="xs" color="blue">
-                        DB
-                      </Badge>
-                    ) : null
-                  }
-                />
+                    rightSection={null}
+                  />
 
                 <Stack gap="xs">
                   <Switch
@@ -361,18 +325,17 @@ export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPage
                     onChange={(e) => setUpdatePassword(e.currentTarget.checked)}
                   />
                   {updatePassword && (
-                    <PasswordInput
-                      label="SMTP Password"
-                      value={formState["mailer.smtp.pass"] === "*****" ? "" : formState["mailer.smtp.pass"]}
-                      onChange={(e) => updateField("mailer.smtp.pass", e.target.value)}
-                      rightSection={
-                        metadata["mailer.smtp.pass"]?.is_set_in_db ? (
-                          <Badge size="xs" color="blue">
-                            DB
-                          </Badge>
-                        ) : null
-                      }
-                    />
+                    <>
+                      <PasswordInput
+                        label="SMTP Password"
+                        value={formState["mailer.smtp.pass"]}
+                        onChange={(e) => updateField("mailer.smtp.pass", e.target.value)}
+                        rightSection={null}
+                      />
+                      <Text size="xs" c="dimmed">
+                        Leave blank to clear the stored password.
+                      </Text>
+                    </>
                   )}
                 </Stack>
 

@@ -33,7 +33,10 @@ export type PlatformSettingsUpdate = z.infer<typeof PlatformSettingsUpdateSchema
  * Validate mailer settings dependencies
  * If driver is "smtp", require SMTP configuration fields
  */
-export function validateMailerDependencies(settings: Record<string, any>): string | null {
+export function validateMailerDependencies(
+  settings: Record<string, any>,
+  options: { hasExistingSmtpPass?: boolean } = {}
+): string | null {
   const driver = settings["mailer.driver"];
 
   if (driver === "smtp") {
@@ -46,11 +49,20 @@ export function validateMailerDependencies(settings: Record<string, any>): strin
     ];
 
     for (const key of required) {
+      const hasKey = key in settings;
       const value = settings[key];
       if (!value || (typeof value === "string" && value.trim().length === 0)) {
         // Allow masked password if it's already set
-        if (key === "mailer.smtp.pass" && value === "*****") {
-          continue;
+        if (key === "mailer.smtp.pass") {
+          if (value === "*****") {
+            continue;
+          }
+          if (hasKey && (value === "" || value === null)) {
+            continue;
+          }
+          if (!hasKey && options.hasExistingSmtpPass) {
+            continue;
+          }
         }
         return `${key} is required when mailer.driver is "smtp"`;
       }

@@ -3,8 +3,8 @@
 
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
-import { getAppEnv, type MailerDriver } from "./env";
-import { getPlatformSetting } from "./platform-settings";
+import type { MailerDriver } from "./env";
+import { ensurePlatformSettingsSeeded, getPlatformSetting } from "./platform-settings";
 
 export class MailerError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -114,13 +114,18 @@ class SmtpMailer implements Mailer {
 
 let mailerInstance: Mailer | null = null;
 
+const DEFAULT_MAILER_DRIVER: MailerDriver = "disabled";
+const DEFAULT_MAILER_FROM_NAME = "Jurnapod";
+const DEFAULT_MAILER_SMTP_PORT = 587;
+const DEFAULT_MAILER_SMTP_SECURE = false;
+const DEFAULT_MAILER_SMTP_TLS_REJECT_UNAUTHORIZED = true;
+
 /**
- * Resolve mailer configuration from DB (overrides env) or env defaults
+ * Resolve mailer configuration from DB
  */
 async function resolveMailerConfig() {
-  const env = getAppEnv();
+  await ensurePlatformSettingsSeeded();
 
-  // Try to load from DB first
   const driver = (await getPlatformSetting("mailer.driver")) as MailerDriver | null;
   const fromName = await getPlatformSetting("mailer.from_name");
   const fromEmail = await getPlatformSetting("mailer.from_email");
@@ -132,16 +137,17 @@ async function resolveMailerConfig() {
   const smtpTlsReject = await getPlatformSetting("mailer.smtp.tls_reject_unauthorized");
 
   return {
-    driver: driver ?? env.mailer.driver,
-    fromName: fromName ?? env.mailer.fromName,
-    fromEmail: fromEmail ?? env.mailer.fromEmail,
+    driver: driver ?? DEFAULT_MAILER_DRIVER,
+    fromName: fromName ?? DEFAULT_MAILER_FROM_NAME,
+    fromEmail: fromEmail ?? "",
     smtp: {
-      host: smtpHost ?? env.mailer.smtp.host,
-      port: smtpPort ? parseInt(smtpPort, 10) : env.mailer.smtp.port,
-      user: smtpUser ?? env.mailer.smtp.user,
-      password: smtpPass ?? env.mailer.smtp.password,
-      secure: smtpSecure !== null ? smtpSecure === "true" : env.mailer.smtp.secure,
-      tlsRejectUnauthorized: smtpTlsReject !== null ? smtpTlsReject === "true" : env.mailer.smtp.tlsRejectUnauthorized
+      host: smtpHost ?? "",
+      port: smtpPort ? parseInt(smtpPort, 10) : DEFAULT_MAILER_SMTP_PORT,
+      user: smtpUser ?? "",
+      password: smtpPass ?? "",
+      secure: smtpSecure !== null ? smtpSecure === "true" : DEFAULT_MAILER_SMTP_SECURE,
+      tlsRejectUnauthorized:
+        smtpTlsReject !== null ? smtpTlsReject === "true" : DEFAULT_MAILER_SMTP_TLS_REJECT_UNAUTHORIZED
     }
   };
 }

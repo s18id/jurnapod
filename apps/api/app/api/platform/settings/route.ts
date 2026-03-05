@@ -3,9 +3,10 @@
 
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
-import { getAppEnv } from "../../../../src/lib/env";
 import {
+  ensurePlatformSettingsSeeded,
   getAllPlatformSettings,
+  PLATFORM_SETTINGS_KEYS,
   setBulkPlatformSettings
 } from "../../../../src/lib/platform-settings";
 import {
@@ -18,39 +19,21 @@ import { getAuditService } from "../../../../src/lib/audit";
 
 /**
  * GET /api/platform/settings
- * Returns merged view: DB settings + env defaults
+ * Returns platform settings from DB
  */
 export const GET = withAuth(
   async (_request, _auth) => {
     try {
-      const env = getAppEnv();
+      await ensurePlatformSettingsSeeded();
       const dbSettings = await getAllPlatformSettings();
 
-      // Build merged response (DB overrides env)
-      const merged: Record<string, any> = {
-        "mailer.driver": dbSettings["mailer.driver"]?.value ?? env.mailer.driver,
-        "mailer.from_name": dbSettings["mailer.from_name"]?.value ?? env.mailer.fromName,
-        "mailer.from_email": dbSettings["mailer.from_email"]?.value ?? env.mailer.fromEmail,
-        "mailer.smtp.host": dbSettings["mailer.smtp.host"]?.value ?? env.mailer.smtp.host,
-        "mailer.smtp.port": dbSettings["mailer.smtp.port"]?.value ?? String(env.mailer.smtp.port),
-        "mailer.smtp.user": dbSettings["mailer.smtp.user"]?.value ?? env.mailer.smtp.user,
-        "mailer.smtp.pass": dbSettings["mailer.smtp.pass"]?.value ?? "*****",
-        "mailer.smtp.secure": dbSettings["mailer.smtp.secure"]?.value ?? String(env.mailer.smtp.secure),
-        "mailer.smtp.tls_reject_unauthorized":
-          dbSettings["mailer.smtp.tls_reject_unauthorized"]?.value ??
-          String(env.mailer.smtp.tlsRejectUnauthorized)
-      };
-
-      // Mark which fields are set in DB vs env
-      const metadata: Record<string, { is_set_in_db: boolean; is_sensitive: boolean }> = {};
-      for (const key of Object.keys(merged)) {
-        metadata[key] = {
-          is_set_in_db: dbSettings[key]?.is_set ?? false,
-          is_sensitive: dbSettings[key]?.is_sensitive ?? false
-        };
+      const settings: Record<string, any> = {};
+      for (const key of PLATFORM_SETTINGS_KEYS) {
+        const entry = dbSettings[key];
+        settings[key] = entry?.value ?? "";
       }
 
-      return successResponse({ settings: merged, metadata });
+      return successResponse({ settings });
     } catch (error) {
       console.error("GET /api/platform/settings failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Platform settings request failed", 500);
@@ -66,17 +49,20 @@ export const GET = withAuth(
 export const PUT = withAuth(
   async (request, auth) => {
     try {
+      await ensurePlatformSettingsSeeded();
       const payload = await request.json();
       const input = PlatformSettingsUpdateSchema.parse(payload);
 
+      const currentSettings = await getAllPlatformSettings();
+      const hasExistingSmtpPass = currentSettings["mailer.smtp.pass"]?.is_set === true;
+
       // Validate mailer dependencies
-      const validationError = validateMailerDependencies(input.settings);
+      const validationError = validateMailerDependencies(input.settings, { hasExistingSmtpPass });
       if (validationError) {
         return errorResponse("VALIDATION_ERROR", validationError, 400);
       }
 
       // Get current settings for audit log
-      const currentSettings = await getAllPlatformSettings();
       const before: Record<string, any> = {};
       for (const key of Object.keys(input.settings)) {
         before[key] = currentSettings[key]?.value ?? null;
@@ -105,7 +91,12 @@ export const PUT = withAuth(
 
       // Return updated settings
       const updated = await getAllPlatformSettings();
-      return successResponse({ settings: updated });
+      const settings: Record<string, any> = {};
+      for (const key of PLATFORM_SETTINGS_KEYS) {
+        const entry = updated[key];
+        settings[key] = entry?.value ?? "";
+      }
+      return successResponse({ settings });
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
