@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { apiRequest } from "./api-client";
+import { apiRequest, getApiBaseUrl } from "./api-client";
 
-const ACCESS_TOKEN_KEY = "jurnapod.backoffice.access_token";
+// Memory-only token storage (no localStorage)
+let inMemoryAccessToken: string | null = null;
 
 export type RoleCode = "SUPER_ADMIN" | "OWNER" | "ADMIN" | "CASHIER" | "ACCOUNTANT";
 
@@ -48,15 +49,15 @@ export type GoogleLoginInput = {
 };
 
 export function getStoredAccessToken(): string | null {
-  return globalThis.localStorage.getItem(ACCESS_TOKEN_KEY);
+  return inMemoryAccessToken;
 }
 
 export function storeAccessToken(token: string): void {
-  globalThis.localStorage.setItem(ACCESS_TOKEN_KEY, token);
+  inMemoryAccessToken = token;
 }
 
 export function clearAccessToken(): void {
-  globalThis.localStorage.removeItem(ACCESS_TOKEN_KEY);
+  inMemoryAccessToken = null;
 }
 
 export async function login(input: LoginInput): Promise<{ token: string; user: SessionUser }> {
@@ -102,4 +103,35 @@ export async function loginWithGoogle(
 export async function fetchCurrentUser(accessToken: string): Promise<SessionUser> {
   const response = await apiRequest<MeResponse>("/users/me", {}, accessToken);
   return response.data;
+}
+
+/**
+ * Refresh access token using httpOnly refresh cookie
+ * Returns new access token or null if refresh fails
+ */
+export async function refreshAccessToken(): Promise<string | null> {
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    if (data.success && data.data?.access_token) {
+      const token = data.data.access_token;
+      storeAccessToken(token);
+      return token;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
