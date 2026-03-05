@@ -6,7 +6,14 @@ import { z } from "zod";
 export const UUID = z.string().uuid();
 export const NumericIdSchema = z.coerce.number().int().positive();
 
-export const RoleSchema = z.enum(["SUPER_ADMIN", "OWNER", "ADMIN", "CASHIER", "ACCOUNTANT"]);
+export const RoleSchema = z.enum([
+  "SUPER_ADMIN",
+  "OWNER",
+  "COMPANY_ADMIN",
+  "ADMIN",
+  "CASHIER",
+  "ACCOUNTANT"
+]);
 
 export const DocumentStatusSchema = z.enum(["DRAFT", "POSTED", "VOID"]);
 

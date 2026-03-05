@@ -52,7 +52,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
+  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );
 
 /**
@@ -102,7 +102,7 @@ export const PUT = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
+  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );
 
 /**
@@ -135,5 +135,5 @@ export const DELETE = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
+  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );

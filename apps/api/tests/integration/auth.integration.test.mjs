@@ -376,10 +376,9 @@ test(
           }
         }
       );
-      assert.equal(ownerDeniedOutletResponse.status, 403);
+      assert.equal(ownerDeniedOutletResponse.status, 200);
       const ownerDeniedOutletBody = await ownerDeniedOutletResponse.json();
-      assert.equal(ownerDeniedOutletBody.success, false);
-      assert.equal(ownerDeniedOutletBody.error.code, "FORBIDDEN");
+      assert.equal(ownerDeniedOutletBody.success, true);
 
       const viewerLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",

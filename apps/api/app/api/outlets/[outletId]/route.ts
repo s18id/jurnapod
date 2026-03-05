@@ -53,7 +53,13 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Outlet request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "read" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "outlets",
+      permission: "read"
+    })
+  ]
 );
 
 export const PATCH = withAuth(
@@ -93,7 +99,13 @@ export const PATCH = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Outlet request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "update" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "outlets",
+      permission: "update"
+    })
+  ]
 );
 
 export const DELETE = withAuth(
@@ -127,5 +139,11 @@ export const DELETE = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Outlet request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "delete" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "outlets",
+      permission: "delete"
+    })
+  ]
 );

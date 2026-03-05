@@ -6,16 +6,13 @@ import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../../../src/lib/request-meta";
 import {
-  getRole,
   listModuleRoles,
   setModuleRolePermission,
   ModuleRoleNotFoundError,
-  RoleNotFoundError
+  RoleNotFoundError,
+  RoleLevelViolationError
 } from "../../../../../../src/lib/users";
 import { errorResponse, successResponse } from "../../../../../../src/lib/response";
-
-const LOCKED_ROLE_CODES = new Set(["SUPER_ADMIN", "OWNER"]);
-const FULL_PERMISSION_MASK = 15;
 
 function parseParams(request: Request): { roleId: number; moduleName: string } {
   const pathname = new URL(request.url).pathname;
@@ -62,16 +59,11 @@ export const PUT = withAuth(
       const body = await request.json();
       const input = ModuleRoleUpdateRequestSchema.parse(body);
 
-      const role = await getRole(roleId);
-      const permissionMask = LOCKED_ROLE_CODES.has(role.code)
-        ? FULL_PERMISSION_MASK
-        : input.permission_mask;
-
       const moduleRole = await setModuleRolePermission({
         companyId: auth.companyId,
         roleId,
         module: moduleName,
-        permissionMask,
+        permissionMask: input.permission_mask,
         actor: {
           userId: auth.userId,
           ipAddress: readClientIp(request)
@@ -85,6 +77,9 @@ export const PUT = withAuth(
       }
       if (error instanceof RoleNotFoundError) {
         return errorResponse("NOT_FOUND", error.message, 404);
+      }
+      if (error instanceof RoleLevelViolationError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
       }
       console.error("PUT /api/settings/module-roles/:roleId/:module failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Module role permission update failed", 500);

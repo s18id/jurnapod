@@ -65,7 +65,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Invoices request failed", 500);
     }
   },
-  [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
+  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );
 
 export const POST = withAuth(
@@ -99,5 +99,5 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Invoices request failed", 500);
     }
   },
-  [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
+  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );

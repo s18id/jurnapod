@@ -108,7 +108,7 @@ export const PUT = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Tax rate request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "update" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "update" })]
 );
 
 export const DELETE = withAuth(
@@ -161,5 +161,5 @@ export const DELETE = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Tax rate request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "delete" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "delete" })]
 );

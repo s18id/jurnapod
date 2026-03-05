@@ -12,6 +12,7 @@ import { getAppEnv } from "./env";
 export class UserNotFoundError extends Error {}
 export class UserEmailExistsError extends Error {}
 export class RoleNotFoundError extends Error {}
+export class RoleLevelViolationError extends Error {}
 export class OutletNotFoundError extends Error {}
 
 export type UserProfile = {
@@ -48,6 +49,14 @@ type RoleRow = RowDataPacket & {
   id: number;
   code: string;
   name: string;
+  is_global?: number | null;
+  role_level?: number | null;
+};
+
+type RoleSnapshot = {
+  id: number;
+  role_level: number;
+  is_global: number;
 };
 
 type RoleJoinRow = RowDataPacket & {
@@ -161,22 +170,26 @@ async function ensureUserExists(
 async function ensureRoleCodesExist(
   connection: PoolConnection | ReturnType<typeof getDbPool>,
   roleCodes: string[]
-): Promise<Map<string, number>> {
+): Promise<Map<string, RoleSnapshot>> {
   if (roleCodes.length === 0) {
     return new Map();
   }
 
   const placeholders = roleCodes.map(() => "?").join(", ");
   const [rows] = await connection.execute<RoleRow[]>(
-    `SELECT id, code
+    `SELECT id, code, is_global, role_level
      FROM roles
      WHERE code IN (${placeholders})`,
     roleCodes
   );
 
-  const map = new Map<string, number>();
+  const map = new Map<string, RoleSnapshot>();
   for (const row of rows) {
-    map.set(row.code, Number(row.id));
+    map.set(row.code, {
+      id: Number(row.id),
+      is_global: Number(row.is_global ?? 0),
+      role_level: Number(row.role_level ?? 0)
+    });
   }
 
   if (map.size !== roleCodes.length) {
@@ -184,6 +197,26 @@ async function ensureRoleCodesExist(
   }
 
   return map;
+}
+
+async function getUserMaxRoleLevelForConnection(
+  connection: PoolConnection | ReturnType<typeof getDbPool>,
+  companyId: number,
+  userId: number
+): Promise<number> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT MAX(r.role_level) AS max_level
+     FROM user_roles ur
+     INNER JOIN roles r ON r.id = ur.role_id
+     INNER JOIN users u ON u.id = ur.user_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND u.is_active = 1`,
+    [userId, companyId]
+  );
+
+  const maxLevel = rows[0]?.max_level;
+  return Number(maxLevel ?? 0);
 }
 
 async function ensureOutletIdsExist(
@@ -376,7 +409,21 @@ export async function createUser(params: {
 
     if (roleCodes.length > 0) {
       const roleMap = await ensureRoleCodesExist(connection, roleCodes);
-      const roleValues = roleCodes.map((code) => [userId, roleMap.get(code) ?? 0]);
+      const actorMaxLevel = await getUserMaxRoleLevelForConnection(
+        connection,
+        params.companyId,
+        params.actor.userId
+      );
+      const requestedMaxLevel = Math.max(
+        0,
+        ...roleCodes.map((code) => roleMap.get(code)?.role_level ?? 0)
+      );
+
+      if (requestedMaxLevel > actorMaxLevel) {
+        throw new RoleLevelViolationError("Insufficient role level to assign requested roles");
+      }
+
+      const roleValues = roleCodes.map((code) => [userId, roleMap.get(code)?.id ?? 0]);
       await connection.query(
         `INSERT INTO user_roles (user_id, role_id) VALUES ${roleValues
           .map(() => "(?, ?)")
@@ -492,13 +539,27 @@ export async function setUserRoles(params: {
     const roleCodes = params.roleCodes.map((role) => RoleSchema.parse(role));
     const roleMap = await ensureRoleCodesExist(connection, roleCodes);
 
+    const actorMaxLevel = await getUserMaxRoleLevelForConnection(
+      connection,
+      params.companyId,
+      params.actor.userId
+    );
+    const requestedMaxLevel = Math.max(
+      0,
+      ...roleCodes.map((code) => roleMap.get(code)?.role_level ?? 0)
+    );
+
+    if (requestedMaxLevel > actorMaxLevel) {
+      throw new RoleLevelViolationError("Insufficient role level to assign requested roles");
+    }
+
     await connection.execute<ResultSetHeader>(
       `DELETE FROM user_roles WHERE user_id = ?`,
       [params.userId]
     );
 
     if (roleCodes.length > 0) {
-      const roleValues = roleCodes.map((code) => [params.userId, roleMap.get(code) ?? 0]);
+      const roleValues = roleCodes.map((code) => [params.userId, roleMap.get(code)?.id ?? 0]);
       await connection.query(
         `INSERT INTO user_roles (user_id, role_id) VALUES ${roleValues
           .map(() => "(?, ?)")
@@ -679,10 +740,12 @@ export async function setUserActiveState(params: {
   }
 }
 
-export async function listRoles(): Promise<Array<{ id: number; code: string; name: string }>> {
+export async function listRoles(): Promise<
+  Array<{ id: number; code: string; name: string; is_global: boolean; role_level: number }>
+> {
   const pool = getDbPool();
   const [rows] = await pool.execute<RoleRow[]>(
-    `SELECT id, code, name
+    `SELECT id, code, name, is_global, role_level
      FROM roles
      ORDER BY code ASC`
   );
@@ -690,14 +753,22 @@ export async function listRoles(): Promise<Array<{ id: number; code: string; nam
   return rows.map((row) => ({
     id: Number(row.id),
     code: row.code,
-    name: row.name
+    name: row.name,
+    is_global: Boolean(row.is_global),
+    role_level: Number(row.role_level ?? 0)
   }));
 }
 
-export async function getRole(roleId: number): Promise<{ id: number; code: string; name: string }> {
+export async function getRole(roleId: number): Promise<{
+  id: number;
+  code: string;
+  name: string;
+  is_global: boolean;
+  role_level: number;
+}> {
   const pool = getDbPool();
   const [rows] = await pool.execute<RoleRow[]>(
-    `SELECT id, code, name
+    `SELECT id, code, name, is_global, role_level
      FROM roles
      WHERE id = ?`,
     [roleId]
@@ -710,7 +781,9 @@ export async function getRole(roleId: number): Promise<{ id: number; code: strin
   return {
     id: Number(rows[0].id),
     code: rows[0].code,
-    name: rows[0].name
+    name: rows[0].name,
+    is_global: Boolean(rows[0].is_global),
+    role_level: Number(rows[0].role_level ?? 0)
   };
 }
 
@@ -719,7 +792,7 @@ export async function createRole(params: {
   code: string;
   name: string;
   actor: UserActor;
-}): Promise<{ id: number; code: string; name: string }> {
+}): Promise<{ id: number; code: string; name: string; is_global: boolean; role_level: number }> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
   const auditService = createAuditServiceForConnection(connection);
@@ -757,7 +830,9 @@ export async function createRole(params: {
     return {
       id: roleId,
       code: params.code,
-      name: params.name
+      name: params.name,
+      is_global: false,
+      role_level: 0
     };
   } catch (error) {
     await connection.rollback();
@@ -772,7 +847,7 @@ export async function updateRole(params: {
   roleId: number;
   name?: string;
   actor: UserActor;
-}): Promise<{ id: number; code: string; name: string }> {
+}): Promise<{ id: number; code: string; name: string; is_global: boolean; role_level: number }> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
   const auditService = createAuditServiceForConnection(connection);
@@ -782,7 +857,7 @@ export async function updateRole(params: {
 
     // Get current role
     const [rows] = await connection.execute<RoleRow[]>(
-      `SELECT id, code, name FROM roles WHERE id = ?`,
+      `SELECT id, code, name, is_global, role_level FROM roles WHERE id = ?`,
       [params.roleId]
     );
 
@@ -791,6 +866,17 @@ export async function updateRole(params: {
     }
 
     const currentRole = rows[0];
+
+    const actorMaxLevel = await getUserMaxRoleLevelForConnection(
+      connection,
+      params.companyId,
+      params.actor.userId
+    );
+    const targetLevel = Number(currentRole.role_level ?? 0);
+
+    if (targetLevel > actorMaxLevel) {
+      throw new RoleLevelViolationError("Insufficient role level to update this role");
+    }
 
     // Build update
     if (params.name && params.name !== currentRole.name) {
@@ -814,7 +900,9 @@ export async function updateRole(params: {
     return {
       id: Number(currentRole.id),
       code: currentRole.code,
-      name: params.name ?? currentRole.name
+      name: params.name ?? currentRole.name,
+      is_global: Boolean(currentRole.is_global),
+      role_level: Number(currentRole.role_level ?? 0)
     };
   } catch (error) {
     await connection.rollback();
@@ -838,7 +926,7 @@ export async function deleteRole(params: {
 
     // Get current role
     const [rows] = await connection.execute<RoleRow[]>(
-      `SELECT id, code, name FROM roles WHERE id = ?`,
+      `SELECT id, code, name, role_level FROM roles WHERE id = ?`,
       [params.roleId]
     );
 
@@ -847,6 +935,17 @@ export async function deleteRole(params: {
     }
 
     const role = rows[0];
+
+    const actorMaxLevel = await getUserMaxRoleLevelForConnection(
+      connection,
+      params.companyId,
+      params.actor.userId
+    );
+    const targetLevel = Number(role.role_level ?? 0);
+
+    if (targetLevel > actorMaxLevel) {
+      throw new RoleLevelViolationError("Insufficient role level to delete this role");
+    }
 
     // Check if role is in use
     const [userRoles] = await connection.execute<RowDataPacket[]>(
@@ -979,6 +1078,29 @@ export async function setModuleRolePermission(params: {
   try {
     await connection.beginTransaction();
 
+    const [roleRows] = await connection.execute<RoleRow[]>(
+      `SELECT id, code, is_global, role_level FROM roles WHERE id = ?`,
+      [params.roleId]
+    );
+
+    if (roleRows.length === 0) {
+      throw new RoleNotFoundError(`Role with id ${params.roleId} not found`);
+    }
+
+    const role = roleRows[0];
+    const actorMaxLevel = await getUserMaxRoleLevelForConnection(
+      connection,
+      params.companyId,
+      params.actor.userId
+    );
+    const targetLevel = Number(role.role_level ?? 0);
+
+    if (targetLevel > actorMaxLevel) {
+      throw new RoleLevelViolationError("Insufficient role level to update module roles");
+    }
+
+    const permissionMask = role.is_global ? 15 : params.permissionMask;
+
     const [existing] = await connection.execute<ModuleRoleRow[]>(
       `SELECT id, permission_mask
        FROM module_roles
@@ -994,30 +1116,30 @@ export async function setModuleRolePermission(params: {
         `UPDATE module_roles
          SET permission_mask = ?
          WHERE company_id = ? AND role_id = ? AND module = ?`,
-        [params.permissionMask, params.companyId, params.roleId, params.module]
+        [permissionMask, params.companyId, params.roleId, params.module]
       );
 
-      if (currentMask !== params.permissionMask) {
+      if (currentMask !== permissionMask) {
         await auditService.logUpdate(
           auditContext,
           "setting",
           entityId,
           { permission_mask: currentMask },
-          { permission_mask: params.permissionMask }
+          { permission_mask: permissionMask }
         );
       }
     } else {
       await connection.execute(
         `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
          VALUES (?, ?, ?, ?)`,
-        [params.companyId, params.roleId, params.module, params.permissionMask]
+        [params.companyId, params.roleId, params.module, permissionMask]
       );
 
       await auditService.logCreate(auditContext, "setting", entityId, {
         type: "module_role",
         role_id: params.roleId,
         module: params.module,
-        permission_mask: params.permissionMask
+        permission_mask: permissionMask
       });
     }
 

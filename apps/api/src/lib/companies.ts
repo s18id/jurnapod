@@ -134,11 +134,12 @@ const COMPANY_MODULE_DEFAULTS = [
 ] as const;
 
 const ROLE_DEFINITIONS = [
-  { code: "SUPER_ADMIN", name: "Super Admin" },
-  { code: "OWNER", name: "Owner" },
-  { code: "ADMIN", name: "Admin" },
-  { code: "CASHIER", name: "Cashier" },
-  { code: "ACCOUNTANT", name: "Accountant" }
+  { code: "SUPER_ADMIN", name: "Super Admin", isGlobal: true, roleLevel: 100 },
+  { code: "OWNER", name: "Owner", isGlobal: true, roleLevel: 90 },
+  { code: "COMPANY_ADMIN", name: "Company Admin", isGlobal: true, roleLevel: 80 },
+  { code: "ADMIN", name: "Admin", isGlobal: false, roleLevel: 60 },
+  { code: "ACCOUNTANT", name: "Accountant", isGlobal: false, roleLevel: 40 },
+  { code: "CASHIER", name: "Cashier", isGlobal: false, roleLevel: 20 }
 ] as const;
 
 const MODULE_ROLE_DEFAULTS = [
@@ -164,6 +165,17 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "OWNER", module: "purchasing", permissionMask: 15 },
   { roleCode: "OWNER", module: "reports", permissionMask: 15 },
   { roleCode: "OWNER", module: "settings", permissionMask: 15 },
+  { roleCode: "COMPANY_ADMIN", module: "companies", permissionMask: 0 },
+  { roleCode: "COMPANY_ADMIN", module: "users", permissionMask: 15 },
+  { roleCode: "COMPANY_ADMIN", module: "roles", permissionMask: 0 },
+  { roleCode: "COMPANY_ADMIN", module: "outlets", permissionMask: 15 },
+  { roleCode: "COMPANY_ADMIN", module: "accounts", permissionMask: 15 },
+  { roleCode: "COMPANY_ADMIN", module: "journals", permissionMask: 15 },
+  { roleCode: "COMPANY_ADMIN", module: "sales", permissionMask: 15 },
+  { roleCode: "COMPANY_ADMIN", module: "inventory", permissionMask: 15 },
+  { roleCode: "COMPANY_ADMIN", module: "purchasing", permissionMask: 0 },
+  { roleCode: "COMPANY_ADMIN", module: "reports", permissionMask: 2 },
+  { roleCode: "COMPANY_ADMIN", module: "settings", permissionMask: 6 },
   { roleCode: "ADMIN", module: "companies", permissionMask: 2 },
   { roleCode: "ADMIN", module: "users", permissionMask: 15 },
   { roleCode: "ADMIN", module: "roles", permissionMask: 2 },
@@ -377,16 +389,20 @@ async function ensureDefaultOutlet(
 async function upsertRole(
   connection: PoolConnection,
   roleCode: string,
-  roleName: string
+  roleName: string,
+  isGlobal: boolean,
+  roleLevel: number
 ): Promise<number> {
   const [result] = await connection.execute<ResultSetHeader>(
-    `INSERT INTO roles (code, name)
-     VALUES (?, ?)
+    `INSERT INTO roles (code, name, is_global, role_level)
+     VALUES (?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        name = VALUES(name),
+       is_global = VALUES(is_global),
+       role_level = VALUES(role_level),
        id = LAST_INSERT_ID(id),
        updated_at = CURRENT_TIMESTAMP`,
-    [roleCode, roleName]
+    [roleCode, roleName, isGlobal ? 1 : 0, roleLevel]
   );
 
   return Number(result.insertId);
@@ -395,7 +411,13 @@ async function upsertRole(
 async function ensureRoles(connection: PoolConnection): Promise<Record<string, number>> {
   const roleIds: Record<string, number> = {};
   for (const role of ROLE_DEFINITIONS) {
-    roleIds[role.code] = await upsertRole(connection, role.code, role.name);
+    roleIds[role.code] = await upsertRole(
+      connection,
+      role.code,
+      role.name,
+      role.isGlobal,
+      role.roleLevel
+    );
   }
   return roleIds;
 }

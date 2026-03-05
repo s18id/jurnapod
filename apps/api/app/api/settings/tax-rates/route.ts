@@ -52,7 +52,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Tax rates request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "read" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "read" })]
 );
 
 export const POST = withAuth(
@@ -122,5 +122,5 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Tax rates request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "create" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "create" })]
 );

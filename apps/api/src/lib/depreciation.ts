@@ -160,6 +160,23 @@ async function ensureUserHasOutletAccess(
   companyId: number,
   outletId: number
 ): Promise<void> {
+  const [globalRows] = await executor.execute<AccessCheckRow[]>(
+    `SELECT u.id
+     FROM users u
+     INNER JOIN user_roles ur ON ur.user_id = u.id
+     INNER JOIN roles r ON r.id = ur.role_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND u.is_active = 1
+       AND r.is_global = 1
+     LIMIT 1`,
+    [userId, companyId]
+  );
+
+  if (globalRows.length > 0) {
+    return;
+  }
+
   const [rows] = await executor.execute<AccessCheckRow[]>(
     `SELECT u.id
      FROM users u

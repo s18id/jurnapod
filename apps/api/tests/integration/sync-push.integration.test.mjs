@@ -596,6 +596,22 @@ async function cleanupCreatedOutletAccountMappings(db, companyId, outletId, fixt
 
 async function cleanupSyncPushPersistedArtifacts(db, clientTxId) {
   await db.execute(
+    `DELETE pti
+     FROM pos_transaction_items pti
+     INNER JOIN pos_transactions pt ON pt.id = pti.pos_transaction_id
+     WHERE pt.client_tx_id = ?`,
+    [clientTxId]
+  );
+
+  await db.execute(
+    `DELETE ptp
+     FROM pos_transaction_payments ptp
+     INNER JOIN pos_transactions pt ON pt.id = ptp.pos_transaction_id
+     WHERE pt.client_tx_id = ?`,
+    [clientTxId]
+  );
+
+  await db.execute(
     `DELETE jl
      FROM journal_lines jl
      INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
@@ -759,6 +775,20 @@ test(
            WHERE JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
           [clientTxId]
         );
+        await db.execute(
+          `DELETE pti
+           FROM pos_transaction_items pti
+           INNER JOIN pos_transactions pt ON pt.id = pti.pos_transaction_id
+           WHERE pt.client_tx_id = ?`,
+          [clientTxId]
+        );
+        await db.execute(
+          `DELETE ptp
+           FROM pos_transaction_payments ptp
+           INNER JOIN pos_transactions pt ON pt.id = ptp.pos_transaction_id
+           WHERE pt.client_tx_id = ?`,
+          [clientTxId]
+        );
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [clientTxId]);
       }
 
@@ -779,11 +809,14 @@ test(
     let childProcess;
     const createdClientTxIds = [];
     let deniedOutletId = 0;
+    let adminUserId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
     const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
     const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const adminEmail = `sync-admin-${runId}@example.com`;
 
     try {
       const [ownerRows] = await db.execute(
@@ -806,6 +839,36 @@ test(
           "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
         );
       }
+
+      const [adminRoleRows] = await db.execute(
+        `SELECT id
+         FROM roles
+         WHERE code = 'ADMIN'
+         LIMIT 1`
+      );
+      const adminRoleId = adminRoleRows[0]?.id;
+      if (!adminRoleId) {
+        throw new Error("ADMIN role fixture not found; run `npm run db:migrate && npm run db:seed`");
+      }
+
+      const [adminInsert] = await db.execute(
+        `INSERT INTO users (company_id, email, password_hash, is_active)
+         VALUES (?, ?, (SELECT password_hash FROM users WHERE email = ? LIMIT 1), 1)`,
+        [Number(owner.company_id), adminEmail, ownerEmail]
+      );
+      adminUserId = Number(adminInsert.insertId);
+
+      await db.execute(
+        `INSERT INTO user_roles (user_id, role_id)
+         VALUES (?, ?)`,
+        [adminUserId, Number(adminRoleId)]
+      );
+
+      await db.execute(
+        `INSERT INTO user_outlets (user_id, outlet_id)
+         VALUES (?, ?)`,
+        [adminUserId, Number(owner.outlet_id)]
+      );
 
       const ownerUserId = Number(owner.id);
       const companyId = Number(owner.company_id);
@@ -837,7 +900,7 @@ test(
         },
         body: JSON.stringify({
           companyCode,
-          email: ownerEmail,
+          email: adminEmail,
           password: ownerPassword
         })
       });
@@ -1892,7 +1955,7 @@ test(
               clientTxId: deniedOutletTxId,
               companyId,
               outletId: deniedOutletId,
-              cashierUserId: ownerUserId,
+              cashierUserId: adminUserId,
               trxAt
             })
           ]
@@ -1920,11 +1983,34 @@ test(
            WHERE JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
           [clientTxId]
         );
+        await db.execute(
+          `DELETE pti
+           FROM pos_transaction_items pti
+           INNER JOIN pos_transactions pt ON pt.id = pti.pos_transaction_id
+           WHERE pt.client_tx_id = ?`,
+          [clientTxId]
+        );
+        await db.execute(
+          `DELETE ptp
+           FROM pos_transaction_payments ptp
+           INNER JOIN pos_transactions pt ON pt.id = ptp.pos_transaction_id
+           WHERE pt.client_tx_id = ?`,
+          [clientTxId]
+        );
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [clientTxId]);
       }
 
       if (deniedOutletId > 0) {
+        await db.execute("DELETE FROM pos_transaction_items WHERE outlet_id = ?", [deniedOutletId]);
+        await db.execute("DELETE FROM pos_transaction_payments WHERE outlet_id = ?", [deniedOutletId]);
+        await db.execute("DELETE FROM pos_transactions WHERE outlet_id = ?", [deniedOutletId]);
         await db.execute("DELETE FROM outlets WHERE id = ?", [deniedOutletId]);
+      }
+
+      if (adminUserId > 0) {
+        await db.execute("DELETE FROM user_outlets WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
 
       await db.end();

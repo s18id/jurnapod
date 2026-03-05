@@ -44,7 +44,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Payment request failed", 500);
     }
   },
-  [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
+  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );
 
 export const PATCH = withAuth(
@@ -91,5 +91,5 @@ export const PATCH = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Payment request failed", 500);
     }
   },
-  [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
+  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );

@@ -6,7 +6,13 @@ import { apiRequest, getApiBaseUrl } from "./api-client";
 // Memory-only token storage (no localStorage)
 let inMemoryAccessToken: string | null = null;
 
-export type RoleCode = "SUPER_ADMIN" | "OWNER" | "ADMIN" | "CASHIER" | "ACCOUNTANT";
+export type RoleCode =
+  | "SUPER_ADMIN"
+  | "OWNER"
+  | "COMPANY_ADMIN"
+  | "ADMIN"
+  | "CASHIER"
+  | "ACCOUNTANT";
 
 export type UserOutlet = {
   id: number;

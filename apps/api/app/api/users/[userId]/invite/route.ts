@@ -111,5 +111,11 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Failed to send invitation", 500);
     }
   },
-  [requireAccess({ roles: ["SUPER_ADMIN", "OWNER", "ADMIN"], module: "users", permission: "update" })]
+  [
+    requireAccess({
+      roles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN"],
+      module: "users",
+      permission: "update"
+    })
+  ]
 );

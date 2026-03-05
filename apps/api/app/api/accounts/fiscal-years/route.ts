@@ -42,7 +42,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
+  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );
 
 export const POST = withAuth(
@@ -82,5 +82,5 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
+  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );

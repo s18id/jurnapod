@@ -47,6 +47,7 @@ const emptyForm: RoleFormData = {
 const SYSTEM_ROLE_CODES = new Set([
   "SUPER_ADMIN",
   "OWNER",
+  "COMPANY_ADMIN",
   "ADMIN",
   "CASHIER",
   "ACCOUNTANT"
@@ -188,13 +189,13 @@ export function RolesPage(props: RolesPageProps) {
         cell: (info) => <Text>{info.row.original.name}</Text>
       },
       {
-        id: "type",
-        header: "Type",
+        id: "scope",
+        header: "Scope",
         cell: (info) => {
-          const isSystem = SYSTEM_ROLE_CODES.has(info.row.original.code);
+          const isGlobal = info.row.original.is_global;
           return (
-            <Badge variant="light" color={isSystem ? "blue" : "gray"}>
-              {isSystem ? "System" : "Custom"}
+            <Badge variant="light" color={isGlobal ? "blue" : "gray"}>
+              {isGlobal ? "Global" : "Outlet-scoped"}
             </Badge>
           );
         }
@@ -205,14 +206,17 @@ export function RolesPage(props: RolesPageProps) {
         cell: (info) => {
           const role = info.row.original;
           const isSystem = SYSTEM_ROLE_CODES.has(role.code);
-          const systemTooltip = isSystem ? "System roles cannot be changed." : undefined;
+          const isLocked = role.is_global || isSystem;
+          const systemTooltip = isLocked
+            ? "Global/system roles cannot be changed."
+            : undefined;
           return (
             <Group gap="xs" justify="flex-end" wrap="wrap">
               <Button
                 size="xs"
                 variant="light"
                 onClick={() => openEditDialog(role)}
-                disabled={isSystem}
+                disabled={isLocked}
                 title={systemTooltip}
               >
                 Edit
@@ -222,7 +226,7 @@ export function RolesPage(props: RolesPageProps) {
                 color="red"
                 variant="light"
                 onClick={() => setConfirmState(role)}
-                disabled={isSystem}
+                disabled={isLocked}
                 title={systemTooltip}
               >
                 Delete

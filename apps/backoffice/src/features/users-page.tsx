@@ -108,6 +108,12 @@ export function UsersPage(props: UsersPageProps) {
     [rolesQuery.data]
   );
 
+  const actorMaxRoleLevel = useMemo(() => {
+    const roleLevels = new Map((rolesQuery.data || []).map((role) => [role.code, role.role_level]));
+    const levels = user.roles.map((code) => roleLevels.get(code) ?? 0);
+    return Math.max(0, ...levels);
+  }, [rolesQuery.data, user.roles]);
+
   const companyOptions = useMemo(
     () =>
       (companiesQuery.data || []).map((company) => ({
@@ -722,6 +728,7 @@ export function UsersPage(props: UsersPageProps) {
                           key={role.code}
                           label={role.name}
                           checked={formData.role_codes.includes(role.code)}
+                          disabled={role.role_level > actorMaxRoleLevel}
                           onChange={(event) => {
                             if (event.currentTarget.checked) {
                               setFormData({
@@ -798,6 +805,7 @@ export function UsersPage(props: UsersPageProps) {
                       key={role.code}
                       label={role.name}
                       checked={formData.role_codes.includes(role.code)}
+                      disabled={role.role_level > actorMaxRoleLevel}
                       onChange={(event) => {
                         if (event.currentTarget.checked) {
                           setFormData({

@@ -51,7 +51,6 @@ const PERMISSION_BITS = {
 } as const;
 
 const FULL_PERMISSION_MASK = 15;
-const LOCKED_ROLE_CODES = new Set(["SUPER_ADMIN", "OWNER"]);
 
 function buildEmptyMasks(): Record<Module, number> {
   return MODULES.reduce<Record<Module, number>>((acc, moduleName) => {
@@ -130,7 +129,7 @@ export function ModuleRolesPage(props: ModuleRolesPageProps) {
     [availableRoles, selectedRoleId]
   );
 
-  const isLockedRole = selectedRole ? LOCKED_ROLE_CODES.has(selectedRole.code) : false;
+  const isLockedRole = selectedRole?.is_global ?? false;
 
   useEffect(() => {
     if (!selectedRoleId) {
@@ -184,7 +183,7 @@ export function ModuleRolesPage(props: ModuleRolesPageProps) {
     }
 
     if (isLockedRole) {
-      setSaveError("Super Admin and Owner permissions are locked to full access.");
+      setSaveError("Global roles are locked to full access.");
       return;
     }
 
@@ -344,7 +343,7 @@ export function ModuleRolesPage(props: ModuleRolesPageProps) {
 
           {isLockedRole ? (
             <Alert color="yellow" title="Permissions locked">
-              Super Admin and Owner always have full access and cannot be edited.
+              Global roles always have full access and cannot be edited.
             </Alert>
           ) : null}
 

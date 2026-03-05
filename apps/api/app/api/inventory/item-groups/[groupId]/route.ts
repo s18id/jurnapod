@@ -42,7 +42,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Item group request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "read" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "read" })]
 );
 
 export const PATCH = withAuth(
@@ -98,7 +98,7 @@ export const PATCH = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Item group request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "update" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "update" })]
 );
 
 export const DELETE = withAuth(
@@ -127,5 +127,5 @@ export const DELETE = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Item group request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "delete" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "delete" })]
 );

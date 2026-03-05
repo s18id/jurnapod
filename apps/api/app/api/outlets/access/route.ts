@@ -22,7 +22,7 @@ export const GET = withAuth(
   async () => successResponse(null),
   [
     requireAccess({
-      roles: ["OWNER", "ADMIN", "CASHIER", "ACCOUNTANT"],
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "CASHIER", "ACCOUNTANT"],
       module: "outlets",
       permission: "read",
       outletId: (request) => outletIdFromRequest(request)

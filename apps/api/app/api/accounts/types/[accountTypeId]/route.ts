@@ -49,7 +49,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "read" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "read" })]
 );
 
 /**
@@ -87,7 +87,7 @@ export const PUT = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "update" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "update" })]
 );
 
 /**
@@ -120,5 +120,5 @@ export const DELETE = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "delete" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "delete" })]
 );

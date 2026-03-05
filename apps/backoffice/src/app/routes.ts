@@ -15,72 +15,72 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/daily-sales",
     label: "Daily Sales",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/profit-loss",
     label: "Profit & Loss",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/general-ledger",
     label: "General Ledger",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/journals",
     label: "Journals & Trial Balance",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/accounting-worksheet",
     label: "Accounting Worksheet",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
 
   // === ACCOUNTING ===
   {
     path: "/account-types",
     label: "Account Types",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/chart-of-accounts",
     label: "Chart of Accounts",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/fiscal-years",
     label: "Fiscal Years",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/account-mappings",
     label: "Account Mappings",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/transaction-templates",
     label: "Transaction Templates",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/transactions",
     label: "Transaction Input",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
 
   // === SALES ===
   {
     path: "/sales-invoices",
     label: "Sales Invoices",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "sales"
   },
   {
     path: "/sales-payments",
     label: "Sales Payments",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "sales"
   },
 
@@ -88,31 +88,31 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/pos-transactions",
     label: "POS Transactions",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "pos"
   },
   {
     path: "/pos-payments",
     label: "POS Payments",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "pos"
   },
   {
     path: "/sync-queue",
     label: "Sync Queue",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "pos"
   },
   {
     path: "/sync-history",
     label: "Sync History",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "pos"
   },
   {
     path: "/pwa-settings",
     label: "PWA Settings",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "pos"
   },
 
@@ -120,31 +120,31 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/item-groups",
     label: "Item Groups",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "inventory"
   },
   {
     path: "/items-prices",
     label: "Items & Prices",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "inventory"
   },
   {
     path: "/supplies",
     label: "Supplies",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "inventory"
   },
   {
     path: "/fixed-assets",
     label: "Fixed Assets",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "inventory"
   },
   {
     path: "/inventory-settings",
     label: "Inventory Settings",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "inventory"
   },
 
@@ -152,7 +152,7 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/audit-logs",
     label: "Audit Logs",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/companies",
@@ -162,12 +162,12 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/outlets",
     label: "Outlets",
-    allowedRoles: ["SUPER_ADMIN", "OWNER", "ADMIN"]
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN"]
   },
   {
     path: "/users",
     label: "Users",
-    allowedRoles: ["SUPER_ADMIN", "OWNER", "ADMIN"]
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN"]
   },
   {
     path: "/roles",
@@ -182,17 +182,17 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/modules",
     label: "Modules",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/tax-rates",
     label: "Tax Rates",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/outlet-settings",
     label: "Outlet Settings",
-    allowedRoles: ["OWNER", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
     path: "/static-pages",

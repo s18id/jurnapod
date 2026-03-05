@@ -75,5 +75,5 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "POS payments report failed", 500);
     }
   },
-  [requireRole(["OWNER", "ADMIN", "ACCOUNTANT"])]
+  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
 );

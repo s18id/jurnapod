@@ -6,7 +6,13 @@ import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
-import { getRole, updateRole, deleteRole, RoleNotFoundError } from "../../../../src/lib/users";
+import {
+  getRole,
+  updateRole,
+  deleteRole,
+  RoleNotFoundError,
+  RoleLevelViolationError
+} from "../../../../src/lib/users";
 
 function parseRoleId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -26,6 +32,9 @@ export const GET = withAuth(
       }
       if (error instanceof RoleNotFoundError) {
         return errorResponse("NOT_FOUND", error.message, 404);
+      }
+      if (error instanceof RoleLevelViolationError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
       }
       console.error("GET /api/roles/:id failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Role request failed", 500);
@@ -62,6 +71,9 @@ export const PATCH = withAuth(
       }
       if (error instanceof RoleNotFoundError) {
         return errorResponse("NOT_FOUND", error.message, 404);
+      }
+      if (error instanceof RoleLevelViolationError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
       }
       console.error("PATCH /api/roles/:id failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Role request failed", 500);

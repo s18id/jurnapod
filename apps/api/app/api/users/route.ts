@@ -12,6 +12,7 @@ import {
   listUsers,
   OutletNotFoundError,
   RoleNotFoundError,
+  RoleLevelViolationError,
   UserEmailExistsError
 } from "../../../src/lib/users";
 
@@ -68,7 +69,13 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Users request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "users", permission: "read" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "users",
+      permission: "read"
+    })
+  ]
 );
 
 export const POST = withAuth(
@@ -120,9 +127,19 @@ export const POST = withAuth(
         return errorResponse("OUTLET_NOT_FOUND", "Outlet not found", 400);
       }
 
+      if (error instanceof RoleLevelViolationError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
+      }
+
       console.error("POST /api/users failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Users request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "users", permission: "create" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "users",
+      permission: "create"
+    })
+  ]
 );

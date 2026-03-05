@@ -54,5 +54,11 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "User outlets update failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "users", permission: "update" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "users",
+      permission: "update"
+    })
+  ]
 );

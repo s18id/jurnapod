@@ -60,5 +60,5 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Depreciation run failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "update" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "update" })]
 );

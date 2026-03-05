@@ -89,7 +89,14 @@ export type AuthenticatedUser = {
   }[];
 };
 
-export const ROLE_CODES = ["SUPER_ADMIN", "OWNER", "ADMIN", "CASHIER", "ACCOUNTANT"] as const;
+export const ROLE_CODES = [
+  "SUPER_ADMIN",
+  "OWNER",
+  "COMPANY_ADMIN",
+  "ADMIN",
+  "CASHIER",
+  "ACCOUNTANT"
+] as const;
 export type RoleCode = (typeof ROLE_CODES)[number];
 
 type AccessCheckRow = RowDataPacket & {
@@ -441,6 +448,25 @@ export async function userHasOutletAccess(
   outletId: number
 ): Promise<boolean> {
   const pool = getDbPool();
+  const [globalRows] = await pool.execute<AccessCheckRow[]>(
+    `SELECT u.id
+     FROM users u
+     INNER JOIN companies c ON c.id = u.company_id
+     INNER JOIN user_roles ur ON ur.user_id = u.id
+     INNER JOIN roles r ON r.id = ur.role_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND u.is_active = 1
+       AND c.deleted_at IS NULL
+       AND r.is_global = 1
+     LIMIT 1`,
+    [userId, companyId]
+  );
+
+  if (globalRows.length > 0) {
+    return true;
+  }
+
   const [rows] = await pool.execute<AccessCheckRow[]>(
     `SELECT u.id
      FROM users u
@@ -486,6 +512,7 @@ export function buildPermissionMask(params: {
 
 type AccessSnapshotRow = RowDataPacket & {
   is_super_admin: number;
+  has_global_role?: number | null;
   has_role?: number | null;
   has_permission?: number | null;
   has_outlet_access?: number | null;
@@ -502,6 +529,7 @@ export type AccessCheckOptions = {
 
 export type AccessCheckResult = {
   isSuperAdmin: boolean;
+  hasGlobalRole: boolean;
   hasRole: boolean;
   hasPermission: boolean;
   hasOutletAccess: boolean;
@@ -518,6 +546,16 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
          AND r.code = "SUPER_ADMIN"
      ) AS is_super_admin`
   ];
+
+  selectParts.push(
+    `EXISTS(
+       SELECT 1
+       FROM user_roles ur
+       INNER JOIN roles r ON r.id = ur.role_id
+       WHERE ur.user_id = u.id
+         AND r.is_global = 1
+     ) AS has_global_role`
+  );
   const params: Array<string | number> = [];
 
   if (allowedRoles && allowedRoles.length > 0) {
@@ -585,6 +623,7 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
 
   return {
     isSuperAdmin: Boolean(row.is_super_admin),
+    hasGlobalRole: Boolean(row.has_global_role),
     hasRole: Boolean(row.has_role),
     hasPermission: Boolean(row.has_permission),
     hasOutletAccess: Boolean(row.has_outlet_access)
@@ -592,6 +631,35 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
 }
 
 export async function listUserOutletIds(userId: number, companyId: number): Promise<number[]> {
+  const pool = getDbPool();
+  const [globalRows] = await pool.execute<AccessCheckRow[]>(
+    `SELECT u.id
+     FROM users u
+     INNER JOIN companies c ON c.id = u.company_id
+     INNER JOIN user_roles ur ON ur.user_id = u.id
+     INNER JOIN roles r ON r.id = ur.role_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND u.is_active = 1
+       AND c.deleted_at IS NULL
+       AND r.is_global = 1
+     LIMIT 1`,
+    [userId, companyId]
+  );
+
+  if (globalRows.length > 0) {
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT o.id
+       FROM outlets o
+       INNER JOIN companies c ON c.id = o.company_id
+       WHERE o.company_id = ?
+         AND c.deleted_at IS NULL
+       ORDER BY o.id ASC`,
+      [companyId]
+    );
+    return rows.map((row) => Number(row.id));
+  }
+
   const outlets = await findUserOutlets(userId, companyId);
   return outlets.map((outlet) => Number(outlet.id));
 }

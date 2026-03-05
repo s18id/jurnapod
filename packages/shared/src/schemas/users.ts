@@ -15,7 +15,9 @@ export const UserOutletSchema = z.object({
 export const RoleResponseSchema = z.object({
   id: NumericIdSchema,
   code: z.string().trim().min(1).max(64),
-  name: z.string().trim().min(1).max(191)
+  name: z.string().trim().min(1).max(191),
+  is_global: z.boolean(),
+  role_level: z.number().int().min(0)
 });
 
 export const OutletResponseSchema = z.object({

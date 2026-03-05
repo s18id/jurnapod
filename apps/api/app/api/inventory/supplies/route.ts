@@ -52,7 +52,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Supplies request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "read" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "read" })]
 );
 
 export const POST = withAuth(
@@ -83,5 +83,5 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Supplies request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "create" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "inventory", permission: "create" })]
 );

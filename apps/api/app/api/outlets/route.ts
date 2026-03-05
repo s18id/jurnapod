@@ -34,7 +34,13 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Outlets request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "read" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "outlets",
+      permission: "read"
+    })
+  ]
 );
 
 export const POST = withAuth(
@@ -83,5 +89,11 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Outlets request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "outlets", permission: "create" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "outlets",
+      permission: "create"
+    })
+  ]
 );

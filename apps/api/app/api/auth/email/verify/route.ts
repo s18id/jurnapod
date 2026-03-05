@@ -79,5 +79,11 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Failed to send verification email", 500);
     }
   },
-  [requireAccess({ roles: ["SUPER_ADMIN", "OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"], module: "users", permission: "read" })]
+  [
+    requireAccess({
+      roles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"],
+      module: "users",
+      permission: "read"
+    })
+  ]
 );

@@ -26,11 +26,13 @@ test(
     const db = await mysql.createConnection(dbConfigFromEnv());
     let childProcess;
     let deniedOutletId = 0;
+    let adminUserId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
     const ownerPassword = readEnv("JP_OWNER_PASSWORD");
     const runId = Date.now().toString(36);
+    const adminEmail = `reports-deny-admin-${runId}@example.com`;
     const deniedOutletCode = `RPTDENY${runId}`.slice(0, 32).toUpperCase();
 
     try {
@@ -51,6 +53,30 @@ test(
         );
       }
 
+      const [adminRoleRows] = await db.execute(
+        `SELECT id
+         FROM roles
+         WHERE code = 'ADMIN'
+         LIMIT 1`
+      );
+      const adminRoleId = adminRoleRows[0]?.id;
+      if (!adminRoleId) {
+        throw new Error("ADMIN role fixture not found; run `npm run db:migrate && npm run db:seed`");
+      }
+
+      const [adminInsert] = await db.execute(
+        `INSERT INTO users (company_id, email, password_hash, is_active)
+         VALUES (?, ?, (SELECT password_hash FROM users WHERE email = ? LIMIT 1), 1)`,
+        [Number(owner.company_id), adminEmail, ownerEmail]
+      );
+      adminUserId = Number(adminInsert.insertId);
+
+      await db.execute(
+        `INSERT INTO user_roles (user_id, role_id)
+         VALUES (?, ?)`,
+        [adminUserId, Number(adminRoleId)]
+      );
+
       const companyId = Number(owner.company_id);
       const [outletInsert] = await db.execute(
         `INSERT INTO outlets (company_id, code, name)
@@ -65,7 +91,7 @@ test(
       childProcess = server.childProcess;
       await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
 
-      const accessToken = await loginUser(baseUrl, companyCode, ownerEmail, ownerPassword);
+      const accessToken = await loginUser(baseUrl, companyCode, adminEmail, ownerPassword);
 
       for (const reportPath of [
         "/api/reports/pos-transactions",
@@ -91,6 +117,11 @@ test(
 
       if (deniedOutletId > 0) {
         await db.execute("DELETE FROM outlets WHERE id = ?", [deniedOutletId]);
+      }
+
+      if (adminUserId > 0) {
+        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
 
       await db.end();

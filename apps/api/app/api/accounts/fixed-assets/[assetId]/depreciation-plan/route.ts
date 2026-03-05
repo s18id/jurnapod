@@ -41,7 +41,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Depreciation plan request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "read" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "read" })]
 );
 
 export const POST = withAuth(
@@ -81,7 +81,7 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Depreciation plan request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "create" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "create" })]
 );
 
 export const PATCH = withAuth(
@@ -130,5 +130,5 @@ export const PATCH = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Depreciation plan request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "update" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "accounts", permission: "update" })]
 );

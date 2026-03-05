@@ -44,7 +44,13 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "User request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "users", permission: "read" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "users",
+      permission: "read"
+    })
+  ]
 );
 
 export const PATCH = withAuth(
@@ -81,5 +87,11 @@ export const PATCH = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "User request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "users", permission: "update" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "users",
+      permission: "update"
+    })
+  ]
 );

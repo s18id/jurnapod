@@ -9,6 +9,7 @@ import { errorResponse, successResponse } from "../../../../../src/lib/response"
 import {
   findUserById,
   RoleNotFoundError,
+  RoleLevelViolationError,
   setUserRoles,
   UserNotFoundError
 } from "../../../../../src/lib/users";
@@ -67,9 +68,19 @@ export const POST = withAuth(
         return errorResponse("ROLE_NOT_FOUND", "Role not found", 400);
       }
 
+      if (error instanceof RoleLevelViolationError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
+      }
+
       console.error("POST /api/users/:userId/roles failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "User roles update failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "SUPER_ADMIN"], module: "users", permission: "update" })]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "users",
+      permission: "update"
+    })
+  ]
 );

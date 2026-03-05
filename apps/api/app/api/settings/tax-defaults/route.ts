@@ -29,7 +29,7 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Tax defaults request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "read" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "read" })]
 );
 
 export const PUT = withAuth(
@@ -131,5 +131,5 @@ export const PUT = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Tax defaults request failed", 500);
     }
   },
-  [requireAccess({ roles: ["OWNER", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "update" })]
+  [requireAccess({ roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"], module: "settings", permission: "update" })]
 );
