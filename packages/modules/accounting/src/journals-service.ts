@@ -233,7 +233,7 @@ export class JournalsService {
    */
   async getJournalBatch(batchId: number, companyId: number): Promise<JournalBatchResponse> {
     const batchSql = `
-      SELECT id, company_id, outlet_id, doc_type, doc_id, posted_at, created_at, updated_at
+      SELECT id, company_id, outlet_id, doc_type, doc_id, client_ref, posted_at, created_at, updated_at
       FROM journal_batches
       WHERE id = ? AND company_id = ?
       LIMIT 1
@@ -265,6 +265,7 @@ export class JournalsService {
       outlet_id: batch.outlet_id,
       doc_type: batch.doc_type,
       doc_id: batch.doc_id,
+      client_ref: batch.client_ref ?? null,
       posted_at: batch.posted_at.toISOString(),
       created_at: batch.created_at.toISOString(),
       updated_at: batch.updated_at.toISOString(),

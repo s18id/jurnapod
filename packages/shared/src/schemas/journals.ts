@@ -37,6 +37,7 @@ export const JournalBatchResponseSchema = z.object({
   outlet_id: z.number().int().positive().nullable(),
   doc_type: z.string(),
   doc_id: z.number().int().positive(),
+  client_ref: z.string().uuid().nullable().optional(),
   posted_at: z.string(),
   created_at: z.string(),
   updated_at: z.string(),

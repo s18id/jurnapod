@@ -164,7 +164,7 @@ Transform the backoffice into a **Smart Hybrid PWA** that:
 
 // Store 1: Outbox (Transaction Queue)
 interface Outbox {
-  id: string;              // UUID v4
+  id: string;              // UUID v4 (used as client_ref for idempotent sync)
   type: 'journal' | 'invoice' | 'payment';
   payload: object;         // Full transaction data
   timestamp: Date;         // When created
@@ -368,6 +368,12 @@ Result: Seamless recovery, conflicts handled gracefully
 ---
 
 ## Sync Strategy
+
+### Idempotency Contract (Backoffice Outbox)
+
+- Every outbox item must include `client_ref` (UUID v4). Backoffice uses the outbox `id` for this value.
+- Backoffice endpoints (`/api/journals`, `/api/sales/invoices`, `/api/sales/payments`) dedupe by `client_ref`.
+- Retried requests with the same `client_ref` return the existing resource and should be treated as success.
 
 ### Auto-Sync Behavior (Recommended)
 

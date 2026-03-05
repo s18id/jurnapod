@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { ManualJournalEntryCreateRequestSchema, JournalListQuerySchema } from "@jurnapod/shared";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import { requireRole, withAuth } from "../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../src/lib/response";
 import {
@@ -92,13 +92,23 @@ export const POST = withAuth(
     try {
       const payload = await request.json();
       const input = ManualJournalEntryCreateRequestSchema.parse(payload);
+      const clientRefCandidate = typeof payload?.client_ref === "string" ? payload.client_ref : null;
+      let clientRef = input.client_ref ?? null;
+      if (!clientRef && clientRefCandidate) {
+        const parsedClientRef = z.string().uuid().safeParse(clientRefCandidate);
+        if (!parsedClientRef.success) {
+          return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+        }
+        clientRef = parsedClientRef.data;
+      }
+      const normalizedInput = clientRef ? { ...input, client_ref: clientRef } : input;
 
       // Verify company_id matches authenticated user
-      if (input.company_id !== auth.companyId) {
+      if (normalizedInput.company_id !== auth.companyId) {
         return errorResponse("COMPANY_MISMATCH", "Company ID mismatch", 400);
       }
 
-      const batch = await createManualJournalEntry(input, auth.userId);
+      const batch = await createManualJournalEntry(normalizedInput, auth.userId);
 
       return successResponse(batch, 201);
     } catch (error) {

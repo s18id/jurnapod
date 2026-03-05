@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { test } from "node:test";
@@ -21,6 +22,16 @@ const TEST_TIMEOUT_MS = 180000;
 
 const SALES_INVOICE_DOC_TYPE = "SALES_INVOICE";
 const SALES_PAYMENT_IN_DOC_TYPE = "SALES_PAYMENT_IN";
+const sharedJournalsDistPath = path.resolve(
+  repoRoot,
+  "packages/shared/dist/schemas/journals.js"
+);
+const sharedJournalsDist = readFileSync(sharedJournalsDistPath, "utf8");
+if (!sharedJournalsDist.includes("client_ref")) {
+  throw new Error(
+    "ManualJournalEntryCreateRequestSchema missing client_ref; rebuild @jurnapod/shared dist"
+  );
+}
 
 function readEnv(name, fallback = null) {
   const value = process.env[name];
@@ -52,6 +63,33 @@ function dbConfigFromEnv() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeDateValue(value) {
+  if (value instanceof Date) {
+    return value.toISOString().split("T")[0];
+  }
+  if (typeof value === "string" && value.length > 0) {
+    return value.split("T")[0];
+  }
+  return new Date().toISOString().split("T")[0];
+}
+
+async function resolveOpenFiscalDate(db, companyId) {
+  const [rows] = await db.execute(
+    `SELECT start_date, end_date
+     FROM fiscal_years
+     WHERE company_id = ? AND status = 'OPEN'
+     ORDER BY start_date DESC
+     LIMIT 1`,
+    [companyId]
+  );
+
+  if (rows.length > 0) {
+    return normalizeDateValue(rows[0].start_date ?? rows[0].end_date);
+  }
+
+  return new Date().toISOString().split("T")[0];
 }
 
 async function getFreePort() {
@@ -419,6 +457,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const db = await mysql.createConnection(dbConfigFromEnv());
   const testInvoiceNos = [];
   const testPaymentNos = [];
+  const testJournalBatchIds = [];
   let companyId = 0;
   let outletId = 0;
   let mappingFixture = null;
@@ -918,6 +957,173 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
 
       assert.strictEqual(batches3[0].count, 1);
     });
+
+    await t.test("Invoice create is idempotent with client_ref", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-${randomUUID().slice(0, 8)}`;
+      const clientRef = randomUUID();
+      testInvoiceNos.push(invoiceNo);
+
+      const payload = {
+        outlet_id: outletId,
+        invoice_no: invoiceNo,
+        invoice_date: "2024-01-15",
+        tax_amount: 0,
+        client_ref: clientRef,
+        lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+      };
+
+      const firstRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(firstRes.status, 201);
+      assert.strictEqual(firstRes.body.success, true);
+      const firstId = firstRes.body.data.id;
+
+      const retryRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(retryRes.status, 201);
+      assert.strictEqual(retryRes.body.success, true);
+      assert.strictEqual(retryRes.body.data.id, firstId);
+
+      const [rows] = await db.execute(
+        `SELECT COUNT(*) as count FROM sales_invoices
+         WHERE company_id = ? AND client_ref = ?`,
+        [companyId, clientRef]
+      );
+
+      assert.strictEqual(Number(rows[0].count), 1);
+    });
+
+    await t.test("Payment create is idempotent with client_ref", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-${randomUUID().slice(0, 8)}`;
+      const paymentNo = `TEST-PAY-${randomUUID().slice(0, 8)}`;
+      const clientRef = randomUUID();
+      testInvoiceNos.push(invoiceNo);
+      testPaymentNos.push(paymentNo);
+
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      const payload = {
+        outlet_id: outletId,
+        invoice_id: invoiceId,
+        payment_no: paymentNo,
+        payment_at: new Date().toISOString(),
+        account_id: mappingFixture.accountIdsByKey.CASH,
+        method: "CASH",
+        amount: 1000,
+        client_ref: clientRef
+      };
+
+      const firstRes = await apiRequest(baseUrl, "/api/sales/payments", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(firstRes.status, 201);
+      assert.strictEqual(firstRes.body.success, true);
+      const firstId = firstRes.body.data.id;
+
+      const retryRes = await apiRequest(baseUrl, "/api/sales/payments", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(retryRes.status, 201);
+      assert.strictEqual(retryRes.body.success, true);
+      assert.strictEqual(retryRes.body.data.id, firstId);
+
+      const [rows] = await db.execute(
+        `SELECT COUNT(*) as count FROM sales_payments
+         WHERE company_id = ? AND client_ref = ?`,
+        [companyId, clientRef]
+      );
+
+      assert.strictEqual(Number(rows[0].count), 1);
+    });
+
+    await t.test("Manual journal create is idempotent with client_ref", { timeout: 30000 }, async () => {
+      const clientRef = randomUUID();
+      const entryDate = await resolveOpenFiscalDate(db, companyId);
+
+      const payload = {
+        company_id: companyId,
+        outlet_id: outletId,
+        client_ref: clientRef,
+        entry_date: entryDate,
+        description: "Integration test manual entry",
+        lines: [
+          {
+            account_id: mappingFixture.accountIdsByKey.CASH,
+            debit: 250,
+            credit: 0,
+            description: "Cash debit"
+          },
+          {
+            account_id: mappingFixture.accountIdsByKey.SALES_REVENUE,
+            debit: 0,
+            credit: 250,
+            description: "Revenue credit"
+          }
+        ]
+      };
+
+      const firstRes = await apiRequest(baseUrl, "/api/journals", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(firstRes.status, 201);
+      assert.strictEqual(firstRes.body.success, true);
+      const firstId = firstRes.body.data.id;
+      testJournalBatchIds.push(firstId);
+
+      const [storedRows] = await db.execute(
+        `SELECT client_ref FROM journal_batches WHERE id = ?`,
+        [firstId]
+      );
+      const storedClientRef = storedRows[0]?.client_ref ?? null;
+      assert.strictEqual(String(storedClientRef), clientRef);
+
+      const retryRes = await apiRequest(baseUrl, "/api/journals", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(retryRes.status, 201);
+      assert.strictEqual(retryRes.body.success, true);
+      assert.strictEqual(retryRes.body.data.id, firstId);
+
+      const [rows] = await db.execute(
+        `SELECT COUNT(*) as count FROM journal_batches
+         WHERE company_id = ? AND doc_type = ? AND client_ref = ?`,
+        [companyId, "MANUAL", clientRef]
+      );
+
+      assert.strictEqual(Number(rows[0].count), 1);
+    });
   } finally {
     // Cleanup
     console.log('Cleaning up test data...');
@@ -960,6 +1166,19 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       await cleanupTestPayments(db, testPaymentNos);
       await cleanupTestJournals(db, companyId, testInvoiceNos);
       await cleanupTestInvoices(db, testInvoiceNos);
+      if (testJournalBatchIds.length > 0) {
+        const placeholders = testJournalBatchIds.map(() => "?").join(", ");
+        await db.execute(
+          `DELETE FROM journal_lines
+           WHERE journal_batch_id IN (${placeholders})`,
+          testJournalBatchIds
+        );
+        await db.execute(
+          `DELETE FROM journal_batches
+           WHERE id IN (${placeholders})`,
+          testJournalBatchIds
+        );
+      }
       await db.end();
       console.log('Database cleanup complete');
     } catch (cleanupErr) {
