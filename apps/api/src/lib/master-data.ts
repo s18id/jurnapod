@@ -248,9 +248,10 @@ async function recordMasterDataAuditLog(
        user_id,
        action,
        result,
+       success,
        ip_address,
        payload_json
-     ) VALUES (?, ?, ?, ?, 'SUCCESS', NULL, ?)`,
+     ) VALUES (?, ?, ?, ?, 'SUCCESS', 1, NULL, ?)`,
     [
       input.companyId,
       input.outletId,

@@ -162,40 +162,46 @@ export class AuditService {
    * Internal method to write audit log entry
    */
   private async log(entry: AuditLogEntryRequest): Promise<void> {
-    try {
-      const sql = `
-        INSERT INTO audit_logs (
-          company_id, outlet_id, user_id, entity_type, entity_id,
-          action, result, ip_address, payload_json, changes_json, created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-      `;
+    const sql = `
+      INSERT INTO audit_logs (
+        company_id, outlet_id, user_id, entity_type, entity_id,
+        action, result, success, ip_address, payload_json, changes_json, created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `;
 
-      const params = [
-        entry.company_id,
-        entry.outlet_id ?? null,
-        entry.user_id,
-        entry.entity_type,
-        entry.entity_id,
-        entry.action,
-        entry.result,
-        entry.ip_address ?? null,
-        JSON.stringify(entry.payload || {}),
-        entry.changes ? JSON.stringify(entry.changes) : null
-      ];
+    const params = [
+      entry.company_id,
+      entry.outlet_id ?? null,
+      entry.user_id,
+      entry.entity_type,
+      entry.entity_id,
+      entry.action,
+      entry.result,
+      entry.result === "SUCCESS" ? 1 : 0,
+      entry.ip_address ?? null,
+      JSON.stringify(entry.payload || {}),
+      entry.changes ? JSON.stringify(entry.changes) : null
+    ];
 
-      await this.db.execute(sql, params);
-    } catch (error) {
-      // If we're in a transaction (db.begin was called), we should throw
-      // to trigger rollback. Otherwise, log error but don't throw.
-      const inTransaction = this.db.begin !== undefined;
-      
-      if (inTransaction) {
-        // Re-throw to trigger transaction rollback
-        throw error;
-      } else {
-        // Audit logging should NOT fail the main operation when not in transaction
-        // Log error but don't throw
+    const inTransaction = this.db.begin !== undefined;
+    const maxAttempts = 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await this.db.execute(sql, params);
+        return;
+      } catch (error) {
+        const shouldRetry = isMysqlDeadlock(error) && attempt < maxAttempts;
+        if (shouldRetry) {
+          await delay(25 * attempt);
+          continue;
+        }
+
+        if (inTransaction) {
+          throw error;
+        }
+
         console.error("[AuditService] Failed to write audit log:", error);
         console.error("[AuditService] Entry details:", {
           entity_type: entry.entity_type,
@@ -203,6 +209,7 @@ export class AuditService {
           action: entry.action,
           user_id: entry.user_id
         });
+        return;
       }
     }
   }
@@ -240,4 +247,17 @@ export class AuditService {
       after: changedAfter
     };
   }
+}
+
+function isMysqlDeadlock(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const err = error as { errno?: number; code?: string; sqlState?: string };
+  return err.errno === 1213 || err.code === "ER_LOCK_DEADLOCK" || err.sqlState === "40001";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

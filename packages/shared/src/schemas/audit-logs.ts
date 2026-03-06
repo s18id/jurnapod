@@ -84,6 +84,7 @@ export const AuditLogResponseSchema = z.object({
   entity_id: z.string().nullable(),
   action: z.string(),
   result: AuditResultSchema,
+  success: z.boolean(),
   ip_address: z.string().nullable(),
   payload_json: z.string(),
   changes_json: z.string().nullable(),

@@ -571,13 +571,13 @@ export async function createInvoice(
       taxLines = input.taxes.map((tax) => ({
         tax_rate_id: tax.tax_rate_id,
         amount: normalizeMoney(tax.amount)
-      })).filter((tax) => tax.amount > 0);
+      })).filter((tax) => tax.tax_rate_id > 0 && tax.amount > 0);
       taxAmount = normalizeMoney(taxLines.reduce((acc, tax) => acc + tax.amount, 0));
     } else {
       const defaultTaxRates = await listCompanyDefaultTaxRates(connection, companyId);
       if (defaultTaxRates.length > 0) {
         taxLines = calculateTaxLines({ grossAmount: subtotal, rates: defaultTaxRates }).filter(
-          (tax) => tax.amount > 0
+          (tax) => tax.tax_rate_id > 0 && tax.amount > 0 
         );
         taxAmount = normalizeMoney(taxLines.reduce((acc, tax) => acc + tax.amount, 0));
       }

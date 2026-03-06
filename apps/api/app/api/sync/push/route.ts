@@ -583,9 +583,10 @@ async function runAcceptedSyncPushHook(
        user_id,
        action,
        result,
+       success,
        ip_address,
        payload_json
-     ) VALUES (?, ?, ?, ?, 'SUCCESS', NULL, ?)`,
+     ) VALUES (?, ?, ?, ?, 'SUCCESS', 1, NULL, ?)`,
     [
       context.companyId,
       context.outletId,
@@ -699,9 +700,10 @@ async function recordSyncPushDuplicateReplayAudit(
        user_id,
        action,
        result,
+       success,
        ip_address,
        payload_json
-     ) VALUES (?, ?, ?, ?, 'SUCCESS', NULL, ?)`,
+     ) VALUES (?, ?, ?, ?, 'SUCCESS', 1, NULL, ?)`,
     [
       params.companyId,
       params.outletId,
@@ -743,9 +745,10 @@ async function recordSyncPushPostingHookFailure(
          user_id,
          action,
          result,
+         success,
          ip_address,
          payload_json
-       ) VALUES (?, ?, ?, ?, 'FAIL', NULL, ?)`,
+        ) VALUES (?, ?, ?, ?, 'FAIL', 0, NULL, ?)`,
       [
         context.companyId,
         context.outletId,

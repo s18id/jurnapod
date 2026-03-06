@@ -69,26 +69,37 @@ export async function auditSuperAdminCrossCompanyWrite(
   const pool = getDbPool();
 
   try {
+    const payloadJson = JSON.stringify({
+      changes: params.changes,
+      reason: "SUPER_ADMIN_CROSS_COMPANY_WRITE"
+    });
+    const changesJson = JSON.stringify(params.changes);
+
     await pool.execute(
       `INSERT INTO audit_logs (
         company_id,
         user_id,
         outlet_id,
         action,
+        result,
+        success,
         entity_type,
         entity_id,
-        changes,
-        ip_address,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        payload_json,
+        changes_json,
+        ip_address
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         params.targetCompanyId,
         params.userId,
         params.outletId ?? null,
         params.action,
+        "SUCCESS",
+        1,
         params.entityType,
         params.entityId != null ? String(params.entityId) : null,
-        JSON.stringify(params.changes),
+        payloadJson,
+        changesJson,
         params.ipAddress ?? null
       ]
     );
