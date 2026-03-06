@@ -34,6 +34,8 @@ test(
     let salesReadOnlyToken = null;
     let reportsNoAccessToken = null;
     let journalsNoCreateToken = null;
+    const trackedModules = ["sales", "reports", "journals"];
+    const modulePermissionsOriginal = new Map();
 
     try {
       // ========================================
@@ -67,6 +69,23 @@ test(
       );
       assert.ok(roleRows.length > 0, "ADMIN role not found");
       adminRoleId = Number(roleRows[0].id);
+
+      const [moduleRows] = await db.execute(
+        `SELECT module, permission_mask
+         FROM module_roles
+         WHERE company_id = ?
+           AND role_id = ?
+           AND module IN ('sales', 'reports', 'journals')`,
+        [companyId, adminRoleId]
+      );
+      for (const row of moduleRows) {
+        modulePermissionsOriginal.set(row.module, Number(row.permission_mask));
+      }
+      for (const moduleName of trackedModules) {
+        if (!modulePermissionsOriginal.has(moduleName)) {
+          modulePermissionsOriginal.set(moduleName, null);
+        }
+      }
 
       // ========================================
       // Test 1: Sales write with read-only permission expects 403
@@ -310,12 +329,23 @@ test(
         await db.execute(`DELETE FROM users WHERE id = ?`, [createdUserId]);
       }
 
-      // Restore module permissions to defaults (full access)
       if (companyId && adminRoleId) {
-        await db.execute(
-          `DELETE FROM module_roles WHERE company_id = ? AND role_id = ? AND module IN ('sales', 'reports', 'journals')`,
-          [companyId, adminRoleId]
-        );
+        for (const [moduleName, permissionMask] of modulePermissionsOriginal.entries()) {
+          if (permissionMask == null) {
+            await db.execute(
+              `DELETE FROM module_roles WHERE company_id = ? AND role_id = ? AND module = ?`,
+              [companyId, adminRoleId, moduleName]
+            );
+            continue;
+          }
+
+          await db.execute(
+            `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE permission_mask = VALUES(permission_mask)`,
+            [companyId, adminRoleId, moduleName, permissionMask]
+          );
+        }
       }
     }
   }
