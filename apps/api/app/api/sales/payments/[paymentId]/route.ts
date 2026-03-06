@@ -6,7 +6,7 @@ import {
   SalesPaymentUpdateRequestSchema
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
-import { requireRole, withAuth } from "../../../../../src/lib/auth-guard";
+import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
   DatabaseConflictError,
@@ -44,7 +44,13 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Payment request failed", 500);
     }
   },
-  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "sales",
+      permission: "read"
+    })
+  ]
 );
 
 export const PATCH = withAuth(
@@ -91,5 +97,11 @@ export const PATCH = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Payment request failed", 500);
     }
   },
-  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "sales",
+      permission: "update"
+    })
+  ]
 );

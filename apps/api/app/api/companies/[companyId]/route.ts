@@ -4,9 +4,10 @@
 import { CompanyUpdateRequestSchema, NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
-import { userHasAnyRole } from "../../../../src/lib/auth";
+import { checkUserAccess } from "../../../../src/lib/auth";
 import { readClientIp } from "../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
+import { auditSuperAdminCrossCompanyWrite, requiresSuperAdminAudit } from "../../../../src/lib/super-admin-audit";
 import {
   getCompany,
   updateCompany,
@@ -17,7 +18,12 @@ import {
 } from "../../../../src/lib/companies";
 
 async function isSuperAdmin(auth: { userId: number; companyId: number }) {
-  return userHasAnyRole(auth.userId, auth.companyId, ["SUPER_ADMIN"]);
+  const access = await checkUserAccess({
+    userId: auth.userId,
+    companyId: auth.companyId,
+    allowedRoles: ["SUPER_ADMIN"]
+  });
+  return access?.isSuperAdmin ?? false;
 }
 
 function parseCompanyId(request: Request): number {
@@ -72,6 +78,19 @@ export const PATCH = withAuth(
         }
       });
 
+      // Audit SUPER_ADMIN cross-company updates
+      if (requiresSuperAdminAudit(superAdmin, auth.companyId, companyId)) {
+        await auditSuperAdminCrossCompanyWrite({
+          userId: auth.userId,
+          targetCompanyId: companyId,
+          action: "UPDATE_COMPANY",
+          entityType: "company",
+          entityId: companyId,
+          changes: input,
+          ipAddress: readClientIp(request)
+        });
+      }
+
       return successResponse(company);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -105,6 +124,20 @@ export const DELETE = withAuth(
           ipAddress: readClientIp(request)
         }
       });
+
+      // Audit SUPER_ADMIN company deletion
+      if (requiresSuperAdminAudit(superAdmin, auth.companyId, companyId)) {
+        await auditSuperAdminCrossCompanyWrite({
+          userId: auth.userId,
+          targetCompanyId: companyId,
+          action: "DELETE_COMPANY",
+          entityType: "company",
+          entityId: companyId,
+          changes: {},
+          ipAddress: readClientIp(request)
+        });
+      }
+
       return successResponse(null);
     } catch (error) {
       if (error instanceof ZodError) {

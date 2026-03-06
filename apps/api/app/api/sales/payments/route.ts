@@ -5,9 +5,9 @@ import {
   SalesPaymentCreateRequestSchema,
   SalesPaymentListQuerySchema
 } from "@jurnapod/shared";
-import { ZodError } from "zod";
-import { checkUserAccess, listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
-import { requireRoleForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
+import { ZodError, z } from "zod";
+import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
+import { requireAccess, requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createPayment,
@@ -16,6 +16,31 @@ import {
   DatabaseReferenceError,
   listPayments
 } from "../../../../src/lib/sales";
+
+const outletGuardSchema = SalesPaymentCreateRequestSchema.pick({
+  outlet_id: true
+});
+
+const invalidJsonGuardError = new ZodError([
+  {
+    code: z.ZodIssueCode.custom,
+    message: "Invalid request",
+    path: []
+  }
+]);
+
+async function parseOutletIdForGuard(request: Request): Promise<number> {
+  try {
+    const payload = await request.clone().json();
+    return outletGuardSchema.parse(payload).outlet_id;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw invalidJsonGuardError;
+    }
+
+    throw error;
+  }
+}
 
 export const GET = withAuth(
   async (request, auth) => {
@@ -63,7 +88,13 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Payments request failed", 500);
     }
   },
-  [requireRoleForOutletQuery(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  [
+    requireAccessForOutletQuery({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "sales",
+      permission: "read"
+    })
+  ]
 );
 
 export const POST = withAuth(
@@ -71,18 +102,6 @@ export const POST = withAuth(
     try {
       const payload = await request.json();
       const input = SalesPaymentCreateRequestSchema.parse(payload);
-      const access = await checkUserAccess({
-        userId: auth.userId,
-        companyId: auth.companyId,
-        allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
-        outletId: input.outlet_id
-      });
-      if (!access || !access.hasRole) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      if (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
       const payment = await createPayment(auth.companyId, input, {
         userId: auth.userId
       });
@@ -109,5 +128,12 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Payments request failed", 500);
     }
   },
-  []
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "sales",
+      permission: "create",
+      outletId: (request) => parseOutletIdForGuard(request)
+    })
+  ]
 );

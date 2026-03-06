@@ -3,8 +3,7 @@
 
 import { ManualJournalEntryCreateRequestSchema, JournalListQuerySchema } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
-import { checkUserAccess } from "../../../src/lib/auth";
-import { requireRoleForOutletQuery, withAuth } from "../../../src/lib/auth-guard";
+import { requireAccess, requireAccessForOutletQuery, withAuth } from "../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../src/lib/response";
 import {
   createManualJournalEntry,
@@ -12,6 +11,32 @@ import {
   JournalNotBalancedError,
   InvalidJournalLineError
 } from "../../../src/lib/journals";
+
+const outletGuardSchema = ManualJournalEntryCreateRequestSchema.pick({
+  outlet_id: true
+});
+
+const invalidJsonGuardError = new ZodError([
+  {
+    code: z.ZodIssueCode.custom,
+    message: "Invalid request",
+    path: []
+  }
+]);
+
+async function parseOutletIdForGuard(request: Request): Promise<number | null> {
+  try {
+    const payload = await request.clone().json();
+    const parsed = outletGuardSchema.parse(payload);
+    return typeof parsed.outlet_id === "number" ? parsed.outlet_id : null;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw invalidJsonGuardError;
+    }
+
+    throw error;
+  }
+}
 
 /**
  * GET /api/journals
@@ -62,7 +87,13 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  [requireRoleForOutletQuery(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  [
+    requireAccessForOutletQuery({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "journals",
+      permission: "read"
+    })
+  ]
 );
 
 /**
@@ -103,22 +134,6 @@ export const POST = withAuth(
         clientRef = parsedClientRef.data;
       }
       const normalizedInput = clientRef ? { ...input, client_ref: clientRef } : input;
-      const outletId =
-        typeof normalizedInput.outlet_id === "number" ? normalizedInput.outlet_id : undefined;
-      const access = await checkUserAccess({
-        userId: auth.userId,
-        companyId: auth.companyId,
-        allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
-        outletId
-      });
-      if (!access || !access.hasRole) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      if (typeof outletId === "number") {
-        if (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
-          return errorResponse("FORBIDDEN", "Forbidden", 403);
-        }
-      }
 
       // Verify company_id matches authenticated user
       if (normalizedInput.company_id !== auth.companyId) {
@@ -153,5 +168,12 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  []
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "journals",
+      permission: "create",
+      outletId: (request) => parseOutletIdForGuard(request)
+    })
+  ]
 );

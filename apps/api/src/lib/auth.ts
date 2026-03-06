@@ -506,40 +506,24 @@ export async function recordLoginAudit(record: LoginAuditRecord): Promise<void> 
   );
 }
 
+/**
+ * @deprecated Use checkUserAccess instead for consistent role checking.
+ * This function checks both global and outlet-scoped roles, but does not
+ * verify outlet access. For outlet-specific checks, use checkUserAccess
+ * with outletId parameter.
+ */
 export async function userHasAnyRole(
   userId: number,
   companyId: number,
   allowedRoles: readonly RoleCode[]
 ): Promise<boolean> {
-  if (allowedRoles.length === 0) {
-    return false;
-  }
-
-  if (allowedRoles.includes("SUPER_ADMIN")) {
-    const isSuperAdmin = await userIsSuperAdmin(userId);
-    if (isSuperAdmin) {
-      return true;
-    }
-  }
-
-  const pool = getDbPool();
-  const rolePlaceholders = allowedRoles.map(() => "?").join(", ");
-  const [rows] = await pool.execute<AccessCheckRow[]>(
-    `SELECT u.id
-     FROM users u
-     INNER JOIN companies c ON c.id = u.company_id
-     INNER JOIN user_roles ur ON ur.user_id = u.id
-     INNER JOIN roles r ON r.id = ur.role_id
-     WHERE u.id = ?
-       AND u.company_id = ?
-       AND u.is_active = 1
-       AND c.deleted_at IS NULL
-       AND r.code IN (${rolePlaceholders})
-     LIMIT 1`,
-    [userId, companyId, ...allowedRoles]
-  );
-
-  return rows.length > 0;
+  const access = await checkUserAccess({
+    userId,
+    companyId,
+    allowedRoles
+  });
+  
+  return access?.hasRole ?? false;
 }
 
 async function userIsSuperAdmin(userId: number): Promise<boolean> {
@@ -702,16 +686,26 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
       params.push(...allowedRoles, outletId, ...allowedRoles);
     } else {
       selectParts.push(
-        `EXISTS(
-           SELECT 1
-           FROM user_roles ur
-           INNER JOIN roles r ON r.id = ur.role_id
-           WHERE ur.user_id = u.id
-             AND r.is_global = 1
-             AND r.code IN (${rolePlaceholders})
+        `(
+           EXISTS(
+             SELECT 1
+             FROM user_roles ur
+             INNER JOIN roles r ON r.id = ur.role_id
+             WHERE ur.user_id = u.id
+               AND r.is_global = 1
+               AND r.code IN (${rolePlaceholders})
+           ) OR EXISTS(
+             SELECT 1
+             FROM user_outlet_roles uor
+             INNER JOIN roles r ON r.id = uor.role_id
+             INNER JOIN outlets o ON o.id = uor.outlet_id
+             WHERE uor.user_id = u.id
+               AND o.company_id = u.company_id
+               AND r.code IN (${rolePlaceholders})
+           )
          ) AS has_role`
       );
-      params.push(...allowedRoles);
+      params.push(...allowedRoles, ...allowedRoles);
     }
   }
 
@@ -748,19 +742,32 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
       params.push(module, permissionBit, outletId, module, permissionBit);
     } else {
       selectParts.push(
-        `EXISTS(
-           SELECT 1
-           FROM user_roles ur
-           INNER JOIN roles r ON r.id = ur.role_id
-           INNER JOIN module_roles mr ON mr.role_id = r.id
-           WHERE ur.user_id = u.id
-             AND r.is_global = 1
-             AND mr.module = ?
-             AND mr.company_id = u.company_id
-             AND (mr.permission_mask & ?) <> 0
+        `(
+           EXISTS(
+             SELECT 1
+             FROM user_roles ur
+             INNER JOIN roles r ON r.id = ur.role_id
+             INNER JOIN module_roles mr ON mr.role_id = r.id
+             WHERE ur.user_id = u.id
+               AND r.is_global = 1
+               AND mr.module = ?
+               AND mr.company_id = u.company_id
+               AND (mr.permission_mask & ?) <> 0
+           ) OR EXISTS(
+             SELECT 1
+             FROM user_outlet_roles uor
+             INNER JOIN roles r ON r.id = uor.role_id
+             INNER JOIN module_roles mr ON mr.role_id = r.id
+             INNER JOIN outlets o ON o.id = uor.outlet_id
+             WHERE uor.user_id = u.id
+               AND o.company_id = u.company_id
+               AND mr.module = ?
+               AND mr.company_id = u.company_id
+               AND (mr.permission_mask & ?) <> 0
+           )
          ) AS has_permission`
       );
-      params.push(module, permissionBit);
+      params.push(module, permissionBit, module, permissionBit);
     }
   }
 

@@ -66,7 +66,10 @@ export type AuthenticatedRouteGuard = (
   auth: AuthContext
 ) => Promise<Response | null> | Response | null;
 
-type OutletIdResolver = (request: Request, auth: AuthContext) => number | Promise<number>;
+type OutletIdResolver = (
+  request: Request,
+  auth: AuthContext
+) => number | null | undefined | Promise<number | null | undefined>;
 
 type AccessGuardOptions = {
   roles?: readonly RoleCode[];
@@ -188,6 +191,7 @@ export function requireAccess(options: AccessGuardOptions): AuthenticatedRouteGu
     }
 
     let outletId: number | undefined;
+    let shouldCheckOutlet = needsOutletCheck;
     if (needsOutletCheck) {
       const outletSource = options.outletId;
       if (outletSource === undefined) {
@@ -199,11 +203,15 @@ export function requireAccess(options: AccessGuardOptions): AuthenticatedRouteGu
           ? await outletSource(request, auth)
           : outletSource;
 
-      if (!Number.isSafeInteger(resolvedOutletId) || resolvedOutletId <= 0) {
-        return createForbiddenResponse();
-      }
+      if (resolvedOutletId == null) {
+        shouldCheckOutlet = false;
+      } else {
+        if (!Number.isSafeInteger(resolvedOutletId) || resolvedOutletId <= 0) {
+          return createForbiddenResponse();
+        }
 
-      outletId = resolvedOutletId;
+        outletId = resolvedOutletId;
+      }
     }
 
     if (!needsRoleCheck && !needsModuleCheck && !needsOutletCheck) {
@@ -216,7 +224,7 @@ export function requireAccess(options: AccessGuardOptions): AuthenticatedRouteGu
       allowedRoles: needsRoleCheck ? uniqueAllowedRoles : undefined,
       module: needsModuleCheck ? options.module : undefined,
       permission: needsModuleCheck ? options.permission : undefined,
-      outletId: needsOutletCheck ? outletId : undefined
+      outletId: shouldCheckOutlet ? outletId : undefined
     });
 
     if (!access) {
@@ -231,7 +239,7 @@ export function requireAccess(options: AccessGuardOptions): AuthenticatedRouteGu
       return createForbiddenResponse();
     }
 
-    if (needsOutletCheck && !access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
+    if (shouldCheckOutlet && !access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
       return createForbiddenResponse();
     }
 

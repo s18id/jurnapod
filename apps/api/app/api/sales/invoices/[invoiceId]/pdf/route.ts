@@ -3,7 +3,7 @@
 
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
-import { requireRole, withAuth } from "../../../../../../src/lib/auth-guard";
+import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { getInvoice } from "../../../../../../src/lib/sales";
 import { generateInvoiceHTML } from "../../../../../../src/lib/invoice-template";
 import { generatePdfFromHtml } from "../../../../../../src/lib/pdf-generator";
@@ -49,5 +49,11 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Invoice PDF request failed", 500);
     }
   },
-  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "sales",
+      permission: "read"
+    })
+  ]
 );

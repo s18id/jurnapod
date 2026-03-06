@@ -4,10 +4,11 @@
 import { CompanyCreateRequestSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
-import { userHasAnyRole } from "../../../src/lib/auth";
+import { checkUserAccess } from "../../../src/lib/auth";
 import { listCompanies, createCompany, CompanyCodeExistsError } from "../../../src/lib/companies";
 import { readClientIp } from "../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../src/lib/response";
+import { auditSuperAdminCrossCompanyWrite } from "../../../src/lib/super-admin-audit";
 
 export const GET = withAuth(
   async (_request, auth) => {
@@ -15,7 +16,12 @@ export const GET = withAuth(
       const url = new URL(_request.url);
       const includeDeletedParam = url.searchParams.get("include_deleted");
       const includeDeleted = includeDeletedParam === "1" || includeDeletedParam === "true";
-      const isSuperAdmin = await userHasAnyRole(auth.userId, auth.companyId, ["SUPER_ADMIN"]);
+      const access = await checkUserAccess({
+        userId: auth.userId,
+        companyId: auth.companyId,
+        allowedRoles: ["SUPER_ADMIN"]
+      });
+      const isSuperAdmin = access?.isSuperAdmin ?? false;
       const companies = await listCompanies(
         isSuperAdmin
           ? { includeDeleted }
@@ -47,6 +53,24 @@ export const POST = withAuth(
           ipAddress: readClientIp(request)
         }
       });
+
+      // Audit SUPER_ADMIN company creation
+      const access = await checkUserAccess({
+        userId: auth.userId,
+        companyId: auth.companyId,
+        allowedRoles: ["SUPER_ADMIN"]
+      });
+      if (access?.isSuperAdmin) {
+        await auditSuperAdminCrossCompanyWrite({
+          userId: auth.userId,
+          targetCompanyId: company.id,
+          action: "CREATE_COMPANY",
+          entityType: "company",
+          entityId: company.id,
+          changes: input,
+          ipAddress: readClientIp(request)
+        });
+      }
 
       return successResponse(company, 201);
     } catch (error) {

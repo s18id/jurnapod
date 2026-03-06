@@ -216,6 +216,20 @@ Strategy:
 
 ---
 
+## ACL & Route Guards
+Audit checklist:
+- Every backoffice route enforces auth (session/token) at the boundary.
+- Every module route checks feature flags before render or fetch.
+- Every data access enforces `company_id` and `outlet_id` scoping.
+- Every mutation validates role (OWNER/ADMIN/ACCOUNTANT/CASHIER) explicitly.
+- Every settings route verifies org ownership or admin role.
+- Every guard logs denials with correlation id and user id.
+
+Preferred guard pattern for settings routes:
+- Use a top-level settings layout guard that runs auth + role + feature checks once, then renders nested settings routes.
+
+---
+
 ## Security & Audit
 - Audit log is required for:
   - void/refund

@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
-import { requireRoleForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
+import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { resolveDefaultFiscalYearDateRange, FiscalYearSelectionError } from "../../../../src/lib/fiscal-years";
 import { getProfitLoss } from "../../../../src/lib/reports";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
@@ -113,5 +113,11 @@ export const GET = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Profit loss report failed", 500);
     }
   },
-  [requireRoleForOutletQuery(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  [
+    requireAccessForOutletQuery({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "reports",
+      permission: "read"
+    })
+  ]
 );

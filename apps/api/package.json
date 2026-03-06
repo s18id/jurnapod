@@ -9,7 +9,10 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
+    "test:unit": "node --test --test-concurrency=1 --import tsx src/**/*.test.ts",
+    "test:unit:auth": "node --test --test-concurrency=1 --import tsx src/lib/auth.test.ts",
+    "test:integration": "node --test --test-concurrency=1 ",
+    "test:integration:all": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "test:integration:fast": "JP_TEST_BASE_URL=http://127.0.0.1:3005 node --test --test-concurrency=8 tests/integration/*.test.mjs",
     "test:integration:local": "node --test --test-concurrency=1 tests/integration/auth.integration.test.mjs tests/integration/sync-push.integration.test.mjs"
   },
@@ -37,6 +40,7 @@
     "@types/sanitize-html": "^2.13.0",
     "eslint": "^9.39.3",
     "eslint-config-next": "^15.5.12",
+    "tsx": "^4.20.3",
     "typescript": "^5.7.3"
   }
 }

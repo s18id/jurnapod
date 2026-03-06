@@ -3,7 +3,7 @@
 
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
-import { requireRole, withAuth } from "../../../../../../src/lib/auth-guard";
+import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { FiscalYearNotOpenError } from "../../../../../../src/lib/fiscal-years";
 import { errorResponse, successResponse } from "../../../../../../src/lib/response";
 import {
@@ -60,5 +60,11 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Invoice post request failed", 500);
     }
   },
-  [requireRole(["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"])]
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "sales",
+      permission: "update"
+    })
+  ]
 );
