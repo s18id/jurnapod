@@ -5,8 +5,8 @@ import {
   ItemPriceCreateRequestSchema,
   NumericIdSchema
 } from "@jurnapod/shared";
-import { ZodError } from "zod";
-import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
+import { ZodError, z } from "zod";
+import { requireAccess, requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createItemPrice,
@@ -14,7 +14,32 @@ import {
   DatabaseReferenceError,
   listItemPrices
 } from "../../../../src/lib/master-data";
-import { checkUserAccess, listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
+import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
+
+const outletGuardSchema = ItemPriceCreateRequestSchema.pick({
+  outlet_id: true
+});
+
+const invalidJsonGuardError = new ZodError([
+  {
+    code: z.ZodIssueCode.custom,
+    message: "Invalid request",
+    path: []
+  }
+]);
+
+async function parseOutletIdForGuard(request: Request): Promise<number> {
+  try {
+    const payload = await request.clone().json();
+    return outletGuardSchema.parse(payload).outlet_id;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw invalidJsonGuardError;
+    }
+
+    throw error;
+  }
+}
 
 function parseOptionalIsActive(value: string | null): boolean | undefined {
   if (value == null) {
@@ -100,24 +125,6 @@ export const POST = withAuth(
     try {
       const payload = await request.json();
       const input = ItemPriceCreateRequestSchema.parse(payload);
-      const access = await checkUserAccess({
-        userId: auth.userId,
-        companyId: auth.companyId,
-        allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
-        module: "inventory",
-        permission: "create",
-        outletId: input.outlet_id
-      });
-      if (!access || !access.hasRole) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      if (!access.hasPermission && !access.isSuperAdmin) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      if (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-
       const itemPrice = await createItemPrice(auth.companyId, input, {
         userId: auth.userId
       });
@@ -140,5 +147,12 @@ export const POST = withAuth(
       return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
     }
   },
-  []
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "inventory",
+      permission: "create",
+      outletId: (request) => parseOutletIdForGuard(request)
+    })
+  ]
 );

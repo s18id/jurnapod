@@ -4,7 +4,7 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
-import { userHasAnyRole } from "../../../../src/lib/auth";
+import { checkUserAccess } from "../../../../src/lib/auth";
 import { readClientIp } from "../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import { getOutlet, updateOutlet, deleteOutlet, OutletNotFoundError } from "../../../../src/lib/outlets";
@@ -23,7 +23,12 @@ async function resolveCompanyId(request: Request, auth: { userId: number; compan
 
   const companyId = NumericIdSchema.parse(companyIdRaw);
   if (companyId !== auth.companyId) {
-    const isSuperAdmin = await userHasAnyRole(auth.userId, auth.companyId, ["SUPER_ADMIN"]);
+    const access = await checkUserAccess({
+      userId: auth.userId,
+      companyId: auth.companyId,
+      allowedRoles: ["SUPER_ADMIN"]
+    });
+    const isSuperAdmin = access?.isSuperAdmin ?? false;
     if (!isSuperAdmin) {
       throw new Error("COMPANY_MISMATCH");
     }

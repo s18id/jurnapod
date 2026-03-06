@@ -4,7 +4,7 @@
 import { NumericIdSchema, RoleSchema } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
-import { userHasAnyRole } from "../../../src/lib/auth";
+import { checkUserAccess } from "../../../src/lib/auth";
 import { readClientIp } from "../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../src/lib/response";
 import {
@@ -95,7 +95,12 @@ export const POST = withAuth(
       const companyId = input.company_id ?? auth.companyId;
 
       if (companyId !== auth.companyId) {
-        const isSuperAdmin = await userHasAnyRole(auth.userId, auth.companyId, ["SUPER_ADMIN"]);
+        const access = await checkUserAccess({
+          userId: auth.userId,
+          companyId: auth.companyId,
+          allowedRoles: ["SUPER_ADMIN"]
+        });
+        const isSuperAdmin = access?.isSuperAdmin ?? false;
         if (!isSuperAdmin) {
           return errorResponse("INVALID_REQUEST", "Invalid request", 400);
         }

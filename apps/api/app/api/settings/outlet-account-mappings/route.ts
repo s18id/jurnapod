@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { z } from "zod";
+import { ZodError, z } from "zod";
 import type { RowDataPacket } from "mysql2";
-import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
-import { checkUserAccess, userHasOutletAccess } from "../../../../src/lib/auth";
+import { requireAccess, requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
+import { userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 
@@ -24,6 +24,31 @@ const bodySchema = z.object({
     })
   )
 });
+
+const outletGuardSchema = bodySchema.pick({
+  outlet_id: true
+});
+
+const invalidJsonGuardError = new ZodError([
+  {
+    code: z.ZodIssueCode.custom,
+    message: "Invalid request",
+    path: []
+  }
+]);
+
+async function parseOutletIdForGuard(request: Request): Promise<number> {
+  try {
+    const payload = await request.clone().json();
+    return outletGuardSchema.parse(payload).outlet_id;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw invalidJsonGuardError;
+    }
+
+    throw error;
+  }
+}
 
 export const GET = withAuth(
   async (request, auth) => {
@@ -74,23 +99,6 @@ export const PUT = withAuth(
     try {
       const payload = await request.json();
       const parsed = bodySchema.parse(payload);
-      const access = await checkUserAccess({
-        userId: auth.userId,
-        companyId: auth.companyId,
-        allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
-        module: "settings",
-        permission: "update",
-        outletId: parsed.outlet_id
-      });
-      if (!access || !access.hasRole) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      if (!access.hasPermission && !access.isSuperAdmin) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      if (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
 
       const pool = getDbPool();
       const connection = await pool.getConnection();
@@ -124,5 +132,12 @@ export const PUT = withAuth(
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
   },
-  []
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      module: "settings",
+      permission: "update",
+      outletId: (request) => parseOutletIdForGuard(request)
+    })
+  ]
 );
