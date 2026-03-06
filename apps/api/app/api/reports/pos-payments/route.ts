@@ -2,10 +2,30 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
+import { checkUserAccess, listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { listPosPaymentsSummary } from "../../../../src/lib/reports";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
+
+const elevatedRoles = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"] as const;
+
+async function isCashierOnly(auth: { userId: number; companyId: number }): Promise<boolean> {
+  const elevatedAccess = await checkUserAccess({
+    userId: auth.userId,
+    companyId: auth.companyId,
+    allowedRoles: elevatedRoles
+  });
+  if (elevatedAccess?.hasRole) {
+    return false;
+  }
+
+  const cashierAccess = await checkUserAccess({
+    userId: auth.userId,
+    companyId: auth.companyId,
+    allowedRoles: ["CASHIER"]
+  });
+  return cashierAccess?.hasRole ?? false;
+}
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive().optional(),
@@ -49,12 +69,15 @@ export const GET = withAuth(
         outletIds = await listUserOutletIds(auth.userId, auth.companyId);
       }
 
+      const cashierOnly = await isCashierOnly(auth);
+
       const rows = await listPosPaymentsSummary({
         companyId: auth.companyId,
         outletIds,
         dateFrom,
         dateTo,
-        status: parsed.status
+        status: parsed.status,
+        userId: cashierOnly ? auth.userId : undefined
       });
 
       return successResponse({
@@ -62,7 +85,8 @@ export const GET = withAuth(
           outlet_ids: outletIds,
           date_from: dateFrom,
           date_to: dateTo,
-          status: parsed.status
+          status: parsed.status,
+          user_id: cashierOnly ? auth.userId : null
         },
         rows
       });
@@ -77,7 +101,7 @@ export const GET = withAuth(
   },
   [
     requireAccessForOutletQuery({
-      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"],
       module: "reports",
       permission: "read"
     })

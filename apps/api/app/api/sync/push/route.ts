@@ -870,15 +870,17 @@ export const POST = withAuth(
               `INSERT INTO pos_transactions (
                  company_id,
                  outlet_id,
+                 cashier_user_id,
                  client_tx_id,
                  status,
                  trx_at,
                  payload_sha256,
                  payload_hash_version
-               ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 tx.company_id,
                 tx.outlet_id,
+                tx.cashier_user_id,
                 tx.client_tx_id,
                 tx.status,
                 trxAtCanonical,

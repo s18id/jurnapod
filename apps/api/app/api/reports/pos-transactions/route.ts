@@ -2,10 +2,30 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
+import { checkUserAccess, listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { listPosTransactions } from "../../../../src/lib/reports";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
+
+const elevatedRoles = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"] as const;
+
+async function isCashierOnly(auth: { userId: number; companyId: number }): Promise<boolean> {
+  const elevatedAccess = await checkUserAccess({
+    userId: auth.userId,
+    companyId: auth.companyId,
+    allowedRoles: elevatedRoles
+  });
+  if (elevatedAccess?.hasRole) {
+    return false;
+  }
+
+  const cashierAccess = await checkUserAccess({
+    userId: auth.userId,
+    companyId: auth.companyId,
+    allowedRoles: ["CASHIER"]
+  });
+  return cashierAccess?.hasRole ?? false;
+}
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive().optional(),
@@ -57,6 +77,8 @@ export const GET = withAuth(
         outletIds = await listUserOutletIds(auth.userId, auth.companyId);
       }
 
+      const cashierOnly = await isCashierOnly(auth);
+
       const report = await listPosTransactions({
         companyId: auth.companyId,
         outletIds,
@@ -65,6 +87,7 @@ export const GET = withAuth(
         asOf: parsed.as_of,
         asOfId: parsed.as_of_id,
         status: parsed.status,
+        userId: cashierOnly ? auth.userId : undefined,
         limit: parsed.limit,
         offset: parsed.offset
       });
@@ -77,6 +100,7 @@ export const GET = withAuth(
           as_of: report.as_of,
           as_of_id: report.as_of_id,
           status: parsed.status ?? null,
+          user_id: cashierOnly ? auth.userId : null,
           limit: parsed.limit,
           offset: parsed.offset
         },
@@ -94,7 +118,7 @@ export const GET = withAuth(
   },
   [
     requireAccessForOutletQuery({
-      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"],
       module: "reports",
       permission: "read"
     })

@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
+import { randomBytes, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
   createIntegrationTestContext,
@@ -148,8 +149,8 @@ test(
   "reports integration: report endpoints enforce OWNER/ADMIN/ACCOUNTANT allow and CASHIER deny",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
-    
     const createdUserIds = [];
+    const createdPosTransactionIds = [];
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -185,6 +186,7 @@ test(
 
       const companyId = Number(owner.company_id);
       const outletId = Number(owner.outlet_id);
+      const ownerUserId = Number(owner.id);
 
       const [roleRows] = await db.execute(
         `SELECT id, code
@@ -198,6 +200,7 @@ test(
         }
       }
 
+      let cashierUserId = 0;
       for (const roleCode of ["ADMIN", "ACCOUNTANT", "CASHIER"]) {
         const [userInsert] = await db.execute(
           `INSERT INTO users (company_id, email, password_hash, is_active)
@@ -206,6 +209,9 @@ test(
         );
         const userId = Number(userInsert.insertId);
         createdUserIds.push(userId);
+        if (roleCode === "CASHIER") {
+          cashierUserId = userId;
+        }
 
         await db.execute(
           `INSERT INTO user_roles (user_id, role_id)
@@ -221,7 +227,64 @@ test(
 
       }
 
+      assert.ok(cashierUserId > 0, "Cashier fixture not found");
+
       await ensureDailySalesView(db);
+
+      const txRows = [
+        {
+          cashier_user_id: cashierUserId,
+          amount: 100
+        },
+        {
+          cashier_user_id: ownerUserId,
+          amount: 200
+        }
+      ];
+
+      for (const tx of txRows) {
+        const [insertTx] = await db.execute(
+          `INSERT INTO pos_transactions (
+             company_id,
+             outlet_id,
+             cashier_user_id,
+             client_tx_id,
+             status,
+             trx_at,
+             payload_sha256,
+             payload_hash_version
+           ) VALUES (?, ?, ?, ?, 'COMPLETED', NOW(), ?, 1)`,
+          [companyId, outletId, tx.cashier_user_id, randomUUID(), randomBytes(32).toString("hex")]
+        );
+        const posTransactionId = Number(insertTx.insertId);
+        createdPosTransactionIds.push(posTransactionId);
+
+        await db.execute(
+          `INSERT INTO pos_transaction_items (
+             pos_transaction_id,
+             company_id,
+             outlet_id,
+             line_no,
+             item_id,
+             qty,
+             price_snapshot,
+             name_snapshot
+           ) VALUES (?, ?, ?, 1, 1, 1, ?, 'Test Item')`,
+          [posTransactionId, companyId, outletId, tx.amount]
+        );
+
+        await db.execute(
+          `INSERT INTO pos_transaction_payments (
+             pos_transaction_id,
+             company_id,
+             outlet_id,
+             payment_no,
+             method,
+             amount
+           ) VALUES (?, ?, ?, 1, 'CASH', ?)`,
+          [posTransactionId, companyId, outletId, tx.amount]
+        );
+      }
 
       const ownerToken = await loginUser(baseUrl, companyCode, ownerEmail, ownerPassword);
       const adminToken = await loginUser(baseUrl, companyCode, roleEmails.ADMIN, ownerPassword);
@@ -230,9 +293,13 @@ test(
 
       const reportUrls = [
         `/api/reports/pos-transactions?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
+        `/api/reports/pos-payments?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
         `/api/reports/daily-sales?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
         `/api/reports/journals?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
-        `/api/reports/trial-balance?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`
+        `/api/reports/trial-balance?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
+        `/api/reports/general-ledger?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
+        `/api/reports/worksheet?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
+        `/api/reports/profit-loss?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`
       ];
 
       for (const accessToken of [ownerToken, adminToken, accountantToken]) {
@@ -248,7 +315,41 @@ test(
         }
       }
 
-      for (const reportUrl of reportUrls) {
+      const cashierAllowed = reportUrls.slice(0, 3);
+      const cashierDenied = reportUrls.slice(3);
+
+      for (const reportUrl of cashierAllowed) {
+        const response = await fetch(`${baseUrl}${reportUrl}`, {
+          headers: {
+            authorization: `Bearer ${cashierToken}`
+          }
+        });
+        assert.equal(response.status, 200);
+        const body = await response.json();
+        assert.equal(body.success, true);
+
+        if (reportUrl.includes("/pos-transactions")) {
+          assert.equal(body.data.total, 1);
+          assert.equal(body.data.transactions.length, 1);
+          assert.equal(body.data.transactions[0].gross_total, 100);
+        }
+
+        if (reportUrl.includes("/pos-payments")) {
+          const totalAmount = body.data.rows.reduce((acc, row) => acc + row.total_amount, 0);
+          const totalCount = body.data.rows.reduce((acc, row) => acc + row.payment_count, 0);
+          assert.equal(totalAmount, 100);
+          assert.equal(totalCount, 1);
+        }
+
+        if (reportUrl.includes("/daily-sales")) {
+          const grossTotal = body.data.rows.reduce((acc, row) => acc + row.gross_total, 0);
+          const paidTotal = body.data.rows.reduce((acc, row) => acc + row.paid_total, 0);
+          assert.equal(grossTotal, 100);
+          assert.equal(paidTotal, 100);
+        }
+      }
+
+      for (const reportUrl of cashierDenied) {
         const response = await fetch(`${baseUrl}${reportUrl}`, {
           headers: {
             authorization: `Bearer ${cashierToken}`
@@ -260,6 +361,12 @@ test(
         assert.equal(body.error.code, "FORBIDDEN");
       }
     } finally {
+      if (createdPosTransactionIds.length > 0) {
+        for (const txId of createdPosTransactionIds) {
+          await db.execute("DELETE FROM pos_transactions WHERE id = ?", [txId]);
+        }
+      }
+
       for (const userId of createdUserIds) {
         await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [userId]);
         await db.execute("DELETE FROM user_roles WHERE user_id = ?", [userId]);

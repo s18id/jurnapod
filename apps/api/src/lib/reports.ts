@@ -109,6 +109,7 @@ type BaseFilter = {
   outletIds: readonly number[];
   dateFrom: string;
   dateTo: string;
+  userId?: number;
 };
 
 type PosTransactionFilter = BaseFilter & {
@@ -250,20 +251,26 @@ export async function listPosTransactions(filter: PosTransactionFilter) {
     scopeValues.push(filter.status);
   }
 
+  let userClause = "";
+  if (typeof filter.userId === "number") {
+    userClause = " AND pt.cashier_user_id = ?";
+    scopeValues.push(filter.userId);
+  }
+
   const connection = await pool.getConnection();
   try {
     const { rows, countRows, asOfId } = await withConsistentReadSnapshot(connection, async () => {
       let asOfId = filter.asOfId ?? null;
       if (asOfId == null) {
         const [asOfRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT COALESCE(MAX(pt.id), 0) AS as_of_id
-           FROM pos_transactions pt
-           WHERE pt.company_id = ?
-             AND pt.trx_at >= ?
-             AND pt.trx_at < ?
-             AND pt.trx_at <= ?${outletClause.sql}${statusClause}`,
-          [...coreValues, ...scopeValues]
-        );
+            `SELECT COALESCE(MAX(pt.id), 0) AS as_of_id
+             FROM pos_transactions pt
+             WHERE pt.company_id = ?
+               AND pt.trx_at >= ?
+               AND pt.trx_at < ?
+               AND pt.trx_at <= ?${outletClause.sql}${statusClause}${userClause}`,
+           [...coreValues, ...scopeValues]
+         );
         asOfId = Number(asOfRows[0]?.as_of_id ?? 0);
       }
 
@@ -290,15 +297,15 @@ export async function listPosTransactions(filter: PosTransactionFilter) {
            FROM pos_transaction_payments
            GROUP BY pos_transaction_id
           ) p ON p.pos_transaction_id = pt.id
-          WHERE pt.company_id = ?
-            AND pt.trx_at >= ?
-            AND pt.trx_at < ?
-            AND pt.trx_at <= ?
-            AND pt.id <= ?${outletClause.sql}${statusClause}
-          ORDER BY pt.trx_at DESC, pt.id DESC
-          LIMIT ? OFFSET ?`,
-        [...coreValues, asOfId, ...scopeValues, filter.limit, filter.offset]
-      );
+           WHERE pt.company_id = ?
+             AND pt.trx_at >= ?
+             AND pt.trx_at < ?
+             AND pt.trx_at <= ?
+             AND pt.id <= ?${outletClause.sql}${statusClause}${userClause}
+           ORDER BY pt.trx_at DESC, pt.id DESC
+           LIMIT ? OFFSET ?`,
+         [...coreValues, asOfId, ...scopeValues, filter.limit, filter.offset]
+       );
 
       const [countRows] = await connection.execute<RowDataPacket[]>(
         `SELECT COUNT(*) AS total
@@ -307,7 +314,7 @@ export async function listPosTransactions(filter: PosTransactionFilter) {
             AND pt.trx_at >= ?
             AND pt.trx_at < ?
             AND pt.trx_at <= ?
-            AND pt.id <= ?${outletClause.sql}${statusClause}`,
+            AND pt.id <= ?${outletClause.sql}${statusClause}${userClause}`,
         [...coreValues, asOfId, ...scopeValues]
       );
 
@@ -344,6 +351,7 @@ export async function listDailySalesSummary(
   const pool = getDbPool();
   const outletClause = buildOutletInClause(filter.outletIds);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo);
+  const hasUserScope = typeof filter.userId === "number";
 
   const viewValues: Array<number | string> = [
     filter.companyId,
@@ -358,26 +366,42 @@ export async function listDailySalesSummary(
   }
 
   let rows: PosDailyRow[] = [];
-  try {
-    const [viewRows] = await pool.execute<PosDailyRow[]>(
-      `SELECT v.trx_date,
-              v.outlet_id,
-              o.name AS outlet_name,
-              SUM(v.tx_count) AS tx_count,
-              SUM(v.gross_total) AS gross_total,
-              SUM(v.paid_total) AS paid_total
-       FROM v_pos_daily_totals v
-       LEFT JOIN outlets o ON o.id = v.outlet_id
-        WHERE v.company_id = ?
-          AND v.trx_date BETWEEN ? AND ?${outletClause.sql.replaceAll("pt.", "v.")}${statusClause.replaceAll("pt.", "v.")}
-        GROUP BY v.trx_date, v.outlet_id, o.name
-        ORDER BY v.trx_date DESC, v.outlet_id ASC`,
-      viewValues
-    );
-    rows = viewRows;
-  } catch (error) {
-    if (!shouldFallbackDailySalesView(error)) {
-      throw error;
+  if (!hasUserScope) {
+    try {
+      const [viewRows] = await pool.execute<PosDailyRow[]>(
+        `SELECT v.trx_date,
+                v.outlet_id,
+                o.name AS outlet_name,
+                SUM(v.tx_count) AS tx_count,
+                SUM(v.gross_total) AS gross_total,
+                SUM(v.paid_total) AS paid_total
+         FROM v_pos_daily_totals v
+         LEFT JOIN outlets o ON o.id = v.outlet_id
+          WHERE v.company_id = ?
+            AND v.trx_date BETWEEN ? AND ?${outletClause.sql.replaceAll("pt.", "v.")}${statusClause.replaceAll("pt.", "v.")}
+          GROUP BY v.trx_date, v.outlet_id, o.name
+          ORDER BY v.trx_date DESC, v.outlet_id ASC`,
+        viewValues
+      );
+      rows = viewRows;
+    } catch (error) {
+      if (!shouldFallbackDailySalesView(error)) {
+        throw error;
+      }
+    }
+  }
+
+  if (hasUserScope || rows.length === 0) {
+    const userClause = hasUserScope ? " AND pt.cashier_user_id = ?" : "";
+    const fallbackValues: Array<number | string> = [
+      filter.companyId,
+      range.fromStart,
+      range.nextDayStart,
+      ...outletClause.values,
+      ...(filter.status ? [filter.status] : [])
+    ];
+    if (hasUserScope) {
+      fallbackValues.push(filter.userId as number);
     }
 
     const [fallbackRows] = await pool.execute<PosDailyRow[]>(
@@ -403,16 +427,10 @@ export async function listDailySalesSummary(
         ) p ON p.pos_transaction_id = pt.id
         WHERE pt.company_id = ?
           AND pt.trx_at >= ?
-          AND pt.trx_at < ?${outletClause.sql}${statusClause}
+          AND pt.trx_at < ?${outletClause.sql}${statusClause}${userClause}
          GROUP BY DATE(pt.trx_at), pt.outlet_id, o.name
          ORDER BY DATE(pt.trx_at) DESC, pt.outlet_id ASC`,
-      [
-        filter.companyId,
-        range.fromStart,
-        range.nextDayStart,
-        ...outletClause.values,
-        ...(filter.status ? [filter.status] : [])
-      ]
+      fallbackValues
     );
     rows = fallbackRows;
   }
@@ -447,6 +465,12 @@ export async function listPosPaymentsSummary(
     values.push(filter.status);
   }
 
+  let userClause = "";
+  if (typeof filter.userId === "number") {
+    userClause = " AND pt.cashier_user_id = ?";
+    values.push(filter.userId);
+  }
+
   const [rows] = await pool.execute<PosPaymentRow[]>(
     `SELECT pt.outlet_id,
             o.name AS outlet_name,
@@ -456,9 +480,9 @@ export async function listPosPaymentsSummary(
      FROM pos_transaction_payments ptp
      INNER JOIN pos_transactions pt ON pt.id = ptp.pos_transaction_id
      LEFT JOIN outlets o ON o.id = pt.outlet_id
-     WHERE pt.company_id = ?
+      WHERE pt.company_id = ?
        AND pt.trx_at >= ?
-       AND pt.trx_at < ?${outletClause.sql}${statusClause}
+       AND pt.trx_at < ?${outletClause.sql}${statusClause}${userClause}
      GROUP BY pt.outlet_id, o.name, ptp.method
      ORDER BY pt.outlet_id ASC, ptp.method ASC`,
     values
