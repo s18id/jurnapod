@@ -151,9 +151,9 @@ export class RuntimeService {
   async getOfflineSnapshot(
     scope: RuntimeOutletScope
   ): Promise<RuntimeOfflineSnapshot> {
-    // Count pending/failed outbox jobs for this scope
-    const allPendingJobs = await this.storage.listPendingOutboxJobs(10000);
-    const scopedPendingJobs = allPendingJobs.filter(
+    // Count pending/failed outbox jobs for this scope (unsynced = PENDING + FAILED)
+    const allUnsyncedJobs = await this.storage.listUnsyncedOutboxJobs(10000);
+    const scopedUnsyncedJobs = allUnsyncedJobs.filter(
       (job) =>
         job.company_id === scope.company_id &&
         job.outlet_id === scope.outlet_id
@@ -166,7 +166,7 @@ export class RuntimeService {
     });
 
     return {
-      pending_outbox_count: scopedPendingJobs.length,
+      pending_outbox_count: scopedUnsyncedJobs.length,
       has_product_cache: products.length > 0
     };
   }

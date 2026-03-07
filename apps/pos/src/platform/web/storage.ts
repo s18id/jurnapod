@@ -100,6 +100,14 @@ export class WebStorageAdapter implements PosStoragePort {
       .toArray();
   }
 
+  async listUnsyncedOutboxJobs(limit = 100): Promise<OutboxJobRow[]> {
+    return await this.db.outbox_jobs
+      .where("status")
+      .anyOf("PENDING", "FAILED")
+      .limit(limit)
+      .toArray();
+  }
+
   async listDueOutboxJobs(input: {
     now: Date;
     limit?: number;

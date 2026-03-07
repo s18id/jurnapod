@@ -48,6 +48,7 @@ export interface PosStoragePort {
   createOutboxJob(job: OutboxJobRow): Promise<void>;
   getOutboxJob(job_id: string): Promise<OutboxJobRow | undefined>;
   listPendingOutboxJobs(limit?: number): Promise<OutboxJobRow[]>;
+  listUnsyncedOutboxJobs(limit?: number): Promise<OutboxJobRow[]>; // PENDING + FAILED
   listDueOutboxJobs(input: { now: Date; limit?: number }): Promise<OutboxJobRow[]>;
   updateOutboxJob(job_id: string, updates: Partial<OutboxJobRow>): Promise<void>;
   countPendingOutboxJobs(): Promise<number>;

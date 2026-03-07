@@ -45,9 +45,9 @@ export class OutboxService {
       this.storage.countGlobalDueOutboxJobs(now)
     ]);
 
-    // Count failed jobs
-    const allPendingJobs = await this.storage.listPendingOutboxJobs(10000);
-    const failed_count = allPendingJobs.filter(job => job.status === "FAILED").length;
+    // Count failed jobs (unsynced jobs include both PENDING and FAILED)
+    const allUnsyncedJobs = await this.storage.listUnsyncedOutboxJobs(10000);
+    const failed_count = allUnsyncedJobs.filter(job => job.status === "FAILED").length;
 
     return {
       pending_count,
@@ -82,35 +82,35 @@ export class OutboxService {
   }
 
   /**
-   * Check if there are any pending jobs for a specific scope.
+   * Check if there are any unsynced jobs (PENDING or FAILED) for a specific scope.
    */
   async hasPendingJobsForScope(scope: {
     company_id: number;
     outlet_id: number;
   }): Promise<boolean> {
-    const allPending = await this.storage.listPendingOutboxJobs(10000);
-    const scopedPending = allPending.filter(
+    const allUnsynced = await this.storage.listUnsyncedOutboxJobs(10000);
+    const scopedUnsynced = allUnsynced.filter(
       job =>
         job.company_id === scope.company_id &&
         job.outlet_id === scope.outlet_id
     );
-    return scopedPending.length > 0;
+    return scopedUnsynced.length > 0;
   }
 
   /**
-   * Count pending jobs for a specific scope.
+   * Count unsynced jobs (PENDING or FAILED) for a specific scope.
    */
   async countPendingJobsForScope(scope: {
     company_id: number;
     outlet_id: number;
   }): Promise<number> {
-    const allPending = await this.storage.listPendingOutboxJobs(10000);
-    const scopedPending = allPending.filter(
+    const allUnsynced = await this.storage.listUnsyncedOutboxJobs(10000);
+    const scopedUnsynced = allUnsynced.filter(
       job =>
         job.company_id === scope.company_id &&
         job.outlet_id === scope.outlet_id
     );
-    return scopedPending.length;
+    return scopedUnsynced.length;
   }
 
   private toSummary(job: OutboxJobRow): OutboxJobSummary {
