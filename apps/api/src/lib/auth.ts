@@ -276,34 +276,20 @@ export async function findActiveUserTokenProfile(
 
 async function findUserRoleCodes(userId: number, companyId: number): Promise<RoleCode[]> {
   const pool = getDbPool();
-  const [globalRows, outletRows] = await Promise.all([
-    pool.execute<UserRoleRow[]>(
-      `SELECT r.code
-       FROM roles r
-       INNER JOIN user_roles ur ON ur.role_id = r.id
-       INNER JOIN users u ON u.id = ur.user_id
-       WHERE u.id = ?
-         AND u.company_id = ?
-         AND u.is_active = 1
-         AND r.is_global = 1
-       ORDER BY r.code ASC`,
-      [userId, companyId]
-    ),
-    pool.execute<UserRoleRow[]>(
-      `SELECT DISTINCT r.code
-       FROM roles r
-       INNER JOIN user_outlet_roles uor ON uor.role_id = r.id
-       INNER JOIN users u ON u.id = uor.user_id
-       WHERE u.id = ?
-         AND u.company_id = ?
-         AND u.is_active = 1
-       ORDER BY r.code ASC`,
-      [userId, companyId]
-    )
-  ]);
+  const [rows] = await pool.execute<UserRoleRow[]>(
+    `SELECT DISTINCT r.code
+     FROM roles r
+     INNER JOIN user_role_assignments ura ON ura.role_id = r.id
+     INNER JOIN users u ON u.id = ura.user_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND u.is_active = 1
+     ORDER BY r.code ASC`,
+    [userId, companyId]
+  );
 
   const roles = new Set<RoleCode>();
-  for (const row of [...globalRows[0], ...outletRows[0]]) {
+  for (const row of rows) {
     if (roleCodeSet.has(row.code)) {
       roles.add(row.code as RoleCode);
     }
@@ -317,39 +303,30 @@ async function findUserOutlets(
   companyId: number
 ): Promise<AuthenticatedUser["outlets"]> {
   const pool = getDbPool();
-  const [globalRows] = await pool.execute<AccessCheckRow[]>(
-    `SELECT u.id
-     FROM users u
-     INNER JOIN user_roles ur ON ur.user_id = u.id
-     INNER JOIN roles r ON r.id = ur.role_id
-     WHERE u.id = ?
-       AND u.company_id = ?
-       AND u.is_active = 1
-       AND r.is_global = 1
-     LIMIT 1`,
-    [userId, companyId]
+  const [rows] = await pool.execute<UserOutletRow[]>(
+    `SELECT o.id, o.code, o.name
+     FROM outlets o
+     WHERE o.company_id = ?
+       AND EXISTS (
+         SELECT 1
+         FROM user_role_assignments ura
+         INNER JOIN roles r ON r.id = ura.role_id
+         WHERE ura.user_id = ?
+           AND r.is_global = 1
+           AND ura.outlet_id IS NULL
+       )
+     
+     UNION
+     
+     SELECT o.id, o.code, o.name
+     FROM outlets o
+     INNER JOIN user_role_assignments ura ON ura.outlet_id = o.id
+     WHERE ura.user_id = ?
+       AND o.company_id = ?
+     
+     ORDER BY id ASC`,
+    [companyId, userId, userId, companyId]
   );
-
-  const [rows] = globalRows.length > 0
-    ? await pool.execute<UserOutletRow[]>(
-      `SELECT o.id, o.code, o.name
-       FROM outlets o
-       WHERE o.company_id = ?
-       ORDER BY o.id ASC`,
-      [companyId]
-    )
-    : await pool.execute<UserOutletRow[]>(
-      `SELECT DISTINCT o.id, o.code, o.name
-       FROM outlets o
-       INNER JOIN user_outlet_roles uor ON uor.outlet_id = o.id
-       INNER JOIN users u ON u.id = uor.user_id
-       WHERE u.id = ?
-         AND u.company_id = ?
-         AND u.is_active = 1
-         AND o.company_id = ?
-       ORDER BY o.id ASC`,
-      [userId, companyId, companyId]
-    );
 
   return rows.map((row) => ({
     id: row.id,
@@ -366,12 +343,13 @@ async function findUserGlobalRoleCodes(
   const [rows] = await pool.execute<UserRoleRow[]>(
     `SELECT r.code
      FROM roles r
-     INNER JOIN user_roles ur ON ur.role_id = r.id
-     INNER JOIN users u ON u.id = ur.user_id
+     INNER JOIN user_role_assignments ura ON ura.role_id = r.id
+     INNER JOIN users u ON u.id = ura.user_id
      WHERE u.id = ?
        AND u.company_id = ?
        AND u.is_active = 1
        AND r.is_global = 1
+       AND ura.outlet_id IS NULL
      ORDER BY r.code ASC`,
     [userId, companyId]
   );
@@ -391,13 +369,14 @@ async function findUserOutletRoleAssignments(
             o.code AS outlet_code,
             o.name AS outlet_name,
             r.code AS role_code
-     FROM user_outlet_roles uor
-     INNER JOIN outlets o ON o.id = uor.outlet_id
-     INNER JOIN roles r ON r.id = uor.role_id
-     INNER JOIN users u ON u.id = uor.user_id
+     FROM user_role_assignments ura
+     INNER JOIN outlets o ON o.id = ura.outlet_id
+     INNER JOIN roles r ON r.id = ura.role_id
+     INNER JOIN users u ON u.id = ura.user_id
      WHERE u.id = ?
        AND u.company_id = ?
        AND u.is_active = 1
+       AND ura.outlet_id IS NOT NULL
      ORDER BY o.id ASC, r.code ASC`,
     [userId, companyId]
   );
@@ -535,11 +514,12 @@ async function userIsSuperAdmin(userId: number): Promise<boolean> {
   const [rows] = await pool.execute<AccessCheckRow[]>(
     `SELECT u.id
      FROM users u
-     INNER JOIN user_roles ur ON ur.user_id = u.id
-     INNER JOIN roles r ON r.id = ur.role_id
+     INNER JOIN user_role_assignments ura ON ura.user_id = u.id
+     INNER JOIN roles r ON r.id = ura.role_id
      WHERE u.id = ?
        AND u.is_active = 1
        AND r.code = "SUPER_ADMIN"
+       AND ura.outlet_id IS NULL
      LIMIT 1`,
     [userId]
   );
@@ -553,39 +533,32 @@ export async function userHasOutletAccess(
   outletId: number
 ): Promise<boolean> {
   const pool = getDbPool();
-  const [globalRows] = await pool.execute<AccessCheckRow[]>(
-    `SELECT u.id
-     FROM users u
-     INNER JOIN companies c ON c.id = u.company_id
-     INNER JOIN user_roles ur ON ur.user_id = u.id
-     INNER JOIN roles r ON r.id = ur.role_id
-     WHERE u.id = ?
-       AND u.company_id = ?
-       AND u.is_active = 1
-       AND c.deleted_at IS NULL
-       AND r.is_global = 1
-     LIMIT 1`,
-    [userId, companyId]
-  );
-
-  if (globalRows.length > 0) {
-    return true;
-  }
-
   const [rows] = await pool.execute<AccessCheckRow[]>(
-    `SELECT u.id
+    `SELECT 1
      FROM users u
      INNER JOIN companies c ON c.id = u.company_id
-     INNER JOIN user_outlet_roles uor ON uor.user_id = u.id
-     INNER JOIN outlets o ON o.id = uor.outlet_id
      WHERE u.id = ?
        AND u.company_id = ?
        AND u.is_active = 1
        AND c.deleted_at IS NULL
-       AND uor.outlet_id = ?
-       AND o.company_id = ?
+       AND (
+         EXISTS (
+           SELECT 1
+           FROM user_role_assignments ura
+           INNER JOIN roles r ON r.id = ura.role_id
+           WHERE ura.user_id = u.id
+             AND r.is_global = 1
+             AND ura.outlet_id IS NULL
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM user_role_assignments ura
+           WHERE ura.user_id = u.id
+             AND ura.outlet_id = ?
+         )
+       )
      LIMIT 1`,
-    [userId, companyId, outletId, companyId]
+    [userId, companyId, outletId]
   );
 
   return rows.length > 0;
@@ -645,20 +618,22 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
   const selectParts: string[] = [
     `EXISTS(
        SELECT 1
-       FROM user_roles ur
-       INNER JOIN roles r ON r.id = ur.role_id
-       WHERE ur.user_id = u.id
+       FROM user_role_assignments ura
+       INNER JOIN roles r ON r.id = ura.role_id
+       WHERE ura.user_id = u.id
          AND r.code = "SUPER_ADMIN"
+         AND ura.outlet_id IS NULL
      ) AS is_super_admin`
   ];
 
   selectParts.push(
     `EXISTS(
        SELECT 1
-       FROM user_roles ur
-       INNER JOIN roles r ON r.id = ur.role_id
-       WHERE ur.user_id = u.id
+       FROM user_role_assignments ura
+       INNER JOIN roles r ON r.id = ura.role_id
+       WHERE ura.user_id = u.id
          AND r.is_global = 1
+         AND ura.outlet_id IS NULL
      ) AS has_global_role`
   );
   const params: Array<string | number> = [];
@@ -670,18 +645,19 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
         `(
            EXISTS(
              SELECT 1
-             FROM user_roles ur
-             INNER JOIN roles r ON r.id = ur.role_id
-             WHERE ur.user_id = u.id
+             FROM user_role_assignments ura
+             INNER JOIN roles r ON r.id = ura.role_id
+             WHERE ura.user_id = u.id
                AND r.is_global = 1
+               AND ura.outlet_id IS NULL
                AND r.code IN (${rolePlaceholders})
            ) OR EXISTS(
              SELECT 1
-             FROM user_outlet_roles uor
-             INNER JOIN roles r ON r.id = uor.role_id
-             INNER JOIN outlets o ON o.id = uor.outlet_id
-             WHERE uor.user_id = u.id
-               AND uor.outlet_id = ?
+             FROM user_role_assignments ura
+             INNER JOIN roles r ON r.id = ura.role_id
+             INNER JOIN outlets o ON o.id = ura.outlet_id
+             WHERE ura.user_id = u.id
+               AND ura.outlet_id = ?
                AND o.company_id = u.company_id
                AND r.code IN (${rolePlaceholders})
            )
@@ -693,17 +669,18 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
         `(
            EXISTS(
              SELECT 1
-             FROM user_roles ur
-             INNER JOIN roles r ON r.id = ur.role_id
-             WHERE ur.user_id = u.id
+             FROM user_role_assignments ura
+             INNER JOIN roles r ON r.id = ura.role_id
+             WHERE ura.user_id = u.id
                AND r.is_global = 1
+               AND ura.outlet_id IS NULL
                AND r.code IN (${rolePlaceholders})
            ) OR EXISTS(
              SELECT 1
-             FROM user_outlet_roles uor
-             INNER JOIN roles r ON r.id = uor.role_id
-             INNER JOIN outlets o ON o.id = uor.outlet_id
-             WHERE uor.user_id = u.id
+             FROM user_role_assignments ura
+             INNER JOIN roles r ON r.id = ura.role_id
+             INNER JOIN outlets o ON o.id = ura.outlet_id
+             WHERE ura.user_id = u.id
                AND o.company_id = u.company_id
                AND r.code IN (${rolePlaceholders})
            )
@@ -720,22 +697,23 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
         `(
            EXISTS(
              SELECT 1
-             FROM user_roles ur
-             INNER JOIN roles r ON r.id = ur.role_id
+             FROM user_role_assignments ura
+             INNER JOIN roles r ON r.id = ura.role_id
              INNER JOIN module_roles mr ON mr.role_id = r.id
-             WHERE ur.user_id = u.id
+             WHERE ura.user_id = u.id
                AND r.is_global = 1
+               AND ura.outlet_id IS NULL
                AND mr.module = ?
                AND mr.company_id = u.company_id
                AND (mr.permission_mask & ?) <> 0
            ) OR EXISTS(
              SELECT 1
-             FROM user_outlet_roles uor
-             INNER JOIN roles r ON r.id = uor.role_id
+             FROM user_role_assignments ura
+             INNER JOIN roles r ON r.id = ura.role_id
              INNER JOIN module_roles mr ON mr.role_id = r.id
-             INNER JOIN outlets o ON o.id = uor.outlet_id
-             WHERE uor.user_id = u.id
-               AND uor.outlet_id = ?
+             INNER JOIN outlets o ON o.id = ura.outlet_id
+             WHERE ura.user_id = u.id
+               AND ura.outlet_id = ?
                AND o.company_id = u.company_id
                AND mr.module = ?
                AND mr.company_id = u.company_id
@@ -749,21 +727,22 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
         `(
            EXISTS(
              SELECT 1
-             FROM user_roles ur
-             INNER JOIN roles r ON r.id = ur.role_id
+             FROM user_role_assignments ura
+             INNER JOIN roles r ON r.id = ura.role_id
              INNER JOIN module_roles mr ON mr.role_id = r.id
-             WHERE ur.user_id = u.id
+             WHERE ura.user_id = u.id
                AND r.is_global = 1
+               AND ura.outlet_id IS NULL
                AND mr.module = ?
                AND mr.company_id = u.company_id
                AND (mr.permission_mask & ?) <> 0
            ) OR EXISTS(
              SELECT 1
-             FROM user_outlet_roles uor
-             INNER JOIN roles r ON r.id = uor.role_id
+             FROM user_role_assignments ura
+             INNER JOIN roles r ON r.id = ura.role_id
              INNER JOIN module_roles mr ON mr.role_id = r.id
-             INNER JOIN outlets o ON o.id = uor.outlet_id
-             WHERE uor.user_id = u.id
+             INNER JOIN outlets o ON o.id = ura.outlet_id
+             WHERE ura.user_id = u.id
                AND o.company_id = u.company_id
                AND mr.module = ?
                AND mr.company_id = u.company_id
@@ -779,10 +758,10 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
     selectParts.push(
       `EXISTS(
          SELECT 1
-         FROM user_outlet_roles uor
-         INNER JOIN outlets o ON o.id = uor.outlet_id
-         WHERE uor.user_id = u.id
-           AND uor.outlet_id = ?
+         FROM user_role_assignments ura
+         INNER JOIN outlets o ON o.id = ura.outlet_id
+         WHERE ura.user_id = u.id
+           AND ura.outlet_id = ?
            AND o.company_id = u.company_id
        ) AS has_outlet_access`
     );
@@ -817,35 +796,6 @@ export async function checkUserAccess(options: AccessCheckOptions): Promise<Acce
 }
 
 export async function listUserOutletIds(userId: number, companyId: number): Promise<number[]> {
-  const pool = getDbPool();
-  const [globalRows] = await pool.execute<AccessCheckRow[]>(
-    `SELECT u.id
-     FROM users u
-     INNER JOIN companies c ON c.id = u.company_id
-     INNER JOIN user_roles ur ON ur.user_id = u.id
-     INNER JOIN roles r ON r.id = ur.role_id
-     WHERE u.id = ?
-       AND u.company_id = ?
-       AND u.is_active = 1
-       AND c.deleted_at IS NULL
-       AND r.is_global = 1
-     LIMIT 1`,
-    [userId, companyId]
-  );
-
-  if (globalRows.length > 0) {
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT o.id
-       FROM outlets o
-       INNER JOIN companies c ON c.id = o.company_id
-       WHERE o.company_id = ?
-         AND c.deleted_at IS NULL
-       ORDER BY o.id ASC`,
-      [companyId]
-    );
-    return rows.map((row) => Number(row.id));
-  }
-
   const outlets = await findUserOutlets(userId, companyId);
-  return outlets.map((outlet) => Number(outlet.id));
+  return outlets.map((outlet) => outlet.id);
 }
