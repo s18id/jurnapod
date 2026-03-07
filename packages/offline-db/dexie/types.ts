@@ -7,11 +7,24 @@ export type LocalSaleStatus = "DRAFT" | "COMPLETED" | "VOID" | "REFUND";
 
 export type SaleSyncStatus = "LOCAL_ONLY" | "PENDING" | "SENT" | "FAILED";
 
+export type OrderServiceType = "TAKEAWAY" | "DINE_IN";
+
+export type OrderStatus = "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
+
 export type OutboxJobType = "SYNC_POS_TX";
 
 export type OutboxJobStatus = "PENDING" | "SENT" | "FAILED";
 
 export type OutletTableStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
+
+export type ReservationStatus =
+  | "BOOKED"
+  | "CONFIRMED"
+  | "ARRIVED"
+  | "SEATED"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "NO_SHOW";
 
 export interface ProductCacheRow {
   pk: string;
@@ -44,6 +57,27 @@ export interface OutletTableRow {
   updated_at: string;
 }
 
+export interface ReservationRow {
+  pk: string;
+  reservation_id: number;
+  company_id: number;
+  outlet_id: number;
+  table_id: number | null;
+  customer_name: string;
+  customer_phone: string | null;
+  guest_count: number;
+  reservation_at: string;
+  duration_minutes: number | null;
+  status: ReservationStatus;
+  notes: string | null;
+  linked_order_id: string | null;
+  created_at: string;
+  updated_at: string;
+  arrived_at: string | null;
+  seated_at: string | null;
+  cancelled_at: string | null;
+}
+
 export interface SyncMetadataRow {
   pk: string;
   company_id: number;
@@ -70,6 +104,14 @@ export interface SaleRow {
   company_id: number;
   outlet_id: number;
   cashier_user_id: number;
+  service_type?: OrderServiceType;
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: OrderStatus;
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
   status: LocalSaleStatus;
   sync_status: SaleSyncStatus;
   trx_at: string;
@@ -133,6 +175,12 @@ export interface CreateSaleDraftInput {
   company_id: number;
   outlet_id: number;
   cashier_user_id: number;
+  service_type?: OrderServiceType;
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: OrderStatus;
+  notes?: string | null;
   opened_at?: string;
 }
 
@@ -167,6 +215,14 @@ export interface CompleteSaleInput {
   items: CompleteSaleItemInput[];
   payments: CompleteSalePaymentInput[];
   totals: CompleteSaleTotalsInput;
+  service_type?: OrderServiceType;
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: OrderStatus;
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
   trx_at?: string;
 }
 

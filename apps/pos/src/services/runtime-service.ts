@@ -10,7 +10,7 @@
 
 import type { PosStoragePort } from "../ports/storage-port.js";
 import type { NetworkPort } from "../ports/network-port.js";
-import type { OutletTableRow, ProductCacheRow } from "@jurnapod/offline-db/dexie";
+import type { OutletTableRow, ProductCacheRow, ReservationRow } from "@jurnapod/offline-db/dexie";
 
 export type RuntimeSyncBadgeState = "Offline" | "Pending" | "Synced";
 
@@ -54,6 +54,48 @@ export interface RuntimeOutletTable {
   capacity: number | null;
   status: RuntimeTableStatus;
   updated_at: string;
+}
+
+export type RuntimeReservationStatus = ReservationRow["status"];
+
+export interface RuntimeReservation {
+  reservation_id: number;
+  company_id: number;
+  outlet_id: number;
+  table_id: number | null;
+  customer_name: string;
+  customer_phone: string | null;
+  guest_count: number;
+  reservation_at: string;
+  duration_minutes: number | null;
+  status: RuntimeReservationStatus;
+  notes: string | null;
+  linked_order_id: string | null;
+  created_at: string;
+  updated_at: string;
+  arrived_at: string | null;
+  seated_at: string | null;
+  cancelled_at: string | null;
+}
+
+export interface CreateRuntimeReservationInput {
+  customer_name: string;
+  customer_phone?: string | null;
+  guest_count: number;
+  reservation_at: string;
+  duration_minutes?: number | null;
+  table_id?: number | null;
+  notes?: string | null;
+}
+
+export interface UpdateRuntimeReservationInput {
+  customer_name?: string;
+  customer_phone?: string | null;
+  guest_count?: number;
+  reservation_at?: string;
+  duration_minutes?: number | null;
+  table_id?: number | null;
+  notes?: string | null;
 }
 
 function nowIso(): string {
@@ -104,6 +146,92 @@ const DEFAULT_OUTLET_TABLES: Array<Omit<RuntimeOutletTable, "company_id" | "outl
     updated_at: "2026-03-07T00:00:00.000Z"
   }
 ];
+
+const DEFAULT_OUTLET_RESERVATIONS: Array<Omit<RuntimeReservation, "company_id" | "outlet_id">> = [
+  {
+    reservation_id: 1,
+    table_id: 2,
+    customer_name: "Ardi Pranata",
+    customer_phone: "+628111000001",
+    guest_count: 4,
+    reservation_at: "2026-03-07T12:00:00.000Z",
+    duration_minutes: 90,
+    status: "BOOKED",
+    notes: "Birthday setup",
+    linked_order_id: null,
+    created_at: "2026-03-07T08:00:00.000Z",
+    updated_at: "2026-03-07T08:00:00.000Z",
+    arrived_at: null,
+    seated_at: null,
+    cancelled_at: null
+  },
+  {
+    reservation_id: 2,
+    table_id: null,
+    customer_name: "Sari Dewi",
+    customer_phone: "+628111000002",
+    guest_count: 2,
+    reservation_at: "2026-03-07T13:30:00.000Z",
+    duration_minutes: 60,
+    status: "CONFIRMED",
+    notes: null,
+    linked_order_id: null,
+    created_at: "2026-03-07T08:15:00.000Z",
+    updated_at: "2026-03-07T08:15:00.000Z",
+    arrived_at: null,
+    seated_at: null,
+    cancelled_at: null
+  }
+];
+
+const RESERVATION_FINAL_STATUSES: RuntimeReservationStatus[] = ["COMPLETED", "CANCELLED", "NO_SHOW"];
+
+function mapReservationRow(row: ReservationRow): RuntimeReservation {
+  return {
+    reservation_id: row.reservation_id,
+    company_id: row.company_id,
+    outlet_id: row.outlet_id,
+    table_id: row.table_id,
+    customer_name: row.customer_name,
+    customer_phone: row.customer_phone,
+    guest_count: row.guest_count,
+    reservation_at: row.reservation_at,
+    duration_minutes: row.duration_minutes,
+    status: row.status,
+    notes: row.notes,
+    linked_order_id: row.linked_order_id,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    arrived_at: row.arrived_at,
+    seated_at: row.seated_at,
+    cancelled_at: row.cancelled_at
+  };
+}
+
+function isReservationFinalStatus(status: RuntimeReservationStatus): boolean {
+  return RESERVATION_FINAL_STATUSES.includes(status);
+}
+
+function canTransitionReservationStatus(
+  fromStatus: RuntimeReservationStatus,
+  toStatus: RuntimeReservationStatus
+): boolean {
+  if (fromStatus === toStatus) {
+    return true;
+  }
+
+  const transitions: Record<RuntimeReservationStatus, RuntimeReservationStatus[]> = {
+    BOOKED: ["CONFIRMED", "ARRIVED", "CANCELLED", "NO_SHOW"],
+    CONFIRMED: ["ARRIVED", "CANCELLED", "NO_SHOW"],
+    ARRIVED: ["SEATED", "CANCELLED", "NO_SHOW"],
+    SEATED: ["COMPLETED"],
+    COMPLETED: [],
+    CANCELLED: [],
+    NO_SHOW: []
+  };
+
+  return transitions[fromStatus].includes(toStatus);
+}
 
 export class RuntimeService {
   constructor(
@@ -338,5 +466,194 @@ export class RuntimeService {
       status: updated.status,
       updated_at: updated.updated_at
     };
+  }
+
+  async getOutletReservations(scope: RuntimeOutletScope): Promise<RuntimeReservation[]> {
+    const existingRows = await this.storage.getReservationsByOutlet({
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id
+    });
+
+    if (existingRows.length > 0) {
+      return existingRows.map(mapReservationRow);
+    }
+
+    const seededRows: ReservationRow[] = DEFAULT_OUTLET_RESERVATIONS.map((reservation) => ({
+      pk: `${scope.company_id}:${scope.outlet_id}:${reservation.reservation_id}`,
+      reservation_id: reservation.reservation_id,
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id,
+      table_id: reservation.table_id,
+      customer_name: reservation.customer_name,
+      customer_phone: reservation.customer_phone,
+      guest_count: reservation.guest_count,
+      reservation_at: reservation.reservation_at,
+      duration_minutes: reservation.duration_minutes,
+      status: reservation.status,
+      notes: reservation.notes,
+      linked_order_id: reservation.linked_order_id,
+      created_at: reservation.created_at,
+      updated_at: reservation.updated_at,
+      arrived_at: reservation.arrived_at,
+      seated_at: reservation.seated_at,
+      cancelled_at: reservation.cancelled_at
+    }));
+
+    await this.storage.upsertReservations(seededRows);
+
+    return seededRows.map(mapReservationRow);
+  }
+
+  async createOutletReservation(
+    scope: RuntimeOutletScope,
+    input: CreateRuntimeReservationInput
+  ): Promise<RuntimeReservation> {
+    const now = nowIso();
+    const reservationRows = await this.storage.getReservationsByOutlet(scope);
+    const nextReservationId = reservationRows.reduce((max, row) => Math.max(max, row.reservation_id), 0) + 1;
+
+    const customerName = input.customer_name.trim();
+    if (!customerName) {
+      throw new Error("Reservation customer_name is required");
+    }
+
+    if (!Number.isInteger(input.guest_count) || input.guest_count <= 0) {
+      throw new Error("Reservation guest_count must be a positive integer");
+    }
+
+    const reservationAtMs = Date.parse(input.reservation_at);
+    if (!Number.isFinite(reservationAtMs)) {
+      throw new Error("Reservation reservation_at must be a valid datetime");
+    }
+
+    const row: ReservationRow = {
+      pk: `${scope.company_id}:${scope.outlet_id}:${nextReservationId}`,
+      reservation_id: nextReservationId,
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id,
+      table_id: input.table_id ?? null,
+      customer_name: customerName,
+      customer_phone: input.customer_phone?.trim() || null,
+      guest_count: input.guest_count,
+      reservation_at: new Date(reservationAtMs).toISOString(),
+      duration_minutes: input.duration_minutes ?? null,
+      status: "BOOKED",
+      notes: input.notes?.trim() || null,
+      linked_order_id: null,
+      created_at: now,
+      updated_at: now,
+      arrived_at: null,
+      seated_at: null,
+      cancelled_at: null
+    };
+
+    if (row.table_id) {
+      const tableRows = await this.storage.getOutletTablesByOutlet(scope);
+      const targetTable = tableRows.find((table) => table.table_id === row.table_id);
+      if (!targetTable || targetTable.status === "OCCUPIED" || targetTable.status === "UNAVAILABLE" || targetTable.status === "RESERVED") {
+        throw new Error("Selected table is not assignable");
+      }
+    }
+
+    await this.storage.upsertReservations([row]);
+
+    if (row.table_id) {
+      await this.setOutletTableStatus(scope, row.table_id, "RESERVED");
+    }
+
+    return mapReservationRow(row);
+  }
+
+  async assignReservationTable(
+    scope: RuntimeOutletScope,
+    reservationId: number,
+    tableId: number | null
+  ): Promise<RuntimeReservation | null> {
+    const [reservationRows, tableRows] = await Promise.all([
+      this.storage.getReservationsByOutlet(scope),
+      this.storage.getOutletTablesByOutlet(scope)
+    ]);
+
+    const target = reservationRows.find((row) => row.reservation_id === reservationId);
+    if (!target || isReservationFinalStatus(target.status)) {
+      return null;
+    }
+
+    if (tableId) {
+      const table = tableRows.find((row) => row.table_id === tableId);
+      const reservedByAnotherReservation = reservationRows.some(
+        (reservation) =>
+          reservation.reservation_id !== reservationId
+          && reservation.table_id === tableId
+          && !isReservationFinalStatus(reservation.status)
+      );
+      if (
+        !table
+        || table.status === "OCCUPIED"
+        || table.status === "UNAVAILABLE"
+        || reservedByAnotherReservation
+      ) {
+        throw new Error("Selected table is not assignable");
+      }
+    }
+
+    if (target.table_id && target.table_id !== tableId) {
+      await this.setOutletTableStatus(scope, target.table_id, "AVAILABLE");
+    }
+
+    if (tableId) {
+      await this.setOutletTableStatus(scope, tableId, "RESERVED");
+    }
+
+    const updated: ReservationRow = {
+      ...target,
+      table_id: tableId,
+      updated_at: nowIso()
+    };
+
+    await this.storage.upsertReservations([updated]);
+    return mapReservationRow(updated);
+  }
+
+  async updateReservationStatus(
+    scope: RuntimeOutletScope,
+    reservationId: number,
+    status: RuntimeReservationStatus
+  ): Promise<RuntimeReservation | null> {
+    const rows = await this.storage.getReservationsByOutlet(scope);
+    const target = rows.find((row) => row.reservation_id === reservationId);
+    if (!target) {
+      return null;
+    }
+
+    if (!canTransitionReservationStatus(target.status, status)) {
+      throw new Error(`Invalid reservation transition: ${target.status} -> ${status}`);
+    }
+
+    if (status === "SEATED" && !target.table_id) {
+      throw new Error("Seated reservation requires table assignment");
+    }
+
+    const timestamp = nowIso();
+    const updated: ReservationRow = {
+      ...target,
+      status,
+      updated_at: timestamp,
+      arrived_at: status === "ARRIVED" ? timestamp : target.arrived_at,
+      seated_at: status === "SEATED" ? timestamp : target.seated_at,
+      cancelled_at: status === "CANCELLED" || status === "NO_SHOW" ? timestamp : target.cancelled_at
+    };
+
+    if (updated.table_id) {
+      if (status === "SEATED") {
+        await this.setOutletTableStatus(scope, updated.table_id, "OCCUPIED");
+      }
+      if (status === "CANCELLED" || status === "NO_SHOW" || status === "COMPLETED") {
+        await this.setOutletTableStatus(scope, updated.table_id, "AVAILABLE");
+      }
+    }
+
+    await this.storage.upsertReservations([updated]);
+    return mapReservationRow(updated);
   }
 }

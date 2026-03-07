@@ -2607,3 +2607,239 @@ localServerTest(
     }
   }
 );
+
+localServerTest(
+  "sync push integration: dine-in metadata is persisted and reservation lifecycle is closed",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    const createdClientTxIds = [];
+    let companyId = 0;
+    let outletId = 0;
+    let ownerUserId = 0;
+    let tableId = 0;
+    let reservationId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      ownerUserId = Number(owner.id);
+      companyId = Number(owner.company_id);
+      outletId = Number(owner.outlet_id);
+
+      const tableCode = `ITBL${Date.now().toString(36)}`.slice(0, 12).toUpperCase();
+      const [tableInsert] = await db.execute(
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'RESERVED')`,
+        [companyId, outletId, tableCode, "Integration Table", "Main", 4]
+      );
+      tableId = Number(tableInsert.insertId);
+
+      const reservationAt = new Date(Date.now() + 30 * 60_000).toISOString().slice(0, 19).replace("T", " ");
+      const [reservationInsert] = await db.execute(
+        `INSERT INTO reservations (
+           company_id,
+           outlet_id,
+           table_id,
+           customer_name,
+           customer_phone,
+           guest_count,
+           reservation_at,
+           duration_minutes,
+           status,
+           notes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SEATED', ?)`,
+        [companyId, outletId, tableId, "Integration Guest", "+620000000001", 4, reservationAt, 90, "Window side"]
+      );
+      reservationId = Number(reservationInsert.insertId);
+
+      const baseUrl = testContext.baseUrl;
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const missingTableClientTxId = randomUUID();
+      const missingTableResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            {
+              ...buildSyncTransaction({
+                clientTxId: missingTableClientTxId,
+                companyId,
+                outletId,
+                cashierUserId: ownerUserId,
+                trxAt: new Date().toISOString()
+              }),
+              service_type: "DINE_IN",
+              table_id: null,
+              reservation_id: null,
+              guest_count: 2,
+              order_status: "READY_TO_PAY",
+              opened_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+              closed_at: new Date().toISOString(),
+              notes: "Missing table"
+            }
+          ]
+        })
+      });
+      assert.equal(missingTableResponse.status, 200);
+      const missingTableBody = await parseJsonResponse(missingTableResponse);
+      assert.equal(missingTableBody.success, true);
+      assert.deepEqual(missingTableBody.results, [
+        {
+          client_tx_id: missingTableClientTxId,
+          result: "ERROR",
+          message: "DINE_IN requires table_id"
+        }
+      ]);
+
+      const dineInClientTxId = randomUUID();
+      const openedAt = new Date(Date.now() - 10 * 60_000).toISOString();
+      const closedAt = new Date().toISOString();
+      const dineInResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            {
+              ...buildSyncTransaction({
+                clientTxId: dineInClientTxId,
+                companyId,
+                outletId,
+                cashierUserId: ownerUserId,
+                trxAt: closedAt
+              }),
+              service_type: "DINE_IN",
+              table_id: tableId,
+              reservation_id: reservationId,
+              guest_count: 4,
+              order_status: "COMPLETED",
+              opened_at: openedAt,
+              closed_at: closedAt,
+              notes: "Integration dine-in close"
+            }
+          ]
+        })
+      });
+      assert.equal(dineInResponse.status, 200);
+      const dineInBody = await parseJsonResponse(dineInResponse);
+      assert.equal(dineInBody.success, true);
+      assert.deepEqual(dineInBody.results, [
+        {
+          client_tx_id: dineInClientTxId,
+          result: "OK"
+        }
+      ]);
+      createdClientTxIds.push(dineInClientTxId);
+
+      const [txRows] = await db.execute(
+        `SELECT service_type, table_id, reservation_id, guest_count, order_status, notes,
+                DATE_FORMAT(opened_at, '%Y-%m-%d %H:%i:%s') AS opened_at,
+                DATE_FORMAT(closed_at, '%Y-%m-%d %H:%i:%s') AS closed_at
+         FROM pos_transactions
+         WHERE client_tx_id = ?
+         LIMIT 1`,
+        [dineInClientTxId]
+      );
+      assert.equal(txRows.length, 1);
+      assert.equal(txRows[0].service_type, "DINE_IN");
+      assert.equal(Number(txRows[0].table_id), tableId);
+      assert.equal(Number(txRows[0].reservation_id), reservationId);
+      assert.equal(Number(txRows[0].guest_count), 4);
+      assert.equal(txRows[0].order_status, "COMPLETED");
+      assert.equal(txRows[0].notes, "Integration dine-in close");
+      assert.equal(txRows[0].opened_at, toMysqlDateTime(openedAt));
+      assert.equal(txRows[0].closed_at, toMysqlDateTime(closedAt));
+
+      const [reservationRows] = await db.execute(
+        `SELECT status, linked_order_id
+         FROM reservations
+         WHERE company_id = ? AND outlet_id = ? AND id = ?
+         LIMIT 1`,
+        [companyId, outletId, reservationId]
+      );
+      assert.equal(reservationRows.length, 1);
+      assert.equal(reservationRows[0].status, "COMPLETED");
+      assert.equal(reservationRows[0].linked_order_id, dineInClientTxId);
+
+      const [tableRows] = await db.execute(
+        `SELECT status
+         FROM outlet_tables
+         WHERE company_id = ? AND outlet_id = ? AND id = ?
+         LIMIT 1`,
+        [companyId, outletId, tableId]
+      );
+      assert.equal(tableRows.length, 1);
+      assert.equal(tableRows[0].status, "AVAILABLE");
+    } finally {
+      for (const clientTxId of createdClientTxIds) {
+        await cleanupSyncPushPersistedArtifacts(db, clientTxId);
+      }
+
+      if (reservationId > 0) {
+        await db.execute(
+          `DELETE FROM reservations
+           WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+          [companyId, outletId, reservationId]
+        );
+      }
+
+      if (tableId > 0) {
+        await db.execute(
+          `DELETE FROM outlet_tables
+           WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+          [companyId, outletId, tableId]
+        );
+      }
+    }
+  }
+);

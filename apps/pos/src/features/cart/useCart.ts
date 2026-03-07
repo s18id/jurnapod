@@ -7,9 +7,17 @@ import { normalizeMoney, computeCartTotals, type CartTotals } from "../../shared
 
 export type OrderServiceType = "TAKEAWAY" | "DINE_IN";
 
+export type OrderLifecycleStatus = "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
+
 export interface ActiveOrderContextState {
   service_type: OrderServiceType;
   table_id: number | null;
+  reservation_id: number | null;
+  guest_count: number | null;
+  order_status: OrderLifecycleStatus;
+  opened_at: string;
+  closed_at: string | null;
+  notes: string | null;
 }
 
 export interface CartLineState {
@@ -41,12 +49,33 @@ export interface UseCartReturn {
   activeOrderContext: ActiveOrderContextState;
   setServiceType: (serviceType: OrderServiceType) => void;
   setActiveTableId: (tableId: number | null) => void;
+  setOrderReservationId: (reservationId: number | null) => void;
+  setGuestCount: (guestCount: number | null) => void;
+  setOrderStatus: (status: OrderLifecycleStatus) => void;
+  setOrderNotes: (notes: string | null) => void;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function createDefaultActiveOrderContext(): ActiveOrderContextState {
+  return {
+    service_type: "TAKEAWAY",
+    table_id: null,
+    reservation_id: null,
+    guest_count: null,
+    order_status: "OPEN",
+    opened_at: nowIso(),
+    closed_at: null,
+    notes: null
+  };
 }
 
 export function useCart({
   initialCart = {},
   paidAmount: initialPaidAmount = 0,
-  activeOrderContext: initialOrderContext = { service_type: "TAKEAWAY", table_id: null }
+  activeOrderContext: initialOrderContext = createDefaultActiveOrderContext()
 }: UseCartOptions = {}): UseCartReturn {
   const [cart, setCart] = React.useState<CartState>(initialCart);
   const [paidAmount, setPaidAmount] = React.useState<number>(initialPaidAmount);
@@ -88,20 +117,54 @@ export function useCart({
   const clearCart = useCallback(() => {
     setCart({});
     setPaidAmount(0);
-    setActiveOrderContext({ service_type: "TAKEAWAY", table_id: null });
+    setActiveOrderContext(createDefaultActiveOrderContext());
   }, []);
 
   const setServiceType = useCallback((serviceType: OrderServiceType) => {
     setActiveOrderContext((previous) => ({
+      ...previous,
       service_type: serviceType,
-      table_id: serviceType === "TAKEAWAY" ? null : previous.table_id
+      table_id: serviceType === "TAKEAWAY" ? null : previous.table_id,
+      reservation_id: serviceType === "TAKEAWAY" ? null : previous.reservation_id,
+      guest_count: serviceType === "TAKEAWAY" ? null : previous.guest_count
     }));
   }, []);
 
   const setActiveTableId = useCallback((tableId: number | null) => {
     setActiveOrderContext((previous) => ({
+      ...previous,
       service_type: tableId ? "DINE_IN" : previous.service_type,
       table_id: tableId
+    }));
+  }, []);
+
+  const setOrderReservationId = useCallback((reservationId: number | null) => {
+    setActiveOrderContext((previous) => ({
+      ...previous,
+      reservation_id: reservationId,
+      service_type: reservationId ? "DINE_IN" : previous.service_type
+    }));
+  }, []);
+
+  const setGuestCount = useCallback((guestCount: number | null) => {
+    setActiveOrderContext((previous) => ({
+      ...previous,
+      guest_count: guestCount
+    }));
+  }, []);
+
+  const setOrderStatus = useCallback((status: OrderLifecycleStatus) => {
+    setActiveOrderContext((previous) => ({
+      ...previous,
+      order_status: status,
+      closed_at: status === "COMPLETED" || status === "CANCELLED" ? nowIso() : previous.closed_at
+    }));
+  }, []);
+
+  const setOrderNotes = useCallback((notes: string | null) => {
+    setActiveOrderContext((previous) => ({
+      ...previous,
+      notes
     }));
   }, []);
 
@@ -118,6 +181,10 @@ export function useCart({
     paidAmount,
     activeOrderContext,
     setServiceType,
-    setActiveTableId
+    setActiveTableId,
+    setOrderReservationId,
+    setGuestCount,
+    setOrderStatus,
+    setOrderNotes
   };
 }

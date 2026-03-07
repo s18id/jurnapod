@@ -6,12 +6,14 @@ import type {
   RuntimeOutletScope,
   RuntimeSyncBadgeState,
   RuntimeProductCatalogItem,
-  RuntimeOutletTable
+  RuntimeOutletTable,
+  RuntimeReservation
 } from "../services/runtime-service.js";
 import type {
   ActiveOrderContextState,
   CartLineState,
   CartState,
+  OrderLifecycleStatus,
   OrderServiceType
 } from "../features/cart/useCart.js";
 import type { CartTotals } from "../shared/utils/money.js";
@@ -40,8 +42,16 @@ export interface PosAppStateValue {
   activeOrderContext: ActiveOrderContextState;
   setServiceType: (serviceType: OrderServiceType) => void;
   setActiveTableId: (tableId: number | null) => void;
+  setOrderReservationId: (reservationId: number | null) => void;
+  setGuestCount: (guestCount: number | null) => void;
+  setOrderStatus: (status: OrderLifecycleStatus) => void;
+  setOrderNotes: (notes: string | null) => void;
   outletTables: RuntimeOutletTable[];
   setOutletTables: Dispatch<SetStateAction<RuntimeOutletTable[]>>;
+  outletReservations: RuntimeReservation[];
+  setOutletReservations: Dispatch<SetStateAction<RuntimeReservation[]>>;
+  activeReservationId: number | null;
+  setActiveReservationId: Dispatch<SetStateAction<number | null>>;
 }
 
 export const PosAppStateContext = createContext<PosAppStateValue | null>(null);

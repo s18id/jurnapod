@@ -11,13 +11,14 @@ import {
   useLocation
 } from "react-router-dom";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
-import type { RuntimeOutletScope, RuntimeOutletTable } from "../services/runtime-service.js";
+import type { RuntimeOutletScope, RuntimeOutletTable, RuntimeReservation } from "../services/runtime-service.js";
 import { routes, mobileTabs, type RouterContextValue, type ProtectedRouteProps } from "./routes.js";
 import { TabBar } from "../shared/components/TabBar.js";
 import { LoginPage } from "../pages/LoginPage.js";
 import { CheckoutPage } from "../pages/CheckoutPage.js";
 import { ProductsPage } from "../pages/ProductsPage.js";
 import { TablesPage } from "../pages/TablesPage.js";
+import { ReservationsPage } from "../pages/ReservationsPage.js";
 import { CartPage } from "../pages/CartPage.js";
 import { SettingsPage } from "../pages/SettingsPage.js";
 import { SyncBadge } from "../features/sync/SyncBadge.js";
@@ -81,8 +82,17 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
     clearCart,
     setPaidAmount,
     activeOrderContext,
-    setOutletTables
+    outletReservations,
+    activeReservationId,
+    setActiveReservationId,
+    setOutletTables,
+    setOutletReservations
   } = usePosAppState();
+
+  const activeReservation = useMemo(
+    () => outletReservations.find((row) => row.reservation_id === activeReservationId) ?? null,
+    [activeReservationId, outletReservations]
+  );
 
   const activePageLabel = useMemo(() => {
     const activeTab = mobileTabs.find((tab) => tab.path === location.pathname);
@@ -191,6 +201,21 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
               >
                 Cart: {cartItemCount}
               </div>
+              {activeReservation ? (
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: "#1e3a8a",
+                    background: "#dbeafe",
+                    border: "1px solid #93c5fd",
+                    borderRadius: 999,
+                    padding: "4px 8px"
+                  }}
+                >
+                  Resv: {activeReservation.customer_name} ({activeReservation.status})
+                </div>
+              ) : null}
             </div>
           </div>
           <div style={{ marginTop: 10 }}>
@@ -211,6 +236,8 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
                   clearCart();
                   setPaidAmount(0);
                   setOutletTables([]);
+                  setOutletReservations([]);
+                  setActiveReservationId(null);
                   navigate(routes.products.path);
                 })();
               }}
@@ -249,6 +276,8 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
   const [pullSyncMessage, setPullSyncMessage] = useState<string | null>(null);
   const [pushSyncMessage, setPushSyncMessage] = useState<string | null>(null);
   const [outletTables, setOutletTables] = useState<RuntimeOutletTable[]>([]);
+  const [outletReservations, setOutletReservations] = useState<RuntimeReservation[]>([]);
+  const [activeReservationId, setActiveReservationId] = useState<number | null>(null);
   const cartState = useCart();
 
   const routerValue = useMemo(() => ({
@@ -382,8 +411,16 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       activeOrderContext: cartState.activeOrderContext,
       setServiceType: cartState.setServiceType,
       setActiveTableId: cartState.setActiveTableId,
+      setOrderReservationId: cartState.setOrderReservationId,
+      setGuestCount: cartState.setGuestCount,
+      setOrderStatus: cartState.setOrderStatus,
+      setOrderNotes: cartState.setOrderNotes,
       outletTables,
-      setOutletTables
+      setOutletTables,
+      outletReservations,
+      setOutletReservations,
+      activeReservationId,
+      setActiveReservationId
     }),
     [
       scope,
@@ -399,7 +436,9 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       runSyncPullNow,
       runSyncPushNow,
       cartState,
-      outletTables
+      outletTables,
+      outletReservations,
+      activeReservationId
     ]
   );
 
@@ -532,6 +571,16 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
               <ProtectedRoute context={context} authToken={authToken}>
                 <AppLayout cartItemCount={effectiveCartItemCount}>
                   <TablesPage context={context} />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path={routes.reservations.path}
+            element={
+              <ProtectedRoute context={context} authToken={authToken}>
+                <AppLayout cartItemCount={effectiveCartItemCount}>
+                  <ReservationsPage context={context} />
                 </AppLayout>
               </ProtectedRoute>
             }

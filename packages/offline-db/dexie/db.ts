@@ -4,6 +4,7 @@
 import Dexie, { type Table } from "dexie";
 import type {
   OutletTableRow,
+  ReservationRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -18,6 +19,7 @@ export const POS_DB_NAME = "jurnapod_pos_v1";
 export class PosOfflineDb extends Dexie {
   products_cache!: Table<ProductCacheRow, string>;
   outlet_tables!: Table<OutletTableRow, string>;
+  reservations!: Table<ReservationRow, string>;
   sales!: Table<SaleRow, string>;
   sale_items!: Table<SaleItemRow, string>;
   payments!: Table<PaymentRow, string>;
@@ -75,6 +77,37 @@ export class PosOfflineDb extends Dexie {
         "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+data_version],[company_id+outlet_id+is_active]",
       outlet_tables: "&pk,[company_id+outlet_id+table_id],[company_id+outlet_id+status],updated_at",
       sales: "&sale_id,&client_tx_id,[company_id+outlet_id+status],[company_id+outlet_id+created_at],sync_status",
+      sale_items: "&line_id,sale_id,[company_id+outlet_id+sale_id]",
+      payments: "&payment_id,sale_id,[company_id+outlet_id+sale_id]",
+      outbox_jobs:
+        "&job_id,&dedupe_key,sale_id,[status+next_attempt_at],[status+lease_expires_at],lease_expires_at,updated_at",
+      sync_metadata: "&pk,[company_id+outlet_id],last_data_version,updated_at",
+      sync_scope_config: "&pk,[company_id+outlet_id],data_version,updated_at"
+    });
+
+    this.version(6).stores({
+      products_cache:
+        "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+data_version],[company_id+outlet_id+is_active]",
+      outlet_tables: "&pk,[company_id+outlet_id+table_id],[company_id+outlet_id+status],updated_at",
+      reservations:
+        "&pk,[company_id+outlet_id+reservation_at],[company_id+outlet_id+status],[company_id+outlet_id+table_id],updated_at",
+      sales: "&sale_id,&client_tx_id,[company_id+outlet_id+status],[company_id+outlet_id+created_at],sync_status",
+      sale_items: "&line_id,sale_id,[company_id+outlet_id+sale_id]",
+      payments: "&payment_id,sale_id,[company_id+outlet_id+sale_id]",
+      outbox_jobs:
+        "&job_id,&dedupe_key,sale_id,[status+next_attempt_at],[status+lease_expires_at],lease_expires_at,updated_at",
+      sync_metadata: "&pk,[company_id+outlet_id],last_data_version,updated_at",
+      sync_scope_config: "&pk,[company_id+outlet_id],data_version,updated_at"
+    });
+
+    this.version(7).stores({
+      products_cache:
+        "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+data_version],[company_id+outlet_id+is_active]",
+      outlet_tables: "&pk,[company_id+outlet_id+table_id],[company_id+outlet_id+status],updated_at",
+      reservations:
+        "&pk,[company_id+outlet_id+reservation_at],[company_id+outlet_id+status],[company_id+outlet_id+table_id],updated_at",
+      sales:
+        "&sale_id,&client_tx_id,[company_id+outlet_id+status],[company_id+outlet_id+created_at],sync_status,[company_id+outlet_id+reservation_id],[company_id+outlet_id+table_id]",
       sale_items: "&line_id,sale_id,[company_id+outlet_id+sale_id]",
       payments: "&payment_id,sale_id,[company_id+outlet_id+sale_id]",
       outbox_jobs:

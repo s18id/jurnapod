@@ -26,18 +26,26 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
     scope,
     outletTables,
     setOutletTables,
+    outletReservations,
+    setOutletReservations,
     activeOrderContext,
     setServiceType,
-    setActiveTableId
+    setActiveTableId,
+    setOrderReservationId,
+    setActiveReservationId
   } = usePosAppState();
 
   useEffect(() => {
     let disposed = false;
 
     async function loadTables() {
-      const tables = await context.runtime.getOutletTables(scope);
+      const [tables, reservations] = await Promise.all([
+        context.runtime.getOutletTables(scope),
+        context.runtime.getOutletReservations(scope)
+      ]);
       if (!disposed) {
         setOutletTables(tables);
+        setOutletReservations(reservations);
       }
     }
 
@@ -45,7 +53,7 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
     return () => {
       disposed = true;
     };
-  }, [context.runtime, scope, setOutletTables]);
+  }, [context.runtime, scope, setOutletReservations, setOutletTables]);
 
   return (
     <div style={{ padding: 16 }}>
@@ -61,6 +69,11 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
           const colors = statusColors[table.status];
           const isCurrentOrderTable = activeOrderContext.table_id === table.table_id;
           const canStartDineIn = table.status === "AVAILABLE" || isCurrentOrderTable;
+          const linkedReservation = outletReservations.find(
+            (reservation) =>
+              reservation.table_id === table.table_id
+              && ["BOOKED", "CONFIRMED", "ARRIVED"].includes(reservation.status)
+          );
 
           return (
             <Card key={table.table_id} padding="small">
@@ -80,6 +93,11 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
                 <div style={{ marginTop: 2, fontSize: 12, color: "#64748b" }}>
                   {table.zone ?? "General"} • Cap {table.capacity ?? "-"}
                 </div>
+                {linkedReservation ? (
+                  <div style={{ marginTop: 4, fontSize: 12, color: "#1e3a8a", fontWeight: 600 }}>
+                    Reserved for {linkedReservation.customer_name} ({linkedReservation.status})
+                  </div>
+                ) : null}
                 <Button
                   variant="primary"
                   fullWidth
@@ -121,6 +139,8 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
 
                       setServiceType("DINE_IN");
                       setActiveTableId(table.table_id);
+                      setOrderReservationId(null);
+                      setActiveReservationId(null);
                       navigate(routes.products.path);
                     })();
                   }}

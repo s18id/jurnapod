@@ -30,6 +30,9 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     setPaidAmount,
     activeOrderContext,
     setServiceType,
+    setOrderReservationId,
+    setGuestCount,
+    setActiveReservationId,
     setOutletTables
   } = usePosAppState();
   const { visibleProducts, searchTerm, setSearchTerm } = useProducts({ catalog });
@@ -109,6 +112,9 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
                 }
 
                 setServiceType("TAKEAWAY");
+                setOrderReservationId(null);
+                setGuestCount(null);
+                setActiveReservationId(null);
                 setDineInGuardMessage(null);
               })();
             }}

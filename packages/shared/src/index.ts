@@ -16,6 +16,7 @@ export * from "./schemas/module-roles";
 export * from "./schemas/outlets";
 export * from "./schemas/posting";
 export * from "./schemas/pos-sync";
+export * from "./schemas/reservations";
 export * from "./schemas/sales";
 export * from "./schemas/settings";
 export * from "./schemas/taxes";

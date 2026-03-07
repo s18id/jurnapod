@@ -22,12 +22,20 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
     setPaidAmount,
     clearCart,
     activeOrderContext,
+    setOrderStatus,
+    setOrderReservationId,
+    outletReservations,
+    activeReservationId,
+    setActiveReservationId,
+    setOutletReservations,
     setOutletTables
   } = usePosAppState();
+  const activeReservation = outletReservations.find((row) => row.reservation_id === activeReservationId) ?? null;
 
   const checkoutConfig = context.runtime.resolveCheckoutConfig(null);
   const { paymentMethod, setPaymentMethod, paymentMethodAllowed, canCompleteSale, completeInFlight, lastCompleteMessage, runCompleteSale } = useCheckout({
     scope,
+    activeOrderContext,
     runtime: {
       isPaymentMethodAllowed: context.runtime.isPaymentMethodAllowed.bind(context.runtime),
       resolvePaymentMethod: context.runtime.resolvePaymentMethod.bind(context.runtime)
@@ -71,6 +79,7 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
             {activeOrderContext.service_type === "DINE_IN"
               ? ` • Table ${activeOrderContext.table_id ?? "Not selected"}`
               : ""}
+            {activeReservation ? ` • Reservation ${activeReservation.customer_name}` : ""}
           </div>
         </header>
 
@@ -151,11 +160,31 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
                     );
                   });
               }
+              setOrderStatus("COMPLETED");
+              setOrderReservationId(null);
               clearCart();
             };
 
             void runCompleteSale(cartLines, cartTotals, {
               setPaidAmount,
+              onAfterComplete: async () => {
+                if (activeReservationId) {
+                  try {
+                    const updated = await context.runtime.updateReservationStatus(scope, activeReservationId, "COMPLETED");
+                    if (updated) {
+                      setOutletReservations((previous) =>
+                        previous.map((reservation) =>
+                          reservation.reservation_id === updated.reservation_id ? updated : reservation
+                        )
+                      );
+                    }
+                  } catch {
+                    // keep sale completion successful even if reservation update fails
+                  } finally {
+                    setActiveReservationId(null);
+                  }
+                }
+              },
               setCart: clearOrderContext
             });
           }}

@@ -11,6 +11,7 @@ import Dexie from "dexie";
 import type { PosStoragePort } from "../../ports/storage-port.js";
 import type {
   OutletTableRow,
+  ReservationRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -65,6 +66,25 @@ export class WebStorageAdapter implements PosStoragePort {
 
   async upsertOutletTables(tables: OutletTableRow[]): Promise<void> {
     await this.db.outlet_tables.bulkPut(tables);
+  }
+
+  async getReservationsByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<ReservationRow[]> {
+    const rows = await this.db.reservations
+      .where("[company_id+outlet_id+reservation_at]")
+      .between(
+        [input.company_id, input.outlet_id, Dexie.minKey],
+        [input.company_id, input.outlet_id, Dexie.maxKey]
+      )
+      .toArray();
+
+    return rows.sort((left, right) => left.reservation_at.localeCompare(right.reservation_at));
+  }
+
+  async upsertReservations(reservations: ReservationRow[]): Promise<void> {
+    await this.db.reservations.bulkPut(reservations);
   }
 
   async createSale(sale: SaleRow): Promise<void> {

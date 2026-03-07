@@ -16,7 +16,20 @@ interface CartPageProps {
 
 export function CartPage({ context }: CartPageProps): JSX.Element {
   const navigate = useNavigate();
-  const { scope, cart, cartLines, cartTotals, upsertCartLine, clearCart, activeOrderContext, setOutletTables } = usePosAppState();
+  const {
+    scope,
+    cart,
+    cartLines,
+    cartTotals,
+    upsertCartLine,
+    clearCart,
+    activeOrderContext,
+    setOrderStatus,
+    outletReservations,
+    activeReservationId,
+    setOutletTables
+  } = usePosAppState();
+  const activeReservation = outletReservations.find((row) => row.reservation_id === activeReservationId) ?? null;
 
   const containerStyles: React.CSSProperties = {
     display: "flex",
@@ -74,6 +87,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
           {activeOrderContext.service_type === "DINE_IN"
             ? ` • Table ${activeOrderContext.table_id ?? "Not selected"}`
             : ""}
+          {activeReservation ? ` • Reservation ${activeReservation.customer_name}` : ""}
         </div>
         <CartList
           lines={cartLines}
@@ -94,7 +108,15 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
       {cartLines.length > 0 ? (
         <footer style={{ paddingTop: "16px", borderTop: "1px solid #e5e7eb" }}>
           <CartSummary totals={cartTotals} />
-          <Button variant="primary" fullWidth style={{ marginTop: 12 }} onClick={() => navigate(routes.checkout.path)}>
+          <Button
+            variant="primary"
+            fullWidth
+            style={{ marginTop: 12 }}
+            onClick={() => {
+              setOrderStatus("READY_TO_PAY");
+              navigate(routes.checkout.path);
+            }}
+          >
             Proceed to payment
           </Button>
         </footer>
