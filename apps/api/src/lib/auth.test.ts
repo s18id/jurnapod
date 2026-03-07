@@ -114,9 +114,10 @@ test(
       );
       globalOwnerUserId = Number((globalOwnerInsert as { insertId: number }).insertId);
       createdUserIds.push(globalOwnerUserId);
-      await pool.execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [
+      await pool.execute(`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`, [
         globalOwnerUserId,
-        ownerRoleId
+        ownerRoleId,
+        null
       ]);
 
       const [outletAdminInsert] = await pool.execute(
@@ -127,7 +128,7 @@ test(
       outletAdminUserId = Number((outletAdminInsert as { insertId: number }).insertId);
       createdUserIds.push(outletAdminUserId);
       await pool.execute(
-        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
          VALUES (?, ?, ?)`,
         [outletAdminUserId, outletAId, adminRoleId]
       );
@@ -139,9 +140,10 @@ test(
       );
       superAdminUserId = Number((superAdminInsert as { insertId: number }).insertId);
       createdUserIds.push(superAdminUserId);
-      await pool.execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [
+      await pool.execute(`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`, [
         superAdminUserId,
-        superAdminRoleId
+        superAdminRoleId,
+        null
       ]);
 
       const [inactiveInsert] = await pool.execute(
@@ -151,9 +153,10 @@ test(
       );
       inactiveUserId = Number((inactiveInsert as { insertId: number }).insertId);
       createdUserIds.push(inactiveUserId);
-      await pool.execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [
+      await pool.execute(`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`, [
         inactiveUserId,
-        ownerRoleId
+        ownerRoleId,
+        null
       ]);
 
       const deletedCompanyCode = `ACL-DEL-${runId}`.slice(0, 32).toUpperCase();
@@ -175,9 +178,10 @@ test(
       );
       deletedCompanyUserId = Number((deletedCompanyUserInsert as { insertId: number }).insertId);
       createdUserIds.push(deletedCompanyUserId);
-      await pool.execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [
+      await pool.execute(`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`, [
         deletedCompanyUserId,
-        ownerRoleId
+        ownerRoleId,
+        null
       ]);
 
       const permissionMask = buildPermissionMask({ canCreate: true, canRead: true });
@@ -338,11 +342,7 @@ test(
       if (createdUserIds.length > 0) {
         const userPlaceholders = createdUserIds.map(() => "?").join(", ");
         await pool.execute(
-          `DELETE FROM user_outlet_roles WHERE user_id IN (${userPlaceholders})`,
-          createdUserIds
-        );
-        await pool.execute(
-          `DELETE FROM user_roles WHERE user_id IN (${userPlaceholders})`,
+          `DELETE FROM user_role_assignments WHERE user_id IN (${userPlaceholders})`,
           createdUserIds
         );
         await pool.execute(`DELETE FROM users WHERE id IN (${userPlaceholders})`, createdUserIds);

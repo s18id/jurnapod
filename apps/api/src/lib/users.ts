@@ -52,6 +52,7 @@ type RoleRow = RowDataPacket & {
   id: number;
   code: string;
   name: string;
+  company_id?: number | null;
   is_global?: number | null;
   role_level?: number | null;
 };
@@ -217,12 +218,13 @@ async function getUserMaxRoleLevelForConnection(
 ): Promise<number> {
   const [rows] = await connection.execute<RowDataPacket[]>(
     `SELECT MAX(r.role_level) AS max_level
-     FROM user_roles ur
-     INNER JOIN roles r ON r.id = ur.role_id
-     INNER JOIN users u ON u.id = ur.user_id
+     FROM user_role_assignments ura
+     INNER JOIN roles r ON r.id = ura.role_id
+     INNER JOIN users u ON u.id = ura.user_id
      WHERE u.id = ?
        AND u.company_id = ?
-       AND u.is_active = 1`,
+       AND u.is_active = 1
+       AND ura.outlet_id IS NULL`,
     [userId, companyId]
   );
 
@@ -237,12 +239,13 @@ async function userHasSuperAdminRole(
 ): Promise<boolean> {
   const [rows] = await connection.execute<RowDataPacket[]>(
     `SELECT 1
-     FROM user_roles ur
-     INNER JOIN roles r ON r.id = ur.role_id
-     INNER JOIN users u ON u.id = ur.user_id
+     FROM user_role_assignments ura
+     INNER JOIN roles r ON r.id = ura.role_id
+     INNER JOIN users u ON u.id = ura.user_id
      WHERE u.id = ?
        AND u.company_id = ?
        AND r.code = 'SUPER_ADMIN'
+       AND ura.outlet_id IS NULL
      LIMIT 1`,
     [userId, companyId]
   );
@@ -279,19 +282,20 @@ async function syncUserOutletsFromRoles(
   await connection.execute<ResultSetHeader>(
     `DELETE uo
      FROM user_outlets uo
-     LEFT JOIN user_outlet_roles uor
-       ON uor.user_id = uo.user_id
-      AND uor.outlet_id = uo.outlet_id
+     LEFT JOIN user_role_assignments ura
+       ON ura.user_id = uo.user_id
+      AND ura.outlet_id = uo.outlet_id
      WHERE uo.user_id = ?
-       AND uor.user_id IS NULL`,
+       AND ura.user_id IS NULL`,
     [userId]
   );
 
   await connection.execute<ResultSetHeader>(
     `INSERT IGNORE INTO user_outlets (user_id, outlet_id)
      SELECT DISTINCT user_id, outlet_id
-     FROM user_outlet_roles
-     WHERE user_id = ?`,
+     FROM user_role_assignments
+     WHERE user_id = ?
+       AND outlet_id IS NOT NULL`,
     [userId]
   );
 }
@@ -307,11 +311,12 @@ async function hydrateUserGlobalRoles(
 
   const placeholders = userIds.map(() => "?").join(", ");
   const [rows] = await connection.execute<RoleJoinRow[]>(
-    `SELECT ur.user_id, r.code
-     FROM user_roles ur
-     INNER JOIN roles r ON r.id = ur.role_id
-     WHERE ur.user_id IN (${placeholders})
+    `SELECT ura.user_id, r.code
+     FROM user_role_assignments ura
+     INNER JOIN roles r ON r.id = ura.role_id
+     WHERE ura.user_id IN (${placeholders})
        AND r.is_global = 1
+       AND ura.outlet_id IS NULL
      ORDER BY r.code ASC`,
     userIds
   );
@@ -337,15 +342,16 @@ async function hydrateUserOutletRoleAssignments(
 
   const placeholders = userIds.map(() => "?").join(", ");
   const [rows] = await connection.execute<OutletRoleJoinRow[]>(
-    `SELECT uor.user_id,
+    `SELECT ura.user_id,
             o.id AS outlet_id,
             o.code AS outlet_code,
             o.name AS outlet_name,
             r.code AS role_code
-     FROM user_outlet_roles uor
-     INNER JOIN outlets o ON o.id = uor.outlet_id
-     INNER JOIN roles r ON r.id = uor.role_id
-     WHERE uor.user_id IN (${placeholders})
+     FROM user_role_assignments ura
+     INNER JOIN outlets o ON o.id = ura.outlet_id
+     INNER JOIN roles r ON r.id = ura.role_id
+     WHERE ura.user_id IN (${placeholders})
+       AND ura.outlet_id IS NOT NULL
      ORDER BY o.id ASC, r.code ASC`,
     userIds
   );
@@ -511,6 +517,10 @@ export async function createUser(params: {
     const globalRoleCodes = roleCodes.filter((code) => roleMap.get(code)?.is_global === 1);
     const nonGlobalRoleCodes = roleCodes.filter((code) => roleMap.get(code)?.is_global !== 1);
 
+    if (globalRoleCodes.length > 1) {
+      throw new RoleScopeViolationError("A user can only have one global role");
+    }
+
     if (outletRoleAssignments.length === 0 && nonGlobalRoleCodes.length > 0) {
       if (outletIds.length === 0) {
         throw new RoleScopeViolationError("Outlet roles require outlet assignments");
@@ -521,10 +531,10 @@ export async function createUser(params: {
     }
 
     if (globalRoleCodes.length > 0) {
-      const roleValues = globalRoleCodes.map((code) => [userId, roleMap.get(code)?.id ?? 0]);
+      const roleValues = globalRoleCodes.map((code) => [userId, roleMap.get(code)?.id ?? 0, null]);
       await connection.query(
-        `INSERT INTO user_roles (user_id, role_id) VALUES ${roleValues
-          .map(() => "(?, ?)")
+        `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES ${roleValues
+          .map(() => "(?, ?, ?)")
           .join(", ")}`,
         roleValues.flat()
       );
@@ -550,7 +560,7 @@ export async function createUser(params: {
 
       if (outletRoleValues.length > 0) {
         await connection.query(
-          `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id) VALUES ${outletRoleValues
+          `INSERT INTO user_role_assignments (user_id, outlet_id, role_id) VALUES ${outletRoleValues
             .map(() => "(?, ?, ?)")
             .join(", ")}`,
           outletRoleValues.flat()
@@ -667,47 +677,48 @@ export async function setUserRoles(params: {
     }
 
     const roleCodes = params.roleCodes.map((role) => RoleSchema.parse(role));
-    const roleMap = await ensureRoleCodesExist(connection, roleCodes);
+    
+    // Get role info if provided
+    let roleMap: Map<string, { id: number; role_level: number; is_global: number }> = new Map();
+    if (roleCodes.length > 0) {
+      const roleRows = await ensureRoleCodesExist(connection, roleCodes);
+      roleMap = roleRows;
+    }
 
     const actorMaxLevel = await getUserMaxRoleLevelForConnection(
       connection,
       params.companyId,
       params.actor.userId
     );
-    const requestedMaxLevel = Math.max(
-      0,
-      ...roleCodes.map((code) => roleMap.get(code)?.role_level ?? 0)
-    );
 
+    // Validate role level
+    const requestedMaxLevel = Math.max(0, ...roleCodes.map((code) => roleMap.get(code)?.role_level ?? 0));
     if (requestedMaxLevel >= actorMaxLevel) {
-      throw new RoleLevelViolationError("Insufficient role level to assign requested roles");
+      throw new RoleLevelViolationError("Insufficient role level to assign this role");
     }
 
+    // Handle outlet role assignment
     if (typeof params.outletId === "number") {
       const outletId = NumericIdSchema.parse(params.outletId);
       await ensureOutletIdsExist(connection, params.companyId, [outletId]);
 
-      for (const roleCode of roleCodes) {
-        if (roleMap.get(roleCode)?.is_global === 1) {
-          throw new RoleScopeViolationError("Global roles cannot be assigned per outlet");
-        }
-      }
-
+      // Get current outlet roles
       const [beforeRows] = await connection.execute<RoleJoinRow[]>(
         `SELECT r.code
-         FROM user_outlet_roles uor
-         INNER JOIN roles r ON r.id = uor.role_id
-         WHERE uor.user_id = ? AND uor.outlet_id = ?
+         FROM user_role_assignments ura
+         INNER JOIN roles r ON r.id = ura.role_id
+         WHERE ura.user_id = ? AND ura.outlet_id = ?
          ORDER BY r.code ASC`,
         [params.userId, outletId]
       );
       const beforeRoles = beforeRows.map((row) => row.code);
 
       await connection.execute<ResultSetHeader>(
-        `DELETE FROM user_outlet_roles WHERE user_id = ? AND outlet_id = ?`,
+        `DELETE FROM user_role_assignments WHERE user_id = ? AND outlet_id = ?`,
         [params.userId, outletId]
       );
 
+      // Insert new outlet roles
       if (roleCodes.length > 0) {
         const roleValues = roleCodes.map((code) => [
           params.userId,
@@ -715,7 +726,7 @@ export async function setUserRoles(params: {
           roleMap.get(code)?.id ?? 0
         ]);
         await connection.query(
-          `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id) VALUES ${roleValues
+          `INSERT INTO user_role_assignments (user_id, outlet_id, role_id) VALUES ${roleValues
             .map(() => "(?, ?, ?)")
             .join(", ")}`,
           roleValues.flat()
@@ -732,27 +743,22 @@ export async function setUserRoles(params: {
         { outlet_id: outletId, role_codes: roleCodes }
       );
     } else {
-      for (const roleCode of roleCodes) {
-        if (roleMap.get(roleCode)?.is_global !== 1) {
-          throw new RoleScopeViolationError("Outlet roles require an outlet id");
-        }
-      }
-
+      // Handle global role - update users.global_role_id directly
       const beforeRoles =
         (await hydrateUserGlobalRoles(connection, [params.userId])).get(params.userId) ?? [];
 
-      await connection.execute<ResultSetHeader>(
-        `DELETE FROM user_roles WHERE user_id = ?`,
-        [params.userId]
-      );
-
       if (roleCodes.length > 0) {
-        const roleValues = roleCodes.map((code) => [params.userId, roleMap.get(code)?.id ?? 0]);
-        await connection.query(
-          `INSERT INTO user_roles (user_id, role_id) VALUES ${roleValues
-            .map(() => "(?, ?)")
-            .join(", ")}`,
-          roleValues.flat()
+        const roleId = roleMap.get(roleCodes[0])?.id;
+        if (roleId) {
+          await connection.execute<ResultSetHeader>(
+            `UPDATE users SET global_role_id = ? WHERE id = ?`,
+            [roleId, params.userId]
+          );
+        }
+      } else {
+        await connection.execute<ResultSetHeader>(
+          `UPDATE users SET global_role_id = NULL WHERE id = ?`,
+          [params.userId]
         );
       }
 
@@ -797,8 +803,9 @@ export async function setUserOutlets(params: {
     await ensureUserExists(connection, params.companyId, params.userId);
     const [beforeRows] = await connection.execute<RowDataPacket[]>(
       `SELECT DISTINCT outlet_id
-       FROM user_outlet_roles
-       WHERE user_id = ?`,
+       FROM user_role_assignments
+       WHERE user_id = ?
+         AND outlet_id IS NOT NULL`,
       [params.userId]
     );
     const beforeOutletIds = beforeRows.map((row) => Number(row.outlet_id));
@@ -809,14 +816,14 @@ export async function setUserOutlets(params: {
 
     if (outletIds.length === 0) {
       await connection.execute<ResultSetHeader>(
-        `DELETE FROM user_outlet_roles WHERE user_id = ?`,
+        `DELETE FROM user_role_assignments WHERE user_id = ? AND outlet_id IS NOT NULL`,
         [params.userId]
       );
     } else {
       const placeholders = outletIds.map(() => "?").join(", ");
       await connection.execute<ResultSetHeader>(
-        `DELETE FROM user_outlet_roles
-         WHERE user_id = ? AND outlet_id NOT IN (${placeholders})`,
+        `DELETE FROM user_role_assignments
+         WHERE user_id = ? AND outlet_id IS NOT NULL AND outlet_id NOT IN (${placeholders})`,
         [params.userId, ...outletIds]
       );
     }
@@ -951,20 +958,51 @@ export async function setUserActiveState(params: {
   }
 }
 
-export async function listRoles(): Promise<
-  Array<{ id: number; code: string; name: string; is_global: boolean; role_level: number }>
+export async function listRoles(
+  companyId: number,
+  isSuperAdmin: boolean = false,
+  filterCompanyId?: number
+): Promise<
+  Array<{ id: number; code: string; name: string; company_id: number | null; is_global: boolean; role_level: number }>
 > {
   const pool = getDbPool();
-  const [rows] = await pool.execute<RoleRow[]>(
-    `SELECT id, code, name, is_global, role_level
-     FROM roles
-     ORDER BY code ASC`
-  );
+
+  let rows: RoleRow[];
+
+  if (isSuperAdmin) {
+    if (filterCompanyId !== undefined) {
+      const [result] = await pool.execute<RoleRow[]>(
+        `SELECT id, code, name, company_id, is_global, role_level
+         FROM roles
+         WHERE company_id = ? OR company_id IS NULL
+         ORDER BY company_id ASC, code ASC`,
+        [filterCompanyId]
+      );
+      rows = result;
+    } else {
+      const [result] = await pool.execute<RoleRow[]>(
+        `SELECT id, code, name, company_id, is_global, role_level
+         FROM roles
+         ORDER BY company_id ASC, code ASC`
+      );
+      rows = result;
+    }
+  } else {
+    const [result] = await pool.execute<RoleRow[]>(
+      `SELECT id, code, name, company_id, is_global, role_level
+       FROM roles
+       WHERE company_id = ? OR company_id IS NULL
+       ORDER BY company_id ASC, code ASC`,
+      [companyId]
+    );
+    rows = result;
+  }
 
   return rows.map((row) => ({
     id: Number(row.id),
     code: row.code,
     name: row.name,
+    company_id: row.company_id ? Number(row.company_id) : null,
     is_global: Boolean(row.is_global),
     role_level: Number(row.role_level ?? 0)
   }));
@@ -1002,8 +1040,9 @@ export async function createRole(params: {
   companyId: number;
   code: string;
   name: string;
+  roleLevel?: number;
   actor: UserActor;
-}): Promise<{ id: number; code: string; name: string; is_global: boolean; role_level: number }> {
+}): Promise<{ id: number; code: string; name: string; company_id: number | null; is_global: boolean; role_level: number }> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
   const auditService = createAuditServiceForConnection(connection);
@@ -1011,20 +1050,31 @@ export async function createRole(params: {
   try {
     await connection.beginTransaction();
 
-    // Check if role code already exists
+    const actorMaxLevel = await getUserMaxRoleLevelForConnection(
+      connection,
+      params.companyId,
+      params.actor.userId
+    );
+    const newRoleLevel = params.roleLevel ?? 0;
+
+    if (newRoleLevel >= actorMaxLevel) {
+      throw new RoleLevelViolationError("Cannot create role with level equal to or higher than your own role level");
+    }
+
+    // Check if role code already exists for this company
     const [existing] = await connection.execute<RoleRow[]>(
-      `SELECT id FROM roles WHERE code = ?`,
-      [params.code]
+      `SELECT id FROM roles WHERE company_id = ? AND code = ?`,
+      [params.companyId, params.code]
     );
 
     if (existing.length > 0) {
       throw new Error(`Role with code ${params.code} already exists`);
     }
 
-    // Insert role
+    // Insert role with company_id
     const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO roles (code, name) VALUES (?, ?)`,
-      [params.code, params.name]
+      `INSERT INTO roles (code, name, company_id, role_level) VALUES (?, ?, ?, ?)`,
+      [params.code, params.name, params.companyId, newRoleLevel]
     );
 
     const roleId = Number(result.insertId);
@@ -1033,7 +1083,9 @@ export async function createRole(params: {
     await auditService.logCreate(auditContext, "setting", roleId, {
       type: "role",
       code: params.code,
-      name: params.name
+      name: params.name,
+      company_id: params.companyId,
+      role_level: newRoleLevel
     });
 
     await connection.commit();
@@ -1042,8 +1094,9 @@ export async function createRole(params: {
       id: roleId,
       code: params.code,
       name: params.name,
+      company_id: params.companyId,
       is_global: false,
-      role_level: 0
+      role_level: newRoleLevel
     };
   } catch (error) {
     await connection.rollback();
@@ -1160,7 +1213,7 @@ export async function deleteRole(params: {
 
     // Check if role is in use
     const [userRoles] = await connection.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM user_roles WHERE role_id = ?`,
+      `SELECT COUNT(*) as count FROM user_role_assignments WHERE role_id = ?`,
       [params.roleId]
     );
 
