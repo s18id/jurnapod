@@ -79,8 +79,7 @@ export const mobileTabs = [
   routes.reservations,
   routes.products,
   routes.cart,
-  routes.checkout,
-  routes.settings
+  routes.checkout
 ];
 
 export interface RouterContextValue {

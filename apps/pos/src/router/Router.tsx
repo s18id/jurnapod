@@ -29,6 +29,50 @@ import { API_CONFIG, POLL_INTERVAL_MS } from "../shared/utils/constants.js";
 import { PosAppStateContext, usePosAppState } from "./pos-app-state.js";
 
 const PLACEHOLDER_OUTLETS = [{ outlet_id: 1, label: "Outlet 1 (placeholder)" }];
+const AUTO_REFRESH_STORAGE_KEY = "jurnapod_pos_auto_refresh_enabled";
+const AUTO_PULL_ENABLED_STORAGE_KEY = "jurnapod_pos_auto_pull_enabled";
+const AUTO_PULL_INTERVAL_STORAGE_KEY = "jurnapod_pos_auto_pull_interval_ms";
+const AUTO_PULL_INTERVAL_OPTIONS_MS = [30000, 60000, 300000] as const;
+
+function readAutoRefreshEnabled(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  const raw = window.localStorage.getItem(AUTO_REFRESH_STORAGE_KEY);
+  if (raw === null) {
+    return true;
+  }
+
+  return raw === "true";
+}
+
+function readAutoPullEnabled(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  const raw = window.localStorage.getItem(AUTO_PULL_ENABLED_STORAGE_KEY);
+  if (raw === null) {
+    return true;
+  }
+
+  return raw === "true";
+}
+
+function readAutoPullIntervalMs(): number {
+  if (typeof window === "undefined") {
+    return 60000;
+  }
+
+  const raw = window.localStorage.getItem(AUTO_PULL_INTERVAL_STORAGE_KEY);
+  const parsed = raw ? Number(raw) : 60000;
+  if (!AUTO_PULL_INTERVAL_OPTIONS_MS.includes(parsed as (typeof AUTO_PULL_INTERVAL_OPTIONS_MS)[number])) {
+    return 60000;
+  }
+
+  return parsed;
+}
 
 interface MeResponse {
   success: boolean;
@@ -137,7 +181,7 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
 
   const currentTabId = useMemo(() => {
     const current = mobileTabs.find(t => t.path === location.pathname);
-    return current?.id ?? "products";
+    return current?.id ?? "";
   }, [location.pathname]);
 
   return (
@@ -171,7 +215,7 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
               <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>Jurnapod POS</div>
               <div style={{ fontSize: 16, color: "#0f172a", fontWeight: 700 }}>{activePageLabel}</div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, width: isCompactHeader ? "100%" : "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, width: isCompactHeader ? "100%" : "auto", flexWrap: "wrap" }}>
               <SyncBadge status={syncBadgeState} pendingCount={pendingOutboxCount} />
               <div
                 style={{
@@ -216,6 +260,41 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
                   Resv: {activeReservation.customer_name} ({activeReservation.status})
                 </div>
               ) : null}
+              {cartItemCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(routes.checkout.path)}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: "#ffffff",
+                    background: "#2563eb",
+                    border: "1px solid #1d4ed8",
+                    borderRadius: 999,
+                    padding: "4px 10px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Pay now
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => navigate(routes.settings.path)}
+                aria-label="Open settings"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#0f172a",
+                  background: "#f8fafc",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 999,
+                  padding: "4px 10px",
+                  cursor: "pointer"
+                }}
+              >
+                Settings
+              </button>
             </div>
           </div>
           <div style={{ marginTop: 10 }}>
@@ -269,6 +348,9 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
   const [outletOptions, setOutletOptions] = useState(PLACEHOLDER_OUTLETS);
   const [isOnline, setIsOnline] = useState<boolean>(() => context.runtime.isOnline());
   const [pendingOutboxCount, setPendingOutboxCount] = useState<number>(0);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(() => readAutoRefreshEnabled());
+  const [autoPullEnabled, setAutoPullEnabled] = useState<boolean>(() => readAutoPullEnabled());
+  const [autoPullIntervalMs, setAutoPullIntervalMs] = useState<number>(() => readAutoPullIntervalMs());
   const [hasProductCache, setHasProductCache] = useState<boolean>(false);
   const [lastDataVersion, setLastDataVersion] = useState<number>(0);
   const [pullSyncInFlight, setPullSyncInFlight] = useState<boolean>(false);
@@ -334,6 +416,30 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
   }, [context, pushSyncInFlight]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, autoRefreshEnabled ? "true" : "false");
+  }, [autoRefreshEnabled]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(AUTO_PULL_ENABLED_STORAGE_KEY, autoPullEnabled ? "true" : "false");
+  }, [autoPullEnabled]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(AUTO_PULL_INTERVAL_STORAGE_KEY, String(autoPullIntervalMs));
+  }, [autoPullIntervalMs]);
+
+  useEffect(() => {
     let disposed = false;
     let refreshQueue = Promise.resolve();
 
@@ -359,6 +465,54 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       setLastDataVersion(dataVersion);
     };
 
+    const runAutoPullIfNeeded = async () => {
+      if (!authToken) {
+        return;
+      }
+
+      const snapshot = await context.runtime.getOfflineSnapshot(scope);
+      if (snapshot.has_product_cache) {
+        return;
+      }
+
+      const result = await context.orchestrator.executePull(scope);
+      if (disposed) {
+        return;
+      }
+
+      if (result.success) {
+        setPullSyncMessage(
+          `Auto sync pull applied (version ${result.data_version}, ${result.upserted_product_count} cached rows).`
+        );
+        setLastDataVersion(result.data_version);
+      } else {
+        setPullSyncMessage(result.message ?? "Auto sync pull failed.");
+      }
+
+      scheduleRefresh();
+    };
+
+    const runAutoPull = async () => {
+      if (!authToken || !autoPullEnabled) {
+        return;
+      }
+
+      const result = await context.orchestrator.executePull(scope);
+      if (disposed) {
+        return;
+      }
+
+      if (result.success) {
+        setLastDataVersion(result.data_version);
+        if (result.upserted_product_count > 0) {
+          setPullSyncMessage(
+            `Auto pull applied (version ${result.data_version}, ${result.upserted_product_count} cached rows).`
+          );
+        }
+      }
+      scheduleRefresh();
+    };
+
     const scheduleRefresh = () => {
       refreshQueue = refreshQueue.then(runRefresh).catch((error: unknown) => {
         if (!disposed) {
@@ -376,15 +530,23 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     });
 
     scheduleRefresh();
-    const intervalId = window.setInterval(scheduleRefresh, POLL_INTERVAL_MS);
+    void runAutoPullIfNeeded();
+    const intervalId = autoRefreshEnabled ? window.setInterval(scheduleRefresh, POLL_INTERVAL_MS) : null;
+    const autoPullIntervalId =
+      autoPullEnabled && authToken ? window.setInterval(() => { void runAutoPull(); }, autoPullIntervalMs) : null;
 
     return () => {
       disposed = true;
       context.orchestrator.dispose();
       unsubscribeNetwork();
-      window.clearInterval(intervalId);
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+      if (autoPullIntervalId !== null) {
+        window.clearInterval(autoPullIntervalId);
+      }
     };
-  }, [authToken, context, scope]);
+  }, [authToken, autoPullEnabled, autoPullIntervalMs, autoRefreshEnabled, context, scope]);
 
   const appStateValue = useMemo(
     () => ({
@@ -393,6 +555,12 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       outletOptions,
       syncBadgeState,
       pendingOutboxCount,
+      autoRefreshEnabled,
+      setAutoRefreshEnabled,
+      autoPullEnabled,
+      setAutoPullEnabled,
+      autoPullIntervalMs,
+      setAutoPullIntervalMs,
       hasProductCache,
       lastDataVersion,
       pullSyncInFlight,
@@ -427,6 +595,9 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       outletOptions,
       syncBadgeState,
       pendingOutboxCount,
+      autoRefreshEnabled,
+      autoPullEnabled,
+      autoPullIntervalMs,
       hasProductCache,
       lastDataVersion,
       pullSyncInFlight,

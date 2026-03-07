@@ -24,6 +24,12 @@ export interface PosAppStateValue {
   outletOptions: Array<{ outlet_id: number; label: string }>;
   syncBadgeState: RuntimeSyncBadgeState;
   pendingOutboxCount: number;
+  autoRefreshEnabled: boolean;
+  setAutoRefreshEnabled: Dispatch<SetStateAction<boolean>>;
+  autoPullEnabled: boolean;
+  setAutoPullEnabled: Dispatch<SetStateAction<boolean>>;
+  autoPullIntervalMs: number;
+  setAutoPullIntervalMs: Dispatch<SetStateAction<number>>;
   hasProductCache: boolean;
   lastDataVersion: number;
   pullSyncInFlight: boolean;
