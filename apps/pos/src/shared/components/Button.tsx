@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React from "react";
+import React, { useState } from "react";
 import { MIN_TOUCH_TARGET } from "../utils/constants.js";
+import { getTouchOptimizedStyles } from "../utils/touch.js";
 
 export interface ButtonProps {
   variant?: "primary" | "secondary" | "danger";
@@ -12,6 +13,7 @@ export interface ButtonProps {
   children: React.ReactNode;
   type?: "button" | "submit";
   style?: React.CSSProperties;
+  fullWidth?: boolean;
 }
 
 export function Button({
@@ -21,8 +23,10 @@ export function Button({
   onClick,
   children,
   type = "button",
-  style
+  style,
+  fullWidth = false
 }: ButtonProps): JSX.Element {
+  const [isPressed, setIsPressed] = useState(false);
   const variantStyles = {
     primary: {
       background: "#3b82f6",
@@ -59,16 +63,43 @@ export function Button({
     }
   };
 
+  const touchStyles = getTouchOptimizedStyles(disabled);
+
   const baseStyles: React.CSSProperties = {
     borderRadius: "8px",
     fontWeight: 600,
-    cursor: disabled ? "not-allowed" : "pointer",
-    opacity: disabled ? 0.5 : 1,
+    opacity: disabled ? 0.5 : isPressed ? 0.8 : 1,
     transition: "all 0.15s",
-    touchAction: "manipulation",
+    transform: isPressed ? "scale(0.95)" : "scale(1)",
+    width: fullWidth ? "100%" : "auto",
+    ...touchStyles,
     ...variantStyles[variant],
     ...sizeStyles[size],
     ...style
+  };
+
+  const handleTouchStart = () => {
+    if (!disabled) {
+      setIsPressed(true);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsPressed(false);
+  };
+
+  const handleMouseDown = () => {
+    if (!disabled) {
+      setIsPressed(true);
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsPressed(false);
+  };
+
+  const handleMouseLeave = () => {
+    setIsPressed(false);
   };
 
   return (
@@ -76,6 +107,11 @@ export function Button({
       type={type}
       disabled={disabled}
       onClick={onClick}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseLeave}
       style={baseStyles}
     >
       {children}
