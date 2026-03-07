@@ -163,17 +163,18 @@ PREPARE stmt FROM @stmt;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- Create dedicated 2-column index for FK if not exists
+-- This ensures MySQL 8 has an explicit index for the compound FK
+SET @idx_company_outlet_exists = (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'item_prices'
+    AND index_name = 'idx_item_prices_company_outlet_fk'
+);
+
 SET @stmt = IF(
-  EXISTS (
-    SELECT 1
-    FROM information_schema.statistics
-    WHERE table_schema = DATABASE()
-      AND table_name = 'item_prices'
-    GROUP BY index_name
-    HAVING SUM(seq_in_index = 1 AND column_name = 'company_id') = 1
-      AND SUM(seq_in_index = 2 AND column_name = 'outlet_id') = 1
-    LIMIT 1
-  ),
+  @idx_company_outlet_exists > 0,
   'SELECT 1',
   'ALTER TABLE item_prices ADD KEY idx_item_prices_company_outlet_fk (company_id, outlet_id)'
 );
