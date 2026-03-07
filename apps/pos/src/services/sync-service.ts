@@ -50,6 +50,17 @@ export class SyncService {
     );
 
     const dataVersion = response.data.data_version;
+    const previousDataVersion = currentMetadata?.last_data_version ?? 0;
+
+    // Skip reconciliation if data version hasn't changed
+    // (server returns empty arrays when currentVersion <= sinceVersion)
+    if (dataVersion <= previousDataVersion) {
+      return {
+        data_version: dataVersion,
+        upserted_product_count: 0
+      };
+    }
+
     const items = response.data.items;
     const itemGroups = response.data.item_groups;
     const prices = response.data.prices;
