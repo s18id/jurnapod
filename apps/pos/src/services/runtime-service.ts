@@ -160,12 +160,10 @@ export class RuntimeService {
     scope: RuntimeOutletScope
   ): Promise<RuntimeOfflineSnapshot> {
     // Count pending/failed outbox jobs for this scope (unsynced = PENDING + FAILED)
-    const allUnsyncedJobs = await this.storage.listUnsyncedOutboxJobs(10000);
-    const scopedUnsyncedJobs = allUnsyncedJobs.filter(
-      (job) =>
-        job.company_id === scope.company_id &&
-        job.outlet_id === scope.outlet_id
-    );
+    const pending_outbox_count = await this.storage.countUnsyncedOutboxJobsForScope({
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id
+    });
 
     // Check if product cache exists for this scope
     const products = await this.storage.getProductsByOutlet({
@@ -174,7 +172,7 @@ export class RuntimeService {
     });
 
     return {
-      pending_outbox_count: scopedUnsyncedJobs.length,
+      pending_outbox_count,
       has_product_cache: products.length > 0
     };
   }

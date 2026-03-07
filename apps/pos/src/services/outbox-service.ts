@@ -40,14 +40,11 @@ export class OutboxService {
    */
   async getStats(): Promise<OutboxStats> {
     const now = new Date();
-    const [pending_count, due_count] = await Promise.all([
+    const [pending_count, failed_count, due_count] = await Promise.all([
       this.storage.countPendingOutboxJobs(),
+      this.storage.countFailedOutboxJobs(),
       this.storage.countGlobalDueOutboxJobs(now)
     ]);
-
-    // Count failed jobs (unsynced jobs include both PENDING and FAILED)
-    const allUnsyncedJobs = await this.storage.listUnsyncedOutboxJobs(10000);
-    const failed_count = allUnsyncedJobs.filter(job => job.status === "FAILED").length;
 
     return {
       pending_count,
@@ -88,13 +85,8 @@ export class OutboxService {
     company_id: number;
     outlet_id: number;
   }): Promise<boolean> {
-    const allUnsynced = await this.storage.listUnsyncedOutboxJobs(10000);
-    const scopedUnsynced = allUnsynced.filter(
-      job =>
-        job.company_id === scope.company_id &&
-        job.outlet_id === scope.outlet_id
-    );
-    return scopedUnsynced.length > 0;
+    const count = await this.storage.countUnsyncedOutboxJobsForScope(scope);
+    return count > 0;
   }
 
   /**
@@ -104,13 +96,7 @@ export class OutboxService {
     company_id: number;
     outlet_id: number;
   }): Promise<number> {
-    const allUnsynced = await this.storage.listUnsyncedOutboxJobs(10000);
-    const scopedUnsynced = allUnsynced.filter(
-      job =>
-        job.company_id === scope.company_id &&
-        job.outlet_id === scope.outlet_id
-    );
-    return scopedUnsynced.length;
+    return await this.storage.countUnsyncedOutboxJobsForScope(scope);
   }
 
   private toSummary(job: OutboxJobRow): OutboxJobSummary {

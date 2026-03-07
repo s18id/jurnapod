@@ -52,6 +52,9 @@ export interface PosStoragePort {
   listDueOutboxJobs(input: { now: Date; limit?: number }): Promise<OutboxJobRow[]>;
   updateOutboxJob(job_id: string, updates: Partial<OutboxJobRow>): Promise<void>;
   countPendingOutboxJobs(): Promise<number>;
+  countFailedOutboxJobs(): Promise<number>;
+  countUnsyncedOutboxJobs(): Promise<number>; // PENDING + FAILED
+  countUnsyncedOutboxJobsForScope(scope: { company_id: number; outlet_id: number }): Promise<number>;
   countGlobalDueOutboxJobs(now: Date): Promise<number>;
 
   // Sync metadata operations

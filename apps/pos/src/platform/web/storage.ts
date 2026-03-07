@@ -144,6 +144,31 @@ export class WebStorageAdapter implements PosStoragePort {
     return await this.db.outbox_jobs.where("status").equals("PENDING").count();
   }
 
+  async countFailedOutboxJobs(): Promise<number> {
+    return await this.db.outbox_jobs.where("status").equals("FAILED").count();
+  }
+
+  async countUnsyncedOutboxJobs(): Promise<number> {
+    return await this.db.outbox_jobs
+      .where("status")
+      .anyOf("PENDING", "FAILED")
+      .count();
+  }
+
+  async countUnsyncedOutboxJobsForScope(scope: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<number> {
+    const jobs = await this.db.outbox_jobs
+      .where("status")
+      .anyOf("PENDING", "FAILED")
+      .toArray();
+
+    return jobs.filter(
+      (job) => job.company_id === scope.company_id && job.outlet_id === scope.outlet_id
+    ).length;
+  }
+
   async countGlobalDueOutboxJobs(now: Date): Promise<number> {
     const nowMs = now.getTime();
     
