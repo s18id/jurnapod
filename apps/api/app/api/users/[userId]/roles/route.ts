@@ -18,12 +18,11 @@ import {
 
 const updateRolesSchema = z
   .object({
-    roles: z.array(RoleSchema).optional(),
-    role_codes: z.array(RoleSchema).optional(),
+    role_codes: z.array(RoleSchema),
     outlet_id: NumericIdSchema.optional()
   })
   .transform((value) => ({
-    roleCodes: value.roles ?? value.role_codes ?? [],
+    roleCodes: value.role_codes,
     outletId: value.outlet_id
   }));
 
@@ -39,6 +38,7 @@ export const POST = withAuth(
       const userId = parseUserId(request);
       const payload = await request.json();
       const input = updateRolesSchema.parse(payload);
+      
       if (input.roleCodes.includes("SUPER_ADMIN")) {
         const existing = await findUserById(auth.companyId, userId);
         if (!existing) {
@@ -48,6 +48,7 @@ export const POST = withAuth(
           return errorResponse("INVALID_REQUEST", "Invalid request", 400);
         }
       }
+      
       const user = await setUserRoles({
         companyId: auth.companyId,
         userId,
