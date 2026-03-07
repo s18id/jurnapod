@@ -37,10 +37,10 @@ INSERT INTO roles (code, name, is_global, role_level)
 VALUES 
   ('SUPER_ADMIN', 'Super Admin', 1, 100),
   ('OWNER', 'Owner', 1, 90),
-  ('COMPANY_ADMIN', 'Company Admin', 1, 80)
+  ('COMPANY_ADMIN', 'Company Admin', 1, 80),
   ('ADMIN', 'Admin', 0, 60),
   ('ACCOUNTANT', 'Accountant', 0, 40),
-  ('CASHIER', 'Cashier', 0, 20),
+  ('CASHIER', 'Cashier', 0, 20)
 ON DUPLICATE KEY UPDATE
   name = VALUES(name),
   is_global = VALUES(is_global),
