@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { type PosOfflineDb, posDb } from "./db.js";
+import { type PosOfflineDb, posDb } from "@jurnapod/offline-db/dexie";
 import { runOutboxDrainAsLeader } from "./outbox-leader.js";
-import type { ProductCacheRow } from "./types.js";
+import type { ProductCacheRow } from "@jurnapod/offline-db/dexie";
 
 export type RuntimeSyncBadgeState = "Offline" | "Pending" | "Synced";
 

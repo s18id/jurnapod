@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { type PosOfflineDb, posDb } from "./db.js";
+import { type PosOfflineDb, posDb } from "@jurnapod/offline-db/dexie";
 import { enqueueOutboxJobInTransaction } from "./outbox.js";
 import {
   type CompleteSaleInput,
@@ -19,7 +19,7 @@ import {
   SaleCompletionInProgressError,
   SaleTotalsMismatchError,
   ScopeValidationError
-} from "./types.js";
+} from "@jurnapod/offline-db/dexie";
 
 const saleCompletionLocks = new Set<string>();
 const MONEY_SCALE = 100;

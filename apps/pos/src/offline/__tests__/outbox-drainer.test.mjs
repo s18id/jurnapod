@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "fake-indexeddb/auto";
 
-import { createPosOfflineDb } from "../../../dist/offline/db.js";
+import { createPosOfflineDb } from "@jurnapod/offline-db/dexie";
 import { drainOutboxJobs } from "../../../dist/offline/outbox-drainer.js";
 import { OutboxSenderError } from "../../../dist/offline/outbox-sender.js";
 import { enqueueOutboxJob, reserveOutboxAttempt, updateOutboxJobStatus } from "../../../dist/offline/outbox.js";

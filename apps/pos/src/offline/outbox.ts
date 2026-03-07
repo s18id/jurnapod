@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import Dexie from "dexie";
-import { type PosOfflineDb, posDb } from "./db.js";
+import { type PosOfflineDb, posDb } from "@jurnapod/offline-db/dexie";
 import {
   type EnqueueOutboxJobInput,
   type OutboxAttemptToken,
@@ -12,7 +12,7 @@ import {
   type UpdateOutboxStatusInput,
   RecordNotFoundError,
   ScopeValidationError
-} from "./types.js";
+} from "@jurnapod/offline-db/dexie";
 
 const SYNC_JOB_TYPE = "SYNC_POS_TX" as const;
 const DEFAULT_LEASE_MS = 30_000;

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "fake-indexeddb/auto";
 
-import { createPosOfflineDb } from "../../../dist/offline/db.js";
+import { createPosOfflineDb } from "@jurnapod/offline-db/dexie";
 import { enqueueOutboxJob, reserveOutboxAttempt, updateOutboxJobStatus } from "../../../dist/offline/outbox.js";
 
 function nowIso() {

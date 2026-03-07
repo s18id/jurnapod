@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "fake-indexeddb/auto";
 
-import { createPosOfflineDb } from "../../../dist/offline/db.js";
+import { createPosOfflineDb } from "@jurnapod/offline-db/dexie";
 import { ingestSyncPullIntoProductsCache, readSyncPullConfig, readSyncPullDataVersion } from "../../../dist/offline/sync-pull.js";
 
 function createSyncPayload({ dataVersion, outletId, price }) {

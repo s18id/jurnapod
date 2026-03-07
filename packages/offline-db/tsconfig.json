@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./dexie",
+    "declaration": true,
+    "declarationMap": true,
+    "composite": true
+  },
+  "include": ["dexie/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
