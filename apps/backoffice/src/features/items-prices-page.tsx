@@ -739,98 +739,282 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
         })()}
       </section>
 
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Outlet Prices</h3>
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={cellStyle}>ID</th>
-              <th style={cellStyle}>Item</th>
-              <th style={cellStyle}>Group</th>
-              <th style={cellStyle}>Price</th>
-              <th style={cellStyle}>Active</th>
-              <th style={cellStyle}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {prices.map((price) => (
-              <tr key={price.id}>
-                <td style={cellStyle}>{price.id}</td>
-                <td style={cellStyle}>
-                  <select
-                    value={price.item_id}
-                    onChange={(event) =>
-                      setPrices((prev) =>
-                        prev.map((entry) =>
-                          entry.id === price.id
-                            ? { ...entry, item_id: Number(event.target.value) }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  >
-                    {items.map((item) => {
-                      const groupName = getGroupPath(item.item_group_id);
-                      return (
-                        <option key={item.id} value={item.id}>
-                          {groupName} - {item.name}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </td>
-                <td style={cellStyle}>
-                  {(() => {
-                    const item = itemMap.get(price.item_id);
-                    if (!item) return "-";
-                    return getGroupPath(item.item_group_id);
-                  })()}
-                </td>
-                <td style={cellStyle}>
-                  <input
-                    value={price.price}
-                    onChange={(event) =>
-                      setPrices((prev) =>
-                        prev.map((entry) =>
-                          entry.id === price.id
-                            ? { ...entry, price: Number(event.target.value || "0") }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <input
-                    type="checkbox"
-                    checked={price.is_active}
-                    onChange={(event) =>
-                      setPrices((prev) =>
-                        prev.map((entry) =>
-                          entry.id === price.id
-                            ? { ...entry, is_active: event.target.checked }
-                            : entry
-                        )
-                      )
-                    }
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <button type="button" onClick={() => savePrice(price)}>
-                    Save
-                  </button>
-                  <button type="button" onClick={() => deletePrice(price.id)}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {prices.length === 0 ? <p>No prices for selected outlet.</p> : null}
-      </section>
+      {pricingViewMode === "defaults" ? (
+        <section style={boxStyle}>
+          <h3 style={{ marginTop: 0 }}>
+            Company Default Prices
+            <span style={{ fontWeight: "normal", fontSize: "12px", marginLeft: "8px", color: "#6b5d48" }}>
+              (applies to all outlets)
+            </span>
+          </h3>
+          {companyDefaults.length === 0 ? (
+            <p>No company default prices. Create one above.</p>
+          ) : (
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={cellStyle}>ID</th>
+                  <th style={cellStyle}>Item</th>
+                  <th style={cellStyle}>Group</th>
+                  <th style={cellStyle}>Price</th>
+                  <th style={cellStyle}>Active</th>
+                  <th style={cellStyle}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {companyDefaults.map((price) => (
+                  <tr key={price.id}>
+                    <td style={cellStyle}>{price.id}</td>
+                    <td style={cellStyle}>
+                      <select
+                        value={price.item_id}
+                        onChange={(event) =>
+                          setCompanyDefaults((prev) =>
+                            prev.map((entry) =>
+                              entry.id === price.id
+                                ? { ...entry, item_id: Number(event.target.value) }
+                                : entry
+                            )
+                          )
+                        }
+                        style={inputStyle}
+                      >
+                        {items.map((item) => {
+                          const groupName = getGroupPath(item.item_group_id);
+                          return (
+                            <option key={item.id} value={item.id}>
+                              {groupName} - {item.name}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </td>
+                    <td style={cellStyle}>
+                      {(() => {
+                        const item = itemMap.get(price.item_id);
+                        if (!item) return "-";
+                        return getGroupPath(item.item_group_id);
+                      })()}
+                    </td>
+                    <td style={cellStyle}>
+                      <input
+                        value={price.price}
+                        onChange={(event) =>
+                          setCompanyDefaults((prev) =>
+                            prev.map((entry) =>
+                              entry.id === price.id
+                                ? { ...entry, price: Number(event.target.value || "0") }
+                                : entry
+                            )
+                          )
+                        }
+                        style={inputStyle}
+                      />
+                    </td>
+                    <td style={cellStyle}>
+                      <input
+                        type="checkbox"
+                        checked={price.is_active}
+                        onChange={(event) =>
+                          setCompanyDefaults((prev) =>
+                            prev.map((entry) =>
+                              entry.id === price.id
+                                ? { ...entry, is_active: event.target.checked }
+                                : entry
+                            )
+                          )
+                        }
+                      />
+                    </td>
+                    <td style={cellStyle}>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await apiRequest(`/inventory/item-prices/${price.id}`, {
+                              method: "PATCH",
+                              body: JSON.stringify({
+                                item_id: price.item_id,
+                                price: price.price,
+                                is_active: price.is_active
+                              })
+                            }, props.accessToken);
+                            await refreshData(selectedOutletId);
+                          } catch (err) {
+                            if (err instanceof ApiError) {
+                              setError(err.message);
+                            }
+                          }
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deletePrice(price.id)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      ) : (
+        <section style={boxStyle}>
+          <h3 style={{ marginTop: 0 }}>
+            Outlet Prices: {props.user.outlets.find((o) => o.id === selectedOutletId)?.name ?? selectedOutletId}
+            <span style={{ fontWeight: "normal", fontSize: "12px", marginLeft: "8px", color: "#6b5d48" }}>
+              (outlet override or company default fallback)
+            </span>
+          </h3>
+          {prices.length === 0 ? (
+            <p>No prices for this outlet. Set a company default or create an outlet override above.</p>
+          ) : (
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={cellStyle}>ID</th>
+                  <th style={cellStyle}>Item</th>
+                  <th style={cellStyle}>Group</th>
+                  <th style={cellStyle}>Scope</th>
+                  <th style={cellStyle}>Price</th>
+                  <th style={cellStyle}>Active</th>
+                  <th style={cellStyle}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {prices.map((price) => {
+                  const isOverride = price.outlet_id !== null;
+                  return (
+                    <tr
+                      key={price.id}
+                      style={isOverride ? {} : { backgroundColor: "#f8f6f3" }}
+                    >
+                      <td style={cellStyle}>{price.id}</td>
+                      <td style={cellStyle}>
+                        <select
+                          value={price.item_id}
+                          onChange={(event) =>
+                            setPrices((prev) =>
+                              prev.map((entry) =>
+                                entry.id === price.id
+                                  ? { ...entry, item_id: Number(event.target.value) }
+                                  : entry
+                              )
+                            )
+                          }
+                          style={inputStyle}
+                        >
+                          {items.map((item) => {
+                            const groupName = getGroupPath(item.item_group_id);
+                            return (
+                              <option key={item.id} value={item.id}>
+                                {groupName} - {item.name}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </td>
+                      <td style={cellStyle}>
+                        {(() => {
+                          const item = itemMap.get(price.item_id);
+                          if (!item) return "-";
+                          return getGroupPath(item.item_group_id);
+                        })()}
+                      </td>
+                      <td style={cellStyle}>
+                        {isOverride ? (
+                          <span style={{ color: "#2f5f4a", fontWeight: 600 }}>Override</span>
+                        ) : (
+                          <span style={{ fontStyle: "italic", color: "#6b5d48" }}>
+                            Default
+                          </span>
+                        )}
+                      </td>
+                      <td style={cellStyle}>
+                        {isOverride ? (
+                          <input
+                            value={price.price}
+                            onChange={(event) =>
+                              setPrices((prev) =>
+                                prev.map((entry) =>
+                                  entry.id === price.id
+                                    ? { ...entry, price: Number(event.target.value || "0") }
+                                    : entry
+                                )
+                              )
+                            }
+                            style={inputStyle}
+                          />
+                        ) : (
+                          <span style={{ fontStyle: "italic", color: "#6b5d48" }}>
+                            {price.price}
+                          </span>
+                        )}
+                      </td>
+                      <td style={cellStyle}>
+                        {isOverride ? (
+                          <input
+                            type="checkbox"
+                            checked={price.is_active}
+                            onChange={(event) =>
+                              setPrices((prev) =>
+                                prev.map((entry) =>
+                                  entry.id === price.id
+                                    ? { ...entry, is_active: event.target.checked }
+                                    : entry
+                                )
+                              )
+                            }
+                          />
+                        ) : (
+                          <span style={{ fontStyle: "italic", color: "#6b5d48" }}>
+                            {price.is_active ? "Yes" : "No"}
+                          </span>
+                        )}
+                      </td>
+                      <td style={cellStyle}>
+                        {isOverride ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => savePrice(price)}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deletePrice(price.id)}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const overridePrice = prompt(`Set override price for this item:`, String(price.price));
+                              if (overridePrice && !isNaN(Number(overridePrice))) {
+                                createOutletOverride(price.item_id, Number(overridePrice));
+                              }
+                            }}
+                            style={{ backgroundColor: "#2f5f4a", color: "white" }}
+                          >
+                            Set Override
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
 
       <section style={boxStyle}>
         <strong>Quick checks</strong>
