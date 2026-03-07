@@ -37,7 +37,7 @@ type ItemGroupRow = RowDataPacket & {
 type ItemPriceRow = RowDataPacket & {
   id: number;
   company_id: number;
-  outlet_id: number;
+  outlet_id: number | null;
   item_id: number;
   price: string | number;
   is_active: number;
@@ -291,7 +291,7 @@ function normalizeItemPrice(row: ItemPriceRow) {
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
-    outlet_id: Number(row.outlet_id),
+    outlet_id: row.outlet_id == null ? null : Number(row.outlet_id),
     item_id: Number(row.item_id),
     price: Number(row.price),
     is_active: row.is_active === 1,
@@ -1201,7 +1201,8 @@ export async function listItemPrices(
     values.push(filters.isActive ? 1 : 0);
   }
 
-  sql += " ORDER BY ip.outlet_id DESC NULLS LAST, ip.id ASC";
+  // MySQL doesn't support NULLS LAST syntax; use IS NULL trick to put nulls last in descending order
+  sql += " ORDER BY ip.outlet_id IS NULL ASC, ip.outlet_id DESC, ip.id ASC";
 
   const [rows] = await pool.execute<ItemPriceRow[]>(sql, values);
   return rows.map(normalizeItemPrice);
@@ -1256,10 +1257,14 @@ export async function listEffectiveItemPricesForOutlet(
   sql += " ORDER BY i.id ASC";
 
   const [rows] = await pool.execute<(ItemPriceRow & { is_override: number })[]>(sql, values);
-  return rows.map((row) => ({
-    ...normalizeItemPrice(row),
-    is_override: row.is_override === 1
-  }));
+  return rows.map((row) => {
+    const normalized = normalizeItemPrice(row);
+    return {
+      ...normalized,
+      outlet_id: normalized.outlet_id ?? outletId, // COALESCE ensures this is always outletId
+      is_override: row.is_override === 1
+    };
+  });
 }
 
 export async function findItemPriceById(companyId: number, itemPriceId: number) {

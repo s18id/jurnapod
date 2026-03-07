@@ -1400,3 +1400,211 @@ test(
     }
   }
 );
+
+test(
+  "master data integration: admin cannot manage company default prices",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let adminUserId = 0;
+    let itemId = 0;
+    let defaultPriceId = 0;
+    let overridePriceId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const adminEmail = `admin-default-rbac-${runId}@example.com`;
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const [ownerPasswordRows] = await db.execute(
+        `SELECT password_hash
+         FROM users
+         WHERE id = ?
+         LIMIT 1`,
+        [Number(owner.id)]
+      );
+      const ownerPasswordHash = ownerPasswordRows[0]?.password_hash;
+      if (!ownerPasswordHash) {
+        throw new Error("owner password hash not found; run `npm run db:migrate && npm run db:seed`");
+      }
+
+      const [adminRoleRows] = await db.execute(
+        `SELECT id
+         FROM roles
+         WHERE code = 'ADMIN'
+         LIMIT 1`
+      );
+      const adminRoleId = adminRoleRows[0]?.id;
+      if (!adminRoleId) {
+        throw new Error("ADMIN role not found; run `npm run db:migrate && npm run db:seed`");
+      }
+
+      const [adminInsert] = await db.execute(
+        `INSERT INTO users (company_id, email, password_hash, is_active)
+         VALUES (?, ?, ?, 1)`,
+        [companyId, adminEmail, ownerPasswordHash]
+      );
+      adminUserId = Number(adminInsert.insertId);
+
+      await db.execute(
+        `INSERT INTO user_roles (user_id, role_id)
+         VALUES (?, ?)`,
+        [adminUserId, Number(adminRoleId)]
+      );
+
+      await db.execute(
+        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+         VALUES (?, ?, ?)`,
+        [adminUserId, outletId, Number(adminRoleId)]
+      );
+
+      await db.execute(
+        `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+         VALUES (?, ?, 'inventory', 15)
+         ON DUPLICATE KEY UPDATE permission_mask = 15`,
+        [companyId, Number(adminRoleId)]
+      );
+
+      const [itemInsert] = await db.execute(
+        `INSERT INTO items (company_id, sku, name, item_type, is_active)
+         VALUES (?, ?, ?, 'PRODUCT', 1)`,
+        [companyId, `RBAC-DEF-${runId}`, `RBAC Default Item ${runId}`]
+      );
+      itemId = Number(itemInsert.insertId);
+
+      const [defaultPriceInsert] = await db.execute(
+        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active)
+         VALUES (?, NULL, ?, ?, 1)`,
+        [companyId, itemId, 88000]
+      );
+      defaultPriceId = Number(defaultPriceInsert.insertId);
+
+      const baseUrl = testContext.baseUrl;
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: adminEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await loginResponse.json();
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const createDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: itemId,
+          outlet_id: null,
+          price: 99000,
+          is_active: true
+        })
+      });
+      assert.equal(createDefaultResponse.status, 403);
+
+      const getDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${defaultPriceId}`, {
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        }
+      });
+      assert.equal(getDefaultResponse.status, 403);
+
+      const patchDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${defaultPriceId}`, {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          price: 90000
+        })
+      });
+      assert.equal(patchDefaultResponse.status, 403);
+
+      const deleteDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${defaultPriceId}`, {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        }
+      });
+      assert.equal(deleteDefaultResponse.status, 403);
+
+      const createOverrideResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: itemId,
+          outlet_id: outletId,
+          price: 91000,
+          is_active: true
+        })
+      });
+      assert.equal(createOverrideResponse.status, 201);
+      const createOverrideBody = await createOverrideResponse.json();
+      assert.equal(createOverrideBody.success, true);
+      overridePriceId = Number(createOverrideBody.data.id);
+    } finally {
+      if (overridePriceId > 0) {
+        await db.execute("DELETE FROM item_prices WHERE id = ?", [overridePriceId]);
+      }
+
+      if (defaultPriceId > 0) {
+        await db.execute("DELETE FROM item_prices WHERE id = ?", [defaultPriceId]);
+      }
+
+      if (itemId > 0) {
+        await db.execute("DELETE FROM items WHERE id = ?", [itemId]);
+      }
+
+      if (adminUserId > 0) {
+        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
+      }
+    }
+  }
+);

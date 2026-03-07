@@ -16,12 +16,16 @@ import {
   findItemPriceById,
   updateItemPrice
 } from "../../../../../src/lib/master-data";
-import { userHasOutletAccess } from "../../../../../src/lib/auth";
+import { userHasOutletAccess, userHasAnyRole } from "../../../../../src/lib/auth";
 
 function parsePriceId(request: Request): number {
   const pathname = new URL(request.url).pathname;
   const priceIdRaw = pathname.split("/").filter(Boolean).pop();
   return NumericIdSchema.parse(priceIdRaw);
+}
+
+async function ensureCompanyDefaultAccess(userId: number, companyId: number): Promise<boolean> {
+  return userHasAnyRole(userId, companyId, ["OWNER", "COMPANY_ADMIN"]);
 }
 
 export const GET = withAuth(
@@ -34,8 +38,15 @@ export const GET = withAuth(
         return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
-      // Check outlet access only for outlet overrides (not company defaults)
-      if (itemPrice.outlet_id !== null) {
+      // Check access based on price scope
+      if (itemPrice.outlet_id === null) {
+        // Company default - requires company-level roles (OWNER or COMPANY_ADMIN)
+        const hasCompanyAccess = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
+        if (!hasCompanyAccess) {
+          return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
+        }
+      } else {
+        // Outlet override - requires outlet access
         const hasOutletAccess = await userHasOutletAccess(
           auth.userId,
           auth.companyId,
@@ -71,8 +82,13 @@ export const PATCH = withAuth(
         return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
-      // Check outlet access only for outlet overrides (not company defaults)
-      if (existingItemPrice.outlet_id !== null) {
+      // Check access based on existing price scope
+      if (existingItemPrice.outlet_id === null) {
+        const hasCompanyAccess = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
+        if (!hasCompanyAccess) {
+          return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
+        }
+      } else {
         const hasCurrentOutletAccess = await userHasOutletAccess(
           auth.userId,
           auth.companyId,
@@ -94,8 +110,12 @@ export const PATCH = withAuth(
           if (!hasTargetOutletAccess) {
             return errorResponse("FORBIDDEN", "Forbidden", 403);
           }
+        } else if (input.outlet_id === null) {
+          const hasCompanyAccess = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
+          if (!hasCompanyAccess) {
+            return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
+          }
         }
-        // input.outlet_id === null means changing to company default (allowed for company admins)
       }
 
       const itemPrice = await updateItemPrice(auth.companyId, priceId, input, {
@@ -141,8 +161,13 @@ export const DELETE = withAuth(
         return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
-      // Check outlet access only for outlet overrides (not company defaults)
-      if (existingItemPrice.outlet_id !== null) {
+      // Check access based on existing price scope
+      if (existingItemPrice.outlet_id === null) {
+        const hasCompanyAccess = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
+        if (!hasCompanyAccess) {
+          return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
+        }
+      } else {
         const hasOutletAccess = await userHasOutletAccess(
           auth.userId,
           auth.companyId,

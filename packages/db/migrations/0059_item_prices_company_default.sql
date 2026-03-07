@@ -125,16 +125,8 @@ ALTER TABLE item_prices
   ADD INDEX idx_item_prices_outlet_item_active (company_id, outlet_id, item_id, is_active);
 
 -- Index for company default queries
-ALTER TABLE item_prices
-  ADD INDEX idx_item_prices_company_default (company_id, item_id, is_active)
-  WHERE outlet_id IS NULL;
-
--- Note: MySQL does not support filtered indexes (WHERE clause in index definition)
--- The WHERE clause above is a comment for documentation; actual index includes all rows.
--- We rely on the optimizer to efficiently use the index when outlet_id IS NULL is in the query.
-
--- Alternative: Use a regular index since MySQL doesn't support partial indexes
-DROP INDEX IF EXISTS idx_item_prices_company_default ON item_prices;
+-- Note: MySQL does not support filtered indexes (WHERE outlet_id IS NULL)
+-- Create a regular index that includes all rows; MySQL optimizer will use it efficiently
 ALTER TABLE item_prices
   ADD INDEX idx_item_prices_company_default_fallback (company_id, item_id, is_active);
 

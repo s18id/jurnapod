@@ -14,7 +14,7 @@ import {
   DatabaseReferenceError,
   listItemPrices
 } from "../../../../src/lib/master-data";
-import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
+import { listUserOutletIds, userHasAnyRole, userHasOutletAccess } from "../../../../src/lib/auth";
 
 const outletGuardSchema = ItemPriceCreateRequestSchema.pick({
   outlet_id: true
@@ -39,6 +39,10 @@ async function parseOutletIdForGuard(request: Request): Promise<number | null> {
 
     throw error;
   }
+}
+
+async function ensureCompanyDefaultAccess(userId: number, companyId: number): Promise<boolean> {
+  return userHasAnyRole(userId, companyId, ["OWNER", "COMPANY_ADMIN"]);
 }
 
 function parseOptionalIsActive(value: string | null): boolean | undefined {
@@ -125,6 +129,14 @@ export const POST = withAuth(
     try {
       const payload = await request.json();
       const input = ItemPriceCreateRequestSchema.parse(payload);
+
+      if (input.outlet_id === null) {
+        const hasCompanyAccess = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
+        if (!hasCompanyAccess) {
+          return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
+        }
+      }
+
       const itemPrice = await createItemPrice(auth.companyId, input, {
         userId: auth.userId
       });
