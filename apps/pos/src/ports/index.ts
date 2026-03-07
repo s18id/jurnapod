@@ -37,3 +37,4 @@ export type {
   DeviceRegistration,
   DevicePlatform
 } from "./device-identity-port.js";
+export type { AppStatePort } from "./app-state-port.js";

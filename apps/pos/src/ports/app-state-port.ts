@@ -27,35 +27,3 @@ export interface AppStatePort {
    */
   onBackground(callback: () => void): () => void;
 }
-
-/**
- * Web implementation using document.visibilitychange
- */
-export function createWebAppStateAdapter(): AppStatePort {
-  return {
-    onActive: (callback) => {
-      const handler = () => {
-        if (document.visibilityState === "visible") {
-          callback();
-        }
-      };
-      document.addEventListener("visibilitychange", handler);
-      return () => document.removeEventListener("visibilitychange", handler);
-    },
-
-    onInactive: (callback) => {
-      const handler = () => {
-        if (document.visibilityState === "hidden") {
-          callback();
-        }
-      };
-      document.addEventListener("visibilitychange", handler);
-      return () => document.removeEventListener("visibilitychange", handler);
-    },
-
-    onBackground: (callback) => {
-      // Same as inactive for web
-      return createWebAppStateAdapter().onInactive(callback);
-    }
-  };
-}
