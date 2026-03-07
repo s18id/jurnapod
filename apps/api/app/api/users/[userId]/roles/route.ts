@@ -12,6 +12,7 @@ import {
   RoleLevelViolationError,
   RoleScopeViolationError,
   setUserRoles,
+  SuperAdminProtectionError,
   UserNotFoundError
 } from "../../../../../src/lib/users";
 
@@ -78,6 +79,10 @@ export const POST = withAuth(
 
       if (error instanceof RoleScopeViolationError) {
         return errorResponse("INVALID_REQUEST", error.message, 400);
+      }
+
+      if (error instanceof SuperAdminProtectionError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
       }
 
       console.error("POST /api/users/:userId/roles failed", error);

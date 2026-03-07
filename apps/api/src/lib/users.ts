@@ -15,6 +15,7 @@ export class RoleNotFoundError extends Error {}
 export class RoleLevelViolationError extends Error {}
 export class RoleScopeViolationError extends Error {}
 export class OutletNotFoundError extends Error {}
+export class SuperAdminProtectionError extends Error {}
 
 export type UserProfile = {
   id: number;
@@ -227,6 +228,26 @@ async function getUserMaxRoleLevelForConnection(
 
   const maxLevel = rows[0]?.max_level;
   return Number(maxLevel ?? 0);
+}
+
+async function userHasSuperAdminRole(
+  connection: PoolConnection | ReturnType<typeof getDbPool>,
+  companyId: number,
+  userId: number
+): Promise<boolean> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT 1
+     FROM user_roles ur
+     INNER JOIN roles r ON r.id = ur.role_id
+     INNER JOIN users u ON u.id = ur.user_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND r.code = 'SUPER_ADMIN'
+     LIMIT 1`,
+    [userId, companyId]
+  );
+
+  return rows.length > 0;
 }
 
 async function ensureOutletIdsExist(
@@ -483,7 +504,7 @@ export async function createUser(params: {
       ...[...combinedRoleCodes].map((code) => roleMap.get(code)?.role_level ?? 0)
     );
 
-    if (requestedMaxLevel > actorMaxLevel) {
+    if (requestedMaxLevel >= actorMaxLevel) {
       throw new RoleLevelViolationError("Insufficient role level to assign requested roles");
     }
 
@@ -632,6 +653,19 @@ export async function setUserRoles(params: {
   try {
     await connection.beginTransaction();
     await ensureUserExists(connection, params.companyId, params.userId);
+
+    // Prevent modifying roles for SUPER_ADMIN users
+    const isSuperAdmin = await userHasSuperAdminRole(
+      connection,
+      params.companyId,
+      params.userId
+    );
+    if (isSuperAdmin) {
+      throw new SuperAdminProtectionError(
+        "Cannot modify roles for SUPER_ADMIN user"
+      );
+    }
+
     const roleCodes = params.roleCodes.map((role) => RoleSchema.parse(role));
     const roleMap = await ensureRoleCodesExist(connection, roleCodes);
 
@@ -645,7 +679,7 @@ export async function setUserRoles(params: {
       ...roleCodes.map((code) => roleMap.get(code)?.role_level ?? 0)
     );
 
-    if (requestedMaxLevel > actorMaxLevel) {
+    if (requestedMaxLevel >= actorMaxLevel) {
       throw new RoleLevelViolationError("Insufficient role level to assign requested roles");
     }
 
@@ -865,6 +899,21 @@ export async function setUserActiveState(params: {
 
   try {
     await connection.beginTransaction();
+
+    // Prevent deactivating SUPER_ADMIN users
+    if (!params.isActive) {
+      const isSuperAdmin = await userHasSuperAdminRole(
+        connection,
+        params.companyId,
+        params.userId
+      );
+      if (isSuperAdmin) {
+        throw new SuperAdminProtectionError(
+          "Cannot deactivate SUPER_ADMIN user"
+        );
+      }
+    }
+
     const [result] = await connection.execute<ResultSetHeader>(
       `UPDATE users
        SET is_active = ?, updated_at = CURRENT_TIMESTAMP

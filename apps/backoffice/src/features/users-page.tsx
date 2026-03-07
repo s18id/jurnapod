@@ -585,8 +585,14 @@ export function UsersPage(props: UsersPageProps) {
         cell: (info) => {
           const targetUser = info.row.original;
           const isSelf = targetUser.id === user.id;
+          const isSuperAdminUser = targetUser.global_roles.includes("SUPER_ADMIN");
           const disableSelfAction = isSelf;
+          const disableRoleAction = isSelf || isSuperAdminUser;
+          const disableDeactivateAction = isSelf || isSuperAdminUser;
           const selfTooltip = isSelf ? "You cannot modify your own access." : undefined;
+          const superAdminTooltip = isSuperAdminUser ? "Cannot modify SUPER_ADMIN user." : undefined;
+          const roleTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
+          const deactivateTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
           return (
             <Group gap="xs" justify="flex-end" wrap="wrap">
               <Button
@@ -600,8 +606,8 @@ export function UsersPage(props: UsersPageProps) {
                 size="xs"
                 variant="light"
                 onClick={() => openRolesDialog(targetUser)}
-                disabled={disableSelfAction}
-                title={selfTooltip}
+                disabled={disableRoleAction}
+                title={roleTooltip}
               >
                 Roles
               </Button>
@@ -609,8 +615,8 @@ export function UsersPage(props: UsersPageProps) {
                 size="xs"
                 variant="light"
                 onClick={() => openOutletsDialog(targetUser)}
-                disabled={disableSelfAction}
-                title={selfTooltip}
+                disabled={disableRoleAction}
+                title={roleTooltip}
               >
                 Outlet Roles
               </Button>
@@ -627,8 +633,8 @@ export function UsersPage(props: UsersPageProps) {
                   color="red"
                   variant="light"
                   onClick={() => setConfirmState({ action: "deactivate", user: targetUser })}
-                  disabled={disableSelfAction}
-                  title={selfTooltip}
+                  disabled={disableDeactivateAction}
+                  title={deactivateTooltip}
                 >
                   Deactivate
                 </Button>
@@ -832,7 +838,7 @@ export function UsersPage(props: UsersPageProps) {
                           key={role.code}
                           label={role.name}
                           checked={formData.global_role_codes.includes(role.code)}
-                          disabled={role.role_level > actorMaxRoleLevel}
+                          disabled={role.role_level >= actorMaxRoleLevel}
                           onChange={(event) => {
                             if (event.currentTarget.checked) {
                               setFormData({
@@ -883,7 +889,7 @@ export function UsersPage(props: UsersPageProps) {
                                   key={`${outlet.id}-${role.code}`}
                                   label={role.name}
                                   checked={checked}
-                                  disabled={role.role_level > actorMaxRoleLevel}
+                                  disabled={role.role_level >= actorMaxRoleLevel}
                                   onChange={(event) =>
                                     updateOutletRoleCode(outlet.id, role.code, event.currentTarget.checked)
                                   }
@@ -923,7 +929,7 @@ export function UsersPage(props: UsersPageProps) {
                         key={role.code}
                         label={role.name}
                         checked={formData.global_role_codes.includes(role.code)}
-                        disabled={role.role_level > actorMaxRoleLevel}
+                        disabled={role.role_level >= actorMaxRoleLevel}
                         onChange={(event) => {
                           if (event.currentTarget.checked) {
                             setFormData({
@@ -976,7 +982,7 @@ export function UsersPage(props: UsersPageProps) {
                                 key={`${outlet.id}-${role.code}`}
                                 label={role.name}
                                 checked={checked}
-                                disabled={role.role_level > actorMaxRoleLevel}
+                                disabled={role.role_level >= actorMaxRoleLevel}
                                 onChange={(event) =>
                                   updateOutletRoleCode(
                                     outlet.id,
