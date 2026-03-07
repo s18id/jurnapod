@@ -29,6 +29,7 @@
     "dev:pos": "npm run dev -w @jurnapod/pos",
     "dev:api": "npm run dev -w @jurnapod/api",
     "dev:backoffice": "npm run dev -w @jurnapod/backoffice",
+    "pos:build-meta": "node ./scripts/gen-pos-build-meta.mjs --format=shell",
     "build:pos": "npm run build -w @jurnapod/pos",
     "build:api": "npm run build -w @jurnapod/api",
     "build:backoffice": "npm run build -w @jurnapod/backoffice",
