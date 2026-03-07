@@ -23,8 +23,8 @@ export function LoginPage({ context, onAuthSuccess }: LoginPageProps): JSX.Eleme
   const GOOGLE_CLIENT_ID = API_CONFIG.googleClientId;
   const googleEnabled = GOOGLE_CLIENT_ID.length > 0;
 
-  const handleAuthSuccess = useCallback(async (accessToken: string, message?: string) => {
-    onAuthSuccess(accessToken);
+  const handleAuthSuccess = useCallback(async (accessToken: string) => {
+    await onAuthSuccess(accessToken);
   }, [onAuthSuccess]);
 
   const { bootstrapAuth } = useAuthCallback({
