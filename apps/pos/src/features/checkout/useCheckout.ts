@@ -25,7 +25,16 @@ export interface UseCheckoutReturn {
   canCompleteSale: (cartLines: CartLine[], cartTotals: CartTotals) => boolean;
   completeInFlight: boolean;
   lastCompleteMessage: string | null;
-  runCompleteSale: (cartLines: CartLine[], cartTotals: CartTotals) => Promise<void>;
+  runCompleteSale: (
+    cartLines: CartLine[],
+    cartTotals: CartTotals,
+    options?: {
+      setPaymentMethod?: (method: string) => void;
+      setCart?: () => void;
+      setPaidAmount?: (amount: number) => void;
+      setCurrentFlowId?: (id: string) => void;
+    }
+  ) => Promise<void>;
 }
 
 export function useCheckout({ scope, runtime, initialPaymentMethods = ["CASH"] }: UseCheckoutOptions): UseCheckoutReturn {
