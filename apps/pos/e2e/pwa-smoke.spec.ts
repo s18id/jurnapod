@@ -138,10 +138,119 @@ test("login + sync pull works with mocked API", async ({ page }) => {
   await page.getByPlaceholder("Password").fill("password");
   await page.getByRole("button", { name: "Sign in" }).click();
 
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/products$/);
 
   await page.goto("/settings");
   await page.getByRole("button", { name: "Sync pull now" }).click();
   await expect(page.getByText(/Sync pull applied/)).toBeVisible();
   await expect(page.getByText("Last data version: 10")).toBeVisible();
+});
+
+test("dine-in flow blocks product add until table selected", async ({ page }) => {
+  await page.route("**/api/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: { service: "jurnapod-api" } })
+    });
+  });
+
+  await page.route("**/api/auth/login", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          access_token: "test-token",
+          token_type: "Bearer",
+          expires_in: 3600
+        }
+      })
+    });
+  });
+
+  await page.route("**/api/users/me", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          id: 1,
+          company_id: 1,
+          outlets: [
+            {
+              id: 10,
+              code: "MAIN",
+              name: "Main Outlet"
+            }
+          ]
+        }
+      })
+    });
+  });
+
+  await page.route("**/api/sync/pull**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          data_version: 10,
+          items: [
+            {
+              id: 100,
+              sku: "AMER",
+              name: "Americano",
+              type: "PRODUCT",
+              is_active: true,
+              updated_at: new Date().toISOString()
+            }
+          ],
+          item_groups: [],
+          prices: [
+            {
+              id: 200,
+              item_id: 100,
+              outlet_id: 10,
+              price: 18000,
+              is_active: true,
+              updated_at: new Date().toISOString()
+            }
+          ],
+          config: {
+            tax: {
+              rate: 0,
+              inclusive: false
+            },
+            payment_methods: ["CASH", "QRIS"]
+          }
+        }
+      })
+    });
+  });
+
+  await page.goto("/");
+  await page.getByPlaceholder("Email").fill("cashier@example.com");
+  await page.getByPlaceholder("Password").fill("password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/products$/);
+
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Sync pull now" }).click();
+  await expect(page.getByText(/Sync pull applied/)).toBeVisible();
+
+  await page.goto("/products");
+  await page.getByRole("button", { name: "Dine-in" }).click();
+  await page.getByRole("button", { name: "Add" }).first().click();
+  await expect(page.getByText("Select a table from the Tables page before adding items for dine-in.")).toBeVisible();
+
+  await page.goto("/tables");
+  await page.getByRole("button", { name: "Use table" }).first().click();
+  await expect(page).toHaveURL(/\/products$/);
+
+  await page.getByRole("button", { name: "Add" }).first().click();
+  await expect(page.getByText("Cart: 1")).toBeVisible();
 });

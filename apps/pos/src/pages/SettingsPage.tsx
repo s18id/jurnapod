@@ -6,6 +6,7 @@ import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { Button } from "../shared/components/index.js";
 import { SyncControls } from "../features/sync/SyncControls.js";
 import { usePosAppState } from "../router/pos-app-state.js";
+import { POLL_INTERVAL_MS } from "../shared/utils/constants.js";
 
 interface SettingsPageProps {
   context: WebBootstrapContext;
@@ -15,8 +16,16 @@ interface SettingsPageProps {
 export function SettingsPage({ context: _context, onLogout }: SettingsPageProps): JSX.Element {
   const {
     scope,
-    setScope,
     outletOptions,
+    syncBadgeState,
+    pendingOutboxCount,
+    autoRefreshEnabled,
+    setAutoRefreshEnabled,
+    autoPullEnabled,
+    setAutoPullEnabled,
+    autoPullIntervalMs,
+    setAutoPullIntervalMs,
+    hasProductCache,
     pullSyncInFlight,
     pushSyncInFlight,
     pullSyncMessage,
@@ -59,6 +68,76 @@ export function SettingsPage({ context: _context, onLogout }: SettingsPageProps)
     fontWeight: 500
   };
 
+  const activeOutlet =
+    outletOptions.find((outlet) => outlet.outlet_id === scope.outlet_id)?.label ?? `Outlet ${scope.outlet_id}`;
+
+  const contextCardStyles: React.CSSProperties = {
+    border: "1px solid #cbd5e1",
+    borderRadius: 12,
+    background: "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
+    padding: 14,
+    display: "grid",
+    gap: 10
+  };
+
+  const contextRowStyles: React.CSSProperties = {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10
+  };
+
+  const contextLabelStyles: React.CSSProperties = {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    color: "#64748b",
+    fontWeight: 700
+  };
+
+  const contextValueStyles: React.CSSProperties = {
+    fontSize: 14,
+    color: "#0f172a",
+    fontWeight: 700,
+    textAlign: "right"
+  };
+
+  const statusChipStyles = (tone: "ok" | "warn" | "info"): React.CSSProperties => {
+    if (tone === "ok") {
+      return {
+        fontSize: 12,
+        fontWeight: 700,
+        color: "#14532d",
+        background: "#dcfce7",
+        border: "1px solid #86efac",
+        borderRadius: 999,
+        padding: "4px 8px"
+      };
+    }
+
+    if (tone === "warn") {
+      return {
+        fontSize: 12,
+        fontWeight: 700,
+        color: "#7c2d12",
+        background: "#ffedd5",
+        border: "1px solid #fdba74",
+        borderRadius: 999,
+        padding: "4px 8px"
+      };
+    }
+
+    return {
+      fontSize: 12,
+      fontWeight: 700,
+      color: "#1e3a8a",
+      background: "#dbeafe",
+      border: "1px solid #93c5fd",
+      borderRadius: 999,
+      padding: "4px 8px"
+    };
+  };
+
   return (
     <div style={containerStyles}>
       <h1 style={{ margin: "0 0 24px", fontSize: "20px", fontWeight: 700 }}>Settings</h1>
@@ -87,48 +166,108 @@ export function SettingsPage({ context: _context, onLogout }: SettingsPageProps)
             {pushSyncMessage}
           </p>
         )}
+
+        <div style={{ marginTop: 12, padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Auto refresh</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                Poll runtime state every {Math.round(POLL_INTERVAL_MS / 1000)}s
+              </div>
+            </div>
+            <Button
+              size="small"
+              variant={autoRefreshEnabled ? "primary" : "secondary"}
+              onClick={() => setAutoRefreshEnabled((enabled) => !enabled)}
+            >
+              {autoRefreshEnabled ? "On" : "Off"}
+            </Button>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10, padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Auto pull catalog</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                Pull incremental product updates on interval
+              </div>
+            </div>
+            <Button
+              size="small"
+              variant={autoPullEnabled ? "primary" : "secondary"}
+              onClick={() => setAutoPullEnabled((enabled) => !enabled)}
+            >
+              {autoPullEnabled ? "On" : "Off"}
+            </Button>
+          </div>
+
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[30000, 60000, 300000].map((ms) => {
+              const isActive = autoPullIntervalMs === ms;
+              const label = ms === 30000 ? "30s" : ms === 60000 ? "1m" : "5m";
+              return (
+                <Button
+                  key={ms}
+                  size="small"
+                  variant={isActive ? "primary" : "secondary"}
+                  disabled={!autoPullEnabled}
+                  onClick={() => setAutoPullIntervalMs(ms)}
+                >
+                  {label}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
       </section>
 
       <section style={sectionStyles}>
-        <h2 style={sectionTitleStyles}>Outlet</h2>
+        <h2 style={sectionTitleStyles}>Active POS Context</h2>
 
-        <label htmlFor="settings-outlet" style={{ display: "block", marginBottom: "8px", fontSize: "14px", color: "#374151" }}>
-          Active outlet
-        </label>
-        <select
-          id="settings-outlet"
-          value={scope.outlet_id}
-          onChange={(event) => {
-            setScope({
-              ...scope,
-              outlet_id: Number(event.target.value)
-            });
+        <div style={contextCardStyles}>
+          <div style={contextRowStyles}>
+            <div style={contextLabelStyles}>Company</div>
+            <div style={contextValueStyles}>#{scope.company_id}</div>
+          </div>
+          <div style={contextRowStyles}>
+            <div style={contextLabelStyles}>Outlet</div>
+            <div style={contextValueStyles}>{activeOutlet}</div>
+          </div>
+          <div style={contextRowStyles}>
+            <div style={contextLabelStyles}>Outlet ID</div>
+            <div style={contextValueStyles}>#{scope.outlet_id}</div>
+          </div>
+          <div style={contextRowStyles}>
+            <div style={contextLabelStyles}>Data Version</div>
+            <div style={contextValueStyles}>{lastDataVersion}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <span style={statusChipStyles("ok")}>Authenticated</span>
+            <span style={statusChipStyles(syncBadgeState === "Offline" ? "warn" : "ok")}>{syncBadgeState}</span>
+            <span style={statusChipStyles(hasProductCache ? "ok" : "warn")}>
+              {hasProductCache ? "Catalog Ready" : "Catalog Empty"}
+            </span>
+            <span style={statusChipStyles(pendingOutboxCount > 0 ? "warn" : "info")}>
+              Outbox: {pendingOutboxCount}
+            </span>
+          </div>
+        </div>
+
+        <div style={infoRowStyles}>
+          <span style={labelStyles}>Context refresh</span>
+          <span style={valueStyles}>Pull to rebuild local catalog</span>
+        </div>
+        <Button
+          variant="secondary"
+          fullWidth
+          onClick={() => {
+            void runSyncPullNow();
           }}
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            borderRadius: "10px",
-            border: "1px solid #cbd5e1",
-            background: "#ffffff",
-            fontSize: "14px",
-            marginBottom: "12px"
-          }}
+          disabled={pullSyncInFlight}
         >
-          {outletOptions.map((option) => (
-            <option key={option.outlet_id} value={option.outlet_id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        
-        <div style={infoRowStyles}>
-          <span style={labelStyles}>Company ID</span>
-          <span style={valueStyles}>{scope.company_id}</span>
-        </div>
-        <div style={infoRowStyles}>
-          <span style={labelStyles}>Outlet ID</span>
-          <span style={valueStyles}>{scope.outlet_id}</span>
-        </div>
+          {pullSyncInFlight ? "Refreshing context..." : "Refresh Catalog Now"}
+        </Button>
       </section>
 
       <section style={sectionStyles}>

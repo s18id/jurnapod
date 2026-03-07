@@ -16,6 +16,8 @@ export interface AppRoutes {
   login: RouteConfig;
   checkout: RouteConfig;
   products: RouteConfig;
+  tables: RouteConfig;
+  reservations: RouteConfig;
   cart: RouteConfig;
   settings: RouteConfig;
 }
@@ -42,6 +44,20 @@ export const routes: AppRoutes = {
     icon: "📦",
     requiresAuth: true
   },
+  tables: {
+    id: "tables",
+    path: "/tables",
+    label: "Tables",
+    icon: "🍽️",
+    requiresAuth: true
+  },
+  reservations: {
+    id: "reservations",
+    path: "/reservations",
+    label: "Reservations",
+    icon: "📅",
+    requiresAuth: true
+  },
   cart: {
     id: "cart",
     path: "/cart",
@@ -59,10 +75,11 @@ export const routes: AppRoutes = {
 };
 
 export const mobileTabs = [
-  routes.checkout,
-  routes.cart,
+  routes.tables,
+  routes.reservations,
   routes.products,
-  routes.settings
+  routes.cart,
+  routes.checkout
 ];
 
 export interface RouterContextValue {

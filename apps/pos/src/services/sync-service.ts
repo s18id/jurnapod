@@ -36,12 +36,20 @@ export class SyncService {
     const currentMetadata = await this.storage.getSyncMetadata(scope);
     const sinceVersion = currentMetadata?.last_data_version;
 
+    // Self-heal for stale metadata: if local active catalog is empty, force full pull.
+    const currentActiveProducts = await this.storage.getProductsByOutlet({
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id,
+      is_active: true
+    });
+    const requestedSinceVersion = currentActiveProducts.length === 0 ? 0 : sinceVersion;
+
     // Pull data from server
     const response = await this.transport.pull(
       {
         company_id: scope.company_id,
         outlet_id: scope.outlet_id,
-        since_version: sinceVersion
+        since_version: requestedSinceVersion
       },
       {
         baseUrl: options?.baseUrl,
@@ -106,12 +114,6 @@ export class SyncService {
     // Reconcile stale products: mark previously cached items as inactive
     // if they don't appear in the new payload
     const incomingItemIds = new Set(productRows.map((row) => row.item_id));
-    const currentActiveProducts = await this.storage.getProductsByOutlet({
-      company_id: scope.company_id,
-      outlet_id: scope.outlet_id,
-      is_active: true
-    });
-
     const staleProducts = currentActiveProducts
       .filter((row) => !incomingItemIds.has(row.item_id))
       .map((row) => ({

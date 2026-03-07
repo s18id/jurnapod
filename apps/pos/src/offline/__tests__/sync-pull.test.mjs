@@ -6,7 +6,7 @@ import { test } from "node:test";
 import "fake-indexeddb/auto";
 
 import { createPosOfflineDb } from "@jurnapod/offline-db/dexie";
-import { ingestSyncPullIntoProductsCache, readSyncPullConfig, readSyncPullDataVersion } from "../../../dist/offline/sync-pull.js";
+import { ingestSyncPullIntoProductsCache, readSyncPullConfig, readSyncPullDataVersion } from "../sync-pull.ts";
 
 function createSyncPayload({ dataVersion, outletId, price }) {
   const timestamp = new Date().toISOString();

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import "fake-indexeddb/auto";
 
 import { createPosOfflineDb } from "@jurnapod/offline-db/dexie";
-import { completeSale, createSaleDraft } from "../../../dist/offline/sales.js";
+import { completeSale, createSaleDraft } from "../sales.ts";
 
 function nowIso() {
   return new Date().toISOString();
@@ -235,6 +235,72 @@ test("sale item snapshots stay immutable after product cache update", async () =
     assert.equal(saleLines[0]?.name_snapshot, "Manual Brew");
     assert.equal(saleLines[0]?.unit_price_snapshot, 50000);
     assert.equal(saleLines[0]?.line_total, 50000);
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});
+
+test("completeSale persists dine-in reservation lifecycle metadata", async () => {
+  const db = createPosOfflineDb(`jp-pos-sales-test-${crypto.randomUUID()}`);
+
+  try {
+    const openedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    const closedAt = new Date().toISOString();
+
+    const draft = await createSaleDraft(
+      {
+        company_id: 8,
+        outlet_id: 80,
+        cashier_user_id: 188,
+        service_type: "DINE_IN",
+        table_id: 12,
+        reservation_id: 31,
+        guest_count: 4,
+        order_status: "OPEN",
+        notes: "Birthday reservation",
+        opened_at: openedAt
+      },
+      db
+    );
+
+    await db.products_cache.add(createProductSnapshot(8, 80, 801));
+
+    await completeSale(
+      {
+        sale_id: draft.sale_id,
+        items: [{ item_id: 801, qty: 1 }],
+        payments: [{ method: "CASH", amount: 50000 }],
+        totals: {
+          subtotal: 50000,
+          discount_total: 0,
+          tax_total: 0,
+          grand_total: 50000,
+          paid_total: 50000,
+          change_total: 0
+        },
+        service_type: "DINE_IN",
+        table_id: 12,
+        reservation_id: 31,
+        guest_count: 4,
+        order_status: "COMPLETED",
+        opened_at: openedAt,
+        closed_at: closedAt,
+        notes: "Birthday reservation"
+      },
+      db
+    );
+
+    const sale = await db.sales.get(draft.sale_id);
+    assert.equal(sale?.status, "COMPLETED");
+    assert.equal(sale?.service_type, "DINE_IN");
+    assert.equal(sale?.table_id, 12);
+    assert.equal(sale?.reservation_id, 31);
+    assert.equal(sale?.guest_count, 4);
+    assert.equal(sale?.order_status, "COMPLETED");
+    assert.equal(sale?.opened_at, openedAt);
+    assert.equal(sale?.closed_at, closedAt);
+    assert.equal(sale?.notes, "Birthday reservation");
   } finally {
     db.close();
     await db.delete();

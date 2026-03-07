@@ -71,6 +71,14 @@ type SyncPushTransactionPayload = {
   outlet_id: number;
   cashier_user_id: number;
   status: "COMPLETED" | "VOID" | "REFUND";
+  service_type?: "TAKEAWAY" | "DINE_IN";
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
   trx_at: string;
   items: Array<{
     item_id: number;
@@ -239,6 +247,14 @@ function canonicalizeTransactionForHash(tx: {
   outlet_id: number;
   cashier_user_id: number;
   status: "COMPLETED" | "VOID" | "REFUND";
+  service_type?: "TAKEAWAY" | "DINE_IN";
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
   trx_at: string;
   items: Array<{
     item_id: number;
@@ -261,6 +277,14 @@ function canonicalizeTransactionForHash(tx: {
     outlet_id: tx.outlet_id,
     cashier_user_id: tx.cashier_user_id,
     status: tx.status,
+    service_type: tx.service_type ?? "TAKEAWAY",
+    table_id: tx.table_id ?? null,
+    reservation_id: tx.reservation_id ?? null,
+    guest_count: tx.guest_count ?? null,
+    order_status: tx.order_status ?? "COMPLETED",
+    opened_at: tx.opened_at ? toMysqlDateTime(tx.opened_at) : null,
+    closed_at: tx.closed_at ? toMysqlDateTime(tx.closed_at) : null,
+    notes: tx.notes ?? null,
     trx_at: toMysqlDateTime(tx.trx_at),
     items: tx.items.map((item) => ({
       item_id: item.item_id,
@@ -852,7 +876,15 @@ export const POST = withAuth(
             continue;
           }
 
+          if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && !tx.table_id) {
+            results.push(toErrorResult(tx.client_tx_id, "DINE_IN requires table_id"));
+            logTransactionResult("ERROR");
+            continue;
+          }
+
           const trxAtCanonical = toMysqlDateTime(tx.trx_at);
+          const openedAtCanonical = tx.opened_at ? toMysqlDateTime(tx.opened_at) : trxAtCanonical;
+          const closedAtCanonical = tx.closed_at ? toMysqlDateTime(tx.closed_at) : trxAtCanonical;
           const payloadSha256 = computePayloadSha256(canonicalizeTransactionForHash(tx));
           const payloadSha256Legacy = computePayloadSha256(canonicalizeTransactionForLegacyHash(tx));
           let acceptedContextForFailureAudit: AcceptedSyncPushContext | null = null;
@@ -873,16 +905,32 @@ export const POST = withAuth(
                  cashier_user_id,
                  client_tx_id,
                  status,
+                 service_type,
+                 table_id,
+                 reservation_id,
+                 guest_count,
+                 order_status,
+                 opened_at,
+                 closed_at,
+                 notes,
                  trx_at,
                  payload_sha256,
-                 payload_hash_version
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                  payload_hash_version
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 tx.company_id,
                 tx.outlet_id,
                 tx.cashier_user_id,
                 tx.client_tx_id,
                 tx.status,
+                tx.service_type ?? "TAKEAWAY",
+                tx.table_id ?? null,
+                tx.reservation_id ?? null,
+                tx.guest_count ?? null,
+                tx.order_status ?? "COMPLETED",
+                openedAtCanonical,
+                closedAtCanonical,
+                tx.notes ?? null,
                 trxAtCanonical,
                 payloadSha256,
                 PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT
@@ -974,6 +1022,30 @@ export const POST = withAuth(
                    amount
                  ) VALUES ${taxPlaceholders}`,
                 taxValues
+              );
+            }
+
+            if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && tx.table_id) {
+              await dbConnection.execute(
+                `UPDATE outlet_tables
+                 SET status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
+                 WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+                [tx.company_id, tx.outlet_id, tx.table_id]
+              );
+            }
+
+            if (tx.reservation_id) {
+              await dbConnection.execute(
+                `UPDATE reservations
+                 SET linked_order_id = ?,
+                     status = CASE
+                       WHEN status IN ('CANCELLED', 'NO_SHOW', 'COMPLETED') THEN status
+                       ELSE 'COMPLETED'
+                     END,
+                     seated_at = COALESCE(seated_at, CURRENT_TIMESTAMP),
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+                [tx.client_tx_id, tx.company_id, tx.outlet_id, tx.reservation_id]
               );
             }
 

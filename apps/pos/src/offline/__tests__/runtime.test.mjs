@@ -14,7 +14,7 @@ import {
   resolveRuntimeCheckoutConfig,
   resolveRuntimeSyncBadgeState,
   resolveRuntimePaymentMethod
-} from "../../../dist/offline/runtime.js";
+} from "../runtime.ts";
 
 function iso(ms) {
   return new Date(ms).toISOString();

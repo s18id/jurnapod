@@ -46,6 +46,14 @@ export interface SyncPushTransaction {
   outlet_id: number;
   cashier_user_id: number;
   status: "COMPLETED" | "VOID" | "REFUND";
+  service_type?: "TAKEAWAY" | "DINE_IN";
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
   trx_at: string;
   items: SyncPushTransactionItem[];
   payments: SyncPushTransactionPayment[];
@@ -189,6 +197,14 @@ function buildSyncRequest(payload: ParsedOutboxPayload, snapshot: HydratedSaleSn
     outlet_id: sale.outlet_id,
     cashier_user_id: sale.cashier_user_id,
     status: "COMPLETED",
+    service_type: sale.service_type ?? "TAKEAWAY",
+    table_id: sale.table_id ?? null,
+    reservation_id: sale.reservation_id ?? null,
+    guest_count: sale.guest_count ?? null,
+    order_status: sale.order_status ?? "COMPLETED",
+    opened_at: sale.opened_at ?? sale.created_at,
+    closed_at: sale.closed_at ?? sale.completed_at,
+    notes: sale.notes ?? null,
     trx_at: sale.trx_at,
     items: snapshot.items.map((item) => ({
       item_id: item.item_id,

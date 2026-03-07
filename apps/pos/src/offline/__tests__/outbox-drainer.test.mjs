@@ -6,9 +6,9 @@ import { test } from "node:test";
 import "fake-indexeddb/auto";
 
 import { createPosOfflineDb } from "@jurnapod/offline-db/dexie";
-import { drainOutboxJobs } from "../../../dist/offline/outbox-drainer.js";
-import { OutboxSenderError } from "../../../dist/offline/outbox-sender.js";
-import { enqueueOutboxJob, reserveOutboxAttempt, updateOutboxJobStatus } from "../../../dist/offline/outbox.js";
+import { drainOutboxJobs } from "../outbox-drainer.ts";
+import { OutboxSenderError } from "../outbox-sender.ts";
+import { enqueueOutboxJob, reserveOutboxAttempt, updateOutboxJobStatus } from "../outbox.ts";
 
 function nowIso(ms = Date.now()) {
   return new Date(ms).toISOString();

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import "fake-indexeddb/auto";
 
 import { createPosOfflineDb } from "@jurnapod/offline-db/dexie";
-import { enqueueOutboxJob, reserveOutboxAttempt, updateOutboxJobStatus } from "../../../dist/offline/outbox.js";
+import { enqueueOutboxJob, reserveOutboxAttempt, updateOutboxJobStatus } from "../outbox.ts";
 
 function nowIso() {
   return new Date().toISOString();
