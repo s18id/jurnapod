@@ -92,7 +92,26 @@ export class SyncService {
       })
       .filter((row): row is NonNullable<typeof row> => row !== null);
 
-    await this.storage.upsertProducts(productRows);
+    // Reconcile stale products: mark previously cached items as inactive
+    // if they don't appear in the new payload
+    const incomingItemIds = new Set(productRows.map((row) => row.item_id));
+    const currentActiveProducts = await this.storage.getProductsByOutlet({
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id,
+      is_active: true
+    });
+
+    const staleProducts = currentActiveProducts
+      .filter((row) => !incomingItemIds.has(row.item_id))
+      .map((row) => ({
+        ...row,
+        is_active: false,
+        data_version: dataVersion,
+        pulled_at: now
+      }));
+
+    // Upsert both new/updated products and stale products
+    await this.storage.upsertProducts([...productRows, ...staleProducts]);
 
     // Update sync metadata
     await this.storage.upsertSyncMetadata({
