@@ -211,12 +211,28 @@ export function RolesPage(props: RolesPageProps) {
               </Badge>
             );
           }
+          if (is_global) {
+            return (
+              <Badge variant="light" color="cyan">
+                Global
+              </Badge>
+            );
+          }
           return (
             <Badge variant="light" color="green">
-              Custom
+              Company
             </Badge>
           );
         }
+      },
+      {
+        id: "level",
+        header: "Level",
+        cell: (info) => (
+          <Badge variant="light" size="sm" color="gray">
+            {info.row.original.role_level}
+          </Badge>
+        )
       },
       {
         id: "actions",
@@ -435,7 +451,14 @@ export function RolesPage(props: RolesPageProps) {
       >
         <Stack gap="md">
           <Text size="sm">
-            Delete role "{confirmState?.name}"? This cannot be undone.
+            Are you sure you want to delete role <Text span fw={600}>"{confirmState?.name}"</Text>?
+          </Text>
+          <Alert color="yellow" title="Warning">
+            If this role is assigned to any users, the deletion will fail.
+            Users must be reassigned to a different role before deleting this one.
+          </Alert>
+          <Text size="sm" c="dimmed">
+            This action cannot be undone.
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setConfirmState(null)}>

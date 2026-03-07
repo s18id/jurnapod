@@ -34,7 +34,7 @@ import { ApiError } from "../lib/api-client";
 import { DataTable } from "../components/DataTable";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
-import type { UserResponse } from "@jurnapod/shared";
+import type { UserResponse, Role } from "@jurnapod/shared";
 
 type UsersPageProps = {
   user: SessionUser;
@@ -159,7 +159,7 @@ export function UsersPage(props: UsersPageProps) {
         item.outlet_role_assignments.forEach((assignment) => {
           assignment.role_codes.forEach((code) => roleSet.add(code));
         });
-        return roleSet.has(roleFilter as any);
+        return roleSet.has(roleFilter as Role);
       });
     }
 
@@ -300,13 +300,13 @@ export function UsersPage(props: UsersPageProps) {
           password: formData.password,
           role_codes:
             formData.global_role_codes.length > 0
-              ? (formData.global_role_codes as any)
+              ? (formData.global_role_codes as Role[])
               : undefined,
           outlet_role_assignments:
             formData.outlet_role_assignments.length > 0
               ? formData.outlet_role_assignments.map((assignment) => ({
                   outlet_id: assignment.outlet_id,
-                  role_codes: assignment.role_codes as any
+                  role_codes: assignment.role_codes as Role[]
                 }))
               : undefined,
           is_active: formData.is_active
@@ -327,7 +327,7 @@ export function UsersPage(props: UsersPageProps) {
           return;
         }
         await updateUserRoles(editingUser.id, {
-          role_codes: formData.global_role_codes as any
+          role_codes: formData.global_role_codes as Role[]
         }, accessToken);
         setSuccessMessage("User roles updated successfully");
         await usersQuery.refetch({ force: true });
@@ -344,21 +344,26 @@ export function UsersPage(props: UsersPageProps) {
           formData.outlet_role_assignments.map((assignment) => assignment.outlet_id)
         );
 
-        for (const assignment of formData.outlet_role_assignments) {
-          await updateUserRoles(editingUser.id, {
+        // Update outlet roles in parallel (much faster for users with many outlets)
+        const updatePromises = formData.outlet_role_assignments.map((assignment) =>
+          updateUserRoles(editingUser.id, {
             outlet_id: assignment.outlet_id,
-            role_codes: assignment.role_codes as any
-          }, accessToken);
-        }
+            role_codes: assignment.role_codes as Role[]
+          }, accessToken)
+        );
 
-        for (const outletId of existingOutletIds) {
-          if (!desiredOutletIds.has(outletId)) {
-            await updateUserRoles(editingUser.id, {
+        // Remove roles from outlets that are no longer assigned (also in parallel)
+        const deletePromises = [...existingOutletIds]
+          .filter(outletId => !desiredOutletIds.has(outletId))
+          .map(outletId =>
+            updateUserRoles(editingUser.id, {
               outlet_id: outletId,
               role_codes: []
-            }, accessToken);
-          }
-        }
+            }, accessToken)
+          );
+
+        // Wait for all updates and deletes to complete
+        await Promise.all([...updatePromises, ...deletePromises]);
 
         setSuccessMessage("User outlet roles updated successfully");
         await usersQuery.refetch({ force: true });
@@ -522,7 +527,7 @@ export function UsersPage(props: UsersPageProps) {
             assignment.role_codes.forEach((code) => outletRoleSet.add(code));
           });
           const outletRoles = [...outletRoleSet].filter(
-            (code) => !globalRoles.includes(code as any)
+            (code) => !globalRoles.includes(code as Role)
           );
           if (globalRoles.length === 0 && outletRoles.length === 0) {
             return (
@@ -557,6 +562,23 @@ export function UsersPage(props: UsersPageProps) {
               <Text size="sm" c="dimmed">
                 No outlets
               </Text>
+            );
+          }
+          if (outlets.length > 3) {
+            const displayOutlets = outlets.slice(0, 2);
+            const remaining = outlets.length - 2;
+            const allOutletNames = outlets.map(o => o.outlet_name).join(', ');
+            return (
+              <Group gap="xs" wrap="nowrap">
+                {displayOutlets.map((outlet) => (
+                  <Badge key={outlet.outlet_id} variant="light" color="yellow" size="sm">
+                    {outlet.outlet_name}
+                  </Badge>
+                ))}
+                <Badge variant="light" color="gray" size="sm" title={allOutletNames}>
+                  +{remaining} more
+                </Badge>
+              </Group>
             );
           }
           return (
@@ -725,7 +747,7 @@ export function UsersPage(props: UsersPageProps) {
                 { value: "inactive", label: "Inactive Only" }
               ]}
               value={statusFilter}
-              onChange={(value) => setStatusFilter((value as any) || "active")}
+              onChange={(value) => setStatusFilter((value as "all" | "active" | "inactive") || "active")}
               style={{ minWidth: 170 }}
             />
 
