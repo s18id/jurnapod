@@ -10,7 +10,7 @@
 
 import type { PosStoragePort } from "../ports/storage-port.js";
 import type { NetworkPort } from "../ports/network-port.js";
-import type { ProductCacheRow } from "@jurnapod/offline-db/dexie";
+import type { OutletTableRow, ProductCacheRow } from "@jurnapod/offline-db/dexie";
 
 export type RuntimeSyncBadgeState = "Offline" | "Pending" | "Synced";
 
@@ -42,11 +42,68 @@ export interface RuntimeProductCatalogItem {
   price_snapshot: number;
 }
 
+export type RuntimeTableStatus = OutletTableRow["status"];
+
+export interface RuntimeOutletTable {
+  table_id: number;
+  company_id: number;
+  outlet_id: number;
+  code: string;
+  name: string;
+  zone: string | null;
+  capacity: number | null;
+  status: RuntimeTableStatus;
+  updated_at: string;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
 const DEFAULT_RUNTIME_PAYMENT_METHODS = ["CASH"];
 const DEFAULT_RUNTIME_TAX = {
   rate: 0,
   inclusive: false
 };
+
+const DEFAULT_OUTLET_TABLES: Array<Omit<RuntimeOutletTable, "company_id" | "outlet_id">> = [
+  {
+    table_id: 1,
+    code: "A1",
+    name: "Table A1",
+    zone: "Main Hall",
+    capacity: 2,
+    status: "AVAILABLE",
+    updated_at: "2026-03-07T00:00:00.000Z"
+  },
+  {
+    table_id: 2,
+    code: "A2",
+    name: "Table A2",
+    zone: "Main Hall",
+    capacity: 4,
+    status: "RESERVED",
+    updated_at: "2026-03-07T00:00:00.000Z"
+  },
+  {
+    table_id: 3,
+    code: "B1",
+    name: "Table B1",
+    zone: "Window",
+    capacity: 2,
+    status: "OCCUPIED",
+    updated_at: "2026-03-07T00:00:00.000Z"
+  },
+  {
+    table_id: 4,
+    code: "T1",
+    name: "Table T1",
+    zone: "Terrace",
+    capacity: 4,
+    status: "UNAVAILABLE",
+    updated_at: "2026-03-07T00:00:00.000Z"
+  }
+];
 
 export class RuntimeService {
   constructor(
@@ -197,5 +254,89 @@ export class RuntimeService {
       item_group_name: row.item_group_name ?? null,
       price_snapshot: row.price_snapshot
     }));
+  }
+
+  async getOutletTables(scope: RuntimeOutletScope): Promise<RuntimeOutletTable[]> {
+    const existingRows = await this.storage.getOutletTablesByOutlet({
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id
+    });
+
+    if (existingRows.length > 0) {
+      return existingRows.map((table) => ({
+        table_id: table.table_id,
+        company_id: table.company_id,
+        outlet_id: table.outlet_id,
+        code: table.code,
+        name: table.name,
+        zone: table.zone,
+        capacity: table.capacity,
+        status: table.status,
+        updated_at: table.updated_at
+      }));
+    }
+
+    const seededRows: OutletTableRow[] = DEFAULT_OUTLET_TABLES.map((table) => ({
+      pk: `${scope.company_id}:${scope.outlet_id}:${table.table_id}`,
+      table_id: table.table_id,
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id,
+      code: table.code,
+      name: table.name,
+      zone: table.zone,
+      capacity: table.capacity,
+      status: table.status,
+      updated_at: table.updated_at
+    }));
+
+    await this.storage.upsertOutletTables(seededRows);
+
+    return seededRows.map((table) => ({
+      table_id: table.table_id,
+      company_id: table.company_id,
+      outlet_id: table.outlet_id,
+      code: table.code,
+      name: table.name,
+      zone: table.zone,
+      capacity: table.capacity,
+      status: table.status,
+      updated_at: table.updated_at
+    }));
+  }
+
+  async setOutletTableStatus(
+    scope: RuntimeOutletScope,
+    tableId: number,
+    status: RuntimeTableStatus
+  ): Promise<RuntimeOutletTable | null> {
+    const rows = await this.storage.getOutletTablesByOutlet({
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id
+    });
+
+    const target = rows.find((row) => row.table_id === tableId);
+    if (!target) {
+      return null;
+    }
+
+    const updated: OutletTableRow = {
+      ...target,
+      status,
+      updated_at: nowIso()
+    };
+
+    await this.storage.upsertOutletTables([updated]);
+
+    return {
+      table_id: updated.table_id,
+      company_id: updated.company_id,
+      outlet_id: updated.outlet_id,
+      code: updated.code,
+      name: updated.name,
+      zone: updated.zone,
+      capacity: updated.capacity,
+      status: updated.status,
+      updated_at: updated.updated_at
+    };
   }
 }

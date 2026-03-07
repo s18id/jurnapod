@@ -15,8 +15,6 @@ interface SettingsPageProps {
 export function SettingsPage({ context: _context, onLogout }: SettingsPageProps): JSX.Element {
   const {
     scope,
-    setScope,
-    outletOptions,
     pullSyncInFlight,
     pushSyncInFlight,
     pullSyncMessage,
@@ -90,36 +88,7 @@ export function SettingsPage({ context: _context, onLogout }: SettingsPageProps)
       </section>
 
       <section style={sectionStyles}>
-        <h2 style={sectionTitleStyles}>Outlet</h2>
-
-        <label htmlFor="settings-outlet" style={{ display: "block", marginBottom: "8px", fontSize: "14px", color: "#374151" }}>
-          Active outlet
-        </label>
-        <select
-          id="settings-outlet"
-          value={scope.outlet_id}
-          onChange={(event) => {
-            setScope({
-              ...scope,
-              outlet_id: Number(event.target.value)
-            });
-          }}
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            borderRadius: "10px",
-            border: "1px solid #cbd5e1",
-            background: "#ffffff",
-            fontSize: "14px",
-            marginBottom: "12px"
-          }}
-        >
-          {outletOptions.map((option) => (
-            <option key={option.outlet_id} value={option.outlet_id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <h2 style={sectionTitleStyles}>Context</h2>
         
         <div style={infoRowStyles}>
           <span style={labelStyles}>Company ID</span>

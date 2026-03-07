@@ -5,6 +5,13 @@ import React, { useCallback, useMemo } from "react";
 import type { RuntimeProductCatalogItem } from "../../services/runtime-service.js";
 import { normalizeMoney, computeCartTotals, type CartTotals } from "../../shared/utils/money.js";
 
+export type OrderServiceType = "TAKEAWAY" | "DINE_IN";
+
+export interface ActiveOrderContextState {
+  service_type: OrderServiceType;
+  table_id: number | null;
+}
+
 export interface CartLineState {
   product: RuntimeProductCatalogItem;
   qty: number;
@@ -20,6 +27,7 @@ function cartToList(cart: CartState): CartLineState[] {
 export interface UseCartOptions {
   initialCart?: CartState;
   paidAmount?: number;
+  activeOrderContext?: ActiveOrderContextState;
 }
 
 export interface UseCartReturn {
@@ -30,11 +38,19 @@ export interface UseCartReturn {
   clearCart: () => void;
   setPaidAmount: (amount: number) => void;
   paidAmount: number;
+  activeOrderContext: ActiveOrderContextState;
+  setServiceType: (serviceType: OrderServiceType) => void;
+  setActiveTableId: (tableId: number | null) => void;
 }
 
-export function useCart({ initialCart = {}, paidAmount: initialPaidAmount = 0 }: UseCartOptions = {}): UseCartReturn {
+export function useCart({
+  initialCart = {},
+  paidAmount: initialPaidAmount = 0,
+  activeOrderContext: initialOrderContext = { service_type: "TAKEAWAY", table_id: null }
+}: UseCartOptions = {}): UseCartReturn {
   const [cart, setCart] = React.useState<CartState>(initialCart);
   const [paidAmount, setPaidAmount] = React.useState<number>(initialPaidAmount);
+  const [activeOrderContext, setActiveOrderContext] = React.useState<ActiveOrderContextState>(initialOrderContext);
 
   const upsertCartLine = useCallback(
     (product: RuntimeProductCatalogItem, patch: Partial<Pick<CartLineState, "qty" | "discount_amount">>) => {
@@ -72,6 +88,21 @@ export function useCart({ initialCart = {}, paidAmount: initialPaidAmount = 0 }:
   const clearCart = useCallback(() => {
     setCart({});
     setPaidAmount(0);
+    setActiveOrderContext({ service_type: "TAKEAWAY", table_id: null });
+  }, []);
+
+  const setServiceType = useCallback((serviceType: OrderServiceType) => {
+    setActiveOrderContext((previous) => ({
+      service_type: serviceType,
+      table_id: serviceType === "TAKEAWAY" ? null : previous.table_id
+    }));
+  }, []);
+
+  const setActiveTableId = useCallback((tableId: number | null) => {
+    setActiveOrderContext((previous) => ({
+      service_type: tableId ? "DINE_IN" : previous.service_type,
+      table_id: tableId
+    }));
   }, []);
 
   const cartLines = useMemo(() => cartToList(cart), [cart]);
@@ -84,6 +115,9 @@ export function useCart({ initialCart = {}, paidAmount: initialPaidAmount = 0 }:
     upsertCartLine,
     clearCart,
     setPaidAmount,
-    paidAmount
+    paidAmount,
+    activeOrderContext,
+    setServiceType,
+    setActiveTableId
   };
 }

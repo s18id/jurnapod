@@ -11,6 +11,8 @@ export type OutboxJobType = "SYNC_POS_TX";
 
 export type OutboxJobStatus = "PENDING" | "SENT" | "FAILED";
 
+export type OutletTableStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
+
 export interface ProductCacheRow {
   pk: string;
   company_id: number;
@@ -27,6 +29,19 @@ export interface ProductCacheRow {
   price_updated_at: string;
   data_version: number;
   pulled_at: string;
+}
+
+export interface OutletTableRow {
+  pk: string;
+  table_id: number;
+  company_id: number;
+  outlet_id: number;
+  code: string;
+  name: string;
+  zone: string | null;
+  capacity: number | null;
+  status: OutletTableStatus;
+  updated_at: string;
 }
 
 export interface SyncMetadataRow {

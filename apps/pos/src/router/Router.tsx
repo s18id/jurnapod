@@ -11,18 +11,21 @@ import {
   useLocation
 } from "react-router-dom";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
-import type { RuntimeOutletScope } from "../services/runtime-service.js";
+import type { RuntimeOutletScope, RuntimeOutletTable } from "../services/runtime-service.js";
 import { routes, mobileTabs, type RouterContextValue, type ProtectedRouteProps } from "./routes.js";
 import { TabBar } from "../shared/components/TabBar.js";
 import { LoginPage } from "../pages/LoginPage.js";
 import { CheckoutPage } from "../pages/CheckoutPage.js";
 import { ProductsPage } from "../pages/ProductsPage.js";
+import { TablesPage } from "../pages/TablesPage.js";
 import { CartPage } from "../pages/CartPage.js";
 import { SettingsPage } from "../pages/SettingsPage.js";
+import { SyncBadge } from "../features/sync/SyncBadge.js";
+import { OutletContextSwitcher } from "../features/outlet/OutletContextSwitcher.js";
 import { readAccessToken, clearAccessToken } from "../offline/auth-session.js";
 import { useCart } from "../features/cart/useCart.js";
 import { API_CONFIG, POLL_INTERVAL_MS } from "../shared/utils/constants.js";
-import { PosAppStateContext } from "./pos-app-state.js";
+import { PosAppStateContext, usePosAppState } from "./pos-app-state.js";
 
 const PLACEHOLDER_OUTLETS = [{ outlet_id: 1, label: "Outlet 1 (placeholder)" }];
 
@@ -56,14 +59,56 @@ function ProtectedRoute({ children, context, authToken }: ProtectedRouteProps): 
 
 interface AppLayoutProps {
   children: ReactNode;
-  context: WebBootstrapContext;
-  authToken: string | null;
   cartItemCount: number;
 }
 
-function AppLayout({ children, context, authToken, cartItemCount }: AppLayoutProps): JSX.Element {
+function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
+  const { context } = useRouterContext();
+  const [isCompactHeader, setIsCompactHeader] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.innerWidth < 420;
+  });
+  const {
+    scope,
+    setScope,
+    outletOptions,
+    syncBadgeState,
+    pendingOutboxCount,
+    clearCart,
+    setPaidAmount,
+    activeOrderContext,
+    setOutletTables
+  } = usePosAppState();
+
+  const activePageLabel = useMemo(() => {
+    const activeTab = mobileTabs.find((tab) => tab.path === location.pathname);
+    if (activeTab) {
+      return activeTab.label;
+    }
+    if (location.pathname === routes.login.path) {
+      return routes.login.label;
+    }
+    return "POS";
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handleResize = () => {
+      setIsCompactHeader(window.innerWidth < 420);
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
 
   const tabs = useMemo(() => 
     mobileTabs.map(tab => ({
@@ -82,7 +127,7 @@ function AppLayout({ children, context, authToken, cartItemCount }: AppLayoutPro
 
   const currentTabId = useMemo(() => {
     const current = mobileTabs.find(t => t.path === location.pathname);
-    return current?.id ?? "checkout";
+    return current?.id ?? "products";
   }, [location.pathname]);
 
   return (
@@ -93,6 +138,85 @@ function AppLayout({ children, context, authToken, cartItemCount }: AppLayoutPro
       flexDirection: "column"
     }}>
       <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        <header
+          style={{
+            padding: "12px 16px",
+            borderBottom: "1px solid #e2e8f0",
+            background: "#ffffff",
+            position: "sticky",
+            top: 0,
+            zIndex: 20
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: isCompactHeader ? "flex-start" : "center",
+              gap: 10,
+              flexDirection: isCompactHeader ? "column" : "row"
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>Jurnapod POS</div>
+              <div style={{ fontSize: 16, color: "#0f172a", fontWeight: 700 }}>{activePageLabel}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, width: isCompactHeader ? "100%" : "auto" }}>
+              <SyncBadge status={syncBadgeState} pendingCount={pendingOutboxCount} />
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: activeOrderContext.service_type === "DINE_IN" ? "#1d4ed8" : "#0f172a",
+                  background: activeOrderContext.service_type === "DINE_IN" ? "#eff6ff" : "#f1f5f9",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 999,
+                  padding: "4px 8px"
+                }}
+              >
+                {activeOrderContext.service_type === "DINE_IN"
+                  ? `Dine-in${activeOrderContext.table_id ? ` • T${activeOrderContext.table_id}` : " • No table"}`
+                  : "Takeaway"}
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#0f172a",
+                  background: "#f1f5f9",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 999,
+                  padding: "4px 8px"
+                }}
+              >
+                Cart: {cartItemCount}
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <OutletContextSwitcher
+              outletOptions={outletOptions}
+              activeOutletId={scope.outlet_id}
+              compact={isCompactHeader}
+              onConfirmSwitch={(nextOutletId) => {
+                void (async () => {
+                  if (activeOrderContext.service_type === "DINE_IN" && activeOrderContext.table_id) {
+                    await context.runtime.setOutletTableStatus(scope, activeOrderContext.table_id, "AVAILABLE");
+                  }
+
+                  setScope({
+                    ...scope,
+                    outlet_id: nextOutletId
+                  });
+                  clearCart();
+                  setPaidAmount(0);
+                  setOutletTables([]);
+                  navigate(routes.products.path);
+                })();
+              }}
+            />
+          </div>
+        </header>
         {children}
       </div>
       <TabBar
@@ -124,6 +248,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
   const [pushSyncInFlight, setPushSyncInFlight] = useState<boolean>(false);
   const [pullSyncMessage, setPullSyncMessage] = useState<string | null>(null);
   const [pushSyncMessage, setPushSyncMessage] = useState<string | null>(null);
+  const [outletTables, setOutletTables] = useState<RuntimeOutletTable[]>([]);
   const cartState = useCart();
 
   const routerValue = useMemo(() => ({
@@ -253,7 +378,12 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       paidAmount: cartState.paidAmount,
       setPaidAmount: cartState.setPaidAmount,
       upsertCartLine: cartState.upsertCartLine,
-      clearCart: cartState.clearCart
+      clearCart: cartState.clearCart,
+      activeOrderContext: cartState.activeOrderContext,
+      setServiceType: cartState.setServiceType,
+      setActiveTableId: cartState.setActiveTableId,
+      outletTables,
+      setOutletTables
     }),
     [
       scope,
@@ -268,7 +398,8 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       pushSyncMessage,
       runSyncPullNow,
       runSyncPushNow,
-      cartState
+      cartState,
+      outletTables
     ]
   );
 
@@ -363,7 +494,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.login.path}
             element={
               authToken ? (
-                <Navigate to={routes.checkout.path} replace />
+                <Navigate to={routes.products.path} replace />
               ) : (
                 <LoginPage
                   context={context}
@@ -376,7 +507,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path="/auth/callback"
             element={
               authToken ? (
-                <Navigate to={routes.checkout.path} replace />
+                <Navigate to={routes.products.path} replace />
               ) : (
                 <LoginPage
                   context={context}
@@ -389,11 +520,18 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.checkout.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>
-                <AppLayout context={context} authToken={authToken} cartItemCount={effectiveCartItemCount}>
-                  <CheckoutPage 
-                    context={context} 
-                    onLogout={handleLogout}
-                  />
+                <AppLayout cartItemCount={effectiveCartItemCount}>
+                  <CheckoutPage context={context} />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path={routes.tables.path}
+            element={
+              <ProtectedRoute context={context} authToken={authToken}>
+                <AppLayout cartItemCount={effectiveCartItemCount}>
+                  <TablesPage context={context} />
                 </AppLayout>
               </ProtectedRoute>
             }
@@ -402,7 +540,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.products.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>
-                <AppLayout context={context} authToken={authToken} cartItemCount={effectiveCartItemCount}>
+                <AppLayout cartItemCount={effectiveCartItemCount}>
                   <ProductsPage 
                     context={context}
                   />
@@ -414,7 +552,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.cart.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>
-                <AppLayout context={context} authToken={authToken} cartItemCount={effectiveCartItemCount}>
+                <AppLayout cartItemCount={effectiveCartItemCount}>
                   <CartPage 
                     context={context}
                   />
@@ -426,13 +564,13 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.settings.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>
-                <AppLayout context={context} authToken={authToken} cartItemCount={effectiveCartItemCount}>
+                <AppLayout cartItemCount={effectiveCartItemCount}>
                   <SettingsPage context={context} onLogout={handleLogout} />
                 </AppLayout>
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to={routes.checkout.path} replace />} />
+          <Route path="*" element={<Navigate to={routes.products.path} replace />} />
         </Routes>
       </BrowserRouter>
       </PosAppStateContext.Provider>

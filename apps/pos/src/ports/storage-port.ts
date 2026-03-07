@@ -12,6 +12,7 @@
  */
 
 import type {
+  OutletTableRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -30,6 +31,14 @@ export interface PosStoragePort {
   }): Promise<ProductCacheRow[]>;
 
   upsertProducts(products: ProductCacheRow[]): Promise<void>;
+
+  // Outlet tables operations
+  getOutletTablesByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<OutletTableRow[]>;
+
+  upsertOutletTables(tables: OutletTableRow[]): Promise<void>;
 
   // Sale operations
   createSale(sale: SaleRow): Promise<void>;

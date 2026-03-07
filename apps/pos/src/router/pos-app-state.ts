@@ -1,9 +1,19 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { createContext, useContext } from "react";
-import type { RuntimeOutletScope, RuntimeSyncBadgeState, RuntimeProductCatalogItem } from "../services/runtime-service.js";
-import type { CartLineState, CartState } from "../features/cart/useCart.js";
+import { createContext, useContext, type Dispatch, type SetStateAction } from "react";
+import type {
+  RuntimeOutletScope,
+  RuntimeSyncBadgeState,
+  RuntimeProductCatalogItem,
+  RuntimeOutletTable
+} from "../services/runtime-service.js";
+import type {
+  ActiveOrderContextState,
+  CartLineState,
+  CartState,
+  OrderServiceType
+} from "../features/cart/useCart.js";
 import type { CartTotals } from "../shared/utils/money.js";
 
 export interface PosAppStateValue {
@@ -27,6 +37,11 @@ export interface PosAppStateValue {
   setPaidAmount: (amount: number) => void;
   upsertCartLine: (product: RuntimeProductCatalogItem, patch: Partial<Pick<CartLineState, "qty" | "discount_amount">>) => void;
   clearCart: () => void;
+  activeOrderContext: ActiveOrderContextState;
+  setServiceType: (serviceType: OrderServiceType) => void;
+  setActiveTableId: (tableId: number | null) => void;
+  outletTables: RuntimeOutletTable[];
+  setOutletTables: Dispatch<SetStateAction<RuntimeOutletTable[]>>;
 }
 
 export const PosAppStateContext = createContext<PosAppStateValue | null>(null);

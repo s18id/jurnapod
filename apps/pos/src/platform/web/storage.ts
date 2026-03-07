@@ -7,8 +7,10 @@
  * Implements PosStoragePort using IndexedDB via Dexie.
  */
 
+import Dexie from "dexie";
 import type { PosStoragePort } from "../../ports/storage-port.js";
 import type {
+  OutletTableRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -44,6 +46,25 @@ export class WebStorageAdapter implements PosStoragePort {
 
   async upsertProducts(products: ProductCacheRow[]): Promise<void> {
     await this.db.products_cache.bulkPut(products);
+  }
+
+  async getOutletTablesByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<OutletTableRow[]> {
+    const rows = await this.db.outlet_tables
+      .where("[company_id+outlet_id+table_id]")
+      .between(
+        [input.company_id, input.outlet_id, Dexie.minKey],
+        [input.company_id, input.outlet_id, Dexie.maxKey]
+      )
+      .toArray();
+
+    return rows.sort((left, right) => left.code.localeCompare(right.code));
+  }
+
+  async upsertOutletTables(tables: OutletTableRow[]): Promise<void> {
+    await this.db.outlet_tables.bulkPut(tables);
   }
 
   async createSale(sale: SaleRow): Promise<void> {

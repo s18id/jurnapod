@@ -12,11 +12,13 @@ export { PosOfflineDb, createPosOfflineDb, posDb, POS_DB_NAME } from "./db.js";
 
 export type {
   ProductItemType,
+  OutletTableStatus,
   LocalSaleStatus,
   SaleSyncStatus,
   OutboxJobType,
   OutboxJobStatus,
   ProductCacheRow,
+  OutletTableRow,
   SyncMetadataRow,
   SyncScopeConfigRow,
   SaleRow,

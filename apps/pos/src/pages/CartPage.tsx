@@ -3,17 +3,20 @@
 
 import React from "react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
+import { useNavigate } from "react-router-dom";
 import { CartList } from "../features/cart/CartList.js";
 import { CartSummary } from "../features/cart/CartSummary.js";
 import { Button } from "../shared/components/index.js";
+import { routes } from "../router/routes.js";
 import { usePosAppState } from "../router/pos-app-state.js";
 
 interface CartPageProps {
   context: WebBootstrapContext;
 }
 
-export function CartPage({ context: _context }: CartPageProps): JSX.Element {
-  const { cart, cartLines, cartTotals, upsertCartLine, clearCart } = usePosAppState();
+export function CartPage({ context }: CartPageProps): JSX.Element {
+  const navigate = useNavigate();
+  const { scope, cart, cartLines, cartTotals, upsertCartLine, clearCart, activeOrderContext, setOutletTables } = usePosAppState();
 
   const containerStyles: React.CSSProperties = {
     display: "flex",
@@ -42,13 +45,36 @@ export function CartPage({ context: _context }: CartPageProps): JSX.Element {
       <header style={headerStyles}>
         <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700 }}>Cart</h1>
         {cartLines.length > 0 && (
-          <Button variant="secondary" size="small" onClick={clearCart}>
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={() => {
+              void (async () => {
+                if (activeOrderContext.service_type === "DINE_IN" && activeOrderContext.table_id) {
+                  const released = await context.runtime.setOutletTableStatus(scope, activeOrderContext.table_id, "AVAILABLE");
+                  if (released) {
+                    setOutletTables((previous) =>
+                      previous.map((table) =>
+                        table.table_id === released.table_id ? released : table
+                      )
+                    );
+                  }
+                }
+                clearCart();
+              })();
+            }}
+          >
             Clear All
           </Button>
         )}
       </header>
-
       <div style={listStyles}>
+        <div style={{ fontSize: 13, color: "#334155", padding: "4px 0" }}>
+          Service: {activeOrderContext.service_type}
+          {activeOrderContext.service_type === "DINE_IN"
+            ? ` • Table ${activeOrderContext.table_id ?? "Not selected"}`
+            : ""}
+        </div>
         <CartList
           lines={cartLines}
           onUpdateLine={(itemId, patch) => {
@@ -68,6 +94,9 @@ export function CartPage({ context: _context }: CartPageProps): JSX.Element {
       {cartLines.length > 0 ? (
         <footer style={{ paddingTop: "16px", borderTop: "1px solid #e5e7eb" }}>
           <CartSummary totals={cartTotals} />
+          <Button variant="primary" fullWidth style={{ marginTop: 12 }} onClick={() => navigate(routes.checkout.path)}>
+            Proceed to payment
+          </Button>
         </footer>
       ) : null}
     </div>
