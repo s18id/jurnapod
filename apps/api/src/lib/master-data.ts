@@ -1219,10 +1219,9 @@ export async function listEffectiveItemPricesForOutlet(
   filters?: { isActive?: boolean }
 ) {
   const pool = getDbPool();
-  const values: Array<number> = [companyId, outletId, companyId];
+  const values: Array<number> = [outletId, outletId, companyId];
 
-  // Use UNION to get outlet overrides OR company defaults
-  // Prioritize outlet override, fallback to company default
+  // Resolve outlet override first, then fall back to company default.
   let sql = `
     SELECT 
       COALESCE(override.id, def.id) AS id,
@@ -1246,8 +1245,6 @@ export async function listEffectiveItemPricesForOutlet(
     WHERE i.company_id = ?
       AND (override.id IS NOT NULL OR def.id IS NOT NULL)
   `;
-
-  values.push(outletId, outletId, companyId);
 
   if (typeof filters?.isActive === "boolean") {
     sql += " AND COALESCE(override.is_active, def.is_active) = ?";
