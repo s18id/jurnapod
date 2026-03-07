@@ -12,3 +12,7 @@ pnpm-lock.yaml
 apps/pos/.lighthouseci/
 apps/pos/test-results/
 e2e-tests/screenshots/
+
+# Capacitor native projects
+apps/pos/android/
+apps/pos/ios/

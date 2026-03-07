@@ -9,3 +9,5 @@
  */
 
 export { createMobileAppStateAdapter } from "./app-state.js";
+export { createMobileNetworkAdapter } from "./network.js";
+export { createMobileDeviceIdentityAdapter } from "./device-identity.js";

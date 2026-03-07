@@ -16,16 +16,22 @@ export { type AppStatePort } from "../../ports/app-state-port.js";
  * Mobile implementation using @capacitor/app plugin.
  * 
  * Note: This implementation expects @capacitor/app to be installed.
- * The actual import is done dynamically to avoid breaking web builds.
+ * The import is conditional to avoid breaking web builds.
  */
 export function createMobileAppStateAdapter(): AppStatePort {
-  // Dynamic import of Capacitor App plugin to avoid breaking web builds
-  // In production, this should be handled by the build system
-  const App = (globalThis as any).Capacitor?.Plugins?.App;
-
-  if (!App) {
+  let App: any;
+  
+  try {
+    // Try to import Capacitor App plugin
+    // This will only work when running in Capacitor context
+    App = require('@capacitor/app').App;
+  } catch (err) {
     // Fallback to web implementation if Capacitor is not available
     console.warn("Capacitor App plugin not found, falling back to web visibilitychange");
+    return createFallbackAppStateAdapter();
+  }
+
+  if (!App) {
     return createFallbackAppStateAdapter();
   }
 
