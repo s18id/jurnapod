@@ -11,6 +11,7 @@ import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createItemPrice,
   DatabaseConflictError,
+  DatabaseForbiddenError,
   DatabaseReferenceError,
   listItemPrices
 } from "../../../../src/lib/master-data";
@@ -132,16 +133,17 @@ export const POST = withAuth(
     try {
       const payload = await request.json();
       const input = ItemPriceCreateRequestSchema.parse(payload);
+      const canManageCompanyDefaults = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
 
       if (input.outlet_id === null) {
-        const hasCompanyAccess = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
-        if (!hasCompanyAccess) {
+        if (!canManageCompanyDefaults) {
           return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
         }
       }
 
       const itemPrice = await createItemPrice(auth.companyId, input, {
-        userId: auth.userId
+        userId: auth.userId,
+        canManageCompanyDefaults
       });
 
       return successResponse(itemPrice, 201);
@@ -152,6 +154,10 @@ export const POST = withAuth(
 
       if (error instanceof DatabaseReferenceError) {
         return errorResponse("NOT_FOUND", "Item or outlet not found", 404);
+      }
+
+      if (error instanceof DatabaseForbiddenError) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       if (error instanceof DatabaseConflictError) {

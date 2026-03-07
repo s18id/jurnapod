@@ -121,6 +121,7 @@ type MasterDataAuditAction = (typeof masterDataAuditActions)[keyof typeof master
 
 type MutationAuditActor = {
   userId: number;
+  canManageCompanyDefaults?: boolean;
 };
 
 type AccessCheckRow = RowDataPacket & {
@@ -1224,16 +1225,16 @@ export async function listEffectiveItemPricesForOutlet(
   // Resolve outlet override first, then fall back to company default.
   let sql = `
     SELECT 
-      COALESCE(override.id, def.id) AS id,
+      COALESCE(CASE WHEN override.is_active = 1 THEN override.id END, def.id) AS id,
       COALESCE(override.company_id, def.company_id) AS company_id,
-      COALESCE(override.outlet_id, ?) AS outlet_id,
+      COALESCE(CASE WHEN override.is_active = 1 THEN override.outlet_id END, ?) AS outlet_id,
       COALESCE(override.item_id, def.item_id) AS item_id,
-      COALESCE(override.price, def.price) AS price,
-      COALESCE(override.is_active, def.is_active) AS is_active,
-      COALESCE(override.updated_at, def.updated_at) AS updated_at,
+      COALESCE(CASE WHEN override.is_active = 1 THEN override.price END, def.price) AS price,
+      COALESCE(CASE WHEN override.is_active = 1 THEN override.is_active END, def.is_active) AS is_active,
+      COALESCE(CASE WHEN override.is_active = 1 THEN override.updated_at END, def.updated_at) AS updated_at,
       i.item_group_id,
       ig.name AS item_group_name,
-      CASE WHEN override.id IS NOT NULL THEN 1 ELSE 0 END AS is_override
+      CASE WHEN override.id IS NOT NULL AND override.is_active = 1 THEN 1 ELSE 0 END AS is_override
     FROM items i
     LEFT JOIN item_prices override ON override.item_id = i.id 
       AND override.company_id = i.company_id 
@@ -1996,6 +1997,10 @@ export async function createItemPrice(
   actor?: MutationAuditActor
 ) {
   return withTransaction(async (connection) => {
+    if (input.outlet_id === null && actor && actor.canManageCompanyDefaults !== true) {
+      throw new DatabaseForbiddenError("Company defaults require OWNER or COMPANY_ADMIN role");
+    }
+
     await ensureCompanyItemExists(connection, companyId, input.item_id);
     
     // Only validate outlet if outlet_id is provided (non-NULL = outlet override)
@@ -2084,6 +2089,10 @@ export async function updateItemPrice(
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, before.outlet_id);
     }
 
+    if (actor && before.outlet_id === null && actor.canManageCompanyDefaults !== true) {
+      throw new DatabaseForbiddenError("Company defaults require OWNER or COMPANY_ADMIN role");
+    }
+
     if (typeof input.item_id === "number") {
       await ensureCompanyItemExists(connection, companyId, input.item_id);
       fields.push("item_id = ?");
@@ -2093,6 +2102,9 @@ export async function updateItemPrice(
     // Handle outlet_id update (can be null for company default or number for outlet override)
     if (Object.hasOwn(input, "outlet_id")) {
       if (input.outlet_id === null) {
+        if (actor && actor.canManageCompanyDefaults !== true) {
+          throw new DatabaseForbiddenError("Company defaults require OWNER or COMPANY_ADMIN role");
+        }
         // Changing to company default
         fields.push("outlet_id = ?");
         values.push(null);
@@ -2170,6 +2182,10 @@ export async function deleteItemPrice(
     // Check outlet access only if deleting an outlet override (not company default)
     if (actor && before.outlet_id !== null) {
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, before.outlet_id);
+    }
+
+    if (actor && before.outlet_id === null && actor.canManageCompanyDefaults !== true) {
+      throw new DatabaseForbiddenError("Company defaults require OWNER or COMPANY_ADMIN role");
     }
 
     await connection.execute<ResultSetHeader>(

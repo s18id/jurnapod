@@ -76,6 +76,7 @@ export const PATCH = withAuth(
       const priceId = parsePriceId(request);
       const payload = await request.json();
       const input = ItemPriceUpdateRequestSchema.parse(payload);
+      const canManageCompanyDefaults = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
 
       const existingItemPrice = await findItemPriceById(auth.companyId, priceId);
       if (!existingItemPrice) {
@@ -84,8 +85,7 @@ export const PATCH = withAuth(
 
       // Check access based on existing price scope
       if (existingItemPrice.outlet_id === null) {
-        const hasCompanyAccess = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
-        if (!hasCompanyAccess) {
+        if (!canManageCompanyDefaults) {
           return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
         }
       } else {
@@ -111,15 +111,15 @@ export const PATCH = withAuth(
             return errorResponse("FORBIDDEN", "Forbidden", 403);
           }
         } else if (input.outlet_id === null) {
-          const hasCompanyAccess = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
-          if (!hasCompanyAccess) {
+          if (!canManageCompanyDefaults) {
             return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
           }
         }
       }
 
       const itemPrice = await updateItemPrice(auth.companyId, priceId, input, {
-        userId: auth.userId
+        userId: auth.userId,
+        canManageCompanyDefaults
       });
 
       if (!itemPrice) {
@@ -161,10 +161,11 @@ export const DELETE = withAuth(
         return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
+      const canManageCompanyDefaults = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
+
       // Check access based on existing price scope
       if (existingItemPrice.outlet_id === null) {
-        const hasCompanyAccess = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
-        if (!hasCompanyAccess) {
+        if (!canManageCompanyDefaults) {
           return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
         }
       } else {
@@ -179,7 +180,8 @@ export const DELETE = withAuth(
       }
 
       const removed = await deleteItemPrice(auth.companyId, priceId, {
-        userId: auth.userId
+        userId: auth.userId,
+        canManageCompanyDefaults
       });
 
       if (!removed) {

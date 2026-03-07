@@ -1332,6 +1332,40 @@ test(
       assert.equal(Number(overrideItemPrice2.price), 65000);
       assert.equal(Number(overrideItemPrice2.outlet_id), outlet2Id);
 
+      // Inactive outlet override should fall back to active company default in sync payload.
+      const deactivateOverrideResponse = await fetch(
+        `${baseUrl}/api/inventory/item-prices/${override1PriceId}`,
+        {
+          method: "PATCH",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            is_active: false
+          })
+        }
+      );
+      assert.equal(deactivateOverrideResponse.status, 200);
+
+      const syncPullAfterDeactivateResponse = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${outlet1Id}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(syncPullAfterDeactivateResponse.status, 200);
+      const syncPullAfterDeactivateBody = await syncPullAfterDeactivateResponse.json();
+      assert.equal(syncPullAfterDeactivateBody.success, true);
+      const overrideFallbackPrice = syncPullAfterDeactivateBody.data.prices.find(
+        (p) => Number(p.item_id) === overrideItemId
+      );
+      assert.equal(Boolean(overrideFallbackPrice), true);
+      assert.equal(Number(overrideFallbackPrice.price), 60000);
+      assert.equal(Number(overrideFallbackPrice.outlet_id), outlet1Id);
+
       // Test duplicate company default prevention
       const createDuplicateDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
         method: "POST",
