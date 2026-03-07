@@ -34,18 +34,18 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 INSERT INTO roles (code, name, is_global, role_level)
-VALUES ('COMPANY_ADMIN', 'Company Admin', 1, 80)
+VALUES 
+  ('SUPER_ADMIN', 'Super Admin', 1, 100),
+  ('OWNER', 'Owner', 1, 90),
+  ('COMPANY_ADMIN', 'Company Admin', 1, 80)
+  ('ADMIN', 'Admin', 0, 60),
+  ('ACCOUNTANT', 'Accountant', 0, 40),
+  ('CASHIER', 'Cashier', 0, 20),
 ON DUPLICATE KEY UPDATE
   name = VALUES(name),
   is_global = VALUES(is_global),
   role_level = VALUES(role_level),
   updated_at = CURRENT_TIMESTAMP;
-
-UPDATE roles SET is_global = 1, role_level = 100 WHERE code = 'SUPER_ADMIN';
-UPDATE roles SET is_global = 1, role_level = 90 WHERE code = 'OWNER';
-UPDATE roles SET is_global = 0, role_level = 60 WHERE code = 'ADMIN';
-UPDATE roles SET is_global = 0, role_level = 40 WHERE code = 'ACCOUNTANT';
-UPDATE roles SET is_global = 0, role_level = 20 WHERE code = 'CASHIER';
 
 INSERT IGNORE INTO module_roles (company_id, role_id, module, permission_mask)
 SELECT c.id, r.id, 'users', 15

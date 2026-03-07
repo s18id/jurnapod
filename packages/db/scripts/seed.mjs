@@ -116,13 +116,24 @@ async function hashOwnerPassword(password, policy) {
 }
 
 async function upsertCompany(connection, companyCode, companyName) {
+  // First check if company exists
+  const [existing] = await connection.execute(
+    `SELECT id FROM companies WHERE code = ? LIMIT 1`,
+    [companyCode]
+  );
+  
+  if (existing.length > 0) {
+    // Update name if it changed
+    await connection.execute(
+      `UPDATE companies SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?`,
+      [companyName, companyCode]
+    );
+    return Number(existing[0].id);
+  }
+  
+  // Insert new company
   const [result] = await connection.execute(
-    `INSERT INTO companies (code, name)
-     VALUES (?, ?)
-     ON DUPLICATE KEY UPDATE
-       name = VALUES(name),
-       id = LAST_INSERT_ID(id),
-       updated_at = CURRENT_TIMESTAMP`,
+    `INSERT INTO companies (code, name) VALUES (?, ?)`,
     [companyCode, companyName]
   );
 
@@ -130,13 +141,24 @@ async function upsertCompany(connection, companyCode, companyName) {
 }
 
 async function upsertOutlet(connection, companyId, outletCode, outletName) {
+  // First check if outlet exists
+  const [existing] = await connection.execute(
+    `SELECT id FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
+    [companyId, outletCode]
+  );
+  
+  if (existing.length > 0) {
+    // Update name if it changed
+    await connection.execute(
+      `UPDATE outlets SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE company_id = ? AND code = ?`,
+      [outletName, companyId, outletCode]
+    );
+    return Number(existing[0].id);
+  }
+  
+  // Insert new outlet
   const [result] = await connection.execute(
-    `INSERT INTO outlets (company_id, code, name)
-     VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       name = VALUES(name),
-       id = LAST_INSERT_ID(id),
-       updated_at = CURRENT_TIMESTAMP`,
+    `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
     [companyId, outletCode, outletName]
   );
 
@@ -144,13 +166,20 @@ async function upsertOutlet(connection, companyId, outletCode, outletName) {
 }
 
 async function upsertRole(connection, roleCode, roleName) {
+  // First check if role exists
+  const [existing] = await connection.execute(
+    `SELECT id FROM roles WHERE code = ? LIMIT 1`,
+    [roleCode]
+  );
+  
+  if (existing.length > 0) {
+    return Number(existing[0].id);
+  }
+  
+  // Only insert if doesn't exist - don't update to preserve is_global and role_level from migrations
   const [result] = await connection.execute(
     `INSERT INTO roles (code, name)
-     VALUES (?, ?)
-     ON DUPLICATE KEY UPDATE
-       name = VALUES(name),
-       id = LAST_INSERT_ID(id),
-       updated_at = CURRENT_TIMESTAMP`,
+     VALUES (?, ?)`,
     [roleCode, roleName]
   );
 
