@@ -10,7 +10,15 @@
 
 import type { PosStoragePort } from "../ports/storage-port.js";
 import type { NetworkPort } from "../ports/network-port.js";
-import type { OutletTableRow, ProductCacheRow, ReservationRow } from "@jurnapod/offline-db/dexie";
+import type {
+  OutletTableRow,
+  ProductCacheRow,
+  ReservationRow,
+  ActiveOrderRow,
+  ActiveOrderLineRow,
+  OrderStatus,
+  OrderServiceType
+} from "@jurnapod/offline-db/dexie";
 
 export type RuntimeSyncBadgeState = "Offline" | "Pending" | "Synced";
 
@@ -81,6 +89,88 @@ export interface RuntimeReservation {
 export interface RuntimeTableTransferResult {
   from: RuntimeOutletTable;
   to: RuntimeOutletTable;
+}
+
+export interface CompleteRuntimeOrderSessionInput {
+  order_id: string | null;
+  table_id: number | null;
+  reservation_id: number | null;
+}
+
+export interface CompleteRuntimeOrderSessionResult {
+  order: RuntimeActiveOrder | null;
+  table: RuntimeOutletTable | null;
+  reservation: RuntimeReservation | null;
+}
+
+export type RuntimeActiveOrderState = ActiveOrderRow["order_state"];
+
+export interface RuntimeActiveOrder {
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  service_type: OrderServiceType;
+  table_id: number | null;
+  reservation_id: number | null;
+  guest_count: number | null;
+  order_status: OrderStatus;
+  order_state: RuntimeActiveOrderState;
+  paid_amount: number;
+  opened_at: string;
+  closed_at: string | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+export interface RuntimeActiveOrderLine {
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  item_id: number;
+  sku_snapshot: string | null;
+  name_snapshot: string;
+  item_type_snapshot: ProductCacheRow["item_type"];
+  unit_price_snapshot: number;
+  qty: number;
+  discount_amount: number;
+  updated_at: string;
+}
+
+export interface RuntimeActiveOrderSnapshot {
+  order: RuntimeActiveOrder;
+  lines: RuntimeActiveOrderLine[];
+}
+
+export interface RuntimeActiveOrderLineInput {
+  item_id: number;
+  sku_snapshot: string | null;
+  name_snapshot: string;
+  item_type_snapshot: ProductCacheRow["item_type"];
+  unit_price_snapshot: number;
+  qty: number;
+  discount_amount: number;
+}
+
+export interface UpsertRuntimeActiveOrderInput {
+  order_id?: string;
+  service_type: OrderServiceType;
+  table_id: number | null;
+  reservation_id: number | null;
+  guest_count: number | null;
+  order_status: OrderStatus;
+  paid_amount: number;
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
+  lines?: RuntimeActiveOrderLineInput[];
+}
+
+export interface ResolveRuntimeActiveOrderInput {
+  service_type: OrderServiceType;
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  notes?: string | null;
 }
 
 export interface CreateRuntimeReservationInput {
@@ -238,11 +328,61 @@ function canTransitionReservationStatus(
   return transitions[fromStatus].includes(toStatus);
 }
 
+function mapActiveOrderRow(row: ActiveOrderRow): RuntimeActiveOrder {
+  return {
+    order_id: row.order_id,
+    company_id: row.company_id,
+    outlet_id: row.outlet_id,
+    service_type: row.service_type,
+    table_id: row.table_id,
+    reservation_id: row.reservation_id,
+    guest_count: row.guest_count,
+    order_status: row.order_status,
+    order_state: row.order_state,
+    paid_amount: row.paid_amount,
+    opened_at: row.opened_at,
+    closed_at: row.closed_at,
+    notes: row.notes,
+    updated_at: row.updated_at
+  };
+}
+
+function mapActiveOrderLineRow(row: ActiveOrderLineRow): RuntimeActiveOrderLine {
+  return {
+    order_id: row.order_id,
+    company_id: row.company_id,
+    outlet_id: row.outlet_id,
+    item_id: row.item_id,
+    sku_snapshot: row.sku_snapshot,
+    name_snapshot: row.name_snapshot,
+    item_type_snapshot: row.item_type_snapshot,
+    unit_price_snapshot: row.unit_price_snapshot,
+    qty: row.qty,
+    discount_amount: row.discount_amount,
+    updated_at: row.updated_at
+  };
+}
+
 export class RuntimeService {
   constructor(
     private storage: PosStoragePort,
     private network: NetworkPort
   ) {}
+
+  private isScopeRow(
+    scope: RuntimeOutletScope,
+    row: { company_id: number; outlet_id: number }
+  ): boolean {
+    return row.company_id === scope.company_id && row.outlet_id === scope.outlet_id;
+  }
+
+  private buildActiveOrderPk(orderId: string): string {
+    return orderId;
+  }
+
+  private buildActiveOrderLinePk(orderId: string, itemId: number): string {
+    return `${orderId}:${itemId}`;
+  }
 
   private normalizePaymentMethods(
     paymentMethods: readonly string[]
@@ -556,6 +696,406 @@ export class RuntimeService {
         updated_at: toUpdated.updated_at
       }
     };
+  }
+
+  async listActiveOrders(
+    scope: RuntimeOutletScope,
+    orderState: RuntimeActiveOrderState = "OPEN"
+  ): Promise<RuntimeActiveOrder[]> {
+    const rows = await this.storage.getActiveOrdersByOutlet(scope);
+    return rows
+      .filter((row) => this.isScopeRow(scope, row) && row.order_state === orderState)
+      .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
+      .map(mapActiveOrderRow);
+  }
+
+  async getActiveOrderSnapshot(
+    scope: RuntimeOutletScope,
+    orderId: string
+  ): Promise<RuntimeActiveOrderSnapshot | null> {
+    const row = await this.storage.getActiveOrder(orderId);
+    if (!row || !this.isScopeRow(scope, row)) {
+      return null;
+    }
+
+    const lines = await this.storage.getActiveOrderLines(orderId);
+
+    return {
+      order: mapActiveOrderRow(row),
+      lines: lines
+        .filter((line) => this.isScopeRow(scope, line))
+        .sort((left, right) => left.item_id - right.item_id)
+        .map(mapActiveOrderLineRow)
+    };
+  }
+
+  async resolveActiveOrder(
+    scope: RuntimeOutletScope,
+    input: ResolveRuntimeActiveOrderInput
+  ): Promise<RuntimeActiveOrderSnapshot> {
+    if (input.service_type === "DINE_IN" && !input.table_id && !input.reservation_id) {
+      throw new Error("Dine-in order requires table_id or reservation_id");
+    }
+
+    const rows = await this.storage.getActiveOrdersByOutlet(scope);
+    const openOrders = rows.filter(
+      (row) => this.isScopeRow(scope, row) && row.order_state === "OPEN"
+    );
+
+    if (input.service_type === "TAKEAWAY") {
+      const takeaway = openOrders.find(
+        (row) => row.service_type === "TAKEAWAY" && row.table_id === null && row.reservation_id === null
+      );
+      if (takeaway) {
+        const lines = await this.storage.getActiveOrderLines(takeaway.order_id);
+        return {
+          order: mapActiveOrderRow(takeaway),
+          lines: lines.filter((line) => this.isScopeRow(scope, line)).map(mapActiveOrderLineRow)
+        };
+      }
+    }
+
+    if (input.table_id) {
+      const byTable = openOrders.find((row) => row.table_id === input.table_id);
+      if (byTable) {
+        const lines = await this.storage.getActiveOrderLines(byTable.order_id);
+        return {
+          order: mapActiveOrderRow(byTable),
+          lines: lines.filter((line) => this.isScopeRow(scope, line)).map(mapActiveOrderLineRow)
+        };
+      }
+    }
+
+    if (input.reservation_id) {
+      const byReservation = openOrders.find((row) => row.reservation_id === input.reservation_id);
+      if (byReservation) {
+        const lines = await this.storage.getActiveOrderLines(byReservation.order_id);
+        return {
+          order: mapActiveOrderRow(byReservation),
+          lines: lines.filter((line) => this.isScopeRow(scope, line)).map(mapActiveOrderLineRow)
+        };
+      }
+    }
+
+    const timestamp = nowIso();
+    const orderId = crypto.randomUUID();
+    const created: ActiveOrderRow = {
+      pk: this.buildActiveOrderPk(orderId),
+      order_id: orderId,
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id,
+      service_type: input.service_type,
+      table_id: input.table_id ?? null,
+      reservation_id: input.reservation_id ?? null,
+      guest_count: input.guest_count ?? null,
+      order_status: "OPEN",
+      order_state: "OPEN",
+      paid_amount: 0,
+      opened_at: timestamp,
+      closed_at: null,
+      notes: input.notes ?? null,
+      updated_at: timestamp
+    };
+
+    await this.storage.upsertActiveOrders([created]);
+    return {
+      order: mapActiveOrderRow(created),
+      lines: []
+    };
+  }
+
+  async upsertActiveOrderSnapshot(
+    scope: RuntimeOutletScope,
+    input: UpsertRuntimeActiveOrderInput
+  ): Promise<RuntimeActiveOrderSnapshot> {
+    if (input.service_type === "DINE_IN" && !input.table_id && !input.reservation_id) {
+      throw new Error("Dine-in order requires table_id or reservation_id");
+    }
+
+    if (!Number.isFinite(input.paid_amount) || input.paid_amount < 0) {
+      throw new Error("paid_amount must be a non-negative number");
+    }
+
+    const orderId = input.order_id ?? crypto.randomUUID();
+    const timestamp = nowIso();
+    const existing = await this.storage.getActiveOrder(orderId);
+
+    if (existing && !this.isScopeRow(scope, existing)) {
+      throw new Error("Active order does not belong to the current outlet scope");
+    }
+
+    const rows = await this.storage.getActiveOrdersByOutlet(scope);
+    const openRows = rows.filter(
+      (row) => this.isScopeRow(scope, row) && row.order_state === "OPEN" && row.order_id !== orderId
+    );
+
+    if (input.table_id && openRows.some((row) => row.table_id === input.table_id)) {
+      throw new Error("Table already has an active order");
+    }
+
+    if (input.reservation_id && openRows.some((row) => row.reservation_id === input.reservation_id)) {
+      throw new Error("Reservation already has an active order");
+    }
+
+    const baseOpenedAt = existing?.opened_at ?? input.opened_at ?? timestamp;
+    const orderState: RuntimeActiveOrderState =
+      input.order_status === "COMPLETED" || input.order_status === "CANCELLED" ? "CLOSED" : "OPEN";
+    const closedAt = orderState === "CLOSED" ? input.closed_at ?? timestamp : null;
+
+    const row: ActiveOrderRow = {
+      pk: this.buildActiveOrderPk(orderId),
+      order_id: orderId,
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id,
+      service_type: input.service_type,
+      table_id: input.table_id,
+      reservation_id: input.reservation_id,
+      guest_count: input.guest_count,
+      order_status: input.order_status,
+      order_state: orderState,
+      paid_amount: input.paid_amount,
+      opened_at: baseOpenedAt,
+      closed_at: closedAt,
+      notes: input.notes ?? null,
+      updated_at: timestamp
+    };
+
+    await this.storage.upsertActiveOrders([row]);
+
+    const lineInputs = input.lines ?? [];
+    const lineRows: ActiveOrderLineRow[] = lineInputs
+      .filter((line) => line.qty > 0)
+      .map((line) => ({
+        pk: this.buildActiveOrderLinePk(orderId, line.item_id),
+        order_id: orderId,
+        company_id: scope.company_id,
+        outlet_id: scope.outlet_id,
+        item_id: line.item_id,
+        sku_snapshot: line.sku_snapshot,
+        name_snapshot: line.name_snapshot,
+        item_type_snapshot: line.item_type_snapshot,
+        unit_price_snapshot: line.unit_price_snapshot,
+        qty: line.qty,
+        discount_amount: line.discount_amount,
+        updated_at: timestamp
+      }));
+    await this.storage.replaceActiveOrderLines(orderId, lineRows);
+
+    return {
+      order: mapActiveOrderRow(row),
+      lines: lineRows.map(mapActiveOrderLineRow)
+    };
+  }
+
+  async closeActiveOrder(
+    scope: RuntimeOutletScope,
+    orderId: string,
+    status: Extract<OrderStatus, "COMPLETED" | "CANCELLED"> = "COMPLETED"
+  ): Promise<RuntimeActiveOrder | null> {
+    const existing = await this.storage.getActiveOrder(orderId);
+    if (!existing || !this.isScopeRow(scope, existing)) {
+      return null;
+    }
+
+    const timestamp = nowIso();
+    const closed: ActiveOrderRow = {
+      ...existing,
+      order_status: status,
+      order_state: "CLOSED",
+      closed_at: timestamp,
+      updated_at: timestamp
+    };
+
+    await this.storage.upsertActiveOrders([closed]);
+    return mapActiveOrderRow(closed);
+  }
+
+  async transferActiveOrderTable(
+    scope: RuntimeOutletScope,
+    orderId: string,
+    toTableId: number
+  ): Promise<RuntimeActiveOrder | null> {
+    return await this.storage.transaction(
+      "readwrite",
+      ["outlet_tables", "reservations", "active_orders"],
+      async () => {
+        const [existingOrder, tableRows, reservationRows, allOrders] = await Promise.all([
+          this.storage.getActiveOrder(orderId),
+          this.storage.getOutletTablesByOutlet(scope),
+          this.storage.getReservationsByOutlet(scope),
+          this.storage.getActiveOrdersByOutlet(scope)
+        ]);
+
+        if (!existingOrder || !this.isScopeRow(scope, existingOrder)) {
+          return null;
+        }
+
+        if (existingOrder.order_state !== "OPEN") {
+          throw new Error("Only open active orders can be transferred");
+        }
+
+        if (existingOrder.service_type !== "DINE_IN") {
+          throw new Error("Only dine-in orders can be transferred");
+        }
+
+        if (!existingOrder.table_id) {
+          throw new Error("Order is not assigned to a source table");
+        }
+
+        if (existingOrder.table_id === toTableId) {
+          return mapActiveOrderRow(existingOrder);
+        }
+
+        const fromTable = tableRows.find((row) => row.table_id === existingOrder.table_id);
+        const toTable = tableRows.find((row) => row.table_id === toTableId);
+        if (!fromTable || !toTable) {
+          return null;
+        }
+
+        if (toTable.status !== "AVAILABLE") {
+          throw new Error("Target table is not available");
+        }
+
+        const targetReserved = reservationRows.some(
+          (reservation) =>
+            reservation.table_id === toTableId
+            && !isReservationFinalStatus(reservation.status)
+            && reservation.reservation_id !== existingOrder.reservation_id
+        );
+
+        if (targetReserved) {
+          throw new Error("Target table has active reservation");
+        }
+
+        const conflictingOrder = allOrders.some(
+          (row) =>
+            this.isScopeRow(scope, row)
+            && row.order_state === "OPEN"
+            && row.order_id !== existingOrder.order_id
+            && row.table_id === toTableId
+        );
+        if (conflictingOrder) {
+          throw new Error("Target table already has another active order");
+        }
+
+        const updatedAt = nowIso();
+        const fromUpdated: OutletTableRow = {
+          ...fromTable,
+          status: "AVAILABLE",
+          updated_at: updatedAt
+        };
+        const toUpdated: OutletTableRow = {
+          ...toTable,
+          status: "OCCUPIED",
+          updated_at: updatedAt
+        };
+        const orderUpdated: ActiveOrderRow = {
+          ...existingOrder,
+          table_id: toTableId,
+          updated_at: updatedAt
+        };
+
+        const linkedReservation = existingOrder.reservation_id
+          ? reservationRows.find((row) => row.reservation_id === existingOrder.reservation_id)
+          : null;
+        const reservationUpdated: ReservationRow | null =
+          linkedReservation && !isReservationFinalStatus(linkedReservation.status)
+            ? {
+              ...linkedReservation,
+              table_id: toTableId,
+              updated_at: updatedAt
+            }
+            : null;
+
+        await this.storage.upsertOutletTables([fromUpdated, toUpdated]);
+        await this.storage.upsertActiveOrders([orderUpdated]);
+        if (reservationUpdated) {
+          await this.storage.upsertReservations([reservationUpdated]);
+        }
+
+        return mapActiveOrderRow(orderUpdated);
+      }
+    );
+  }
+
+  async completeOrderSession(
+    scope: RuntimeOutletScope,
+    input: CompleteRuntimeOrderSessionInput
+  ): Promise<CompleteRuntimeOrderSessionResult> {
+    return await this.storage.transaction(
+      "readwrite",
+      ["outlet_tables", "reservations", "active_orders"],
+      async () => {
+        const timestamp = nowIso();
+        let updatedTable: RuntimeOutletTable | null = null;
+        let updatedReservation: RuntimeReservation | null = null;
+        let updatedOrder: RuntimeActiveOrder | null = null;
+
+        if (input.table_id) {
+          const tableRows = await this.storage.getOutletTablesByOutlet(scope);
+          const table = tableRows.find((row) => row.table_id === input.table_id);
+          if (table) {
+            const nextTable: OutletTableRow = {
+              ...table,
+              status: "AVAILABLE",
+              updated_at: timestamp
+            };
+            await this.storage.upsertOutletTables([nextTable]);
+            updatedTable = {
+              table_id: nextTable.table_id,
+              company_id: nextTable.company_id,
+              outlet_id: nextTable.outlet_id,
+              code: nextTable.code,
+              name: nextTable.name,
+              zone: nextTable.zone,
+              capacity: nextTable.capacity,
+              status: nextTable.status,
+              updated_at: nextTable.updated_at
+            };
+          }
+        }
+
+        if (input.reservation_id) {
+          const reservationRows = await this.storage.getReservationsByOutlet(scope);
+          const reservation = reservationRows.find((row) => row.reservation_id === input.reservation_id);
+          if (reservation && !isReservationFinalStatus(reservation.status)) {
+            const canComplete = canTransitionReservationStatus(reservation.status, "COMPLETED");
+            const nextReservation: ReservationRow = canComplete
+              ? {
+                ...reservation,
+                status: "COMPLETED",
+                updated_at: timestamp
+              }
+              : reservation;
+            if (canComplete) {
+              await this.storage.upsertReservations([nextReservation]);
+            }
+            updatedReservation = mapReservationRow(nextReservation);
+          }
+        }
+
+        if (input.order_id) {
+          const existingOrder = await this.storage.getActiveOrder(input.order_id);
+          if (existingOrder && this.isScopeRow(scope, existingOrder)) {
+            const nextOrder: ActiveOrderRow = {
+              ...existingOrder,
+              order_status: "COMPLETED",
+              order_state: "CLOSED",
+              closed_at: timestamp,
+              updated_at: timestamp
+            };
+            await this.storage.upsertActiveOrders([nextOrder]);
+            updatedOrder = mapActiveOrderRow(nextOrder);
+          }
+        }
+
+        return {
+          order: updatedOrder,
+          table: updatedTable,
+          reservation: updatedReservation
+        };
+      }
+    );
   }
 
   async getOutletReservations(scope: RuntimeOutletScope): Promise<RuntimeReservation[]> {

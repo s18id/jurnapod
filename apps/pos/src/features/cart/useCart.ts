@@ -53,6 +53,11 @@ export interface UseCartReturn {
   setGuestCount: (guestCount: number | null) => void;
   setOrderStatus: (status: OrderLifecycleStatus) => void;
   setOrderNotes: (notes: string | null) => void;
+  hydrateOrder: (input: {
+    cart: CartState;
+    paidAmount: number;
+    activeOrderContext: ActiveOrderContextState;
+  }) => void;
 }
 
 function nowIso(): string {
@@ -168,6 +173,16 @@ export function useCart({
     }));
   }, []);
 
+  const hydrateOrder = useCallback((input: {
+    cart: CartState;
+    paidAmount: number;
+    activeOrderContext: ActiveOrderContextState;
+  }) => {
+    setCart(input.cart);
+    setPaidAmount(input.paidAmount);
+    setActiveOrderContext(input.activeOrderContext);
+  }, []);
+
   const cartLines = useMemo(() => cartToList(cart), [cart]);
   const cartTotals = useMemo(() => computeCartTotals(cartLines, paidAmount), [cartLines, paidAmount]);
 
@@ -185,6 +200,7 @@ export function useCart({
     setOrderReservationId,
     setGuestCount,
     setOrderStatus,
-    setOrderNotes
+    setOrderNotes,
+    hydrateOrder
   };
 }

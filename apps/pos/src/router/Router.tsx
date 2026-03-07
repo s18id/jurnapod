@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React, { createContext, useContext, useMemo, useState, useCallback, useEffect, type ReactNode } from "react";
+import React, { createContext, useContext, useMemo, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -26,7 +26,7 @@ import {
 import { SyncBadge } from "../features/sync/SyncBadge.js";
 import { OutletContextSwitcher } from "../features/outlet/OutletContextSwitcher.js";
 import { readAccessToken, clearAccessToken } from "../offline/auth-session.js";
-import { useCart } from "../features/cart/useCart.js";
+import { useCart, type ActiveOrderContextState, type CartState } from "../features/cart/useCart.js";
 import { API_CONFIG, MOBILE_BREAKPOINT, POLL_INTERVAL_MS } from "../shared/utils/constants.js";
 import { PosAppStateContext, usePosAppState } from "./pos-app-state.js";
 
@@ -403,7 +403,164 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
   const [outletTables, setOutletTables] = useState<RuntimeOutletTable[]>([]);
   const [outletReservations, setOutletReservations] = useState<RuntimeReservation[]>([]);
   const [activeReservationId, setActiveReservationId] = useState<number | null>(null);
+  const [currentActiveOrderId, setCurrentActiveOrderId] = useState<string | null>(null);
   const cartState = useCart();
+  const hydrateInProgressRef = useRef(false);
+  const [activeOrderHydrated, setActiveOrderHydrated] = useState(false);
+
+  const toCartState = useCallback((snapshotLines: Array<{
+    item_id: number;
+    sku_snapshot: string | null;
+    name_snapshot: string;
+    item_type_snapshot: string;
+    unit_price_snapshot: number;
+    qty: number;
+    discount_amount: number;
+  }>): CartState => {
+    const next: CartState = {};
+    for (const line of snapshotLines) {
+      next[line.item_id] = {
+        product: {
+          item_id: line.item_id,
+          sku: line.sku_snapshot,
+          name: line.name_snapshot,
+          item_type: line.item_type_snapshot as "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE",
+          price_snapshot: line.unit_price_snapshot
+        },
+        qty: line.qty,
+        discount_amount: line.discount_amount
+      };
+    }
+    return next;
+  }, []);
+
+  const toOrderContext = useCallback((order: {
+    service_type: ActiveOrderContextState["service_type"];
+    table_id: number | null;
+    reservation_id: number | null;
+    guest_count: number | null;
+    order_status: ActiveOrderContextState["order_status"];
+    opened_at: string;
+    closed_at: string | null;
+    notes: string | null;
+  }): ActiveOrderContextState => ({
+    service_type: order.service_type,
+    table_id: order.table_id,
+    reservation_id: order.reservation_id,
+    guest_count: order.guest_count,
+    order_status: order.order_status,
+    opened_at: order.opened_at,
+    closed_at: order.closed_at,
+    notes: order.notes
+  }), []);
+
+  const hasMeaningfulOrderState = useMemo(() => {
+    return (
+      cartState.cartLines.length > 0
+      || cartState.paidAmount > 0
+      || cartState.activeOrderContext.service_type === "DINE_IN"
+      || !!cartState.activeOrderContext.table_id
+      || !!cartState.activeOrderContext.reservation_id
+      || cartState.activeOrderContext.guest_count !== null
+      || cartState.activeOrderContext.notes !== null
+    );
+  }, [cartState.activeOrderContext, cartState.cartLines.length, cartState.paidAmount]);
+
+  const hydrateFromSnapshot = useCallback((input: {
+    order_id: string;
+    paid_amount: number;
+    lines: Array<{
+      item_id: number;
+      sku_snapshot: string | null;
+      name_snapshot: string;
+      item_type_snapshot: string;
+      unit_price_snapshot: number;
+      qty: number;
+      discount_amount: number;
+    }>;
+    order: {
+      service_type: ActiveOrderContextState["service_type"];
+      table_id: number | null;
+      reservation_id: number | null;
+      guest_count: number | null;
+      order_status: ActiveOrderContextState["order_status"];
+      opened_at: string;
+      closed_at: string | null;
+      notes: string | null;
+    };
+  }) => {
+    hydrateInProgressRef.current = true;
+    cartState.hydrateOrder({
+      cart: toCartState(input.lines),
+      paidAmount: input.paid_amount,
+      activeOrderContext: toOrderContext(input.order)
+    });
+    setCurrentActiveOrderId(input.order_id);
+    setActiveReservationId(input.order.reservation_id);
+    hydrateInProgressRef.current = false;
+  }, [cartState, toCartState, toOrderContext]);
+
+  const persistCurrentOrderSnapshot = useCallback(async () => {
+    if (!activeOrderHydrated || hydrateInProgressRef.current) {
+      return null;
+    }
+
+    if (!hasMeaningfulOrderState && !currentActiveOrderId) {
+      return null;
+    }
+
+    const snapshot = await context.runtime.upsertActiveOrderSnapshot(scope, {
+      order_id: currentActiveOrderId ?? undefined,
+      service_type: cartState.activeOrderContext.service_type,
+      table_id: cartState.activeOrderContext.table_id,
+      reservation_id: cartState.activeOrderContext.reservation_id,
+      guest_count: cartState.activeOrderContext.guest_count,
+      order_status: cartState.activeOrderContext.order_status,
+      paid_amount: cartState.paidAmount,
+      opened_at: cartState.activeOrderContext.opened_at,
+      closed_at: cartState.activeOrderContext.closed_at,
+      notes: cartState.activeOrderContext.notes,
+      lines: cartState.cartLines.map((line) => ({
+        item_id: line.product.item_id,
+        sku_snapshot: line.product.sku,
+        name_snapshot: line.product.name,
+        item_type_snapshot: line.product.item_type,
+        unit_price_snapshot: line.product.price_snapshot,
+        qty: line.qty,
+        discount_amount: line.discount_amount
+      }))
+    });
+
+    if (snapshot.order.order_id !== currentActiveOrderId) {
+      setCurrentActiveOrderId(snapshot.order.order_id);
+    }
+
+    return snapshot.order.order_id;
+  }, [
+    activeOrderHydrated,
+    cartState,
+    context.runtime,
+    currentActiveOrderId,
+    hasMeaningfulOrderState,
+    scope
+  ]);
+
+  const resolveAndHydrateActiveOrder = useCallback(async (input: {
+    service_type: ActiveOrderContextState["service_type"];
+    table_id?: number | null;
+    reservation_id?: number | null;
+    guest_count?: number | null;
+    notes?: string | null;
+  }) => {
+    await persistCurrentOrderSnapshot();
+    const resolved = await context.runtime.resolveActiveOrder(scope, input);
+    hydrateFromSnapshot({
+      order_id: resolved.order.order_id,
+      paid_amount: resolved.order.paid_amount,
+      lines: resolved.lines,
+      order: resolved.order
+    });
+  }, [context.runtime, hydrateFromSnapshot, persistCurrentOrderSnapshot, scope]);
 
   const routerValue = useMemo(() => ({
     context,
@@ -481,6 +638,129 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
 
     window.localStorage.setItem(AUTO_PULL_INTERVAL_STORAGE_KEY, String(autoPullIntervalMs));
   }, [autoPullIntervalMs]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    void (async () => {
+      setActiveOrderHydrated(false);
+      const openOrders = await context.runtime.listActiveOrders(scope, "OPEN");
+
+      if (disposed) {
+        return;
+      }
+
+      if (openOrders.length === 0) {
+        hydrateInProgressRef.current = true;
+        cartState.clearCart();
+        setCurrentActiveOrderId(null);
+        setActiveReservationId(null);
+        hydrateInProgressRef.current = false;
+        setActiveOrderHydrated(true);
+        return;
+      }
+
+      const latest = openOrders[0];
+      const snapshot = await context.runtime.getActiveOrderSnapshot(scope, latest.order_id);
+      if (disposed) {
+        return;
+      }
+
+      if (snapshot) {
+        hydrateFromSnapshot({
+          order_id: snapshot.order.order_id,
+          paid_amount: snapshot.order.paid_amount,
+          lines: snapshot.lines,
+          order: snapshot.order
+        });
+      }
+      setActiveOrderHydrated(true);
+    })().catch((error: unknown) => {
+      if (!disposed) {
+        console.error("Failed to hydrate active order", error);
+        setActiveOrderHydrated(true);
+      }
+    });
+
+    return () => {
+      disposed = true;
+    };
+  }, [cartState, context.runtime, hydrateFromSnapshot, scope]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    if (!activeOrderHydrated || hydrateInProgressRef.current) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        await persistCurrentOrderSnapshot();
+      } catch (error) {
+        if (!disposed) {
+          console.error("Failed to persist active order snapshot", error);
+        }
+      }
+    })();
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    activeOrderHydrated,
+    cartState.activeOrderContext,
+    cartState.cartLines,
+    cartState.paidAmount,
+    persistCurrentOrderSnapshot
+  ]);
+
+  const clearCart = useCallback(() => {
+    const orderId = currentActiveOrderId;
+    setCurrentActiveOrderId(null);
+    setActiveReservationId(null);
+    cartState.clearCart();
+
+    if (orderId) {
+      void context.runtime.closeActiveOrder(scope, orderId, "CANCELLED");
+    }
+  }, [cartState, context.runtime, currentActiveOrderId, scope]);
+
+  const setServiceType = useCallback((serviceType: ActiveOrderContextState["service_type"]) => {
+    if (serviceType === "TAKEAWAY") {
+      setActiveReservationId(null);
+      void resolveAndHydrateActiveOrder({ service_type: "TAKEAWAY" });
+      return;
+    }
+
+    cartState.setServiceType(serviceType);
+  }, [cartState, resolveAndHydrateActiveOrder]);
+
+  const setActiveTableId = useCallback((tableId: number | null) => {
+    if (!tableId) {
+      cartState.setActiveTableId(null);
+      return;
+    }
+
+    void resolveAndHydrateActiveOrder({
+      service_type: "DINE_IN",
+      table_id: tableId
+    });
+  }, [cartState, resolveAndHydrateActiveOrder]);
+
+  const setOrderReservationId = useCallback((reservationId: number | null) => {
+    if (!reservationId) {
+      setActiveReservationId(null);
+      cartState.setOrderReservationId(null);
+      return;
+    }
+
+    setActiveReservationId(reservationId);
+    void resolveAndHydrateActiveOrder({
+      service_type: "DINE_IN",
+      reservation_id: reservationId
+    });
+  }, [cartState, resolveAndHydrateActiveOrder]);
 
   useEffect(() => {
     let disposed = false;
@@ -618,14 +898,15 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       paidAmount: cartState.paidAmount,
       setPaidAmount: cartState.setPaidAmount,
       upsertCartLine: cartState.upsertCartLine,
-      clearCart: cartState.clearCart,
+      clearCart,
       activeOrderContext: cartState.activeOrderContext,
-      setServiceType: cartState.setServiceType,
-      setActiveTableId: cartState.setActiveTableId,
-      setOrderReservationId: cartState.setOrderReservationId,
+      setServiceType,
+      setActiveTableId,
+      setOrderReservationId,
       setGuestCount: cartState.setGuestCount,
       setOrderStatus: cartState.setOrderStatus,
       setOrderNotes: cartState.setOrderNotes,
+      currentActiveOrderId,
       outletTables,
       setOutletTables,
       outletReservations,
@@ -650,6 +931,11 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       runSyncPullNow,
       runSyncPushNow,
       cartState,
+      clearCart,
+      setServiceType,
+      setActiveTableId,
+      setOrderReservationId,
+      currentActiveOrderId,
       outletTables,
       outletReservations,
       activeReservationId

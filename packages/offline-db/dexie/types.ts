@@ -11,6 +11,8 @@ export type OrderServiceType = "TAKEAWAY" | "DINE_IN";
 
 export type OrderStatus = "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
 
+export type ActiveOrderState = "OPEN" | "CLOSED";
+
 export type OutboxJobType = "SYNC_POS_TX";
 
 export type OutboxJobStatus = "PENDING" | "SENT" | "FAILED";
@@ -76,6 +78,39 @@ export interface ReservationRow {
   arrived_at: string | null;
   seated_at: string | null;
   cancelled_at: string | null;
+}
+
+export interface ActiveOrderRow {
+  pk: string;
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  service_type: OrderServiceType;
+  table_id: number | null;
+  reservation_id: number | null;
+  guest_count: number | null;
+  order_status: OrderStatus;
+  order_state: ActiveOrderState;
+  paid_amount: number;
+  opened_at: string;
+  closed_at: string | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+export interface ActiveOrderLineRow {
+  pk: string;
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  item_id: number;
+  sku_snapshot: string | null;
+  name_snapshot: string;
+  item_type_snapshot: ProductItemType;
+  unit_price_snapshot: number;
+  qty: number;
+  discount_amount: number;
+  updated_at: string;
 }
 
 export interface SyncMetadataRow {

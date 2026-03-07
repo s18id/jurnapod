@@ -9,6 +9,7 @@ import { CartSummary } from "../features/cart/CartSummary.js";
 import { Button } from "../shared/components/index.js";
 import { routes } from "../router/routes.js";
 import { usePosAppState } from "../router/pos-app-state.js";
+import { formatMoney } from "../shared/utils/money.js";
 
 interface CartPageProps {
   context: WebBootstrapContext;
@@ -24,6 +25,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
     upsertCartLine,
     clearCart,
     activeOrderContext,
+    currentActiveOrderId,
     setActiveTableId,
     setOrderStatus,
     outletTables,
@@ -36,14 +38,55 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
   const [transferTargetTableId, setTransferTargetTableId] = useState<string>("");
   const [transferInFlight, setTransferInFlight] = useState(false);
   const [transferMessage, setTransferMessage] = useState<string | null>(null);
+  const [tableOrderSummaryByTableId, setTableOrderSummaryByTableId] = useState<Record<number, {
+    order_id: string;
+    item_count: number;
+    subtotal: number;
+  }>>({});
 
   useEffect(() => {
     let disposed = false;
 
     async function loadTables() {
-      const tables = await context.runtime.getOutletTables(scope);
+      const [tables, activeOrders] = await Promise.all([
+        context.runtime.getOutletTables(scope),
+        context.runtime.listActiveOrders(scope, "OPEN")
+      ]);
+
+      const snapshots = await Promise.all(
+        activeOrders.map(async (order) => {
+          const snapshot = await context.runtime.getActiveOrderSnapshot(scope, order.order_id);
+          return snapshot;
+        })
+      );
+
+      const nextSummaryByTableId: Record<number, {
+        order_id: string;
+        item_count: number;
+        subtotal: number;
+      }> = {};
+
+      for (const snapshot of snapshots) {
+        if (!snapshot || snapshot.order.service_type !== "DINE_IN" || !snapshot.order.table_id) {
+          continue;
+        }
+
+        const itemCount = snapshot.lines.reduce((sum, line) => sum + line.qty, 0);
+        const subtotal = snapshot.lines.reduce(
+          (sum, line) => sum + (line.qty * line.unit_price_snapshot) - line.discount_amount,
+          0
+        );
+
+        nextSummaryByTableId[snapshot.order.table_id] = {
+          order_id: snapshot.order.order_id,
+          item_count: itemCount,
+          subtotal
+        };
+      }
+
       if (!disposed) {
         setOutletTables(tables);
+        setTableOrderSummaryByTableId(nextSummaryByTableId);
       }
     }
 
@@ -59,10 +102,26 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
   const transferOptions = useMemo(
     () =>
       outletTables.filter(
-        (table) => table.status === "AVAILABLE" && table.table_id !== activeOrderContext.table_id
+        (table) =>
+          table.status === "AVAILABLE"
+          && table.table_id !== activeOrderContext.table_id
+          && !tableOrderSummaryByTableId[table.table_id]
       ),
-    [activeOrderContext.table_id, outletTables]
+    [activeOrderContext.table_id, outletTables, tableOrderSummaryByTableId]
   );
+
+  const transferSelectionSummary = useMemo(() => {
+    if (!transferTargetTableId) {
+      return null;
+    }
+    const tableId = Number(transferTargetTableId);
+    const table = outletTables.find((row) => row.table_id === tableId) ?? null;
+    const summary = tableOrderSummaryByTableId[tableId] ?? null;
+    return {
+      table,
+      summary
+    };
+  }, [outletTables, tableOrderSummaryByTableId, transferTargetTableId]);
 
   const containerStyles: React.CSSProperties = {
     display: "flex",
@@ -158,56 +217,37 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
               <Button
                 size="small"
                 variant="secondary"
-                disabled={transferInFlight || !transferTargetTableId}
+                disabled={transferInFlight || !transferTargetTableId || !currentActiveOrderId}
                 onClick={() => {
                   void (async () => {
                     setTransferInFlight(true);
                     setTransferMessage(null);
                     try {
-                      const targetTableId = Number(transferTargetTableId);
-                      const result = await context.runtime.transferActiveTable(
-                        scope,
-                        activeOrderContext.table_id as number,
-                        targetTableId
-                      );
-
-                      if (!result) {
-                        setTransferMessage("Failed to transfer table.");
+                      if (!currentActiveOrderId) {
+                        setTransferMessage("No active order to transfer.");
                         return;
                       }
 
-                      setOutletTables((previous) =>
-                        previous.map((table) => {
-                          if (table.table_id === result.from.table_id) {
-                            return result.from;
-                          }
-                          if (table.table_id === result.to.table_id) {
-                            return result.to;
-                          }
-                          return table;
-                        })
-                      );
-                      setActiveTableId(result.to.table_id);
+                      const targetTableId = Number(transferTargetTableId);
+                      const result = await context.runtime.transferActiveOrderTable(scope, currentActiveOrderId, targetTableId);
 
-                      if (activeReservationId) {
-                        const updatedReservation = await context.runtime.assignReservationTable(
-                          scope,
-                          activeReservationId,
-                          result.to.table_id
-                        );
-                        if (updatedReservation) {
-                          setOutletReservations((previous) =>
-                            previous.map((reservation) =>
-                              reservation.reservation_id === updatedReservation.reservation_id
-                                ? updatedReservation
-                                : reservation
-                            )
-                          );
-                        }
+                      if (!result) {
+                        setTransferMessage("Failed to transfer active order.");
+                        return;
                       }
 
+                      const [latestTables, latestReservations] = await Promise.all([
+                        context.runtime.getOutletTables(scope),
+                        context.runtime.getOutletReservations(scope)
+                      ]);
+
+                      setOutletTables(latestTables);
+                      setOutletReservations(latestReservations);
+                      setActiveTableId(result.table_id);
+
                       setTransferTargetTableId("");
-                      setTransferMessage(`Table moved to ${result.to.code}.`);
+                      const targetTable = latestTables.find((table) => table.table_id === result.table_id);
+                      setTransferMessage(`Table moved to ${targetTable?.code ?? `#${result.table_id}`}.`);
                     } catch (error) {
                       setTransferMessage(error instanceof Error ? error.message : "Failed to transfer table");
                     } finally {
@@ -219,6 +259,31 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                 {transferInFlight ? "Moving..." : "Move table"}
               </Button>
             </div>
+            <div style={{ fontSize: 12, color: "#475569" }}>
+              {transferSelectionSummary?.table
+                ? `${transferSelectionSummary.table.code} is available and has no running order.`
+                : "Only available tables without active orders are shown."}
+            </div>
+            {Object.entries(tableOrderSummaryByTableId).length > 0 ? (
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>Running totals by table</div>
+                <div style={{ display: "grid", gap: 2 }}>
+                  {Object.entries(tableOrderSummaryByTableId)
+                    .sort((left, right) => Number(left[0]) - Number(right[0]))
+                    .map(([tableId, summary]) => {
+                      const table = outletTables.find((row) => row.table_id === Number(tableId));
+                      if (!table) {
+                        return null;
+                      }
+                      return (
+                        <div key={summary.order_id} style={{ fontSize: 12, color: "#334155" }}>
+                          {table.code}: {summary.item_count} item(s) • {formatMoney(summary.subtotal)}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            ) : null}
             {transferMessage ? (
               <div style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{transferMessage}</div>
             ) : null}

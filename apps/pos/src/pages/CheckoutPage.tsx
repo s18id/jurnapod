@@ -23,6 +23,7 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
     clearCart,
     activeOrderContext,
     setOrderStatus,
+    currentActiveOrderId,
     setOrderReservationId,
     outletReservations,
     activeReservationId,
@@ -145,46 +146,39 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
           onPaymentMethodChange={setPaymentMethod}
           onPaidAmountChange={(amount) => setPaidAmount(normalizeMoney(amount))}
           onComplete={() => {
-            const clearOrderContext = () => {
-              if (activeOrderContext.service_type === "DINE_IN" && activeOrderContext.table_id) {
-                void context.runtime
-                  .setOutletTableStatus(scope, activeOrderContext.table_id, "AVAILABLE")
-                  .then((released) => {
-                    if (!released) {
-                      return;
-                    }
-                    setOutletTables((previous) =>
-                      previous.map((table) =>
-                        table.table_id === released.table_id ? released : table
-                      )
-                    );
-                  });
-              }
-              setOrderStatus("COMPLETED");
-              setOrderReservationId(null);
-              clearCart();
-            };
+              const clearOrderContext = async () => {
+                const sessionResult = await context.runtime.completeOrderSession(scope, {
+                  order_id: currentActiveOrderId,
+                  table_id: activeOrderContext.service_type === "DINE_IN" ? activeOrderContext.table_id : null,
+                  reservation_id: activeOrderContext.reservation_id
+                });
+
+                if (sessionResult.table) {
+                  setOutletTables((previous) =>
+                    previous.map((table) =>
+                      table.table_id === sessionResult.table?.table_id ? sessionResult.table : table
+                    )
+                  );
+                }
+
+                if (sessionResult.reservation) {
+                  setOutletReservations((previous) =>
+                    previous.map((reservation) =>
+                      reservation.reservation_id === sessionResult.reservation?.reservation_id
+                        ? sessionResult.reservation
+                        : reservation
+                    )
+                  );
+                }
+
+                setOrderStatus("COMPLETED");
+                setOrderReservationId(null);
+                setActiveReservationId(null);
+                clearCart();
+              };
 
             void runCompleteSale(cartLines, cartTotals, {
               setPaidAmount,
-              onAfterComplete: async () => {
-                if (activeReservationId) {
-                  try {
-                    const updated = await context.runtime.updateReservationStatus(scope, activeReservationId, "COMPLETED");
-                    if (updated) {
-                      setOutletReservations((previous) =>
-                        previous.map((reservation) =>
-                          reservation.reservation_id === updated.reservation_id ? updated : reservation
-                        )
-                      );
-                    }
-                  } catch {
-                    // keep sale completion successful even if reservation update fails
-                  } finally {
-                    setActiveReservationId(null);
-                  }
-                }
-              },
               setCart: clearOrderContext
             });
           }}

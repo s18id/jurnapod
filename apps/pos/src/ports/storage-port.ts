@@ -14,6 +14,8 @@
 import type {
   OutletTableRow,
   ReservationRow,
+  ActiveOrderRow,
+  ActiveOrderLineRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -48,6 +50,22 @@ export interface PosStoragePort {
   }): Promise<ReservationRow[]>;
 
   upsertReservations(reservations: ReservationRow[]): Promise<void>;
+
+  // Active orders operations
+  getActiveOrdersByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<ActiveOrderRow[]>;
+
+  getActiveOrder(order_id: string): Promise<ActiveOrderRow | undefined>;
+
+  upsertActiveOrders(orders: ActiveOrderRow[]): Promise<void>;
+
+  deleteActiveOrder(order_id: string): Promise<void>;
+
+  getActiveOrderLines(order_id: string): Promise<ActiveOrderLineRow[]>;
+
+  replaceActiveOrderLines(order_id: string, lines: ActiveOrderLineRow[]): Promise<void>;
 
   // Sale operations
   createSale(sale: SaleRow): Promise<void>;

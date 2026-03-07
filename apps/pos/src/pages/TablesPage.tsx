@@ -1,13 +1,14 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { Button, Card } from "../shared/components/index.js";
 import { routes } from "../router/routes.js";
 import type { RuntimeTableStatus } from "../services/runtime-service.js";
 import { usePosAppState } from "../router/pos-app-state.js";
+import { formatMoney } from "../shared/utils/money.js";
 
 interface TablesPageProps {
   context: WebBootstrapContext;
@@ -32,20 +33,63 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
     setServiceType,
     setActiveTableId,
     setOrderReservationId,
-    setActiveReservationId
+    setActiveReservationId,
+    currentActiveOrderId
   } = usePosAppState();
+  const [tableOrderSummaryByTableId, setTableOrderSummaryByTableId] = useState<Record<number, {
+    order_id: string;
+    item_count: number;
+    subtotal: number;
+    reservation_id: number | null;
+  }>>({});
 
   useEffect(() => {
     let disposed = false;
 
     async function loadTables() {
-      const [tables, reservations] = await Promise.all([
+      const [tables, reservations, activeOrders] = await Promise.all([
         context.runtime.getOutletTables(scope),
-        context.runtime.getOutletReservations(scope)
+        context.runtime.getOutletReservations(scope),
+        context.runtime.listActiveOrders(scope, "OPEN")
       ]);
+
+      const snapshots = await Promise.all(
+        activeOrders.map(async (order) => {
+          const snapshot = await context.runtime.getActiveOrderSnapshot(scope, order.order_id);
+          return snapshot;
+        })
+      );
+
+      const nextSummaryByTableId: Record<number, {
+        order_id: string;
+        item_count: number;
+        subtotal: number;
+        reservation_id: number | null;
+      }> = {};
+
+      for (const snapshot of snapshots) {
+        if (!snapshot || snapshot.order.service_type !== "DINE_IN" || !snapshot.order.table_id) {
+          continue;
+        }
+
+        const itemCount = snapshot.lines.reduce((sum, line) => sum + line.qty, 0);
+        const subtotal = snapshot.lines.reduce(
+          (sum, line) => sum + (line.qty * line.unit_price_snapshot) - line.discount_amount,
+          0
+        );
+
+        nextSummaryByTableId[snapshot.order.table_id] = {
+          order_id: snapshot.order.order_id,
+          item_count: itemCount,
+          subtotal,
+          reservation_id: snapshot.order.reservation_id
+        };
+      }
+
       if (!disposed) {
         setOutletTables(tables);
         setOutletReservations(reservations);
+        setTableOrderSummaryByTableId(nextSummaryByTableId);
       }
     }
 
@@ -54,6 +98,15 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
       disposed = true;
     };
   }, [context.runtime, scope, setOutletReservations, setOutletTables]);
+
+  const currentOrderTableId = useMemo(() => {
+    for (const [tableIdRaw, summary] of Object.entries(tableOrderSummaryByTableId)) {
+      if (summary.order_id === currentActiveOrderId) {
+        return Number(tableIdRaw);
+      }
+    }
+    return activeOrderContext.table_id;
+  }, [activeOrderContext.table_id, currentActiveOrderId, tableOrderSummaryByTableId]);
 
   return (
     <div style={{ padding: 16 }}>
@@ -67,14 +120,17 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 10 }}>
         {outletTables.map((table) => {
           const colors = statusColors[table.status];
-          const isCurrentOrderTable = activeOrderContext.table_id === table.table_id;
+          const tableOrderSummary = tableOrderSummaryByTableId[table.table_id] ?? null;
+          const hasTableOrder = !!tableOrderSummary;
+          const isCurrentOrderTable = currentOrderTableId === table.table_id;
           const hasOtherActiveTable =
             activeOrderContext.service_type === "DINE_IN"
-            && !!activeOrderContext.table_id
+            && !!currentOrderTableId
             && !isCurrentOrderTable;
           const canStartDineIn =
             table.status === "AVAILABLE"
             || isCurrentOrderTable
+            || hasTableOrder
             || (table.status === "OCCUPIED" && !hasOtherActiveTable);
           const linkedReservation = outletReservations.find(
             (reservation) =>
@@ -105,6 +161,11 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
                     Reserved for {linkedReservation.customer_name} ({linkedReservation.status})
                   </div>
                 ) : null}
+                {tableOrderSummary ? (
+                  <div style={{ marginTop: 4, fontSize: 12, color: "#0f172a", fontWeight: 600 }}>
+                    Active order: {tableOrderSummary.item_count} item(s) • {formatMoney(tableOrderSummary.subtotal)}
+                  </div>
+                ) : null}
                 <Button
                   variant="primary"
                   fullWidth
@@ -112,28 +173,34 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
                   disabled={!canStartDineIn}
                   onClick={() => {
                     void (async () => {
-                      const occupied = await context.runtime.setOutletTableStatus(scope, table.table_id, "OCCUPIED");
-                      if (occupied) {
-                        setOutletTables((previous) =>
-                          previous.map((row) => {
-                            if (row.table_id === occupied.table_id) {
-                              return occupied;
-                            }
-                            return row;
-                          })
-                        );
+                      if (!tableOrderSummary) {
+                        const occupied = await context.runtime.setOutletTableStatus(scope, table.table_id, "OCCUPIED");
+                        if (occupied) {
+                          setOutletTables((previous) =>
+                            previous.map((row) => {
+                              if (row.table_id === occupied.table_id) {
+                                return occupied;
+                              }
+                              return row;
+                            })
+                          );
+                        }
                       }
 
                       setServiceType("DINE_IN");
                       setActiveTableId(table.table_id);
-                      setOrderReservationId(null);
-                      setActiveReservationId(null);
+                      if (!tableOrderSummary?.reservation_id) {
+                        setOrderReservationId(null);
+                        setActiveReservationId(null);
+                      }
                       navigate(routes.products.path);
                     })();
                   }}
                 >
                   {isCurrentOrderTable
                     ? "Resume current order"
+                    : hasTableOrder
+                      ? "Resume table order"
                     : table.status === "OCCUPIED"
                       ? "Resume occupied table"
                       : "Use table"}

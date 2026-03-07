@@ -52,6 +52,7 @@ export interface PosAppStateValue {
   setGuestCount: (guestCount: number | null) => void;
   setOrderStatus: (status: OrderLifecycleStatus) => void;
   setOrderNotes: (notes: string | null) => void;
+  currentActiveOrderId: string | null;
   outletTables: RuntimeOutletTable[];
   setOutletTables: Dispatch<SetStateAction<RuntimeOutletTable[]>>;
   outletReservations: RuntimeReservation[];
