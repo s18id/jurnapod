@@ -105,11 +105,24 @@ export class WebStorageAdapter implements PosStoragePort {
     limit?: number;
   }): Promise<OutboxJobRow[]> {
     const limit = input.limit ?? 100;
-    return await this.db.outbox_jobs
-      .where("[status+next_attempt_at]")
-      .between(["PENDING", new Date(0)], ["PENDING", input.now], true, true)
-      .limit(limit)
+    const nowMs = input.now.getTime();
+    
+    // Include:
+    // 1. PENDING with next_attempt_at = null (freshly enqueued)
+    // 2. PENDING with next_attempt_at <= now
+    // 3. FAILED with next_attempt_at = null or <= now
+    const jobs = await this.db.outbox_jobs
+      .where("status")
+      .anyOf("PENDING", "FAILED")
       .toArray();
+    
+    return jobs
+      .filter(job => {
+        if (!job.next_attempt_at) return true; // freshly enqueued
+        const attemptMs = new Date(job.next_attempt_at).getTime();
+        return attemptMs <= nowMs;
+      })
+      .slice(0, limit);
   }
 
   async updateOutboxJob(
@@ -124,10 +137,22 @@ export class WebStorageAdapter implements PosStoragePort {
   }
 
   async countGlobalDueOutboxJobs(now: Date): Promise<number> {
-    return await this.db.outbox_jobs
-      .where("[status+next_attempt_at]")
-      .between(["PENDING", new Date(0)], ["PENDING", now], true, true)
-      .count();
+    const nowMs = now.getTime();
+    
+    // Include:
+    // 1. PENDING with next_attempt_at = null (freshly enqueued)
+    // 2. PENDING with next_attempt_at <= now
+    // 3. FAILED with next_attempt_at = null or <= now
+    const jobs = await this.db.outbox_jobs
+      .where("status")
+      .anyOf("PENDING", "FAILED")
+      .toArray();
+    
+    return jobs.filter(job => {
+      if (!job.next_attempt_at) return true; // freshly enqueued or failed without retry time
+      const attemptMs = new Date(job.next_attempt_at).getTime();
+      return attemptMs <= nowMs;
+    }).length;
   }
 
   async getSyncMetadata(input: {
