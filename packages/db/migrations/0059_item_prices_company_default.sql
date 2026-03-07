@@ -48,10 +48,23 @@ PREPARE stmt FROM @stmt;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Step 3: Make outlet_id nullable
-ALTER TABLE item_prices
-  MODIFY COLUMN outlet_id BIGINT UNSIGNED NULL
-  COMMENT 'NULL = company default price, non-NULL = outlet override';
+-- Step 3: Make outlet_id nullable (idempotent)
+SET @outlet_id_is_nullable = (
+  SELECT IS_NULLABLE = 'YES'
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'item_prices'
+    AND column_name = 'outlet_id'
+);
+
+SET @stmt = IF(
+  @outlet_id_is_nullable = 1,
+  'SELECT 1',
+  'ALTER TABLE item_prices MODIFY COLUMN outlet_id BIGINT UNSIGNED NULL COMMENT ''NULL = company default price, non-NULL = outlet override'''
+);
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- Step 4: Add uniqueness constraint for company default (outlet_id IS NULL)
 -- MySQL does not support partial indexes with WHERE clause like PostgreSQL,
@@ -63,18 +76,41 @@ ALTER TABLE item_prices
 -- but we want to prevent duplicate (company_id, item_id) when outlet_id IS NULL.
 -- Solution: Use a generated column or check constraint (MySQL 8.0.16+)
 
--- Add a generated scope key column to enforce uniqueness
-ALTER TABLE item_prices
-  ADD COLUMN scope_key VARCHAR(100) AS (
-    CASE
-      WHEN outlet_id IS NULL THEN CONCAT('default:', company_id, ':', item_id)
-      ELSE CONCAT('override:', company_id, ':', outlet_id, ':', item_id)
-    END
-  ) STORED;
+-- Add a generated scope key column to enforce uniqueness (idempotent)
+SET @scope_key_exists = (
+  SELECT COUNT(*)
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'item_prices'
+    AND column_name = 'scope_key'
+);
 
--- Step 5: Add unique constraint on scope_key
-ALTER TABLE item_prices
-  ADD UNIQUE KEY uq_item_prices_scope (scope_key);
+SET @stmt = IF(
+  @scope_key_exists > 0,
+  'SELECT 1',
+  'ALTER TABLE item_prices ADD COLUMN scope_key VARCHAR(100) AS (CASE WHEN outlet_id IS NULL THEN CONCAT(''default:'', company_id, '':'', item_id) ELSE CONCAT(''override:'', company_id, '':'', outlet_id, '':'', item_id) END) STORED'
+);
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Step 5: Add unique constraint on scope_key (idempotent)
+SET @scope_unique_exists = (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'item_prices'
+    AND index_name = 'uq_item_prices_scope'
+);
+
+SET @stmt = IF(
+  @scope_unique_exists > 0,
+  'SELECT 1',
+  'ALTER TABLE item_prices ADD UNIQUE KEY uq_item_prices_scope (scope_key)'
+);
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- Step 6: Re-add foreign key constraint on outlet_id (nullable)
 -- MySQL allows FK on nullable columns; constraint only enforced when value is NOT NULL
@@ -101,7 +137,48 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 -- Step 8: Update indexes for efficient querying
--- Drop old index if exists
+-- CRITICAL: Add new indexes BEFORE dropping old index to avoid breaking FK support
+
+-- Add new indexes optimized for both scopes (idempotent)
+-- Index for outlet-specific queries (effective price resolution)
+SET @new_idx_outlet_exists = (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'item_prices'
+    AND index_name = 'idx_item_prices_outlet_item_active'
+);
+
+SET @stmt = IF(
+  @new_idx_outlet_exists > 0,
+  'SELECT 1',
+  'ALTER TABLE item_prices ADD INDEX idx_item_prices_outlet_item_active (company_id, outlet_id, item_id, is_active)'
+);
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Index for company default queries (idempotent)
+-- Note: MySQL does not support filtered indexes (WHERE outlet_id IS NULL)
+-- Create a regular index that includes all rows; MySQL optimizer will use it efficiently
+SET @new_idx_default_exists = (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'item_prices'
+    AND index_name = 'idx_item_prices_company_default_fallback'
+);
+
+SET @stmt = IF(
+  @new_idx_default_exists > 0,
+  'SELECT 1',
+  'ALTER TABLE item_prices ADD INDEX idx_item_prices_company_default_fallback (company_id, item_id, is_active)'
+);
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Drop old index if exists (now safe after new index created)
 SET @old_idx_exists = (
   SELECT COUNT(*)
   FROM information_schema.statistics
@@ -118,17 +195,6 @@ SET @stmt = IF(
 PREPARE stmt FROM @stmt;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
-
--- Add new indexes optimized for both scopes
--- Index for outlet-specific queries (effective price resolution)
-ALTER TABLE item_prices
-  ADD INDEX idx_item_prices_outlet_item_active (company_id, outlet_id, item_id, is_active);
-
--- Index for company default queries
--- Note: MySQL does not support filtered indexes (WHERE outlet_id IS NULL)
--- Create a regular index that includes all rows; MySQL optimizer will use it efficiently
-ALTER TABLE item_prices
-  ADD INDEX idx_item_prices_company_default_fallback (company_id, item_id, is_active);
 
 -- Step 9: Add comment to table for documentation
 ALTER TABLE item_prices
