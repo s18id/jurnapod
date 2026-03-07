@@ -11,10 +11,11 @@ import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createItemPrice,
   DatabaseConflictError,
+  DatabaseForbiddenError,
   DatabaseReferenceError,
   listItemPrices
 } from "../../../../src/lib/master-data";
-import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
+import { listUserOutletIds, userHasAnyRole, userHasOutletAccess } from "../../../../src/lib/auth";
 
 const outletGuardSchema = ItemPriceCreateRequestSchema.pick({
   outlet_id: true
@@ -28,7 +29,7 @@ const invalidJsonGuardError = new ZodError([
   }
 ]);
 
-async function parseOutletIdForGuard(request: Request): Promise<number> {
+async function parseOutletIdForGuard(request: Request): Promise<number | null> {
   try {
     const payload = await request.clone().json();
     return outletGuardSchema.parse(payload).outlet_id;
@@ -39,6 +40,10 @@ async function parseOutletIdForGuard(request: Request): Promise<number> {
 
     throw error;
   }
+}
+
+async function ensureCompanyDefaultAccess(userId: number, companyId: number): Promise<boolean> {
+  return userHasAnyRole(userId, companyId, ["OWNER", "COMPANY_ADMIN"]);
 }
 
 function parseOptionalIsActive(value: string | null): boolean | undefined {
@@ -80,6 +85,7 @@ export const GET = withAuth(
 
       const outletId = parseOptionalOutletId(url.searchParams.get("outlet_id"));
       const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
+      const canAccessCompanyDefaults = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
 
       if (typeof outletId === "number") {
         const hasOutletAccess = await userHasOutletAccess(auth.userId, auth.companyId, outletId);
@@ -89,7 +95,8 @@ export const GET = withAuth(
 
         const prices = await listItemPrices(auth.companyId, {
           outletId,
-          isActive
+          isActive,
+          includeDefaults: canAccessCompanyDefaults
         });
 
         return successResponse(prices);
@@ -98,7 +105,8 @@ export const GET = withAuth(
       const outletIds = await listUserOutletIds(auth.userId, auth.companyId);
       const prices = await listItemPrices(auth.companyId, {
         outletIds,
-        isActive
+        isActive,
+        includeDefaults: canAccessCompanyDefaults
       });
 
       return successResponse(prices);
@@ -125,8 +133,17 @@ export const POST = withAuth(
     try {
       const payload = await request.json();
       const input = ItemPriceCreateRequestSchema.parse(payload);
+      const canManageCompanyDefaults = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
+
+      if (input.outlet_id === null) {
+        if (!canManageCompanyDefaults) {
+          return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
+        }
+      }
+
       const itemPrice = await createItemPrice(auth.companyId, input, {
-        userId: auth.userId
+        userId: auth.userId,
+        canManageCompanyDefaults
       });
 
       return successResponse(itemPrice, 201);
@@ -137,6 +154,10 @@ export const POST = withAuth(
 
       if (error instanceof DatabaseReferenceError) {
         return errorResponse("NOT_FOUND", "Item or outlet not found", 404);
+      }
+
+      if (error instanceof DatabaseForbiddenError) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       if (error instanceof DatabaseConflictError) {

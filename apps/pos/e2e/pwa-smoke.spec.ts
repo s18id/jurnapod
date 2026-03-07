@@ -3,6 +3,8 @@
 
 import { expect, test } from "@playwright/test";
 
+const ACCESS_TOKEN_STORAGE_KEY = "jurnapod_pos_access_token";
+
 test("sync badge changes to Offline when network goes down", async ({ context, page }) => {
   await page.route("**/api/health", async (route) => {
     await route.fulfill({
@@ -11,6 +13,30 @@ test("sync badge changes to Offline when network goes down", async ({ context, p
       body: JSON.stringify({ success: true, data: { service: "jurnapod-api" } })
     });
   });
+
+  await page.route("**/api/users/me", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          company_id: 1,
+          outlets: [
+            {
+              id: 1,
+              code: "MAIN",
+              name: "Main Outlet"
+            }
+          ]
+        }
+      })
+    });
+  });
+
+  await page.addInitScript((storageKey) => {
+    window.localStorage.setItem(storageKey, "test-token");
+  }, ACCESS_TOKEN_STORAGE_KEY);
 
   await page.goto("/");
   await expect(page.getByText("Sync: Synced")).toBeVisible();
@@ -84,6 +110,7 @@ test("login + sync pull works with mocked API", async ({ page }) => {
               updated_at: new Date().toISOString()
             }
           ],
+          item_groups: [],
           prices: [
             {
               id: 200,
@@ -109,11 +136,12 @@ test("login + sync pull works with mocked API", async ({ page }) => {
   await page.goto("/");
   await page.getByPlaceholder("Email").fill("cashier@example.com");
   await page.getByPlaceholder("Password").fill("password");
-  await page.getByRole("button", { name: "Login" }).click();
+  await page.getByRole("button", { name: "Sign in" }).click();
 
-  await expect(page.getByText("Authenticated. Sync pull and push are now authorized.")).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
 
+  await page.goto("/settings");
   await page.getByRole("button", { name: "Sync pull now" }).click();
   await expect(page.getByText(/Sync pull applied/)).toBeVisible();
-  await expect(page.getByText("Product cache status for outlet 10: Ready")).toBeVisible();
+  await expect(page.getByText("Last data version: 10")).toBeVisible();
 });

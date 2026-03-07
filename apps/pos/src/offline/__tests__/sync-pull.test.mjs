@@ -20,10 +20,12 @@ function createSyncPayload({ dataVersion, outletId, price }) {
           sku: "AMERICANO",
           name: "Americano",
           type: "PRODUCT",
+          item_group_id: null,
           is_active: true,
           updated_at: timestamp
         }
       ],
+      item_groups: [],
       prices: [
         {
           id: 8001,
@@ -63,6 +65,7 @@ test("sync pull upserts products cache rows", async () => {
       {
         company_id: 1,
         outlet_id: 10,
+        base_url: "http://127.0.0.1:3001",
         fetch_impl: fetchWithPayload(createSyncPayload({ dataVersion: 2, outletId: 10, price: 25000 }))
       },
       db
@@ -89,6 +92,7 @@ test("sync pull replaces existing price snapshot on newer version", async () => 
       {
         company_id: 1,
         outlet_id: 10,
+        base_url: "http://127.0.0.1:3001",
         fetch_impl: fetchWithPayload(createSyncPayload({ dataVersion: 2, outletId: 10, price: 25000 }))
       },
       db
@@ -98,6 +102,7 @@ test("sync pull replaces existing price snapshot on newer version", async () => 
       {
         company_id: 1,
         outlet_id: 10,
+        base_url: "http://127.0.0.1:3001",
         fetch_impl: fetchWithPayload(createSyncPayload({ dataVersion: 3, outletId: 10, price: 27000 }))
       },
       db
@@ -120,6 +125,7 @@ test("sync pull persists per-outlet data version", async () => {
       {
         company_id: 1,
         outlet_id: 10,
+        base_url: "http://127.0.0.1:3001",
         fetch_impl: fetchWithPayload(createSyncPayload({ dataVersion: 5, outletId: 10, price: 25000 }))
       },
       db
@@ -161,6 +167,7 @@ test("sync pull deactivates stale rows missing from newer payload", async () => 
       {
         company_id: 1,
         outlet_id: 10,
+        base_url: "http://127.0.0.1:3001",
         fetch_impl: fetchWithPayload(createSyncPayload({ dataVersion: 2, outletId: 10, price: 25000 }))
       },
       db
@@ -186,6 +193,7 @@ test("equal or lower data_version replay does not regress cache", async () => {
       {
         company_id: 1,
         outlet_id: 10,
+        base_url: "http://127.0.0.1:3001",
         fetch_impl: fetchWithPayload(createSyncPayload({ dataVersion: 5, outletId: 10, price: 28000 }))
       },
       db
@@ -195,6 +203,7 @@ test("equal or lower data_version replay does not regress cache", async () => {
       {
         company_id: 1,
         outlet_id: 10,
+        base_url: "http://127.0.0.1:3001",
         fetch_impl: fetchWithPayload(createSyncPayload({ dataVersion: 5, outletId: 10, price: 22000 }))
       },
       db
@@ -220,6 +229,7 @@ test("sync pull persists and reads scoped config", async () => {
       {
         company_id: 1,
         outlet_id: 10,
+        base_url: "http://127.0.0.1:3001",
         fetch_impl: fetchWithPayload(createSyncPayload({ dataVersion: 7, outletId: 10, price: 30000 }))
       },
       db

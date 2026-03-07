@@ -82,7 +82,7 @@ export const ItemUpdateRequestSchema = z
 
 export const ItemPriceCreateRequestSchema = z.object({
   item_id: NumericIdSchema,
-  outlet_id: NumericIdSchema,
+  outlet_id: NumericIdSchema.nullable(),
   price: z.coerce.number().finite().nonnegative(),
   is_active: z.boolean().optional()
 });
@@ -90,7 +90,7 @@ export const ItemPriceCreateRequestSchema = z.object({
 export const ItemPriceUpdateRequestSchema = z
   .object({
     item_id: NumericIdSchema.optional(),
-    outlet_id: NumericIdSchema.optional(),
+    outlet_id: NumericIdSchema.nullable().optional(),
     price: z.coerce.number().finite().nonnegative().optional(),
     is_active: z.boolean().optional()
   })

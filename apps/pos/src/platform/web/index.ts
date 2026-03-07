@@ -13,3 +13,4 @@ export { createWebStorageAdapter } from "./storage.js";
 export { createWebSyncTransportAdapter } from "./sync-transport.js";
 export { createWebPrinterAdapter } from "./printer.js";
 export { createWebDeviceIdentityAdapter } from "./device-identity.js";
+export { createWebAppStateAdapter } from "./app-state.js";

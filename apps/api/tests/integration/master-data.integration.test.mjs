@@ -1091,3 +1091,586 @@ test(
     }
   }
 );
+
+test(
+  "master data integration: company default price + outlet override resolution",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let defaultItemId = 0;
+    let overrideItemId = 0;
+    let defaultPriceId = 0;
+    let defaultPrice2Id = 0;
+    let override1PriceId = 0;
+    let override2PriceId = 0;
+    let outlet2Id = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const companyId = Number(owner.company_id);
+      const outlet1Id = Number(owner.outlet_id);
+
+      const [outlet2Result] = await db.execute(
+        `INSERT INTO outlets (company_id, code, name)
+         VALUES (?, ?, ?)`,
+        [companyId, `OUT2-${runId}`.slice(0, 32).toUpperCase(), `Outlet 2 ${runId}`]
+      );
+      outlet2Id = Number(outlet2Result.insertId);
+
+      const baseUrl = testContext.baseUrl;
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await loginResponse.json();
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      // Create item with company default price
+      const createDefaultItemResponse = await fetch(`${baseUrl}/api/inventory/items`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          sku: `DEFAULT-${runId}`,
+          name: `Default Price Item ${runId}`,
+          type: "PRODUCT",
+          is_active: true
+        })
+      });
+      assert.equal(createDefaultItemResponse.status, 201);
+      const createDefaultItemBody = await createDefaultItemResponse.json();
+      defaultItemId = Number(createDefaultItemBody.data.id);
+
+      // Create company default price (outlet_id = null)
+      const createDefaultPriceResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: defaultItemId,
+          outlet_id: null,
+          price: 50000,
+          is_active: true
+        })
+      });
+      assert.equal(createDefaultPriceResponse.status, 201);
+      const createDefaultPriceBody = await createDefaultPriceResponse.json();
+      assert.equal(createDefaultPriceBody.success, true);
+      defaultPriceId = Number(createDefaultPriceBody.data.id);
+      assert.equal(createDefaultPriceBody.data.outlet_id, null);
+      assert.equal(Number(createDefaultPriceBody.data.price), 50000);
+
+      // Create item with outlet overrides
+      const createOverrideItemResponse = await fetch(`${baseUrl}/api/inventory/items`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          sku: `OVERRIDE-${runId}`,
+          name: `Override Item ${runId}`,
+          type: "PRODUCT",
+          is_active: true
+        })
+      });
+      assert.equal(createOverrideItemResponse.status, 201);
+      const createOverrideItemBody = await createOverrideItemResponse.json();
+      overrideItemId = Number(createOverrideItemBody.data.id);
+
+      // Create company default for override item
+      const createDefaultPrice2Response = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: overrideItemId,
+          outlet_id: null,
+          price: 60000,
+          is_active: true
+        })
+      });
+      assert.equal(createDefaultPrice2Response.status, 201);
+      const createDefaultPrice2Body = await createDefaultPrice2Response.json();
+      defaultPrice2Id = Number(createDefaultPrice2Body.data.id);
+
+      // Create outlet override for outlet1
+      const createOverride1Response = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: overrideItemId,
+          outlet_id: outlet1Id,
+          price: 75000,
+          is_active: true
+        })
+      });
+      assert.equal(createOverride1Response.status, 201);
+      const createOverride1Body = await createOverride1Response.json();
+      override1PriceId = Number(createOverride1Body.data.id);
+
+      // Create outlet override for outlet2
+      const createOverride2Response = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: overrideItemId,
+          outlet_id: outlet2Id,
+          price: 65000,
+          is_active: true
+        })
+      });
+      assert.equal(createOverride2Response.status, 201);
+      const createOverride2Body = await createOverride2Response.json();
+      override2PriceId = Number(createOverride2Body.data.id);
+
+      // Test sync pull for outlet1: should get default price for defaultItem and override for overrideItem
+      const syncPullOutlet1Response = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${outlet1Id}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(syncPullOutlet1Response.status, 200);
+      const syncPullOutlet1Body = await syncPullOutlet1Response.json();
+      assert.equal(syncPullOutlet1Body.success, true);
+
+      const defaultItemPrice = syncPullOutlet1Body.data.prices.find(
+        (p) => Number(p.item_id) === defaultItemId
+      );
+      const overrideItemPrice = syncPullOutlet1Body.data.prices.find(
+        (p) => Number(p.item_id) === overrideItemId
+      );
+
+      assert.equal(Boolean(defaultItemPrice), true);
+      assert.equal(Number(defaultItemPrice.price), 50000);
+      assert.equal(Number(defaultItemPrice.outlet_id), outlet1Id);
+
+      assert.equal(Boolean(overrideItemPrice), true);
+      assert.equal(Number(overrideItemPrice.price), 75000);
+      assert.equal(Number(overrideItemPrice.outlet_id), outlet1Id);
+
+      // Test sync pull for outlet2: should get default price for defaultItem and different override for overrideItem
+      const syncPullOutlet2Response = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${outlet2Id}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(syncPullOutlet2Response.status, 200);
+      const syncPullOutlet2Body = await syncPullOutlet2Response.json();
+      assert.equal(syncPullOutlet2Body.success, true);
+
+      const defaultItemPrice2 = syncPullOutlet2Body.data.prices.find(
+        (p) => Number(p.item_id) === defaultItemId
+      );
+      const overrideItemPrice2 = syncPullOutlet2Body.data.prices.find(
+        (p) => Number(p.item_id) === overrideItemId
+      );
+
+      assert.equal(Boolean(defaultItemPrice2), true);
+      assert.equal(Number(defaultItemPrice2.price), 50000);
+      assert.equal(Number(defaultItemPrice2.outlet_id), outlet2Id);
+
+      assert.equal(Boolean(overrideItemPrice2), true);
+      assert.equal(Number(overrideItemPrice2.price), 65000);
+      assert.equal(Number(overrideItemPrice2.outlet_id), outlet2Id);
+
+      // Inactive outlet override should fall back to active company default in sync payload.
+      const deactivateOverrideResponse = await fetch(
+        `${baseUrl}/api/inventory/item-prices/${override1PriceId}`,
+        {
+          method: "PATCH",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            is_active: false
+          })
+        }
+      );
+      assert.equal(deactivateOverrideResponse.status, 200);
+
+      const syncPullAfterDeactivateResponse = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${outlet1Id}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(syncPullAfterDeactivateResponse.status, 200);
+      const syncPullAfterDeactivateBody = await syncPullAfterDeactivateResponse.json();
+      assert.equal(syncPullAfterDeactivateBody.success, true);
+      const overrideFallbackPrice = syncPullAfterDeactivateBody.data.prices.find(
+        (p) => Number(p.item_id) === overrideItemId
+      );
+      assert.equal(Boolean(overrideFallbackPrice), true);
+      assert.equal(Number(overrideFallbackPrice.price), 60000);
+      assert.equal(Number(overrideFallbackPrice.outlet_id), outlet1Id);
+
+      // Test duplicate company default prevention
+      const createDuplicateDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: defaultItemId,
+          outlet_id: null,
+          price: 55000,
+          is_active: true
+        })
+      });
+      assert.equal(createDuplicateDefaultResponse.status, 409);
+      const createDuplicateDefaultBody = await createDuplicateDefaultResponse.json();
+      assert.equal(createDuplicateDefaultBody.success, false);
+      assert.equal(createDuplicateDefaultBody.error.code, "CONFLICT");
+
+      // Test duplicate outlet override prevention
+      const createDuplicateOverrideResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: overrideItemId,
+          outlet_id: outlet1Id,
+          price: 80000,
+          is_active: true
+        })
+      });
+      assert.equal(createDuplicateOverrideResponse.status, 409);
+      const createDuplicateOverrideBody = await createDuplicateOverrideResponse.json();
+      assert.equal(createDuplicateOverrideBody.success, false);
+      assert.equal(createDuplicateOverrideBody.error.code, "CONFLICT");
+    } finally {
+      if (override2PriceId > 0) {
+        await db.execute("DELETE FROM item_prices WHERE id = ?", [override2PriceId]);
+      }
+
+      if (override1PriceId > 0) {
+        await db.execute("DELETE FROM item_prices WHERE id = ?", [override1PriceId]);
+      }
+
+      if (defaultPrice2Id > 0) {
+        await db.execute("DELETE FROM item_prices WHERE id = ?", [defaultPrice2Id]);
+      }
+
+      if (defaultPriceId > 0) {
+        await db.execute("DELETE FROM item_prices WHERE id = ?", [defaultPriceId]);
+      }
+
+      if (overrideItemId > 0) {
+        await db.execute("DELETE FROM items WHERE id = ?", [overrideItemId]);
+      }
+
+      if (defaultItemId > 0) {
+        await db.execute("DELETE FROM items WHERE id = ?", [defaultItemId]);
+      }
+
+      if (outlet2Id > 0) {
+        await db.execute("DELETE FROM outlets WHERE id = ?", [outlet2Id]);
+      }
+    }
+  }
+);
+
+test(
+  "master data integration: admin cannot manage company default prices",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let adminUserId = 0;
+    let itemId = 0;
+    let defaultPriceId = 0;
+    let overridePriceId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const adminEmail = `admin-default-rbac-${runId}@example.com`;
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const [ownerPasswordRows] = await db.execute(
+        `SELECT password_hash
+         FROM users
+         WHERE id = ?
+         LIMIT 1`,
+        [Number(owner.id)]
+      );
+      const ownerPasswordHash = ownerPasswordRows[0]?.password_hash;
+      if (!ownerPasswordHash) {
+        throw new Error("owner password hash not found; run `npm run db:migrate && npm run db:seed`");
+      }
+
+      const [adminRoleRows] = await db.execute(
+        `SELECT id
+         FROM roles
+         WHERE code = 'ADMIN'
+         LIMIT 1`
+      );
+      const adminRoleId = adminRoleRows[0]?.id;
+      if (!adminRoleId) {
+        throw new Error("ADMIN role not found; run `npm run db:migrate && npm run db:seed`");
+      }
+
+      const [adminInsert] = await db.execute(
+        `INSERT INTO users (company_id, email, password_hash, is_active)
+         VALUES (?, ?, ?, 1)`,
+        [companyId, adminEmail, ownerPasswordHash]
+      );
+      adminUserId = Number(adminInsert.insertId);
+
+      await db.execute(
+        `INSERT INTO user_roles (user_id, role_id)
+         VALUES (?, ?)`,
+        [adminUserId, Number(adminRoleId)]
+      );
+
+      await db.execute(
+        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+         VALUES (?, ?, ?)`,
+        [adminUserId, outletId, Number(adminRoleId)]
+      );
+
+      await db.execute(
+        `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+         VALUES (?, ?, 'inventory', 15)
+         ON DUPLICATE KEY UPDATE permission_mask = 15`,
+        [companyId, Number(adminRoleId)]
+      );
+
+      const [itemInsert] = await db.execute(
+        `INSERT INTO items (company_id, sku, name, item_type, is_active)
+         VALUES (?, ?, ?, 'PRODUCT', 1)`,
+        [companyId, `RBAC-DEF-${runId}`, `RBAC Default Item ${runId}`]
+      );
+      itemId = Number(itemInsert.insertId);
+
+      const [defaultPriceInsert] = await db.execute(
+        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active)
+         VALUES (?, NULL, ?, ?, 1)`,
+        [companyId, itemId, 88000]
+      );
+      defaultPriceId = Number(defaultPriceInsert.insertId);
+
+      const baseUrl = testContext.baseUrl;
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: adminEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await loginResponse.json();
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const createDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: itemId,
+          outlet_id: null,
+          price: 99000,
+          is_active: true
+        })
+      });
+      assert.equal(createDefaultResponse.status, 403);
+
+      const getDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${defaultPriceId}`, {
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        }
+      });
+      assert.equal(getDefaultResponse.status, 403);
+
+      const patchDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${defaultPriceId}`, {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          price: 90000
+        })
+      });
+      assert.equal(patchDefaultResponse.status, 403);
+
+      const deleteDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices/${defaultPriceId}`, {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        }
+      });
+      assert.equal(deleteDefaultResponse.status, 403);
+
+      const listByOutletResponse = await fetch(
+        `${baseUrl}/api/inventory/item-prices?outlet_id=${outletId}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(listByOutletResponse.status, 200);
+      const listByOutletBody = await listByOutletResponse.json();
+      assert.equal(listByOutletBody.success, true);
+      const defaultVisibleInOutletList = listByOutletBody.data.some(
+        (price) => Number(price.id) === defaultPriceId
+      );
+      assert.equal(defaultVisibleInOutletList, false);
+
+      const activeByOutletResponse = await fetch(
+        `${baseUrl}/api/inventory/item-prices/active?outlet_id=${outletId}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(activeByOutletResponse.status, 200);
+      const activeByOutletBody = await activeByOutletResponse.json();
+      assert.equal(activeByOutletBody.success, true);
+      const defaultVisibleInActiveList = activeByOutletBody.data.some(
+        (price) => Number(price.id) === defaultPriceId
+      );
+      assert.equal(defaultVisibleInActiveList, false);
+
+      const createOverrideResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: itemId,
+          outlet_id: outletId,
+          price: 91000,
+          is_active: true
+        })
+      });
+      assert.equal(createOverrideResponse.status, 201);
+      const createOverrideBody = await createOverrideResponse.json();
+      assert.equal(createOverrideBody.success, true);
+      overridePriceId = Number(createOverrideBody.data.id);
+    } finally {
+      if (overridePriceId > 0) {
+        await db.execute("DELETE FROM item_prices WHERE id = ?", [overridePriceId]);
+      }
+
+      if (defaultPriceId > 0) {
+        await db.execute("DELETE FROM item_prices WHERE id = ?", [defaultPriceId]);
+      }
+
+      if (itemId > 0) {
+        await db.execute("DELETE FROM items WHERE id = ?", [itemId]);
+      }
+
+      if (adminUserId > 0) {
+        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
+      }
+    }
+  }
+);

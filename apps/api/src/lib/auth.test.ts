@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import { buildPermissionMask, checkUserAccess } from "./auth";
 import { getDbPool } from "./db";
+import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
 
@@ -18,9 +19,9 @@ test(
     const emailPrefix = `acl-unit-${runId}`;
     const moduleName = `acl_test_${runId}`;
 
-    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
-    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
-    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+    const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
+    const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
     const createdUserIds: number[] = [];
     const createdOutletIds: number[] = [];
@@ -42,7 +43,7 @@ test(
     let superAdminRoleId = 0;
 
     try {
-      const [ownerRows] = await pool.execute(
+      const [ownerRows] = await pool.execute<RowDataPacket[]>(
         `SELECT u.id, u.company_id, u.password_hash, o.id AS outlet_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id

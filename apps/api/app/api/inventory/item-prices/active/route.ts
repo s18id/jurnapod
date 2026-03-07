@@ -6,6 +6,7 @@ import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { listItemPrices } from "../../../../../src/lib/master-data";
 import { errorResponse, successResponse } from "../../../../../src/lib/response";
+import { userHasAnyRole } from "../../../../../src/lib/auth";
 
 function parseOutletId(request: Request): number {
   const outletIdRaw = new URL(request.url).searchParams.get("outlet_id");
@@ -16,9 +17,14 @@ export const GET = withAuth(
   async (request, auth) => {
     try {
       const outletId = parseOutletId(request);
+      const canAccessCompanyDefaults = await userHasAnyRole(auth.userId, auth.companyId, [
+        "OWNER",
+        "COMPANY_ADMIN"
+      ]);
       const prices = await listItemPrices(auth.companyId, {
         outletId,
-        isActive: true
+        isActive: true,
+        includeDefaults: canAccessCompanyDefaults
       });
 
       return successResponse(prices);

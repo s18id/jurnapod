@@ -16,12 +16,16 @@ import {
   findItemPriceById,
   updateItemPrice
 } from "../../../../../src/lib/master-data";
-import { userHasOutletAccess } from "../../../../../src/lib/auth";
+import { userHasOutletAccess, userHasAnyRole } from "../../../../../src/lib/auth";
 
 function parsePriceId(request: Request): number {
   const pathname = new URL(request.url).pathname;
   const priceIdRaw = pathname.split("/").filter(Boolean).pop();
   return NumericIdSchema.parse(priceIdRaw);
+}
+
+async function ensureCompanyDefaultAccess(userId: number, companyId: number): Promise<boolean> {
+  return userHasAnyRole(userId, companyId, ["OWNER", "COMPANY_ADMIN"]);
 }
 
 export const GET = withAuth(
@@ -34,13 +38,23 @@ export const GET = withAuth(
         return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
-      const hasOutletAccess = await userHasOutletAccess(
-        auth.userId,
-        auth.companyId,
-        itemPrice.outlet_id
-      );
-      if (!hasOutletAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      // Check access based on price scope
+      if (itemPrice.outlet_id === null) {
+        // Company default - requires company-level roles (OWNER or COMPANY_ADMIN)
+        const hasCompanyAccess = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
+        if (!hasCompanyAccess) {
+          return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
+        }
+      } else {
+        // Outlet override - requires outlet access
+        const hasOutletAccess = await userHasOutletAccess(
+          auth.userId,
+          auth.companyId,
+          itemPrice.outlet_id
+        );
+        if (!hasOutletAccess) {
+          return errorResponse("FORBIDDEN", "Forbidden", 403);
+        }
       }
 
        return successResponse(itemPrice);
@@ -62,34 +76,50 @@ export const PATCH = withAuth(
       const priceId = parsePriceId(request);
       const payload = await request.json();
       const input = ItemPriceUpdateRequestSchema.parse(payload);
+      const canManageCompanyDefaults = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
 
       const existingItemPrice = await findItemPriceById(auth.companyId, priceId);
       if (!existingItemPrice) {
         return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
-      const hasCurrentOutletAccess = await userHasOutletAccess(
-        auth.userId,
-        auth.companyId,
-        existingItemPrice.outlet_id
-      );
-      if (!hasCurrentOutletAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-
-      if (typeof input.outlet_id === "number") {
-        const hasTargetOutletAccess = await userHasOutletAccess(
+      // Check access based on existing price scope
+      if (existingItemPrice.outlet_id === null) {
+        if (!canManageCompanyDefaults) {
+          return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
+        }
+      } else {
+        const hasCurrentOutletAccess = await userHasOutletAccess(
           auth.userId,
           auth.companyId,
-          input.outlet_id
+          existingItemPrice.outlet_id
         );
-        if (!hasTargetOutletAccess) {
+        if (!hasCurrentOutletAccess) {
           return errorResponse("FORBIDDEN", "Forbidden", 403);
         }
       }
 
+      // If changing outlet scope, validate access
+      if (Object.hasOwn(input, "outlet_id")) {
+        if (typeof input.outlet_id === "number") {
+          const hasTargetOutletAccess = await userHasOutletAccess(
+            auth.userId,
+            auth.companyId,
+            input.outlet_id
+          );
+          if (!hasTargetOutletAccess) {
+            return errorResponse("FORBIDDEN", "Forbidden", 403);
+          }
+        } else if (input.outlet_id === null) {
+          if (!canManageCompanyDefaults) {
+            return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
+          }
+        }
+      }
+
       const itemPrice = await updateItemPrice(auth.companyId, priceId, input, {
-        userId: auth.userId
+        userId: auth.userId,
+        canManageCompanyDefaults
       });
 
       if (!itemPrice) {
@@ -131,17 +161,27 @@ export const DELETE = withAuth(
         return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
-      const hasOutletAccess = await userHasOutletAccess(
-        auth.userId,
-        auth.companyId,
-        existingItemPrice.outlet_id
-      );
-      if (!hasOutletAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      const canManageCompanyDefaults = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
+
+      // Check access based on existing price scope
+      if (existingItemPrice.outlet_id === null) {
+        if (!canManageCompanyDefaults) {
+          return errorResponse("FORBIDDEN", "Company defaults require OWNER or COMPANY_ADMIN role", 403);
+        }
+      } else {
+        const hasOutletAccess = await userHasOutletAccess(
+          auth.userId,
+          auth.companyId,
+          existingItemPrice.outlet_id
+        );
+        if (!hasOutletAccess) {
+          return errorResponse("FORBIDDEN", "Forbidden", 403);
+        }
       }
 
       const removed = await deleteItemPrice(auth.companyId, priceId, {
-        userId: auth.userId
+        userId: auth.userId,
+        canManageCompanyDefaults
       });
 
       if (!removed) {
