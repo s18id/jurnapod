@@ -84,6 +84,7 @@ export const GET = withAuth(
 
       const outletId = parseOptionalOutletId(url.searchParams.get("outlet_id"));
       const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
+      const canAccessCompanyDefaults = await ensureCompanyDefaultAccess(auth.userId, auth.companyId);
 
       if (typeof outletId === "number") {
         const hasOutletAccess = await userHasOutletAccess(auth.userId, auth.companyId, outletId);
@@ -93,7 +94,8 @@ export const GET = withAuth(
 
         const prices = await listItemPrices(auth.companyId, {
           outletId,
-          isActive
+          isActive,
+          includeDefaults: canAccessCompanyDefaults
         });
 
         return successResponse(prices);
@@ -102,7 +104,8 @@ export const GET = withAuth(
       const outletIds = await listUserOutletIds(auth.userId, auth.companyId);
       const prices = await listItemPrices(auth.companyId, {
         outletIds,
-        isActive
+        isActive,
+        includeDefaults: canAccessCompanyDefaults
       });
 
       return successResponse(prices);

@@ -1570,6 +1570,38 @@ test(
       });
       assert.equal(deleteDefaultResponse.status, 403);
 
+      const listByOutletResponse = await fetch(
+        `${baseUrl}/api/inventory/item-prices?outlet_id=${outletId}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(listByOutletResponse.status, 200);
+      const listByOutletBody = await listByOutletResponse.json();
+      assert.equal(listByOutletBody.success, true);
+      const defaultVisibleInOutletList = listByOutletBody.data.some(
+        (price) => Number(price.id) === defaultPriceId
+      );
+      assert.equal(defaultVisibleInOutletList, false);
+
+      const activeByOutletResponse = await fetch(
+        `${baseUrl}/api/inventory/item-prices/active?outlet_id=${outletId}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(activeByOutletResponse.status, 200);
+      const activeByOutletBody = await activeByOutletResponse.json();
+      assert.equal(activeByOutletBody.success, true);
+      const defaultVisibleInActiveList = activeByOutletBody.data.some(
+        (price) => Number(price.id) === defaultPriceId
+      );
+      assert.equal(defaultVisibleInActiveList, false);
+
       const createOverrideResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
         method: "POST",
         headers: {
