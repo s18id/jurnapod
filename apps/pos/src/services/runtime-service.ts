@@ -129,6 +129,14 @@ export class RuntimeService {
     return this.network.isOnline();
   }
 
+  async verifyConnectivity(options?: {
+    baseUrl?: string;
+    healthcheckPath?: string;
+    timeoutMs?: number;
+  }): Promise<boolean> {
+    return await this.network.verifyConnectivity(options);
+  }
+
   onNetworkStatusChange(callback: (online: boolean) => void): () => void {
     return this.network.onStatusChange(callback);
   }

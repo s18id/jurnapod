@@ -140,13 +140,18 @@ export class SyncOrchestrator {
     this.config.onPullStatusChange?.(true);
 
     try {
-      // Check network connectivity
-      if (!this.network.isOnline()) {
+      // Verify network connectivity with healthcheck
+      const isConnected = await this.network.verifyConnectivity({
+        baseUrl: this.config.apiOrigin,
+        timeoutMs: 3000
+      });
+
+      if (!isConnected) {
         return {
           success: false,
           data_version: 0,
           upserted_product_count: 0,
-          message: "Pull sync skipped: offline"
+          message: "Pull sync skipped: backend unreachable"
         };
       }
 
@@ -275,8 +280,13 @@ export class SyncOrchestrator {
     this.config.onPushStatusChange?.(true);
 
     try {
-      // Check network connectivity
-      if (!this.network.isOnline()) {
+      // Verify network connectivity with healthcheck
+      const isConnected = await this.network.verifyConnectivity({
+        baseUrl: this.config.apiOrigin,
+        timeoutMs: 3000
+      });
+
+      if (!isConnected) {
         return;
       }
 
