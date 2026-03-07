@@ -373,6 +373,19 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             }
           />
           <Route
+            path="/auth/callback"
+            element={
+              authToken ? (
+                <Navigate to={routes.checkout.path} replace />
+              ) : (
+                <LoginPage
+                  context={context}
+                  onAuthSuccess={handleAuthChange}
+                />
+              )
+            }
+          />
+          <Route
             path={routes.checkout.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>

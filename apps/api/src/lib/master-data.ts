@@ -1248,7 +1248,8 @@ export async function listEffectiveItemPricesForOutlet(
   `;
 
   if (typeof filters?.isActive === "boolean") {
-    sql += " AND COALESCE(override.is_active, def.is_active) = ?";
+    sql +=
+      " AND COALESCE(CASE WHEN override.is_active = 1 THEN override.is_active END, def.is_active) = ?";
     values.push(filters.isActive ? 1 : 0);
   }
 

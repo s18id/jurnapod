@@ -60,6 +60,16 @@ test("/cart redirects to /login when token missing", async ({ page }) => {
   await expect(page.getByPlaceholder("Email")).toBeVisible();
 });
 
+test("/auth/callback stays routable for OAuth processing", async ({ page }) => {
+  await page.addInitScript((storageKey) => {
+    window.localStorage.removeItem(storageKey);
+  }, ACCESS_TOKEN_STORAGE_KEY);
+
+  await page.goto("/auth/callback?code=test-code&state=test-state");
+
+  await expect(page).toHaveURL(/\/auth\/callback\?code=test-code&state=test-state$/);
+});
+
 test("logout from checkout redirects to /login", async ({ page }) => {
   await mockUserMe(page);
   await page.addInitScript((storageKey) => {
