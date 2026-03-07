@@ -35,13 +35,14 @@ type Item = {
 type ItemPrice = {
   id: number;
   company_id: number;
-  outlet_id: number;
+  outlet_id: number | null;  // null = company default
   item_id: number;
   price: number;
   is_active: boolean;
   item_group_id: number | null;
   item_group_name: string | null;
   updated_at: string;
+  is_override?: boolean;  // computed field from API
 };
 
 const itemTypeOptions: readonly ItemType[] = ["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"];
@@ -69,6 +70,16 @@ function getItemTypeWarning(type: ItemType, hasPrice: boolean): string | null {
   }
   return null;
 }
+
+function canManageCompanyDefaults(user: SessionUser): boolean {
+  return user.roles.includes("OWNER") || user.roles.includes("COMPANY_ADMIN");
+}
+
+function isCompanyDefault(price: ItemPrice): boolean {
+  return price.outlet_id === null;
+}
+
+type PricingViewMode = "defaults" | "outlet";
 
 const boxStyle = {
   border: "1px solid #e2ddd2",
@@ -102,10 +113,13 @@ type ItemsPricesPageProps = {
 export function ItemsPricesPage(props: ItemsPricesPageProps) {
   const [items, setItems] = useState<Item[]>([]);
   const [prices, setPrices] = useState<ItemPrice[]>([]);
+  const [companyDefaults, setCompanyDefaults] = useState<ItemPrice[]>([]);
   const [itemGroups, setItemGroups] = useState<ItemGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedOutletId, setSelectedOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
+  const [pricingViewMode, setPricingViewMode] = useState<PricingViewMode>("outlet");
+  const canManageDefaults = canManageCompanyDefaults(props.user);
   const isOnline = useOnlineStatus();
 
   const [newItem, setNewItem] = useState({
@@ -118,7 +132,8 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
   const [newPrice, setNewPrice] = useState({
     item_id: 0,
     price: "",
-    is_active: true
+    is_active: true,
+    is_company_default: false
   });
 
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
@@ -161,17 +176,22 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     try {
       let itemsData: Item[] = [];
       let pricesData: ItemPrice[] = [];
+      let defaultsData: ItemPrice[] = [];
       let groupsData: ItemGroup[] = [];
 
       if (isOnline) {
-        const [itemsResponse, pricesResponse, groupsResponse] = await Promise.all([
+        const [itemsResponse, pricesResponse, groupsResponse, defaultsResponse] = await Promise.all([
           CacheService.refreshItems(props.user.company_id, props.accessToken),
           CacheService.refreshItemPrices(props.user.company_id, outletId, props.accessToken),
-          CacheService.refreshItemGroups(props.user.company_id, props.accessToken)
+          CacheService.refreshItemGroups(props.user.company_id, props.accessToken),
+          canManageDefaults
+            ? apiRequest<{ success: boolean; data: ItemPrice[] }>("/inventory/item-prices", {}, props.accessToken)
+            : Promise.resolve({ success: true, data: [] } as any)
         ]);
         itemsData = itemsResponse as Item[];
         pricesData = pricesResponse as ItemPrice[];
         groupsData = groupsResponse as ItemGroup[];
+        defaultsData = defaultsResponse.success ? defaultsResponse.data.filter((p: ItemPrice) => isCompanyDefault(p)) : [];
       } else {
         const [itemsResponse, pricesResponse, groupsResponse] = await Promise.all([
           CacheService.getCachedItems(props.user.company_id, props.accessToken, { allowStale: true }),
@@ -186,10 +206,12 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
         itemsData = itemsResponse as Item[];
         pricesData = pricesResponse as ItemPrice[];
         groupsData = groupsResponse as ItemGroup[];
+        defaultsData = [];
       }
 
       setItems(itemsData);
       setPrices(pricesData);
+      setCompanyDefaults(defaultsData);
       setItemGroups(groupsData);
       setNewPrice((prev) => ({
         ...prev,
@@ -270,11 +292,12 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     }
 
     try {
+      const outletId = newPrice.is_company_default ? null : selectedOutletId;
       await apiRequest("/inventory/item-prices", {
         method: "POST",
         body: JSON.stringify({
           item_id: newPrice.item_id,
-          outlet_id: selectedOutletId,
+          outlet_id: outletId,
           price: Number(newPrice.price),
           is_active: newPrice.is_active
         })
@@ -314,6 +337,25 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {
         setError(deleteError.message);
+      }
+    }
+  }
+
+  async function createOutletOverride(itemId: number, price: number) {
+    try {
+      await apiRequest("/inventory/item-prices", {
+        method: "POST",
+        body: JSON.stringify({
+          item_id: itemId,
+          outlet_id: selectedOutletId,
+          price: price,
+          is_active: true
+        })
+      }, props.accessToken);
+      await refreshData(selectedOutletId);
+    } catch (createError) {
+      if (createError instanceof ApiError) {
+        setError(createError.message);
       }
     }
   }
@@ -361,6 +403,34 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             </option>
           ))}
         </select>
+        <div style={{ marginTop: "12px", display: "flex", gap: "8px", alignItems: "center" }}>
+          <label style={{ fontWeight: 600 }}>Pricing view:</label>
+          <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+            <input
+              type="radio"
+              name="pricingViewMode"
+              checked={pricingViewMode === "outlet"}
+              onChange={() => setPricingViewMode("outlet")}
+            />
+            Outlet Prices
+          </label>
+          {canManageDefaults && (
+            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="pricingViewMode"
+                checked={pricingViewMode === "defaults"}
+                onChange={() => setPricingViewMode("defaults")}
+              />
+              Company Defaults
+            </label>
+          )}
+        </div>
+        {pricingViewMode === "defaults" && !canManageDefaults && (
+          <p style={{ fontSize: "12px", color: "#6b5d48", marginTop: "8px" }}>
+            ℹ️ Only OWNER and COMPANY_ADMIN can manage company default prices.
+          </p>
+        )}
         <StaleDataWarning
           cacheKey={buildCacheKey("items", { companyId: props.user.company_id })}
           label="items"
@@ -589,7 +659,9 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
       </section>
 
       <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Create Price</h3>
+        <h3 style={{ marginTop: 0 }}>
+          {pricingViewMode === "defaults" ? "Create Company Default Price" : "Create Price"}
+        </h3>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <select
             value={newPrice.item_id}
@@ -617,6 +689,21 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             onChange={(event) => setNewPrice((prev) => ({ ...prev, price: event.target.value }))}
             style={inputStyle}
           />
+          {pricingViewMode === "outlet" && canManageDefaults && (
+            <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <input
+                type="checkbox"
+                checked={newPrice.is_company_default}
+                onChange={(event) =>
+                  setNewPrice((prev) => ({
+                    ...prev,
+                    is_company_default: event.target.checked
+                  }))
+                }
+              />
+              Company default
+            </label>
+          )}
           <label>
             <input
               type="checkbox"
@@ -634,6 +721,11 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
             Add price
           </button>
         </div>
+        {pricingViewMode === "defaults" && (
+          <p style={{ fontSize: "12px", color: "#6b5d48", marginTop: "8px", marginBottom: 0 }}>
+            ℹ️ Company default prices apply to all outlets unless overridden.
+          </p>
+        )}
         {newPrice.item_id > 0 && (() => {
           const selectedItem = itemMap.get(newPrice.item_id);
           if (!selectedItem) return null;
