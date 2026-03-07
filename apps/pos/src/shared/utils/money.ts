@@ -19,7 +19,7 @@ export function formatMoney(value: number): string {
 }
 
 export interface CartLine {
-  product: { price_snapshot: number };
+  product: { item_id: number; price_snapshot: number };
   qty: number;
   discount_amount: number;
 }

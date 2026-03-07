@@ -5,6 +5,7 @@ import React from "react";
 import { MIN_TOUCH_TARGET } from "../utils/constants.js";
 
 export interface InputProps {
+  id?: string;
   type?: "text" | "number" | "email" | "password" | "search";
   value: string | number;
   onChange: (value: string) => void;
@@ -12,16 +13,21 @@ export interface InputProps {
   disabled?: boolean;
   autoFocus?: boolean;
   inputMode?: "text" | "numeric" | "email" | "search";
+  min?: number;
+  max?: number;
 }
 
 export function Input({
+  id,
   type = "text",
   value,
   onChange,
   placeholder,
   disabled = false,
   autoFocus = false,
-  inputMode
+  inputMode,
+  min,
+  max
 }: InputProps): JSX.Element {
   const baseStyles: React.CSSProperties = {
     width: "100%",
@@ -37,6 +43,7 @@ export function Input({
 
   return (
     <input
+      id={id}
       type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
@@ -44,6 +51,8 @@ export function Input({
       disabled={disabled}
       autoFocus={autoFocus}
       inputMode={inputMode}
+      min={min}
+      max={max}
       style={baseStyles}
       onFocus={(e) => {
         e.target.style.borderColor = "#3b82f6";

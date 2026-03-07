@@ -11,6 +11,7 @@ export interface ButtonProps {
   onClick?: () => void;
   children: React.ReactNode;
   type?: "button" | "submit";
+  style?: React.CSSProperties;
 }
 
 export function Button({
@@ -19,7 +20,8 @@ export function Button({
   disabled = false,
   onClick,
   children,
-  type = "button"
+  type = "button",
+  style
 }: ButtonProps): JSX.Element {
   const variantStyles = {
     primary: {
@@ -63,9 +65,10 @@ export function Button({
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.5 : 1,
     transition: "all 0.15s",
-    touchAction: "manipulation", // Prevent double-tap zoom
+    touchAction: "manipulation",
     ...variantStyles[variant],
-    ...sizeStyles[size]
+    ...sizeStyles[size],
+    ...style
   };
 
   return (
