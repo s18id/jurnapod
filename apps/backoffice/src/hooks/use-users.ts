@@ -170,7 +170,7 @@ export function useUser(
  * Hook: useRoles
  * Fetches list of available roles
  */
-export function useRoles(accessToken: string) {
+export function useRoles(accessToken: string, companyId?: number) {
   const [data, setData] = useState<RoleResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -179,8 +179,11 @@ export function useRoles(accessToken: string) {
     setLoading(true);
     setError(null);
     try {
+      const params = companyId !== undefined 
+        ? `?company_id=${companyId}` 
+        : "";
       const response = await apiRequest<RolesListResponse>(
-        "/roles",
+        `/roles${params}`,
         {},
         accessToken
       );
@@ -195,7 +198,7 @@ export function useRoles(accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [accessToken]);
+  }, [accessToken, companyId]);
 
   useEffect(() => {
     refetch();
@@ -382,7 +385,7 @@ export async function reactivateUser(
  * Creates a new role
  */
 export async function createRole(
-  data: { code: string; name: string },
+  data: { code: string; name: string; role_level?: number },
   accessToken: string
 ): Promise<RoleResponse> {
   const response = await apiRequest<{ success: true; data: RoleResponse }>(

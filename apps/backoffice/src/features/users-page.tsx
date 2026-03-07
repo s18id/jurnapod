@@ -822,44 +822,17 @@ export function UsersPage(props: UsersPageProps) {
 
           {dialogMode === "create" ? (
             <Stack gap="sm">
-              <div>
-                <Text fw={600} size="sm">
-                  Global Roles
-                </Text>
-                <ScrollArea h={140} type="auto">
-                  <Stack gap="xs">
-                    {globalRoleOptions.length === 0 ? (
-                      <Text size="sm" c="dimmed">
-                        No global roles available.
-                      </Text>
-                    ) : (
-                      globalRoleOptions.map((role) => (
-                        <Checkbox
-                          key={role.code}
-                          label={role.name}
-                          checked={formData.global_role_codes.includes(role.code)}
-                          disabled={role.role_level >= actorMaxRoleLevel}
-                          onChange={(event) => {
-                            if (event.currentTarget.checked) {
-                              setFormData({
-                                ...formData,
-                                global_role_codes: [...formData.global_role_codes, role.code]
-                              });
-                            } else {
-                              setFormData({
-                                ...formData,
-                                global_role_codes: formData.global_role_codes.filter(
-                                  (code) => code !== role.code
-                                )
-                              });
-                            }
-                          }}
-                        />
-                      ))
-                    )}
-                  </Stack>
-                </ScrollArea>
-              </div>
+              <Select
+                label="Global Role"
+                description="A user can have only one global role"
+                placeholder="Select a global role (optional)"
+                value={formData.global_role_codes[0] ?? ""}
+                onChange={(value) => setFormData({ ...formData, global_role_codes: value ? [value] : [] })}
+                data={globalRoleOptions
+                  .filter((role) => role.role_level < actorMaxRoleLevel)
+                  .map((role) => ({ value: role.code, label: role.name }))}
+                allowDeselect
+              />
 
               <div>
                 <Text fw={600} size="sm">
@@ -913,44 +886,17 @@ export function UsersPage(props: UsersPageProps) {
           ) : null}
 
           {dialogMode === "roles" ? (
-            <div>
-              <Text fw={600} size="sm" mb={6}>
-                Select Global Roles
-              </Text>
-              <ScrollArea h={260} type="auto">
-                <Stack gap="xs">
-                  {globalRoleOptions.length === 0 ? (
-                    <Text size="sm" c="dimmed">
-                      No global roles available.
-                    </Text>
-                  ) : (
-                    globalRoleOptions.map((role) => (
-                      <Checkbox
-                        key={role.code}
-                        label={role.name}
-                        checked={formData.global_role_codes.includes(role.code)}
-                        disabled={role.role_level >= actorMaxRoleLevel}
-                        onChange={(event) => {
-                          if (event.currentTarget.checked) {
-                            setFormData({
-                              ...formData,
-                              global_role_codes: [...formData.global_role_codes, role.code]
-                            });
-                          } else {
-                            setFormData({
-                              ...formData,
-                              global_role_codes: formData.global_role_codes.filter(
-                                (code) => code !== role.code
-                              )
-                            });
-                          }
-                        }}
-                      />
-                    ))
-                  )}
-                </Stack>
-              </ScrollArea>
-            </div>
+            <Select
+              label="Global Role"
+              description="A user can have only one global role"
+              placeholder="Select a global role (optional)"
+              value={formData.global_role_codes[0] ?? ""}
+              onChange={(value) => setFormData({ ...formData, global_role_codes: value ? [value] : [] })}
+              data={globalRoleOptions
+                .filter((role) => role.role_level < actorMaxRoleLevel)
+                .map((role) => ({ value: role.code, label: role.name }))}
+              allowDeselect
+            />
           ) : null}
 
           {dialogMode === "outlets" ? (

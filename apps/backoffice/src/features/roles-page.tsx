@@ -8,10 +8,12 @@ import {
   Button,
   Group,
   Modal,
+  NumberInput,
   Stack,
   Text,
   TextInput,
-  Title
+  Title,
+  Select
 } from "@mantine/core";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
@@ -21,6 +23,7 @@ import {
   updateRole,
   deleteRole
 } from "../hooks/use-users";
+import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
 import { DataTable } from "../components/DataTable";
 import { FilterBar } from "../components/FilterBar";
@@ -37,11 +40,13 @@ type DialogMode = "create" | "edit" | null;
 type RoleFormData = {
   code: string;
   name: string;
+  role_level: number;
 };
 
 const emptyForm: RoleFormData = {
   code: "",
-  name: ""
+  name: "",
+  role_level: 0
 };
 
 const SYSTEM_ROLE_CODES = new Set([
@@ -54,9 +59,17 @@ const SYSTEM_ROLE_CODES = new Set([
 ]);
 
 export function RolesPage(props: RolesPageProps) {
-  const { accessToken } = props;
+  const { accessToken, user } = props;
+  const userCompanyId = user.company_id;
+  const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
   
-  // Dialog state
+  const [filterCompanyId, setFilterCompanyId] = useState<number | undefined>(
+    isSuperAdmin ? undefined : userCompanyId
+  );
+  
+  const rolesQuery = useRoles(accessToken, filterCompanyId);
+  const companiesQuery = useCompanies(accessToken, { enabled: isSuperAdmin });
+
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingRole, setEditingRole] = useState<RoleResponse | null>(null);
   const [formData, setFormData] = useState<RoleFormData>(emptyForm);
@@ -65,13 +78,9 @@ export function RolesPage(props: RolesPageProps) {
   const [confirmState, setConfirmState] = useState<RoleResponse | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   
-  // UI state
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  
-  // API hooks
-  const rolesQuery = useRoles(accessToken);
 
   const filteredRoles = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -99,7 +108,8 @@ export function RolesPage(props: RolesPageProps) {
   const openEditDialog = (role: RoleResponse) => {
     setFormData({
       code: role.code,
-      name: role.name
+      name: role.name,
+      role_level: role.role_level
     });
     setFormErrors({});
     setEditingRole(role);
@@ -146,7 +156,8 @@ export function RolesPage(props: RolesPageProps) {
         await createRole(
           {
             code: formData.code.trim().toUpperCase(),
-            name: formData.name.trim()
+            name: formData.name.trim(),
+            role_level: formData.role_level
           },
           accessToken
         );
@@ -192,10 +203,17 @@ export function RolesPage(props: RolesPageProps) {
         id: "scope",
         header: "Scope",
         cell: (info) => {
-          const isGlobal = info.row.original.is_global;
+          const { company_id, is_global } = info.row.original;
+          if (company_id === null) {
+            return (
+              <Badge variant="light" color="blue">
+                System
+              </Badge>
+            );
+          }
           return (
-            <Badge variant="light" color={isGlobal ? "blue" : "gray"}>
-              {isGlobal ? "Global" : "Outlet-scoped"}
+            <Badge variant="light" color="green">
+              Custom
             </Badge>
           );
         }
@@ -206,9 +224,12 @@ export function RolesPage(props: RolesPageProps) {
         cell: (info) => {
           const role = info.row.original;
           const isSystem = SYSTEM_ROLE_CODES.has(role.code);
-          const isLocked = role.is_global || isSystem;
+          const isCustomForOtherCompany = role.company_id !== null && role.company_id !== userCompanyId;
+          const isLocked = role.is_global || isSystem || isCustomForOtherCompany;
           const systemTooltip = isLocked
-            ? "Global/system roles cannot be changed."
+            ? isCustomForOtherCompany
+              ? "You can only edit roles from your company."
+              : "System roles cannot be changed."
             : undefined;
           return (
             <Group gap="xs" justify="flex-end" wrap="wrap">
@@ -236,7 +257,7 @@ export function RolesPage(props: RolesPageProps) {
         }
       }
     ];
-  }, [openEditDialog]);
+  }, [openEditDialog, userCompanyId]);
 
   async function handleConfirmDelete() {
     if (!confirmState) {
@@ -273,6 +294,23 @@ export function RolesPage(props: RolesPageProps) {
         >
           <Stack gap="sm">
             <FilterBar>
+              {isSuperAdmin && companiesQuery.data ? (
+                <Select
+                  label="Company"
+                  placeholder="All companies"
+                  value={filterCompanyId?.toString() ?? ""}
+                  onChange={(value) => setFilterCompanyId(value ? Number(value) : undefined)}
+                  data={[
+                    { value: "", label: "All companies" },
+                    ...companiesQuery.data.map((company) => ({
+                      value: company.id.toString(),
+                      label: company.name
+                    }))
+                  ]}
+                  style={{ minWidth: 200 }}
+                  clearable
+                />
+              ) : null}
               <TextInput
                 label="Search"
                 placeholder="Search by code or name"
@@ -360,6 +398,17 @@ export function RolesPage(props: RolesPageProps) {
             error={formErrors.name}
             withAsterisk
           />
+
+          {dialogMode === "create" && (
+            <NumberInput
+              label="Role Level"
+              description="Users can only create roles with level lower than their own"
+              value={formData.role_level}
+              onChange={(value) => setFormData({ ...formData, role_level: typeof value === "number" ? value : 0 })}
+              min={0}
+              max={99}
+            />
+          )}
 
           {error ? (
             <Alert color="red" title="Unable to save">
