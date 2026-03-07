@@ -10,24 +10,21 @@ import type {
 } from "./services/runtime-service.js";
 import { clearAccessToken, readAccessToken, writeAccessToken } from "./offline/auth-session.js";
 import { completeSale, createSaleDraft } from "./offline/sales.js";
+import { normalizeMoney, formatMoney, computeCartTotals } from "./shared/utils/money.js";
+import { 
+  POLL_INTERVAL_MS, 
+  CASHIER_USER_ID, 
+  API_CONFIG,
+  buildGoogleAuthUrl,
+  OAUTH_STATE_KEY,
+  OAUTH_COMPANY_KEY
+} from "./shared/utils/constants.js";
+import { badgeColors } from "./shared/utils/ui-helpers.js";
 
 const PLACEHOLDER_OUTLETS = [{ outlet_id: 1, label: "Outlet 1 (placeholder)" }];
 
-const POLL_INTERVAL_MS = 1500;
-const CASHIER_USER_ID = 1;
-type RuntimeConfig = {
-  API_BASE_URL?: string;
-};
-
-const runtimeConfig = globalThis as RuntimeConfig;
-const runtimeBaseUrl = runtimeConfig.API_BASE_URL?.trim();
-const envBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
-const API_BASE_URL = runtimeBaseUrl || envBaseUrl || undefined;
-const API_ORIGIN = API_BASE_URL ?? window.location.origin;
-const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined)?.trim() ?? "";
-const GOOGLE_OAUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
-const OAUTH_STATE_KEY = "jurnapod.pos.oauth.state";
-const OAUTH_COMPANY_KEY = "jurnapod.pos.oauth.company";
+const API_ORIGIN = API_CONFIG.baseUrl;
+const GOOGLE_CLIENT_ID = API_CONFIG.googleClientId;
 
 interface CartLine {
   product: RuntimeProductCatalogItem;
@@ -37,79 +34,8 @@ interface CartLine {
 
 type CartState = Record<number, CartLine>;
 
-function normalizeMoney(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-
-function formatMoney(value: number): string {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0
-  }).format(value);
-}
-
 function cartToList(cart: CartState): CartLine[] {
   return Object.values(cart).filter((line) => line.qty > 0);
-}
-
-function computeCartTotals(lines: CartLine[], paidAmount: number): {
-  subtotal: number;
-  discount_total: number;
-  tax_total: number;
-  grand_total: number;
-  paid_total: number;
-  change_total: number;
-} {
-  const subtotal = normalizeMoney(lines.reduce((sum, line) => sum + line.qty * line.product.price_snapshot, 0));
-  const discountTotal = normalizeMoney(lines.reduce((sum, line) => sum + line.discount_amount, 0));
-  const grandTotal = normalizeMoney(subtotal - discountTotal);
-  const paidTotal = normalizeMoney(paidAmount);
-  const changeTotal = normalizeMoney(paidTotal - grandTotal);
-
-  return {
-    subtotal,
-    discount_total: discountTotal,
-    tax_total: 0,
-    grand_total: grandTotal,
-    paid_total: paidTotal,
-    change_total: changeTotal
-  };
-}
-
-function buildGoogleAuthUrl(params: { clientId: string; redirectUri: string; state: string }): string {
-  const authUrl = new URL(GOOGLE_OAUTH_URL);
-  authUrl.searchParams.set("client_id", params.clientId);
-  authUrl.searchParams.set("redirect_uri", params.redirectUri);
-  authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("scope", "openid email profile");
-  authUrl.searchParams.set("prompt", "select_account");
-  authUrl.searchParams.set("state", params.state);
-  return authUrl.toString();
-}
-
-function badgeColors(status: RuntimeSyncBadgeState): { background: string; border: string; text: string } {
-  if (status === "Offline") {
-    return {
-      background: "#fef2f2",
-      border: "#fecaca",
-      text: "#b91c1c"
-    };
-  }
-
-  if (status === "Pending") {
-    return {
-      background: "#fffbeb",
-      border: "#fde68a",
-      text: "#92400e"
-    };
-  }
-
-  return {
-    background: "#ecfdf5",
-    border: "#bbf7d0",
-    text: "#166534"
-  };
 }
 
 function SyncBadge({ status, pendingCount }: { status: RuntimeSyncBadgeState; pendingCount: number }) {

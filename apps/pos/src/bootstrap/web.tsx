@@ -16,13 +16,16 @@ import {
   createWebStorageAdapter,
   createWebSyncTransportAdapter,
   createWebPrinterAdapter,
-  createWebDeviceIdentityAdapter
+  createWebDeviceIdentityAdapter,
+  createWebAppStateAdapter
 } from "../platform/web/index.js";
 import { RuntimeService } from "../services/runtime-service.js";
 import { SyncService } from "../services/sync-service.js";
 import { PrintService } from "../services/print-service.js";
 import { SyncOrchestrator, type SyncOrchestratorConfig } from "../services/sync-orchestrator.js";
 import { OutboxService } from "../services/outbox-service.js";
+
+import { AppStatePort } from "../ports/app-state-port.js";
 
 export interface WebBootstrapContext {
   db: PosOfflineDb;
@@ -31,6 +34,7 @@ export interface WebBootstrapContext {
   print: PrintService;
   orchestrator: SyncOrchestrator;
   outbox: OutboxService;
+  appState: AppStatePort;
 }
 
 export interface WebBootstrapConfig {
@@ -51,6 +55,7 @@ export function createWebBootstrapContext(config: WebBootstrapConfig): WebBootst
   const syncTransportAdapter = createWebSyncTransportAdapter();
   const printerAdapter = createWebPrinterAdapter();
   const deviceIdentityAdapter = createWebDeviceIdentityAdapter();
+  const appStateAdapter = createWebAppStateAdapter();
 
   // Create services
   const runtime = new RuntimeService(storageAdapter, networkAdapter);
@@ -80,7 +85,8 @@ export function createWebBootstrapContext(config: WebBootstrapConfig): WebBootst
     sync,
     print,
     orchestrator,
-    outbox
+    outbox,
+    appState: appStateAdapter
   };
 }
 
