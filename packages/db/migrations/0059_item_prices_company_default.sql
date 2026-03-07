@@ -88,7 +88,7 @@ SET @scope_key_exists = (
 SET @stmt = IF(
   @scope_key_exists > 0,
   'SELECT 1',
-  'ALTER TABLE item_prices ADD COLUMN scope_key VARCHAR(100) AS (CASE WHEN outlet_id IS NULL THEN CONCAT(''default:'', company_id, '':'', item_id) ELSE CONCAT(''override:'', company_id, '':'', outlet_id, '':'', item_id) END) STORED'
+  'ALTER TABLE item_prices ADD COLUMN scope_key VARCHAR(100) AS (CASE WHEN outlet_id IS NULL THEN CONCAT(\'default:\', company_id, \':\', item_id) ELSE CONCAT(\'override:\', company_id, \':\', outlet_id, \':\', item_id) END) VIRTUAL'
 );
 PREPARE stmt FROM @stmt;
 EXECUTE stmt;
