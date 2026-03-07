@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  Accordion,
   Alert,
   Badge,
   Button,
@@ -34,7 +35,7 @@ import { ApiError } from "../lib/api-client";
 import { DataTable } from "../components/DataTable";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
-import type { UserResponse, Role } from "@jurnapod/shared";
+import type { OutletResponse, Role, RoleResponse, UserResponse } from "@jurnapod/shared";
 
 type UsersPageProps = {
   user: SessionUser;
@@ -60,6 +61,207 @@ const emptyForm: UserFormData = {
   outlet_role_assignments: [],
   is_active: true
 };
+
+const ROLE_HELP_TEXT: Record<string, string> = {
+  OWNER: "Full operational access for this outlet.",
+  COMPANY_ADMIN: "Manages outlet configuration and staff access.",
+  ADMIN: "Handles daily operations and oversight.",
+  CASHIER: "Runs checkout and sales transactions.",
+  ACCOUNTANT: "Reviews journals and financial records."
+};
+
+type OutletRoleAssignmentsFieldProps = {
+  title: string;
+  outlets: OutletResponse[];
+  roles: RoleResponse[];
+  actorMaxRoleLevel: number;
+  maxHeight: number;
+  outletRoleCodesFor: (outletId: number) => string[];
+  onUpdateRoleCode: (outletId: number, roleCode: string, checked: boolean) => void;
+  onSetRoleForOutlets: (outletIds: number[], roleCode: string, checked: boolean) => void;
+  onSetAllAssignableRolesForOutlets: (outletIds: number[]) => void;
+  onClearRolesForOutlets: (outletIds: number[]) => void;
+};
+
+function OutletRoleAssignmentsField(props: OutletRoleAssignmentsFieldProps) {
+  const {
+    title,
+    outlets,
+    roles,
+    actorMaxRoleLevel,
+    maxHeight,
+    outletRoleCodesFor,
+    onUpdateRoleCode,
+    onSetRoleForOutlets,
+    onSetAllAssignableRolesForOutlets,
+    onClearRolesForOutlets
+  } = props;
+  const [searchValue, setSearchValue] = useState("");
+
+  const normalizedSearch = searchValue.trim().toLowerCase();
+  const filteredOutlets = useMemo(
+    () =>
+      outlets.filter((outlet) => {
+        if (!normalizedSearch) {
+          return true;
+        }
+        const haystack = `${outlet.name} ${outlet.code}`.toLowerCase();
+        return haystack.includes(normalizedSearch);
+      }),
+    [normalizedSearch, outlets]
+  );
+
+  const assignableRoles = useMemo(
+    () => roles.filter((role) => role.role_level < actorMaxRoleLevel),
+    [roles, actorMaxRoleLevel]
+  );
+
+  const filteredOutletIds = useMemo(() => filteredOutlets.map((outlet) => outlet.id), [filteredOutlets]);
+  const totalSelectedRoleCount = useMemo(
+    () =>
+      outlets.reduce((count, outlet) => {
+        const selected = outletRoleCodesFor(outlet.id);
+        return count + selected.length;
+      }, 0),
+    [outletRoleCodesFor, outlets]
+  );
+  const selectedOutletCount = useMemo(
+    () => outlets.filter((outlet) => outletRoleCodesFor(outlet.id).length > 0).length,
+    [outletRoleCodesFor, outlets]
+  );
+  const hasSelectionInFilteredOutlets = useMemo(
+    () => filteredOutlets.some((outlet) => outletRoleCodesFor(outlet.id).length > 0),
+    [filteredOutlets, outletRoleCodesFor]
+  );
+
+  return (
+    <div>
+      <Text fw={600} size="sm" mb={4}>
+        {title}
+      </Text>
+      <Text size="xs" c="dimmed" mb="xs" role="status" aria-live="polite">
+        {selectedOutletCount} outlets assigned, {totalSelectedRoleCount} role selections total.
+      </Text>
+
+      <Stack gap="xs" mb="sm">
+        <TextInput
+          label="Search outlets"
+          placeholder="Search by outlet name or code"
+          value={searchValue}
+          onChange={(event) => setSearchValue(event.currentTarget.value)}
+        />
+        <Group gap="xs" wrap="wrap">
+          <Button
+            size="xs"
+            variant="default"
+            onClick={() => onClearRolesForOutlets(filteredOutletIds)}
+            disabled={filteredOutletIds.length === 0 || !hasSelectionInFilteredOutlets}
+          >
+            Clear filtered outlets
+          </Button>
+          {assignableRoles.map((role) => (
+            <Button
+              key={`bulk-add-${role.code}`}
+              size="xs"
+              variant="light"
+              onClick={() => onSetRoleForOutlets(filteredOutletIds, role.code, true)}
+              disabled={filteredOutletIds.length === 0}
+            >
+              Add {role.name} to filtered
+            </Button>
+          ))}
+        </Group>
+      </Stack>
+
+      <ScrollArea h={maxHeight} type="auto">
+        <Stack gap="sm">
+          {outlets.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              No outlets available.
+            </Text>
+          ) : roles.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              No outlet-scoped roles available.
+            </Text>
+          ) : filteredOutlets.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              No outlets match your search.
+            </Text>
+          ) : (
+            <Accordion variant="separated" multiple>
+              {filteredOutlets.map((outlet) => {
+                const selectedRoleCodes = outletRoleCodesFor(outlet.id);
+                return (
+                  <Accordion.Item key={outlet.id} value={String(outlet.id)}>
+                    <Accordion.Control>
+                      <Group justify="space-between" wrap="nowrap">
+                        <div>
+                          <Text size="sm" fw={600}>
+                            {outlet.name}
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            {outlet.code}
+                          </Text>
+                        </div>
+                        <Badge variant="light" color={selectedRoleCodes.length > 0 ? "teal" : "gray"}>
+                          {selectedRoleCodes.length} selected
+                        </Badge>
+                      </Group>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <Stack gap="xs">
+                        <Group gap="xs" wrap="wrap">
+                          <Button
+                            size="xs"
+                            variant="subtle"
+                            onClick={() => onSetAllAssignableRolesForOutlets([outlet.id])}
+                            disabled={assignableRoles.length === 0}
+                          >
+                            Select all assignable
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="subtle"
+                            color="red"
+                            onClick={() => onClearRolesForOutlets([outlet.id])}
+                            disabled={selectedRoleCodes.length === 0}
+                          >
+                            Clear outlet
+                          </Button>
+                        </Group>
+
+                        {roles.map((role) => {
+                          const checked = selectedRoleCodes.includes(role.code);
+                          const disabled = role.role_level >= actorMaxRoleLevel;
+                          return (
+                            <Checkbox
+                              key={`${outlet.id}-${role.code}`}
+                              label={role.name}
+                              description={
+                                disabled
+                                  ? `Requires higher privilege. ${ROLE_HELP_TEXT[role.code] ?? ""}`.trim()
+                                  : ROLE_HELP_TEXT[role.code] ?? "Outlet-scoped operational role."
+                              }
+                              checked={checked}
+                              disabled={disabled}
+                              onChange={(event) =>
+                                onUpdateRoleCode(outlet.id, role.code, event.currentTarget.checked)
+                              }
+                            />
+                          );
+                        })}
+                      </Stack>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                );
+              })}
+            </Accordion>
+          )}
+        </Stack>
+      </ScrollArea>
+    </div>
+  );
+}
 
 export function UsersPage(props: UsersPageProps) {
   const { user, accessToken } = props;
@@ -390,41 +592,80 @@ export function UsersPage(props: UsersPageProps) {
     formData.outlet_role_assignments.find((assignment) => assignment.outlet_id === outletId)
       ?.role_codes ?? [];
 
-  const updateOutletRoleCode = (outletId: number, roleCode: string, checked: boolean) => {
+  const mutateOutletRoleAssignments = (
+    mutate: (roleMap: Map<number, Set<string>>) => void
+  ) => {
     setFormData((prev) => {
-      const assignments = prev.outlet_role_assignments.map((assignment) => ({
-        ...assignment,
-        role_codes: [...assignment.role_codes]
-      }));
-      const index = assignments.findIndex((assignment) => assignment.outlet_id === outletId);
-      if (index === -1) {
-        if (!checked) {
-          return prev;
-        }
-        return {
-          ...prev,
-          outlet_role_assignments: [
-            ...assignments,
-            { outlet_id: outletId, role_codes: [roleCode] }
-          ]
-        };
-      }
+      const roleMap = new Map<number, Set<string>>(
+        prev.outlet_role_assignments.map((assignment) => [assignment.outlet_id, new Set(assignment.role_codes)])
+      );
+      mutate(roleMap);
+      const nextAssignments = [...roleMap.entries()]
+        .filter(([, roleCodes]) => roleCodes.size > 0)
+        .map(([outlet_id, roleCodes]) => ({ outlet_id, role_codes: [...roleCodes] }));
+      return { ...prev, outlet_role_assignments: nextAssignments };
+    });
+  };
 
-      const current = assignments[index];
-      const roleSet = new Set(current.role_codes);
+  const updateOutletRoleCode = (outletId: number, roleCode: string, checked: boolean) => {
+    mutateOutletRoleAssignments((roleMap) => {
+      const roleSet = roleMap.get(outletId) ?? new Set<string>();
       if (checked) {
         roleSet.add(roleCode);
       } else {
         roleSet.delete(roleCode);
       }
-      const nextRoles = [...roleSet];
-      if (nextRoles.length === 0) {
-        assignments.splice(index, 1);
+      if (roleSet.size === 0) {
+        roleMap.delete(outletId);
       } else {
-        assignments[index] = { ...current, role_codes: nextRoles };
+        roleMap.set(outletId, roleSet);
       }
+    });
+  };
 
-      return { ...prev, outlet_role_assignments: assignments };
+  const setOutletRoleCodeForOutlets = (outletIds: number[], roleCode: string, checked: boolean) => {
+    if (outletIds.length === 0) {
+      return;
+    }
+    mutateOutletRoleAssignments((roleMap) => {
+      outletIds.forEach((outletId) => {
+        const roleSet = roleMap.get(outletId) ?? new Set<string>();
+        if (checked) {
+          roleSet.add(roleCode);
+        } else {
+          roleSet.delete(roleCode);
+        }
+        if (roleSet.size === 0) {
+          roleMap.delete(outletId);
+        } else {
+          roleMap.set(outletId, roleSet);
+        }
+      });
+    });
+  };
+
+  const setAllAssignableRoleCodesForOutlets = (outletIds: number[]) => {
+    if (outletIds.length === 0) {
+      return;
+    }
+    const assignableRoleCodes = outletRoleOptions
+      .filter((role) => role.role_level < actorMaxRoleLevel)
+      .map((role) => role.code);
+    mutateOutletRoleAssignments((roleMap) => {
+      outletIds.forEach((outletId) => {
+        roleMap.set(outletId, new Set(assignableRoleCodes));
+      });
+    });
+  };
+
+  const clearOutletRolesForOutlets = (outletIds: number[]) => {
+    if (outletIds.length === 0) {
+      return;
+    }
+    mutateOutletRoleAssignments((roleMap) => {
+      outletIds.forEach((outletId) => {
+        roleMap.delete(outletId);
+      });
     });
   };
   
@@ -856,48 +1097,18 @@ export function UsersPage(props: UsersPageProps) {
                 allowDeselect
               />
 
-              <div>
-                <Text fw={600} size="sm">
-                  Outlet Roles
-                </Text>
-                <ScrollArea h={220} type="auto">
-                  <Stack gap="sm">
-                    {(outletsQuery.data || []).length === 0 ? (
-                      <Text size="sm" c="dimmed">
-                        No outlets available.
-                      </Text>
-                    ) : outletRoleOptions.length === 0 ? (
-                      <Text size="sm" c="dimmed">
-                        No outlet-scoped roles available.
-                      </Text>
-                    ) : (
-                      (outletsQuery.data || []).map((outlet) => (
-                        <Stack key={outlet.id} gap={4}>
-                          <Text size="xs" fw={600} c="dimmed">
-                            {outlet.name}
-                          </Text>
-                          <Group gap="xs" wrap="wrap">
-                            {outletRoleOptions.map((role) => {
-                              const checked = outletRoleCodesFor(outlet.id).includes(role.code);
-                              return (
-                                <Checkbox
-                                  key={`${outlet.id}-${role.code}`}
-                                  label={role.name}
-                                  checked={checked}
-                                  disabled={role.role_level >= actorMaxRoleLevel}
-                                  onChange={(event) =>
-                                    updateOutletRoleCode(outlet.id, role.code, event.currentTarget.checked)
-                                  }
-                                />
-                              );
-                            })}
-                          </Group>
-                        </Stack>
-                      ))
-                    )}
-                  </Stack>
-                </ScrollArea>
-              </div>
+              <OutletRoleAssignmentsField
+                title="Outlet Roles"
+                outlets={outletsQuery.data || []}
+                roles={outletRoleOptions}
+                actorMaxRoleLevel={actorMaxRoleLevel}
+                maxHeight={300}
+                outletRoleCodesFor={outletRoleCodesFor}
+                onUpdateRoleCode={updateOutletRoleCode}
+                onSetRoleForOutlets={setOutletRoleCodeForOutlets}
+                onSetAllAssignableRolesForOutlets={setAllAssignableRoleCodesForOutlets}
+                onClearRolesForOutlets={clearOutletRolesForOutlets}
+              />
 
               <Checkbox
                 label="Active"
@@ -922,52 +1133,18 @@ export function UsersPage(props: UsersPageProps) {
           ) : null}
 
           {dialogMode === "outlets" ? (
-            <div>
-              <Text fw={600} size="sm" mb={6}>
-                Select Outlet Roles
-              </Text>
-              <ScrollArea h={260} type="auto">
-                <Stack gap="sm">
-                  {(outletsQuery.data || []).length === 0 ? (
-                    <Text size="sm" c="dimmed">
-                      No outlets available.
-                    </Text>
-                  ) : outletRoleOptions.length === 0 ? (
-                    <Text size="sm" c="dimmed">
-                      No outlet-scoped roles available.
-                    </Text>
-                  ) : (
-                    (outletsQuery.data || []).map((outlet) => (
-                      <Stack key={outlet.id} gap={4}>
-                        <Text size="xs" fw={600} c="dimmed">
-                          {outlet.name}
-                        </Text>
-                        <Group gap="xs" wrap="wrap">
-                          {outletRoleOptions.map((role) => {
-                            const checked = outletRoleCodesFor(outlet.id).includes(role.code);
-                            return (
-                              <Checkbox
-                                key={`${outlet.id}-${role.code}`}
-                                label={role.name}
-                                checked={checked}
-                                disabled={role.role_level >= actorMaxRoleLevel}
-                                onChange={(event) =>
-                                  updateOutletRoleCode(
-                                    outlet.id,
-                                    role.code,
-                                    event.currentTarget.checked
-                                  )
-                                }
-                              />
-                            );
-                          })}
-                        </Group>
-                      </Stack>
-                    ))
-                  )}
-                </Stack>
-              </ScrollArea>
-            </div>
+            <OutletRoleAssignmentsField
+              title="Select Outlet Roles"
+              outlets={outletsQuery.data || []}
+              roles={outletRoleOptions}
+              actorMaxRoleLevel={actorMaxRoleLevel}
+              maxHeight={320}
+              outletRoleCodesFor={outletRoleCodesFor}
+              onUpdateRoleCode={updateOutletRoleCode}
+              onSetRoleForOutlets={setOutletRoleCodeForOutlets}
+              onSetAllAssignableRolesForOutlets={setAllAssignableRoleCodesForOutlets}
+              onClearRolesForOutlets={clearOutletRolesForOutlets}
+            />
           ) : null}
 
           {dialogMode === "password" ? (
