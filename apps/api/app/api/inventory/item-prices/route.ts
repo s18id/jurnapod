@@ -28,7 +28,7 @@ const invalidJsonGuardError = new ZodError([
   }
 ]);
 
-async function parseOutletIdForGuard(request: Request): Promise<number> {
+async function parseOutletIdForGuard(request: Request): Promise<number | null> {
   try {
     const payload = await request.clone().json();
     return outletGuardSchema.parse(payload).outlet_id;

@@ -34,13 +34,16 @@ export const GET = withAuth(
         return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
-      const hasOutletAccess = await userHasOutletAccess(
-        auth.userId,
-        auth.companyId,
-        itemPrice.outlet_id
-      );
-      if (!hasOutletAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      // Check outlet access only for outlet overrides (not company defaults)
+      if (itemPrice.outlet_id !== null) {
+        const hasOutletAccess = await userHasOutletAccess(
+          auth.userId,
+          auth.companyId,
+          itemPrice.outlet_id
+        );
+        if (!hasOutletAccess) {
+          return errorResponse("FORBIDDEN", "Forbidden", 403);
+        }
       }
 
        return successResponse(itemPrice);
@@ -68,24 +71,31 @@ export const PATCH = withAuth(
         return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
-      const hasCurrentOutletAccess = await userHasOutletAccess(
-        auth.userId,
-        auth.companyId,
-        existingItemPrice.outlet_id
-      );
-      if (!hasCurrentOutletAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-
-      if (typeof input.outlet_id === "number") {
-        const hasTargetOutletAccess = await userHasOutletAccess(
+      // Check outlet access only for outlet overrides (not company defaults)
+      if (existingItemPrice.outlet_id !== null) {
+        const hasCurrentOutletAccess = await userHasOutletAccess(
           auth.userId,
           auth.companyId,
-          input.outlet_id
+          existingItemPrice.outlet_id
         );
-        if (!hasTargetOutletAccess) {
+        if (!hasCurrentOutletAccess) {
           return errorResponse("FORBIDDEN", "Forbidden", 403);
         }
+      }
+
+      // If changing outlet scope, validate access
+      if (Object.hasOwn(input, "outlet_id")) {
+        if (typeof input.outlet_id === "number") {
+          const hasTargetOutletAccess = await userHasOutletAccess(
+            auth.userId,
+            auth.companyId,
+            input.outlet_id
+          );
+          if (!hasTargetOutletAccess) {
+            return errorResponse("FORBIDDEN", "Forbidden", 403);
+          }
+        }
+        // input.outlet_id === null means changing to company default (allowed for company admins)
       }
 
       const itemPrice = await updateItemPrice(auth.companyId, priceId, input, {
@@ -131,13 +141,16 @@ export const DELETE = withAuth(
         return errorResponse("NOT_FOUND", "Item price not found", 404);
       }
 
-      const hasOutletAccess = await userHasOutletAccess(
-        auth.userId,
-        auth.companyId,
-        existingItemPrice.outlet_id
-      );
-      if (!hasOutletAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      // Check outlet access only for outlet overrides (not company defaults)
+      if (existingItemPrice.outlet_id !== null) {
+        const hasOutletAccess = await userHasOutletAccess(
+          auth.userId,
+          auth.companyId,
+          existingItemPrice.outlet_id
+        );
+        if (!hasOutletAccess) {
+          return errorResponse("FORBIDDEN", "Forbidden", 403);
+        }
       }
 
       const removed = await deleteItemPrice(auth.companyId, priceId, {

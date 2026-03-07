@@ -1159,7 +1159,7 @@ export async function deleteItem(
 
 export async function listItemPrices(
   companyId: number,
-  filters?: { outletId?: number; outletIds?: readonly number[]; isActive?: boolean }
+  filters?: { outletId?: number; outletIds?: readonly number[]; isActive?: boolean; includeDefaults?: boolean }
 ) {
   const pool = getDbPool();
   const values: Array<number> = [companyId];
@@ -1172,16 +1172,28 @@ export async function listItemPrices(
     "WHERE ip.company_id = ?";
 
   if (typeof filters?.outletId === "number") {
-    sql += " AND ip.outlet_id = ?";
-    values.push(filters.outletId);
+    // When querying by specific outlet, return both outlet overrides and company defaults
+    // unless includeDefaults is explicitly false
+    if (filters.includeDefaults !== false) {
+      sql += " AND (ip.outlet_id = ? OR ip.outlet_id IS NULL)";
+      values.push(filters.outletId);
+    } else {
+      sql += " AND ip.outlet_id = ?";
+      values.push(filters.outletId);
+    }
   } else if (Array.isArray(filters?.outletIds)) {
     if (filters.outletIds.length === 0) {
       return [];
     }
 
     const outletPlaceholders = filters.outletIds.map(() => "?").join(", ");
-    sql += ` AND ip.outlet_id IN (${outletPlaceholders})`;
-    values.push(...filters.outletIds);
+    if (filters.includeDefaults !== false) {
+      sql += ` AND (ip.outlet_id IN (${outletPlaceholders}) OR ip.outlet_id IS NULL)`;
+      values.push(...filters.outletIds);
+    } else {
+      sql += ` AND ip.outlet_id IN (${outletPlaceholders})`;
+      values.push(...filters.outletIds);
+    }
   }
 
   if (typeof filters?.isActive === "boolean") {
@@ -1189,10 +1201,65 @@ export async function listItemPrices(
     values.push(filters.isActive ? 1 : 0);
   }
 
-  sql += " ORDER BY id ASC";
+  sql += " ORDER BY ip.outlet_id DESC NULLS LAST, ip.id ASC";
 
   const [rows] = await pool.execute<ItemPriceRow[]>(sql, values);
   return rows.map(normalizeItemPrice);
+}
+
+/**
+ * List effective item prices for a specific outlet.
+ * Returns outlet overrides when available, otherwise company defaults.
+ * Filters out items without any price (neither override nor default).
+ */
+export async function listEffectiveItemPricesForOutlet(
+  companyId: number,
+  outletId: number,
+  filters?: { isActive?: boolean }
+) {
+  const pool = getDbPool();
+  const values: Array<number> = [companyId, outletId, companyId];
+
+  // Use UNION to get outlet overrides OR company defaults
+  // Prioritize outlet override, fallback to company default
+  let sql = `
+    SELECT 
+      COALESCE(override.id, def.id) AS id,
+      COALESCE(override.company_id, def.company_id) AS company_id,
+      COALESCE(override.outlet_id, ?) AS outlet_id,
+      COALESCE(override.item_id, def.item_id) AS item_id,
+      COALESCE(override.price, def.price) AS price,
+      COALESCE(override.is_active, def.is_active) AS is_active,
+      COALESCE(override.updated_at, def.updated_at) AS updated_at,
+      i.item_group_id,
+      ig.name AS item_group_name,
+      CASE WHEN override.id IS NOT NULL THEN 1 ELSE 0 END AS is_override
+    FROM items i
+    LEFT JOIN item_prices override ON override.item_id = i.id 
+      AND override.company_id = i.company_id 
+      AND override.outlet_id = ?
+    LEFT JOIN item_prices def ON def.item_id = i.id 
+      AND def.company_id = i.company_id 
+      AND def.outlet_id IS NULL
+    LEFT JOIN item_groups ig ON ig.id = i.item_group_id AND ig.company_id = i.company_id
+    WHERE i.company_id = ?
+      AND (override.id IS NOT NULL OR def.id IS NOT NULL)
+  `;
+
+  values.push(outletId, outletId, companyId);
+
+  if (typeof filters?.isActive === "boolean") {
+    sql += " AND COALESCE(override.is_active, def.is_active) = ?";
+    values.push(filters.isActive ? 1 : 0);
+  }
+
+  sql += " ORDER BY i.id ASC";
+
+  const [rows] = await pool.execute<(ItemPriceRow & { is_override: number })[]>(sql, values);
+  return rows.map((row) => ({
+    ...normalizeItemPrice(row),
+    is_override: row.is_override === 1
+  }));
 }
 
 export async function findItemPriceById(companyId: number, itemPriceId: number) {
@@ -1920,7 +1987,7 @@ export async function createItemPrice(
   companyId: number,
   input: {
     item_id: number;
-    outlet_id: number;
+    outlet_id: number | null;
     price: number;
     is_active?: boolean;
   },
@@ -1928,7 +1995,11 @@ export async function createItemPrice(
 ) {
   return withTransaction(async (connection) => {
     await ensureCompanyItemExists(connection, companyId, input.item_id);
-    await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+    
+    // Only validate outlet if outlet_id is provided (non-NULL = outlet override)
+    if (input.outlet_id !== null) {
+      await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+    }
 
     try {
       const [result] = await connection.execute<ResultSetHeader>(
@@ -1979,14 +2050,14 @@ export async function updateItemPrice(
   itemPriceId: number,
   input: {
     item_id?: number;
-    outlet_id?: number;
+    outlet_id?: number | null;
     price?: number;
     is_active?: boolean;
   },
   actor?: MutationAuditActor
 ) {
   const fields: string[] = [];
-  const values: Array<number> = [];
+  const values: Array<number | null> = [];
 
   if (typeof input.price === "number") {
     fields.push("price = ?");
@@ -2006,7 +2077,8 @@ export async function updateItemPrice(
       return null;
     }
 
-    if (actor) {
+    // Check outlet access for existing price (if it's an outlet override)
+    if (actor && before.outlet_id !== null) {
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, before.outlet_id);
     }
 
@@ -2016,13 +2088,21 @@ export async function updateItemPrice(
       values.push(input.item_id);
     }
 
-    if (typeof input.outlet_id === "number") {
-      if (actor) {
-        await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+    // Handle outlet_id update (can be null for company default or number for outlet override)
+    if (Object.hasOwn(input, "outlet_id")) {
+      if (input.outlet_id === null) {
+        // Changing to company default
+        fields.push("outlet_id = ?");
+        values.push(null);
+      } else if (typeof input.outlet_id === "number") {
+        // Changing to outlet override
+        if (actor) {
+          await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+        }
+        await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+        fields.push("outlet_id = ?");
+        values.push(input.outlet_id);
       }
-      await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
-      fields.push("outlet_id = ?");
-      values.push(input.outlet_id);
     }
 
     if (fields.length === 0) {
@@ -2085,7 +2165,8 @@ export async function deleteItemPrice(
       return false;
     }
 
-    if (actor) {
+    // Check outlet access only if deleting an outlet override (not company default)
+    if (actor && before.outlet_id !== null) {
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, before.outlet_id);
     }
 
@@ -2213,9 +2294,9 @@ export async function buildSyncPullPayload(
     };
   }
 
-  const [items, prices, itemGroups] = await Promise.all([
+  const [items, effectivePrices, itemGroups] = await Promise.all([
     listItems(companyId, { isActive: true }),
-    listItemPrices(companyId, { outletId, isActive: true }),
+    listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true }),
     listItemGroups(companyId)
   ]);
 
@@ -2238,7 +2319,7 @@ export async function buildSyncPullPayload(
       is_active: group.is_active,
       updated_at: group.updated_at
     })),
-    prices: prices.map((price) => ({
+    prices: effectivePrices.map((price) => ({
       id: price.id,
       item_id: price.item_id,
       outlet_id: price.outlet_id,
