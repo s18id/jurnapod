@@ -50,26 +50,47 @@ export class SyncService {
     );
 
     const dataVersion = response.data.data_version;
-    const products = response.data.products;
+    const items = response.data.items;
+    const itemGroups = response.data.item_groups;
+    const prices = response.data.prices;
     const config = response.data.config;
 
-    // Upsert products into cache
+    // Build lookup maps
     const now = new Date().toISOString();
-    const productRows = products.map((product) => ({
-      pk: `${scope.company_id}:${scope.outlet_id}:${product.item_id}`,
-      company_id: scope.company_id,
-      outlet_id: scope.outlet_id,
-      item_id: product.item_id,
-      sku: product.sku,
-      name: product.name,
-      item_type: "PRODUCT" as const,
-      price_snapshot: product.price,
-      is_active: product.is_active,
-      item_updated_at: now,
-      price_updated_at: now,
-      data_version: dataVersion,
-      pulled_at: now
-    }));
+    const itemsById = new Map(items.map((item) => [item.id, item]));
+    const groupsById = new Map(itemGroups.map((group) => [group.id, group]));
+
+    // Join items with prices for this outlet
+    const productRows = prices
+      .filter((price) => price.outlet_id === scope.outlet_id)
+      .map((price) => {
+        const item = itemsById.get(price.item_id);
+        if (!item) {
+          return null;
+        }
+
+        const groupId = item.item_group_id ?? null;
+        const group = groupId ? groupsById.get(groupId) : null;
+
+        return {
+          pk: `${scope.company_id}:${scope.outlet_id}:${item.id}`,
+          company_id: scope.company_id,
+          outlet_id: scope.outlet_id,
+          item_id: item.id,
+          sku: item.sku,
+          name: item.name,
+          item_type: item.type,
+          item_group_id: groupId,
+          item_group_name: group?.name ?? null,
+          price_snapshot: price.price,
+          is_active: item.is_active && price.is_active,
+          item_updated_at: item.updated_at,
+          price_updated_at: price.updated_at,
+          data_version: dataVersion,
+          pulled_at: now
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
 
     await this.storage.upsertProducts(productRows);
 
@@ -83,20 +104,17 @@ export class SyncService {
       updated_at: now
     });
 
-    // Update sync scope config if present
-    if (config && typeof config === "object") {
-      const configObj = config as { tax?: { rate: number; inclusive: boolean }; payment_methods?: string[] };
-      await this.storage.upsertSyncScopeConfig({
-        pk: `${scope.company_id}:${scope.outlet_id}`,
-        company_id: scope.company_id,
-        outlet_id: scope.outlet_id,
-        data_version: dataVersion,
-        tax_rate: configObj.tax?.rate ?? 0,
-        tax_inclusive: configObj.tax?.inclusive ?? false,
-        payment_methods: configObj.payment_methods ?? ["CASH"],
-        updated_at: now
-      });
-    }
+    // Update sync scope config
+    await this.storage.upsertSyncScopeConfig({
+      pk: `${scope.company_id}:${scope.outlet_id}`,
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id,
+      data_version: dataVersion,
+      tax_rate: config.tax.rate,
+      tax_inclusive: config.tax.inclusive,
+      payment_methods: config.payment_methods,
+      updated_at: now
+    });
 
     return {
       data_version: dataVersion,

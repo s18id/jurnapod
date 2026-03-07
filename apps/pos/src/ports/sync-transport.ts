@@ -22,14 +22,38 @@ export interface SyncPullResponse {
   success: boolean;
   data: {
     data_version: number;
-    config: unknown;
-    products: Array<{
-      item_id: number;
+    items: Array<{
+      id: number;
       sku: string | null;
       name: string;
+      type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+      item_group_id: number | null;
+      is_active: boolean;
+      updated_at: string;
+    }>;
+    item_groups: Array<{
+      id: number;
+      parent_id: number | null;
+      code: string | null;
+      name: string;
+      is_active: boolean;
+      updated_at: string;
+    }>;
+    prices: Array<{
+      id: number;
+      item_id: number;
+      outlet_id: number;
       price: number;
       is_active: boolean;
+      updated_at: string;
     }>;
+    config: {
+      tax: {
+        rate: number;
+        inclusive: boolean;
+      };
+      payment_methods: string[];
+    };
   };
 }
 
