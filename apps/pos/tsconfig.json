@@ -2,11 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "rootDir": "src",
     "outDir": "dist",
     "paths": {
-      "@jurnapod/shared": ["../../packages/shared/dist/index.d.ts"]
+      "@jurnapod/shared": ["packages/shared/dist/index.d.ts"],
+      "@jurnapod/offline-db/dexie": ["packages/offline-db/dexie/index.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../../packages/offline-db/dexie/**/*"]
 }
