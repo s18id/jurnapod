@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { type PosOfflineDb, posDb } from "./db.js";
+import { type PosOfflineDb, posDb } from "@jurnapod/offline-db/dexie";
 import { renewOutboxAttemptLease, reserveOutboxAttempt, updateOutboxJobStatus } from "./outbox.js";
 import {
   type OutboxSendAck,
@@ -9,7 +9,7 @@ import {
   classifyOutboxSenderError,
   sendOutboxJobToSyncPush
 } from "./outbox-sender.js";
-import type { OutboxJobRow } from "./types.js";
+import type { OutboxJobRow } from "@jurnapod/offline-db/dexie";
 
 const DEFAULT_BATCH_SIZE = 10;
 const RETRY_BACKOFF_BASE_MS = 5_000;

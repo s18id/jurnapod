@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm run build -w @jurnapod/offline-db",
     "dev": "vite",
+    "prebuild": "npm run build -w @jurnapod/offline-db",
     "build": "vite build",
     "preview": "vite preview",
     "qa:pwa:build": "npm run build",
@@ -15,11 +17,14 @@
     "qa:e2e:real": "playwright test --config=playwright.real.config.ts",
     "qa:lhci": "CHROME_PATH=$(node -e \"const { chromium } = require('playwright'); process.stdout.write(chromium.executablePath());\") node ./scripts/qa-lighthouse.mjs",
     "build:offline": "tsc -p tsconfig.json",
+    "pretypecheck": "npm run build -w @jurnapod/offline-db",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'lint not configured yet for @jurnapod/pos'",
+    "pretest": "npm run build -w @jurnapod/offline-db",
     "test": "npm run build:offline && node --test \"src/offline/__tests__/*.test.mjs\""
   },
   "dependencies": {
+    "@jurnapod/offline-db": "file:../../packages/offline-db",
     "dexie": "^4.0.11",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

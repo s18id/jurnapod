@@ -2,19 +2,34 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React from "react";
-import { bootstrapWebApp, type WebBootstrapContext } from "./bootstrap/web.js";
-import type {
-  RuntimeProductCatalogItem,
-  RuntimeOutletScope,
-  RuntimeSyncBadgeState
-} from "./services/runtime-service.js";
+import { createRoot } from "react-dom/client";
+import {
+  isRuntimePaymentMethodAllowed,
+  readNavigatorOnlineState,
+  readRuntimeOnlineState,
+  readRuntimeGlobalDueOutboxCount,
+  readRuntimeOfflineSnapshot,
+  readRuntimeProductCatalog,
+  resolveRuntimeCheckoutConfig,
+  resolveRuntimePaymentMethod,
+  resolveRuntimeSyncBadgeState,
+  type RuntimeProductCatalogItem,
+  type RuntimeOutletScope,
+  type RuntimeSyncBadgeState
+} from "./offline/runtime.js";
+import { drainOutboxJobs } from "./offline/outbox-drainer.js";
+import { createOutboxDrainScheduler } from "./offline/outbox-drain-scheduler.js";
+import { runOutboxDrainAsLeader } from "./offline/outbox-leader.js";
+import { sendOutboxJobToSyncPush } from "./offline/outbox-sender.js";
 import { clearAccessToken, readAccessToken, writeAccessToken } from "./offline/auth-session.js";
 import { completeSale, createSaleDraft } from "./offline/sales.js";
+import { ingestSyncPullIntoProductsCache, readSyncPullConfig, readSyncPullDataVersion } from "./offline/sync-pull.js";
 
 const PLACEHOLDER_OUTLETS = [{ outlet_id: 1, label: "Outlet 1 (placeholder)" }];
 
 const POLL_INTERVAL_MS = 1500;
 const CASHIER_USER_ID = 1;
+const DEFAULT_CHECKOUT_CONFIG = resolveRuntimeCheckoutConfig(null);
 type RuntimeConfig = {
   API_BASE_URL?: string;
 };
@@ -137,28 +152,27 @@ function SyncBadge({ status, pendingCount }: { status: RuntimeSyncBadgeState; pe
   );
 }
 
-function App({ context }: { context: WebBootstrapContext }) {
-  const defaultCheckoutConfig = context.runtime.resolveCheckoutConfig(null);
+function App() {
   const [outletOptions, setOutletOptions] = React.useState<{ outlet_id: number; label: string }[]>(PLACEHOLDER_OUTLETS);
   const [scope, setScope] = React.useState<RuntimeOutletScope>({
     company_id: 1,
     outlet_id: PLACEHOLDER_OUTLETS[0].outlet_id
   });
   const [currentFlowId, setCurrentFlowId] = React.useState<string>(() => crypto.randomUUID());
-  const [isOnline, setIsOnline] = React.useState<boolean>(() => context.runtime.isOnline());
+  const [isOnline, setIsOnline] = React.useState<boolean>(() => readNavigatorOnlineState());
   const [pendingOutboxCount, setPendingOutboxCount] = React.useState<number>(0);
   const [hasProductCache, setHasProductCache] = React.useState<boolean>(false);
   const [catalog, setCatalog] = React.useState<RuntimeProductCatalogItem[]>([]);
   const [searchTerm, setSearchTerm] = React.useState<string>("");
   const [cart, setCart] = React.useState<CartState>({});
   const [scopedPaymentMethods, setScopedPaymentMethods] = React.useState<string[]>(
-    defaultCheckoutConfig.payment_methods
+    DEFAULT_CHECKOUT_CONFIG.payment_methods
   );
   const [checkoutTaxConfig, setCheckoutTaxConfig] = React.useState<{
     rate: number;
     inclusive: boolean;
-  }>(defaultCheckoutConfig.tax);
-  const [paymentMethod, setPaymentMethod] = React.useState<string>(defaultCheckoutConfig.payment_methods[0]);
+  }>(DEFAULT_CHECKOUT_CONFIG.tax);
+  const [paymentMethod, setPaymentMethod] = React.useState<string>(DEFAULT_CHECKOUT_CONFIG.payment_methods[0]);
   const [paidAmount, setPaidAmount] = React.useState<number>(0);
   const [companyCode, setCompanyCode] = React.useState<string>("JP");
   const [email, setEmail] = React.useState<string>("");
@@ -178,6 +192,7 @@ function App({ context }: { context: WebBootstrapContext }) {
   const [lastCompleteMessage, setLastCompleteMessage] = React.useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = React.useState<number>(0);
   const inFlightFlowIdsRef = React.useRef<Set<string>>(new Set());
+  const drainSchedulerRef = React.useRef<ReturnType<typeof createOutboxDrainScheduler> | null>(null);
   const googleEnabled = GOOGLE_CLIENT_ID.length > 0;
 
   const applyAuthenticatedSession = React.useCallback(
@@ -336,26 +351,91 @@ function App({ context }: { context: WebBootstrapContext }) {
   React.useEffect(() => {
     let disposed = false;
     let refreshQueue = Promise.resolve();
+    const scheduler = createOutboxDrainScheduler({
+      on_error: (error) => {
+        if (disposed) {
+          return;
+        }
 
-    context.orchestrator.updateConfig({
-      apiOrigin: API_ORIGIN,
-      accessToken: authToken ?? undefined
+        const message = error instanceof Error ? error.message : "Unknown error";
+        setPushSyncMessage(`Sync push failed: ${message}`);
+      },
+      drain: async ({ reasons }) => {
+        if (disposed) {
+          return;
+        }
+
+        const hasManualReason = reasons.includes("MANUAL_PUSH");
+        setPushSyncInFlight(true);
+
+        try {
+          const online = await readRuntimeOnlineState();
+          if (!online) {
+            if (hasManualReason) {
+              setPushSyncMessage("Sync push skipped: offline.");
+            }
+            return;
+          }
+
+          const dueCount = await readRuntimeGlobalDueOutboxCount();
+          if (dueCount <= 0) {
+            if (hasManualReason) {
+              setPushSyncMessage("Sync push skipped: no pending outbox jobs.");
+            }
+            return;
+          }
+
+          const leaderResult = await runOutboxDrainAsLeader(async () => {
+            const drainReason = reasons.slice().sort().join(",");
+            return drainOutboxJobs({
+              drain_reason: drainReason,
+              sender: async ({ job, db }) => {
+                return sendOutboxJobToSyncPush(
+                  {
+                    job,
+                    endpoint: `${API_ORIGIN}/api/sync/push`,
+                    access_token: authToken ?? undefined
+                  },
+                  db
+                );
+              }
+            });
+          });
+
+          if (!leaderResult.acquired) {
+            if (hasManualReason) {
+              setPushSyncMessage("Sync push skipped: another tab is currently draining outbox.");
+            }
+            return;
+          }
+
+          const drainResult = leaderResult.value;
+          if (hasManualReason && drainResult) {
+            setPushSyncMessage(
+              `Sync push done: sent=${drainResult.sent_count}, failed=${drainResult.failed_count}, stale=${drainResult.stale_count}.`
+            );
+          }
+        } finally {
+          if (!disposed) {
+            setPushSyncInFlight(false);
+          }
+        }
+      }
     });
-    context.orchestrator.initialize();
+    drainSchedulerRef.current = scheduler;
 
     const runRefresh = async () => {
-      const [snapshot, products, globalDueOutboxCount, scopedConfig, dataVersion] = await Promise.all([
-        context.runtime.getOfflineSnapshot(scope),
-        context.runtime.getProductCatalog(scope),
-        context.runtime.getGlobalDueOutboxCount(),
-        context.sync.getSyncConfig(scope),
-        context.sync.getSyncDataVersion(scope)
+      const [snapshot, products, globalDueOutboxCount, scopedConfig] = await Promise.all([
+        readRuntimeOfflineSnapshot(scope),
+        readRuntimeProductCatalog(scope),
+        readRuntimeGlobalDueOutboxCount(),
+        readSyncPullConfig(scope)
       ]);
-      const checkoutConfig = context.runtime.resolveCheckoutConfig(scopedConfig);
-      const online = context.runtime.isOnline();
+      const checkoutConfig = resolveRuntimeCheckoutConfig(scopedConfig);
+      const online = await readRuntimeOnlineState();
 
       if (online && globalDueOutboxCount > 0) {
-        await context.orchestrator.requestPush("AUTO_REFRESH");
+        await scheduler.requestDrain("AUTO_REFRESH");
       }
 
       if (disposed) {
@@ -368,9 +448,8 @@ function App({ context }: { context: WebBootstrapContext }) {
       setCatalog(products);
       setScopedPaymentMethods(checkoutConfig.payment_methods);
       setCheckoutTaxConfig(checkoutConfig.tax);
-      setPaymentMethod((current) => context.runtime.resolvePaymentMethod(current, checkoutConfig.payment_methods));
-      setLastDataVersion(dataVersion);
-      setPushSyncInFlight(context.orchestrator.isPushInFlight());
+      setPaymentMethod((current) => resolveRuntimePaymentMethod(current, checkoutConfig.payment_methods));
+      setLastDataVersion(await readSyncPullDataVersion(scope));
     };
 
     const scheduleRefresh = () => {
@@ -381,14 +460,14 @@ function App({ context }: { context: WebBootstrapContext }) {
       });
     };
 
-    const unsubscribeNetwork = context.runtime.onNetworkStatusChange((online) => {
+    const onNetworkChange = () => {
       if (disposed) {
         return;
       }
 
-      setIsOnline(online);
+      setIsOnline(readNavigatorOnlineState());
       scheduleRefresh();
-    });
+    };
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -399,23 +478,29 @@ function App({ context }: { context: WebBootstrapContext }) {
     scheduleRefresh();
 
     const intervalId = window.setInterval(scheduleRefresh, POLL_INTERVAL_MS);
+    window.addEventListener("online", onNetworkChange);
+    window.addEventListener("offline", onNetworkChange);
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       disposed = true;
-      context.orchestrator.dispose();
-      unsubscribeNetwork();
+      scheduler.dispose();
+      if (drainSchedulerRef.current === scheduler) {
+        drainSchedulerRef.current = null;
+      }
       window.clearInterval(intervalId);
+      window.removeEventListener("online", onNetworkChange);
+      window.removeEventListener("offline", onNetworkChange);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [authToken, context, scope, refreshNonce]);
+  }, [authToken, scope, refreshNonce]);
 
-  const syncBadgeState = context.runtime.resolveSyncBadgeState(isOnline, pendingOutboxCount);
+  const syncBadgeState = resolveRuntimeSyncBadgeState(isOnline, pendingOutboxCount);
   const offlineCacheMissing = !isOnline && !hasProductCache;
   const completeInFlight = Boolean(inFlightFlowIds[currentFlowId]);
   const cartLines = React.useMemo(() => cartToList(cart), [cart]);
   const cartTotals = React.useMemo(() => computeCartTotals(cartLines, paidAmount), [cartLines, paidAmount]);
-  const paymentMethodAllowed = context.runtime.isPaymentMethodAllowed(paymentMethod, scopedPaymentMethods);
+  const paymentMethodAllowed = isRuntimePaymentMethodAllowed(paymentMethod, scopedPaymentMethods);
   const canAttemptSaleCompletion = !offlineCacheMissing && cartLines.length > 0 && cartTotals.paid_total >= cartTotals.grand_total;
   const canCompleteSale = canAttemptSaleCompletion && paymentMethodAllowed;
   const visibleProducts = React.useMemo(() => {
@@ -491,8 +576,8 @@ function App({ context }: { context: WebBootstrapContext }) {
       return;
     }
 
-    if (!context.runtime.isPaymentMethodAllowed(paymentMethod, scopedPaymentMethods)) {
-      const nextPaymentMethod = context.runtime.resolvePaymentMethod(paymentMethod, scopedPaymentMethods);
+    if (!isRuntimePaymentMethodAllowed(paymentMethod, scopedPaymentMethods)) {
+      const nextPaymentMethod = resolveRuntimePaymentMethod(paymentMethod, scopedPaymentMethods);
       setPaymentMethod(nextPaymentMethod);
       setLastCompleteMessage(
         `Payment method ${paymentMethod} is no longer allowed for this outlet. Switched to ${nextPaymentMethod}.`
@@ -562,14 +647,16 @@ function App({ context }: { context: WebBootstrapContext }) {
     setPullSyncMessage(null);
 
     try {
-      const result = await context.orchestrator.executePull(scope);
-      if (result.success) {
-        setPullSyncMessage(
-          `Sync pull applied (version ${result.data_version}, ${result.upserted_product_count} cached rows).`
-        );
-      } else {
-        setPullSyncMessage(result.message);
-      }
+      const result = await ingestSyncPullIntoProductsCache({
+        company_id: scope.company_id,
+        outlet_id: scope.outlet_id,
+        base_url: API_BASE_URL,
+        access_token: authToken ?? undefined
+      });
+
+      setPullSyncMessage(
+        `Sync pull applied (version ${result.data_version}, ${result.upserted_product_count} cached rows).`
+      );
       setRefreshNonce((previous) => previous + 1);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -577,22 +664,23 @@ function App({ context }: { context: WebBootstrapContext }) {
     } finally {
       setPullSyncInFlight(false);
     }
-  }, [context, pullSyncInFlight, scope]);
+  }, [authToken, pullSyncInFlight, scope.company_id, scope.outlet_id]);
 
   const runSyncPushNow = React.useCallback(async () => {
     if (pushSyncInFlight) {
       return;
     }
-    setPushSyncMessage("Sync push requested...");
-    try {
-      await context.orchestrator.requestPush("MANUAL_PUSH");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      setPushSyncMessage(`Sync push failed: ${message}`);
-    } finally {
-      setRefreshNonce((previous) => previous + 1);
+
+    const scheduler = drainSchedulerRef.current;
+    if (!scheduler) {
+      setPushSyncMessage("Sync push scheduler is not ready yet.");
+      return;
     }
-  }, [context, pushSyncInFlight]);
+
+    setPushSyncMessage("Sync push requested...");
+    await scheduler.requestDrain("MANUAL_PUSH");
+    setRefreshNonce((previous) => previous + 1);
+  }, [pushSyncInFlight]);
 
   const runLogin = React.useCallback(async () => {
     if (loginInFlight) {
@@ -1032,7 +1120,7 @@ function App({ context }: { context: WebBootstrapContext }) {
             <select
               value={paymentMethod}
               onChange={(event) => {
-                setPaymentMethod(context.runtime.resolvePaymentMethod(event.target.value, scopedPaymentMethods));
+                setPaymentMethod(resolveRuntimePaymentMethod(event.target.value, scopedPaymentMethods));
               }}
               style={{ flex: 1, padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
             >
@@ -1122,14 +1210,14 @@ if (!root) {
   throw new Error("Root element #root not found");
 }
 
-bootstrapWebApp({
-  rootElement: root,
-  AppComponent: App,
-  config: {
-    apiOrigin: API_ORIGIN,
-    accessToken: readAccessToken() ?? undefined,
-    onPushError: (error) => {
-      console.error("Sync push failed", error);
-    }
-  }
-});
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js");
+  });
+}
+
+createRoot(root).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);

@@ -2,8 +2,8 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { type PosOfflineDb, posDb } from "./db.js";
-import type { ProductCacheRow, SyncMetadataRow, SyncScopeConfigRow } from "./types.js";
+import { type PosOfflineDb, posDb } from "@jurnapod/offline-db/dexie";
+import type { ProductCacheRow, SyncMetadataRow, SyncScopeConfigRow } from "@jurnapod/offline-db/dexie";
 
 const DEFAULT_SYNC_PULL_ENDPOINT = "/api/sync/pull";
 const inFlightPullsByScope = new Map<string, Promise<SyncPullIngestResult>>();

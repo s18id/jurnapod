@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { type PosOfflineDb, posDb } from "./db.js";
-import type { OutboxJobRow, PaymentRow, SaleItemRow, SaleRow } from "./types.js";
+import { type PosOfflineDb, posDb } from "@jurnapod/offline-db/dexie";
+import type { OutboxJobRow, PaymentRow, SaleItemRow, SaleRow } from "@jurnapod/offline-db/dexie";
 
 const DEFAULT_SYNC_PUSH_ENDPOINT = "/api/sync/push";
 const DEFAULT_SYNC_PUSH_TIMEOUT_MS = 10_000;
