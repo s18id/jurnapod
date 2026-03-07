@@ -112,13 +112,75 @@ PREPARE stmt FROM @stmt;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Step 6: Re-add foreign key constraint on outlet_id (nullable)
--- MySQL allows FK on nullable columns; constraint only enforced when value is NOT NULL
-ALTER TABLE item_prices
-  ADD CONSTRAINT fk_item_prices_outlet
-    FOREIGN KEY (outlet_id) REFERENCES outlets(id) ON DELETE RESTRICT;
+-- Step 6: Keep only company-scoped outlet FK semantics.
+-- Legacy single-column FK (outlet_id -> outlets.id) is intentionally not re-added.
 
--- Step 7: Add company-scoped outlet FK if not exists (from migration 0004)
+-- Step 7: Validate and add company-scoped outlet FK if not exists (from migration 0004)
+SET @outlet_fk_invalid_rows = (
+  SELECT COUNT(*)
+  FROM item_prices ip
+  LEFT JOIN outlets o
+    ON o.company_id = ip.company_id
+   AND o.id = ip.outlet_id
+  WHERE ip.outlet_id IS NOT NULL
+    AND o.id IS NULL
+);
+
+SET @outlet_fk_error_message = IF(
+  @outlet_fk_invalid_rows > 0,
+  CONCAT(
+    'migration 0059 preflight failed: item_prices has ',
+    @outlet_fk_invalid_rows,
+    ' rows with invalid (company_id, outlet_id). fix data, rerun db:migrate'
+  ),
+  NULL
+);
+
+SET @stmt = IF(
+  @outlet_fk_error_message IS NULL,
+  'SELECT 1',
+  'SIGNAL SQLSTATE ''45000'' SET MESSAGE_TEXT = @outlet_fk_error_message'
+);
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @stmt = IF(
+  EXISTS (
+    SELECT 1
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'outlets'
+    GROUP BY index_name
+    HAVING SUM(seq_in_index = 1 AND column_name = 'company_id') = 1
+      AND SUM(seq_in_index = 2 AND column_name = 'id') = 1
+    LIMIT 1
+  ),
+  'SELECT 1',
+  'ALTER TABLE outlets ADD KEY idx_outlets_company_id_id (company_id, id)'
+);
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @stmt = IF(
+  EXISTS (
+    SELECT 1
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'item_prices'
+    GROUP BY index_name
+    HAVING SUM(seq_in_index = 1 AND column_name = 'company_id') = 1
+      AND SUM(seq_in_index = 2 AND column_name = 'outlet_id') = 1
+    LIMIT 1
+  ),
+  'SELECT 1',
+  'ALTER TABLE item_prices ADD KEY idx_item_prices_company_outlet_fk (company_id, outlet_id)'
+);
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 SET @outlet_fk_scoped_exists = (
   SELECT COUNT(*)
   FROM information_schema.referential_constraints
