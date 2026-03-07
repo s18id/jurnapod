@@ -68,7 +68,14 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
         {outletTables.map((table) => {
           const colors = statusColors[table.status];
           const isCurrentOrderTable = activeOrderContext.table_id === table.table_id;
-          const canStartDineIn = table.status === "AVAILABLE" || isCurrentOrderTable;
+          const hasOtherActiveTable =
+            activeOrderContext.service_type === "DINE_IN"
+            && !!activeOrderContext.table_id
+            && !isCurrentOrderTable;
+          const canStartDineIn =
+            table.status === "AVAILABLE"
+            || isCurrentOrderTable
+            || (table.status === "OCCUPIED" && !hasOtherActiveTable);
           const linkedReservation = outletReservations.find(
             (reservation) =>
               reservation.table_id === table.table_id
@@ -105,32 +112,12 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
                   disabled={!canStartDineIn}
                   onClick={() => {
                     void (async () => {
-                      if (
-                        activeOrderContext.service_type === "DINE_IN" &&
-                        activeOrderContext.table_id &&
-                        activeOrderContext.table_id !== table.table_id
-                      ) {
-                        await context.runtime.setOutletTableStatus(scope, activeOrderContext.table_id, "AVAILABLE");
-                      }
-
                       const occupied = await context.runtime.setOutletTableStatus(scope, table.table_id, "OCCUPIED");
                       if (occupied) {
                         setOutletTables((previous) =>
                           previous.map((row) => {
                             if (row.table_id === occupied.table_id) {
                               return occupied;
-                            }
-                            if (
-                              activeOrderContext.service_type === "DINE_IN" &&
-                              activeOrderContext.table_id &&
-                              row.table_id === activeOrderContext.table_id &&
-                              row.table_id !== occupied.table_id
-                            ) {
-                              return {
-                                ...row,
-                                status: "AVAILABLE",
-                                updated_at: occupied.updated_at
-                              };
                             }
                             return row;
                           })
@@ -145,8 +132,17 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
                     })();
                   }}
                 >
-                  {isCurrentOrderTable ? "Resume current order" : "Use table"}
+                  {isCurrentOrderTable
+                    ? "Resume current order"
+                    : table.status === "OCCUPIED"
+                      ? "Resume occupied table"
+                      : "Use table"}
                 </Button>
+                {table.status === "OCCUPIED" && hasOtherActiveTable ? (
+                  <div style={{ marginTop: 6, fontSize: 11, color: "#7c2d12", fontWeight: 600 }}>
+                    Use "Transfer table" in Cart to move current unpaid order.
+                  </div>
+                ) : null}
               </div>
             </Card>
           );

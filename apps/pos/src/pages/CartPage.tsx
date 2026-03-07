@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { useNavigate } from "react-router-dom";
 import { CartList } from "../features/cart/CartList.js";
@@ -24,12 +24,45 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
     upsertCartLine,
     clearCart,
     activeOrderContext,
+    setActiveTableId,
     setOrderStatus,
+    outletTables,
     outletReservations,
     activeReservationId,
-    setOutletTables
+    setOutletTables,
+    setOutletReservations
   } = usePosAppState();
   const activeReservation = outletReservations.find((row) => row.reservation_id === activeReservationId) ?? null;
+  const [transferTargetTableId, setTransferTargetTableId] = useState<string>("");
+  const [transferInFlight, setTransferInFlight] = useState(false);
+  const [transferMessage, setTransferMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+
+    async function loadTables() {
+      const tables = await context.runtime.getOutletTables(scope);
+      if (!disposed) {
+        setOutletTables(tables);
+      }
+    }
+
+    if (activeOrderContext.service_type === "DINE_IN") {
+      void loadTables();
+    }
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeOrderContext.service_type, context.runtime, scope, setOutletTables]);
+
+  const transferOptions = useMemo(
+    () =>
+      outletTables.filter(
+        (table) => table.status === "AVAILABLE" && table.table_id !== activeOrderContext.table_id
+      ),
+    [activeOrderContext.table_id, outletTables]
+  );
 
   const containerStyles: React.CSSProperties = {
     display: "flex",
@@ -89,6 +122,108 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             : ""}
           {activeReservation ? ` • Reservation ${activeReservation.customer_name}` : ""}
         </div>
+        {activeOrderContext.service_type === "DINE_IN" && activeOrderContext.table_id ? (
+          <div
+            style={{
+              marginTop: 6,
+              padding: 10,
+              borderRadius: 10,
+              border: "1px solid #cbd5e1",
+              background: "#f8fafc",
+              display: "grid",
+              gap: 8
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>Transfer table (unpaid order)</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <select
+                value={transferTargetTableId}
+                onChange={(event) => setTransferTargetTableId(event.target.value)}
+                style={{
+                  minWidth: 180,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  fontSize: 13,
+                  background: "#ffffff"
+                }}
+              >
+                <option value="">Select available table</option>
+                {transferOptions.map((table) => (
+                  <option key={table.table_id} value={String(table.table_id)}>
+                    {table.code} ({table.name})
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="small"
+                variant="secondary"
+                disabled={transferInFlight || !transferTargetTableId}
+                onClick={() => {
+                  void (async () => {
+                    setTransferInFlight(true);
+                    setTransferMessage(null);
+                    try {
+                      const targetTableId = Number(transferTargetTableId);
+                      const result = await context.runtime.transferActiveTable(
+                        scope,
+                        activeOrderContext.table_id as number,
+                        targetTableId
+                      );
+
+                      if (!result) {
+                        setTransferMessage("Failed to transfer table.");
+                        return;
+                      }
+
+                      setOutletTables((previous) =>
+                        previous.map((table) => {
+                          if (table.table_id === result.from.table_id) {
+                            return result.from;
+                          }
+                          if (table.table_id === result.to.table_id) {
+                            return result.to;
+                          }
+                          return table;
+                        })
+                      );
+                      setActiveTableId(result.to.table_id);
+
+                      if (activeReservationId) {
+                        const updatedReservation = await context.runtime.assignReservationTable(
+                          scope,
+                          activeReservationId,
+                          result.to.table_id
+                        );
+                        if (updatedReservation) {
+                          setOutletReservations((previous) =>
+                            previous.map((reservation) =>
+                              reservation.reservation_id === updatedReservation.reservation_id
+                                ? updatedReservation
+                                : reservation
+                            )
+                          );
+                        }
+                      }
+
+                      setTransferTargetTableId("");
+                      setTransferMessage(`Table moved to ${result.to.code}.`);
+                    } catch (error) {
+                      setTransferMessage(error instanceof Error ? error.message : "Failed to transfer table");
+                    } finally {
+                      setTransferInFlight(false);
+                    }
+                  })();
+                }}
+              >
+                {transferInFlight ? "Moving..." : "Move table"}
+              </Button>
+            </div>
+            {transferMessage ? (
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{transferMessage}</div>
+            ) : null}
+          </div>
+        ) : null}
         <CartList
           lines={cartLines}
           onUpdateLine={(itemId, patch) => {

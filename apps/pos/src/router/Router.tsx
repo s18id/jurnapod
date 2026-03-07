@@ -14,18 +14,20 @@ import type { WebBootstrapContext } from "../bootstrap/web.js";
 import type { RuntimeOutletScope, RuntimeOutletTable, RuntimeReservation } from "../services/runtime-service.js";
 import { routes, mobileTabs, type RouterContextValue, type ProtectedRouteProps } from "./routes.js";
 import { TabBar } from "../shared/components/TabBar.js";
-import { LoginPage } from "../pages/LoginPage.js";
-import { CheckoutPage } from "../pages/CheckoutPage.js";
-import { ProductsPage } from "../pages/ProductsPage.js";
-import { TablesPage } from "../pages/TablesPage.js";
-import { ReservationsPage } from "../pages/ReservationsPage.js";
-import { CartPage } from "../pages/CartPage.js";
-import { SettingsPage } from "../pages/SettingsPage.js";
+import {
+  LoginPage,
+  CheckoutPage,
+  ProductsPage,
+  TablesPage,
+  ReservationsPage,
+  CartPage,
+  SettingsPage
+} from "../pages/index.js";
 import { SyncBadge } from "../features/sync/SyncBadge.js";
 import { OutletContextSwitcher } from "../features/outlet/OutletContextSwitcher.js";
 import { readAccessToken, clearAccessToken } from "../offline/auth-session.js";
 import { useCart } from "../features/cart/useCart.js";
-import { API_CONFIG, POLL_INTERVAL_MS } from "../shared/utils/constants.js";
+import { API_CONFIG, MOBILE_BREAKPOINT, POLL_INTERVAL_MS } from "../shared/utils/constants.js";
 import { PosAppStateContext, usePosAppState } from "./pos-app-state.js";
 
 const PLACEHOLDER_OUTLETS = [{ outlet_id: 1, label: "Outlet 1 (placeholder)" }];
@@ -117,6 +119,12 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
     }
     return window.innerWidth < 420;
   });
+  const [isMobileNav, setIsMobileNav] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.innerWidth < MOBILE_BREAKPOINT;
+  });
   const {
     scope,
     setScope,
@@ -156,6 +164,7 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
 
     const handleResize = () => {
       setIsCompactHeader(window.innerWidth < 420);
+      setIsMobileNav(window.innerWidth < MOBILE_BREAKPOINT);
     };
 
     window.addEventListener("resize", handleResize);
@@ -183,6 +192,11 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
     const current = mobileTabs.find(t => t.path === location.pathname);
     return current?.id ?? "";
   }, [location.pathname]);
+
+  const headerNavItems = useMemo(
+    () => [routes.products, routes.tables, routes.reservations, routes.cart, routes.checkout, routes.settings],
+    []
+  );
 
   return (
     <div style={{ 
@@ -322,6 +336,35 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
               }}
             />
           </div>
+          {!isMobileNav ? (
+            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {headerNavItems.map((item) => {
+                const isActive = location.pathname === item.path;
+                const cartBadge = item.id === "cart" && cartItemCount > 0 ? ` (${cartItemCount})` : "";
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => navigate(item.path)}
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: isActive ? "#1d4ed8" : "#334155",
+                      background: isActive ? "#dbeafe" : "#f8fafc",
+                      border: `1px solid ${isActive ? "#93c5fd" : "#cbd5e1"}`,
+                      borderRadius: 999,
+                      padding: "6px 10px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    {item.icon} {item.label}
+                    {cartBadge}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </header>
         {children}
       </div>

@@ -78,6 +78,11 @@ export interface RuntimeReservation {
   cancelled_at: string | null;
 }
 
+export interface RuntimeTableTransferResult {
+  from: RuntimeOutletTable;
+  to: RuntimeOutletTable;
+}
+
 export interface CreateRuntimeReservationInput {
   customer_name: string;
   customer_phone?: string | null;
@@ -465,6 +470,91 @@ export class RuntimeService {
       capacity: updated.capacity,
       status: updated.status,
       updated_at: updated.updated_at
+    };
+  }
+
+  async transferActiveTable(
+    scope: RuntimeOutletScope,
+    fromTableId: number,
+    toTableId: number
+  ): Promise<RuntimeTableTransferResult | null> {
+    if (fromTableId === toTableId) {
+      throw new Error("Target table must be different from current table");
+    }
+
+    const [tableRows, reservationRows] = await Promise.all([
+      this.storage.getOutletTablesByOutlet({
+        company_id: scope.company_id,
+        outlet_id: scope.outlet_id
+      }),
+      this.storage.getReservationsByOutlet({
+        company_id: scope.company_id,
+        outlet_id: scope.outlet_id
+      })
+    ]);
+
+    const fromTable = tableRows.find((row) => row.table_id === fromTableId);
+    const toTable = tableRows.find((row) => row.table_id === toTableId);
+
+    if (!fromTable || !toTable) {
+      return null;
+    }
+
+    if (fromTable.status !== "OCCUPIED") {
+      throw new Error("Current table is not occupied");
+    }
+
+    if (toTable.status !== "AVAILABLE") {
+      throw new Error("Target table is not available");
+    }
+
+    const targetReserved = reservationRows.some(
+      (reservation) =>
+        reservation.table_id === toTableId
+        && !isReservationFinalStatus(reservation.status)
+    );
+
+    if (targetReserved) {
+      throw new Error("Target table has active reservation");
+    }
+
+    const updatedAt = nowIso();
+    const fromUpdated: OutletTableRow = {
+      ...fromTable,
+      status: "AVAILABLE",
+      updated_at: updatedAt
+    };
+    const toUpdated: OutletTableRow = {
+      ...toTable,
+      status: "OCCUPIED",
+      updated_at: updatedAt
+    };
+
+    await this.storage.upsertOutletTables([fromUpdated, toUpdated]);
+
+    return {
+      from: {
+        table_id: fromUpdated.table_id,
+        company_id: fromUpdated.company_id,
+        outlet_id: fromUpdated.outlet_id,
+        code: fromUpdated.code,
+        name: fromUpdated.name,
+        zone: fromUpdated.zone,
+        capacity: fromUpdated.capacity,
+        status: fromUpdated.status,
+        updated_at: fromUpdated.updated_at
+      },
+      to: {
+        table_id: toUpdated.table_id,
+        company_id: toUpdated.company_id,
+        outlet_id: toUpdated.outlet_id,
+        code: toUpdated.code,
+        name: toUpdated.name,
+        zone: toUpdated.zone,
+        capacity: toUpdated.capacity,
+        status: toUpdated.status,
+        updated_at: toUpdated.updated_at
+      }
     };
   }
 
