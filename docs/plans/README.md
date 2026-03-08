@@ -116,6 +116,19 @@ Detailed design for syncing open dine-in snapshots and immutable update history 
 
 ---
 
+### 6. [Phase 4 Verification - Table Operations](./phase-4-table-operations-verification.md)
+Verification notes and test coverage for table transfer and reservation integration.
+
+**Contents:**
+- Phase 4 scope verification checklist
+- Table move and reservation integration validation
+- Added runtime and E2E test coverage map
+- Phase 4 exit criteria status
+
+**Status:** In Progress ✅
+
+---
+
 ## Implementation Checklist
 
 ### Design Phase ✅ COMPLETE

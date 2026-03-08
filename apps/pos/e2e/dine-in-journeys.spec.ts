@@ -194,6 +194,36 @@ test("table transfer journey moves active dine-in order", async ({ page }) => {
   await expect(page.getByText(/Table moved to/)).toBeVisible();
 });
 
+test("reservation check-in to seated keeps dine-in context for continue order", async ({ page }) => {
+  await setupAuthenticatedSession(page);
+
+  await page.goto("/reservations");
+  await expect(page).toHaveURL(/\/reservations$/);
+
+  await page.getByPlaceholder("Customer name").fill(`E2E Seated ${Date.now()}`);
+
+  const createTableSelect = page.locator("select").first();
+  const createOptionCount = await createTableSelect.locator("option").count();
+  if (createOptionCount <= 1) {
+    test.skip(true, "No assignable table options in reservation form for this dataset.");
+  }
+  await createTableSelect.selectOption({ index: 1 });
+  await page.getByRole("button", { name: "Create reservation" }).click();
+
+  await expect(page.getByText("ACTIVE RESERVATION CONTEXT")).toBeVisible();
+
+  await page.getByRole("button", { name: "ARRIVED" }).first().click();
+  await page.getByRole("button", { name: "SEATED" }).first().click();
+  await expect(page.getByRole("button", { name: "Continue order" }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Continue order" }).first().click();
+  await expect(page).toHaveURL(/\/products$/);
+
+  await page.goto("/cart");
+  await expect(page.getByText(/Service: DINE_IN/)).toBeVisible();
+  await expect(page.getByText(/Reservation/)).toBeVisible();
+});
+
 test("resume order and cancel finalized item captures reason and audit update", async ({ page }) => {
   await setupAuthenticatedSession(page);
   await mockSyncPull(page);

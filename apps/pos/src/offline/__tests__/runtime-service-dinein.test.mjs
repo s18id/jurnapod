@@ -173,6 +173,47 @@ test("completeOrderSession closes order, releases table, and finalizes reservati
   }
 });
 
+test("transferActiveOrderTable blocks moving into table with another active reservation", async () => {
+  const db = createPosOfflineDb(`jp-pos-runtime-service-dinein-transfer-reservation-conflict-${crypto.randomUUID()}`);
+  const storage = createWebStorageAdapter(db);
+  const runtime = new RuntimeService(storage, createNetworkMock());
+  const scope = { company_id: 1, outlet_id: 17 };
+
+  try {
+    const tables = await runtime.getOutletTables(scope);
+    const fromTable = tables.find((table) => table.status === "AVAILABLE");
+    const toTable = tables.find((table) => table.status === "RESERVED" && table.table_id !== fromTable?.table_id);
+
+    assert.ok(fromTable, "expected source available table");
+    assert.ok(toTable, "expected target reserved table");
+
+    const sourceReservation = await runtime.createOutletReservation(scope, {
+      customer_name: "Transfer Source",
+      customer_phone: null,
+      guest_count: 2,
+      reservation_at: new Date(Date.now() + 1800_000).toISOString(),
+      duration_minutes: 90,
+      table_id: fromTable.table_id,
+      notes: null
+    });
+    await runtime.updateReservationStatus(scope, sourceReservation.reservation_id, "ARRIVED");
+    await runtime.updateReservationStatus(scope, sourceReservation.reservation_id, "SEATED");
+
+    const order = await runtime.resolveActiveOrder(scope, {
+      service_type: "DINE_IN",
+      table_id: fromTable.table_id,
+      reservation_id: sourceReservation.reservation_id
+    });
+
+    await assert.rejects(
+      runtime.transferActiveOrderTable(scope, order.order.order_id, toTable.table_id),
+      /Target table is not available/
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test("upsertActiveOrderSnapshot emits update log and outbox job", async () => {
   const db = createPosOfflineDb(`jp-pos-runtime-service-dinein-update-log-${crypto.randomUUID()}`);
   const storage = createWebStorageAdapter(db);

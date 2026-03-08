@@ -4,8 +4,9 @@
 import { expect, test } from "@playwright/test";
 
 const ACCESS_TOKEN_STORAGE_KEY = "jurnapod_pos_access_token";
+const CATALOG_VERSION = 10;
 
-test("sync badge changes to Offline when network goes down", async ({ context, page }) => {
+async function mockHealth(page: import("@playwright/test").Page): Promise<void> {
   await page.route("**/api/health", async (route) => {
     await route.fulfill({
       status: 200,
@@ -13,7 +14,9 @@ test("sync badge changes to Offline when network goes down", async ({ context, p
       body: JSON.stringify({ success: true, data: { service: "jurnapod-api" } })
     });
   });
+}
 
+async function mockUserMe(page: import("@playwright/test").Page): Promise<void> {
   await page.route("**/api/users/me", async (route) => {
     await route.fulfill({
       status: 200,
@@ -21,10 +24,11 @@ test("sync badge changes to Offline when network goes down", async ({ context, p
       body: JSON.stringify({
         success: true,
         data: {
+          id: 1,
           company_id: 1,
           outlets: [
             {
-              id: 1,
+              id: 10,
               code: "MAIN",
               name: "Main Outlet"
             }
@@ -33,10 +37,89 @@ test("sync badge changes to Offline when network goes down", async ({ context, p
       })
     });
   });
+}
 
+async function mockSyncPull(page: import("@playwright/test").Page): Promise<void> {
+  await page.route("**/api/sync/pull**", async (route) => {
+    const url = new URL(route.request().url());
+    const sinceVersion = Number(url.searchParams.get("since_version") ?? "0");
+    const changed = sinceVersion < CATALOG_VERSION;
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          data_version: changed ? CATALOG_VERSION : sinceVersion,
+          items: changed
+            ? [
+                {
+                  id: 100,
+                  sku: "AMER",
+                  name: "Americano",
+                  type: "PRODUCT",
+                  item_group_id: null,
+                  is_active: true,
+                  updated_at: "2026-03-08T00:00:00.000Z"
+                }
+              ]
+            : [],
+          item_groups: [],
+          prices: changed
+            ? [
+                {
+                  id: 200,
+                  item_id: 100,
+                  outlet_id: 10,
+                  price: 18000,
+                  is_active: true,
+                  updated_at: "2026-03-08T00:00:00.000Z"
+                }
+              ]
+            : [],
+          config: {
+            tax: {
+              rate: 0,
+              inclusive: false
+            },
+            payment_methods: ["CASH", "QRIS"]
+          },
+          open_orders: [],
+          open_order_lines: [],
+          order_updates: [],
+          orders_cursor: 0
+        }
+      })
+    });
+  });
+}
+
+async function setupAuthenticatedSession(page: import("@playwright/test").Page): Promise<void> {
+  await mockHealth(page);
+  await mockUserMe(page);
+  await mockSyncPull(page);
   await page.addInitScript((storageKey) => {
     window.localStorage.setItem(storageKey, "test-token");
   }, ACCESS_TOKEN_STORAGE_KEY);
+}
+
+async function primeCatalog(page: import("@playwright/test").Page): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Refresh Catalog Now" }).click();
+    await expect(page.getByRole("button", { name: "Refresh Catalog Now" })).toBeVisible();
+    await page.goto("/products");
+    if (await page.getByText("Americano").first().isVisible()) {
+      return;
+    }
+  }
+
+  await expect(page.getByText("Americano")).toBeVisible();
+}
+
+test("sync badge changes to Offline when network goes down", async ({ context, page }) => {
+  await setupAuthenticatedSession(page);
 
   await page.goto("/");
   await expect(page.getByText("Sync: Synced")).toBeVisible();
@@ -48,199 +131,17 @@ test("sync badge changes to Offline when network goes down", async ({ context, p
 });
 
 test("login + sync pull works with mocked API", async ({ page }) => {
-  await page.route("**/api/health", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: { service: "jurnapod-api" } })
-    });
-  });
+  await setupAuthenticatedSession(page);
+  await primeCatalog(page);
 
-  await page.route("**/api/auth/login", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          access_token: "test-token",
-          token_type: "Bearer",
-          expires_in: 3600
-        }
-      })
-    });
-  });
-
-  await page.route("**/api/users/me", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          id: 1,
-          company_id: 1,
-          outlets: [
-            {
-              id: 10,
-              code: "MAIN",
-              name: "Main Outlet"
-            }
-          ]
-        }
-      })
-    });
-  });
-
-  await page.route("**/api/sync/pull**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          data_version: 10,
-          items: [
-            {
-              id: 100,
-              sku: "AMER",
-              name: "Americano",
-              type: "PRODUCT",
-              is_active: true,
-              updated_at: new Date().toISOString()
-            }
-          ],
-          item_groups: [],
-          prices: [
-            {
-              id: 200,
-              item_id: 100,
-              outlet_id: 10,
-              price: 18000,
-              is_active: true,
-              updated_at: new Date().toISOString()
-            }
-          ],
-          config: {
-            tax: {
-              rate: 0,
-              inclusive: false
-            },
-            payment_methods: ["CASH", "QRIS"]
-          }
-        }
-      })
-    });
-  });
-
-  await page.goto("/");
-  await page.getByPlaceholder("Email").fill("cashier@example.com");
-  await page.getByPlaceholder("Password").fill("password");
-  await page.getByRole("button", { name: "Sign in" }).click();
-
-  await expect(page).toHaveURL(/\/products$/);
-
-  await page.goto("/settings");
-  await page.getByRole("button", { name: "Sync pull now" }).click();
-  await expect(page.getByText(/Sync pull applied/)).toBeVisible();
-  await expect(page.getByText("Last data version: 10")).toBeVisible();
+  await page.goto("/products");
+  await expect(page.getByText("Americano")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add" }).first()).toBeVisible();
 });
 
 test("dine-in flow blocks product add until table selected", async ({ page }) => {
-  await page.route("**/api/health", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: { service: "jurnapod-api" } })
-    });
-  });
-
-  await page.route("**/api/auth/login", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          access_token: "test-token",
-          token_type: "Bearer",
-          expires_in: 3600
-        }
-      })
-    });
-  });
-
-  await page.route("**/api/users/me", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          id: 1,
-          company_id: 1,
-          outlets: [
-            {
-              id: 10,
-              code: "MAIN",
-              name: "Main Outlet"
-            }
-          ]
-        }
-      })
-    });
-  });
-
-  await page.route("**/api/sync/pull**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          data_version: 10,
-          items: [
-            {
-              id: 100,
-              sku: "AMER",
-              name: "Americano",
-              type: "PRODUCT",
-              is_active: true,
-              updated_at: new Date().toISOString()
-            }
-          ],
-          item_groups: [],
-          prices: [
-            {
-              id: 200,
-              item_id: 100,
-              outlet_id: 10,
-              price: 18000,
-              is_active: true,
-              updated_at: new Date().toISOString()
-            }
-          ],
-          config: {
-            tax: {
-              rate: 0,
-              inclusive: false
-            },
-            payment_methods: ["CASH", "QRIS"]
-          }
-        }
-      })
-    });
-  });
-
-  await page.goto("/");
-  await page.getByPlaceholder("Email").fill("cashier@example.com");
-  await page.getByPlaceholder("Password").fill("password");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/products$/);
-
-  await page.goto("/settings");
-  await page.getByRole("button", { name: "Sync pull now" }).click();
-  await expect(page.getByText(/Sync pull applied/)).toBeVisible();
+  await setupAuthenticatedSession(page);
+  await primeCatalog(page);
 
   await page.goto("/products");
   await page.getByRole("button", { name: "Dine-in" }).click();

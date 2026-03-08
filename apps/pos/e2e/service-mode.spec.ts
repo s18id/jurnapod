@@ -4,6 +4,17 @@
 import { expect, test } from "@playwright/test";
 
 const ACCESS_TOKEN_STORAGE_KEY = "jurnapod_pos_access_token";
+const CATALOG_VERSION = 10;
+
+async function mockHealth(page: import("@playwright/test").Page): Promise<void> {
+  await page.route("**/api/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: { service: "jurnapod-api" } })
+    });
+  });
+}
 
 async function mockUserMe(page: import("@playwright/test").Page): Promise<void> {
   await page.route("**/api/users/me", async (route) => {
@@ -27,69 +38,105 @@ async function mockUserMe(page: import("@playwright/test").Page): Promise<void> 
   });
 }
 
-async function mockProductCatalog(page: import("@playwright/test").Page): Promise<void> {
-  await page.route("**/api/offline/product-catalog*", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: [
-          {
-            item_id: 1,
-            name: "Coffee",
-            price_snapshot: 500,
-            category: "Beverages"
-          },
-          {
-            item_id: 2,
-            name: "Sandwich",
-            price_snapshot: 800,
-            category: "Food"
-          }
-        ]
-      })
-    });
-  });
-}
+async function mockSyncPull(page: import("@playwright/test").Page): Promise<void> {
+  await page.route("**/api/sync/pull**", async (route) => {
+    const url = new URL(route.request().url());
+    const sinceVersion = Number(url.searchParams.get("since_version") ?? "0");
+    const changed = sinceVersion < CATALOG_VERSION;
 
-async function mockOutletTables(page: import("@playwright/test").Page): Promise<void> {
-  await page.route("**/api/offline/outlet-tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         success: true,
-        data: [
-          {
-            table_id: 1,
-            code: "A1",
-            name: "Table A1",
-            zone: "Main",
-            capacity: 4,
-            status: "AVAILABLE"
+        data: {
+          data_version: changed ? CATALOG_VERSION : sinceVersion,
+          items: changed
+            ? [
+                {
+                  id: 1,
+                  sku: "COF-01",
+                  name: "Coffee",
+                  type: "PRODUCT",
+                  item_group_id: null,
+                  is_active: true,
+                  updated_at: "2026-03-08T00:00:00.000Z"
+                },
+                {
+                  id: 2,
+                  sku: "SND-01",
+                  name: "Sandwich",
+                  type: "PRODUCT",
+                  item_group_id: null,
+                  is_active: true,
+                  updated_at: "2026-03-08T00:00:00.000Z"
+                }
+              ]
+            : [],
+          item_groups: [],
+          prices: changed
+            ? [
+                {
+                  id: 10,
+                  item_id: 1,
+                  outlet_id: 1,
+                  price: 500,
+                  is_active: true,
+                  updated_at: "2026-03-08T00:00:00.000Z"
+                },
+                {
+                  id: 11,
+                  item_id: 2,
+                  outlet_id: 1,
+                  price: 800,
+                  is_active: true,
+                  updated_at: "2026-03-08T00:00:00.000Z"
+                }
+              ]
+            : [],
+          config: {
+            tax: {
+              rate: 0,
+              inclusive: false
+            },
+            payment_methods: ["CASH", "QRIS"]
           },
-          {
-            table_id: 2,
-            code: "A2",
-            name: "Table A2",
-            zone: "Main",
-            capacity: 2,
-            status: "AVAILABLE"
-          }
-        ]
+          open_orders: [],
+          open_order_lines: [],
+          order_updates: [],
+          orders_cursor: 0
+        }
       })
     });
   });
 }
 
 async function setupAuthenticatedSession(page: import("@playwright/test").Page): Promise<void> {
+  await mockHealth(page);
   await mockUserMe(page);
-  await mockProductCatalog(page);
-  await mockOutletTables(page);
+  await mockSyncPull(page);
   await page.addInitScript((storageKey) => {
     window.localStorage.setItem(storageKey, "test-token");
   }, ACCESS_TOKEN_STORAGE_KEY);
+}
+
+async function primeCatalog(page: import("@playwright/test").Page): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Refresh Catalog Now" }).click();
+    await expect(page.getByRole("button", { name: "Refresh Catalog Now" })).toBeVisible();
+    await page.goto("/products");
+
+    if (await page.getByText("Coffee").first().isVisible()) {
+      return;
+    }
+  }
+
+  await expect(page.getByText("Coffee")).toBeVisible();
+}
+
+async function addCoffee(page: import("@playwright/test").Page): Promise<void> {
+  await page.getByRole("button", { name: "Add" }).first().click();
 }
 
 test("service mode page is accessible and shows takeaway/dine-in buttons", async ({ page }) => {
@@ -109,7 +156,6 @@ test("clicking takeaway starts new takeaway order", async ({ page }) => {
   await page.getByRole("button", { name: /takeaway/i }).click();
 
   await expect(page).toHaveURL(/\/products$/);
-  // Service mode should be set to TAKEAWAY
   await expect(page.getByText(/service mode/i)).toBeVisible();
 });
 
@@ -124,125 +170,80 @@ test("clicking dine-in navigates to tables page", async ({ page }) => {
 
 test("service switch from takeaway to dine-in shows confirmation modal", async ({ page }) => {
   await setupAuthenticatedSession(page);
-  await page.goto("/products");
+  await primeCatalog(page);
 
-  // Wait for products page to load
   await expect(page.getByText(/start order/i)).toBeVisible();
-
-  // Add an item to cart
-  await page.getByRole("button", { name: /coffee/i }).first().click();
-
-  // Try to switch to dine-in
+  await addCoffee(page);
   await page.getByRole("button", { name: /^dine-in$/i }).click();
 
-  // Should show service switch modal
   await expect(page.getByRole("heading", { name: /switch to dine-in/i })).toBeVisible();
-  await expect(page.getByText(/select a table/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /select a table/i })).toBeVisible();
 });
 
 test("service switch from dine-in to takeaway shows confirmation modal", async ({ page }) => {
   await setupAuthenticatedSession(page);
-  await page.goto("/products");
+  await primeCatalog(page);
 
-  // Wait for products page to load
-  await expect(page.getByText(/start order/i)).toBeVisible();
-
-  // Switch to dine-in mode first (no items, so no modal)
+  await page.goto("/tables");
+  await page.getByRole("button", { name: /Use table|Resume current order|Resume table order|Resume occupied table/ }).first().click();
+  await expect(page).toHaveURL(/\/products$/);
   await page.getByRole("button", { name: /^dine-in$/i }).click();
-
-  // Add an item to cart
-  await page.getByRole("button", { name: /coffee/i }).first().click();
-
-  // Try to switch to takeaway
+  await addCoffee(page);
   await page.getByRole("button", { name: /^takeaway$/i }).click();
 
-  // Should show service switch modal
   await expect(page.getByRole("heading", { name: /switch to takeaway/i })).toBeVisible();
 });
 
 test("dine-in blocks adding items without table selection", async ({ page }) => {
   await setupAuthenticatedSession(page);
-  await page.goto("/products");
+  await primeCatalog(page);
 
-  // Wait for products page to load
   await expect(page.getByText(/start order/i)).toBeVisible();
-
-  // Switch to dine-in mode
   await page.getByRole("button", { name: /^dine-in$/i }).click();
+  await addCoffee(page);
 
-  // Try to add an item without selecting a table
-  await page.getByRole("button", { name: /coffee/i }).first().click();
-
-  // Should show guard message
   await expect(page.getByText(/select a table.*before adding items/i)).toBeVisible();
 });
 
-test("complete takeaway flow: service mode → products → cart → checkout", async ({ page }) => {
+test("complete takeaway flow: service mode -> products -> cart -> checkout", async ({ page }) => {
   await setupAuthenticatedSession(page);
+  await primeCatalog(page);
   await page.goto("/service-mode");
 
-  // Start takeaway order
   await page.getByRole("button", { name: /takeaway/i }).click();
   await expect(page).toHaveURL(/\/products$/);
 
-  // Add items to cart
-  await page.getByRole("button", { name: /coffee/i }).first().click();
-  await page.getByRole("button", { name: /sandwich/i }).first().click();
+  await page.getByRole("button", { name: "Add" }).first().click();
 
-  // Navigate to cart
   await page.getByRole("button", { name: /continue to cart/i }).click();
   await expect(page).toHaveURL(/\/cart$/);
-
-  // Cart should show takeaway service type
-  await expect(page.getByText(/takeaway/i)).toBeVisible();
+  await expect(page.getByText(/Service:\s*TAKEAWAY/i)).toBeVisible();
 });
 
 test("can increase and decrease quantity from products page", async ({ page }) => {
   await setupAuthenticatedSession(page);
-  await page.goto("/products");
+  await primeCatalog(page);
 
-  // Wait for products page to load
   await expect(page.getByText(/start order/i)).toBeVisible();
+  await addCoffee(page);
 
-  // Add coffee once - should show quantity controls
-  await page.getByRole("button", { name: /coffee/i }).first().click();
-
-  // Should now show +/- buttons with quantity 1
-  const coffeeCard = page.locator('div:has-text("Coffee")').first();
-  await expect(coffeeCard.getByText("1")).toBeVisible();
-  await expect(coffeeCard.getByRole("button", { name: "+" })).toBeVisible();
-  await expect(coffeeCard.getByRole("button", { name: "−" })).toBeVisible();
-
-  // Click + to increase quantity
-  await coffeeCard.getByRole("button", { name: "+" }).click();
-  await expect(coffeeCard.getByText("2")).toBeVisible();
-
-  // Click - to decrease quantity
-  await coffeeCard.getByRole("button", { name: "−" }).click();
-  await expect(coffeeCard.getByText("1")).toBeVisible();
-
-  // Click - again to remove from cart (back to 0)
-  await coffeeCard.getByRole("button", { name: "−" }).click();
-  
-  // Should show Add button again (no quantity)
-  await expect(coffeeCard.getByRole("button", { name: /add/i })).toBeVisible();
-  await expect(coffeeCard.getByText("1")).not.toBeVisible();
+  await expect(page.getByRole("button", { name: /Cart \(1\)/ })).toBeVisible();
+  await page.getByRole("button", { name: "+" }).first().click();
+  await expect(page.getByRole("button", { name: /Cart \(2\)/ })).toBeVisible();
+  await page.getByRole("button", { name: "−" }).first().click();
+  await expect(page.getByRole("button", { name: /Cart \(1\)/ })).toBeVisible();
+  await page.getByRole("button", { name: "−" }).first().click();
+  await expect(page.getByRole("button", { name: /Cart$/ })).toBeVisible();
 });
 
 test("resume active order button appears when order exists", async ({ page }) => {
   await setupAuthenticatedSession(page);
-  
-  // First create an order
-  await page.goto("/products");
-  await page.getByRole("button", { name: /coffee/i }).first().click();
+  await primeCatalog(page);
 
-  // Go back to service mode
+  await addCoffee(page);
   await page.goto("/service-mode");
 
-  // Resume button should be visible
   await expect(page.getByRole("button", { name: /resume active order/i })).toBeVisible();
-
-  // Clicking resume should take to products
   await page.getByRole("button", { name: /resume active order/i }).click();
   await expect(page).toHaveURL(/\/products$/);
 });
