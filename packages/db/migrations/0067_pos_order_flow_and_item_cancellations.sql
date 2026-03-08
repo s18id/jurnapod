@@ -1,11 +1,73 @@
 -- Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 -- Ownership: Ahmad Faruk (Signal18 ID)
 
-ALTER TABLE pos_order_snapshots
-  ADD COLUMN IF NOT EXISTS source_flow VARCHAR(16) NULL AFTER service_type,
-  ADD COLUMN IF NOT EXISTS settlement_flow VARCHAR(16) NULL AFTER source_flow,
-  ADD CONSTRAINT chk_pos_order_snapshots_source_flow CHECK (source_flow IS NULL OR source_flow IN ('WALK_IN', 'RESERVATION', 'PHONE', 'ONLINE', 'MANUAL')),
-  ADD CONSTRAINT chk_pos_order_snapshots_settlement_flow CHECK (settlement_flow IS NULL OR settlement_flow IN ('IMMEDIATE', 'DEFERRED', 'SPLIT'));
+SET @sql := (
+  SELECT IF(
+    EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'pos_order_snapshots'
+        AND COLUMN_NAME = 'source_flow'
+    ),
+    'SELECT 1',
+    'ALTER TABLE pos_order_snapshots ADD COLUMN source_flow VARCHAR(16) NULL AFTER service_type'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'pos_order_snapshots'
+        AND COLUMN_NAME = 'settlement_flow'
+    ),
+    'SELECT 1',
+    'ALTER TABLE pos_order_snapshots ADD COLUMN settlement_flow VARCHAR(16) NULL AFTER source_flow'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS (
+      SELECT 1
+      FROM information_schema.TABLE_CONSTRAINTS
+      WHERE CONSTRAINT_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'pos_order_snapshots'
+        AND CONSTRAINT_NAME = 'chk_pos_order_snapshots_source_flow'
+    ),
+    'SELECT 1',
+    'ALTER TABLE pos_order_snapshots ADD CONSTRAINT chk_pos_order_snapshots_source_flow CHECK (source_flow IS NULL OR source_flow IN (''WALK_IN'', ''RESERVATION'', ''PHONE'', ''ONLINE'', ''MANUAL''))'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS (
+      SELECT 1
+      FROM information_schema.TABLE_CONSTRAINTS
+      WHERE CONSTRAINT_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'pos_order_snapshots'
+        AND CONSTRAINT_NAME = 'chk_pos_order_snapshots_settlement_flow'
+    ),
+    'SELECT 1',
+    'ALTER TABLE pos_order_snapshots ADD CONSTRAINT chk_pos_order_snapshots_settlement_flow CHECK (settlement_flow IS NULL OR settlement_flow IN (''IMMEDIATE'', ''DEFERRED'', ''SPLIT''))'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS pos_item_cancellations (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
