@@ -12,6 +12,8 @@ export interface PaymentMethodPickerProps {
 export function PaymentMethodPicker({ value, options, onChange }: PaymentMethodPickerProps): JSX.Element {
   return (
     <select
+      id="checkout-payment-method"
+      name="checkoutPaymentMethod"
       value={value}
       onChange={(event) => onChange(event.target.value)}
       style={{

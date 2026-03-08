@@ -157,11 +157,15 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
         <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>Create reservation</h2>
         <div style={{ display: "grid", gap: 8 }}>
           <Input
+            id="reservation-customer-name"
+            name="reservationCustomerName"
             value={form.customer_name}
             placeholder="Customer name"
             onChange={(value) => setForm((previous) => ({ ...previous, customer_name: value }))}
           />
           <Input
+            id="reservation-customer-phone"
+            name="reservationCustomerPhone"
             type="tel"
             value={form.customer_phone}
             placeholder="Customer phone"
@@ -169,6 +173,8 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
           />
           <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
             <Input
+              id="reservation-guest-count"
+              name="reservationGuestCount"
               type="number"
               value={form.guest_count}
               placeholder="Guest count"
@@ -176,6 +182,8 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
               min={1}
             />
             <Input
+              id="reservation-duration-minutes"
+              name="reservationDurationMinutes"
               type="number"
               value={form.duration_minutes}
               placeholder="Duration (min)"
@@ -184,6 +192,8 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
             />
           </div>
           <input
+            id="reservation-datetime"
+            name="reservationDateTime"
             type="datetime-local"
             value={form.reservation_at}
             onChange={(event) => setForm((previous) => ({ ...previous, reservation_at: event.target.value }))}
@@ -196,6 +206,8 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
             }}
           />
           <select
+            id="reservation-table-id"
+            name="reservationTableId"
             value={form.table_id}
             onChange={(event) => setForm((previous) => ({ ...previous, table_id: event.target.value }))}
             style={{
@@ -215,11 +227,15 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
             ))}
           </select>
           <Input
+            id="reservation-notes"
+            name="reservationNotes"
             value={form.notes}
             placeholder="Notes"
             onChange={(value) => setForm((previous) => ({ ...previous, notes: value }))}
           />
           <Button
+            id="reservation-create"
+            name="reservationCreate"
             variant="primary"
             fullWidth
             disabled={submitInFlight}
@@ -281,6 +297,8 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
                 </div>
               </div>
               <Button
+                id={`reservation-set-active-${reservation.reservation_id}`}
+                name={`reservationSetActive-${reservation.reservation_id}`}
                 variant={activeReservationId === reservation.reservation_id ? "primary" : "secondary"}
                 size="small"
                 onClick={() => activateReservationOrderContext(reservation)}
@@ -294,6 +312,8 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {reservation.table_id ? (
                     <Button
+                      id={`reservation-continue-order-${reservation.reservation_id}`}
+                      name={`reservationContinueOrder-${reservation.reservation_id}`}
                       size="small"
                       variant="primary"
                       onClick={() => {
@@ -307,6 +327,8 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
                   {statusActionMap[reservation.status].map((nextStatus) => (
                     <Button
                       key={nextStatus}
+                      id={`reservation-status-${reservation.reservation_id}-${nextStatus.toLowerCase()}`}
+                      name={`reservationStatus-${reservation.reservation_id}-${nextStatus.toLowerCase()}`}
                       size="small"
                       variant={nextStatus === "CANCELLED" || nextStatus === "NO_SHOW" ? "danger" : "secondary"}
                       onClick={() => {
@@ -334,6 +356,8 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <select
+                    id={`reservation-table-assign-${reservation.reservation_id}`}
+                    name={`reservationTableAssign-${reservation.reservation_id}`}
                     value={reservation.table_id ? String(reservation.table_id) : ""}
                     onChange={(event) => {
                       const nextTableId = event.target.value ? Number(event.target.value) : null;

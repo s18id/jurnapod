@@ -6,6 +6,8 @@ import { MIN_TOUCH_TARGET } from "../utils/constants.js";
 import { getTouchOptimizedStyles } from "../utils/touch.js";
 
 export interface ButtonProps {
+  id?: string;
+  name?: string;
   variant?: "primary" | "secondary" | "danger";
   size?: "small" | "medium" | "large";
   disabled?: boolean;
@@ -17,6 +19,8 @@ export interface ButtonProps {
 }
 
 export function Button({
+  id,
+  name,
   variant = "primary",
   size = "medium",
   disabled = false,
@@ -104,6 +108,8 @@ export function Button({
 
   return (
     <button
+      id={id}
+      name={name}
       type={type}
       disabled={disabled}
       onClick={onClick}

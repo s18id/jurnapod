@@ -176,6 +176,8 @@ export function SettingsPage({ context: _context, onLogout }: SettingsPageProps)
               </div>
             </div>
             <Button
+              id="settings-auto-refresh-toggle"
+              name="settingsAutoRefreshToggle"
               size="small"
               variant={autoRefreshEnabled ? "primary" : "secondary"}
               onClick={() => setAutoRefreshEnabled((enabled) => !enabled)}
@@ -194,6 +196,8 @@ export function SettingsPage({ context: _context, onLogout }: SettingsPageProps)
               </div>
             </div>
             <Button
+              id="settings-auto-pull-toggle"
+              name="settingsAutoPullToggle"
               size="small"
               variant={autoPullEnabled ? "primary" : "secondary"}
               onClick={() => setAutoPullEnabled((enabled) => !enabled)}
@@ -209,6 +213,8 @@ export function SettingsPage({ context: _context, onLogout }: SettingsPageProps)
               return (
                 <Button
                   key={ms}
+                  id={`settings-auto-pull-interval-${ms}`}
+                  name={`settingsAutoPullInterval-${ms}`}
                   size="small"
                   variant={isActive ? "primary" : "secondary"}
                   disabled={!autoPullEnabled}
@@ -259,6 +265,8 @@ export function SettingsPage({ context: _context, onLogout }: SettingsPageProps)
           <span style={valueStyles}>Pull to rebuild local catalog</span>
         </div>
         <Button
+          id="settings-refresh-catalog"
+          name="settingsRefreshCatalog"
           variant="secondary"
           fullWidth
           onClick={() => {
@@ -273,7 +281,7 @@ export function SettingsPage({ context: _context, onLogout }: SettingsPageProps)
       <section style={sectionStyles}>
         <h2 style={sectionTitleStyles}>Account</h2>
         
-        <Button variant="danger" onClick={onLogout} style={{ width: "100%" }}>
+        <Button id="settings-logout" name="settingsLogout" variant="danger" onClick={onLogout} style={{ width: "100%" }}>
           Logout
         </Button>
       </section>

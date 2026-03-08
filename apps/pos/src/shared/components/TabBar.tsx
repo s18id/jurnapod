@@ -91,6 +91,8 @@ export function TabBar({
         return (
           <button
             key={tab.id}
+            id={`tab-${tab.id}`}
+            name={`tab-${tab.id}`}
             type="button"
             onClick={() => onTabChange(tab.id)}
             style={tabButtonStyles(isActive)}

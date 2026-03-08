@@ -51,6 +51,8 @@ export function CheckoutForm({
           onChange={onPaymentMethodChange}
         />
         <Input
+          id="checkout-paid-amount"
+          name="checkoutPaidAmount"
           type="number"
           value={totals.paid_total}
           onChange={(val) => onPaidAmountChange(normalizeMoney(Number(val) || 0))}
@@ -70,6 +72,8 @@ export function CheckoutForm({
       ) : null}
 
       <Button
+        id="checkout-complete-sale"
+        name="checkoutCompleteSale"
         variant="primary"
         onClick={onComplete}
         disabled={!canComplete || completeInFlight}

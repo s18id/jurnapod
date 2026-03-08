@@ -41,6 +41,7 @@ export function ProductSearch({ value, onChange }: ProductSearchProps): JSX.Elem
       </label>
       <Input
         id="product-search"
+        name="productSearch"
         value={localValue}
         onChange={setLocalValue}
         placeholder="Search by name or SKU"

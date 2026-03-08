@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { expect, test } from "@playwright/test";
+import { E2E_SELECTORS } from "./selectors.js";
 
 const ACCESS_TOKEN_STORAGE_KEY = "jurnapod_pos_access_token";
 const CATALOG_VERSION = 10;
@@ -107,8 +108,8 @@ async function setupAuthenticatedSession(page: import("@playwright/test").Page):
 async function primeCatalog(page: import("@playwright/test").Page): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await page.goto("/settings");
-    await page.getByRole("button", { name: "Refresh Catalog Now" }).click();
-    await expect(page.getByRole("button", { name: "Refresh Catalog Now" })).toBeVisible();
+    await page.locator(E2E_SELECTORS.settings.refreshCatalog).click();
+    await expect(page.locator(E2E_SELECTORS.settings.refreshCatalog)).toBeVisible();
     await page.goto("/products");
     if (await page.getByText("Americano").first().isVisible()) {
       return;
@@ -136,7 +137,7 @@ test("login + sync pull works with mocked API", async ({ page }) => {
 
   await page.goto("/products");
   await expect(page.getByText("Americano")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Add" }).first()).toBeVisible();
+  await expect(page.locator(E2E_SELECTORS.products.addAmericano)).toBeVisible();
 });
 
 test("dine-in flow blocks product add until table selected", async ({ page }) => {
@@ -144,14 +145,14 @@ test("dine-in flow blocks product add until table selected", async ({ page }) =>
   await primeCatalog(page);
 
   await page.goto("/products");
-  await page.getByRole("button", { name: "Dine-in" }).click();
-  await page.getByRole("button", { name: "Add" }).first().click();
+  await page.locator(E2E_SELECTORS.products.serviceTypeDineIn).click();
+  await page.locator(E2E_SELECTORS.products.addAmericano).click();
   await expect(page.getByText("Select a table from the Tables page before adding items for dine-in.")).toBeVisible();
 
   await page.goto("/tables");
-  await page.getByRole("button", { name: "Use table" }).first().click();
+  await page.locator(E2E_SELECTORS.tables.anyAction).first().click();
   await expect(page).toHaveURL(/\/products$/);
 
-  await page.getByRole("button", { name: "Add" }).first().click();
+  await page.locator(E2E_SELECTORS.products.addAmericano).click();
   await expect(page.getByText("Cart: 1")).toBeVisible();
 });

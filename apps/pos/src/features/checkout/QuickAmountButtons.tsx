@@ -35,6 +35,8 @@ export function QuickAmountButtons({ total, onSelectAmount }: QuickAmountButtons
       {quickAmounts.map((amount) => (
         <Button
           key={amount}
+          id={`checkout-quick-amount-${amount}`}
+          name={`checkoutQuickAmount-${amount}`}
           size="small"
           variant="secondary"
           onClick={() => onSelectAmount(amount)}

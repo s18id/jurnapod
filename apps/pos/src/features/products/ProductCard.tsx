@@ -21,6 +21,8 @@ export function ProductCard({
   onRemove, 
   canRemove = true 
 }: ProductCardProps): JSX.Element {
+  const selectorSuffix = (product.sku ?? String(product.item_id)).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
   return (
     <Card padding="small">
       <div
@@ -43,6 +45,8 @@ export function ProductCard({
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               {onRemove && (
                 <Button 
+                  id={`product-remove-${selectorSuffix}`}
+                  name={`productRemove-${selectorSuffix}`}
                   size="small" 
                   variant="secondary" 
                   onClick={onRemove}
@@ -67,6 +71,8 @@ export function ProductCard({
                 {quantity}
               </span>
               <Button 
+                id={`product-add-${selectorSuffix}`}
+                name={`productAdd-${selectorSuffix}`}
                 size="small" 
                 variant="primary" 
                 onClick={onAdd}
@@ -77,7 +83,13 @@ export function ProductCard({
             </div>
           ) : (
             // Show simple Add button when not in cart
-            <Button size="small" variant="primary" onClick={onAdd}>
+            <Button
+              id={`product-add-${selectorSuffix}`}
+              name={`productAdd-${selectorSuffix}`}
+              size="small"
+              variant="primary"
+              onClick={onAdd}
+            >
               Add
             </Button>
           )}

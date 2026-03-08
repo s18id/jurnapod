@@ -15,8 +15,10 @@ function getAllowedOrigins(): string[] {
     // Development: Allow local Vite dev servers
     return [
       "http://localhost:3002",  // Backoffice (Vite)
+      "http://localhost:4173",  // POS (E2E)
       "http://localhost:5173",  // POS (Vite)
       "http://127.0.0.1:3002",  // Backoffice (alternative)
+      "http://127.0.0.1:4173",  // POS (E2E alternative)
       "http://127.0.0.1:5173",  // POS (alternative)
     ];
   }

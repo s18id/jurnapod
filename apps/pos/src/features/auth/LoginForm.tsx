@@ -66,23 +66,31 @@ export function LoginForm({
 
         <div style={{ display: "grid", gap: 10 }}>
           <Input
+            id="login-company-code"
+            name="companyCode"
             value={companyCode}
             onChange={onCompanyCodeChange}
             placeholder="Company code"
           />
           <Input
+            id="login-email"
+            name="email"
             type="email"
             value={email}
             onChange={onEmailChange}
             placeholder="Email"
           />
           <Input
+            id="login-password"
+            name="password"
             type="password"
             value={password}
             onChange={onPasswordChange}
             placeholder="Password"
           />
           <Button
+            id="login-submit"
+            name="loginSubmit"
             variant="primary"
             onClick={() => {
               void onLogin();
@@ -93,6 +101,8 @@ export function LoginForm({
           </Button>
           {googleEnabled ? (
             <Button
+              id="login-google-submit"
+              name="loginGoogleSubmit"
               variant="secondary"
               onClick={onGoogleLogin}
               disabled={loginInFlight || companyCode.trim().length === 0}

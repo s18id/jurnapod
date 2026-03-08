@@ -350,6 +350,8 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
                 return (
                   <button
                     key={item.id}
+                    id={`header-nav-${item.id}`}
+                    name={`headerNav-${item.id}`}
                     type="button"
                     onClick={() => navigate(item.path)}
                     style={{

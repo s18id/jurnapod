@@ -66,13 +66,13 @@ export function ServiceSwitchModal({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title={title}>
+    <Modal isOpen={isOpen} onClose={handleClose} title={title} titleId="service-switch-modal-title">
       <div className="service-switch-modal-content">
         <p className="service-switch-message">{getMessage()}</p>
 
         {isDineInSwitch && (
           <div className="table-selection">
-            <h3 className="table-selection-title">Select a Table</h3>
+            <h3 id="service-switch-table-title" className="table-selection-title">Select a Table</h3>
             {availableTablesForSelection.length === 0 ? (
               <p className="no-tables-message">
                 No available tables. Please free up a table or use takeaway mode.
@@ -82,6 +82,8 @@ export function ServiceSwitchModal({
                 {availableTablesForSelection.map((table) => (
                   <button
                     key={table.table_id}
+                    id={`service-switch-table-${table.table_id}`}
+                    name={`serviceSwitchTable-${table.table_id}`}
                     type="button"
                     className={`table-button ${selectedTableId === table.table_id ? "selected" : ""}`}
                     onClick={() => setSelectedTableId(table.table_id)}
@@ -100,6 +102,8 @@ export function ServiceSwitchModal({
             Cancel
           </Button>
           <Button
+            id="service-switch-confirm"
+            name="serviceSwitchConfirm"
             variant="primary"
             onClick={handleConfirm}
             fullWidth

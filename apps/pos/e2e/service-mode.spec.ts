@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { expect, test } from "@playwright/test";
+import { E2E_SELECTORS } from "./selectors.js";
 
 const ACCESS_TOKEN_STORAGE_KEY = "jurnapod_pos_access_token";
 const CATALOG_VERSION = 10;
@@ -123,8 +124,8 @@ async function setupAuthenticatedSession(page: import("@playwright/test").Page):
 async function primeCatalog(page: import("@playwright/test").Page): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await page.goto("/settings");
-    await page.getByRole("button", { name: "Refresh Catalog Now" }).click();
-    await expect(page.getByRole("button", { name: "Refresh Catalog Now" })).toBeVisible();
+    await page.locator(E2E_SELECTORS.settings.refreshCatalog).click();
+    await expect(page.locator(E2E_SELECTORS.settings.refreshCatalog)).toBeVisible();
     await page.goto("/products");
 
     if (await page.getByText("Coffee").first().isVisible()) {
@@ -136,7 +137,7 @@ async function primeCatalog(page: import("@playwright/test").Page): Promise<void
 }
 
 async function addCoffee(page: import("@playwright/test").Page): Promise<void> {
-  await page.getByRole("button", { name: "Add" }).first().click();
+  await page.locator(E2E_SELECTORS.products.addCoffee).click();
 }
 
 test("service mode page is accessible and shows takeaway/dine-in buttons", async ({ page }) => {
@@ -144,16 +145,16 @@ test("service mode page is accessible and shows takeaway/dine-in buttons", async
   await page.goto("/service-mode");
 
   await expect(page).toHaveURL(/\/service-mode$/);
-  await expect(page.getByRole("heading", { name: /select service mode/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /takeaway/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /dine-in/i })).toBeVisible();
+  await expect(page.locator(E2E_SELECTORS.serviceMode.title)).toBeVisible();
+  await expect(page.locator(E2E_SELECTORS.serviceMode.takeaway)).toBeVisible();
+  await expect(page.locator(E2E_SELECTORS.serviceMode.dineIn)).toBeVisible();
 });
 
 test("clicking takeaway starts new takeaway order", async ({ page }) => {
   await setupAuthenticatedSession(page);
   await page.goto("/service-mode");
 
-  await page.getByRole("button", { name: /takeaway/i }).click();
+  await page.locator(E2E_SELECTORS.serviceMode.takeaway).click();
 
   await expect(page).toHaveURL(/\/products$/);
   await expect(page.getByText(/service mode/i)).toBeVisible();
@@ -163,7 +164,7 @@ test("clicking dine-in navigates to tables page", async ({ page }) => {
   await setupAuthenticatedSession(page);
   await page.goto("/service-mode");
 
-  await page.getByRole("button", { name: /dine-in/i }).click();
+  await page.locator(E2E_SELECTORS.serviceMode.dineIn).click();
 
   await expect(page).toHaveURL(/\/tables$/);
 });
@@ -174,10 +175,10 @@ test("service switch from takeaway to dine-in shows confirmation modal", async (
 
   await expect(page.getByText(/start order/i)).toBeVisible();
   await addCoffee(page);
-  await page.getByRole("button", { name: /^dine-in$/i }).click();
+  await page.locator(E2E_SELECTORS.products.serviceTypeDineIn).click();
 
-  await expect(page.getByRole("heading", { name: /switch to dine-in/i })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /select a table/i })).toBeVisible();
+  await expect(page.locator(E2E_SELECTORS.serviceSwitchModal.title)).toContainText("Switch to Dine-In");
+  await expect(page.locator(E2E_SELECTORS.serviceSwitchModal.tableTitle)).toBeVisible();
 });
 
 test("service switch from dine-in to takeaway shows confirmation modal", async ({ page }) => {
@@ -185,13 +186,13 @@ test("service switch from dine-in to takeaway shows confirmation modal", async (
   await primeCatalog(page);
 
   await page.goto("/tables");
-  await page.getByRole("button", { name: /Use table|Resume current order|Resume table order|Resume occupied table/ }).first().click();
+  await page.locator(E2E_SELECTORS.tables.anyAction).first().click();
   await expect(page).toHaveURL(/\/products$/);
-  await page.getByRole("button", { name: /^dine-in$/i }).click();
+  await page.locator(E2E_SELECTORS.products.serviceTypeDineIn).click();
   await addCoffee(page);
-  await page.getByRole("button", { name: /^takeaway$/i }).click();
+  await page.locator(E2E_SELECTORS.products.serviceTypeTakeaway).click();
 
-  await expect(page.getByRole("heading", { name: /switch to takeaway/i })).toBeVisible();
+  await expect(page.locator(E2E_SELECTORS.serviceSwitchModal.title)).toContainText("Switch to Takeaway");
 });
 
 test("dine-in blocks adding items without table selection", async ({ page }) => {
@@ -199,7 +200,7 @@ test("dine-in blocks adding items without table selection", async ({ page }) => 
   await primeCatalog(page);
 
   await expect(page.getByText(/start order/i)).toBeVisible();
-  await page.getByRole("button", { name: /^dine-in$/i }).click();
+  await page.locator(E2E_SELECTORS.products.serviceTypeDineIn).click();
   await addCoffee(page);
 
   await expect(page.getByText(/select a table.*before adding items/i)).toBeVisible();
@@ -210,12 +211,12 @@ test("complete takeaway flow: service mode -> products -> cart -> checkout", asy
   await primeCatalog(page);
   await page.goto("/service-mode");
 
-  await page.getByRole("button", { name: /takeaway/i }).click();
+  await page.locator(E2E_SELECTORS.serviceMode.takeaway).click();
   await expect(page).toHaveURL(/\/products$/);
 
-  await page.getByRole("button", { name: "Add" }).first().click();
+  await page.locator(E2E_SELECTORS.products.addCoffee).click();
 
-  await page.getByRole("button", { name: /continue to cart/i }).click();
+  await page.locator(E2E_SELECTORS.products.continueToCart).click();
   await expect(page).toHaveURL(/\/cart$/);
   await expect(page.getByText(/Service:\s*TAKEAWAY/i)).toBeVisible();
 });
@@ -227,13 +228,13 @@ test("can increase and decrease quantity from products page", async ({ page }) =
   await expect(page.getByText(/start order/i)).toBeVisible();
   await addCoffee(page);
 
-  await expect(page.getByRole("button", { name: /Cart \(1\)/ })).toBeVisible();
-  await page.getByRole("button", { name: "+" }).first().click();
-  await expect(page.getByRole("button", { name: /Cart \(2\)/ })).toBeVisible();
-  await page.getByRole("button", { name: "−" }).first().click();
-  await expect(page.getByRole("button", { name: /Cart \(1\)/ })).toBeVisible();
-  await page.getByRole("button", { name: "−" }).first().click();
-  await expect(page.getByRole("button", { name: /Cart$/ })).toBeVisible();
+  await expect(page.locator(E2E_SELECTORS.headerNav.cart)).toContainText("(1)");
+  await page.locator(E2E_SELECTORS.products.addCoffee).click();
+  await expect(page.locator(E2E_SELECTORS.headerNav.cart)).toContainText("(2)");
+  await page.locator(E2E_SELECTORS.products.removeCoffee).click();
+  await expect(page.locator(E2E_SELECTORS.headerNav.cart)).toContainText("(1)");
+  await page.locator(E2E_SELECTORS.products.removeCoffee).click();
+  await expect(page.locator(E2E_SELECTORS.headerNav.cart)).toBeVisible();
 });
 
 test("resume active order button appears when order exists", async ({ page }) => {
@@ -243,7 +244,7 @@ test("resume active order button appears when order exists", async ({ page }) =>
   await addCoffee(page);
   await page.goto("/service-mode");
 
-  await expect(page.getByRole("button", { name: /resume active order/i })).toBeVisible();
-  await page.getByRole("button", { name: /resume active order/i }).click();
+  await expect(page.locator(E2E_SELECTORS.serviceMode.resumeActiveOrder)).toBeVisible();
+  await page.locator(E2E_SELECTORS.serviceMode.resumeActiveOrder).click();
   await expect(page).toHaveURL(/\/products$/);
 });

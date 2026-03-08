@@ -204,6 +204,8 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
         <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>SERVICE MODE</div>
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <Button
+            id="service-type-takeaway"
+            name="serviceTypeTakeaway"
             variant={activeOrderContext.service_type === "TAKEAWAY" ? "primary" : "secondary"}
             size="small"
             onClick={() => handleServiceSwitch("TAKEAWAY")}
@@ -211,13 +213,21 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
             Takeaway
           </Button>
           <Button
+            id="service-type-dine-in"
+            name="serviceTypeDineIn"
             variant={activeOrderContext.service_type === "DINE_IN" ? "primary" : "secondary"}
             size="small"
             onClick={() => handleServiceSwitch("DINE_IN")}
           >
             Dine-in
           </Button>
-          <Button variant="secondary" size="small" onClick={() => navigate(routes.tables.path)}>
+          <Button
+            id="open-tables"
+            name="openTables"
+            variant="secondary"
+            size="small"
+            onClick={() => navigate(routes.tables.path)}
+          >
             Open tables
           </Button>
         </div>
@@ -282,6 +292,8 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
           </div>
         ) : null}
         <Button
+          id="continue-to-cart"
+          name="continueToCart"
           variant="primary"
           fullWidth
           style={{ marginTop: 10 }}

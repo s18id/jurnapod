@@ -188,6 +188,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
         <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700 }}>Cart</h1>
         {cartLines.length > 0 && (
           <Button
+            id="cart-clear-all"
+            name="cartClearAll"
             variant="secondary"
             size="small"
             onClick={() => {
@@ -236,6 +238,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             </div>
             <div>
               <Button
+                id="cart-reload-latest-order"
+                name="cartReloadLatestOrder"
                 size="small"
                 variant="secondary"
                 onClick={() => {
@@ -266,6 +270,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
           </div>
           <div>
             <Button
+              id="cart-finalize-order"
+              name="cartFinalizeOrder"
               size="small"
               variant={activeOrderContext.is_finalized ? "secondary" : "primary"}
               disabled={cartLines.length === 0}
@@ -302,6 +308,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             <div style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>Transfer table (unpaid order)</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <select
+                id="cart-transfer-target-table"
+                name="cartTransferTargetTable"
                 value={transferTargetTableId}
                 onChange={(event) => setTransferTargetTableId(event.target.value)}
                 style={{
@@ -321,6 +329,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                 ))}
               </select>
               <Button
+                id="cart-move-table"
+                name="cartMoveTable"
                 size="small"
                 variant="secondary"
                 disabled={transferInFlight || !transferTargetTableId || !currentActiveOrderId}
@@ -413,6 +423,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             </div>
             <div style={{ display: "grid", gap: 8 }}>
               <select
+                id="cart-cancel-item-id"
+                name="cartCancelItemId"
                 value={cancelLineItemId}
                 onChange={(event) => {
                   setCancelLineItemId(event.target.value);
@@ -435,6 +447,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                 ))}
               </select>
               <input
+                id="cart-cancel-quantity"
+                name="cartCancelQuantity"
                 type="number"
                 min={1}
                 max={selectedCancelableMaxQty}
@@ -453,6 +467,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                 }}
               />
               <textarea
+                id="cart-cancel-reason"
+                name="cartCancelReason"
                 value={cancelReason}
                 onChange={(event) => {
                   setCancelReason(event.target.value);
@@ -472,6 +488,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
               />
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <Button
+                  id="cart-confirm-cancellation"
+                  name="cartConfirmCancellation"
                   size="small"
                   variant="danger"
                   disabled={cancelInFlight}
@@ -551,6 +569,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
         <footer style={{ paddingTop: "16px", borderTop: "1px solid #e5e7eb" }}>
           <CartSummary totals={cartTotals} />
           <Button
+            id="cart-proceed-payment"
+            name="cartProceedPayment"
             variant="primary"
             fullWidth
             style={{ marginTop: 12 }}

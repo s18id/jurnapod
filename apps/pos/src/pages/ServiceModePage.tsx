@@ -50,7 +50,7 @@ export function ServiceModePage({ context }: ServiceModePageProps): JSX.Element 
     <Container maxWidth="full">
       <div className="service-mode-page">
         <div className="service-mode-header">
-          <h1 className="service-mode-title">Select Service Mode</h1>
+          <h1 id="service-mode-title" className="service-mode-title">Select Service Mode</h1>
           <p className="service-mode-subtitle">
             Choose how you want to serve this customer
           </p>
@@ -58,6 +58,8 @@ export function ServiceModePage({ context }: ServiceModePageProps): JSX.Element 
 
         <div className="service-mode-buttons">
           <button
+            id="service-mode-takeaway"
+            name="serviceModeTakeaway"
             type="button"
             className="service-mode-button service-mode-button--takeaway"
             onClick={handleTakeawayStart}
@@ -70,6 +72,8 @@ export function ServiceModePage({ context }: ServiceModePageProps): JSX.Element 
           </button>
 
           <button
+            id="service-mode-dine-in"
+            name="serviceModeDineIn"
             type="button"
             className="service-mode-button service-mode-button--dinein"
             onClick={handleDineInStart}
@@ -83,6 +87,8 @@ export function ServiceModePage({ context }: ServiceModePageProps): JSX.Element 
 
           {hasActiveOrder && (
             <button
+              id="service-mode-resume-active-order"
+              name="serviceModeResumeActiveOrder"
               type="button"
               className="service-mode-button service-mode-button--resume"
               onClick={handleResumeActive}
@@ -98,6 +104,8 @@ export function ServiceModePage({ context }: ServiceModePageProps): JSX.Element 
 
         <div className="service-mode-footer">
           <Button
+            id="service-mode-settings"
+            name="serviceModeSettings"
             variant="secondary"
             onClick={() => navigate(routes.settings.path)}
           >

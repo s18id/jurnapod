@@ -165,6 +165,8 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
                   </div>
                 ) : null}
                 <Button
+                  id={`table-action-${table.table_id}`}
+                  name={`tableAction-${table.table_id}`}
                   variant="primary"
                   fullWidth
                   style={{ marginTop: 8 }}
