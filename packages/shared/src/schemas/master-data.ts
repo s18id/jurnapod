@@ -194,7 +194,66 @@ export const FixedAssetCategoryUpdateRequestSchema = z
 
 export const SyncPullRequestQuerySchema = z.object({
   outlet_id: NumericIdSchema,
-  since_version: z.coerce.number().int().min(0).default(0)
+  since_version: z.coerce.number().int().min(0).default(0),
+  orders_cursor: z.coerce.number().int().min(0).optional()
+});
+
+export const SyncPullOpenOrderSchema = z.object({
+  order_id: z.string().uuid(),
+  company_id: NumericIdSchema,
+  outlet_id: NumericIdSchema,
+  service_type: z.enum(["TAKEAWAY", "DINE_IN"]),
+  source_flow: z.enum(["WALK_IN", "RESERVATION", "PHONE", "ONLINE", "MANUAL"]).optional(),
+  settlement_flow: z.enum(["IMMEDIATE", "DEFERRED", "SPLIT"]).optional(),
+  table_id: NumericIdSchema.nullable(),
+  reservation_id: NumericIdSchema.nullable(),
+  guest_count: z.number().int().positive().nullable(),
+  is_finalized: z.boolean(),
+  order_status: z.enum(["OPEN", "READY_TO_PAY", "COMPLETED", "CANCELLED"]),
+  order_state: z.enum(["OPEN", "CLOSED"]),
+  paid_amount: z.number().finite().min(0),
+  opened_at: z.string().datetime(),
+  closed_at: z.string().datetime().nullable(),
+  notes: z.string().nullable(),
+  updated_at: z.string().datetime()
+});
+
+export const SyncPullOpenOrderLineSchema = z.object({
+  order_id: z.string().uuid(),
+  company_id: NumericIdSchema,
+  outlet_id: NumericIdSchema,
+  item_id: NumericIdSchema,
+  sku_snapshot: z.string().nullable(),
+  name_snapshot: z.string().min(1),
+  item_type_snapshot: ItemTypeSchema,
+  unit_price_snapshot: z.number().finite().nonnegative(),
+  qty: z.number().positive(),
+  discount_amount: z.number().finite().min(0),
+  updated_at: z.string().datetime()
+});
+
+export const SyncPullOrderUpdateSchema = z.object({
+  update_id: z.string().uuid(),
+  order_id: z.string().uuid(),
+  company_id: NumericIdSchema,
+  outlet_id: NumericIdSchema,
+  base_order_updated_at: z.string().datetime().nullable(),
+  event_type: z.enum([
+    "SNAPSHOT_FINALIZED",
+    "ITEM_ADDED",
+    "ITEM_REMOVED",
+    "QTY_CHANGED",
+    "ITEM_CANCELLED",
+    "NOTES_CHANGED",
+    "ORDER_RESUMED",
+    "ORDER_CLOSED"
+  ]),
+  delta_json: z.string(),
+  actor_user_id: NumericIdSchema.nullable(),
+  device_id: z.string().min(1),
+  event_at: z.string().datetime(),
+  created_at: z.string().datetime(),
+  sequence_no: z.number().int().positive()
 });
 
 export const SyncPullItemSchema = z.object({
@@ -260,7 +319,11 @@ export const SyncPullPayloadSchema = z.object({
   items: z.array(SyncPullItemSchema),
   item_groups: z.array(SyncPullItemGroupSchema),
   prices: z.array(SyncPullPriceSchema),
-  config: SyncPullConfigSchema
+  config: SyncPullConfigSchema,
+  open_orders: z.array(SyncPullOpenOrderSchema).default([]),
+  open_order_lines: z.array(SyncPullOpenOrderLineSchema).default([]),
+  order_updates: z.array(SyncPullOrderUpdateSchema).default([]),
+  orders_cursor: z.number().int().min(0).default(0)
 });
 
 export const SyncPullResponseSchema = z.object({

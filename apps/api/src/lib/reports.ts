@@ -10,6 +10,11 @@ type PosTransactionRow = RowDataPacket & {
   outlet_id: number;
   client_tx_id: string;
   status: "COMPLETED" | "VOID" | "REFUND";
+  service_type: "TAKEAWAY" | "DINE_IN" | null;
+  table_id: number | null;
+  reservation_id: number | null;
+  guest_count: number | null;
+  order_status: "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED" | null;
   trx_at: Date;
   gross_total: number | string | null;
   paid_total: number | string | null;
@@ -279,6 +284,11 @@ export async function listPosTransactions(filter: PosTransactionFilter) {
                 pt.outlet_id,
                 pt.client_tx_id,
                 pt.status,
+                pt.service_type,
+                pt.table_id,
+                pt.reservation_id,
+                pt.guest_count,
+                pt.order_status,
                 pt.trx_at,
                 COALESCE(i.gross_total, 0) AS gross_total,
                 COALESCE(p.paid_total, 0) AS paid_total,
@@ -334,6 +344,11 @@ export async function listPosTransactions(filter: PosTransactionFilter) {
         outlet_id: Number(row.outlet_id),
         client_tx_id: row.client_tx_id,
         status: row.status,
+        service_type: row.service_type,
+        table_id: row.table_id != null ? Number(row.table_id) : null,
+        reservation_id: row.reservation_id != null ? Number(row.reservation_id) : null,
+        guest_count: row.guest_count != null ? Number(row.guest_count) : null,
+        order_status: row.order_status,
         trx_at: toIsoDateTime(row.trx_at),
         gross_total: toNumber(row.gross_total),
         paid_total: toNumber(row.paid_total),

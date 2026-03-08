@@ -22,6 +22,8 @@ export function SyncControls({
   return (
     <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
       <Button
+        id="sync-push-now"
+        name="syncPushNow"
         variant="primary"
         size="small"
         onClick={onPushSync}
@@ -30,6 +32,8 @@ export function SyncControls({
         {pushInFlight ? "Pushing..." : "Sync push now"}
       </Button>
       <Button
+        id="sync-pull-now"
+        name="syncPullNow"
         variant="primary"
         size="small"
         onClick={onPullSync}

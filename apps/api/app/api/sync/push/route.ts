@@ -4,7 +4,7 @@
 import { type ResultSetHeader } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { createHash } from "node:crypto";
-import { SyncPushPayloadSchema, SyncPushRequestSchema, type SyncPushResultItem } from "@jurnapod/shared";
+import { PosTransactionSchema, SyncPushPayloadSchema, SyncPushRequestSchema, type SyncPushResultItem } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { getRequestCorrelationId } from "../../../../src/lib/correlation-id";
@@ -71,6 +71,14 @@ type SyncPushTransactionPayload = {
   outlet_id: number;
   cashier_user_id: number;
   status: "COMPLETED" | "VOID" | "REFUND";
+  service_type?: "TAKEAWAY" | "DINE_IN";
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
   trx_at: string;
   items: Array<{
     item_id: number;
@@ -239,6 +247,14 @@ function canonicalizeTransactionForHash(tx: {
   outlet_id: number;
   cashier_user_id: number;
   status: "COMPLETED" | "VOID" | "REFUND";
+  service_type?: "TAKEAWAY" | "DINE_IN";
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
   trx_at: string;
   items: Array<{
     item_id: number;
@@ -261,6 +277,14 @@ function canonicalizeTransactionForHash(tx: {
     outlet_id: tx.outlet_id,
     cashier_user_id: tx.cashier_user_id,
     status: tx.status,
+    service_type: tx.service_type ?? "TAKEAWAY",
+    table_id: tx.table_id ?? null,
+    reservation_id: tx.reservation_id ?? null,
+    guest_count: tx.guest_count ?? null,
+    order_status: tx.order_status ?? "COMPLETED",
+    opened_at: tx.opened_at ? toMysqlDateTime(tx.opened_at) : null,
+    closed_at: tx.closed_at ? toMysqlDateTime(tx.closed_at) : null,
+    notes: tx.notes ?? null,
     trx_at: toMysqlDateTime(tx.trx_at),
     items: tx.items.map((item) => ({
       item_id: item.item_id,
@@ -778,12 +802,14 @@ const syncPushOutletGuardSchema = SyncPushRequestSchema.pick({
   outlet_id: true
 });
 
-const syncPushTransactionSchemaWithOffset = SyncPushRequestSchema.shape.transactions.element.extend({
+const syncPushTransactionSchemaWithOffset = PosTransactionSchema.extend({
   trx_at: z.string().datetime({ offset: true })
 });
 
 const syncPushRequestSchemaWithOffset = SyncPushRequestSchema.extend({
-  transactions: z.array(syncPushTransactionSchemaWithOffset).min(1)
+  transactions: z.array(syncPushTransactionSchemaWithOffset).default([])
+}).refine((value) => value.transactions.length > 0 || (value.order_updates?.length ?? 0) > 0, {
+  message: "At least one transaction or order_update is required"
 });
 
 const invalidJsonGuardError = new ZodError([
@@ -819,6 +845,16 @@ export const POST = withAuth(
       const dbPool = getDbPool();
       const dbConnection = await dbPool.getConnection();
       const results: SyncPushResultItem[] = [];
+      const orderUpdateResults: Array<{
+        update_id: string;
+        result: "OK" | "DUPLICATE" | "ERROR";
+        message?: string;
+      }> = [];
+      const itemCancellationResults: Array<{
+        cancellation_id: string;
+        result: "OK" | "DUPLICATE" | "ERROR";
+        message?: string;
+      }> = [];
       try {
         const [companyTaxRates, defaultTaxRates] = await Promise.all([
           listCompanyTaxRates(dbConnection, auth.companyId),
@@ -852,7 +888,15 @@ export const POST = withAuth(
             continue;
           }
 
+          if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && !tx.table_id) {
+            results.push(toErrorResult(tx.client_tx_id, "DINE_IN requires table_id"));
+            logTransactionResult("ERROR");
+            continue;
+          }
+
           const trxAtCanonical = toMysqlDateTime(tx.trx_at);
+          const openedAtCanonical = tx.opened_at ? toMysqlDateTime(tx.opened_at) : trxAtCanonical;
+          const closedAtCanonical = tx.closed_at ? toMysqlDateTime(tx.closed_at) : trxAtCanonical;
           const payloadSha256 = computePayloadSha256(canonicalizeTransactionForHash(tx));
           const payloadSha256Legacy = computePayloadSha256(canonicalizeTransactionForLegacyHash(tx));
           let acceptedContextForFailureAudit: AcceptedSyncPushContext | null = null;
@@ -873,16 +917,32 @@ export const POST = withAuth(
                  cashier_user_id,
                  client_tx_id,
                  status,
+                 service_type,
+                 table_id,
+                 reservation_id,
+                 guest_count,
+                 order_status,
+                 opened_at,
+                 closed_at,
+                 notes,
                  trx_at,
                  payload_sha256,
-                 payload_hash_version
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                  payload_hash_version
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 tx.company_id,
                 tx.outlet_id,
                 tx.cashier_user_id,
                 tx.client_tx_id,
                 tx.status,
+                tx.service_type ?? "TAKEAWAY",
+                tx.table_id ?? null,
+                tx.reservation_id ?? null,
+                tx.guest_count ?? null,
+                tx.order_status ?? "COMPLETED",
+                openedAtCanonical,
+                closedAtCanonical,
+                tx.notes ?? null,
                 trxAtCanonical,
                 payloadSha256,
                 PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT
@@ -897,7 +957,7 @@ export const POST = withAuth(
 
             if (tx.items.length > 0) {
               const itemPlaceholders = tx.items.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-              const itemValues = tx.items.flatMap((item, index) => [
+              const itemValues = (tx.items as SyncPushTransactionPayload["items"]).flatMap((item, index) => [
                 posTransactionId,
                 tx.company_id,
                 tx.outlet_id,
@@ -925,7 +985,7 @@ export const POST = withAuth(
 
             if (tx.payments.length > 0) {
               const paymentPlaceholders = tx.payments.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
-              const paymentValues = tx.payments.flatMap((payment, index) => [
+              const paymentValues = (tx.payments as SyncPushTransactionPayload["payments"]).flatMap((payment, index) => [
                 posTransactionId,
                 tx.company_id,
                 tx.outlet_id,
@@ -974,6 +1034,30 @@ export const POST = withAuth(
                    amount
                  ) VALUES ${taxPlaceholders}`,
                 taxValues
+              );
+            }
+
+            if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && tx.table_id) {
+              await dbConnection.execute(
+                `UPDATE outlet_tables
+                 SET status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
+                 WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+                [tx.company_id, tx.outlet_id, tx.table_id]
+              );
+            }
+
+            if (tx.reservation_id) {
+              await dbConnection.execute(
+                `UPDATE reservations
+                 SET linked_order_id = ?,
+                     status = CASE
+                       WHEN status IN ('CANCELLED', 'NO_SHOW', 'COMPLETED') THEN status
+                       ELSE 'COMPLETED'
+                     END,
+                     seated_at = COALESCE(seated_at, CURRENT_TIMESTAMP),
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+                [tx.client_tx_id, tx.company_id, tx.outlet_id, tx.reservation_id]
               );
             }
 
@@ -1146,11 +1230,270 @@ export const POST = withAuth(
             logTransactionResult("ERROR");
           }
         }
+
+        for (const update of input.order_updates ?? []) {
+          if (update.company_id !== auth.companyId) {
+            orderUpdateResults.push({
+              update_id: update.update_id,
+              result: "ERROR",
+              message: "company_id mismatch"
+            });
+            continue;
+          }
+          if (update.outlet_id !== input.outlet_id) {
+            orderUpdateResults.push({
+              update_id: update.update_id,
+              result: "ERROR",
+              message: "outlet_id mismatch"
+            });
+            continue;
+          }
+
+          const snapshot = (input.active_orders ?? []).find((row) => row.order_id === update.order_id);
+          if (!snapshot) {
+            orderUpdateResults.push({
+              update_id: update.update_id,
+              result: "ERROR",
+              message: "active_order snapshot missing"
+            });
+            continue;
+          }
+
+          const cancellation = (input.item_cancellations ?? []).find((row) => row.update_id === update.update_id);
+          if (cancellation) {
+            if (cancellation.company_id !== update.company_id || cancellation.outlet_id !== update.outlet_id) {
+              orderUpdateResults.push({
+                update_id: update.update_id,
+                result: "ERROR",
+                message: "item_cancellation scope mismatch"
+              });
+              itemCancellationResults.push({
+                cancellation_id: cancellation.cancellation_id,
+                result: "ERROR",
+                message: "item_cancellation scope mismatch"
+              });
+              continue;
+            }
+            if (cancellation.order_id !== update.order_id) {
+              orderUpdateResults.push({
+                update_id: update.update_id,
+                result: "ERROR",
+                message: "item_cancellation order_id mismatch"
+              });
+              itemCancellationResults.push({
+                cancellation_id: cancellation.cancellation_id,
+                result: "ERROR",
+                message: "item_cancellation order_id mismatch"
+              });
+              continue;
+            }
+          }
+
+          try {
+            await dbConnection.beginTransaction();
+
+            await dbConnection.execute(
+              `INSERT INTO pos_order_snapshots (
+                 order_id,
+                 company_id,
+                 outlet_id,
+                 service_type,
+                 source_flow,
+                 settlement_flow,
+                 table_id,
+                 reservation_id,
+                 guest_count,
+                 is_finalized,
+                 order_status,
+                 order_state,
+                 paid_amount,
+                 opened_at,
+                 closed_at,
+                 notes,
+                 updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE
+                  service_type = VALUES(service_type),
+                  source_flow = VALUES(source_flow),
+                  settlement_flow = VALUES(settlement_flow),
+                  table_id = VALUES(table_id),
+                 reservation_id = VALUES(reservation_id),
+                 guest_count = VALUES(guest_count),
+                 is_finalized = VALUES(is_finalized),
+                 order_status = VALUES(order_status),
+                 order_state = VALUES(order_state),
+                 paid_amount = VALUES(paid_amount),
+                 opened_at = VALUES(opened_at),
+                 closed_at = VALUES(closed_at),
+                 notes = VALUES(notes),
+                 updated_at = VALUES(updated_at)`,
+              [
+                snapshot.order_id,
+                snapshot.company_id,
+                snapshot.outlet_id,
+                snapshot.service_type,
+                snapshot.source_flow ?? "WALK_IN",
+                snapshot.settlement_flow ?? (snapshot.service_type === "DINE_IN" ? "DEFERRED" : "IMMEDIATE"),
+                snapshot.table_id,
+                snapshot.reservation_id,
+                snapshot.guest_count,
+                snapshot.is_finalized ? 1 : 0,
+                snapshot.order_status,
+                snapshot.order_state,
+                snapshot.paid_amount,
+                toMysqlDateTime(snapshot.opened_at),
+                snapshot.closed_at ? toMysqlDateTime(snapshot.closed_at) : null,
+                snapshot.notes,
+                toMysqlDateTime(snapshot.updated_at)
+              ]
+            );
+
+            await dbConnection.execute(
+              `DELETE FROM pos_order_snapshot_lines
+               WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
+              [snapshot.order_id, snapshot.company_id, snapshot.outlet_id]
+            );
+
+            if (snapshot.lines.length > 0) {
+              const placeholders = snapshot.lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+              const values = snapshot.lines.flatMap((line) => [
+                snapshot.order_id,
+                snapshot.company_id,
+                snapshot.outlet_id,
+                line.item_id,
+                line.sku_snapshot,
+                line.name_snapshot,
+                line.item_type_snapshot,
+                line.unit_price_snapshot,
+                line.qty,
+                line.discount_amount,
+                toMysqlDateTime(line.updated_at)
+              ]);
+              await dbConnection.execute(
+                `INSERT INTO pos_order_snapshot_lines (
+                   order_id,
+                   company_id,
+                   outlet_id,
+                   item_id,
+                   sku_snapshot,
+                   name_snapshot,
+                   item_type_snapshot,
+                   unit_price_snapshot,
+                   qty,
+                   discount_amount,
+                   updated_at
+                 ) VALUES ${placeholders}`,
+                values
+              );
+            }
+
+            await dbConnection.execute(
+              `INSERT INTO pos_order_updates (
+                 update_id,
+                 order_id,
+                 company_id,
+                 outlet_id,
+                 base_order_updated_at,
+                 event_type,
+                 delta_json,
+                 actor_user_id,
+                 device_id,
+                 event_at,
+                 created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                update.update_id,
+                update.order_id,
+                update.company_id,
+                update.outlet_id,
+                update.base_order_updated_at ? toMysqlDateTime(update.base_order_updated_at) : null,
+                update.event_type,
+                update.delta_json,
+                update.actor_user_id,
+                update.device_id,
+                toMysqlDateTime(update.event_at),
+                toMysqlDateTime(update.created_at)
+              ]
+            );
+
+            if (cancellation) {
+              await dbConnection.execute(
+                `INSERT INTO pos_item_cancellations (
+                   cancellation_id,
+                   update_id,
+                   order_id,
+                   company_id,
+                   outlet_id,
+                   item_id,
+                   cancelled_quantity,
+                   reason,
+                   cancelled_by_user_id,
+                   cancelled_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+                [
+                  cancellation.cancellation_id,
+                  update.update_id,
+                  cancellation.order_id,
+                  cancellation.company_id,
+                  cancellation.outlet_id,
+                  cancellation.item_id,
+                  cancellation.cancelled_quantity,
+                  cancellation.reason,
+                  cancellation.cancelled_by_user_id,
+                  toMysqlDateTime(cancellation.cancelled_at)
+                ]
+              );
+            }
+
+            await dbConnection.commit();
+            orderUpdateResults.push({
+              update_id: update.update_id,
+              result: "OK"
+            });
+            if (cancellation) {
+              itemCancellationResults.push({
+                cancellation_id: cancellation.cancellation_id,
+                result: "OK"
+              });
+            }
+          } catch (error) {
+            await rollbackQuietly(dbConnection);
+            if (isMysqlError(error) && error.errno === MYSQL_DUPLICATE_ERROR_CODE) {
+              orderUpdateResults.push({
+                update_id: update.update_id,
+                result: "DUPLICATE"
+              });
+              if (cancellation) {
+                itemCancellationResults.push({
+                  cancellation_id: cancellation.cancellation_id,
+                  result: "DUPLICATE"
+                });
+              }
+            } else {
+              orderUpdateResults.push({
+                update_id: update.update_id,
+                result: "ERROR",
+                message: "order_update insert failed"
+              });
+              if (cancellation) {
+                itemCancellationResults.push({
+                  cancellation_id: cancellation.cancellation_id,
+                  result: "ERROR",
+                  message: "item_cancellation insert failed"
+                });
+              }
+            }
+          }
+        }
       } finally {
         dbConnection.release();
       }
 
-      const response = SyncPushPayloadSchema.parse({ results });
+      const response = SyncPushPayloadSchema.parse({
+        results,
+        order_update_results: orderUpdateResults,
+        item_cancellation_results: itemCancellationResults
+      });
 
       return successResponse(response, 200, withCorrelationHeaders(correlationId));
     } catch (error) {

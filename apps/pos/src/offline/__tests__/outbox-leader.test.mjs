@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createOutboxDrainLeader, outboxDrainStorageKey } from "../../../dist/offline/outbox-leader.js";
+import { createOutboxDrainLeader, outboxDrainStorageKey } from "../outbox-leader.ts";
 
 function createMemoryStorage() {
   const values = new Map();

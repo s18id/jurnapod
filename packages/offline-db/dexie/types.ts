@@ -7,9 +7,42 @@ export type LocalSaleStatus = "DRAFT" | "COMPLETED" | "VOID" | "REFUND";
 
 export type SaleSyncStatus = "LOCAL_ONLY" | "PENDING" | "SENT" | "FAILED";
 
-export type OutboxJobType = "SYNC_POS_TX";
+export type OrderServiceType = "TAKEAWAY" | "DINE_IN";
+
+export type SourceFlow = "WALK_IN" | "RESERVATION" | "PHONE" | "ONLINE" | "MANUAL";
+
+export type SettlementFlow = "IMMEDIATE" | "DEFERRED" | "SPLIT";
+
+export type OrderStatus = "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
+
+export type ActiveOrderState = "OPEN" | "CLOSED";
+
+export type OutboxJobType = "SYNC_POS_TX" | "SYNC_POS_ORDER_UPDATE";
 
 export type OutboxJobStatus = "PENDING" | "SENT" | "FAILED";
+
+export type OrderUpdateEventType =
+  | "SNAPSHOT_FINALIZED"
+  | "ITEM_ADDED"
+  | "ITEM_REMOVED"
+  | "QTY_CHANGED"
+  | "ITEM_CANCELLED"
+  | "NOTES_CHANGED"
+  | "ORDER_RESUMED"
+  | "ORDER_CLOSED";
+
+export type OrderUpdateSyncStatus = "PENDING" | "SENT" | "FAILED";
+
+export type OutletTableStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
+
+export type ReservationStatus =
+  | "BOOKED"
+  | "CONFIRMED"
+  | "ARRIVED"
+  | "SEATED"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "NO_SHOW";
 
 export interface ProductCacheRow {
   pk: string;
@@ -29,13 +62,116 @@ export interface ProductCacheRow {
   pulled_at: string;
 }
 
+export interface OutletTableRow {
+  pk: string;
+  table_id: number;
+  company_id: number;
+  outlet_id: number;
+  code: string;
+  name: string;
+  zone: string | null;
+  capacity: number | null;
+  status: OutletTableStatus;
+  updated_at: string;
+}
+
+export interface ReservationRow {
+  pk: string;
+  reservation_id: number;
+  company_id: number;
+  outlet_id: number;
+  table_id: number | null;
+  customer_name: string;
+  customer_phone: string | null;
+  guest_count: number;
+  reservation_at: string;
+  duration_minutes: number | null;
+  status: ReservationStatus;
+  notes: string | null;
+  linked_order_id: string | null;
+  created_at: string;
+  updated_at: string;
+  arrived_at: string | null;
+  seated_at: string | null;
+  cancelled_at: string | null;
+}
+
+export interface ActiveOrderRow {
+  pk: string;
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  service_type: OrderServiceType;
+  source_flow?: SourceFlow;
+  settlement_flow?: SettlementFlow;
+  table_id: number | null;
+  reservation_id: number | null;
+  guest_count: number | null;
+  is_finalized: boolean;
+  order_status: OrderStatus;
+  order_state: ActiveOrderState;
+  paid_amount: number;
+  opened_at: string;
+  closed_at: string | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+export interface ItemCancellationRow {
+  pk: string;
+  cancellation_id: string;
+  order_id: string;
+  item_id: number;
+  company_id: number;
+  outlet_id: number;
+  cancelled_quantity: number;
+  reason: string;
+  cancelled_by_user_id: number | null;
+  cancelled_at: string;
+  sync_status: "PENDING" | "SENT" | "FAILED";
+  sync_error: string | null;
+}
+
+export interface ActiveOrderLineRow {
+  pk: string;
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  item_id: number;
+  sku_snapshot: string | null;
+  name_snapshot: string;
+  item_type_snapshot: ProductItemType;
+  unit_price_snapshot: number;
+  qty: number;
+  discount_amount: number;
+  updated_at: string;
+}
+
 export interface SyncMetadataRow {
   pk: string;
   company_id: number;
   outlet_id: number;
   last_data_version: number;
+  orders_cursor?: number;
   last_pulled_at: string;
   updated_at: string;
+}
+
+export interface ActiveOrderUpdateRow {
+  pk: string;
+  update_id: string;
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  base_order_updated_at: string | null;
+  event_type: OrderUpdateEventType;
+  delta_json: string;
+  actor_user_id: number | null;
+  device_id: string;
+  event_at: string;
+  created_at: string;
+  sync_status: OrderUpdateSyncStatus;
+  sync_error: string | null;
 }
 
 export interface SyncScopeConfigRow {
@@ -55,6 +191,16 @@ export interface SaleRow {
   company_id: number;
   outlet_id: number;
   cashier_user_id: number;
+  service_type?: OrderServiceType;
+  source_flow?: SourceFlow;
+  settlement_flow?: SettlementFlow;
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: OrderStatus;
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
   status: LocalSaleStatus;
   sync_status: SaleSyncStatus;
   trx_at: string;
@@ -118,6 +264,12 @@ export interface CreateSaleDraftInput {
   company_id: number;
   outlet_id: number;
   cashier_user_id: number;
+  service_type?: OrderServiceType;
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: OrderStatus;
+  notes?: string | null;
   opened_at?: string;
 }
 
@@ -152,6 +304,14 @@ export interface CompleteSaleInput {
   items: CompleteSaleItemInput[];
   payments: CompleteSalePaymentInput[];
   totals: CompleteSaleTotalsInput;
+  service_type?: OrderServiceType;
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  order_status?: OrderStatus;
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
   trx_at?: string;
 }
 

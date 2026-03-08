@@ -3,7 +3,14 @@
 
 import { z } from "zod";
 import { type PosOfflineDb, posDb } from "@jurnapod/offline-db/dexie";
-import type { ProductCacheRow, SyncMetadataRow, SyncScopeConfigRow } from "@jurnapod/offline-db/dexie";
+import type {
+  ActiveOrderLineRow,
+  ActiveOrderRow,
+  ActiveOrderUpdateRow,
+  ProductCacheRow,
+  SyncMetadataRow,
+  SyncScopeConfigRow
+} from "@jurnapod/offline-db/dexie";
 
 const DEFAULT_SYNC_PULL_ENDPOINT = "/api/sync/pull";
 const inFlightPullsByScope = new Map<string, Promise<SyncPullIngestResult>>();
@@ -43,12 +50,74 @@ const SyncPullConfigSchema = z.object({
   payment_methods: z.array(z.string().min(1))
 });
 
+const SyncPullOpenOrderSchema = z.object({
+  order_id: z.string().uuid(),
+  company_id: z.coerce.number().int().positive(),
+  outlet_id: z.coerce.number().int().positive(),
+  service_type: z.enum(["TAKEAWAY", "DINE_IN"]),
+  source_flow: z.enum(["WALK_IN", "RESERVATION", "PHONE", "ONLINE", "MANUAL"]).optional(),
+  settlement_flow: z.enum(["IMMEDIATE", "DEFERRED", "SPLIT"]).optional(),
+  table_id: z.number().int().positive().nullable(),
+  reservation_id: z.number().int().positive().nullable(),
+  guest_count: z.number().int().positive().nullable(),
+  is_finalized: z.boolean(),
+  order_status: z.enum(["OPEN", "READY_TO_PAY", "COMPLETED", "CANCELLED"]),
+  order_state: z.enum(["OPEN", "CLOSED"]),
+  paid_amount: z.number().finite().min(0),
+  opened_at: z.string().datetime(),
+  closed_at: z.string().datetime().nullable(),
+  notes: z.string().nullable(),
+  updated_at: z.string().datetime()
+});
+
+const SyncPullOpenOrderLineSchema = z.object({
+  order_id: z.string().uuid(),
+  company_id: z.coerce.number().int().positive(),
+  outlet_id: z.coerce.number().int().positive(),
+  item_id: z.coerce.number().int().positive(),
+  sku_snapshot: z.string().nullable(),
+  name_snapshot: z.string().min(1),
+  item_type_snapshot: z.enum(["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"]),
+  unit_price_snapshot: z.number().finite().nonnegative(),
+  qty: z.number().positive(),
+  discount_amount: z.number().finite().min(0),
+  updated_at: z.string().datetime()
+});
+
+const SyncPullOrderUpdateSchema = z.object({
+  update_id: z.string().uuid(),
+  order_id: z.string().uuid(),
+  company_id: z.coerce.number().int().positive(),
+  outlet_id: z.coerce.number().int().positive(),
+  base_order_updated_at: z.string().datetime().nullable(),
+  event_type: z.enum([
+    "SNAPSHOT_FINALIZED",
+    "ITEM_ADDED",
+    "ITEM_REMOVED",
+    "QTY_CHANGED",
+    "ITEM_CANCELLED",
+    "NOTES_CHANGED",
+    "ORDER_RESUMED",
+    "ORDER_CLOSED"
+  ]),
+  delta_json: z.string(),
+  actor_user_id: z.number().int().positive().nullable(),
+  device_id: z.string().min(1),
+  event_at: z.string().datetime(),
+  created_at: z.string().datetime(),
+  sequence_no: z.number().int().positive()
+});
+
 const SyncPullResponseSchema = z.object({
   data_version: z.coerce.number().int().min(0),
   items: z.array(SyncPullItemSchema),
   item_groups: z.array(SyncPullItemGroupSchema),
   prices: z.array(SyncPullPriceSchema),
-  config: SyncPullConfigSchema
+  config: SyncPullConfigSchema,
+  open_orders: z.array(SyncPullOpenOrderSchema).default([]),
+  open_order_lines: z.array(SyncPullOpenOrderLineSchema).default([]),
+  order_updates: z.array(SyncPullOrderUpdateSchema).default([]),
+  orders_cursor: z.coerce.number().int().min(0).default(0)
 });
 
 type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;
@@ -249,6 +318,65 @@ function mapSyncPullToConfigRow(
   };
 }
 
+function mapSyncPullToOpenOrderRows(payload: SyncPullResponse): ActiveOrderRow[] {
+  return payload.open_orders.map((order) => ({
+    pk: order.order_id,
+    order_id: order.order_id,
+    company_id: order.company_id,
+    outlet_id: order.outlet_id,
+    service_type: order.service_type,
+    source_flow: order.source_flow,
+    settlement_flow: order.settlement_flow,
+    table_id: order.table_id,
+    reservation_id: order.reservation_id,
+    guest_count: order.guest_count,
+    is_finalized: order.is_finalized,
+    order_status: order.order_status,
+    order_state: order.order_state,
+    paid_amount: order.paid_amount,
+    opened_at: order.opened_at,
+    closed_at: order.closed_at,
+    notes: order.notes,
+    updated_at: order.updated_at
+  }));
+}
+
+function mapSyncPullToOpenOrderLineRows(payload: SyncPullResponse): ActiveOrderLineRow[] {
+  return payload.open_order_lines.map((line) => ({
+    pk: `${line.order_id}:${line.item_id}`,
+    order_id: line.order_id,
+    company_id: line.company_id,
+    outlet_id: line.outlet_id,
+    item_id: line.item_id,
+    sku_snapshot: line.sku_snapshot,
+    name_snapshot: line.name_snapshot,
+    item_type_snapshot: line.item_type_snapshot,
+    unit_price_snapshot: line.unit_price_snapshot,
+    qty: line.qty,
+    discount_amount: line.discount_amount,
+    updated_at: line.updated_at
+  }));
+}
+
+function mapSyncPullToOrderUpdateRows(payload: SyncPullResponse): ActiveOrderUpdateRow[] {
+  return payload.order_updates.map((update) => ({
+    pk: `active_order_update:${update.update_id}`,
+    update_id: update.update_id,
+    order_id: update.order_id,
+    company_id: update.company_id,
+    outlet_id: update.outlet_id,
+    base_order_updated_at: update.base_order_updated_at,
+    event_type: update.event_type,
+    delta_json: update.delta_json,
+    actor_user_id: update.actor_user_id,
+    device_id: update.device_id,
+    event_at: update.event_at,
+    created_at: update.created_at,
+    sync_status: "SENT",
+    sync_error: null
+  }));
+}
+
 export async function readSyncPullDataVersion(
   scope: { company_id: number; outlet_id: number },
   db: PosOfflineDb = posDb
@@ -335,10 +463,24 @@ async function applySyncPullRows(
     config: SyncScopeConfigRow;
     data_version: number;
     pulled_at: string;
+    open_orders: ActiveOrderRow[];
+    open_order_lines: ActiveOrderLineRow[];
+    order_updates: ActiveOrderUpdateRow[];
+    orders_cursor: number;
   },
   db: PosOfflineDb
 ): Promise<{ applied: boolean; previous_data_version: number; data_version: number }> {
-  return db.transaction("rw", [db.products_cache, db.sync_metadata, db.sync_scope_config], async () => {
+  return db.transaction(
+    "rw",
+    [
+      db.products_cache,
+      db.sync_metadata,
+      db.sync_scope_config,
+      db.active_orders,
+      db.active_order_lines,
+      db.active_order_updates
+    ],
+    async () => {
     const metadataPk = resolveScopePk(input.company_id, input.outlet_id);
     const existingMetadata = await db.sync_metadata.get(metadataPk);
     const previousDataVersion = existingMetadata?.last_data_version ?? 0;
@@ -382,15 +524,31 @@ async function applySyncPullRows(
       last_pulled_at: input.pulled_at,
       updated_at: input.pulled_at
     };
-    await db.sync_metadata.put(metadataRow);
+    await db.sync_metadata.put({
+      ...metadataRow,
+      orders_cursor: input.orders_cursor
+    });
     await db.sync_scope_config.put(input.config);
+
+    if (input.open_orders.length > 0) {
+      await db.active_orders.bulkPut(input.open_orders);
+    }
+
+    if (input.open_order_lines.length > 0) {
+      await db.active_order_lines.bulkPut(input.open_order_lines);
+    }
+
+    if (input.order_updates.length > 0) {
+      await db.active_order_updates.bulkPut(input.order_updates);
+    }
 
     return {
       applied: true,
       previous_data_version: previousDataVersion,
       data_version: input.data_version
     };
-  });
+    }
+  );
 }
 
 export async function ingestSyncPullIntoProductsCache(
@@ -451,6 +609,9 @@ export async function ingestSyncPullIntoProductsCache(
       },
       pulledAt
     );
+    const openOrders = mapSyncPullToOpenOrderRows(payload);
+    const openOrderLines = mapSyncPullToOpenOrderLineRows(payload);
+    const orderUpdates = mapSyncPullToOrderUpdateRows(payload);
 
     const applyResult = await applySyncPullRows(
       {
@@ -459,7 +620,11 @@ export async function ingestSyncPullIntoProductsCache(
         rows,
         config,
         data_version: payload.data_version,
-        pulled_at: pulledAt
+        pulled_at: pulledAt,
+        open_orders: openOrders,
+        open_order_lines: openOrderLines,
+        order_updates: orderUpdates,
+        orders_cursor: payload.orders_cursor
       },
       db
     );

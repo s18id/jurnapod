@@ -14,8 +14,11 @@ export interface RouteConfig {
 
 export interface AppRoutes {
   login: RouteConfig;
+  serviceMode: RouteConfig;
   checkout: RouteConfig;
   products: RouteConfig;
+  tables: RouteConfig;
+  reservations: RouteConfig;
   cart: RouteConfig;
   settings: RouteConfig;
 }
@@ -27,6 +30,13 @@ export const routes: AppRoutes = {
     label: "Login",
     icon: "🔑",
     requiresAuth: false
+  },
+  serviceMode: {
+    id: "serviceMode",
+    path: "/service-mode",
+    label: "Service Mode",
+    icon: "🎯",
+    requiresAuth: true
   },
   checkout: {
     id: "checkout",
@@ -40,6 +50,20 @@ export const routes: AppRoutes = {
     path: "/products",
     label: "Products",
     icon: "📦",
+    requiresAuth: true
+  },
+  tables: {
+    id: "tables",
+    path: "/tables",
+    label: "Tables",
+    icon: "🍽️",
+    requiresAuth: true
+  },
+  reservations: {
+    id: "reservations",
+    path: "/reservations",
+    label: "Reservations",
+    icon: "📅",
     requiresAuth: true
   },
   cart: {
@@ -59,10 +83,11 @@ export const routes: AppRoutes = {
 };
 
 export const mobileTabs = [
-  routes.checkout,
-  routes.cart,
+  routes.tables,
+  routes.reservations,
   routes.products,
-  routes.settings
+  routes.cart,
+  routes.checkout
 ];
 
 export interface RouterContextValue {

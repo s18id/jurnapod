@@ -8,6 +8,7 @@ export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  titleId?: string;
   children: React.ReactNode;
   showCloseButton?: boolean;
 }
@@ -16,6 +17,7 @@ export function Modal({
   isOpen,
   onClose,
   title,
+  titleId,
   children,
   showCloseButton = true
 }: ModalProps): JSX.Element | null {
@@ -128,7 +130,7 @@ export function Modal({
       <div style={modalStyles}>
         {(title || showCloseButton) && (
           <div style={headerStyles}>
-            {title ? <h2 style={titleStyles}>{title}</h2> : <div />}
+            {title ? <h2 id={titleId} style={titleStyles}>{title}</h2> : <div />}
             {showCloseButton && (
               <button
                 type="button"

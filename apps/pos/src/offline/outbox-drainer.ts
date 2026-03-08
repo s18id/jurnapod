@@ -150,15 +150,44 @@ function resolveDrainReason(value: string | undefined): string {
 
 function readClientTxIdFromOutboxPayload(job: OutboxJobRow): string {
   try {
-    const parsed = JSON.parse(job.payload_json) as { client_tx_id?: unknown };
+    const parsed = JSON.parse(job.payload_json) as { client_tx_id?: unknown; update_id?: unknown };
     if (typeof parsed.client_tx_id === "string" && parsed.client_tx_id.trim().length > 0) {
       return parsed.client_tx_id;
+    }
+    if (typeof parsed.update_id === "string" && parsed.update_id.trim().length > 0) {
+      return parsed.update_id;
     }
   } catch {
     // Keep deterministic fallback for malformed payloads.
   }
 
   return UNKNOWN_CLIENT_TX_ID;
+}
+
+function readOrderUpdateIdFromOutboxPayload(job: OutboxJobRow): string | null {
+  try {
+    const parsed = JSON.parse(job.payload_json) as { update_id?: unknown };
+    if (typeof parsed.update_id === "string" && parsed.update_id.trim().length > 0) {
+      return parsed.update_id;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function readItemCancellationIdFromOutboxPayload(job: OutboxJobRow): string | null {
+  try {
+    const parsed = JSON.parse(job.payload_json) as { cancellation_id?: unknown };
+    if (typeof parsed.cancellation_id === "string" && parsed.cancellation_id.trim().length > 0) {
+      return parsed.cancellation_id;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function maskLeaseToken(value: string | null): string | null {
@@ -310,7 +339,30 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
         db
       );
 
-      if (updateResult.applied) {
+        if (updateResult.applied) {
+          if (job.job_type === "SYNC_POS_ORDER_UPDATE") {
+            const updateId = readOrderUpdateIdFromOutboxPayload(job);
+            if (updateId) {
+            const orderUpdateRow = await db.active_order_updates.where("update_id").equals(updateId).first();
+            if (orderUpdateRow) {
+              await db.active_order_updates.update(orderUpdateRow.pk, {
+                sync_status: "SENT",
+                sync_error: null
+                });
+              }
+            }
+
+            const cancellationId = readItemCancellationIdFromOutboxPayload(job);
+            if (cancellationId) {
+              const cancellationRow = await db.item_cancellations.where("cancellation_id").equals(cancellationId).first();
+              if (cancellationRow) {
+                await db.item_cancellations.update(cancellationRow.pk, {
+                  sync_status: "SENT",
+                  sync_error: null
+                });
+              }
+            }
+          }
         result.sent_count += 1;
         logOutboxDrainAttempt({
           correlationId: sendResult.correlation_id ?? null,
@@ -348,7 +400,30 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
         db
       );
 
-      if (updateResult.applied) {
+        if (updateResult.applied) {
+          if (job.job_type === "SYNC_POS_ORDER_UPDATE") {
+            const updateId = readOrderUpdateIdFromOutboxPayload(job);
+            if (updateId) {
+            const orderUpdateRow = await db.active_order_updates.where("update_id").equals(updateId).first();
+            if (orderUpdateRow) {
+              await db.active_order_updates.update(orderUpdateRow.pk, {
+                sync_status: "FAILED",
+                sync_error: stringifySendError(classified)
+                });
+              }
+            }
+
+            const cancellationId = readItemCancellationIdFromOutboxPayload(job);
+            if (cancellationId) {
+              const cancellationRow = await db.item_cancellations.where("cancellation_id").equals(cancellationId).first();
+              if (cancellationRow) {
+                await db.item_cancellations.update(cancellationRow.pk, {
+                  sync_status: "FAILED",
+                  sync_error: stringifySendError(classified)
+                });
+              }
+            }
+          }
         result.failed_count += 1;
         logOutboxDrainAttempt({
           correlationId: null,

@@ -33,13 +33,14 @@ export function TabBar({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "#ffffff",
-    borderTop: "1px solid #e5e7eb",
+    background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+    borderTop: "1px solid #cbd5e1",
     display: "flex",
     justifyContent: "space-around",
-    paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
+    paddingBottom: "calc(10px + env(safe-area-inset-bottom))",
+    paddingTop: "6px",
     zIndex: 9998,
-    boxShadow: "0 -2px 10px rgba(0, 0, 0, 0.05)"
+    boxShadow: "0 -8px 20px rgba(15, 23, 42, 0.08)"
   };
 
   const tabButtonStyles = (isActive: boolean): React.CSSProperties => ({
@@ -47,16 +48,18 @@ export function TabBar({
     flexDirection: "column",
     alignItems: "center",
     gap: "4px",
-    background: "none",
-    border: "none",
-    padding: "8px 16px",
+    background: isActive ? "#dbeafe" : "transparent",
+    border: isActive ? "1px solid #93c5fd" : "1px solid transparent",
+    borderRadius: 12,
+    padding: "8px 10px",
     cursor: "pointer",
-    color: isActive ? "#3b82f6" : "#6b7280",
+    color: isActive ? "#1d4ed8" : "#64748b",
     fontSize: "12px",
     fontWeight: isActive ? 600 : 500,
-    minWidth: `${MIN_TOUCH_TARGET}px`,
+    minWidth: "64px",
     minHeight: `${MIN_TOUCH_TARGET}px`,
-    position: "relative"
+    position: "relative",
+    transition: "all 0.15s ease"
   });
 
   const iconStyles: React.CSSProperties = {
@@ -88,6 +91,8 @@ export function TabBar({
         return (
           <button
             key={tab.id}
+            id={`tab-${tab.id}`}
+            name={`tab-${tab.id}`}
             type="button"
             onClick={() => onTabChange(tab.id)}
             style={tabButtonStyles(isActive)}

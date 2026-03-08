@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createOutboxDrainScheduler } from "../../../dist/offline/outbox-drain-scheduler.js";
+import { createOutboxDrainScheduler } from "../outbox-drain-scheduler.ts";
 
 function createDeferred() {
   let resolve;

@@ -12,6 +12,12 @@
  */
 
 import type {
+  OutletTableRow,
+  ReservationRow,
+  ActiveOrderRow,
+  ActiveOrderLineRow,
+  ActiveOrderUpdateRow,
+  ItemCancellationRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -30,6 +36,66 @@ export interface PosStoragePort {
   }): Promise<ProductCacheRow[]>;
 
   upsertProducts(products: ProductCacheRow[]): Promise<void>;
+
+  // Outlet tables operations
+  getOutletTablesByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<OutletTableRow[]>;
+
+  upsertOutletTables(tables: OutletTableRow[]): Promise<void>;
+
+  // Reservations operations
+  getReservationsByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<ReservationRow[]>;
+
+  upsertReservations(reservations: ReservationRow[]): Promise<void>;
+
+  // Active orders operations
+  getActiveOrdersByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<ActiveOrderRow[]>;
+
+  getActiveOrder(order_id: string): Promise<ActiveOrderRow | undefined>;
+
+  upsertActiveOrders(orders: ActiveOrderRow[]): Promise<void>;
+
+  deleteActiveOrder(order_id: string): Promise<void>;
+
+  getActiveOrderLines(order_id: string): Promise<ActiveOrderLineRow[]>;
+
+  replaceActiveOrderLines(order_id: string, lines: ActiveOrderLineRow[]): Promise<void>;
+
+  putActiveOrderUpdate(update: ActiveOrderUpdateRow): Promise<void>;
+
+  listPendingActiveOrderUpdates(input: {
+    company_id: number;
+    outlet_id: number;
+    limit?: number;
+  }): Promise<ActiveOrderUpdateRow[]>;
+
+  listActiveOrderUpdatesByOrder(input: {
+    company_id: number;
+    outlet_id: number;
+    order_id: string;
+  }): Promise<ActiveOrderUpdateRow[]>;
+
+  markActiveOrderUpdateSyncResult(input: {
+    update_id: string;
+    sync_status: "SENT" | "FAILED";
+    sync_error?: string | null;
+  }): Promise<void>;
+
+  putItemCancellation(cancellation: ItemCancellationRow): Promise<void>;
+
+  listItemCancellationsByOrder(input: {
+    company_id: number;
+    outlet_id: number;
+    order_id: string;
+  }): Promise<ItemCancellationRow[]>;
 
   // Sale operations
   createSale(sale: SaleRow): Promise<void>;

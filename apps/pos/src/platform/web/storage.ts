@@ -7,8 +7,15 @@
  * Implements PosStoragePort using IndexedDB via Dexie.
  */
 
+import Dexie from "dexie";
 import type { PosStoragePort } from "../../ports/storage-port.js";
 import type {
+  OutletTableRow,
+  ReservationRow,
+  ActiveOrderRow,
+  ActiveOrderLineRow,
+  ActiveOrderUpdateRow,
+  ItemCancellationRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -44,6 +51,168 @@ export class WebStorageAdapter implements PosStoragePort {
 
   async upsertProducts(products: ProductCacheRow[]): Promise<void> {
     await this.db.products_cache.bulkPut(products);
+  }
+
+  async getOutletTablesByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<OutletTableRow[]> {
+    const rows = await this.db.outlet_tables
+      .where("[company_id+outlet_id+table_id]")
+      .between(
+        [input.company_id, input.outlet_id, Dexie.minKey],
+        [input.company_id, input.outlet_id, Dexie.maxKey]
+      )
+      .toArray();
+
+    return rows.sort((left, right) => left.code.localeCompare(right.code));
+  }
+
+  async upsertOutletTables(tables: OutletTableRow[]): Promise<void> {
+    await this.db.outlet_tables.bulkPut(tables);
+  }
+
+  async getReservationsByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<ReservationRow[]> {
+    const rows = await this.db.reservations
+      .where("[company_id+outlet_id+reservation_at]")
+      .between(
+        [input.company_id, input.outlet_id, Dexie.minKey],
+        [input.company_id, input.outlet_id, Dexie.maxKey]
+      )
+      .toArray();
+
+    return rows.sort((left, right) => left.reservation_at.localeCompare(right.reservation_at));
+  }
+
+  async upsertReservations(reservations: ReservationRow[]): Promise<void> {
+    await this.db.reservations.bulkPut(reservations);
+  }
+
+  async getActiveOrdersByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<ActiveOrderRow[]> {
+    const rows = await this.db.active_orders
+      .where("[company_id+outlet_id+order_state+updated_at]")
+      .between(
+        [input.company_id, input.outlet_id, "", Dexie.minKey],
+        [input.company_id, input.outlet_id, "\uffff", Dexie.maxKey]
+      )
+      .toArray();
+
+    return rows.sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+  }
+
+  async getActiveOrder(order_id: string): Promise<ActiveOrderRow | undefined> {
+    return await this.db.active_orders.get(order_id);
+  }
+
+  async upsertActiveOrders(orders: ActiveOrderRow[]): Promise<void> {
+    await this.db.active_orders.bulkPut(orders);
+  }
+
+  async deleteActiveOrder(order_id: string): Promise<void> {
+    await this.db.active_orders.delete(order_id);
+  }
+
+  async getActiveOrderLines(order_id: string): Promise<ActiveOrderLineRow[]> {
+    const rows = await this.db.active_order_lines
+      .where("[order_id+item_id]")
+      .between([order_id, Dexie.minKey], [order_id, Dexie.maxKey])
+      .toArray();
+
+    return rows.sort((left, right) => left.item_id - right.item_id);
+  }
+
+  async replaceActiveOrderLines(order_id: string, lines: ActiveOrderLineRow[]): Promise<void> {
+    await this.db.transaction("rw", this.db.active_order_lines, async () => {
+      const existing = await this.db.active_order_lines
+        .where("[order_id+item_id]")
+        .between([order_id, Dexie.minKey], [order_id, Dexie.maxKey])
+        .primaryKeys();
+      const existingKeys = existing.map((key) => String(key));
+
+      if (existingKeys.length > 0) {
+        await this.db.active_order_lines.bulkDelete(existingKeys);
+      }
+
+      if (lines.length > 0) {
+        await this.db.active_order_lines.bulkPut(lines);
+      }
+    });
+  }
+
+  async putActiveOrderUpdate(update: ActiveOrderUpdateRow): Promise<void> {
+    await this.db.active_order_updates.put(update);
+  }
+
+  async listPendingActiveOrderUpdates(input: {
+    company_id: number;
+    outlet_id: number;
+    limit?: number;
+  }): Promise<ActiveOrderUpdateRow[]> {
+    const rows = await this.db.active_order_updates
+      .where("[company_id+outlet_id+sync_status+event_at]")
+      .between(
+        [input.company_id, input.outlet_id, "PENDING", Dexie.minKey],
+        [input.company_id, input.outlet_id, "PENDING", Dexie.maxKey]
+      )
+      .limit(input.limit ?? 100)
+      .toArray();
+
+    return rows.sort((left, right) => left.event_at.localeCompare(right.event_at));
+  }
+
+  async listActiveOrderUpdatesByOrder(input: {
+    company_id: number;
+    outlet_id: number;
+    order_id: string;
+  }): Promise<ActiveOrderUpdateRow[]> {
+    const rows = await this.db.active_order_updates
+      .where("[company_id+outlet_id+order_id+event_at]")
+      .between(
+        [input.company_id, input.outlet_id, input.order_id, Dexie.minKey],
+        [input.company_id, input.outlet_id, input.order_id, Dexie.maxKey]
+      )
+      .toArray();
+
+    return rows.sort((left, right) => left.event_at.localeCompare(right.event_at));
+  }
+
+  async markActiveOrderUpdateSyncResult(input: {
+    update_id: string;
+    sync_status: "SENT" | "FAILED";
+    sync_error?: string | null;
+  }): Promise<void> {
+    const existing = await this.db.active_order_updates.where("update_id").equals(input.update_id).first();
+    if (!existing) {
+      return;
+    }
+
+    await this.db.active_order_updates.update(existing.pk, {
+      sync_status: input.sync_status,
+      sync_error: input.sync_status === "FAILED" ? input.sync_error ?? "SYNC_FAILED" : null
+    });
+  }
+
+  async putItemCancellation(cancellation: ItemCancellationRow): Promise<void> {
+    await this.db.item_cancellations.put(cancellation);
+  }
+
+  async listItemCancellationsByOrder(input: {
+    company_id: number;
+    outlet_id: number;
+    order_id: string;
+  }): Promise<ItemCancellationRow[]> {
+    const rows = await this.db.item_cancellations
+      .where("[company_id+outlet_id+order_id]")
+      .equals([input.company_id, input.outlet_id, input.order_id])
+      .toArray();
+
+    return rows.sort((left, right) => left.cancelled_at.localeCompare(right.cancelled_at));
   }
 
   async createSale(sale: SaleRow): Promise<void> {

@@ -16,6 +16,7 @@ export interface SyncPullRequest {
   company_id: number;
   outlet_id: number;
   since_version?: number;
+  orders_cursor?: number;
 }
 
 export interface SyncPullResponse {
@@ -54,6 +55,51 @@ export interface SyncPullResponse {
       };
       payment_methods: string[];
     };
+    open_orders?: Array<{
+      order_id: string;
+      company_id: number;
+      outlet_id: number;
+      service_type: "TAKEAWAY" | "DINE_IN";
+      table_id: number | null;
+      reservation_id: number | null;
+      guest_count: number | null;
+      is_finalized: boolean;
+      order_status: "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
+      order_state: "OPEN" | "CLOSED";
+      paid_amount: number;
+      opened_at: string;
+      closed_at: string | null;
+      notes: string | null;
+      updated_at: string;
+    }>;
+    open_order_lines?: Array<{
+      order_id: string;
+      company_id: number;
+      outlet_id: number;
+      item_id: number;
+      sku_snapshot: string | null;
+      name_snapshot: string;
+      item_type_snapshot: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+      unit_price_snapshot: number;
+      qty: number;
+      discount_amount: number;
+      updated_at: string;
+    }>;
+    order_updates?: Array<{
+      update_id: string;
+      order_id: string;
+      company_id: number;
+      outlet_id: number;
+      base_order_updated_at: string | null;
+      event_type: string;
+      delta_json: string;
+      actor_user_id: number | null;
+      device_id: string;
+      event_at: string;
+      created_at: string;
+      sequence_no: number;
+    }>;
+    orders_cursor?: number;
   };
 }
 

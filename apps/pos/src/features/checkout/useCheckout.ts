@@ -5,10 +5,12 @@ import React, { useCallback, useRef, useState } from "react";
 import { CASHIER_USER_ID } from "../../shared/utils/constants.js";
 import { createSaleDraft, completeSale } from "../../offline/sales.js";
 import type { RuntimeOutletScope } from "../../services/runtime-service.js";
+import type { ActiveOrderContextState } from "../cart/useCart.js";
 import type { CartTotals, CartLine } from "../../shared/utils/money.js";
 
 export interface UseCheckoutOptions {
   scope: RuntimeOutletScope;
+  activeOrderContext: ActiveOrderContextState;
   initialPaymentMethods?: string[];
   runtime: {
     isPaymentMethodAllowed: (method: string, methods: readonly string[]) => boolean;
@@ -28,16 +30,17 @@ export interface UseCheckoutReturn {
   runCompleteSale: (
     cartLines: CartLine[],
     cartTotals: CartTotals,
-    options?: {
+      options?: {
       setPaymentMethod?: (method: string) => void;
       setCart?: () => void;
       setPaidAmount?: (amount: number) => void;
-      setCurrentFlowId?: (id: string) => void;
-    }
-  ) => Promise<void>;
+        setCurrentFlowId?: (id: string) => void;
+        onAfterComplete?: () => Promise<void> | void;
+      }
+    ) => Promise<void>;
 }
 
-export function useCheckout({ scope, runtime, initialPaymentMethods = ["CASH"] }: UseCheckoutOptions): UseCheckoutReturn {
+export function useCheckout({ scope, activeOrderContext, runtime, initialPaymentMethods = ["CASH"] }: UseCheckoutOptions): UseCheckoutReturn {
   const [paymentMethod, setPaymentMethod] = useState<string>(initialPaymentMethods[0]);
   const [paymentMethods] = useState<string[]>(initialPaymentMethods);
   const [completeInFlight, setCompleteInFlight] = useState<boolean>(false);
@@ -72,7 +75,13 @@ export function useCheckout({ scope, runtime, initialPaymentMethods = ["CASH"] }
     async (
       cartLines: CartLine[],
       cartTotals: CartTotals,
-      options?: { setPaymentMethod?: (method: string) => void; setCart?: () => void; setPaidAmount?: (amount: number) => void; setCurrentFlowId?: (id: string) => void }
+      options?: {
+        setPaymentMethod?: (method: string) => void;
+        setCart?: () => void;
+        setPaidAmount?: (amount: number) => void;
+        setCurrentFlowId?: (id: string) => void;
+        onAfterComplete?: () => Promise<void> | void;
+      }
     ) => {
       if (!cartLines.length || cartTotals.paid_total < cartTotals.grand_total) {
         return;
@@ -97,7 +106,14 @@ export function useCheckout({ scope, runtime, initialPaymentMethods = ["CASH"] }
         const draft = await createSaleDraft({
           company_id: scope.company_id,
           outlet_id: scope.outlet_id,
-          cashier_user_id: CASHIER_USER_ID
+          cashier_user_id: CASHIER_USER_ID,
+          service_type: activeOrderContext.service_type,
+          table_id: activeOrderContext.table_id,
+          reservation_id: activeOrderContext.reservation_id,
+          guest_count: activeOrderContext.guest_count,
+          order_status: activeOrderContext.order_status,
+          notes: activeOrderContext.notes,
+          opened_at: activeOrderContext.opened_at
         });
 
         const result = await completeSale({
@@ -114,9 +130,19 @@ export function useCheckout({ scope, runtime, initialPaymentMethods = ["CASH"] }
             }
           ],
           totals: cartTotals
+          ,
+          service_type: activeOrderContext.service_type,
+          table_id: activeOrderContext.table_id,
+          reservation_id: activeOrderContext.reservation_id,
+          guest_count: activeOrderContext.guest_count,
+          order_status: "COMPLETED",
+          opened_at: activeOrderContext.opened_at,
+          closed_at: new Date().toISOString(),
+          notes: activeOrderContext.notes
         });
 
         setLastCompleteMessage(`Sale completed offline (${result.client_tx_id}). Outbox job queued.`);
+        await options?.onAfterComplete?.();
         options?.setCart?.();
         options?.setPaidAmount?.(0);
         options?.setCurrentFlowId?.(crypto.randomUUID());
@@ -127,7 +153,7 @@ export function useCheckout({ scope, runtime, initialPaymentMethods = ["CASH"] }
         unlockSaleCompletion(flowId);
       }
     },
-    [paymentMethod, paymentMethods, scope, runtime, lockSaleCompletion, unlockSaleCompletion]
+    [activeOrderContext, paymentMethod, paymentMethods, scope, runtime, lockSaleCompletion, unlockSaleCompletion]
   );
 
   return {

@@ -181,6 +181,14 @@ export async function createSaleDraft(
     company_id: input.company_id,
     outlet_id: input.outlet_id,
     cashier_user_id: input.cashier_user_id,
+    service_type: input.service_type ?? "TAKEAWAY",
+    table_id: input.table_id ?? null,
+    reservation_id: input.reservation_id ?? null,
+    guest_count: input.guest_count ?? null,
+    order_status: input.order_status ?? "OPEN",
+    opened_at: openedAt,
+    closed_at: null,
+    notes: input.notes ?? null,
     status: "DRAFT",
     sync_status: "LOCAL_ONLY",
     trx_at: openedAt,
@@ -220,6 +228,7 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
       const completedAt = nowIso();
       const clientTxId = crypto.randomUUID();
       const trxAt = input.trx_at ?? completedAt;
+      const orderStatus = input.order_status ?? "COMPLETED";
 
       const itemRows: SaleItemRow[] = [];
       for (const line of input.items) {
@@ -266,6 +275,14 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
 
       const updatedCount = await db.sales.update(currentSale.sale_id, {
         client_tx_id: clientTxId,
+        service_type: input.service_type ?? currentSale.service_type ?? "TAKEAWAY",
+        table_id: input.table_id ?? currentSale.table_id ?? null,
+        reservation_id: input.reservation_id ?? currentSale.reservation_id ?? null,
+        guest_count: input.guest_count ?? currentSale.guest_count ?? null,
+        order_status: orderStatus,
+        opened_at: input.opened_at ?? currentSale.opened_at ?? currentSale.created_at,
+        closed_at: input.closed_at ?? completedAt,
+        notes: input.notes ?? currentSale.notes ?? null,
         status: "COMPLETED",
         sync_status: "PENDING",
         trx_at: trxAt,

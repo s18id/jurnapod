@@ -46,6 +46,20 @@ type QueryExecutor = {
   execute: PoolConnection["execute"];
 };
 
+type MysqlLikeError = {
+  code?: string;
+  errno?: number;
+};
+
+function isNoSuchTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const mysqlError = error as MysqlLikeError;
+  return mysqlError.code === "ER_NO_SUCH_TABLE" || mysqlError.errno === 1146;
+}
+
 export class SyncPushPostingHookError extends Error {
   readonly mode: SyncPushPostingMode;
   readonly hookCause: unknown;
@@ -226,16 +240,24 @@ async function readOutletPaymentMethodMappings(
   dbExecutor: QueryExecutor,
   context: SyncPushPostingContext
 ): Promise<Map<string, number>> {
-  const [rows] = await dbExecutor.execute(
-    `SELECT method_code, account_id
-     FROM outlet_payment_method_mappings
-     WHERE company_id = ?
-       AND outlet_id = ?`,
-    [context.companyId, context.outletId]
-  );
+  let rows: Array<{ method_code?: string; account_id?: number }> = [];
+  try {
+    const [paymentRows] = await dbExecutor.execute(
+      `SELECT method_code, account_id
+       FROM outlet_payment_method_mappings
+       WHERE company_id = ?
+         AND outlet_id = ?`,
+      [context.companyId, context.outletId]
+    );
+    rows = paymentRows as Array<{ method_code?: string; account_id?: number }>;
+  } catch (error) {
+    if (!isNoSuchTableError(error)) {
+      throw error;
+    }
+  }
 
   const accountByMethod = new Map<string, number>();
-  for (const row of rows as Array<{ method_code?: string; account_id?: number }>) {
+  for (const row of rows) {
     if (!row.method_code || !Number.isFinite(row.account_id)) {
       continue;
     }

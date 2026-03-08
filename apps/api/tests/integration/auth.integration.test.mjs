@@ -221,28 +221,30 @@ test(
 
       const [ownerRoleRows] = await db.execute(
         `SELECT DISTINCT r.code
-         FROM roles r
-         INNER JOIN user_roles ur ON ur.role_id = r.id
-         INNER JOIN users u ON u.id = ur.user_id
-         WHERE u.id = ?
-           AND u.company_id = ?
-           AND u.is_active = 1
-           AND r.code IN ('OWNER', 'ADMIN', 'CASHIER', 'ACCOUNTANT')
-         ORDER BY r.code ASC`,
+          FROM roles r
+          INNER JOIN user_role_assignments ura ON ura.role_id = r.id
+          INNER JOIN users u ON u.id = ura.user_id
+          WHERE u.id = ?
+            AND u.company_id = ?
+            AND u.is_active = 1
+            AND ura.outlet_id IS NULL
+            AND r.code IN ('OWNER', 'ADMIN', 'CASHIER', 'ACCOUNTANT')
+          ORDER BY r.code ASC`,
         [ownerUserId, companyId]
       );
       const expectedOwnerRoles = ownerRoleRows.map((row) => row.code);
 
       const [ownerGlobalRoleRows] = await db.execute(
         `SELECT r.code
-         FROM roles r
-         INNER JOIN user_roles ur ON ur.role_id = r.id
-         INNER JOIN users u ON u.id = ur.user_id
-         WHERE u.id = ?
-           AND u.company_id = ?
-           AND u.is_active = 1
-           AND r.is_global = 1
-         LIMIT 1`,
+          FROM roles r
+          INNER JOIN user_role_assignments ura ON ura.role_id = r.id
+          INNER JOIN users u ON u.id = ura.user_id
+          WHERE u.id = ?
+            AND u.company_id = ?
+            AND u.is_active = 1
+            AND ura.outlet_id IS NULL
+            AND r.is_global = 1
+          LIMIT 1`,
         [ownerUserId, companyId]
       );
       const ownerHasGlobalRole = ownerGlobalRoleRows.length > 0;
@@ -308,14 +310,14 @@ test(
       viewerUserId = Number(viewerUserResult.insertId);
 
       await db.execute(
-        `INSERT INTO user_roles (user_id, role_id)
-         VALUES (?, ?)
+        `INSERT INTO user_role_assignments (user_id, role_id, outlet_id)
+         VALUES (?, ?, NULL)
          ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)`,
         [viewerUserId, viewerRoleId]
       );
 
       await db.execute(
-        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
          VALUES (?, ?, ?)
          ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)`,
         [viewerUserId, allowedOutletId, viewerRoleId]
@@ -485,8 +487,7 @@ test(
       );
 
       if (viewerUserId > 0) {
-        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [viewerUserId]);
-        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [viewerUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [viewerUserId]);
         await db.execute("DELETE FROM users WHERE id = ?", [viewerUserId]);
       }
 
@@ -746,9 +747,8 @@ localServerTest(
 
       for (const userId of createdUserIds) {
         if (userId > 0) {
-          await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [userId]);
+          await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [userId]);
           await db.execute("DELETE FROM user_outlets WHERE user_id = ?", [userId]);
-          await db.execute("DELETE FROM user_roles WHERE user_id = ?", [userId]);
           await db.execute("DELETE FROM users WHERE id = ?", [userId]);
         }
       }

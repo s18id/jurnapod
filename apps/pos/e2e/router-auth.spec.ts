@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { expect, test } from "@playwright/test";
+import { E2E_SELECTORS } from "./selectors.js";
 
 const ACCESS_TOKEN_STORAGE_KEY = "jurnapod_pos_access_token";
 
@@ -27,7 +28,7 @@ async function mockUserMe(page: import("@playwright/test").Page): Promise<void> 
   });
 }
 
-test("/login redirects to checkout when token exists", async ({ page }) => {
+test("/login redirects to products when token exists", async ({ page }) => {
   await mockUserMe(page);
   await page.addInitScript((storageKey) => {
     window.localStorage.setItem(storageKey, "test-token");
@@ -35,7 +36,7 @@ test("/login redirects to checkout when token exists", async ({ page }) => {
 
   await page.goto("/login");
 
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/products$/);
 });
 
 test("/login stays on login when token missing", async ({ page }) => {
@@ -46,7 +47,7 @@ test("/login stays on login when token missing", async ({ page }) => {
   await page.goto("/login");
 
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByPlaceholder("Email")).toBeVisible();
+  await expect(page.locator(E2E_SELECTORS.login.email)).toBeVisible();
 });
 
 test("/cart redirects to /login when token missing", async ({ page }) => {
@@ -57,30 +58,30 @@ test("/cart redirects to /login when token missing", async ({ page }) => {
   await page.goto("/cart");
 
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByPlaceholder("Email")).toBeVisible();
+  await expect(page.locator(E2E_SELECTORS.login.email)).toBeVisible();
 });
 
-test("/auth/callback stays routable for OAuth processing", async ({ page }) => {
+test("/auth/callback is routable and normalized after OAuth processing", async ({ page }) => {
   await page.addInitScript((storageKey) => {
     window.localStorage.removeItem(storageKey);
   }, ACCESS_TOKEN_STORAGE_KEY);
 
   await page.goto("/auth/callback?code=test-code&state=test-state");
 
-  await expect(page).toHaveURL(/\/auth\/callback\?code=test-code&state=test-state$/);
+  await expect(page).toHaveURL(/\/$/);
 });
 
-test("logout from checkout redirects to /login", async ({ page }) => {
+test("logout from settings redirects to /login", async ({ page }) => {
   await mockUserMe(page);
   await page.addInitScript((storageKey) => {
     window.localStorage.setItem(storageKey, "test-token");
   }, ACCESS_TOKEN_STORAGE_KEY);
 
-  await page.goto("/");
-  await expect(page).toHaveURL(/\/$/);
+  await page.goto("/settings");
+  await expect(page).toHaveURL(/\/settings$/);
 
-  await page.getByRole("button", { name: "Logout" }).click();
+  await page.locator(E2E_SELECTORS.settings.logout).click();
 
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByPlaceholder("Email")).toBeVisible();
+  await expect(page.locator(E2E_SELECTORS.login.email)).toBeVisible();
 });

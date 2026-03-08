@@ -2293,18 +2293,24 @@ async function readSyncConfig(companyId: number): Promise<SyncPullResponse["data
 export async function buildSyncPullPayload(
   companyId: number,
   outletId: number,
-  sinceVersion: number
+  sinceVersion: number,
+  ordersCursor: number = 0
 ): Promise<SyncPullPayload> {
   const currentVersion = await getCompanyDataVersion(companyId);
   const config = await readSyncConfig(companyId);
 
   if (currentVersion <= sinceVersion) {
+    const openOrderSync = await readOpenOrderSyncPayload(companyId, outletId, ordersCursor);
     return {
       data_version: currentVersion,
       items: [],
       item_groups: [],
       prices: [],
-      config
+      config,
+      open_orders: openOrderSync.open_orders,
+      open_order_lines: openOrderSync.open_order_lines,
+      order_updates: openOrderSync.order_updates,
+      orders_cursor: openOrderSync.orders_cursor
     };
   }
 
@@ -2313,6 +2319,8 @@ export async function buildSyncPullPayload(
     listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true }),
     listItemGroups(companyId)
   ]);
+
+  const openOrderSync = await readOpenOrderSyncPayload(companyId, outletId, ordersCursor);
 
   return {
     data_version: currentVersion,
@@ -2341,6 +2349,121 @@ export async function buildSyncPullPayload(
       is_active: price.is_active,
       updated_at: price.updated_at
     })),
-    config
+    config,
+    open_orders: openOrderSync.open_orders,
+    open_order_lines: openOrderSync.open_order_lines,
+    order_updates: openOrderSync.order_updates,
+    orders_cursor: openOrderSync.orders_cursor
   };
+}
+
+async function readOpenOrderSyncPayload(
+  companyId: number,
+  outletId: number,
+  ordersCursor: number
+): Promise<{
+  open_orders: SyncPullPayload["open_orders"];
+  open_order_lines: SyncPullPayload["open_order_lines"];
+  order_updates: SyncPullPayload["order_updates"];
+  orders_cursor: number;
+}> {
+  const pool = getDbPool();
+
+  try {
+    const [ordersRows, linesRows, updatesRows] = await Promise.all([
+      pool.execute<RowDataPacket[]>(
+        `SELECT order_id, company_id, outlet_id, service_type, source_flow, settlement_flow, table_id, reservation_id, guest_count,
+                is_finalized, order_status, order_state, paid_amount, opened_at, closed_at, notes, updated_at
+         FROM pos_order_snapshots
+         WHERE company_id = ?
+           AND outlet_id = ?
+           AND order_state = 'OPEN'
+         ORDER BY updated_at DESC`,
+        [companyId, outletId]
+      ),
+      pool.execute<RowDataPacket[]>(
+        `SELECT order_id, company_id, outlet_id, item_id, sku_snapshot, name_snapshot, item_type_snapshot,
+                unit_price_snapshot, qty, discount_amount, updated_at
+         FROM pos_order_snapshot_lines
+         WHERE company_id = ?
+           AND outlet_id = ?`,
+        [companyId, outletId]
+      ),
+      pool.execute<RowDataPacket[]>(
+        `SELECT sequence_no, update_id, order_id, company_id, outlet_id, base_order_updated_at, event_type,
+                delta_json, actor_user_id, device_id, event_at, created_at
+         FROM pos_order_updates
+         WHERE company_id = ?
+           AND outlet_id = ?
+           AND sequence_no > ?
+         ORDER BY sequence_no ASC`,
+        [companyId, outletId, ordersCursor]
+      )
+    ]);
+
+    const orderUpdates = (updatesRows[0] as RowDataPacket[]).map((row) => ({
+      sequence_no: Number(row.sequence_no),
+      update_id: String(row.update_id),
+      order_id: String(row.order_id),
+      company_id: Number(row.company_id),
+      outlet_id: Number(row.outlet_id),
+      base_order_updated_at: row.base_order_updated_at ? new Date(row.base_order_updated_at as string).toISOString() : null,
+      event_type: String(row.event_type) as SyncPullPayload["order_updates"][number]["event_type"],
+      delta_json: String(row.delta_json),
+      actor_user_id: row.actor_user_id == null ? null : Number(row.actor_user_id),
+      device_id: String(row.device_id),
+      event_at: new Date(row.event_at as string).toISOString(),
+      created_at: new Date(row.created_at as string).toISOString()
+    }));
+
+    const nextCursor = orderUpdates.length > 0 ? orderUpdates[orderUpdates.length - 1].sequence_no : ordersCursor;
+
+    return {
+      open_orders: (ordersRows[0] as RowDataPacket[]).map((row) => ({
+        order_id: String(row.order_id),
+        company_id: Number(row.company_id),
+        outlet_id: Number(row.outlet_id),
+        service_type: String(row.service_type) as SyncPullPayload["open_orders"][number]["service_type"],
+        source_flow: row.source_flow == null ? undefined : String(row.source_flow) as SyncPullPayload["open_orders"][number]["source_flow"],
+        settlement_flow: row.settlement_flow == null ? undefined : String(row.settlement_flow) as SyncPullPayload["open_orders"][number]["settlement_flow"],
+        table_id: row.table_id == null ? null : Number(row.table_id),
+        reservation_id: row.reservation_id == null ? null : Number(row.reservation_id),
+        guest_count: row.guest_count == null ? null : Number(row.guest_count),
+        is_finalized: Number(row.is_finalized) === 1,
+        order_status: String(row.order_status) as SyncPullPayload["open_orders"][number]["order_status"],
+        order_state: String(row.order_state) as SyncPullPayload["open_orders"][number]["order_state"],
+        paid_amount: Number(row.paid_amount),
+        opened_at: new Date(row.opened_at as string).toISOString(),
+        closed_at: row.closed_at ? new Date(row.closed_at as string).toISOString() : null,
+        notes: row.notes == null ? null : String(row.notes),
+        updated_at: new Date(row.updated_at as string).toISOString()
+      })),
+      open_order_lines: (linesRows[0] as RowDataPacket[]).map((row) => ({
+        order_id: String(row.order_id),
+        company_id: Number(row.company_id),
+        outlet_id: Number(row.outlet_id),
+        item_id: Number(row.item_id),
+        sku_snapshot: row.sku_snapshot == null ? null : String(row.sku_snapshot),
+        name_snapshot: String(row.name_snapshot),
+        item_type_snapshot: String(row.item_type_snapshot) as SyncPullPayload["open_order_lines"][number]["item_type_snapshot"],
+        unit_price_snapshot: Number(row.unit_price_snapshot),
+        qty: Number(row.qty),
+        discount_amount: Number(row.discount_amount),
+        updated_at: new Date(row.updated_at as string).toISOString()
+      })),
+      order_updates: orderUpdates,
+      orders_cursor: nextCursor
+    };
+  } catch (error) {
+    if (isMysqlError(error) && (error as { code?: string }).code === "ER_NO_SUCH_TABLE") {
+      return {
+        open_orders: [],
+        open_order_lines: [],
+        order_updates: [],
+        orders_cursor: ordersCursor
+      };
+    }
+
+    throw error;
+  }
 }

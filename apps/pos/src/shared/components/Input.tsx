@@ -8,6 +8,7 @@ import type { InputModeType } from "../hooks/useKeyboard.js";
 
 export interface InputProps {
   id?: string;
+  name?: string;
   type?: "text" | "number" | "email" | "password" | "search" | "tel";
   value: string | number;
   onChange: (value: string) => void;
@@ -28,6 +29,7 @@ export interface InputProps {
 
 export function Input({
   id,
+  name,
   type = "text",
   value,
   onChange,
@@ -69,6 +71,7 @@ export function Input({
   return (
     <input
       id={id}
+      name={name}
       type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
