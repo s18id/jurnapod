@@ -22,10 +22,16 @@ export const GET = withAuth(
       const url = new URL(request.url);
       const input = SyncPullRequestQuerySchema.parse({
         outlet_id: url.searchParams.get("outlet_id"),
-        since_version: url.searchParams.get("since_version") ?? 0
+        since_version: url.searchParams.get("since_version") ?? 0,
+        orders_cursor: url.searchParams.get("orders_cursor") ?? undefined
       });
 
-      const payload = await buildSyncPullPayload(auth.companyId, input.outlet_id, input.since_version);
+      const payload = await buildSyncPullPayload(
+        auth.companyId,
+        input.outlet_id,
+        input.since_version,
+        input.orders_cursor ?? 0
+      );
       const response = SyncPullPayloadSchema.parse(payload);
 
       return successResponse(response);

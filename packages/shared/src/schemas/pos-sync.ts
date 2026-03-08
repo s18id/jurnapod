@@ -8,6 +8,17 @@ export const PosOrderServiceTypeSchema = z.enum(["TAKEAWAY", "DINE_IN"]);
 
 export const PosOrderStatusSchema = z.enum(["OPEN", "READY_TO_PAY", "COMPLETED", "CANCELLED"]);
 
+export const OrderUpdateEventTypeSchema = z.enum([
+  "SNAPSHOT_FINALIZED",
+  "ITEM_ADDED",
+  "ITEM_REMOVED",
+  "QTY_CHANGED",
+  "ITEM_CANCELLED",
+  "NOTES_CHANGED",
+  "ORDER_RESUMED",
+  "ORDER_CLOSED"
+]);
+
 export const PosItemSchema = z.object({
   item_id: NumericIdSchema,
   qty: z.number().positive(),
@@ -47,7 +58,57 @@ export const PosTransactionSchema = z.object({
 
 export const SyncPushRequestSchema = z.object({
   outlet_id: NumericIdSchema,
-  transactions: z.array(PosTransactionSchema).min(1)
+  transactions: z.array(PosTransactionSchema).default([]),
+  active_orders: z
+    .array(
+      z.object({
+        order_id: UUID,
+        company_id: NumericIdSchema,
+        outlet_id: NumericIdSchema,
+        service_type: PosOrderServiceTypeSchema,
+        table_id: NumericIdSchema.nullable(),
+        reservation_id: NumericIdSchema.nullable(),
+        guest_count: z.coerce.number().int().positive().nullable(),
+        is_finalized: z.boolean(),
+        order_status: PosOrderStatusSchema,
+        order_state: z.enum(["OPEN", "CLOSED"]),
+        paid_amount: z.number().finite().nonnegative(),
+        opened_at: z.string().datetime(),
+        closed_at: z.string().datetime().nullable(),
+        notes: z.string().trim().max(500).nullable(),
+        updated_at: z.string().datetime(),
+        lines: z.array(
+          z.object({
+            item_id: NumericIdSchema,
+            sku_snapshot: z.string().nullable(),
+            name_snapshot: z.string().min(1),
+            item_type_snapshot: z.enum(["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"]),
+            unit_price_snapshot: z.number().finite().nonnegative(),
+            qty: z.number().positive(),
+            discount_amount: z.number().finite().min(0),
+            updated_at: z.string().datetime()
+          })
+        )
+      })
+    )
+    .optional(),
+  order_updates: z
+    .array(
+      z.object({
+        update_id: UUID,
+        order_id: UUID,
+        company_id: NumericIdSchema,
+        outlet_id: NumericIdSchema,
+        base_order_updated_at: z.string().datetime().nullable(),
+        event_type: OrderUpdateEventTypeSchema,
+        delta_json: z.string().min(2),
+        actor_user_id: NumericIdSchema.nullable(),
+        device_id: z.string().min(1),
+        event_at: z.string().datetime(),
+        created_at: z.string().datetime()
+      })
+    )
+    .optional()
 });
 
 export const SyncPushResultItemSchema = z.object({
@@ -57,7 +118,16 @@ export const SyncPushResultItemSchema = z.object({
 });
 
 export const SyncPushPayloadSchema = z.object({
-  results: z.array(SyncPushResultItemSchema)
+  results: z.array(SyncPushResultItemSchema),
+  order_update_results: z
+    .array(
+      z.object({
+        update_id: UUID,
+        result: z.enum(["OK", "DUPLICATE", "ERROR"]),
+        message: z.string().optional()
+      })
+    )
+    .optional()
 });
 
 export const SyncPushResponseSchema = z.object({

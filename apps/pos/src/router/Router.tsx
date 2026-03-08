@@ -139,7 +139,9 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
     activeReservationId,
     setActiveReservationId,
     setOutletTables,
-    setOutletReservations
+    setOutletReservations,
+    staleEditWarning,
+    reloadLatestActiveOrder
   } = usePosAppState();
 
   const activeReservation = useMemo(
@@ -368,6 +370,41 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
               })}
             </div>
           ) : null}
+          {staleEditWarning ? (
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                background: "#fff7ed",
+                border: "1px solid #fdba74",
+                borderRadius: 8,
+                padding: "8px 10px"
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#9a3412" }}>{staleEditWarning}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  void reloadLatestActiveOrder();
+                }}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#7c2d12",
+                  background: "#ffedd5",
+                  border: "1px solid #fdba74",
+                  borderRadius: 999,
+                  padding: "4px 10px",
+                  cursor: "pointer"
+                }}
+              >
+                Reload latest
+              </button>
+            </div>
+          ) : null}
         </header>
         {children}
       </div>
@@ -407,6 +444,8 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
   const [outletReservations, setOutletReservations] = useState<RuntimeReservation[]>([]);
   const [activeReservationId, setActiveReservationId] = useState<number | null>(null);
   const [currentActiveOrderId, setCurrentActiveOrderId] = useState<string | null>(null);
+  const [activeEditBaseUpdatedAt, setActiveEditBaseUpdatedAt] = useState<string | null>(null);
+  const [staleEditWarning, setStaleEditWarning] = useState<string | null>(null);
   const cartState = useCart();
   const hydrateInProgressRef = useRef(false);
   const [activeOrderHydrated, setActiveOrderHydrated] = useState(false);
@@ -495,6 +534,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       opened_at: string;
       closed_at: string | null;
       notes: string | null;
+      updated_at?: string;
     };
   }) => {
     hydrateInProgressRef.current = true;
@@ -504,6 +544,8 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       activeOrderContext: toOrderContext(input.order)
     });
     setCurrentActiveOrderId(input.order_id);
+    setActiveEditBaseUpdatedAt(input.order.updated_at ?? input.order.opened_at ?? null);
+    setStaleEditWarning(null);
     setActiveReservationId(input.order.reservation_id);
     hydrateInProgressRef.current = false;
   }, [cartState.hydrateOrder, toCartState, toOrderContext]);
@@ -598,6 +640,12 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
           `Sync pull applied (version ${result.data_version}, ${result.upserted_product_count} cached rows).`
         );
         setLastDataVersion(result.data_version);
+        if (currentActiveOrderId && activeEditBaseUpdatedAt) {
+          const latestSnapshot = await context.runtime.getActiveOrderSnapshot(scope, currentActiveOrderId);
+          if (latestSnapshot && latestSnapshot.order.updated_at > activeEditBaseUpdatedAt) {
+            setStaleEditWarning("Order changed on another terminal");
+          }
+        }
       } else {
         setPullSyncMessage(result.message ?? "Sync pull failed.");
       }
@@ -607,7 +655,25 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     } finally {
       setPullSyncInFlight(false);
     }
-  }, [context, pullSyncInFlight, scope]);
+  }, [activeEditBaseUpdatedAt, context, currentActiveOrderId, pullSyncInFlight, scope]);
+
+  const reloadLatestActiveOrder = useCallback(async () => {
+    if (!currentActiveOrderId) {
+      return;
+    }
+
+    const snapshot = await context.runtime.getActiveOrderSnapshot(scope, currentActiveOrderId);
+    if (!snapshot) {
+      return;
+    }
+
+    hydrateFromSnapshot({
+      order_id: snapshot.order.order_id,
+      paid_amount: snapshot.order.paid_amount,
+      lines: snapshot.lines,
+      order: snapshot.order
+    });
+  }, [context.runtime, currentActiveOrderId, hydrateFromSnapshot, scope]);
 
   const runSyncPushNow = useCallback(async () => {
     if (pushSyncInFlight) {
@@ -964,7 +1030,9 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       outletReservations,
       setOutletReservations,
       activeReservationId,
-      setActiveReservationId
+      setActiveReservationId,
+      staleEditWarning,
+      reloadLatestActiveOrder
     }),
     [
       scope,
@@ -991,7 +1059,9 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       currentActiveOrderId,
       outletTables,
       outletReservations,
-      activeReservationId
+      activeReservationId,
+      staleEditWarning,
+      reloadLatestActiveOrder
     ]
   );
 

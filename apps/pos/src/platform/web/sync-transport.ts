@@ -27,6 +27,9 @@ export class WebSyncTransportAdapter implements SyncTransport {
     if (request.since_version !== undefined) {
       url.searchParams.set("since_version", String(request.since_version));
     }
+    if (request.orders_cursor !== undefined) {
+      url.searchParams.set("orders_cursor", String(request.orders_cursor));
+    }
 
     const headers: HeadersInit = {
       accept: "application/json"

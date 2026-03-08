@@ -66,6 +66,8 @@ export interface PosAppStateValue {
   setOutletReservations: Dispatch<SetStateAction<RuntimeReservation[]>>;
   activeReservationId: number | null;
   setActiveReservationId: Dispatch<SetStateAction<number | null>>;
+  staleEditWarning: string | null;
+  reloadLatestActiveOrder: () => Promise<void>;
 }
 
 export const PosAppStateContext = createContext<PosAppStateValue | null>(null);

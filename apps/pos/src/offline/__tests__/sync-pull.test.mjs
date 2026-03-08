@@ -248,3 +248,91 @@ test("sync pull persists and reads scoped config", async () => {
     await db.delete();
   }
 });
+
+test("sync pull ingests open orders, lines, updates, and cursor", async () => {
+  const db = createPosOfflineDb(`jp-pos-sync-pull-open-orders-${crypto.randomUUID()}`);
+  const ts = new Date().toISOString();
+  const orderId = crypto.randomUUID();
+  const updateId = crypto.randomUUID();
+
+  try {
+    await ingestSyncPullIntoProductsCache(
+      {
+        company_id: 1,
+        outlet_id: 10,
+        base_url: "http://127.0.0.1:3001",
+        fetch_impl: fetchWithPayload({
+          success: true,
+          data: {
+            ...createSyncPayload({ dataVersion: 8, outletId: 10, price: 31000 }).data,
+            open_orders: [
+              {
+                order_id: orderId,
+                company_id: 1,
+                outlet_id: 10,
+                service_type: "DINE_IN",
+                table_id: 5,
+                reservation_id: null,
+                guest_count: 2,
+                is_finalized: false,
+                order_status: "OPEN",
+                order_state: "OPEN",
+                paid_amount: 0,
+                opened_at: ts,
+                closed_at: null,
+                notes: null,
+                updated_at: ts
+              }
+            ],
+            open_order_lines: [
+              {
+                order_id: orderId,
+                company_id: 1,
+                outlet_id: 10,
+                item_id: 1001,
+                sku_snapshot: "AMERICANO",
+                name_snapshot: "Americano",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 31000,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: ts
+              }
+            ],
+            order_updates: [
+              {
+                sequence_no: 11,
+                update_id: updateId,
+                order_id: orderId,
+                company_id: 1,
+                outlet_id: 10,
+                base_order_updated_at: null,
+                event_type: "SNAPSHOT_FINALIZED",
+                delta_json: "{}",
+                actor_user_id: null,
+                device_id: "TERM-A",
+                event_at: ts,
+                created_at: ts
+              }
+            ],
+            orders_cursor: 11
+          }
+        })
+      },
+      db
+    );
+
+    const order = await db.active_orders.get(orderId);
+    const lines = await db.active_order_lines.where("order_id").equals(orderId).toArray();
+    const updates = await db.active_order_updates.where("update_id").equals(updateId).toArray();
+    const metadata = await db.sync_metadata.get("1:10");
+
+    assert.equal(order?.order_id, orderId);
+    assert.equal(lines.length, 1);
+    assert.equal(updates.length, 1);
+    assert.equal(metadata?.orders_cursor, 11);
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});

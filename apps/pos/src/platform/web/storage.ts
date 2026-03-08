@@ -14,6 +14,7 @@ import type {
   ReservationRow,
   ActiveOrderRow,
   ActiveOrderLineRow,
+  ActiveOrderUpdateRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -140,6 +141,59 @@ export class WebStorageAdapter implements PosStoragePort {
       if (lines.length > 0) {
         await this.db.active_order_lines.bulkPut(lines);
       }
+    });
+  }
+
+  async putActiveOrderUpdate(update: ActiveOrderUpdateRow): Promise<void> {
+    await this.db.active_order_updates.put(update);
+  }
+
+  async listPendingActiveOrderUpdates(input: {
+    company_id: number;
+    outlet_id: number;
+    limit?: number;
+  }): Promise<ActiveOrderUpdateRow[]> {
+    const rows = await this.db.active_order_updates
+      .where("[company_id+outlet_id+sync_status+event_at]")
+      .between(
+        [input.company_id, input.outlet_id, "PENDING", Dexie.minKey],
+        [input.company_id, input.outlet_id, "PENDING", Dexie.maxKey]
+      )
+      .limit(input.limit ?? 100)
+      .toArray();
+
+    return rows.sort((left, right) => left.event_at.localeCompare(right.event_at));
+  }
+
+  async listActiveOrderUpdatesByOrder(input: {
+    company_id: number;
+    outlet_id: number;
+    order_id: string;
+  }): Promise<ActiveOrderUpdateRow[]> {
+    const rows = await this.db.active_order_updates
+      .where("[company_id+outlet_id+order_id+event_at]")
+      .between(
+        [input.company_id, input.outlet_id, input.order_id, Dexie.minKey],
+        [input.company_id, input.outlet_id, input.order_id, Dexie.maxKey]
+      )
+      .toArray();
+
+    return rows.sort((left, right) => left.event_at.localeCompare(right.event_at));
+  }
+
+  async markActiveOrderUpdateSyncResult(input: {
+    update_id: string;
+    sync_status: "SENT" | "FAILED";
+    sync_error?: string | null;
+  }): Promise<void> {
+    const existing = await this.db.active_order_updates.where("update_id").equals(input.update_id).first();
+    if (!existing) {
+      return;
+    }
+
+    await this.db.active_order_updates.update(existing.pk, {
+      sync_status: input.sync_status,
+      sync_error: input.sync_status === "FAILED" ? input.sync_error ?? "SYNC_FAILED" : null
     });
   }
 

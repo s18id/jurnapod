@@ -172,3 +172,47 @@ test("completeOrderSession closes order, releases table, and finalizes reservati
     db.close();
   }
 });
+
+test("upsertActiveOrderSnapshot emits update log and outbox job", async () => {
+  const db = createPosOfflineDb(`jp-pos-runtime-service-dinein-update-log-${crypto.randomUUID()}`);
+  const storage = createWebStorageAdapter(db);
+  const runtime = new RuntimeService(storage, createNetworkMock());
+  const scope = { company_id: 1, outlet_id: 13 };
+
+  try {
+    const snapshot = await runtime.upsertActiveOrderSnapshot(scope, {
+      service_type: "TAKEAWAY",
+      table_id: null,
+      reservation_id: null,
+      guest_count: null,
+      is_finalized: false,
+      order_status: "OPEN",
+      paid_amount: 0,
+      notes: "new order",
+      lines: [
+        {
+          item_id: 10,
+          sku_snapshot: "SKU-10",
+          name_snapshot: "Tea",
+          item_type_snapshot: "PRODUCT",
+          unit_price_snapshot: 12000,
+          qty: 1,
+          discount_amount: 0
+        }
+      ]
+    });
+
+    const updates = await db.active_order_updates.toArray();
+    const jobs = await db.outbox_jobs.toArray();
+
+    assert.equal(snapshot.order.order_id.length > 0, true);
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].order_id, snapshot.order.order_id);
+    assert.equal(updates[0].sync_status, "PENDING");
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].job_type, "SYNC_POS_ORDER_UPDATE");
+    assert.equal(jobs[0].dedupe_key, updates[0].update_id);
+  } finally {
+    db.close();
+  }
+});

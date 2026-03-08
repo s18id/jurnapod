@@ -13,9 +13,21 @@ export type OrderStatus = "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
 
 export type ActiveOrderState = "OPEN" | "CLOSED";
 
-export type OutboxJobType = "SYNC_POS_TX";
+export type OutboxJobType = "SYNC_POS_TX" | "SYNC_POS_ORDER_UPDATE";
 
 export type OutboxJobStatus = "PENDING" | "SENT" | "FAILED";
+
+export type OrderUpdateEventType =
+  | "SNAPSHOT_FINALIZED"
+  | "ITEM_ADDED"
+  | "ITEM_REMOVED"
+  | "QTY_CHANGED"
+  | "ITEM_CANCELLED"
+  | "NOTES_CHANGED"
+  | "ORDER_RESUMED"
+  | "ORDER_CLOSED";
+
+export type OrderUpdateSyncStatus = "PENDING" | "SENT" | "FAILED";
 
 export type OutletTableStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
 
@@ -119,8 +131,26 @@ export interface SyncMetadataRow {
   company_id: number;
   outlet_id: number;
   last_data_version: number;
+  orders_cursor?: number;
   last_pulled_at: string;
   updated_at: string;
+}
+
+export interface ActiveOrderUpdateRow {
+  pk: string;
+  update_id: string;
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  base_order_updated_at: string | null;
+  event_type: OrderUpdateEventType;
+  delta_json: string;
+  actor_user_id: number | null;
+  device_id: string;
+  event_at: string;
+  created_at: string;
+  sync_status: OrderUpdateSyncStatus;
+  sync_error: string | null;
 }
 
 export interface SyncScopeConfigRow {

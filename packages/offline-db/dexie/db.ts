@@ -7,6 +7,7 @@ import type {
   ReservationRow,
   ActiveOrderRow,
   ActiveOrderLineRow,
+  ActiveOrderUpdateRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -24,6 +25,7 @@ export class PosOfflineDb extends Dexie {
   reservations!: Table<ReservationRow, string>;
   active_orders!: Table<ActiveOrderRow, string>;
   active_order_lines!: Table<ActiveOrderLineRow, string>;
+  active_order_updates!: Table<ActiveOrderUpdateRow, string>;
   sales!: Table<SaleRow, string>;
   sale_items!: Table<SaleItemRow, string>;
   payments!: Table<PaymentRow, string>;
@@ -155,6 +157,27 @@ export class PosOfflineDb extends Dexie {
       outbox_jobs:
         "&job_id,&dedupe_key,sale_id,[status+next_attempt_at],[status+lease_expires_at],lease_expires_at,updated_at",
       sync_metadata: "&pk,[company_id+outlet_id],last_data_version,updated_at",
+      sync_scope_config: "&pk,[company_id+outlet_id],data_version,updated_at"
+    });
+
+    this.version(10).stores({
+      products_cache:
+        "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+data_version],[company_id+outlet_id+is_active]",
+      outlet_tables: "&pk,[company_id+outlet_id+table_id],[company_id+outlet_id+status],updated_at",
+      reservations:
+        "&pk,[company_id+outlet_id+reservation_at],[company_id+outlet_id+status],[company_id+outlet_id+table_id],updated_at",
+      active_orders:
+        "&pk,&order_id,[company_id+outlet_id+order_state+updated_at],[company_id+outlet_id+order_state+is_finalized+updated_at],[company_id+outlet_id+table_id+order_state],[company_id+outlet_id+reservation_id+order_state]",
+      active_order_lines: "&pk,[order_id+item_id],[company_id+outlet_id+order_id]",
+      active_order_updates:
+        "&pk,&update_id,[company_id+outlet_id+order_id+event_at],[company_id+outlet_id+sync_status+event_at]",
+      sales:
+        "&sale_id,&client_tx_id,[company_id+outlet_id+status],[company_id+outlet_id+created_at],sync_status,[company_id+outlet_id+reservation_id],[company_id+outlet_id+table_id]",
+      sale_items: "&line_id,sale_id,[company_id+outlet_id+sale_id]",
+      payments: "&payment_id,sale_id,[company_id+outlet_id+sale_id]",
+      outbox_jobs:
+        "&job_id,&dedupe_key,sale_id,[status+next_attempt_at],[status+lease_expires_at],lease_expires_at,updated_at",
+      sync_metadata: "&pk,[company_id+outlet_id],last_data_version,orders_cursor,updated_at",
       sync_scope_config: "&pk,[company_id+outlet_id],data_version,updated_at"
     });
   }

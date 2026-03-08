@@ -158,6 +158,7 @@ export class SyncOrchestrator {
       // Get current sync metadata
       const currentMetadata = await this.storage.getSyncMetadata(scope);
       const sinceVersion = currentMetadata?.last_data_version;
+      const ordersCursor = currentMetadata?.orders_cursor;
 
       // Self-heal for stale metadata: if local active catalog is empty, force full pull.
       const currentActiveProducts = await this.storage.getProductsByOutlet({
@@ -172,7 +173,8 @@ export class SyncOrchestrator {
         {
           company_id: scope.company_id,
           outlet_id: scope.outlet_id,
-          since_version: requestedSinceVersion
+          since_version: requestedSinceVersion,
+          orders_cursor: ordersCursor
         },
         {
           baseUrl: this.config.apiOrigin,
@@ -207,6 +209,10 @@ export class SyncOrchestrator {
       const itemGroups = response.data.item_groups;
       const prices = response.data.prices;
       const config = response.data.config;
+      const openOrders = response.data.open_orders ?? [];
+      const openOrderLines = response.data.open_order_lines ?? [];
+      const orderUpdates = response.data.order_updates ?? [];
+      const nextOrdersCursor = response.data.orders_cursor ?? ordersCursor ?? 0;
 
       // Build lookup maps
       const now = new Date().toISOString();
@@ -266,6 +272,7 @@ export class SyncOrchestrator {
         company_id: scope.company_id,
         outlet_id: scope.outlet_id,
         last_data_version: dataVersion,
+        orders_cursor: nextOrdersCursor,
         last_pulled_at: now,
         updated_at: now
       });
@@ -281,6 +288,81 @@ export class SyncOrchestrator {
         payment_methods: config.payment_methods,
         updated_at: now
       });
+
+      if (openOrders.length > 0) {
+        await this.storage.upsertActiveOrders(
+          openOrders.map((order) => ({
+            pk: order.order_id,
+            order_id: order.order_id,
+            company_id: order.company_id,
+            outlet_id: order.outlet_id,
+            service_type: order.service_type,
+            table_id: order.table_id,
+            reservation_id: order.reservation_id,
+            guest_count: order.guest_count,
+            is_finalized: order.is_finalized,
+            order_status: order.order_status,
+            order_state: order.order_state,
+            paid_amount: order.paid_amount,
+            opened_at: order.opened_at,
+            closed_at: order.closed_at,
+            notes: order.notes,
+            updated_at: order.updated_at
+          }))
+        );
+
+        const orderLineMap = new Map<string, typeof openOrderLines>();
+        for (const line of openOrderLines) {
+          const list = orderLineMap.get(line.order_id) ?? [];
+          list.push(line);
+          orderLineMap.set(line.order_id, list);
+        }
+
+        for (const order of openOrders) {
+          const lines = (orderLineMap.get(order.order_id) ?? []).map((line) => ({
+            pk: `${line.order_id}:${line.item_id}`,
+            order_id: line.order_id,
+            company_id: line.company_id,
+            outlet_id: line.outlet_id,
+            item_id: line.item_id,
+            sku_snapshot: line.sku_snapshot,
+            name_snapshot: line.name_snapshot,
+            item_type_snapshot: line.item_type_snapshot,
+            unit_price_snapshot: line.unit_price_snapshot,
+            qty: line.qty,
+            discount_amount: line.discount_amount,
+            updated_at: line.updated_at
+          }));
+          await this.storage.replaceActiveOrderLines(order.order_id, lines);
+        }
+      }
+
+      for (const update of orderUpdates) {
+        await this.storage.putActiveOrderUpdate({
+          pk: `active_order_update:${update.update_id}`,
+          update_id: update.update_id,
+          order_id: update.order_id,
+          company_id: update.company_id,
+          outlet_id: update.outlet_id,
+          base_order_updated_at: update.base_order_updated_at,
+          event_type: update.event_type as
+            | "SNAPSHOT_FINALIZED"
+            | "ITEM_ADDED"
+            | "ITEM_REMOVED"
+            | "QTY_CHANGED"
+            | "ITEM_CANCELLED"
+            | "NOTES_CHANGED"
+            | "ORDER_RESUMED"
+            | "ORDER_CLOSED",
+          delta_json: update.delta_json,
+          actor_user_id: update.actor_user_id,
+          device_id: update.device_id,
+          event_at: update.event_at,
+          created_at: update.created_at,
+          sync_status: "SENT",
+          sync_error: null
+        });
+      }
 
       return {
         success: true,

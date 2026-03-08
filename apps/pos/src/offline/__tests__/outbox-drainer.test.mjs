@@ -426,3 +426,80 @@ test("timeout-like retry then duplicate replay converges to SENT", async () => {
     await db.delete();
   }
 });
+
+test("order update jobs mark active_order_updates as SENT", async () => {
+  const db = createPosOfflineDb(`jp-pos-outbox-drainer-order-update-${crypto.randomUUID()}`);
+  const fixedNow = Date.parse("2026-02-21T17:00:00.000Z");
+  const orderId = crypto.randomUUID();
+  const updateId = crypto.randomUUID();
+
+  try {
+    await db.active_orders.add({
+      pk: orderId,
+      order_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      service_type: "TAKEAWAY",
+      table_id: null,
+      reservation_id: null,
+      guest_count: null,
+      is_finalized: false,
+      order_status: "OPEN",
+      order_state: "OPEN",
+      paid_amount: 0,
+      opened_at: nowIso(fixedNow),
+      closed_at: null,
+      notes: null,
+      updated_at: nowIso(fixedNow)
+    });
+    await db.active_order_updates.add({
+      pk: `active_order_update:${updateId}`,
+      update_id: updateId,
+      order_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      base_order_updated_at: null,
+      event_type: "SNAPSHOT_FINALIZED",
+      delta_json: "{}",
+      actor_user_id: null,
+      device_id: "WEB_POS",
+      event_at: nowIso(fixedNow),
+      created_at: nowIso(fixedNow),
+      sync_status: "PENDING",
+      sync_error: null
+    });
+    await db.outbox_jobs.add({
+      job_id: crypto.randomUUID(),
+      sale_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      job_type: "SYNC_POS_ORDER_UPDATE",
+      dedupe_key: updateId,
+      payload_json: JSON.stringify({ update_id: updateId, order_id: orderId }),
+      status: "PENDING",
+      attempts: 0,
+      lease_owner_id: null,
+      lease_token: null,
+      lease_expires_at: null,
+      next_attempt_at: null,
+      last_error: null,
+      created_at: nowIso(fixedNow),
+      updated_at: nowIso(fixedNow)
+    });
+
+    await drainOutboxJobs(
+      {
+        now: () => fixedNow,
+        sender: async () => ({ result: "OK" })
+      },
+      db
+    );
+
+    const update = await db.active_order_updates.where("update_id").equals(updateId).first();
+    assert.equal(update?.sync_status, "SENT");
+    assert.equal(update?.sync_error, null);
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});

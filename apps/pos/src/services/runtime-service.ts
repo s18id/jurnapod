@@ -16,6 +16,8 @@ import type {
   ReservationRow,
   ActiveOrderRow,
   ActiveOrderLineRow,
+  ActiveOrderUpdateRow,
+  OrderUpdateEventType,
   OrderStatus,
   OrderServiceType
 } from "@jurnapod/offline-db/dexie";
@@ -390,6 +392,91 @@ export class RuntimeService {
 
   private buildActiveOrderLinePk(orderId: string, itemId: number): string {
     return `${orderId}:${itemId}`;
+  }
+
+  private buildActiveOrderUpdatePk(updateId: string): string {
+    return `active_order_update:${updateId}`;
+  }
+
+  private createActiveOrderUpdateEvent(input: {
+    scope: RuntimeOutletScope;
+    orderId: string;
+    existingOrder: ActiveOrderRow | undefined;
+    nextOrder: ActiveOrderRow;
+    existingLines: ActiveOrderLineRow[];
+    nextLines: ActiveOrderLineRow[];
+    timestamp: string;
+  }): ActiveOrderUpdateRow | null {
+    const existingOrder = input.existingOrder;
+    const existingLineMap = new Map(input.existingLines.map((line) => [line.item_id, line]));
+    const nextLineMap = new Map(input.nextLines.map((line) => [line.item_id, line]));
+
+    let eventType: OrderUpdateEventType = "SNAPSHOT_FINALIZED";
+
+    if (!existingOrder) {
+      eventType = "SNAPSHOT_FINALIZED";
+    } else if (existingOrder.order_state === "CLOSED" && input.nextOrder.order_state === "OPEN") {
+      eventType = "ORDER_RESUMED";
+    } else if (existingOrder.order_state === "OPEN" && input.nextOrder.order_state === "CLOSED") {
+      eventType = "ORDER_CLOSED";
+    } else if ((existingOrder.notes ?? null) !== (input.nextOrder.notes ?? null)) {
+      eventType = "NOTES_CHANGED";
+    } else {
+      const added = input.nextLines.find((line) => !existingLineMap.has(line.item_id));
+      if (added) {
+        eventType = "ITEM_ADDED";
+      } else {
+        const removed = input.existingLines.find((line) => !nextLineMap.has(line.item_id));
+        if (removed) {
+          eventType = "ITEM_REMOVED";
+        } else {
+          const qtyChanged = input.nextLines.find((line) => {
+            const before = existingLineMap.get(line.item_id);
+            return before && before.qty !== line.qty;
+          });
+          if (qtyChanged) {
+            eventType = "QTY_CHANGED";
+          }
+        }
+      }
+    }
+
+    const hasChange =
+      !existingOrder
+      || JSON.stringify({
+        order: existingOrder,
+        lines: input.existingLines
+      }) !==
+        JSON.stringify({
+          order: input.nextOrder,
+          lines: input.nextLines
+        });
+
+    if (!hasChange) {
+      return null;
+    }
+
+    const updateId = crypto.randomUUID();
+    return {
+      pk: this.buildActiveOrderUpdatePk(updateId),
+      update_id: updateId,
+      order_id: input.orderId,
+      company_id: input.scope.company_id,
+      outlet_id: input.scope.outlet_id,
+      base_order_updated_at: existingOrder?.updated_at ?? null,
+      event_type: eventType,
+      delta_json: JSON.stringify({
+        previous_updated_at: existingOrder?.updated_at ?? null,
+        next_updated_at: input.nextOrder.updated_at,
+        line_count: input.nextLines.length
+      }),
+      actor_user_id: null,
+      device_id: "WEB_POS",
+      event_at: input.timestamp,
+      created_at: input.timestamp,
+      sync_status: "PENDING",
+      sync_error: null
+    };
   }
 
   private normalizePaymentMethods(
@@ -837,6 +924,7 @@ export class RuntimeService {
     const orderId = input.order_id ?? crypto.randomUUID();
     const timestamp = nowIso();
     const existing = await this.storage.getActiveOrder(orderId);
+    const existingLines = existing ? await this.storage.getActiveOrderLines(orderId) : [];
 
     if (existing && !this.isScopeRow(scope, existing)) {
       throw new Error("Active order does not belong to the current outlet scope");
@@ -879,8 +967,6 @@ export class RuntimeService {
       updated_at: timestamp
     };
 
-    await this.storage.upsertActiveOrders([row]);
-
     const lineInputs = input.lines ?? [];
     const lineRows: ActiveOrderLineRow[] = lineInputs
       .filter((line) => line.qty > 0)
@@ -898,7 +984,46 @@ export class RuntimeService {
         discount_amount: line.discount_amount,
         updated_at: timestamp
       }));
+
+    const updateEvent = this.createActiveOrderUpdateEvent({
+      scope,
+      orderId,
+      existingOrder: existing,
+      nextOrder: row,
+      existingLines,
+      nextLines: lineRows,
+      timestamp
+    });
+
+    await this.storage.upsertActiveOrders([row]);
     await this.storage.replaceActiveOrderLines(orderId, lineRows);
+
+    if (updateEvent) {
+      await this.storage.putActiveOrderUpdate(updateEvent);
+      await this.storage.createOutboxJob({
+        job_id: crypto.randomUUID(),
+        sale_id: orderId,
+        company_id: scope.company_id,
+        outlet_id: scope.outlet_id,
+        job_type: "SYNC_POS_ORDER_UPDATE",
+        dedupe_key: updateEvent.update_id,
+        payload_json: JSON.stringify({
+          update_id: updateEvent.update_id,
+          order_id: orderId,
+          company_id: scope.company_id,
+          outlet_id: scope.outlet_id
+        }),
+        status: "PENDING",
+        attempts: 0,
+        lease_owner_id: null,
+        lease_token: null,
+        lease_expires_at: null,
+        next_attempt_at: null,
+        last_error: null,
+        created_at: timestamp,
+        updated_at: timestamp
+      });
+    }
 
     return {
       order: mapActiveOrderRow(row),

@@ -97,6 +97,25 @@ Sync pull/push contract extensions for tables and reservations.
 
 ---
 
+### 5. [Active Order Sync Specification](./pos-active-order-sync-spec.md)
+Detailed design for syncing open dine-in snapshots and immutable update history across terminals.
+
+**Contents:**
+- Durable snapshot + update-log model
+- Local and server schema extensions
+- Push/pull contract extensions
+- Optimistic merge conflict policy with stale-edit warnings
+- Idempotency and rollout/testing requirements
+
+**Key Decisions:**
+- ✅ Use optimistic merge + stale-edit warning (no hard lock in MVP)
+- ✅ Keep finalized sale sync path unchanged (`client_tx_id`)
+- ✅ Add immutable `order_updates` stream with idempotent `update_id`
+
+**Status:** Draft ✅
+
+---
+
 ## Implementation Checklist
 
 ### Design Phase ✅ COMPLETE

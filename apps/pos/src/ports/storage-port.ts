@@ -16,6 +16,7 @@ import type {
   ReservationRow,
   ActiveOrderRow,
   ActiveOrderLineRow,
+  ActiveOrderUpdateRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -66,6 +67,26 @@ export interface PosStoragePort {
   getActiveOrderLines(order_id: string): Promise<ActiveOrderLineRow[]>;
 
   replaceActiveOrderLines(order_id: string, lines: ActiveOrderLineRow[]): Promise<void>;
+
+  putActiveOrderUpdate(update: ActiveOrderUpdateRow): Promise<void>;
+
+  listPendingActiveOrderUpdates(input: {
+    company_id: number;
+    outlet_id: number;
+    limit?: number;
+  }): Promise<ActiveOrderUpdateRow[]>;
+
+  listActiveOrderUpdatesByOrder(input: {
+    company_id: number;
+    outlet_id: number;
+    order_id: string;
+  }): Promise<ActiveOrderUpdateRow[]>;
+
+  markActiveOrderUpdateSyncResult(input: {
+    update_id: string;
+    sync_status: "SENT" | "FAILED";
+    sync_error?: string | null;
+  }): Promise<void>;
 
   // Sale operations
   createSale(sale: SaleRow): Promise<void>;
