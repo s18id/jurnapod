@@ -17,6 +17,12 @@ Important:
 - Shared contracts should stay aligned across apps and packages.
 - Favor correctness, auditability, and tenant isolation over cosmetic cleanup.
 
+## Database compatibility
+- All schema and migration SQL must run on both MySQL 8.0+ and MariaDB.
+- Keep migrations rerunnable/idempotent because MySQL-family DDL is non-atomic.
+- Avoid MySQL/MariaDB syntax drift in migrations (for example, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` is not portable across engines/versions).
+- For additive rerunnable DDL, prefer `information_schema` existence checks plus guarded dynamic `ALTER TABLE` statements.
+
 ## Review guidelines
 
 ### Severity
