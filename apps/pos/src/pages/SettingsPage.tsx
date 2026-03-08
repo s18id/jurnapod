@@ -13,7 +13,7 @@ interface SettingsPageProps {
   onLogout: () => void;
 }
 
-export function SettingsPage({ context: _context, onLogout }: SettingsPageProps): JSX.Element {
+export function SettingsPage({ context, onLogout }: SettingsPageProps): JSX.Element {
   const {
     scope,
     outletOptions,
@@ -34,6 +34,9 @@ export function SettingsPage({ context: _context, onLogout }: SettingsPageProps)
     runSyncPullNow,
     runSyncPushNow
   } = usePosAppState();
+  const [cacheResetInFlight, setCacheResetInFlight] = React.useState(false);
+  const [cacheResetMessage, setCacheResetMessage] = React.useState<string | null>(null);
+  const [cacheResetConfirmText, setCacheResetConfirmText] = React.useState("");
 
   const containerStyles: React.CSSProperties = {
     display: "flex",
@@ -280,6 +283,71 @@ export function SettingsPage({ context: _context, onLogout }: SettingsPageProps)
 
       <section style={sectionStyles}>
         <h2 style={sectionTitleStyles}>Account</h2>
+
+        <div style={{ marginBottom: 12, padding: 12, borderRadius: 10, border: "1px solid #fecaca", background: "#fff1f2" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#881337" }}>Reset local master cache</div>
+          <div style={{ fontSize: 12, color: "#9f1239", marginTop: 4 }}>
+            Clears local catalog, tables, and reservations for this outlet only. Does not clear open orders, sales, payments, or outbox transactions.
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <label htmlFor="settings-reset-confirm" style={{ fontSize: 12, color: "#9f1239", display: "block", marginBottom: 4 }}>
+              Type <strong>RESET</strong> to enable reset
+            </label>
+            <input
+              id="settings-reset-confirm"
+              name="settingsResetConfirm"
+              value={cacheResetConfirmText}
+              onChange={(event) => setCacheResetConfirmText(event.target.value)}
+              placeholder="Type RESET"
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: "1px solid #fda4af",
+                fontSize: 13,
+                background: "#ffffff"
+              }}
+            />
+          </div>
+          <Button
+            id="settings-reset-master-cache"
+            name="settingsResetMasterCache"
+            variant="danger"
+            size="small"
+            disabled={cacheResetInFlight || cacheResetConfirmText.trim() !== "RESET"}
+            style={{ marginTop: 10 }}
+            onClick={() => {
+              const shouldReset = window.confirm(
+                "Reset local master cache for this outlet? Open orders and transactions will be kept."
+              );
+              if (!shouldReset) {
+                return;
+              }
+
+              void (async () => {
+                setCacheResetInFlight(true);
+                setCacheResetMessage(null);
+                try {
+                  await context.runtime.clearLocalMasterCache(scope);
+                  await runSyncPullNow();
+                  setCacheResetMessage("Local master cache reset and synced.");
+                  setCacheResetConfirmText("");
+                } catch (error) {
+                  setCacheResetMessage(
+                    error instanceof Error ? error.message : "Failed to reset local master cache"
+                  );
+                } finally {
+                  setCacheResetInFlight(false);
+                }
+              })();
+            }}
+          >
+            {cacheResetInFlight ? "Resetting..." : "Reset Local Cache"}
+          </Button>
+          {cacheResetMessage ? (
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: "#881337" }}>{cacheResetMessage}</p>
+          ) : null}
+        </div>
         
         <Button id="settings-logout" name="settingsLogout" variant="danger" onClick={onLogout} style={{ width: "100%" }}>
           Logout

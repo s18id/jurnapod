@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { Button, Card } from "../shared/components/index.js";
@@ -40,16 +40,38 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
     subtotal: number;
     reservation_id: number | null;
   }>>({});
+  const [isSyncing, setIsSyncing] = useState(false);
+  const autoSyncScopesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let disposed = false;
 
     async function loadTables() {
-      const [tables, reservations, activeOrders] = await Promise.all([
+      let [tables, reservations, activeOrders] = await Promise.all([
         context.runtime.getOutletTables(scope),
         context.runtime.getOutletReservations(scope),
         context.runtime.listActiveOrders(scope, "OPEN", { finalizedOnly: true })
       ]);
+
+      const scopeKey = `${scope.company_id}:${scope.outlet_id}`;
+      const shouldAutoSync =
+        context.runtime.isOnline() &&
+        (tables.length === 0 || reservations.length === 0) &&
+        !autoSyncScopesRef.current.has(scopeKey);
+
+      if (shouldAutoSync) {
+        autoSyncScopesRef.current.add(scopeKey);
+        try {
+          await context.sync.pull(scope);
+          [tables, reservations, activeOrders] = await Promise.all([
+            context.runtime.getOutletTables(scope),
+            context.runtime.getOutletReservations(scope),
+            context.runtime.listActiveOrders(scope, "OPEN", { finalizedOnly: true })
+          ]);
+        } catch (error) {
+          console.error("Failed to auto-sync tables/reservations:", error);
+        }
+      }
 
       const snapshots = await Promise.all(
         activeOrders.map(async (order) => {
@@ -106,17 +128,68 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
     return activeOrderContext.table_id;
   }, [activeOrderContext.table_id, currentActiveOrderId, tableOrderSummaryByTableId]);
 
+  async function handleSyncTables() {
+    setIsSyncing(true);
+    try {
+      await context.sync.pull(scope);
+      const tables = await context.runtime.getOutletTables(scope);
+      setOutletTables(tables);
+    } catch (error) {
+      console.error("Failed to sync tables:", error);
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
   return (
     <div style={{ padding: 16 }}>
       <header style={{ marginBottom: 14 }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Tables</h1>
-        <p style={{ margin: "8px 0 0", color: "#475569", fontSize: 13 }}>
-          Start or resume dine-in orders by table.
-        </p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Tables</h1>
+            <p style={{ margin: "8px 0 0", color: "#475569", fontSize: 13 }}>
+              Start or resume dine-in orders by table.
+            </p>
+          </div>
+          <Button
+            id="sync-tables"
+            name="syncTables"
+            variant="secondary"
+            disabled={isSyncing}
+            onClick={() => void handleSyncTables()}
+          >
+            {isSyncing ? "Syncing..." : "Refresh tables"}
+          </Button>
+        </div>
       </header>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 10 }}>
-        {outletTables.map((table) => {
+      {outletTables.length === 0 ? (
+        <div style={{
+          padding: 32,
+          textAlign: "center",
+          background: "#f8fafc",
+          border: "1px solid #e2e8f0",
+          borderRadius: 8
+        }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "#334155", marginBottom: 8 }}>
+            No tables configured
+          </div>
+          <div style={{ fontSize: 14, color: "#64748b", marginBottom: 16 }}>
+            Please configure tables in backoffice or sync to get the latest configuration.
+          </div>
+          <Button
+            id="sync-tables-empty"
+            name="syncTablesEmpty"
+            variant="primary"
+            disabled={isSyncing}
+            onClick={() => void handleSyncTables()}
+          >
+            {isSyncing ? "Syncing..." : "Sync now"}
+          </Button>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 10 }}>
+          {outletTables.map((table) => {
           const colors = statusColors[table.status];
           const tableOrderSummary = tableOrderSummaryByTableId[table.table_id] ?? null;
           const hasTableOrder = !!tableOrderSummary;
@@ -205,18 +278,19 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
                       ? "Resume table order"
                     : table.status === "OCCUPIED"
                       ? "Resume occupied table"
-                      : "Use table"}
-                </Button>
-                {table.status === "OCCUPIED" && hasOtherActiveTable ? (
-                  <div style={{ marginTop: 6, fontSize: 11, color: "#7c2d12", fontWeight: 600 }}>
-                    Use "Transfer table" in Cart to move current unpaid order.
-                  </div>
-                ) : null}
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+                       : "Use table"}
+                 </Button>
+                 {table.status === "OCCUPIED" && hasOtherActiveTable ? (
+                   <div style={{ marginTop: 6, fontSize: 11, color: "#7c2d12", fontWeight: 600 }}>
+                     Use "Transfer table" in Cart to move current unpaid order.
+                   </div>
+                 ) : null}
+               </div>
+             </Card>
+           );
+         })}
+       </div>
+      )}
+     </div>
+   );
+ }

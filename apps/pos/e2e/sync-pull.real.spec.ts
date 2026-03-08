@@ -22,6 +22,7 @@ function requireEnv(value: string | undefined, key: string): string {
 
 test.describe("real API sync pull", () => {
   test("login then sync pull succeeds without auth errors", async ({ page, request }) => {
+    test.skip(!companyCode || !email || !password, "Set E2E_COMPANY_CODE/E2E_OWNER_EMAIL/E2E_OWNER_PASSWORD or JP_* env vars");
     const resolvedCompanyCode = requireEnv(companyCode, "E2E_COMPANY_CODE");
     const resolvedEmail = requireEnv(email, "E2E_OWNER_EMAIL");
     const resolvedPassword = requireEnv(password, "E2E_OWNER_PASSWORD");

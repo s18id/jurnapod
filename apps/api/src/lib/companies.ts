@@ -154,6 +154,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "SUPER_ADMIN", module: "purchasing", permissionMask: 15 },
   { roleCode: "SUPER_ADMIN", module: "reports", permissionMask: 15 },
   { roleCode: "SUPER_ADMIN", module: "settings", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "pos", permissionMask: 15 },
   { roleCode: "OWNER", module: "companies", permissionMask: 15 },
   { roleCode: "OWNER", module: "users", permissionMask: 15 },
   { roleCode: "OWNER", module: "roles", permissionMask: 15 },
@@ -165,6 +166,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "OWNER", module: "purchasing", permissionMask: 15 },
   { roleCode: "OWNER", module: "reports", permissionMask: 15 },
   { roleCode: "OWNER", module: "settings", permissionMask: 15 },
+  { roleCode: "OWNER", module: "pos", permissionMask: 15 },
   { roleCode: "COMPANY_ADMIN", module: "companies", permissionMask: 0 },
   { roleCode: "COMPANY_ADMIN", module: "users", permissionMask: 15 },
   { roleCode: "COMPANY_ADMIN", module: "roles", permissionMask: 0 },
@@ -176,6 +178,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "COMPANY_ADMIN", module: "purchasing", permissionMask: 0 },
   { roleCode: "COMPANY_ADMIN", module: "reports", permissionMask: 2 },
   { roleCode: "COMPANY_ADMIN", module: "settings", permissionMask: 6 },
+  { roleCode: "COMPANY_ADMIN", module: "pos", permissionMask: 15 },
   { roleCode: "ADMIN", module: "companies", permissionMask: 2 },
   { roleCode: "ADMIN", module: "users", permissionMask: 15 },
   { roleCode: "ADMIN", module: "roles", permissionMask: 2 },
@@ -187,6 +190,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "ADMIN", module: "purchasing", permissionMask: 15 },
   { roleCode: "ADMIN", module: "reports", permissionMask: 2 },
   { roleCode: "ADMIN", module: "settings", permissionMask: 6 },
+  { roleCode: "ADMIN", module: "pos", permissionMask: 15 },
   { roleCode: "CASHIER", module: "companies", permissionMask: 0 },
   { roleCode: "CASHIER", module: "users", permissionMask: 0 },
   { roleCode: "CASHIER", module: "roles", permissionMask: 0 },
@@ -198,6 +202,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "CASHIER", module: "purchasing", permissionMask: 0 },
   { roleCode: "CASHIER", module: "reports", permissionMask: 2 },
   { roleCode: "CASHIER", module: "settings", permissionMask: 0 },
+  { roleCode: "CASHIER", module: "pos", permissionMask: 3 },
   { roleCode: "ACCOUNTANT", module: "companies", permissionMask: 0 },
   { roleCode: "ACCOUNTANT", module: "users", permissionMask: 0 },
   { roleCode: "ACCOUNTANT", module: "roles", permissionMask: 0 },
@@ -208,7 +213,8 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "ACCOUNTANT", module: "inventory", permissionMask: 0 },
   { roleCode: "ACCOUNTANT", module: "purchasing", permissionMask: 2 },
   { roleCode: "ACCOUNTANT", module: "reports", permissionMask: 2 },
-  { roleCode: "ACCOUNTANT", module: "settings", permissionMask: 0 }
+  { roleCode: "ACCOUNTANT", module: "settings", permissionMask: 0 },
+  { roleCode: "ACCOUNTANT", module: "pos", permissionMask: 2 }
 ] as const;
 
 const SETTINGS_DEFINITIONS = [

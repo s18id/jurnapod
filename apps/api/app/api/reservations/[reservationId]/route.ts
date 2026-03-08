@@ -46,6 +46,8 @@ export const PATCH = withAuth(
   [
     requireAccess({
       roles: ["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"],
+      module: "pos",
+      permission: "update",
       outletId: async (request, auth) => {
         const reservationId = parseReservationId(request);
         return await readReservationOutletId(auth.companyId, reservationId);

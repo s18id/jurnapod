@@ -98,6 +98,18 @@ export const APP_ROUTES: readonly AppRoute[] = [
     requiredModule: "pos"
   },
   {
+    path: "/outlet-tables",
+    label: "Outlet Tables",
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN"],
+    requiredModule: "pos"
+  },
+  {
+    path: "/reservations",
+    label: "Reservations",
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "pos"
+  },
+  {
     path: "/sync-queue",
     label: "Sync Queue",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
@@ -220,8 +232,13 @@ export function findRoute(path: string): AppRoute | null {
   return APP_ROUTES.find((route) => route.path === path) ?? null;
 }
 
-export function userCanAccessRoute(userRoles: readonly RoleCode[], route: AppRoute): boolean {
-  return route.allowedRoles.some((role) => userRoles.includes(role));
+export function userCanAccessRoute(
+  userRoles: readonly RoleCode[],
+  route: AppRoute,
+  userGlobalRoles?: readonly RoleCode[]
+): boolean {
+  const allRoles = [...userRoles, ...(userGlobalRoles || [])];
+  return route.allowedRoles.some((role) => allRoles.includes(role));
 }
 
 export function filterRoutesByModules(

@@ -34,6 +34,8 @@ export const AuditEntityTypeSchema = z.enum([
   "pos_transaction",
   "user",
   "outlet",
+  "outlet_table",
+  "reservation",
   "company",
   "setting",
   "feature_flag",

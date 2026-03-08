@@ -100,6 +100,31 @@ export interface SyncPullResponse {
       sequence_no: number;
     }>;
     orders_cursor?: number;
+    tables?: Array<{
+      table_id: number;
+      code: string;
+      name: string;
+      zone: string | null;
+      capacity: number | null;
+      status: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
+      updated_at: string;
+    }>;
+    reservations?: Array<{
+      reservation_id: number;
+      table_id: number | null;
+      customer_name: string;
+      customer_phone: string | null;
+      guest_count: number;
+      reservation_at: string;
+      duration_minutes: number | null;
+      status: "BOOKED" | "CONFIRMED" | "ARRIVED" | "SEATED" | "COMPLETED" | "CANCELLED" | "NO_SHOW";
+      notes: string | null;
+      linked_order_id: string | null;
+      arrived_at: string | null;
+      seated_at: string | null;
+      cancelled_at: string | null;
+      updated_at: string;
+    }>;
   };
 }
 

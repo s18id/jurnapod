@@ -65,6 +65,8 @@ import { PublicStaticPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
 import { SyncHistoryPage } from "../features/sync-history-page";
 import { PWASettingsPage } from "../features/pwa-settings-page";
+import { OutletTablesPage } from "../features/outlet-tables-page";
+import { ReservationsPage } from "../features/reservations-page";
 import { ResetPasswordPage } from "../features/reset-password-page";
 import { InvitePage } from "../features/invite-page";
 import { VerifyEmailPage } from "../features/verify-email-page";
@@ -170,6 +172,12 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/pos-payments") {
     return <PosPaymentsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/outlet-tables") {
+    return <OutletTablesPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/reservations") {
+    return <ReservationsPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/daily-sales") {
     return <DailySalesPage user={props.user} accessToken={props.accessToken} />;
@@ -284,7 +292,9 @@ export function AppRouter() {
 
       const publicSlug = getPublicStaticSlugFromLocation(globalThis.location);
       if (!publicSlug) {
-        const firstPath = APP_ROUTES.find((item) => userCanAccessRoute(session.user.roles, item))?.path;
+        const firstPath = APP_ROUTES.find((item) =>
+          userCanAccessRoute(session.user.roles, item, session.user.global_roles)
+        )?.path;
         ensureHash(firstPath ?? DEFAULT_ROUTE_PATH);
         globalThis.history.replaceState({}, "", `/${globalThis.location.hash}`);
       }
@@ -414,7 +424,9 @@ export function AppRouter() {
     if (!user) {
       return APP_ROUTES;
     }
-    const roleFiltered = APP_ROUTES.filter((route) => userCanAccessRoute(user.roles, route));
+    const roleFiltered = APP_ROUTES.filter((route) =>
+      userCanAccessRoute(user.roles, route, user.global_roles)
+    );
     const moduleFiltered = filterRoutesByModules(roleFiltered, enabledModules);
     return moduleFiltered;
   }, [user, enabledModules]);
@@ -451,7 +463,7 @@ export function AppRouter() {
   const canAccess = !!(
     user &&
     route &&
-    userCanAccessRoute(user.roles, route) &&
+    userCanAccessRoute(user.roles, route, user.global_roles) &&
     (!route.requiredModule || enabledModules[route.requiredModule] === true)
   );
 
@@ -464,7 +476,9 @@ export function AppRouter() {
       setUser(session.user);
       setSessionStatus("authenticated");
 
-      const firstPath = APP_ROUTES.find((item) => userCanAccessRoute(session.user.roles, item))?.path;
+      const firstPath = APP_ROUTES.find((item) =>
+        userCanAccessRoute(session.user.roles, item, session.user.global_roles)
+      )?.path;
       ensureHash(firstPath ?? DEFAULT_ROUTE_PATH);
     } catch (error) {
       if (error instanceof ApiError) {

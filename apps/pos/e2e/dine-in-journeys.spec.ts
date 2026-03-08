@@ -79,7 +79,46 @@ async function mockSyncPull(page: import("@playwright/test").Page): Promise<void
           open_orders: [],
           open_order_lines: [],
           order_updates: [],
-          orders_cursor: 0
+          orders_cursor: 0,
+          tables: [
+            {
+              table_id: 1,
+              code: "A1",
+              name: "Table A1",
+              zone: "Main Hall",
+              capacity: 2,
+              status: "AVAILABLE",
+              updated_at: "2026-03-08T00:00:00.000Z"
+            },
+            {
+              table_id: 2,
+              code: "A2",
+              name: "Table A2",
+              zone: "Main Hall",
+              capacity: 4,
+              status: "RESERVED",
+              updated_at: "2026-03-08T00:00:00.000Z"
+            },
+            {
+              table_id: 3,
+              code: "B1",
+              name: "Table B1",
+              zone: "Window",
+              capacity: 2,
+              status: "OCCUPIED",
+              updated_at: "2026-03-08T00:00:00.000Z"
+            },
+            {
+              table_id: 4,
+              code: "T1",
+              name: "Table T1",
+              zone: "Terrace",
+              capacity: 4,
+              status: "UNAVAILABLE",
+              updated_at: "2026-03-08T00:00:00.000Z"
+            }
+          ],
+          reservations: []
         }
       })
     });
@@ -89,6 +128,7 @@ async function mockSyncPull(page: import("@playwright/test").Page): Promise<void
 async function setupAuthenticatedSession(page: import("@playwright/test").Page): Promise<void> {
   await mockHealth(page);
   await mockUserMe(page);
+  await mockSyncPull(page);
   await page.addInitScript((storageKey) => {
     window.localStorage.setItem(storageKey, "test-token");
   }, ACCESS_TOKEN_STORAGE_KEY);
@@ -248,6 +288,8 @@ async function ensureAssignableTables(page: import("@playwright/test").Page): Pr
 test("reservation to order journey keeps dine-in context", async ({ page }) => {
   await setupAuthenticatedSession(page);
   await page.goto("/reservations");
+  await ensureAssignableTables(page);
+  await page.reload();
   await expect(page).toHaveURL(/\/reservations$/);
 
   await page.locator(E2E_SELECTORS.reservations.customerName).fill(`E2E Guest ${Date.now()}`);
@@ -350,6 +392,8 @@ test("resume order and cancel finalized item captures reason and audit update", 
   }
 
   await page.goto("/tables");
+  await ensureAssignableTables(page);
+  await page.reload();
   await expect(page).toHaveURL(/\/tables$/);
 
   const useTableButton = page.locator(E2E_SELECTORS.tables.anyAction).first();

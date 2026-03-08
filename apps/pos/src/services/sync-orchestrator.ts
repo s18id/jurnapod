@@ -213,6 +213,8 @@ export class SyncOrchestrator {
       const openOrderLines = response.data.open_order_lines ?? [];
       const orderUpdates = response.data.order_updates ?? [];
       const nextOrdersCursor = response.data.orders_cursor ?? ordersCursor ?? 0;
+      const tables = response.data.tables ?? [];
+      const reservations = response.data.reservations ?? [];
 
       // Build lookup maps
       const now = new Date().toISOString();
@@ -362,6 +364,23 @@ export class SyncOrchestrator {
           sync_status: "SENT",
           sync_error: null
         });
+      }
+
+      // Upsert outlet tables
+      if (tables.length > 0) {
+        const tableRows = tables.map((table) => ({
+          pk: `${scope.company_id}:${scope.outlet_id}:${table.table_id}`,
+          company_id: scope.company_id,
+          outlet_id: scope.outlet_id,
+          table_id: table.table_id,
+          code: table.code,
+          name: table.name,
+          zone: table.zone,
+          capacity: table.capacity,
+          status: table.status,
+          updated_at: table.updated_at
+        }));
+        await this.storage.upsertOutletTables(tableRows);
       }
 
       return {

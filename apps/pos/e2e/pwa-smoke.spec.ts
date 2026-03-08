@@ -89,7 +89,30 @@ async function mockSyncPull(page: import("@playwright/test").Page): Promise<void
           open_orders: [],
           open_order_lines: [],
           order_updates: [],
-          orders_cursor: 0
+          orders_cursor: 0,
+          tables: changed
+            ? [
+                {
+                  table_id: 1,
+                  code: "A1",
+                  name: "Table A1",
+                  zone: "Main Hall",
+                  capacity: 2,
+                  status: "AVAILABLE",
+                  updated_at: "2026-03-08T00:00:00.000Z"
+                },
+                {
+                  table_id: 2,
+                  code: "A2",
+                  name: "Table A2",
+                  zone: "Main Hall",
+                  capacity: 4,
+                  status: "RESERVED",
+                  updated_at: "2026-03-08T00:00:00.000Z"
+                }
+              ]
+            : [],
+          reservations: []
         }
       })
     });

@@ -84,6 +84,37 @@ type FixedAssetCategoryRow = RowDataPacket & {
   updated_at: Date;
 };
 
+type OutletTableRow = RowDataPacket & {
+  id: number;
+  company_id: number;
+  outlet_id: number;
+  code: string;
+  name: string;
+  zone: string | null;
+  capacity: number | null;
+  status: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
+  updated_at: Date;
+};
+
+type ReservationRow = RowDataPacket & {
+  id: number;
+  company_id: number;
+  outlet_id: number;
+  table_id: number | null;
+  customer_name: string;
+  customer_phone: string | null;
+  guest_count: number;
+  reservation_at: Date;
+  duration_minutes: number | null;
+  status: "BOOKED" | "CONFIRMED" | "ARRIVED" | "SEATED" | "COMPLETED" | "CANCELLED" | "NO_SHOW";
+  notes: string | null;
+  linked_order_id: string | null;
+  arrived_at: Date | null;
+  seated_at: Date | null;
+  cancelled_at: Date | null;
+  updated_at: Date;
+};
+
 type VersionRow = RowDataPacket & {
   current_version: number;
 };
@@ -310,6 +341,37 @@ function normalizeSupply(row: SupplyRow) {
     name: row.name,
     unit: row.unit,
     is_active: row.is_active === 1,
+    updated_at: new Date(row.updated_at).toISOString()
+  };
+}
+
+function normalizeOutletTable(row: OutletTableRow) {
+  return {
+    table_id: Number(row.id),
+    code: row.code,
+    name: row.name,
+    zone: row.zone,
+    capacity: row.capacity == null ? null : Number(row.capacity),
+    status: row.status,
+    updated_at: new Date(row.updated_at).toISOString()
+  };
+}
+
+function normalizeReservation(row: ReservationRow) {
+  return {
+    reservation_id: Number(row.id),
+    table_id: row.table_id == null ? null : Number(row.table_id),
+    customer_name: row.customer_name,
+    customer_phone: row.customer_phone,
+    guest_count: Number(row.guest_count),
+    reservation_at: new Date(row.reservation_at).toISOString(),
+    duration_minutes: row.duration_minutes == null ? null : Number(row.duration_minutes),
+    status: row.status,
+    notes: row.notes,
+    linked_order_id: row.linked_order_id,
+    arrived_at: row.arrived_at ? new Date(row.arrived_at).toISOString() : null,
+    seated_at: row.seated_at ? new Date(row.seated_at).toISOString() : null,
+    cancelled_at: row.cancelled_at ? new Date(row.cancelled_at).toISOString() : null,
     updated_at: new Date(row.updated_at).toISOString()
   };
 }
@@ -727,6 +789,33 @@ export async function listItemGroups(companyId: number, filters?: { isActive?: b
 
   const [rows] = await pool.execute<ItemGroupRow[]>(sql, values);
   return rows.map(normalizeItemGroup);
+}
+
+export async function listOutletTables(companyId: number, outletId: number) {
+  const pool = getDbPool();
+  const sql = `
+    SELECT id, company_id, outlet_id, code, name, zone, capacity, status, updated_at
+    FROM outlet_tables
+    WHERE company_id = ? AND outlet_id = ?
+    ORDER BY code ASC
+  `;
+  const [rows] = await pool.execute<OutletTableRow[]>(sql, [companyId, outletId]);
+  return rows.map(normalizeOutletTable);
+}
+
+export async function listActiveReservations(companyId: number, outletId: number) {
+  const pool = getDbPool();
+  const sql = `
+    SELECT id, company_id, outlet_id, table_id, customer_name, customer_phone, guest_count,
+           reservation_at, duration_minutes, status, notes, linked_order_id,
+           arrived_at, seated_at, cancelled_at, updated_at
+    FROM reservations
+    WHERE company_id = ? AND outlet_id = ?
+      AND status IN ('BOOKED', 'CONFIRMED', 'ARRIVED', 'SEATED')
+    ORDER BY reservation_at ASC
+  `;
+  const [rows] = await pool.execute<ReservationRow[]>(sql, [companyId, outletId]);
+  return rows.map(normalizeReservation);
 }
 
 export async function findItemById(companyId: number, itemId: number) {
@@ -2300,7 +2389,11 @@ export async function buildSyncPullPayload(
   const config = await readSyncConfig(companyId);
 
   if (currentVersion <= sinceVersion) {
-    const openOrderSync = await readOpenOrderSyncPayload(companyId, outletId, ordersCursor);
+    const [openOrderSync, tables, reservations] = await Promise.all([
+      readOpenOrderSyncPayload(companyId, outletId, ordersCursor),
+      listOutletTables(companyId, outletId),
+      listActiveReservations(companyId, outletId)
+    ]);
     return {
       data_version: currentVersion,
       items: [],
@@ -2310,14 +2403,18 @@ export async function buildSyncPullPayload(
       open_orders: openOrderSync.open_orders,
       open_order_lines: openOrderSync.open_order_lines,
       order_updates: openOrderSync.order_updates,
-      orders_cursor: openOrderSync.orders_cursor
+      orders_cursor: openOrderSync.orders_cursor,
+      tables,
+      reservations
     };
   }
 
-  const [items, effectivePrices, itemGroups] = await Promise.all([
+  const [items, effectivePrices, itemGroups, tables, reservations] = await Promise.all([
     listItems(companyId, { isActive: true }),
     listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true }),
-    listItemGroups(companyId)
+    listItemGroups(companyId),
+    listOutletTables(companyId, outletId),
+    listActiveReservations(companyId, outletId)
   ]);
 
   const openOrderSync = await readOpenOrderSyncPayload(companyId, outletId, ordersCursor);
@@ -2353,7 +2450,9 @@ export async function buildSyncPullPayload(
     open_orders: openOrderSync.open_orders,
     open_order_lines: openOrderSync.open_order_lines,
     order_updates: openOrderSync.order_updates,
-    orders_cursor: openOrderSync.orders_cursor
+    orders_cursor: openOrderSync.orders_cursor,
+    tables,
+    reservations
   };
 }
 

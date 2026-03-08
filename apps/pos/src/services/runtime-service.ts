@@ -230,82 +230,6 @@ const DEFAULT_RUNTIME_TAX = {
   inclusive: false
 };
 
-const DEFAULT_OUTLET_TABLES: Array<Omit<RuntimeOutletTable, "company_id" | "outlet_id">> = [
-  {
-    table_id: 1,
-    code: "A1",
-    name: "Table A1",
-    zone: "Main Hall",
-    capacity: 2,
-    status: "AVAILABLE",
-    updated_at: "2026-03-07T00:00:00.000Z"
-  },
-  {
-    table_id: 2,
-    code: "A2",
-    name: "Table A2",
-    zone: "Main Hall",
-    capacity: 4,
-    status: "RESERVED",
-    updated_at: "2026-03-07T00:00:00.000Z"
-  },
-  {
-    table_id: 3,
-    code: "B1",
-    name: "Table B1",
-    zone: "Window",
-    capacity: 2,
-    status: "OCCUPIED",
-    updated_at: "2026-03-07T00:00:00.000Z"
-  },
-  {
-    table_id: 4,
-    code: "T1",
-    name: "Table T1",
-    zone: "Terrace",
-    capacity: 4,
-    status: "UNAVAILABLE",
-    updated_at: "2026-03-07T00:00:00.000Z"
-  }
-];
-
-const DEFAULT_OUTLET_RESERVATIONS: Array<Omit<RuntimeReservation, "company_id" | "outlet_id">> = [
-  {
-    reservation_id: 1,
-    table_id: 2,
-    customer_name: "Ardi Pranata",
-    customer_phone: "+628111000001",
-    guest_count: 4,
-    reservation_at: "2026-03-07T12:00:00.000Z",
-    duration_minutes: 90,
-    status: "BOOKED",
-    notes: "Birthday setup",
-    linked_order_id: null,
-    created_at: "2026-03-07T08:00:00.000Z",
-    updated_at: "2026-03-07T08:00:00.000Z",
-    arrived_at: null,
-    seated_at: null,
-    cancelled_at: null
-  },
-  {
-    reservation_id: 2,
-    table_id: null,
-    customer_name: "Sari Dewi",
-    customer_phone: "+628111000002",
-    guest_count: 2,
-    reservation_at: "2026-03-07T13:30:00.000Z",
-    duration_minutes: 60,
-    status: "CONFIRMED",
-    notes: null,
-    linked_order_id: null,
-    created_at: "2026-03-07T08:15:00.000Z",
-    updated_at: "2026-03-07T08:15:00.000Z",
-    arrived_at: null,
-    seated_at: null,
-    cancelled_at: null
-  }
-];
-
 const RESERVATION_FINAL_STATUSES: RuntimeReservationStatus[] = ["COMPLETED", "CANCELLED", "NO_SHOW"];
 
 function mapReservationRow(row: ReservationRow): RuntimeReservation {
@@ -659,6 +583,13 @@ export class RuntimeService {
     };
   }
 
+  async clearLocalMasterCache(scope: RuntimeOutletScope): Promise<void> {
+    await this.storage.clearScopeCache({
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id
+    });
+  }
+
   async getProductCatalog(
     scope: RuntimeOutletScope
   ): Promise<RuntimeProductCatalogItem[]> {
@@ -687,36 +618,7 @@ export class RuntimeService {
       outlet_id: scope.outlet_id
     });
 
-    if (existingRows.length > 0) {
-      return existingRows.map((table) => ({
-        table_id: table.table_id,
-        company_id: table.company_id,
-        outlet_id: table.outlet_id,
-        code: table.code,
-        name: table.name,
-        zone: table.zone,
-        capacity: table.capacity,
-        status: table.status,
-        updated_at: table.updated_at
-      }));
-    }
-
-    const seededRows: OutletTableRow[] = DEFAULT_OUTLET_TABLES.map((table) => ({
-      pk: `${scope.company_id}:${scope.outlet_id}:${table.table_id}`,
-      table_id: table.table_id,
-      company_id: scope.company_id,
-      outlet_id: scope.outlet_id,
-      code: table.code,
-      name: table.name,
-      zone: table.zone,
-      capacity: table.capacity,
-      status: table.status,
-      updated_at: table.updated_at
-    }));
-
-    await this.storage.upsertOutletTables(seededRows);
-
-    return seededRows.map((table) => ({
+    return existingRows.map((table) => ({
       table_id: table.table_id,
       company_id: table.company_id,
       outlet_id: table.outlet_id,
@@ -1435,34 +1337,7 @@ export class RuntimeService {
       outlet_id: scope.outlet_id
     });
 
-    if (existingRows.length > 0) {
-      return existingRows.map(mapReservationRow);
-    }
-
-    const seededRows: ReservationRow[] = DEFAULT_OUTLET_RESERVATIONS.map((reservation) => ({
-      pk: `${scope.company_id}:${scope.outlet_id}:${reservation.reservation_id}`,
-      reservation_id: reservation.reservation_id,
-      company_id: scope.company_id,
-      outlet_id: scope.outlet_id,
-      table_id: reservation.table_id,
-      customer_name: reservation.customer_name,
-      customer_phone: reservation.customer_phone,
-      guest_count: reservation.guest_count,
-      reservation_at: reservation.reservation_at,
-      duration_minutes: reservation.duration_minutes,
-      status: reservation.status,
-      notes: reservation.notes,
-      linked_order_id: reservation.linked_order_id,
-      created_at: reservation.created_at,
-      updated_at: reservation.updated_at,
-      arrived_at: reservation.arrived_at,
-      seated_at: reservation.seated_at,
-      cancelled_at: reservation.cancelled_at
-    }));
-
-    await this.storage.upsertReservations(seededRows);
-
-    return seededRows.map(mapReservationRow);
+    return existingRows.map(mapReservationRow);
   }
 
   async createOutletReservation(
