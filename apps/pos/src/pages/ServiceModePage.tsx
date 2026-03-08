@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React, { useMemo } from "react";
+import { IonContent, IonPage } from "@ionic/react";
 import { useNavigate } from "react-router-dom";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { usePosAppState } from "../router/pos-app-state.js";
@@ -47,8 +48,10 @@ export function ServiceModePage({ context }: ServiceModePageProps): JSX.Element 
   };
 
   return (
-    <Container maxWidth="full">
-      <div className="service-mode-page">
+    <IonPage>
+      <IonContent>
+        <Container maxWidth="full">
+          <div className="service-mode-page">
         <div className="service-mode-header">
           <h1 id="service-mode-title" className="service-mode-title">Select Service Mode</h1>
           <p className="service-mode-subtitle">
@@ -112,9 +115,9 @@ export function ServiceModePage({ context }: ServiceModePageProps): JSX.Element 
             Settings
           </Button>
         </div>
-      </div>
+          </div>
 
-      <style>{`
+          <style>{`
         .service-mode-page {
           min-height: 100vh;
           display: flex;
@@ -251,7 +254,9 @@ export function ServiceModePage({ context }: ServiceModePageProps): JSX.Element 
             font-size: 1.5rem;
           }
         }
-      `}</style>
-    </Container>
+          `}</style>
+        </Container>
+      </IonContent>
+    </IonPage>
   );
 }

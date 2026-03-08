@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React, { useState, useEffect } from "react";
+import { IonRefresher, IonRefresherContent, type RefresherEventDetail } from "@ionic/react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { useNavigate } from "react-router-dom";
 import type { RuntimeProductCatalogItem } from "../services/runtime-service.js";
@@ -37,7 +38,9 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     setActiveReservationId,
     setOutletTables,
     setActiveTableId,
-    outletTables
+    outletTables,
+    createOrderCheckpoint,
+    hasUnsentDineInItems
   } = usePosAppState();
   const { visibleProducts, searchTerm, setSearchTerm } = useProducts({ catalog });
   const [dineInGuardMessage, setDineInGuardMessage] = useState<string | null>(null);
@@ -51,23 +54,36 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     toServiceType: "TAKEAWAY"
   });
 
-  useEffect(() => {
-    let disposed = false;
-
-    async function loadProducts() {
-      try {
-        const products = await context.runtime.getProductCatalog(scope);
-        if (!disposed) {
-          setCatalog(products);
-        }
-      } catch (error) {
-        console.error("Failed to load products:", error);
-      }
+  const loadProducts = React.useCallback(async () => {
+    try {
+      const products = await context.runtime.getProductCatalog(scope);
+      setCatalog(products);
+    } catch (error) {
+      console.error("Failed to load products:", error);
     }
-
-    void loadProducts();
-    return () => { disposed = true; };
   }, [context.runtime, scope]);
+
+  useEffect(() => {
+    void loadProducts();
+  }, [loadProducts]);
+
+  useEffect(() => {
+    if (hasUnsentDineInItems) {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        e.preventDefault();
+        e.returnValue = "You have unsent items. Are you sure?";
+      };
+      
+      window.addEventListener("beforeunload", handleBeforeUnload);
+      return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    }
+  }, [hasUnsentDineInItems]);
+
+  const handleRefresh = (event: CustomEvent<RefresherEventDetail>) => {
+    void loadProducts().finally(() => {
+      event.detail.complete();
+    });
+  };
 
   const cartQuantities: Record<number, number> = Object.fromEntries(
     Object.values(cart).map((line) => [line.product.item_id, line.qty])
@@ -96,44 +112,12 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     toServiceType: OrderServiceType,
     selectedTableId?: number
   ) => {
-    // Release current table if switching from dine-in
-    if (
-      activeOrderContext.service_type === "DINE_IN" &&
-      activeOrderContext.table_id
-    ) {
-      const released = await context.runtime.setOutletTableStatus(
-        scope,
-        activeOrderContext.table_id,
-        "AVAILABLE"
-      );
-      if (released) {
-        setOutletTables((previous) =>
-          previous.map((table) =>
-            table.table_id === released.table_id ? released : table
-          )
-        );
-      }
-    }
-
     // Switch to new service type
     setServiceType(toServiceType);
 
     if (toServiceType === "DINE_IN" && selectedTableId) {
       // Set the selected table
       setActiveTableId(selectedTableId);
-      // Mark table as occupied
-      const occupied = await context.runtime.setOutletTableStatus(
-        scope,
-        selectedTableId,
-        "OCCUPIED"
-      );
-      if (occupied) {
-        setOutletTables((previous) =>
-          previous.map((table) =>
-            table.table_id === occupied.table_id ? occupied : table
-          )
-        );
-      }
       setDineInGuardMessage(null);
     } else if (toServiceType === "TAKEAWAY") {
       // Clear table-related state for takeaway
@@ -177,8 +161,8 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
   const canRemoveProduct = (product: RuntimeProductCatalogItem): boolean => {
     const cartLine = cart[product.item_id];
     if (!cartLine) return true;
-    // Can only reduce if current qty is greater than committed qty
-    return cartLine.qty > cartLine.committed_qty;
+    // Can only reduce if current qty is greater than kitchen_sent qty
+    return cartLine.qty > cartLine.kitchen_sent_qty;
   };
 
   const containerStyles: React.CSSProperties = {
@@ -190,6 +174,10 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
 
   return (
     <div style={containerStyles}>
+      <IonRefresher slot="fixed" onIonRefresh={handleRefresh}>
+        <IonRefresherContent />
+      </IonRefresher>
+
       <h1 style={{ margin: "0 0 16px", fontSize: "20px", fontWeight: 700 }}>Start Order</h1>
 
       <section
@@ -286,22 +274,53 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
         <div style={{ fontSize: 13, color: "#475569" }}>
           Active order: {cartLines.length} item(s) • Total {formatMoney(cartTotals.grand_total)}
         </div>
-        {!activeOrderContext.is_finalized && cartLines.length > 0 ? (
+        {!activeOrderContext.kitchen_sent && cartLines.length > 0 ? (
           <div style={{ marginTop: 6, fontSize: 12, color: "#9a3412", fontWeight: 600 }}>
-            Draft order: review and finalize in Cart before payment.
+            Draft order • Send to kitchen before payment
+          </div>
+        ) : activeOrderContext.kitchen_sent ? (
+          <div style={{ marginTop: 6, fontSize: 12, color: "#166534", fontWeight: 600 }}>
+            ✓ Sent to kitchen • Ready for payment or add more items
           </div>
         ) : null}
-        <Button
-          id="continue-to-cart"
-          name="continueToCart"
-          variant="primary"
-          fullWidth
-          style={{ marginTop: 10 }}
-          disabled={cartLines.length === 0}
-          onClick={() => navigate(routes.cart.path)}
-        >
-          Continue to cart
-        </Button>
+        {activeOrderContext.service_type === "DINE_IN" ? (
+          activeOrderContext.kitchen_sent ? (
+            <Button
+              id="continue-to-cart"
+              name="continueToCart"
+              variant="primary"
+              fullWidth
+              style={{ marginTop: 10 }}
+              onClick={() => navigate(routes.cart.path)}
+            >
+              Continue to cart
+            </Button>
+          ) : (
+            <Button
+              id="send-to-kitchen"
+              name="sendToKitchen"
+              variant="primary"
+              fullWidth
+              style={{ marginTop: 10 }}
+              disabled={cartLines.length === 0}
+              onClick={createOrderCheckpoint}
+            >
+              Send to kitchen
+            </Button>
+          )
+        ) : (
+          <Button
+            id="continue-to-cart"
+            name="continueToCart"
+            variant="primary"
+            fullWidth
+            style={{ marginTop: 10 }}
+            disabled={cartLines.length === 0}
+            onClick={() => navigate(routes.cart.path)}
+          >
+            Continue to cart
+          </Button>
+        )}
       </footer>
 
       <ServiceSwitchModal

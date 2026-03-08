@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React from "react";
-import { Button, Input } from "../../shared/components/index.js";
+import { IonButton, IonInput, IonItem, IonLabel, IonText } from "@ionic/react";
 import { PaymentMethodPicker } from "./PaymentMethodPicker.js";
 import { QuickAmountButtons } from "./QuickAmountButtons.js";
 import { CartSummary } from "../cart/CartSummary.js";
@@ -44,21 +44,23 @@ export function CheckoutForm({
         Allowed methods: {paymentMethods.join(", ")} (tax: {taxConfig.rate}% /{" "}
         {taxConfig.inclusive ? "inclusive" : "exclusive"})
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "grid", gap: 8 }}>
         <PaymentMethodPicker
           value={paymentMethod}
           options={paymentMethods}
           onChange={onPaymentMethodChange}
         />
-        <Input
-          id="checkout-paid-amount"
-          name="checkoutPaidAmount"
-          type="number"
-          value={totals.paid_total}
-          onChange={(val) => onPaidAmountChange(normalizeMoney(Number(val) || 0))}
-          inputMode="numeric"
-          min={0}
-        />
+        <IonItem>
+          <IonLabel position="stacked">Paid amount</IonLabel>
+          <IonInput
+            id="checkout-paid-amount"
+            type="number"
+            value={totals.paid_total}
+            min={0}
+            inputmode="decimal"
+            onIonInput={(event) => onPaidAmountChange(normalizeMoney(Number(event.detail.value) || 0))}
+          />
+        </IonItem>
       </div>
 
       <QuickAmountButtons total={totals.grand_total} onSelectAmount={onPaidAmountChange} />
@@ -66,21 +68,21 @@ export function CheckoutForm({
       <CartSummary totals={totals} />
 
       {!paymentMethodAllowed ? (
-        <div style={{ marginTop: 8, fontSize: 12, color: "#b91c1c" }}>
+        <IonText color="danger" style={{ marginTop: 8, display: "block", fontSize: 12 }}>
           Selected payment method is not allowed for this outlet. It will be corrected on next refresh.
-        </div>
+        </IonText>
       ) : null}
 
-      <Button
+      <IonButton
         id="checkout-complete-sale"
-        name="checkoutCompleteSale"
-        variant="primary"
+        color="primary"
+        expand="block"
         onClick={onComplete}
         disabled={!canComplete || completeInFlight}
         style={{ marginTop: 18, width: "100%" }}
       >
         {completeInFlight ? "Completing sale..." : "Complete sale offline"}
-      </Button>
+      </IonButton>
     </div>
   );
 }

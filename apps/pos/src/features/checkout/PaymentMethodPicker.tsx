@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React from "react";
+import { IonItem, IonLabel, IonSelect, IonSelectOption } from "@ionic/react";
 
 export interface PaymentMethodPickerProps {
   value: string;
@@ -11,25 +12,20 @@ export interface PaymentMethodPickerProps {
 
 export function PaymentMethodPicker({ value, options, onChange }: PaymentMethodPickerProps): JSX.Element {
   return (
-    <select
-      id="checkout-payment-method"
-      name="checkoutPaymentMethod"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      style={{
-        flex: 1,
-        padding: "10px 12px",
-        borderRadius: 8,
-        border: "1px solid #cbd5e1",
-        fontSize: 16,
-        minHeight: 44
-      }}
-    >
-      {options.map((method) => (
-        <option key={method} value={method}>
-          {method}
-        </option>
-      ))}
-    </select>
+    <IonItem>
+      <IonLabel>Method</IonLabel>
+      <IonSelect
+        id="checkout-payment-method"
+        interface="action-sheet"
+        value={value}
+        onIonChange={(event) => onChange(String(event.detail.value ?? ""))}
+      >
+        {options.map((method) => (
+          <IonSelectOption key={method} value={method}>
+            {method}
+          </IonSelectOption>
+        ))}
+      </IonSelect>
+    </IonItem>
   );
 }

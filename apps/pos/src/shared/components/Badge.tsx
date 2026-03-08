@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React from "react";
+import { IonBadge } from "@ionic/react";
 import { badgeColors } from "../utils/ui-helpers.js";
 
 export type BadgeStatus = "synced" | "pending" | "offline";
@@ -39,7 +40,7 @@ export function Badge({
   };
 
   return (
-    <span style={baseStyles}>
+    <IonBadge style={baseStyles}>
       {showDot && (
         <span
           style={{
@@ -51,6 +52,6 @@ export function Badge({
         />
       )}
       {text || statusMap[status]}
-    </span>
+    </IonBadge>
   );
 }

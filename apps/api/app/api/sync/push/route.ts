@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { type ResultSetHeader } from "mysql2";
+import { type ResultSetHeader, type RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { createHash } from "node:crypto";
 import { PosTransactionSchema, SyncPushPayloadSchema, SyncPushRequestSchema, type SyncPushResultItem } from "@jurnapod/shared";
@@ -1292,6 +1292,28 @@ export const POST = withAuth(
           try {
             await dbConnection.beginTransaction();
 
+            let previousTableId: number | null = null;
+            let previousServiceType: "TAKEAWAY" | "DINE_IN" | null = null;
+
+            const [previousRows] = await dbConnection.execute<RowDataPacket[]>(
+              `SELECT table_id, service_type
+               FROM pos_order_snapshots
+               WHERE order_id = ? AND company_id = ? AND outlet_id = ?
+               LIMIT 1`,
+              [snapshot.order_id, snapshot.company_id, snapshot.outlet_id]
+            );
+            const previousSnapshot = previousRows[0] as
+              | {
+                  table_id: number | null;
+                  service_type: "TAKEAWAY" | "DINE_IN";
+                }
+              | undefined;
+
+            if (previousSnapshot) {
+              previousTableId = previousSnapshot.table_id;
+              previousServiceType = previousSnapshot.service_type;
+            }
+
             await dbConnection.execute(
               `INSERT INTO pos_order_snapshots (
                  order_id,
@@ -1347,6 +1369,65 @@ export const POST = withAuth(
                 toMysqlDateTime(snapshot.updated_at)
               ]
             );
+
+            const currentTableId = snapshot.table_id ?? null;
+            const shouldReleasePrevious =
+              previousServiceType === "DINE_IN"
+              && previousTableId !== null
+              && (
+                snapshot.order_state === "CLOSED"
+                || snapshot.service_type !== "DINE_IN"
+                || currentTableId !== previousTableId
+              );
+            const shouldOccupyCurrent =
+              snapshot.order_state === "OPEN"
+              && snapshot.service_type === "DINE_IN"
+              && currentTableId !== null;
+
+            const releaseTable = async (tableId: number) => {
+              const [tableRows] = await dbConnection.execute<RowDataPacket[]>(
+                `SELECT status FROM outlet_tables
+                 WHERE company_id = ? AND outlet_id = ? AND id = ?
+                 LIMIT 1`,
+                [snapshot.company_id, snapshot.outlet_id, tableId]
+              );
+              const tableStatus = (tableRows[0] as { status?: string } | undefined)?.status;
+              if (tableStatus === "UNAVAILABLE") {
+                return;
+              }
+
+              const [reservationRows] = await dbConnection.execute<RowDataPacket[]>(
+                `SELECT id FROM reservations
+                 WHERE company_id = ? AND outlet_id = ? AND table_id = ?
+                   AND status IN ('BOOKED', 'CONFIRMED', 'ARRIVED')
+                 LIMIT 1`,
+                [snapshot.company_id, snapshot.outlet_id, tableId]
+              );
+              const nextStatus = reservationRows.length > 0 ? "RESERVED" : "AVAILABLE";
+              await dbConnection.execute(
+                `UPDATE outlet_tables
+                 SET status = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+                [nextStatus, snapshot.company_id, snapshot.outlet_id, tableId]
+              );
+            };
+
+            const occupyTable = async (tableId: number) => {
+              await dbConnection.execute(
+                `UPDATE outlet_tables
+                 SET status = 'OCCUPIED', updated_at = CURRENT_TIMESTAMP
+                 WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+                [snapshot.company_id, snapshot.outlet_id, tableId]
+              );
+            };
+
+            if (shouldReleasePrevious && previousTableId !== null) {
+              await releaseTable(previousTableId);
+            }
+
+            if (shouldOccupyCurrent && currentTableId !== null) {
+              await occupyTable(currentTableId);
+            }
 
             await dbConnection.execute(
               `DELETE FROM pos_order_snapshot_lines

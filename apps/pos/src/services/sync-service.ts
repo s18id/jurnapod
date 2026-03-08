@@ -59,15 +59,7 @@ export class SyncService {
 
     const dataVersion = response.data.data_version;
     const previousDataVersion = currentMetadata?.last_data_version ?? 0;
-
-    // Skip reconciliation if data version hasn't changed
-    // (server returns empty arrays when currentVersion <= sinceVersion)
-    if (dataVersion <= previousDataVersion) {
-      return {
-        data_version: dataVersion,
-        upserted_product_count: 0
-      };
-    }
+    const catalogAdvanced = dataVersion > previousDataVersion;
 
     const items = response.data.items;
     const itemGroups = response.data.item_groups;
@@ -81,52 +73,74 @@ export class SyncService {
     const itemsById = new Map(items.map((item) => [item.id, item]));
     const groupsById = new Map(itemGroups.map((group) => [group.id, group]));
 
-    // Join items with prices for this outlet
-    const productRows = prices
-      .filter((price) => price.outlet_id === scope.outlet_id)
-      .map((price) => {
-        const item = itemsById.get(price.item_id);
-        if (!item) {
-          return null;
-        }
+    let productRows: Array<{
+      pk: string;
+      company_id: number;
+      outlet_id: number;
+      item_id: number;
+      sku: string | null;
+      name: string;
+      item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+      item_group_id: number | null;
+      item_group_name: string | null;
+      price_snapshot: number;
+      is_active: boolean;
+      item_updated_at: string;
+      price_updated_at: string;
+      data_version: number;
+      pulled_at: string;
+    }> = [];
 
-        const groupId = item.item_group_id ?? null;
-        const group = groupId ? groupsById.get(groupId) : null;
+    if (catalogAdvanced) {
+      // Join items with prices for this outlet
+      productRows = prices
+        .filter((price) => price.outlet_id === scope.outlet_id)
+        .map((price) => {
+          const item = itemsById.get(price.item_id);
+          if (!item) {
+            return null;
+          }
 
-        return {
-          pk: `${scope.company_id}:${scope.outlet_id}:${item.id}`,
-          company_id: scope.company_id,
-          outlet_id: scope.outlet_id,
-          item_id: item.id,
-          sku: item.sku,
-          name: item.name,
-          item_type: item.type,
-          item_group_id: groupId,
-          item_group_name: group?.name ?? null,
-          price_snapshot: price.price,
-          is_active: item.is_active && price.is_active,
-          item_updated_at: item.updated_at,
-          price_updated_at: price.updated_at,
+          const groupId = item.item_group_id ?? null;
+          const group = groupId ? groupsById.get(groupId) : null;
+
+          return {
+            pk: `${scope.company_id}:${scope.outlet_id}:${item.id}`,
+            company_id: scope.company_id,
+            outlet_id: scope.outlet_id,
+            item_id: item.id,
+            sku: item.sku,
+            name: item.name,
+            item_type: item.type,
+            item_group_id: groupId,
+            item_group_name: group?.name ?? null,
+            price_snapshot: price.price,
+            is_active: item.is_active && price.is_active,
+            item_updated_at: item.updated_at,
+            price_updated_at: price.updated_at,
+            data_version: dataVersion,
+            pulled_at: now
+          };
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null);
+
+      // Reconcile stale products: mark previously cached items as inactive
+      // if they don't appear in the new payload
+      const incomingItemIds = new Set(productRows.map((row) => row.item_id));
+      const staleProducts = currentActiveProducts
+        .filter((row) => !incomingItemIds.has(row.item_id))
+        .map((row) => ({
+          ...row,
+          is_active: false,
           data_version: dataVersion,
           pulled_at: now
-        };
-      })
-      .filter((row): row is NonNullable<typeof row> => row !== null);
+        }));
 
-    // Reconcile stale products: mark previously cached items as inactive
-    // if they don't appear in the new payload
-    const incomingItemIds = new Set(productRows.map((row) => row.item_id));
-    const staleProducts = currentActiveProducts
-      .filter((row) => !incomingItemIds.has(row.item_id))
-      .map((row) => ({
-        ...row,
-        is_active: false,
-        data_version: dataVersion,
-        pulled_at: now
-      }));
+      // Upsert both new/updated products and stale products
+      await this.storage.upsertProducts([...productRows, ...staleProducts]);
+    }
 
-    // Upsert both new/updated products and stale products
-    await this.storage.upsertProducts([...productRows, ...staleProducts]);
+    const effectiveDataVersion = catalogAdvanced ? dataVersion : previousDataVersion;
 
     // Upsert outlet tables
     if (tables.length > 0) {
@@ -145,12 +159,37 @@ export class SyncService {
       await this.storage.upsertOutletTables(tableRows);
     }
 
+    // Upsert reservations
+    if (reservations.length > 0) {
+      const reservationRows = reservations.map((reservation) => ({
+        pk: `${scope.company_id}:${scope.outlet_id}:${reservation.reservation_id}`,
+        reservation_id: reservation.reservation_id,
+        company_id: scope.company_id,
+        outlet_id: scope.outlet_id,
+        table_id: reservation.table_id,
+        customer_name: reservation.customer_name,
+        customer_phone: reservation.customer_phone,
+        guest_count: reservation.guest_count,
+        reservation_at: reservation.reservation_at,
+        duration_minutes: reservation.duration_minutes,
+        status: reservation.status,
+        notes: reservation.notes,
+        linked_order_id: reservation.linked_order_id,
+        created_at: reservation.updated_at,
+        updated_at: reservation.updated_at,
+        arrived_at: reservation.arrived_at,
+        seated_at: reservation.seated_at,
+        cancelled_at: reservation.cancelled_at
+      }));
+      await this.storage.upsertReservations(reservationRows);
+    }
+
     // Update sync metadata
     await this.storage.upsertSyncMetadata({
       pk: `${scope.company_id}:${scope.outlet_id}`,
       company_id: scope.company_id,
       outlet_id: scope.outlet_id,
-      last_data_version: dataVersion,
+      last_data_version: effectiveDataVersion,
       last_pulled_at: now,
       updated_at: now
     });
@@ -160,7 +199,7 @@ export class SyncService {
       pk: `${scope.company_id}:${scope.outlet_id}`,
       company_id: scope.company_id,
       outlet_id: scope.outlet_id,
-      data_version: dataVersion,
+      data_version: effectiveDataVersion,
       tax_rate: config.tax.rate,
       tax_inclusive: config.tax.inclusive,
       payment_methods: config.payment_methods,
@@ -168,7 +207,7 @@ export class SyncService {
     });
 
     return {
-      data_version: dataVersion,
+      data_version: effectiveDataVersion,
       upserted_product_count: productRows.length
     };
   }

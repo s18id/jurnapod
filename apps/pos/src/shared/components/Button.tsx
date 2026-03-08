@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React, { useState } from "react";
+import { IonButton } from "@ionic/react";
 import { MIN_TOUCH_TARGET } from "../utils/constants.js";
 import { getTouchOptimizedStyles } from "../utils/touch.js";
 
@@ -31,22 +32,10 @@ export function Button({
   fullWidth = false
 }: ButtonProps): JSX.Element {
   const [isPressed, setIsPressed] = useState(false);
-  const variantStyles = {
-    primary: {
-      background: "#3b82f6",
-      color: "#ffffff",
-      border: "none"
-    },
-    secondary: {
-      background: "#f3f4f6",
-      color: "#1f2937",
-      border: "1px solid #d1d5db"
-    },
-    danger: {
-      background: "#ef4444",
-      color: "#ffffff",
-      border: "none"
-    }
+  const variantConfig = {
+    primary: { color: "primary", fill: "solid" as const },
+    secondary: { color: "medium", fill: "outline" as const },
+    danger: { color: "danger", fill: "solid" as const }
   };
 
   const sizeStyles = {
@@ -70,15 +59,14 @@ export function Button({
   const touchStyles = getTouchOptimizedStyles(disabled);
 
   const baseStyles: React.CSSProperties = {
-    borderRadius: "8px",
     fontWeight: 600,
     opacity: disabled ? 0.5 : isPressed ? 0.8 : 1,
     transition: "all 0.15s",
     transform: isPressed ? "scale(0.95)" : "scale(1)",
     width: fullWidth ? "100%" : "auto",
+    fontSize: sizeStyles[size].fontSize,
+    margin: 0,
     ...touchStyles,
-    ...variantStyles[variant],
-    ...sizeStyles[size],
     ...style
   };
 
@@ -107,10 +95,12 @@ export function Button({
   };
 
   return (
-    <button
+    <IonButton
       id={id}
-      name={name}
-      type={type}
+      buttonType={type}
+      color={variantConfig[variant].color}
+      fill={variantConfig[variant].fill}
+      expand={fullWidth ? "block" : undefined}
       disabled={disabled}
       onClick={onClick}
       onTouchStart={handleTouchStart}
@@ -121,6 +111,6 @@ export function Button({
       style={baseStyles}
     >
       {children}
-    </button>
+    </IonButton>
   );
 }

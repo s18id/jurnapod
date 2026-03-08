@@ -59,6 +59,9 @@ export interface PosAppStateValue {
   setOrderFinalized: (isFinalized: boolean) => void;
   setOrderStatus: (status: OrderLifecycleStatus) => void;
   setOrderNotes: (notes: string | null) => void;
+  createOrderCheckpoint: () => void;
+  discardDraftItems: () => void;
+  hasUnsentDineInItems: boolean;
   currentActiveOrderId: string | null;
   outletTables: RuntimeOutletTable[];
   setOutletTables: Dispatch<SetStateAction<RuntimeOutletTable[]>>;

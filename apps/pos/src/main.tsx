@@ -2,12 +2,20 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React from "react";
+import { IonApp, setupIonicReact } from "@ionic/react";
+import "@ionic/react/css/core.css";
+import "@ionic/react/css/normalize.css";
+import "@ionic/react/css/structure.css";
+import "@ionic/react/css/typography.css";
+import "./theme/variables.css";
 import { bootstrapWebApp, type WebBootstrapContext } from "./bootstrap/web.js";
 import { bootstrapMobileApp, type MobileBootstrapContext } from "./bootstrap/mobile.js";
 import { PosRouter } from "./router/Router.js";
 import { readAccessToken } from "./offline/auth-session.js";
 import { API_CONFIG } from "./shared/utils/constants.js";
 import { isCapacitor } from "./shared/utils/platform.js";
+
+setupIonicReact();
 
 const root = document.getElementById("root");
 if (!root) {
@@ -18,7 +26,11 @@ if (!root) {
 type BootstrapContext = WebBootstrapContext | MobileBootstrapContext;
 
 function App({ context }: { context: BootstrapContext }): JSX.Element {
-  return <PosRouter context={context} />;
+  return (
+    <IonApp>
+      <PosRouter context={context} />
+    </IonApp>
+  );
 }
 
 // Platform detection: use mobile bootstrap for Capacitor, web for browser

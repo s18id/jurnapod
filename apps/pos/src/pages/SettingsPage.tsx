@@ -2,6 +2,15 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React from "react";
+import {
+  IonInput,
+  IonItem,
+  IonLabel,
+  IonList,
+  IonSelect,
+  IonSelectOption,
+  IonToggle
+} from "@ionic/react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { Button } from "../shared/components/index.js";
 import { SyncControls } from "../features/sync/SyncControls.js";
@@ -170,65 +179,47 @@ export function SettingsPage({ context, onLogout }: SettingsPageProps): JSX.Elem
           </p>
         )}
 
-        <div style={{ marginTop: 12, padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Auto refresh</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                Poll runtime state every {Math.round(POLL_INTERVAL_MS / 1000)}s
-              </div>
-            </div>
-            <Button
+        <IonList inset style={{ marginTop: 12 }}>
+          <IonItem>
+            <IonLabel>
+              <h3 style={{ margin: 0 }}>Auto refresh</h3>
+              <p style={{ margin: "2px 0 0" }}>Poll runtime state every {Math.round(POLL_INTERVAL_MS / 1000)}s</p>
+            </IonLabel>
+            <IonToggle
               id="settings-auto-refresh-toggle"
-              name="settingsAutoRefreshToggle"
-              size="small"
-              variant={autoRefreshEnabled ? "primary" : "secondary"}
-              onClick={() => setAutoRefreshEnabled((enabled) => !enabled)}
-            >
-              {autoRefreshEnabled ? "On" : "Off"}
-            </Button>
-          </div>
-        </div>
+              checked={autoRefreshEnabled}
+              onIonChange={(event) => setAutoRefreshEnabled(event.detail.checked)}
+            />
+          </IonItem>
+        </IonList>
 
-        <div style={{ marginTop: 10, padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Auto pull catalog</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                Pull incremental product updates on interval
-              </div>
-            </div>
-            <Button
+        <IonList inset style={{ marginTop: 10 }}>
+          <IonItem>
+            <IonLabel>
+              <h3 style={{ margin: 0 }}>Auto pull catalog</h3>
+              <p style={{ margin: "2px 0 0" }}>Pull incremental product updates on interval</p>
+            </IonLabel>
+            <IonToggle
               id="settings-auto-pull-toggle"
-              name="settingsAutoPullToggle"
-              size="small"
-              variant={autoPullEnabled ? "primary" : "secondary"}
-              onClick={() => setAutoPullEnabled((enabled) => !enabled)}
+              checked={autoPullEnabled}
+              onIonChange={(event) => setAutoPullEnabled(event.detail.checked)}
+            />
+          </IonItem>
+          <IonItem>
+            <IonLabel>Auto pull interval</IonLabel>
+            <IonSelect
+              id="settings-auto-pull-interval"
+              value={autoPullIntervalMs}
+              interface="popover"
+              disabled={!autoPullEnabled}
+              onIonChange={(event) => setAutoPullIntervalMs(Number(event.detail.value))}
             >
-              {autoPullEnabled ? "On" : "Off"}
-            </Button>
-          </div>
-
-          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {[30000, 60000, 300000].map((ms) => {
-              const isActive = autoPullIntervalMs === ms;
-              const label = ms === 30000 ? "30s" : ms === 60000 ? "1m" : "5m";
-              return (
-                <Button
-                  key={ms}
-                  id={`settings-auto-pull-interval-${ms}`}
-                  name={`settingsAutoPullInterval-${ms}`}
-                  size="small"
-                  variant={isActive ? "primary" : "secondary"}
-                  disabled={!autoPullEnabled}
-                  onClick={() => setAutoPullIntervalMs(ms)}
-                >
-                  {label}
-                </Button>
-              );
-            })}
-          </div>
-        </div>
+              <IonSelectOption value={30000}>30s</IonSelectOption>
+              <IonSelectOption value={60000}>1m</IonSelectOption>
+              <IonSelectOption value={300000}>5m</IonSelectOption>
+            </IonSelect>
+          </IonItem>
+        </IonList>
       </section>
 
       <section style={sectionStyles}>
@@ -293,20 +284,12 @@ export function SettingsPage({ context, onLogout }: SettingsPageProps): JSX.Elem
             <label htmlFor="settings-reset-confirm" style={{ fontSize: 12, color: "#9f1239", display: "block", marginBottom: 4 }}>
               Type <strong>RESET</strong> to enable reset
             </label>
-            <input
+            <IonInput
               id="settings-reset-confirm"
-              name="settingsResetConfirm"
               value={cacheResetConfirmText}
-              onChange={(event) => setCacheResetConfirmText(event.target.value)}
+              onIonInput={(event) => setCacheResetConfirmText(String(event.detail.value ?? ""))}
               placeholder="Type RESET"
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: "1px solid #fda4af",
-                fontSize: 13,
-                background: "#ffffff"
-              }}
+              fill="outline"
             />
           </div>
           <Button

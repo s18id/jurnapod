@@ -2,8 +2,23 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  IonActionSheet,
+  IonBadge,
+  IonButton,
+  IonCard,
+  IonCardContent,
+  IonDatetime,
+  IonInput,
+  IonItem,
+  IonLabel,
+  IonList,
+  IonSelect,
+  IonSelectOption,
+  IonText,
+  IonTextarea
+} from "@ionic/react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
-import { Button, Card, Input } from "../shared/components/index.js";
 import type { RuntimeReservation, RuntimeReservationStatus } from "../services/runtime-service.js";
 import { usePosAppState } from "../router/pos-app-state.js";
 import { useNavigate } from "react-router-dom";
@@ -33,7 +48,15 @@ const statusActionMap: Record<RuntimeReservationStatus, RuntimeReservationStatus
   NO_SHOW: []
 };
 
-function fromDateTimeLocal(value: string): string {
+function toIsoDateTime(value: string): string {
+  if (!value) {
+    return value;
+  }
+
+  if (value.endsWith("Z") || /[+-]\d\d:\d\d$/.test(value)) {
+    return value;
+  }
+
   return new Date(value).toISOString();
 }
 
@@ -56,6 +79,7 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
   } = usePosAppState();
   const [submitInFlight, setSubmitInFlight] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [actionSheetReservation, setActionSheetReservation] = useState<RuntimeReservation | null>(null);
   const autoSyncScopesRef = useRef<Set<string>>(new Set());
   const [form, setForm] = useState<CreateReservationForm>(() => ({
     customer_name: "",
@@ -154,6 +178,51 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
     setOutletTables(tables);
   };
 
+  const statusActionButtons = useMemo(() => {
+    if (!actionSheetReservation) {
+      return [];
+    }
+
+    const nextStatusButtons = statusActionMap[actionSheetReservation.status].map((nextStatus) => ({
+      text: nextStatus.replace("_", " "),
+      role: (nextStatus === "CANCELLED" || nextStatus === "NO_SHOW") ? "destructive" : undefined,
+      handler: () => {
+        void (async () => {
+          try {
+            const updated = await context.runtime.updateReservationStatus(
+              scope,
+              actionSheetReservation.reservation_id,
+              nextStatus
+            );
+            upsertReservation(updated);
+            if (updated && nextStatus === "SEATED") {
+              activateReservationOrderContext(updated);
+            }
+            await refreshTables();
+          } catch (error) {
+            setErrorMessage(error instanceof Error ? error.message : "Failed to update reservation");
+          }
+        })();
+      }
+    }));
+
+    const buttons: Array<{ text: string; role?: string; handler?: () => void }> = [];
+
+    if (actionSheetReservation.table_id) {
+      buttons.push({
+        text: "Continue order",
+        handler: () => {
+          activateReservationOrderContext(actionSheetReservation);
+          navigate(routes.products.path);
+        }
+      });
+    }
+
+    buttons.push(...nextStatusButtons);
+    buttons.push({ text: "Cancel", role: "cancel" });
+    return buttons;
+  }, [actionSheetReservation, context.runtime, navigate, scope]);
+
   return (
     <div style={{ padding: 16, display: "grid", gap: 12 }}>
       <header>
@@ -163,91 +232,87 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
         </p>
       </header>
 
-      <Card>
-        <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>Create reservation</h2>
-        <div style={{ display: "grid", gap: 8 }}>
-          <Input
-            id="reservation-customer-name"
-            name="reservationCustomerName"
-            value={form.customer_name}
-            placeholder="Customer name"
-            onChange={(value) => setForm((previous) => ({ ...previous, customer_name: value }))}
-          />
-          <Input
-            id="reservation-customer-phone"
-            name="reservationCustomerPhone"
-            type="tel"
-            value={form.customer_phone}
-            placeholder="Customer phone"
-            onChange={(value) => setForm((previous) => ({ ...previous, customer_phone: value }))}
-          />
-          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
-            <Input
-              id="reservation-guest-count"
-              name="reservationGuestCount"
-              type="number"
-              value={form.guest_count}
-              placeholder="Guest count"
-              onChange={(value) => setForm((previous) => ({ ...previous, guest_count: value }))}
-              min={1}
-            />
-            <Input
-              id="reservation-duration-minutes"
-              name="reservationDurationMinutes"
-              type="number"
-              value={form.duration_minutes}
-              placeholder="Duration (min)"
-              onChange={(value) => setForm((previous) => ({ ...previous, duration_minutes: value }))}
-              min={15}
-            />
-          </div>
-          <input
-            id="reservation-datetime"
-            name="reservationDateTime"
-            type="datetime-local"
-            value={form.reservation_at}
-            onChange={(event) => setForm((previous) => ({ ...previous, reservation_at: event.target.value }))}
-            style={{
-              width: "100%",
-              padding: "12px 16px",
-              borderRadius: 8,
-              border: "1px solid #d1d5db",
-              fontSize: 16
-            }}
-          />
-          <select
-            id="reservation-table-id"
-            name="reservationTableId"
-            value={form.table_id}
-            onChange={(event) => setForm((previous) => ({ ...previous, table_id: event.target.value }))}
-            style={{
-              width: "100%",
-              padding: "12px 16px",
-              borderRadius: 8,
-              border: "1px solid #d1d5db",
-              fontSize: 16,
-              background: "#ffffff"
-            }}
-          >
-            <option value="">No table assigned</option>
-            {availableTables.map((table) => (
-              <option key={table.table_id} value={String(table.table_id)}>
-                {table.code} ({table.status})
-              </option>
-            ))}
-          </select>
-          <Input
-            id="reservation-notes"
-            name="reservationNotes"
-            value={form.notes}
-            placeholder="Notes"
-            onChange={(value) => setForm((previous) => ({ ...previous, notes: value }))}
-          />
-          <Button
+      <IonCard>
+        <IonCardContent>
+          <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>Create reservation</h2>
+          <IonList inset>
+            <IonItem>
+              <IonLabel position="stacked">Customer name</IonLabel>
+              <IonInput
+                id="reservation-customer-name"
+                value={form.customer_name}
+                onIonInput={(event) => setForm((previous) => ({ ...previous, customer_name: String(event.detail.value ?? "") }))}
+              />
+            </IonItem>
+            <IonItem>
+              <IonLabel position="stacked">Customer phone</IonLabel>
+              <IonInput
+                id="reservation-customer-phone"
+                type="tel"
+                value={form.customer_phone}
+                onIonInput={(event) => setForm((previous) => ({ ...previous, customer_phone: String(event.detail.value ?? "") }))}
+              />
+            </IonItem>
+            <IonItem>
+              <IonLabel position="stacked">Guest count</IonLabel>
+              <IonInput
+                id="reservation-guest-count"
+                type="number"
+                min={1}
+                value={form.guest_count}
+                onIonInput={(event) => setForm((previous) => ({ ...previous, guest_count: String(event.detail.value ?? "") }))}
+              />
+            </IonItem>
+            <IonItem>
+              <IonLabel position="stacked">Duration (minutes)</IonLabel>
+              <IonInput
+                id="reservation-duration-minutes"
+                type="number"
+                min={15}
+                value={form.duration_minutes}
+                onIonInput={(event) => setForm((previous) => ({ ...previous, duration_minutes: String(event.detail.value ?? "") }))}
+              />
+            </IonItem>
+            <IonItem>
+              <IonLabel position="stacked">Reservation date & time</IonLabel>
+              <IonDatetime
+                id="reservation-datetime"
+                presentation="date-time"
+                preferWheel
+                value={form.reservation_at || undefined}
+                onIonChange={(event) => setForm((previous) => ({ ...previous, reservation_at: String(event.detail.value ?? "") }))}
+              />
+            </IonItem>
+            <IonItem>
+              <IonLabel>Assign table</IonLabel>
+              <IonSelect
+                id="reservation-table-id"
+                interface="popover"
+                value={form.table_id}
+                onIonChange={(event) => setForm((previous) => ({ ...previous, table_id: String(event.detail.value ?? "") }))}
+              >
+                <IonSelectOption value="">No table assigned</IonSelectOption>
+                {availableTables.map((table) => (
+                  <IonSelectOption key={table.table_id} value={String(table.table_id)}>
+                    {table.code} ({table.status})
+                  </IonSelectOption>
+                ))}
+              </IonSelect>
+            </IonItem>
+            <IonItem>
+              <IonLabel position="stacked">Notes</IonLabel>
+              <IonTextarea
+                id="reservation-notes"
+                value={form.notes}
+                autoGrow
+                onIonInput={(event) => setForm((previous) => ({ ...previous, notes: String(event.detail.value ?? "") }))}
+              />
+            </IonItem>
+          </IonList>
+
+          <IonButton
             id="reservation-create"
-            name="reservationCreate"
-            variant="primary"
-            fullWidth
+            expand="block"
             disabled={submitInFlight}
             onClick={() => {
               void (async () => {
@@ -271,7 +336,7 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
                     customer_name: form.customer_name,
                     customer_phone: form.customer_phone || null,
                     guest_count: guestCount,
-                    reservation_at: fromDateTimeLocal(form.reservation_at),
+                    reservation_at: toIsoDateTime(form.reservation_at),
                     duration_minutes: form.duration_minutes ? Number(form.duration_minutes) : null,
                     table_id: form.table_id ? Number(form.table_id) : null,
                     notes: form.notes || null
@@ -288,138 +353,120 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
             }}
           >
             {submitInFlight ? "Creating..." : "Create reservation"}
-          </Button>
+          </IonButton>
           {errorMessage ? (
-            <p role="alert" style={{ margin: 0, color: "#991b1b", fontSize: 13, fontWeight: 600 }}>
-              {errorMessage}
-            </p>
+            <IonText color="danger" style={{ fontSize: 13, fontWeight: 600 }}>
+              <p role="alert" style={{ margin: "8px 0 0" }}>{errorMessage}</p>
+            </IonText>
           ) : null}
-        </div>
-      </Card>
+        </IonCardContent>
+      </IonCard>
 
       {activeReservation ? (
-        <Card style={{ border: "1px solid #93c5fd", background: "#eff6ff" }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#1e3a8a" }}>ACTIVE RESERVATION CONTEXT</div>
-          <div style={{ marginTop: 4, fontSize: 14, color: "#0f172a", fontWeight: 700 }}>
-            {activeReservation.customer_name} • {activeReservation.status}
-          </div>
-        </Card>
+        <IonCard style={{ border: "1px solid #93c5fd", background: "#eff6ff" }}>
+          <IonCardContent>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#1e3a8a" }}>ACTIVE RESERVATION CONTEXT</div>
+            <div style={{ marginTop: 4, fontSize: 14, color: "#0f172a", fontWeight: 700 }}>
+              {activeReservation.customer_name} • {activeReservation.status}
+            </div>
+          </IonCardContent>
+        </IonCard>
       ) : null}
 
       <div style={{ display: "grid", gap: 10 }}>
-        {sortedReservations.map((reservation) => (
-          <Card key={reservation.reservation_id} style={{ border: "1px solid #e2e8f0" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{reservation.customer_name}</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: "#334155" }}>
-                  {reservation.guest_count} guest(s) • {formatReservationTime(reservation.reservation_at)}
-                </div>
-                <div style={{ marginTop: 2, fontSize: 12, color: "#64748b" }}>
-                  Table {reservation.table_id ?? "-"} • {reservation.status}
-                </div>
-              </div>
-              <Button
-                id={`reservation-set-active-${reservation.reservation_id}`}
-                name={`reservationSetActive-${reservation.reservation_id}`}
-                variant={activeReservationId === reservation.reservation_id ? "primary" : "secondary"}
-                size="small"
-                onClick={() => activateReservationOrderContext(reservation)}
-              >
-                {activeReservationId === reservation.reservation_id ? "Active" : "Set active"}
-              </Button>
-            </div>
+        {sortedReservations.map((reservation) => {
+          const isFinalState = (["COMPLETED", "CANCELLED", "NO_SHOW"] as RuntimeReservationStatus[]).includes(reservation.status);
 
-            {!(["COMPLETED", "CANCELLED", "NO_SHOW"] as RuntimeReservationStatus[]).includes(reservation.status) ? (
-              <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {reservation.table_id ? (
-                    <Button
-                      id={`reservation-continue-order-${reservation.reservation_id}`}
-                      name={`reservationContinueOrder-${reservation.reservation_id}`}
-                      size="small"
-                      variant="primary"
-                      onClick={() => {
-                        activateReservationOrderContext(reservation);
-                        navigate(routes.products.path);
-                      }}
-                    >
-                      Continue order
-                    </Button>
-                  ) : null}
-                  {statusActionMap[reservation.status].map((nextStatus) => (
-                    <Button
-                      key={nextStatus}
-                      id={`reservation-status-${reservation.reservation_id}-${nextStatus.toLowerCase()}`}
-                      name={`reservationStatus-${reservation.reservation_id}-${nextStatus.toLowerCase()}`}
-                      size="small"
-                      variant={nextStatus === "CANCELLED" || nextStatus === "NO_SHOW" ? "danger" : "secondary"}
-                      onClick={() => {
-                        void (async () => {
-                          try {
-                            const updated = await context.runtime.updateReservationStatus(
-                              scope,
-                              reservation.reservation_id,
-                              nextStatus
-                            );
-                            upsertReservation(updated);
-                            if (updated && nextStatus === "SEATED") {
-                              activateReservationOrderContext(updated);
-                            }
-                            await refreshTables();
-                          } catch (error) {
-                            setErrorMessage(error instanceof Error ? error.message : "Failed to update reservation");
-                          }
-                        })();
-                      }}
-                    >
-                      {nextStatus.replace("_", " ")}
-                    </Button>
-                  ))}
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <select
-                    id={`reservation-table-assign-${reservation.reservation_id}`}
-                    name={`reservationTableAssign-${reservation.reservation_id}`}
-                    value={reservation.table_id ? String(reservation.table_id) : ""}
-                    onChange={(event) => {
-                      const nextTableId = event.target.value ? Number(event.target.value) : null;
-                      void (async () => {
-                        try {
-                          const updated = await context.runtime.assignReservationTable(
-                            scope,
-                            reservation.reservation_id,
-                            nextTableId
-                          );
-                          upsertReservation(updated);
-                          await refreshTables();
-                        } catch (error) {
-                          setErrorMessage(error instanceof Error ? error.message : "Failed to assign table");
-                        }
-                      })();
-                    }}
-                    style={{
-                      minWidth: 180,
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      fontSize: 13,
-                      background: "#ffffff"
-                    }}
+          return (
+            <IonCard key={reservation.reservation_id} style={{ border: "1px solid #e2e8f0" }}>
+              <IonCardContent>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{reservation.customer_name}</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#334155" }}>
+                      {reservation.guest_count} guest(s) • {formatReservationTime(reservation.reservation_at)}
+                    </div>
+                    <div style={{ marginTop: 2, fontSize: 12, color: "#64748b" }}>
+                      Table {reservation.table_id ?? "-"}
+                    </div>
+                  </div>
+                  <IonButton
+                    id={`reservation-set-active-${reservation.reservation_id}`}
+                    fill={activeReservationId === reservation.reservation_id ? "solid" : "outline"}
+                    color={activeReservationId === reservation.reservation_id ? "primary" : "medium"}
+                    size="small"
+                    onClick={() => activateReservationOrderContext(reservation)}
                   >
-                    <option value="">No table assigned</option>
-                    {availableTables.map((table) => (
-                      <option key={table.table_id} value={String(table.table_id)}>
-                        {table.code} ({table.status})
-                      </option>
-                    ))}
-                  </select>
+                    {activeReservationId === reservation.reservation_id ? "Active" : "Set active"}
+                  </IonButton>
                 </div>
-              </div>
-            ) : null}
-          </Card>
-        ))}
+
+                <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <IonBadge color="tertiary">{reservation.status}</IonBadge>
+                  {!isFinalState ? (
+                    <IonButton
+                      id={`reservation-actions-${reservation.reservation_id}`}
+                      size="small"
+                      fill="outline"
+                      color="medium"
+                      onClick={() => {
+                        setActionSheetReservation(reservation);
+                      }}
+                    >
+                      Actions
+                    </IonButton>
+                  ) : null}
+                </div>
+
+                {!isFinalState ? (
+                  <div style={{ marginTop: 10 }}>
+                    <IonItem lines="none" style={{ paddingInlineStart: 0 }}>
+                      <IonLabel>Assign table</IonLabel>
+                      <IonSelect
+                        id={`reservation-table-assign-${reservation.reservation_id}`}
+                        interface="popover"
+                        value={reservation.table_id ? String(reservation.table_id) : ""}
+                        onIonChange={(event) => {
+                          const nextTableId = event.detail.value ? Number(event.detail.value) : null;
+                          void (async () => {
+                            try {
+                              const updated = await context.runtime.assignReservationTable(
+                                scope,
+                                reservation.reservation_id,
+                                nextTableId
+                              );
+                              upsertReservation(updated);
+                              await refreshTables();
+                            } catch (error) {
+                              setErrorMessage(error instanceof Error ? error.message : "Failed to assign table");
+                            }
+                          })();
+                        }}
+                      >
+                        <IonSelectOption value="">No table assigned</IonSelectOption>
+                        {availableTables.map((table) => (
+                          <IonSelectOption key={table.table_id} value={String(table.table_id)}>
+                            {table.code} ({table.status})
+                          </IonSelectOption>
+                        ))}
+                      </IonSelect>
+                    </IonItem>
+                  </div>
+                ) : null}
+              </IonCardContent>
+            </IonCard>
+          );
+        })}
       </div>
+
+      <IonActionSheet
+        isOpen={actionSheetReservation !== null}
+        header={actionSheetReservation ? `Actions: ${actionSheetReservation.customer_name}` : undefined}
+        buttons={statusActionButtons}
+        onDidDismiss={() => {
+          setActionSheetReservation(null);
+        }}
+      />
     </div>
   );
 }

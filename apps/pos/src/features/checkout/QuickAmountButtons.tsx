@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React from "react";
-import { Button } from "../../shared/components/index.js";
+import { IonButton } from "@ionic/react";
 import { formatMoney } from "../../shared/utils/money.js";
 
 export interface QuickAmountButtonsProps {
@@ -33,16 +33,16 @@ export function QuickAmountButtons({ total, onSelectAmount }: QuickAmountButtons
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
       {quickAmounts.map((amount) => (
-        <Button
+        <IonButton
           key={amount}
           id={`checkout-quick-amount-${amount}`}
-          name={`checkoutQuickAmount-${amount}`}
           size="small"
-          variant="secondary"
+          fill="outline"
+          color="medium"
           onClick={() => onSelectAmount(amount)}
         >
           {formatMoney(amount)}
-        </Button>
+        </IonButton>
       ))}
     </div>
   );

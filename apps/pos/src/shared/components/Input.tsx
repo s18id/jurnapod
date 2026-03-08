@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React from "react";
-import { MIN_TOUCH_TARGET } from "../utils/constants.js";
+import { IonInput } from "@ionic/react";
 import { getTouchOptimizedStyles } from "../utils/touch.js";
 import type { InputModeType } from "../hooks/useKeyboard.js";
 
@@ -51,17 +51,19 @@ export function Input({
 
   const baseStyles: React.CSSProperties = {
     width: fullWidth ? "100%" : "auto",
-    padding: "12px 16px",
+    boxSizing: "border-box",
     fontSize: "16px", // Prevents iOS auto-zoom
-    border: "1px solid #d1d5db",
-    borderRadius: "8px",
-    outline: "none",
-    transition: "border-color 0.15s",
-    backgroundColor: disabled ? "#f3f4f6" : "#ffffff",
+    ["--padding-start" as string]: "16px",
+    ["--padding-end" as string]: "16px",
+    ["--padding-top" as string]: "12px",
+    ["--padding-bottom" as string]: "12px",
+    ["--background" as string]: disabled ? "#f3f4f6" : "#ffffff",
+    ["--border-radius" as string]: "8px",
+    ["--border-color" as string]: "#d1d5db",
     ...touchStyles
-  };
+  } as React.CSSProperties;
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLIonInputElement>) => {
     if (e.key === "Enter" && onEnter) {
       e.preventDefault();
       onEnter();
@@ -69,35 +71,25 @@ export function Input({
   };
 
   return (
-    <input
+    <IonInput
       id={id}
-      name={name}
       type={type}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onIonInput={(e) => onChange((e.detail.value ?? "").toString())}
       onKeyDown={handleKeyDown}
       placeholder={placeholder}
       disabled={disabled}
       autoFocus={autoFocus}
-      inputMode={inputMode}
+      inputmode={inputMode}
       pattern={pattern}
-      autoComplete={autoComplete}
-      autoCorrect={autoCorrect}
-      autoCapitalize={autoCapitalize}
-      spellCheck={spellCheck}
+      autocomplete={autoComplete as any}
+      autocorrect={autoCorrect}
+      autocapitalize={autoCapitalize}
+      spellcheck={spellCheck}
       min={min}
       max={max}
+      clearInput={false}
       style={baseStyles}
-      onFocus={(e) => {
-        e.target.style.borderColor = "#3b82f6";
-        // Scroll input into view on mobile
-        setTimeout(() => {
-          e.target.scrollIntoView({ behavior: "smooth", block: "center" });
-        }, 300);
-      }}
-      onBlur={(e) => {
-        e.target.style.borderColor = "#d1d5db";
-      }}
     />
   );
 }

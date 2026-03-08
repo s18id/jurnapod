@@ -46,7 +46,7 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
 
   const offlineCacheMissing = syncBadgeState === "Offline" && !hasProductCache;
   const dineInTableMissing = activeOrderContext.service_type === "DINE_IN" && !activeOrderContext.table_id;
-  const orderNotFinalized = !activeOrderContext.is_finalized;
+  const orderNotFinalized = !activeOrderContext.kitchen_sent;
   const canComplete = !offlineCacheMissing && !dineInTableMissing && !orderNotFinalized && canCompleteSale(cartLines, cartTotals);
 
   return (
