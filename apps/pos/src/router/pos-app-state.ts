@@ -50,6 +50,7 @@ export interface PosAppStateValue {
   setActiveTableId: (tableId: number | null) => void;
   setOrderReservationId: (reservationId: number | null) => void;
   setGuestCount: (guestCount: number | null) => void;
+  setOrderFinalized: (isFinalized: boolean) => void;
   setOrderStatus: (status: OrderLifecycleStatus) => void;
   setOrderNotes: (notes: string | null) => void;
   currentActiveOrderId: string | null;

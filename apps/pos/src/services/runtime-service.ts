@@ -113,6 +113,7 @@ export interface RuntimeActiveOrder {
   table_id: number | null;
   reservation_id: number | null;
   guest_count: number | null;
+  is_finalized: boolean;
   order_status: OrderStatus;
   order_state: RuntimeActiveOrderState;
   paid_amount: number;
@@ -157,6 +158,7 @@ export interface UpsertRuntimeActiveOrderInput {
   table_id: number | null;
   reservation_id: number | null;
   guest_count: number | null;
+  is_finalized: boolean;
   order_status: OrderStatus;
   paid_amount: number;
   opened_at?: string;
@@ -170,7 +172,12 @@ export interface ResolveRuntimeActiveOrderInput {
   table_id?: number | null;
   reservation_id?: number | null;
   guest_count?: number | null;
+  is_finalized?: boolean;
   notes?: string | null;
+}
+
+export interface ListRuntimeActiveOrdersOptions {
+  finalizedOnly?: boolean;
 }
 
 export interface CreateRuntimeReservationInput {
@@ -337,6 +344,7 @@ function mapActiveOrderRow(row: ActiveOrderRow): RuntimeActiveOrder {
     table_id: row.table_id,
     reservation_id: row.reservation_id,
     guest_count: row.guest_count,
+    is_finalized: row.is_finalized ?? false,
     order_status: row.order_status,
     order_state: row.order_state,
     paid_amount: row.paid_amount,
@@ -700,11 +708,20 @@ export class RuntimeService {
 
   async listActiveOrders(
     scope: RuntimeOutletScope,
-    orderState: RuntimeActiveOrderState = "OPEN"
+    orderState: RuntimeActiveOrderState = "OPEN",
+    options: ListRuntimeActiveOrdersOptions = {}
   ): Promise<RuntimeActiveOrder[]> {
     const rows = await this.storage.getActiveOrdersByOutlet(scope);
     return rows
-      .filter((row) => this.isScopeRow(scope, row) && row.order_state === orderState)
+      .filter((row) => {
+        if (!this.isScopeRow(scope, row) || row.order_state !== orderState) {
+          return false;
+        }
+        if (options.finalizedOnly && !row.is_finalized) {
+          return false;
+        }
+        return true;
+      })
       .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
       .map(mapActiveOrderRow);
   }
@@ -788,6 +805,7 @@ export class RuntimeService {
       table_id: input.table_id ?? null,
       reservation_id: input.reservation_id ?? null,
       guest_count: input.guest_count ?? null,
+      is_finalized: input.is_finalized ?? false,
       order_status: "OPEN",
       order_state: "OPEN",
       paid_amount: 0,
@@ -851,6 +869,7 @@ export class RuntimeService {
       table_id: input.table_id,
       reservation_id: input.reservation_id,
       guest_count: input.guest_count,
+      is_finalized: input.is_finalized,
       order_status: input.order_status,
       order_state: orderState,
       paid_amount: input.paid_amount,

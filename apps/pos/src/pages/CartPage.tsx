@@ -27,6 +27,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
     activeOrderContext,
     currentActiveOrderId,
     setActiveTableId,
+    setOrderFinalized,
     setOrderStatus,
     outletTables,
     outletReservations,
@@ -50,7 +51,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
     async function loadTables() {
       const [tables, activeOrders] = await Promise.all([
         context.runtime.getOutletTables(scope),
-        context.runtime.listActiveOrders(scope, "OPEN")
+        context.runtime.listActiveOrders(scope, "OPEN", { finalizedOnly: true })
       ]);
 
       const snapshots = await Promise.all(
@@ -180,6 +181,46 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             ? ` • Table ${activeOrderContext.table_id ?? "Not selected"}`
             : ""}
           {activeReservation ? ` • Reservation ${activeReservation.customer_name}` : ""}
+        </div>
+        <div
+          style={{
+            marginTop: 4,
+            padding: 10,
+            borderRadius: 10,
+            border: `1px solid ${activeOrderContext.is_finalized ? "#86efac" : "#fdba74"}`,
+            background: activeOrderContext.is_finalized ? "#ecfdf5" : "#fff7ed",
+            display: "grid",
+            gap: 8
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>Review & finalize</div>
+          <div style={{ fontSize: 12, color: "#475569" }}>
+            {activeOrderContext.is_finalized
+              ? "Order finalized. Edit any item to return to draft."
+              : "Draft mode. Finalize before proceeding to payment."}
+          </div>
+          <div>
+            <Button
+              size="small"
+              variant={activeOrderContext.is_finalized ? "secondary" : "primary"}
+              disabled={cartLines.length === 0}
+              onClick={() => {
+                if (activeOrderContext.is_finalized) {
+                  setOrderFinalized(false);
+                  return;
+                }
+
+                const confirmed = window.confirm(
+                  `Finalize this order with ${cartLines.length} item(s) and total ${formatMoney(cartTotals.grand_total)}?`
+                );
+                if (confirmed) {
+                  setOrderFinalized(true);
+                }
+              }}
+            >
+              {activeOrderContext.is_finalized ? "Mark as draft" : "Finalize order"}
+            </Button>
+          </div>
         </div>
         {activeOrderContext.service_type === "DINE_IN" && activeOrderContext.table_id ? (
           <div
@@ -312,12 +353,16 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             variant="primary"
             fullWidth
             style={{ marginTop: 12 }}
+            disabled={!activeOrderContext.is_finalized}
             onClick={() => {
+              if (!activeOrderContext.is_finalized) {
+                return;
+              }
               setOrderStatus("READY_TO_PAY");
               navigate(routes.checkout.path);
             }}
           >
-            Proceed to payment
+            {activeOrderContext.is_finalized ? "Proceed to payment" : "Finalize order first"}
           </Button>
         </footer>
       ) : null}

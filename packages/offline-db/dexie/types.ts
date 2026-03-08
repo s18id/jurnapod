@@ -89,6 +89,7 @@ export interface ActiveOrderRow {
   table_id: number | null;
   reservation_id: number | null;
   guest_count: number | null;
+  is_finalized: boolean;
   order_status: OrderStatus;
   order_state: ActiveOrderState;
   paid_amount: number;

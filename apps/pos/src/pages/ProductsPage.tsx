@@ -187,6 +187,11 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
         <div style={{ fontSize: 13, color: "#475569" }}>
           Active order: {cartLines.length} item(s) • Total {formatMoney(cartTotals.grand_total)}
         </div>
+        {!activeOrderContext.is_finalized && cartLines.length > 0 ? (
+          <div style={{ marginTop: 6, fontSize: 12, color: "#9a3412", fontWeight: 600 }}>
+            Draft order: review and finalize in Cart before payment.
+          </div>
+        ) : null}
         <Button
           variant="primary"
           fullWidth

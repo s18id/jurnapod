@@ -416,7 +416,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     unit_price_snapshot: number;
     qty: number;
     discount_amount: number;
-  }>): CartState => {
+  }>, orderIsFinalized: boolean): CartState => {
     const next: CartState = {};
     for (const line of snapshotLines) {
       next[line.item_id] = {
@@ -428,6 +428,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
           price_snapshot: line.unit_price_snapshot
         },
         qty: line.qty,
+        committed_qty: orderIsFinalized ? line.qty : 0,
         discount_amount: line.discount_amount
       };
     }
@@ -439,6 +440,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     table_id: number | null;
     reservation_id: number | null;
     guest_count: number | null;
+    is_finalized: boolean;
     order_status: ActiveOrderContextState["order_status"];
     opened_at: string;
     closed_at: string | null;
@@ -448,6 +450,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     table_id: order.table_id,
     reservation_id: order.reservation_id,
     guest_count: order.guest_count,
+    is_finalized: order.is_finalized,
     order_status: order.order_status,
     opened_at: order.opened_at,
     closed_at: order.closed_at,
@@ -462,6 +465,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       || !!cartState.activeOrderContext.table_id
       || !!cartState.activeOrderContext.reservation_id
       || cartState.activeOrderContext.guest_count !== null
+      || cartState.activeOrderContext.is_finalized
       || cartState.activeOrderContext.notes !== null
     );
   }, [cartState.activeOrderContext, cartState.cartLines.length, cartState.paidAmount]);
@@ -483,6 +487,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       table_id: number | null;
       reservation_id: number | null;
       guest_count: number | null;
+      is_finalized: boolean;
       order_status: ActiveOrderContextState["order_status"];
       opened_at: string;
       closed_at: string | null;
@@ -491,14 +496,14 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
   }) => {
     hydrateInProgressRef.current = true;
     cartState.hydrateOrder({
-      cart: toCartState(input.lines),
+      cart: toCartState(input.lines, input.order.is_finalized),
       paidAmount: input.paid_amount,
       activeOrderContext: toOrderContext(input.order)
     });
     setCurrentActiveOrderId(input.order_id);
     setActiveReservationId(input.order.reservation_id);
     hydrateInProgressRef.current = false;
-  }, [cartState, toCartState, toOrderContext]);
+  }, [cartState.hydrateOrder, toCartState, toOrderContext]);
 
   const persistCurrentOrderSnapshot = useCallback(async () => {
     if (!activeOrderHydrated || hydrateInProgressRef.current) {
@@ -515,6 +520,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       table_id: cartState.activeOrderContext.table_id,
       reservation_id: cartState.activeOrderContext.reservation_id,
       guest_count: cartState.activeOrderContext.guest_count,
+      is_finalized: cartState.activeOrderContext.is_finalized,
       order_status: cartState.activeOrderContext.order_status,
       paid_amount: cartState.paidAmount,
       opened_at: cartState.activeOrderContext.opened_at,
@@ -538,7 +544,9 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     return snapshot.order.order_id;
   }, [
     activeOrderHydrated,
-    cartState,
+    cartState.activeOrderContext,
+    cartState.cartLines,
+    cartState.paidAmount,
     context.runtime,
     currentActiveOrderId,
     hasMeaningfulOrderState,
@@ -685,7 +693,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     return () => {
       disposed = true;
     };
-  }, [cartState, context.runtime, hydrateFromSnapshot, scope]);
+  }, [cartState.clearCart, context.runtime, hydrateFromSnapshot, scope]);
 
   useEffect(() => {
     let disposed = false;
@@ -724,7 +732,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     if (orderId) {
       void context.runtime.closeActiveOrder(scope, orderId, "CANCELLED");
     }
-  }, [cartState, context.runtime, currentActiveOrderId, scope]);
+  }, [cartState.clearCart, context.runtime, currentActiveOrderId, scope]);
 
   const setServiceType = useCallback((serviceType: ActiveOrderContextState["service_type"]) => {
     if (serviceType === "TAKEAWAY") {
@@ -734,7 +742,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     }
 
     cartState.setServiceType(serviceType);
-  }, [cartState, resolveAndHydrateActiveOrder]);
+  }, [cartState.setServiceType, resolveAndHydrateActiveOrder]);
 
   const setActiveTableId = useCallback((tableId: number | null) => {
     if (!tableId) {
@@ -746,7 +754,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       service_type: "DINE_IN",
       table_id: tableId
     });
-  }, [cartState, resolveAndHydrateActiveOrder]);
+  }, [cartState.setActiveTableId, resolveAndHydrateActiveOrder]);
 
   const setOrderReservationId = useCallback((reservationId: number | null) => {
     if (!reservationId) {
@@ -760,7 +768,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       service_type: "DINE_IN",
       reservation_id: reservationId
     });
-  }, [cartState, resolveAndHydrateActiveOrder]);
+  }, [cartState.setOrderReservationId, resolveAndHydrateActiveOrder]);
 
   useEffect(() => {
     let disposed = false;
@@ -904,6 +912,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       setActiveTableId,
       setOrderReservationId,
       setGuestCount: cartState.setGuestCount,
+      setOrderFinalized: cartState.setOrderFinalized,
       setOrderStatus: cartState.setOrderStatus,
       setOrderNotes: cartState.setOrderNotes,
       currentActiveOrderId,

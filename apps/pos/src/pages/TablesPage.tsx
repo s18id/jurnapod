@@ -50,7 +50,7 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
       const [tables, reservations, activeOrders] = await Promise.all([
         context.runtime.getOutletTables(scope),
         context.runtime.getOutletReservations(scope),
-        context.runtime.listActiveOrders(scope, "OPEN")
+        context.runtime.listActiveOrders(scope, "OPEN", { finalizedOnly: true })
       ]);
 
       const snapshots = await Promise.all(

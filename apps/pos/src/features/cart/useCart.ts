@@ -14,6 +14,7 @@ export interface ActiveOrderContextState {
   table_id: number | null;
   reservation_id: number | null;
   guest_count: number | null;
+  is_finalized: boolean;
   order_status: OrderLifecycleStatus;
   opened_at: string;
   closed_at: string | null;
@@ -23,6 +24,7 @@ export interface ActiveOrderContextState {
 export interface CartLineState {
   product: RuntimeProductCatalogItem;
   qty: number;
+  committed_qty: number;
   discount_amount: number;
 }
 
@@ -53,6 +55,7 @@ export interface UseCartReturn {
   setGuestCount: (guestCount: number | null) => void;
   setOrderStatus: (status: OrderLifecycleStatus) => void;
   setOrderNotes: (notes: string | null) => void;
+  setOrderFinalized: (isFinalized: boolean) => void;
   hydrateOrder: (input: {
     cart: CartState;
     paidAmount: number;
@@ -70,6 +73,7 @@ function createDefaultActiveOrderContext(): ActiveOrderContextState {
     table_id: null,
     reservation_id: null,
     guest_count: null,
+    is_finalized: false,
     order_status: "OPEN",
     opened_at: nowIso(),
     closed_at: null,
@@ -92,15 +96,17 @@ export function useCart({
         const existing = previous[product.item_id] ?? {
           product,
           qty: 1,
+          committed_qty: 0,
           discount_amount: 0
         };
 
-        const nextQty = Math.max(0, patch.qty ?? existing.qty);
+        const minQty = existing.committed_qty;
+        const nextQty = Math.max(minQty, patch.qty ?? existing.qty);
         const rawDiscount = patch.discount_amount ?? existing.discount_amount;
         const maxDiscount = normalizeMoney(nextQty * product.price_snapshot);
         const nextDiscount = Math.max(0, Math.min(normalizeMoney(rawDiscount), maxDiscount));
 
-        if (nextQty === 0) {
+        if (nextQty === 0 && minQty === 0) {
           const next = { ...previous };
           delete next[product.item_id];
           return next;
@@ -111,10 +117,15 @@ export function useCart({
           [product.item_id]: {
             product,
             qty: nextQty,
+            committed_qty: existing.committed_qty,
             discount_amount: nextDiscount
           }
         };
       });
+      setActiveOrderContext((previous) => ({
+        ...previous,
+        is_finalized: false
+      }));
     },
     []
   );
@@ -131,7 +142,8 @@ export function useCart({
       service_type: serviceType,
       table_id: serviceType === "TAKEAWAY" ? null : previous.table_id,
       reservation_id: serviceType === "TAKEAWAY" ? null : previous.reservation_id,
-      guest_count: serviceType === "TAKEAWAY" ? null : previous.guest_count
+      guest_count: serviceType === "TAKEAWAY" ? null : previous.guest_count,
+      is_finalized: false
     }));
   }, []);
 
@@ -139,7 +151,8 @@ export function useCart({
     setActiveOrderContext((previous) => ({
       ...previous,
       service_type: tableId ? "DINE_IN" : previous.service_type,
-      table_id: tableId
+      table_id: tableId,
+      is_finalized: false
     }));
   }, []);
 
@@ -147,14 +160,16 @@ export function useCart({
     setActiveOrderContext((previous) => ({
       ...previous,
       reservation_id: reservationId,
-      service_type: reservationId ? "DINE_IN" : previous.service_type
+      service_type: reservationId ? "DINE_IN" : previous.service_type,
+      is_finalized: false
     }));
   }, []);
 
   const setGuestCount = useCallback((guestCount: number | null) => {
     setActiveOrderContext((previous) => ({
       ...previous,
-      guest_count: guestCount
+      guest_count: guestCount,
+      is_finalized: false
     }));
   }, []);
 
@@ -169,7 +184,27 @@ export function useCart({
   const setOrderNotes = useCallback((notes: string | null) => {
     setActiveOrderContext((previous) => ({
       ...previous,
-      notes
+      notes,
+      is_finalized: false
+    }));
+  }, []);
+
+  const setOrderFinalized = useCallback((isFinalized: boolean) => {
+    if (isFinalized) {
+      setCart((previous) => {
+        const next: CartState = {};
+        for (const [itemId, line] of Object.entries(previous)) {
+          next[Number(itemId)] = {
+            ...line,
+            committed_qty: line.qty
+          };
+        }
+        return next;
+      });
+    }
+    setActiveOrderContext((previous) => ({
+      ...previous,
+      is_finalized: isFinalized
     }));
   }, []);
 
@@ -201,6 +236,7 @@ export function useCart({
     setGuestCount,
     setOrderStatus,
     setOrderNotes,
+    setOrderFinalized,
     hydrateOrder
   };
 }

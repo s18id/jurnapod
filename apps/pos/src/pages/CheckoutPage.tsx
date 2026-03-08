@@ -46,7 +46,8 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
 
   const offlineCacheMissing = syncBadgeState === "Offline" && !hasProductCache;
   const dineInTableMissing = activeOrderContext.service_type === "DINE_IN" && !activeOrderContext.table_id;
-  const canComplete = !offlineCacheMissing && !dineInTableMissing && canCompleteSale(cartLines, cartTotals);
+  const orderNotFinalized = !activeOrderContext.is_finalized;
+  const canComplete = !offlineCacheMissing && !dineInTableMissing && !orderNotFinalized && canCompleteSale(cartLines, cartTotals);
 
   return (
     <main
@@ -132,6 +133,23 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
             }}
           >
             Dine-in checkout is blocked until a table is selected.
+          </p>
+        ) : null}
+
+        {orderNotFinalized ? (
+          <p
+            role="alert"
+            style={{
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 10,
+              background: "#fff7ed",
+              border: "1px solid #fdba74",
+              color: "#9a3412",
+              fontWeight: 600
+            }}
+          >
+            Checkout is blocked until this order is finalized from the Cart page.
           </p>
         ) : null}
 

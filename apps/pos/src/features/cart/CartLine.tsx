@@ -11,6 +11,7 @@ export interface CartLineData {
     price_snapshot: number;
   };
   qty: number;
+  committed_qty: number;
   discount_amount: number;
 }
 
@@ -21,6 +22,8 @@ export interface CartLineProps {
 }
 
 export function CartLine({ line, onQuantityChange, onDiscountChange }: CartLineProps): JSX.Element {
+  const hasCommittedQty = line.committed_qty > 0;
+
   return (
     <div style={{ display: "grid", gap: 6 }}>
       <div style={{ fontSize: 13, fontWeight: 600 }}>{line.product.name}</div>
@@ -30,6 +33,7 @@ export function CartLine({ line, onQuantityChange, onDiscountChange }: CartLineP
           value={line.qty}
           onChange={(val) => onQuantityChange(Number(val) || 0)}
           inputMode="numeric"
+          min={line.committed_qty}
         />
         <Input
           type="number"
@@ -38,6 +42,11 @@ export function CartLine({ line, onQuantityChange, onDiscountChange }: CartLineP
           inputMode="numeric"
         />
       </div>
+      {hasCommittedQty ? (
+        <div style={{ fontSize: 11, color: "#9a3412", fontWeight: 600 }}>
+          Min qty: {line.committed_qty} (already saved)
+        </div>
+      ) : null}
     </div>
   );
 }
