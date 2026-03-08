@@ -61,11 +61,7 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
     setOutletReservations,
     activeReservationId,
     setActiveReservationId,
-    setServiceType,
-    setActiveTableId,
-    setOrderReservationId,
-    setGuestCount,
-    setOrderNotes,
+    setDineInContext,
     setOrderStatus
   } = usePosAppState();
   const [submitInFlight, setSubmitInFlight] = useState(false);
@@ -118,12 +114,13 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
 
   const activateReservationOrderContext = (reservation: RuntimeReservation) => {
     setActiveReservationId(reservation.reservation_id);
-    setOrderReservationId(reservation.reservation_id);
-    setGuestCount(reservation.guest_count);
-    setOrderNotes(reservation.notes);
+    setDineInContext({
+      tableId: reservation.table_id,
+      reservationId: reservation.reservation_id,
+      guestCount: reservation.guest_count,
+      notes: reservation.notes
+    });
     setOrderStatus("OPEN");
-    setServiceType("DINE_IN");
-    setActiveTableId(reservation.table_id);
   };
 
   const upsertReservation = (updated: RuntimeReservation | null) => {

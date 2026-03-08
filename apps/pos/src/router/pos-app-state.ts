@@ -47,6 +47,12 @@ export interface PosAppStateValue {
   clearCart: () => void;
   activeOrderContext: ActiveOrderContextState;
   setServiceType: (serviceType: OrderServiceType) => void;
+  setDineInContext: (input: {
+    tableId: number | null;
+    reservationId?: number | null;
+    guestCount?: number | null;
+    notes?: string | null;
+  }) => void;
   setActiveTableId: (tableId: number | null) => void;
   setOrderReservationId: (reservationId: number | null) => void;
   setGuestCount: (guestCount: number | null) => void;

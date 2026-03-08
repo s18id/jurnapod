@@ -759,6 +759,45 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     });
   }, [cartState.setActiveTableId, resolveAndHydrateActiveOrder]);
 
+  const setDineInContext = useCallback((input: {
+    tableId: number | null;
+    reservationId?: number | null;
+    guestCount?: number | null;
+    notes?: string | null;
+  }) => {
+    const hasTable = typeof input.tableId === "number";
+    const hasReservation = typeof input.reservationId === "number";
+
+    if (!hasTable && !hasReservation) {
+      cartState.setServiceType("DINE_IN");
+      cartState.setActiveTableId(null);
+      cartState.setOrderReservationId(null);
+      setActiveReservationId(null);
+      if (input.guestCount !== undefined) {
+        cartState.setGuestCount(input.guestCount);
+      }
+      if (input.notes !== undefined) {
+        cartState.setOrderNotes(input.notes);
+      }
+      return;
+    }
+
+    if (hasReservation) {
+      setActiveReservationId(input.reservationId ?? null);
+    }
+
+    void resolveAndHydrateActiveOrder({
+      service_type: "DINE_IN",
+      table_id: input.tableId ?? undefined,
+      reservation_id: input.reservationId ?? undefined,
+      guest_count: input.guestCount,
+      notes: input.notes
+    });
+  }, [
+    cartState,
+    resolveAndHydrateActiveOrder
+  ]);
+
   const setOrderReservationId = useCallback((reservationId: number | null) => {
     if (!reservationId) {
       setActiveReservationId(null);
@@ -912,6 +951,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       clearCart,
       activeOrderContext: cartState.activeOrderContext,
       setServiceType,
+      setDineInContext,
       setActiveTableId,
       setOrderReservationId,
       setGuestCount: cartState.setGuestCount,
@@ -945,6 +985,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       cartState,
       clearCart,
       setServiceType,
+      setDineInContext,
       setActiveTableId,
       setOrderReservationId,
       currentActiveOrderId,

@@ -30,9 +30,7 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
     outletReservations,
     setOutletReservations,
     activeOrderContext,
-    setServiceType,
-    setActiveTableId,
-    setOrderReservationId,
+    setDineInContext,
     setActiveReservationId,
     currentActiveOrderId
   } = usePosAppState();
@@ -187,12 +185,14 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
                         }
                       }
 
-                      setServiceType("DINE_IN");
-                      setActiveTableId(table.table_id);
-                      if (!tableOrderSummary?.reservation_id) {
-                        setOrderReservationId(null);
+                      const reservationId = tableOrderSummary?.reservation_id ?? null;
+                      if (!reservationId) {
                         setActiveReservationId(null);
                       }
+                      setDineInContext({
+                        tableId: table.table_id,
+                        reservationId
+                      });
                       navigate(routes.products.path);
                     })();
                   }}
