@@ -167,7 +167,7 @@ export interface UpsertRuntimeActiveOrderInput {
   table_id: number | null;
   reservation_id: number | null;
   guest_count: number | null;
-  is_finalized: boolean;
+  kitchen_sent: boolean;  // UI field name - maps to DB is_finalized
   order_status: OrderStatus;
   paid_amount: number;
   opened_at?: string;
@@ -183,7 +183,7 @@ export interface ResolveRuntimeActiveOrderInput {
   table_id?: number | null;
   reservation_id?: number | null;
   guest_count?: number | null;
-  is_finalized?: boolean;
+  kitchen_sent?: boolean;  // UI field name - maps to DB is_finalized
   notes?: string | null;
 }
 
@@ -636,6 +636,14 @@ export class RuntimeService {
     tableId: number,
     status: RuntimeTableStatus
   ): Promise<RuntimeOutletTable | null> {
+    if (status !== "UNAVAILABLE") {
+      console.warn(
+        `setOutletTableStatus: ignoring status ${status}. `
+        + "Only UNAVAILABLE is supported on POS; other statuses are server-managed."
+      );
+      return null;
+    }
+
     const rows = await this.storage.getOutletTablesByOutlet({
       company_id: scope.company_id,
       outlet_id: scope.outlet_id
@@ -857,7 +865,7 @@ export class RuntimeService {
       table_id: input.table_id ?? null,
       reservation_id: input.reservation_id ?? null,
       guest_count: input.guest_count ?? null,
-      is_finalized: input.is_finalized ?? false,
+      is_finalized: input.kitchen_sent ?? false,  // Map UI kitchen_sent → DB is_finalized
       order_status: "OPEN",
       order_state: "OPEN",
       paid_amount: 0,
@@ -928,7 +936,7 @@ export class RuntimeService {
       table_id: input.table_id,
       reservation_id: input.reservation_id,
       guest_count: input.guest_count,
-      is_finalized: input.is_finalized,
+      is_finalized: input.kitchen_sent,  // Map UI kitchen_sent → DB is_finalized
       order_status: input.order_status,
       order_state: orderState,
       paid_amount: input.paid_amount,

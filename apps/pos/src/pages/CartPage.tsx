@@ -132,7 +132,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
   }, [outletTables, tableOrderSummaryByTableId, transferTargetTableId]);
 
   const cancellableLines = useMemo(
-    () => cartLines.filter((line) => line.committed_qty > 0),
+    () => cartLines.filter((line) => line.kitchen_sent_qty > 0),
     [cartLines]
   );
 
@@ -143,7 +143,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
     return cancellableLines.find((line) => line.product.item_id === Number(cancelLineItemId)) ?? null;
   }, [cancelLineItemId, cancellableLines]);
 
-  const selectedCancelableMaxQty = selectedCancelableLine ? Math.max(1, selectedCancelableLine.committed_qty) : 1;
+  const selectedCancelableMaxQty = selectedCancelableLine ? Math.max(1, selectedCancelableLine.kitchen_sent_qty) : 1;
 
   useEffect(() => {
     if (cancellableLines.length === 0) {
@@ -194,16 +194,6 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             size="small"
             onClick={() => {
               void (async () => {
-                if (activeOrderContext.service_type === "DINE_IN" && activeOrderContext.table_id) {
-                  const released = await context.runtime.setOutletTableStatus(scope, activeOrderContext.table_id, "AVAILABLE");
-                  if (released) {
-                    setOutletTables((previous) =>
-                      previous.map((table) =>
-                        table.table_id === released.table_id ? released : table
-                      )
-                    );
-                  }
-                }
                 clearCart();
               })();
             }}
@@ -256,15 +246,15 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             marginTop: 4,
             padding: 10,
             borderRadius: 10,
-            border: `1px solid ${activeOrderContext.is_finalized ? "#86efac" : "#fdba74"}`,
-            background: activeOrderContext.is_finalized ? "#ecfdf5" : "#fff7ed",
+            border: `1px solid ${activeOrderContext.kitchen_sent ? "#86efac" : "#fdba74"}`,
+            background: activeOrderContext.kitchen_sent ? "#ecfdf5" : "#fff7ed",
             display: "grid",
             gap: 8
           }}
         >
           <div style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>Review & finalize</div>
           <div style={{ fontSize: 12, color: "#475569" }}>
-            {activeOrderContext.is_finalized
+            {activeOrderContext.kitchen_sent
               ? "Order finalized. Edit any item to return to draft."
               : "Draft mode. Finalize before proceeding to payment."}
           </div>
@@ -273,10 +263,10 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
               id="cart-finalize-order"
               name="cartFinalizeOrder"
               size="small"
-              variant={activeOrderContext.is_finalized ? "secondary" : "primary"}
+              variant={activeOrderContext.kitchen_sent ? "secondary" : "primary"}
               disabled={cartLines.length === 0}
               onClick={() => {
-                if (activeOrderContext.is_finalized) {
+                if (activeOrderContext.kitchen_sent) {
                   setOrderFinalized(false);
                   return;
                 }
@@ -289,7 +279,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                 }
               }}
             >
-              {activeOrderContext.is_finalized ? "Mark as draft" : "Finalize order"}
+              {activeOrderContext.kitchen_sent ? "Mark as draft" : "Finalize order"}
             </Button>
           </div>
         </div>
@@ -405,7 +395,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             ) : null}
           </div>
         ) : null}
-        {activeOrderContext.is_finalized && currentActiveOrderId && cancellableLines.length > 0 ? (
+        {activeOrderContext.kitchen_sent && currentActiveOrderId && cancellableLines.length > 0 ? (
           <div
             style={{
               marginTop: 6,
@@ -442,7 +432,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
               >
                 {cancellableLines.map((line) => (
                   <option key={line.product.item_id} value={String(line.product.item_id)}>
-                    {line.product.name} (committed: {line.committed_qty})
+                    {line.product.name} (committed: {line.kitchen_sent_qty})
                   </option>
                 ))}
               </select>
@@ -506,8 +496,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                         return;
                       }
 
-                      if (cancelQty > selectedCancelableLine.committed_qty) {
-                        setCancelMessage(`Cannot cancel more than committed qty (${selectedCancelableLine.committed_qty}).`);
+                      if (cancelQty > selectedCancelableLine.kitchen_sent_qty) {
+                        setCancelMessage(`Cannot cancel more than committed qty (${selectedCancelableLine.kitchen_sent_qty}).`);
                         return;
                       }
 
@@ -540,7 +530,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                   {cancelInFlight ? "Cancelling..." : "Confirm cancellation"}
                 </Button>
                 <div style={{ fontSize: 12, color: "#7f1d1d" }}>
-                  Max cancel qty: {selectedCancelableLine?.committed_qty ?? 0}
+                  Max cancel qty: {selectedCancelableLine?.kitchen_sent_qty ?? 0}
                 </div>
               </div>
             </div>
@@ -551,6 +541,15 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
         ) : null}
         <CartList
           lines={cartLines}
+          onQuickReduceLine={(itemId) => {
+            const line = cart[itemId];
+            if (!line) {
+              return;
+            }
+
+            const nextQty = Math.max(line.kitchen_sent_qty, line.qty - 1);
+            upsertCartLine(line.product, { qty: nextQty });
+          }}
           onUpdateLine={(itemId, patch) => {
             const line = cart[itemId];
             if (!line) {
@@ -574,16 +573,16 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             variant="primary"
             fullWidth
             style={{ marginTop: 12 }}
-            disabled={!activeOrderContext.is_finalized}
+            disabled={!activeOrderContext.kitchen_sent}
             onClick={() => {
-              if (!activeOrderContext.is_finalized) {
+              if (!activeOrderContext.kitchen_sent) {
                 return;
               }
               setOrderStatus("READY_TO_PAY");
               navigate(routes.checkout.path);
             }}
           >
-            {activeOrderContext.is_finalized ? "Proceed to payment" : "Finalize order first"}
+            {activeOrderContext.kitchen_sent ? "Proceed to payment" : "Finalize order first"}
           </Button>
         </footer>
       ) : null}

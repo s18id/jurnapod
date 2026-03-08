@@ -14,7 +14,7 @@ export interface ActiveOrderContextState {
   table_id: number | null;
   reservation_id: number | null;
   guest_count: number | null;
-  is_finalized: boolean;
+  kitchen_sent: boolean;  // Renamed from is_finalized
   order_status: OrderLifecycleStatus;
   opened_at: string;
   closed_at: string | null;
@@ -24,7 +24,7 @@ export interface ActiveOrderContextState {
 export interface CartLineState {
   product: RuntimeProductCatalogItem;
   qty: number;
-  committed_qty: number;
+  kitchen_sent_qty: number;  // Renamed from committed_qty
   discount_amount: number;
 }
 
@@ -73,7 +73,7 @@ function createDefaultActiveOrderContext(): ActiveOrderContextState {
     table_id: null,
     reservation_id: null,
     guest_count: null,
-    is_finalized: false,
+    kitchen_sent: false,  // Renamed from is_finalized
     order_status: "OPEN",
     opened_at: nowIso(),
     closed_at: null,
@@ -96,11 +96,11 @@ export function useCart({
         const existing = previous[product.item_id] ?? {
           product,
           qty: 1,
-          committed_qty: 0,
+          kitchen_sent_qty: 0,  // Renamed from committed_qty
           discount_amount: 0
         };
 
-        const minQty = existing.committed_qty;
+        const minQty = existing.kitchen_sent_qty;  // Renamed from committed_qty
         const nextQty = Math.max(minQty, patch.qty ?? existing.qty);
         const rawDiscount = patch.discount_amount ?? existing.discount_amount;
         const maxDiscount = normalizeMoney(nextQty * product.price_snapshot);
@@ -117,14 +117,14 @@ export function useCart({
           [product.item_id]: {
             product,
             qty: nextQty,
-            committed_qty: existing.committed_qty,
+            kitchen_sent_qty: existing.kitchen_sent_qty,  // Renamed from committed_qty
             discount_amount: nextDiscount
           }
         };
       });
       setActiveOrderContext((previous) => ({
         ...previous,
-        is_finalized: false
+        kitchen_sent: false  // Renamed from is_finalized
       }));
     },
     []
@@ -143,7 +143,7 @@ export function useCart({
       table_id: serviceType === "TAKEAWAY" ? null : previous.table_id,
       reservation_id: serviceType === "TAKEAWAY" ? null : previous.reservation_id,
       guest_count: serviceType === "TAKEAWAY" ? null : previous.guest_count,
-      is_finalized: false
+      kitchen_sent: false  // Renamed from is_finalized
     }));
   }, []);
 
@@ -152,7 +152,7 @@ export function useCart({
       ...previous,
       service_type: tableId ? "DINE_IN" : previous.service_type,
       table_id: tableId,
-      is_finalized: false
+      kitchen_sent: false  // Renamed from is_finalized
     }));
   }, []);
 
@@ -161,7 +161,7 @@ export function useCart({
       ...previous,
       reservation_id: reservationId,
       service_type: reservationId ? "DINE_IN" : previous.service_type,
-      is_finalized: false
+      kitchen_sent: false  // Renamed from is_finalized
     }));
   }, []);
 
@@ -169,7 +169,7 @@ export function useCart({
     setActiveOrderContext((previous) => ({
       ...previous,
       guest_count: guestCount,
-      is_finalized: false
+      kitchen_sent: false  // Renamed from is_finalized
     }));
   }, []);
 
@@ -185,7 +185,7 @@ export function useCart({
     setActiveOrderContext((previous) => ({
       ...previous,
       notes,
-      is_finalized: false
+      kitchen_sent: false  // Renamed from is_finalized
     }));
   }, []);
 
@@ -196,7 +196,7 @@ export function useCart({
         for (const [itemId, line] of Object.entries(previous)) {
           next[Number(itemId)] = {
             ...line,
-            committed_qty: line.qty
+            kitchen_sent_qty: line.qty  // Renamed from committed_qty
           };
         }
         return next;
@@ -204,7 +204,7 @@ export function useCart({
     }
     setActiveOrderContext((previous) => ({
       ...previous,
-      is_finalized: isFinalized
+      kitchen_sent: isFinalized  // Renamed from is_finalized
     }));
   }, []);
 

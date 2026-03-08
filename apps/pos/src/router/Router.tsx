@@ -1,34 +1,20 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React, { createContext, useContext, useMemo, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import React, { Suspense, createContext, useContext, useMemo, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import {
   BrowserRouter,
   Routes,
   Route,
   Navigate,
-  useNavigate,
   useLocation
 } from "react-router-dom";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import type { RuntimeOutletScope, RuntimeOutletTable, RuntimeReservation } from "../services/runtime-service.js";
-import { routes, mobileTabs, type RouterContextValue, type ProtectedRouteProps } from "./routes.js";
-import { TabBar } from "../shared/components/TabBar.js";
-import {
-  LoginPage,
-  CheckoutPage,
-  ProductsPage,
-  TablesPage,
-  ReservationsPage,
-  CartPage,
-  SettingsPage,
-  ServiceModePage
-} from "../pages/index.js";
-import { SyncBadge } from "../features/sync/SyncBadge.js";
-import { OutletContextSwitcher } from "../features/outlet/OutletContextSwitcher.js";
+import { routes, type RouterContextValue, type ProtectedRouteProps } from "./routes.js";
 import { readAccessToken, clearAccessToken } from "../offline/auth-session.js";
 import { useCart, type ActiveOrderContextState, type CartState } from "../features/cart/useCart.js";
-import { API_CONFIG, MOBILE_BREAKPOINT, POLL_INTERVAL_MS } from "../shared/utils/constants.js";
+import { API_CONFIG, POLL_INTERVAL_MS } from "../shared/utils/constants.js";
 import { PosAppStateContext, usePosAppState } from "./pos-app-state.js";
 
 const PLACEHOLDER_OUTLETS = [{ outlet_id: 1, label: "Outlet 1 (placeholder)" }];
@@ -36,6 +22,43 @@ const AUTO_REFRESH_STORAGE_KEY = "jurnapod_pos_auto_refresh_enabled";
 const AUTO_PULL_ENABLED_STORAGE_KEY = "jurnapod_pos_auto_pull_enabled";
 const AUTO_PULL_INTERVAL_STORAGE_KEY = "jurnapod_pos_auto_pull_interval_ms";
 const AUTO_PULL_INTERVAL_OPTIONS_MS = [30000, 60000, 300000] as const;
+
+const LoginPage = React.lazy(async () => {
+  const module = await import("../pages/LoginPage.js");
+  return { default: module.LoginPage };
+});
+const CheckoutPage = React.lazy(async () => {
+  const module = await import("../pages/CheckoutPage.js");
+  return { default: module.CheckoutPage };
+});
+const ProductsPage = React.lazy(async () => {
+  const module = await import("../pages/ProductsPage.js");
+  return { default: module.ProductsPage };
+});
+const TablesPage = React.lazy(async () => {
+  const module = await import("../pages/TablesPage.js");
+  return { default: module.TablesPage };
+});
+const ReservationsPage = React.lazy(async () => {
+  const module = await import("../pages/ReservationsPage.js");
+  return { default: module.ReservationsPage };
+});
+const CartPage = React.lazy(async () => {
+  const module = await import("../pages/CartPage.js");
+  return { default: module.CartPage };
+});
+const SettingsPage = React.lazy(async () => {
+  const module = await import("../pages/SettingsPage.js");
+  return { default: module.SettingsPage };
+});
+const ServiceModePage = React.lazy(async () => {
+  const module = await import("../pages/ServiceModePage.js");
+  return { default: module.ServiceModePage };
+});
+const AppLayout = React.lazy(async () => {
+  const module = await import("./AppLayout.js");
+  return { default: module.AppLayout };
+});
 
 function readAutoRefreshEnabled(): boolean {
   if (typeof window === "undefined") {
@@ -105,320 +128,6 @@ function ProtectedRoute({ children, context, authToken }: ProtectedRouteProps): 
   return <>{children}</>;
 }
 
-interface AppLayoutProps {
-  children: ReactNode;
-  cartItemCount: number;
-}
-
-function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { context } = useRouterContext();
-  const [isCompactHeader, setIsCompactHeader] = useState<boolean>(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-    return window.innerWidth < 420;
-  });
-  const [isMobileNav, setIsMobileNav] = useState<boolean>(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-    return window.innerWidth < MOBILE_BREAKPOINT;
-  });
-  const {
-    scope,
-    setScope,
-    outletOptions,
-    syncBadgeState,
-    pendingOutboxCount,
-    clearCart,
-    setPaidAmount,
-    activeOrderContext,
-    outletReservations,
-    activeReservationId,
-    setActiveReservationId,
-    setOutletTables,
-    setOutletReservations,
-    staleEditWarning,
-    reloadLatestActiveOrder
-  } = usePosAppState();
-
-  const activeReservation = useMemo(
-    () => outletReservations.find((row) => row.reservation_id === activeReservationId) ?? null,
-    [activeReservationId, outletReservations]
-  );
-
-  const activePageLabel = useMemo(() => {
-    const activeTab = mobileTabs.find((tab) => tab.path === location.pathname);
-    if (activeTab) {
-      return activeTab.label;
-    }
-    if (location.pathname === routes.login.path) {
-      return routes.login.label;
-    }
-    return "POS";
-  }, [location.pathname]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const handleResize = () => {
-      setIsCompactHeader(window.innerWidth < 420);
-      setIsMobileNav(window.innerWidth < MOBILE_BREAKPOINT);
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => {
-      window.removeEventListener("resize", handleResize);
-    };
-  }, []);
-
-  const tabs = useMemo(() => 
-    mobileTabs.map(tab => ({
-      ...tab,
-      badge: tab.id === "cart" ? cartItemCount : undefined
-    })),
-    [cartItemCount]
-  );
-
-  const handleTabChange = (tabId: string) => {
-    const route = mobileTabs.find(t => t.id === tabId);
-    if (route) {
-      navigate(route.path);
-    }
-  };
-
-  const currentTabId = useMemo(() => {
-    const current = mobileTabs.find(t => t.path === location.pathname);
-    return current?.id ?? "";
-  }, [location.pathname]);
-
-  const headerNavItems = useMemo(
-    () => [routes.products, routes.tables, routes.reservations, routes.cart, routes.checkout, routes.settings],
-    []
-  );
-
-  return (
-    <div style={{ 
-      minHeight: "100vh", 
-      paddingBottom: "60px",
-      display: "flex",
-      flexDirection: "column"
-    }}>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        <header
-          style={{
-            padding: "12px 16px",
-            borderBottom: "1px solid #e2e8f0",
-            background: "#ffffff",
-            position: "sticky",
-            top: 0,
-            zIndex: 20
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: isCompactHeader ? "flex-start" : "center",
-              gap: 10,
-              flexDirection: isCompactHeader ? "column" : "row"
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>Jurnapod POS</div>
-              <div style={{ fontSize: 16, color: "#0f172a", fontWeight: 700 }}>{activePageLabel}</div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, width: isCompactHeader ? "100%" : "auto", flexWrap: "wrap" }}>
-              <SyncBadge status={syncBadgeState} pendingCount={pendingOutboxCount} />
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: activeOrderContext.service_type === "DINE_IN" ? "#1d4ed8" : "#0f172a",
-                  background: activeOrderContext.service_type === "DINE_IN" ? "#eff6ff" : "#f1f5f9",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: 999,
-                  padding: "4px 8px"
-                }}
-              >
-                {activeOrderContext.service_type === "DINE_IN"
-                  ? `Dine-in${activeOrderContext.table_id ? ` • T${activeOrderContext.table_id}` : " • No table"}`
-                  : "Takeaway"}
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: "#0f172a",
-                  background: "#f1f5f9",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: 999,
-                  padding: "4px 8px"
-                }}
-              >
-                Cart: {cartItemCount}
-              </div>
-              {activeReservation ? (
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: "#1e3a8a",
-                    background: "#dbeafe",
-                    border: "1px solid #93c5fd",
-                    borderRadius: 999,
-                    padding: "4px 8px"
-                  }}
-                >
-                  Resv: {activeReservation.customer_name} ({activeReservation.status})
-                </div>
-              ) : null}
-              {cartItemCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => navigate(routes.checkout.path)}
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: "#ffffff",
-                    background: "#2563eb",
-                    border: "1px solid #1d4ed8",
-                    borderRadius: 999,
-                    padding: "4px 10px",
-                    cursor: "pointer"
-                  }}
-                >
-                  Pay now
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => navigate(routes.settings.path)}
-                aria-label="Open settings"
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: "#0f172a",
-                  background: "#f8fafc",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: 999,
-                  padding: "4px 10px",
-                  cursor: "pointer"
-                }}
-              >
-                Settings
-              </button>
-            </div>
-          </div>
-          <div style={{ marginTop: 10 }}>
-            <OutletContextSwitcher
-              outletOptions={outletOptions}
-              activeOutletId={scope.outlet_id}
-              compact={isCompactHeader}
-              hasActiveTable={activeOrderContext.table_id !== null}
-              serviceType={activeOrderContext.service_type}
-              onConfirmSwitch={(nextOutletId) => {
-                void (async () => {
-                  if (activeOrderContext.service_type === "DINE_IN" && activeOrderContext.table_id) {
-                    await context.runtime.setOutletTableStatus(scope, activeOrderContext.table_id, "AVAILABLE");
-                  }
-
-                  setScope({
-                    ...scope,
-                    outlet_id: nextOutletId
-                  });
-                  clearCart();
-                  setPaidAmount(0);
-                  setOutletTables([]);
-                  setOutletReservations([]);
-                  setActiveReservationId(null);
-                  navigate(routes.products.path);
-                })();
-              }}
-            />
-          </div>
-          {!isMobileNav ? (
-            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {headerNavItems.map((item) => {
-                const isActive = location.pathname === item.path;
-                const cartBadge = item.id === "cart" && cartItemCount > 0 ? ` (${cartItemCount})` : "";
-
-                return (
-                  <button
-                    key={item.id}
-                    id={`header-nav-${item.id}`}
-                    name={`headerNav-${item.id}`}
-                    type="button"
-                    onClick={() => navigate(item.path)}
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: isActive ? "#1d4ed8" : "#334155",
-                      background: isActive ? "#dbeafe" : "#f8fafc",
-                      border: `1px solid ${isActive ? "#93c5fd" : "#cbd5e1"}`,
-                      borderRadius: 999,
-                      padding: "6px 10px",
-                      cursor: "pointer"
-                    }}
-                  >
-                    {item.icon} {item.label}
-                    {cartBadge}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          {staleEditWarning ? (
-            <div
-              style={{
-                marginTop: 10,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8,
-                background: "#fff7ed",
-                border: "1px solid #fdba74",
-                borderRadius: 8,
-                padding: "8px 10px"
-              }}
-            >
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#9a3412" }}>{staleEditWarning}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  void reloadLatestActiveOrder();
-                }}
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: "#7c2d12",
-                  background: "#ffedd5",
-                  border: "1px solid #fdba74",
-                  borderRadius: 999,
-                  padding: "4px 10px",
-                  cursor: "pointer"
-                }}
-              >
-                Reload latest
-              </button>
-            </div>
-          ) : null}
-        </header>
-        {children}
-      </div>
-      <TabBar
-        tabs={tabs}
-        activeTab={currentTabId}
-        onTabChange={handleTabChange}
-      />
-    </div>
-  );
-}
-
 interface PosRouterProps {
   context: WebBootstrapContext;
   cartItemCount?: number;
@@ -472,7 +181,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
           price_snapshot: line.unit_price_snapshot
         },
         qty: line.qty,
-        committed_qty: orderIsFinalized ? line.qty : 0,
+        kitchen_sent_qty: orderIsFinalized ? line.qty : 0,  // Renamed from committed_qty
         discount_amount: line.discount_amount
       };
     }
@@ -484,7 +193,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     table_id: number | null;
     reservation_id: number | null;
     guest_count: number | null;
-    is_finalized: boolean;
+    is_finalized: boolean;  // DB field name
     order_status: ActiveOrderContextState["order_status"];
     opened_at: string;
     closed_at: string | null;
@@ -494,7 +203,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     table_id: order.table_id,
     reservation_id: order.reservation_id,
     guest_count: order.guest_count,
-    is_finalized: order.is_finalized,
+    kitchen_sent: order.is_finalized,  // Map DB is_finalized → UI kitchen_sent
     order_status: order.order_status,
     opened_at: order.opened_at,
     closed_at: order.closed_at,
@@ -502,14 +211,21 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
   }), []);
 
   const hasMeaningfulOrderState = useMemo(() => {
+    const hasDineInAnchor =
+      cartState.activeOrderContext.service_type === "DINE_IN"
+      && (
+        !!cartState.activeOrderContext.table_id
+        || !!cartState.activeOrderContext.reservation_id
+      );
+
     return (
       cartState.cartLines.length > 0
       || cartState.paidAmount > 0
-      || cartState.activeOrderContext.service_type === "DINE_IN"
+      || hasDineInAnchor
       || !!cartState.activeOrderContext.table_id
       || !!cartState.activeOrderContext.reservation_id
       || cartState.activeOrderContext.guest_count !== null
-      || cartState.activeOrderContext.is_finalized
+      || cartState.activeOrderContext.kitchen_sent  // Renamed from is_finalized
       || cartState.activeOrderContext.notes !== null
     );
   }, [cartState.activeOrderContext, cartState.cartLines.length, cartState.paidAmount]);
@@ -531,7 +247,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       table_id: number | null;
       reservation_id: number | null;
       guest_count: number | null;
-      is_finalized: boolean;
+      is_finalized: boolean;  // DB field name
       order_status: ActiveOrderContextState["order_status"];
       opened_at: string;
       closed_at: string | null;
@@ -541,9 +257,9 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
   }) => {
     hydrateInProgressRef.current = true;
     cartState.hydrateOrder({
-      cart: toCartState(input.lines, input.order.is_finalized),
+      cart: toCartState(input.lines, input.order.is_finalized),  // DB field
       paidAmount: input.paid_amount,
-      activeOrderContext: toOrderContext(input.order)
+      activeOrderContext: toOrderContext(input.order)  // Maps is_finalized → kitchen_sent inside
     });
     setCurrentActiveOrderId(input.order_id);
     setActiveEditBaseUpdatedAt(input.order.updated_at ?? input.order.opened_at ?? null);
@@ -561,13 +277,24 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       return null;
     }
 
+    const hasDineInAnchor =
+      cartState.activeOrderContext.service_type === "DINE_IN"
+      && (
+        !!cartState.activeOrderContext.table_id
+        || !!cartState.activeOrderContext.reservation_id
+      );
+
+    if (cartState.activeOrderContext.service_type === "DINE_IN" && !hasDineInAnchor) {
+      return null;
+    }
+
     const snapshot = await context.runtime.upsertActiveOrderSnapshot(scope, {
       order_id: currentActiveOrderId ?? undefined,
       service_type: cartState.activeOrderContext.service_type,
       table_id: cartState.activeOrderContext.table_id,
       reservation_id: cartState.activeOrderContext.reservation_id,
       guest_count: cartState.activeOrderContext.guest_count,
-      is_finalized: cartState.activeOrderContext.is_finalized,
+      kitchen_sent: cartState.activeOrderContext.kitchen_sent,  // Renamed from is_finalized
       order_status: cartState.activeOrderContext.order_status,
       paid_amount: cartState.paidAmount,
       opened_at: cartState.activeOrderContext.opened_at,
@@ -880,6 +607,55 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     });
   }, [cartState.setOrderReservationId, resolveAndHydrateActiveOrder]);
 
+  /**
+   * Creates order checkpoint by marking all current items as kitchen-sent.
+   * Used when sending order to kitchen (dine-in flow).
+   */
+  const createOrderCheckpoint = useCallback(() => {
+    cartState.setOrderFinalized(true);
+  }, [cartState]);
+
+  /**
+   * Discards only unsent (draft) items, preserving kitchen-sent items.
+   * Resets qty to kitchen_sent_qty for each line.
+   */
+  const discardDraftItems = useCallback(() => {
+    const nextCart: CartState = {};
+    for (const [key, line] of Object.entries(cartState.cart)) {
+      if (line.kitchen_sent_qty > 0) {
+        // Keep line, reset qty to kitchen_sent_qty
+        nextCart[Number(key)] = {
+          ...line,
+          qty: line.kitchen_sent_qty
+        };
+      }
+      // Lines with kitchen_sent_qty = 0 are discarded
+    }
+
+    // If no items remain, clear entire order
+    if (Object.keys(nextCart).length === 0) {
+      clearCart();
+    } else {
+      // Update cart with filtered items
+      cartState.hydrateOrder({
+        cart: nextCart,
+        paidAmount: cartState.paidAmount,
+        activeOrderContext: cartState.activeOrderContext
+      });
+    }
+  }, [cartState, clearCart]);
+
+  /**
+   * Helper computed value for navigation guard decisions.
+   */
+  const hasUnsentDineInItems = useMemo(
+    () =>
+      cartState.activeOrderContext.service_type === "DINE_IN" &&
+      !cartState.activeOrderContext.kitchen_sent &&
+      cartState.cartLines.length > 0,
+    [cartState.activeOrderContext, cartState.cartLines.length]
+  );
+
   useEffect(() => {
     let disposed = false;
     let refreshQueue = Promise.resolve();
@@ -1026,6 +802,9 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       setOrderFinalized: cartState.setOrderFinalized,
       setOrderStatus: cartState.setOrderStatus,
       setOrderNotes: cartState.setOrderNotes,
+      createOrderCheckpoint,
+      discardDraftItems,
+      hasUnsentDineInItems,
       currentActiveOrderId,
       outletTables,
       setOutletTables,
@@ -1058,6 +837,9 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       setDineInContext,
       setActiveTableId,
       setOrderReservationId,
+      createOrderCheckpoint,
+      discardDraftItems,
+      hasUnsentDineInItems,
       currentActiveOrderId,
       outletTables,
       outletReservations,
@@ -1153,6 +935,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     <RouterContext.Provider value={routerValue}>
       <PosAppStateContext.Provider value={appStateValue}>
       <BrowserRouter>
+        <Suspense fallback={<div style={{ padding: 16, fontSize: 14, color: "#475569" }}>Loading page...</div>}>
         <Routes>
           <Route
             path={routes.login.path}
@@ -1192,7 +975,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.checkout.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>
-                <AppLayout cartItemCount={effectiveCartItemCount}>
+                <AppLayout context={context} cartItemCount={effectiveCartItemCount}>
                   <CheckoutPage context={context} />
                 </AppLayout>
               </ProtectedRoute>
@@ -1202,7 +985,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.tables.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>
-                <AppLayout cartItemCount={effectiveCartItemCount}>
+                <AppLayout context={context} cartItemCount={effectiveCartItemCount}>
                   <TablesPage context={context} />
                 </AppLayout>
               </ProtectedRoute>
@@ -1212,7 +995,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.reservations.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>
-                <AppLayout cartItemCount={effectiveCartItemCount}>
+                <AppLayout context={context} cartItemCount={effectiveCartItemCount}>
                   <ReservationsPage context={context} />
                 </AppLayout>
               </ProtectedRoute>
@@ -1222,7 +1005,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.products.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>
-                <AppLayout cartItemCount={effectiveCartItemCount}>
+                <AppLayout context={context} cartItemCount={effectiveCartItemCount}>
                   <ProductsPage 
                     context={context}
                   />
@@ -1234,7 +1017,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.cart.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>
-                <AppLayout cartItemCount={effectiveCartItemCount}>
+                <AppLayout context={context} cartItemCount={effectiveCartItemCount}>
                   <CartPage 
                     context={context}
                   />
@@ -1246,7 +1029,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
             path={routes.settings.path}
             element={
               <ProtectedRoute context={context} authToken={authToken}>
-                <AppLayout cartItemCount={effectiveCartItemCount}>
+                <AppLayout context={context} cartItemCount={effectiveCartItemCount}>
                   <SettingsPage context={context} onLogout={handleLogout} />
                 </AppLayout>
               </ProtectedRoute>
@@ -1254,6 +1037,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
           />
           <Route path="*" element={<Navigate to={routes.products.path} replace />} />
         </Routes>
+        </Suspense>
       </BrowserRouter>
       </PosAppStateContext.Provider>
     </RouterContext.Provider>

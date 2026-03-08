@@ -2,7 +2,8 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React from "react";
-import { Card, Button } from "../../shared/components/index.js";
+import { IonBadge, IonItem, IonLabel } from "@ionic/react";
+import { Button } from "../../shared/components/index.js";
 import type { RuntimeProductCatalogItem } from "../../services/runtime-service.js";
 import { formatMoney } from "../../shared/utils/money.js";
 
@@ -14,87 +15,63 @@ export interface ProductCardProps {
   canRemove?: boolean;
 }
 
-export function ProductCard({ 
-  product, 
-  quantity, 
-  onAdd, 
-  onRemove, 
-  canRemove = true 
+export function ProductCard({
+  product,
+  quantity,
+  onAdd,
+  onRemove,
+  canRemove = true
 }: ProductCardProps): JSX.Element {
   const selectorSuffix = (product.sku ?? String(product.item_id)).toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   return (
-    <Card padding="small">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 8
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>{product.name}</div>
-          <div style={{ fontSize: 12, color: "#64748b" }}>
-            {(product.sku ?? "NO-SKU")} - {formatMoney(product.price_snapshot)}
-          </div>
+    <IonItem lines="full">
+      <IonLabel>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>{product.name}</div>
+        <div style={{ fontSize: 12, color: "#64748b" }}>
+          {(product.sku ?? "NO-SKU")} - {formatMoney(product.price_snapshot)}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {quantity > 0 ? (
-            // Show +/- controls when item is in cart
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              {onRemove && (
-                <Button 
-                  id={`product-remove-${selectorSuffix}`}
-                  name={`productRemove-${selectorSuffix}`}
-                  size="small" 
-                  variant="secondary" 
-                  onClick={onRemove}
-                  disabled={!canRemove}
-                  style={{ minWidth: "32px", padding: "6px" }}
-                >
-                  −
-                </Button>
-              )}
-              <span
-                style={{
-                  background: "#0f766e",
-                  color: "#ffffff",
-                  borderRadius: 4,
-                  padding: "4px 8px",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  minWidth: "24px",
-                  textAlign: "center"
-                }}
+      </IonLabel>
+      <div slot="end" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {quantity > 0 ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {onRemove && (
+              <Button
+                id={`product-remove-${selectorSuffix}`}
+                name={`productRemove-${selectorSuffix}`}
+                size="small"
+                variant="secondary"
+                onClick={onRemove}
+                disabled={!canRemove}
+                style={{ minWidth: "32px" }}
               >
-                {quantity}
-              </span>
-              <Button 
-                id={`product-add-${selectorSuffix}`}
-                name={`productAdd-${selectorSuffix}`}
-                size="small" 
-                variant="primary" 
-                onClick={onAdd}
-                style={{ minWidth: "32px", padding: "6px" }}
-              >
-                +
+                -
               </Button>
-            </div>
-          ) : (
-            // Show simple Add button when not in cart
+            )}
+            <IonBadge color="primary">{quantity}</IonBadge>
             <Button
               id={`product-add-${selectorSuffix}`}
               name={`productAdd-${selectorSuffix}`}
               size="small"
               variant="primary"
               onClick={onAdd}
+              style={{ minWidth: "32px" }}
             >
-              Add
+              +
             </Button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <Button
+            id={`product-add-${selectorSuffix}`}
+            name={`productAdd-${selectorSuffix}`}
+            size="small"
+            variant="primary"
+            onClick={onAdd}
+          >
+            Add
+          </Button>
+        )}
       </div>
-    </Card>
+    </IonItem>
   );
 }

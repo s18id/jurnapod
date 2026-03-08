@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import React from "react";
-import { Input } from "../../shared/components/index.js";
+import { IonSearchbar } from "@ionic/react";
 import { SEARCH_DEBOUNCE_MS } from "../../shared/utils/constants.js";
 
 export interface ProductSearchProps {
@@ -11,41 +11,18 @@ export interface ProductSearchProps {
 }
 
 export function ProductSearch({ value, onChange }: ProductSearchProps): JSX.Element {
-  const [localValue, setLocalValue] = React.useState(value);
-  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  React.useEffect(() => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    timeoutRef.current = setTimeout(() => {
-      onChange(localValue);
-    }, SEARCH_DEBOUNCE_MS);
-
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-  }, [localValue, onChange]);
-
-  React.useEffect(() => {
-    setLocalValue(value);
-  }, [value]);
-
   return (
     <div style={{ marginTop: 16 }}>
       <label htmlFor="product-search" style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>
         Product search
       </label>
-      <Input
+      <IonSearchbar
         id="product-search"
-        name="productSearch"
-        value={localValue}
-        onChange={setLocalValue}
+        value={value}
+        debounce={SEARCH_DEBOUNCE_MS}
+        onIonInput={(event) => onChange((event.detail.value ?? "").toString())}
         placeholder="Search by name or SKU"
-        inputMode="search"
+        inputmode="search"
       />
     </div>
   );
