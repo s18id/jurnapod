@@ -57,7 +57,15 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   },
   {
     label: "POS",
-    paths: ["/pos-transactions", "/pos-payments", "/sync-queue", "/sync-history", "/pwa-settings"]
+    paths: [
+      "/pos-transactions",
+      "/pos-payments",
+      "/outlet-tables",
+      "/reservations",
+      "/sync-queue",
+      "/sync-history",
+      "/pwa-settings"
+    ]
   },
   {
     label: "Inventory",
@@ -66,6 +74,7 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   {
     label: "Settings",
     paths: [
+      "/audit-logs",
       "/companies",
       "/outlets",
       "/users",

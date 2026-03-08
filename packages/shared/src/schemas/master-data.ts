@@ -3,6 +3,8 @@
 
 import { z } from "zod";
 import { NumericIdSchema } from "./common";
+import { ReservationStatusSchema } from "./reservations";
+import { OutletTableStatusSchema } from "./outlet-tables";
 
 /**
  * Item Type Taxonomy
@@ -314,6 +316,33 @@ export const SyncPullConfigSchema = z.object({
     .default(["CASH"])
 });
 
+export const SyncPullTableSchema = z.object({
+  table_id: NumericIdSchema,
+  code: z.string().min(1).max(32),
+  name: z.string().min(1).max(191),
+  zone: z.string().max(64).nullable(),
+  capacity: z.number().int().positive().nullable(),
+  status: OutletTableStatusSchema,
+  updated_at: z.string().datetime()
+});
+
+export const SyncPullReservationSchema = z.object({
+  reservation_id: NumericIdSchema,
+  table_id: NumericIdSchema.nullable(),
+  customer_name: z.string().min(1).max(191),
+  customer_phone: z.string().max(64).nullable(),
+  guest_count: z.number().int().positive(),
+  reservation_at: z.string().datetime(),
+  duration_minutes: z.number().int().positive().nullable(),
+  status: ReservationStatusSchema,
+  notes: z.string().max(500).nullable(),
+  linked_order_id: z.string().uuid().nullable(),
+  arrived_at: z.string().datetime().nullable(),
+  seated_at: z.string().datetime().nullable(),
+  cancelled_at: z.string().datetime().nullable(),
+  updated_at: z.string().datetime()
+});
+
 export const SyncPullPayloadSchema = z.object({
   data_version: z.coerce.number().int().min(0),
   items: z.array(SyncPullItemSchema),
@@ -323,7 +352,9 @@ export const SyncPullPayloadSchema = z.object({
   open_orders: z.array(SyncPullOpenOrderSchema).default([]),
   open_order_lines: z.array(SyncPullOpenOrderLineSchema).default([]),
   order_updates: z.array(SyncPullOrderUpdateSchema).default([]),
-  orders_cursor: z.number().int().min(0).default(0)
+  orders_cursor: z.number().int().min(0).default(0),
+  tables: z.array(SyncPullTableSchema).default([]),
+  reservations: z.array(SyncPullReservationSchema).default([])
 });
 
 export const SyncPullResponseSchema = z.object({

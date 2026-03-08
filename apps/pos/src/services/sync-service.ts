@@ -73,6 +73,8 @@ export class SyncService {
     const itemGroups = response.data.item_groups;
     const prices = response.data.prices;
     const config = response.data.config;
+    const tables = response.data.tables ?? [];
+    const reservations = response.data.reservations ?? [];
 
     // Build lookup maps
     const now = new Date().toISOString();
@@ -125,6 +127,23 @@ export class SyncService {
 
     // Upsert both new/updated products and stale products
     await this.storage.upsertProducts([...productRows, ...staleProducts]);
+
+    // Upsert outlet tables
+    if (tables.length > 0) {
+      const tableRows = tables.map((table) => ({
+        pk: `${scope.company_id}:${scope.outlet_id}:${table.table_id}`,
+        company_id: scope.company_id,
+        outlet_id: scope.outlet_id,
+        table_id: table.table_id,
+        code: table.code,
+        name: table.name,
+        zone: table.zone,
+        capacity: table.capacity,
+        status: table.status,
+        updated_at: table.updated_at
+      }));
+      await this.storage.upsertOutletTables(tableRows);
+    }
 
     // Update sync metadata
     await this.storage.upsertSyncMetadata({

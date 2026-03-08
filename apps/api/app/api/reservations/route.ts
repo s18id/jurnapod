@@ -63,6 +63,8 @@ export const GET = withAuth(
   [
     requireAccess({
       roles: ["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"],
+      module: "pos",
+      permission: "read",
       outletId: (request) => parseOutletIdForListGuard(request)
     })
   ]
@@ -91,6 +93,8 @@ export const POST = withAuth(
   [
     requireAccess({
       roles: ["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"],
+      module: "pos",
+      permission: "create",
       outletId: (request) => parseOutletIdForCreateGuard(request)
     })
   ]

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { Button, Card, Input } from "../shared/components/index.js";
 import type { RuntimeReservation, RuntimeReservationStatus } from "../services/runtime-service.js";
@@ -33,16 +33,6 @@ const statusActionMap: Record<RuntimeReservationStatus, RuntimeReservationStatus
   NO_SHOW: []
 };
 
-function toDateTimeLocal(iso: string): string {
-  const date = new Date(iso);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
 function fromDateTimeLocal(value: string): string {
   return new Date(value).toISOString();
 }
@@ -66,12 +56,13 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
   } = usePosAppState();
   const [submitInFlight, setSubmitInFlight] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const autoSyncScopesRef = useRef<Set<string>>(new Set());
   const [form, setForm] = useState<CreateReservationForm>(() => ({
     customer_name: "",
     customer_phone: "",
-    guest_count: "2",
-    reservation_at: toDateTimeLocal(new Date(Date.now() + 30 * 60_000).toISOString()),
-    duration_minutes: "90",
+    guest_count: "",
+    reservation_at: "",
+    duration_minutes: "",
     table_id: "",
     notes: ""
   }));
@@ -80,10 +71,29 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
     let disposed = false;
 
     async function loadData() {
-      const [tables, reservations] = await Promise.all([
+      let [tables, reservations] = await Promise.all([
         context.runtime.getOutletTables(scope),
         context.runtime.getOutletReservations(scope)
       ]);
+
+      const scopeKey = `${scope.company_id}:${scope.outlet_id}`;
+      const shouldAutoSync =
+        context.runtime.isOnline() &&
+        (tables.length === 0 || reservations.length === 0) &&
+        !autoSyncScopesRef.current.has(scopeKey);
+
+      if (shouldAutoSync) {
+        autoSyncScopesRef.current.add(scopeKey);
+        try {
+          await context.sync.pull(scope);
+          [tables, reservations] = await Promise.all([
+            context.runtime.getOutletTables(scope),
+            context.runtime.getOutletReservations(scope)
+          ]);
+        } catch (error) {
+          console.error("Failed to auto-sync tables/reservations:", error);
+        }
+      }
 
       if (disposed) {
         return;
@@ -244,10 +254,23 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
                 setSubmitInFlight(true);
                 setErrorMessage(null);
                 try {
+                  if (!form.customer_name.trim()) {
+                    throw new Error("Customer name is required");
+                  }
+
+                  const guestCount = Number(form.guest_count);
+                  if (!Number.isInteger(guestCount) || guestCount <= 0) {
+                    throw new Error("Guest count must be a positive integer");
+                  }
+
+                  if (!form.reservation_at) {
+                    throw new Error("Reservation time is required");
+                  }
+
                   const created = await context.runtime.createOutletReservation(scope, {
                     customer_name: form.customer_name,
                     customer_phone: form.customer_phone || null,
-                    guest_count: Number(form.guest_count),
+                    guest_count: guestCount,
                     reservation_at: fromDateTimeLocal(form.reservation_at),
                     duration_minutes: form.duration_minutes ? Number(form.duration_minutes) : null,
                     table_id: form.table_id ? Number(form.table_id) : null,

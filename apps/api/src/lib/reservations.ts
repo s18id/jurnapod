@@ -59,6 +59,15 @@ function toIso(value: Date | string | null): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+function toDbDateTime(value: Date | string): string {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new ReservationValidationError("Invalid reservation datetime value");
+  }
+
+  return parsed.toISOString().slice(0, 19).replace("T", " ");
+}
+
 function mapRow(row: ReservationDbRow): ReservationRow {
   const reservationAt = toIso(row.reservation_at);
   const createdAt = toIso(row.created_at);
@@ -201,11 +210,11 @@ export async function listReservations(
   }
   if (query.from) {
     where.push("reservation_at >= ?");
-    params.push(query.from);
+    params.push(toDbDateTime(query.from));
   }
   if (query.to) {
     where.push("reservation_at <= ?");
-    params.push(query.to);
+    params.push(toDbDateTime(query.to));
   }
 
   params.push(query.limit, query.offset);
@@ -264,6 +273,8 @@ export async function createReservation(
       await setTableStatus(connection, companyId, input.outlet_id, input.table_id, "RESERVED");
     }
 
+    const reservationAtDb = toDbDateTime(input.reservation_at);
+
     const [insertResult] = await connection.execute<ResultSetHeader>(
       `INSERT INTO reservations (
          company_id, outlet_id, table_id, customer_name, customer_phone,
@@ -276,7 +287,7 @@ export async function createReservation(
         input.customer_name,
         input.customer_phone ?? null,
         input.guest_count,
-        input.reservation_at,
+        reservationAtDb,
         input.duration_minutes ?? null,
         input.notes ?? null
       ]
@@ -312,6 +323,19 @@ export async function updateReservation(
     }
 
     if (isFinalStatus(current.status) && current.status !== nextStatus) {
+      throw new ReservationValidationError("Finalized reservation cannot be modified");
+    }
+
+    if (
+      isFinalStatus(current.status) &&
+      (patch.table_id !== undefined ||
+        patch.customer_name !== undefined ||
+        patch.customer_phone !== undefined ||
+        patch.guest_count !== undefined ||
+        patch.reservation_at !== undefined ||
+        patch.duration_minutes !== undefined ||
+        patch.notes !== undefined)
+    ) {
       throw new ReservationValidationError("Finalized reservation cannot be modified");
     }
 
@@ -369,7 +393,9 @@ export async function updateReservation(
         patch.customer_name ?? current.customer_name,
         patch.customer_phone === undefined ? current.customer_phone : patch.customer_phone,
         patch.guest_count ?? current.guest_count,
-        patch.reservation_at ?? toIso(current.reservation_at),
+        patch.reservation_at === undefined
+          ? toDbDateTime(current.reservation_at)
+          : toDbDateTime(patch.reservation_at),
         patch.duration_minutes === undefined ? current.duration_minutes : patch.duration_minutes,
         nextStatus,
         patch.notes === undefined ? current.notes : patch.notes,

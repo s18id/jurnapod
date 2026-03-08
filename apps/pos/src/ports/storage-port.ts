@@ -53,6 +53,11 @@ export interface PosStoragePort {
 
   upsertReservations(reservations: ReservationRow[]): Promise<void>;
 
+  clearScopeCache(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<void>;
+
   // Active orders operations
   getActiveOrdersByOutlet(input: {
     company_id: number;

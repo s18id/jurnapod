@@ -14,6 +14,7 @@ export * from "./schemas/master-data";
 export * from "./schemas/modules";
 export * from "./schemas/module-roles";
 export * from "./schemas/outlets";
+export * from "./schemas/outlet-tables";
 export * from "./schemas/posting";
 export * from "./schemas/pos-sync";
 export * from "./schemas/reservations";

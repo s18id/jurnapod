@@ -91,6 +91,52 @@ export class WebStorageAdapter implements PosStoragePort {
     await this.db.reservations.bulkPut(reservations);
   }
 
+  async clearScopeCache(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<void> {
+    const scopePk = `${input.company_id}:${input.outlet_id}`;
+
+    await this.db.transaction(
+      "rw",
+      [
+        this.db.products_cache,
+        this.db.outlet_tables,
+        this.db.reservations,
+        this.db.sync_scope_config,
+        this.db.sync_metadata
+      ],
+      async () => {
+        const productPks = (await this.db.products_cache
+          .toCollection()
+          .filter((row) => row.company_id === input.company_id && row.outlet_id === input.outlet_id)
+          .primaryKeys()) as string[];
+        if (productPks.length > 0) {
+          await this.db.products_cache.bulkDelete(productPks);
+        }
+
+        const tablePks = (await this.db.outlet_tables
+          .toCollection()
+          .filter((row) => row.company_id === input.company_id && row.outlet_id === input.outlet_id)
+          .primaryKeys()) as string[];
+        if (tablePks.length > 0) {
+          await this.db.outlet_tables.bulkDelete(tablePks);
+        }
+
+        const reservationPks = (await this.db.reservations
+          .toCollection()
+          .filter((row) => row.company_id === input.company_id && row.outlet_id === input.outlet_id)
+          .primaryKeys()) as string[];
+        if (reservationPks.length > 0) {
+          await this.db.reservations.bulkDelete(reservationPks);
+        }
+
+        await this.db.sync_scope_config.delete(scopePk);
+        await this.db.sync_metadata.delete(scopePk);
+      }
+    );
+  }
+
   async getActiveOrdersByOutlet(input: {
     company_id: number;
     outlet_id: number;

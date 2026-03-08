@@ -8,8 +8,10 @@ import type {
   ActiveOrderRow,
   ActiveOrderUpdateRow,
   ProductCacheRow,
+  ReservationRow,
   SyncMetadataRow,
-  SyncScopeConfigRow
+  SyncScopeConfigRow,
+  OutletTableRow
 } from "@jurnapod/offline-db/dexie";
 
 const DEFAULT_SYNC_PULL_ENDPOINT = "/api/sync/pull";
@@ -108,6 +110,34 @@ const SyncPullOrderUpdateSchema = z.object({
   sequence_no: z.number().int().positive()
 });
 
+const SyncPullTableSchema = z.object({
+  table_id: z.coerce.number().int().positive(),
+  code: z.string().min(1).max(32),
+  name: z.string().min(1).max(191),
+  zone: z.string().max(64).nullable(),
+  capacity: z.number().int().positive().nullable(),
+  status: z.enum(["AVAILABLE", "RESERVED", "OCCUPIED", "UNAVAILABLE"]),
+  updated_at: z.string().datetime()
+});
+
+const SyncPullReservationSchema = z.object({
+  reservation_id: z.coerce.number().int().positive(),
+  table_id: z.number().int().positive().nullable(),
+  customer_name: z.string().min(1).max(191),
+  customer_phone: z.string().max(64).nullable(),
+  guest_count: z.number().int().positive(),
+  reservation_at: z.string().datetime(),
+  duration_minutes: z.number().int().positive().nullable(),
+  status: z.enum(["BOOKED", "CONFIRMED", "ARRIVED", "SEATED", "COMPLETED", "CANCELLED", "NO_SHOW"]),
+  notes: z.string().max(500).nullable(),
+  linked_order_id: z.string().uuid().nullable(),
+  created_at: z.string().datetime().optional(),
+  arrived_at: z.string().datetime().nullable(),
+  seated_at: z.string().datetime().nullable(),
+  cancelled_at: z.string().datetime().nullable(),
+  updated_at: z.string().datetime()
+});
+
 const SyncPullResponseSchema = z.object({
   data_version: z.coerce.number().int().min(0),
   items: z.array(SyncPullItemSchema),
@@ -117,7 +147,9 @@ const SyncPullResponseSchema = z.object({
   open_orders: z.array(SyncPullOpenOrderSchema).default([]),
   open_order_lines: z.array(SyncPullOpenOrderLineSchema).default([]),
   order_updates: z.array(SyncPullOrderUpdateSchema).default([]),
-  orders_cursor: z.coerce.number().int().min(0).default(0)
+  orders_cursor: z.coerce.number().int().min(0).default(0),
+  tables: z.array(SyncPullTableSchema).default([]),
+  reservations: z.array(SyncPullReservationSchema).default([])
 });
 
 type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;
@@ -377,6 +409,51 @@ function mapSyncPullToOrderUpdateRows(payload: SyncPullResponse): ActiveOrderUpd
   }));
 }
 
+function mapSyncPullToOutletTableRows(
+  payload: SyncPullResponse,
+  scope: { company_id: number; outlet_id: number },
+  pulledAt: string
+): OutletTableRow[] {
+  return payload.tables.map((table) => ({
+    pk: `${scope.company_id}:${scope.outlet_id}:${table.table_id}`,
+    company_id: scope.company_id,
+    outlet_id: scope.outlet_id,
+    table_id: table.table_id,
+    code: table.code,
+    name: table.name,
+    zone: table.zone,
+    capacity: table.capacity,
+    status: table.status,
+    updated_at: table.updated_at
+  }));
+}
+
+function mapSyncPullToReservationRows(
+  payload: SyncPullResponse,
+  scope: { company_id: number; outlet_id: number }
+): ReservationRow[] {
+  return payload.reservations.map((reservation) => ({
+    pk: `${scope.company_id}:${scope.outlet_id}:${reservation.reservation_id}`,
+    reservation_id: reservation.reservation_id,
+    company_id: scope.company_id,
+    outlet_id: scope.outlet_id,
+    table_id: reservation.table_id,
+    customer_name: reservation.customer_name,
+    customer_phone: reservation.customer_phone,
+    guest_count: reservation.guest_count,
+    reservation_at: reservation.reservation_at,
+    duration_minutes: reservation.duration_minutes,
+    status: reservation.status,
+    notes: reservation.notes,
+    linked_order_id: reservation.linked_order_id,
+    arrived_at: reservation.arrived_at,
+    seated_at: reservation.seated_at,
+    cancelled_at: reservation.cancelled_at,
+    created_at: reservation.created_at ?? reservation.updated_at,
+    updated_at: reservation.updated_at
+  }));
+}
+
 export async function readSyncPullDataVersion(
   scope: { company_id: number; outlet_id: number },
   db: PosOfflineDb = posDb
@@ -467,6 +544,8 @@ async function applySyncPullRows(
     open_order_lines: ActiveOrderLineRow[];
     order_updates: ActiveOrderUpdateRow[];
     orders_cursor: number;
+    tables: OutletTableRow[];
+    reservations: ReservationRow[];
   },
   db: PosOfflineDb
 ): Promise<{ applied: boolean; previous_data_version: number; data_version: number }> {
@@ -478,57 +557,59 @@ async function applySyncPullRows(
       db.sync_scope_config,
       db.active_orders,
       db.active_order_lines,
-      db.active_order_updates
+      db.active_order_updates,
+      db.outlet_tables,
+      db.reservations
     ],
     async () => {
-    const metadataPk = resolveScopePk(input.company_id, input.outlet_id);
-    const existingMetadata = await db.sync_metadata.get(metadataPk);
-    const previousDataVersion = existingMetadata?.last_data_version ?? 0;
+      const metadataPk = resolveScopePk(input.company_id, input.outlet_id);
+      const existingMetadata = await db.sync_metadata.get(metadataPk);
+      const previousDataVersion = existingMetadata?.last_data_version ?? 0;
+      const catalogAdvanced = input.data_version > previousDataVersion;
 
-    if (input.data_version <= previousDataVersion) {
-      return {
-        applied: false,
-        previous_data_version: previousDataVersion,
-        data_version: previousDataVersion
+      if (catalogAdvanced) {
+        const incomingItemIds = new Set(input.rows.map((row) => row.item_id));
+        const currentActiveRows = await db.products_cache
+          .toCollection()
+          .filter((row) => row.company_id === input.company_id && row.outlet_id === input.outlet_id && row.is_active)
+          .toArray();
+
+        const staleRows = currentActiveRows
+          .filter((row) => !incomingItemIds.has(row.item_id))
+          .map((row) => ({
+            ...row,
+            is_active: false,
+            data_version: input.data_version,
+            pulled_at: input.pulled_at
+          }));
+
+        if (input.rows.length > 0) {
+          await db.products_cache.bulkPut(input.rows);
+        }
+
+        if (staleRows.length > 0) {
+          await db.products_cache.bulkPut(staleRows);
+        }
+      }
+
+      const effectiveDataVersion = catalogAdvanced ? input.data_version : previousDataVersion;
+      const metadataRow: SyncMetadataRow = {
+        pk: metadataPk,
+        company_id: input.company_id,
+        outlet_id: input.outlet_id,
+        last_data_version: effectiveDataVersion,
+        last_pulled_at: input.pulled_at,
+        updated_at: input.pulled_at
       };
-    }
-
-    const incomingItemIds = new Set(input.rows.map((row) => row.item_id));
-    const currentActiveRows = await db.products_cache
-      .toCollection()
-      .filter((row) => row.company_id === input.company_id && row.outlet_id === input.outlet_id && row.is_active)
-      .toArray();
-
-    const staleRows = currentActiveRows
-      .filter((row) => !incomingItemIds.has(row.item_id))
-      .map((row) => ({
-        ...row,
-        is_active: false,
-        data_version: input.data_version,
-        pulled_at: input.pulled_at
-      }));
-
-    if (input.rows.length > 0) {
-      await db.products_cache.bulkPut(input.rows);
-    }
-
-    if (staleRows.length > 0) {
-      await db.products_cache.bulkPut(staleRows);
-    }
-
-    const metadataRow: SyncMetadataRow = {
-      pk: metadataPk,
-      company_id: input.company_id,
-      outlet_id: input.outlet_id,
-      last_data_version: input.data_version,
-      last_pulled_at: input.pulled_at,
-      updated_at: input.pulled_at
-    };
     await db.sync_metadata.put({
       ...metadataRow,
       orders_cursor: input.orders_cursor
     });
-    await db.sync_scope_config.put(input.config);
+    await db.sync_scope_config.put({
+      ...input.config,
+      data_version: effectiveDataVersion,
+      updated_at: input.pulled_at
+    });
 
     if (input.open_orders.length > 0) {
       await db.active_orders.bulkPut(input.open_orders);
@@ -542,10 +623,42 @@ async function applySyncPullRows(
       await db.active_order_updates.bulkPut(input.order_updates);
     }
 
+    const currentTables = await db.outlet_tables
+      .toCollection()
+      .filter((row) => row.company_id === input.company_id && row.outlet_id === input.outlet_id)
+      .toArray();
+    const incomingTablePks = new Set(input.tables.map((row) => row.pk));
+    const staleTablePks = currentTables
+      .filter((row) => !incomingTablePks.has(row.pk))
+      .map((row) => row.pk);
+    if (staleTablePks.length > 0) {
+      await db.outlet_tables.bulkDelete(staleTablePks);
+    }
+
+    if (input.tables.length > 0) {
+      await db.outlet_tables.bulkPut(input.tables);
+    }
+
+    const currentReservations = await db.reservations
+      .toCollection()
+      .filter((row) => row.company_id === input.company_id && row.outlet_id === input.outlet_id)
+      .toArray();
+    const incomingReservationPks = new Set(input.reservations.map((row) => row.pk));
+    const staleReservationPks = currentReservations
+      .filter((row) => !incomingReservationPks.has(row.pk))
+      .map((row) => row.pk);
+    if (staleReservationPks.length > 0) {
+      await db.reservations.bulkDelete(staleReservationPks);
+    }
+
+    if (input.reservations.length > 0) {
+      await db.reservations.bulkPut(input.reservations);
+    }
+
     return {
-      applied: true,
+      applied: catalogAdvanced,
       previous_data_version: previousDataVersion,
-      data_version: input.data_version
+      data_version: effectiveDataVersion
     };
     }
   );
@@ -612,6 +725,18 @@ export async function ingestSyncPullIntoProductsCache(
     const openOrders = mapSyncPullToOpenOrderRows(payload);
     const openOrderLines = mapSyncPullToOpenOrderLineRows(payload);
     const orderUpdates = mapSyncPullToOrderUpdateRows(payload);
+    const tables = mapSyncPullToOutletTableRows(
+      payload,
+      {
+        company_id: input.company_id,
+        outlet_id: input.outlet_id
+      },
+      pulledAt
+    );
+    const reservations = mapSyncPullToReservationRows(payload, {
+      company_id: input.company_id,
+      outlet_id: input.outlet_id
+    });
 
     const applyResult = await applySyncPullRows(
       {
@@ -624,7 +749,9 @@ export async function ingestSyncPullIntoProductsCache(
         open_orders: openOrders,
         open_order_lines: openOrderLines,
         order_updates: orderUpdates,
-        orders_cursor: payload.orders_cursor
+        orders_cursor: payload.orders_cursor,
+        tables,
+        reservations
       },
       db
     );

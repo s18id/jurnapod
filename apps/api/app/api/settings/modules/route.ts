@@ -80,7 +80,7 @@ export const GET = withAuth(
         config_json: typeof row.config_json === "string" ? row.config_json : "{}"
       }));
 
-      return successResponse(modules);
+      return successResponse({ modules });
     } catch (error) {
       console.error("GET /api/settings/modules failed", error);
       return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
