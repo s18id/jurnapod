@@ -14,13 +14,17 @@ export interface OutletContextSwitcherProps {
   activeOutletId: number;
   onConfirmSwitch: (outletId: number) => void;
   compact?: boolean;
+  hasActiveTable?: boolean;
+  serviceType?: "TAKEAWAY" | "DINE_IN";
 }
 
 export function OutletContextSwitcher({
   outletOptions,
   activeOutletId,
   onConfirmSwitch,
-  compact = false
+  compact = false,
+  hasActiveTable = false,
+  serviceType = "TAKEAWAY"
 }: OutletContextSwitcherProps): JSX.Element {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingOutletId, setPendingOutletId] = useState(activeOutletId);
@@ -97,6 +101,11 @@ export function OutletContextSwitcher({
         <ul style={{ marginTop: 0, marginBottom: 16, paddingLeft: 18, color: "#334155", fontSize: 13 }}>
           <li>Current cart and order draft will be cleared.</li>
           <li>Payment draft will be reset.</li>
+          {hasActiveTable && serviceType === "DINE_IN" && (
+            <li style={{ fontWeight: 600, color: "#dc2626" }}>
+              Active dine-in table will be released.
+            </li>
+          )}
           <li>Product context will reload for the selected outlet.</li>
           <li>You will continue from the products screen.</li>
         </ul>

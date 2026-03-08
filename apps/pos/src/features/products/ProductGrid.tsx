@@ -9,12 +9,16 @@ export interface ProductGridProps {
   products: RuntimeProductCatalogItem[];
   cartQuantities: Record<number, number>;
   onAddProduct: (product: RuntimeProductCatalogItem) => void;
+  onRemoveProduct?: (product: RuntimeProductCatalogItem) => void;
+  canRemoveProduct?: (product: RuntimeProductCatalogItem) => boolean;
 }
 
 export function ProductGrid({
   products,
   cartQuantities,
-  onAddProduct
+  onAddProduct,
+  onRemoveProduct,
+  canRemoveProduct
 }: ProductGridProps): JSX.Element {
   if (products.length === 0) {
     return (
@@ -32,6 +36,8 @@ export function ProductGrid({
           product={product}
           quantity={cartQuantities[product.item_id] ?? 0}
           onAdd={() => onAddProduct(product)}
+          onRemove={onRemoveProduct ? () => onRemoveProduct(product) : undefined}
+          canRemove={canRemoveProduct ? canRemoveProduct(product) : true}
         />
       ))}
     </div>

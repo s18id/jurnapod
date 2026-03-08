@@ -21,7 +21,8 @@ import {
   TablesPage,
   ReservationsPage,
   CartPage,
-  SettingsPage
+  SettingsPage,
+  ServiceModePage
 } from "../pages/index.js";
 import { SyncBadge } from "../features/sync/SyncBadge.js";
 import { OutletContextSwitcher } from "../features/outlet/OutletContextSwitcher.js";
@@ -316,6 +317,8 @@ function AppLayout({ children, cartItemCount }: AppLayoutProps): JSX.Element {
               outletOptions={outletOptions}
               activeOutletId={scope.outlet_id}
               compact={isCompactHeader}
+              hasActiveTable={activeOrderContext.table_id !== null}
+              serviceType={activeOrderContext.service_type}
               onConfirmSwitch={(nextOutletId) => {
                 void (async () => {
                   if (activeOrderContext.service_type === "DINE_IN" && activeOrderContext.table_id) {
@@ -1062,6 +1065,14 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
                   onAuthSuccess={handleAuthChange}
                 />
               )
+            }
+          />
+          <Route
+            path={routes.serviceMode.path}
+            element={
+              <ProtectedRoute context={context} authToken={authToken}>
+                <ServiceModePage context={context} />
+              </ProtectedRoute>
             }
           />
           <Route

@@ -16,6 +16,9 @@ export type { BadgeProps, BadgeStatus } from "./Badge.js";
 export { Modal } from "./Modal.js";
 export type { ModalProps } from "./Modal.js";
 
+export { ConfirmationModal, ThreeWayConfirmationModal } from "./ConfirmationModal.js";
+export type { ConfirmationModalProps, ThreeWayConfirmationModalProps } from "./ConfirmationModal.js";
+
 export { TabBar } from "./TabBar.js";
 export type { TabBarProps, Tab } from "./TabBar.js";
 

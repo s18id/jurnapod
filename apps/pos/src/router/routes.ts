@@ -14,6 +14,7 @@ export interface RouteConfig {
 
 export interface AppRoutes {
   login: RouteConfig;
+  serviceMode: RouteConfig;
   checkout: RouteConfig;
   products: RouteConfig;
   tables: RouteConfig;
@@ -29,6 +30,13 @@ export const routes: AppRoutes = {
     label: "Login",
     icon: "🔑",
     requiresAuth: false
+  },
+  serviceMode: {
+    id: "serviceMode",
+    path: "/service-mode",
+    label: "Service Mode",
+    icon: "🎯",
+    requiresAuth: true
   },
   checkout: {
     id: "checkout",

@@ -12,6 +12,8 @@ import { Button } from "../shared/components/index.js";
 import { routes } from "../router/routes.js";
 import { formatMoney } from "../shared/utils/money.js";
 import { usePosAppState } from "../router/pos-app-state.js";
+import { ServiceSwitchModal } from "../features/navigation/ServiceSwitchModal.js";
+import type { OrderServiceType } from "../features/cart/useCart.js";
 
 interface ProductsPageProps {
   context: WebBootstrapContext;
@@ -33,10 +35,21 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     setOrderReservationId,
     setGuestCount,
     setActiveReservationId,
-    setOutletTables
+    setOutletTables,
+    setActiveTableId,
+    outletTables
   } = usePosAppState();
   const { visibleProducts, searchTerm, setSearchTerm } = useProducts({ catalog });
   const [dineInGuardMessage, setDineInGuardMessage] = useState<string | null>(null);
+  const [serviceSwitchModal, setServiceSwitchModal] = useState<{
+    isOpen: boolean;
+    fromServiceType: OrderServiceType;
+    toServiceType: OrderServiceType;
+  }>({
+    isOpen: false,
+    fromServiceType: "TAKEAWAY",
+    toServiceType: "TAKEAWAY"
+  });
 
   useEffect(() => {
     let disposed = false;
@@ -60,6 +73,87 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     Object.values(cart).map((line) => [line.product.item_id, line.qty])
   );
 
+  const handleServiceSwitch = (toServiceType: OrderServiceType) => {
+    // If switching to same type, do nothing
+    if (activeOrderContext.service_type === toServiceType) {
+      return;
+    }
+
+    // If has items, show confirmation modal
+    if (cartLines.length > 0) {
+      setServiceSwitchModal({
+        isOpen: true,
+        fromServiceType: activeOrderContext.service_type,
+        toServiceType
+      });
+    } else {
+      // No items, switch directly
+      performServiceSwitch(toServiceType, undefined);
+    }
+  };
+
+  const performServiceSwitch = async (
+    toServiceType: OrderServiceType,
+    selectedTableId?: number
+  ) => {
+    // Release current table if switching from dine-in
+    if (
+      activeOrderContext.service_type === "DINE_IN" &&
+      activeOrderContext.table_id
+    ) {
+      const released = await context.runtime.setOutletTableStatus(
+        scope,
+        activeOrderContext.table_id,
+        "AVAILABLE"
+      );
+      if (released) {
+        setOutletTables((previous) =>
+          previous.map((table) =>
+            table.table_id === released.table_id ? released : table
+          )
+        );
+      }
+    }
+
+    // Switch to new service type
+    setServiceType(toServiceType);
+
+    if (toServiceType === "DINE_IN" && selectedTableId) {
+      // Set the selected table
+      setActiveTableId(selectedTableId);
+      // Mark table as occupied
+      const occupied = await context.runtime.setOutletTableStatus(
+        scope,
+        selectedTableId,
+        "OCCUPIED"
+      );
+      if (occupied) {
+        setOutletTables((previous) =>
+          previous.map((table) =>
+            table.table_id === occupied.table_id ? occupied : table
+          )
+        );
+      }
+      setDineInGuardMessage(null);
+    } else if (toServiceType === "TAKEAWAY") {
+      // Clear table-related state for takeaway
+      setActiveTableId(null);
+      setOrderReservationId(null);
+      setGuestCount(null);
+      setActiveReservationId(null);
+      setDineInGuardMessage(null);
+    }
+  };
+
+  const handleServiceSwitchConfirm = (selectedTableId?: number) => {
+    performServiceSwitch(serviceSwitchModal.toServiceType, selectedTableId);
+    setServiceSwitchModal((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  const handleServiceSwitchCancel = () => {
+    setServiceSwitchModal((prev) => ({ ...prev, isOpen: false }));
+  };
+
   const handleAddProduct = (product: RuntimeProductCatalogItem) => {
     if (activeOrderContext.service_type === "DINE_IN" && !activeOrderContext.table_id) {
       setDineInGuardMessage("Select a table from the Tables page before adding items for dine-in.");
@@ -71,6 +165,20 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     if (paidAmount <= 0) {
       setPaidAmount(product.price_snapshot);
     }
+  };
+
+  const handleRemoveProduct = (product: RuntimeProductCatalogItem) => {
+    const currentQty = cart[product.item_id]?.qty ?? 0;
+    if (currentQty > 0) {
+      upsertCartLine(product, { qty: currentQty - 1 });
+    }
+  };
+
+  const canRemoveProduct = (product: RuntimeProductCatalogItem): boolean => {
+    const cartLine = cart[product.item_id];
+    if (!cartLine) return true;
+    // Can only reduce if current qty is greater than committed qty
+    return cartLine.qty > cartLine.committed_qty;
   };
 
   const containerStyles: React.CSSProperties = {
@@ -98,35 +206,14 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
           <Button
             variant={activeOrderContext.service_type === "TAKEAWAY" ? "primary" : "secondary"}
             size="small"
-            onClick={() => {
-              void (async () => {
-                if (activeOrderContext.service_type === "DINE_IN" && activeOrderContext.table_id) {
-                  const released = await context.runtime.setOutletTableStatus(scope, activeOrderContext.table_id, "AVAILABLE");
-                  if (released) {
-                    setOutletTables((previous) =>
-                      previous.map((table) =>
-                        table.table_id === released.table_id ? released : table
-                      )
-                    );
-                  }
-                }
-
-                setServiceType("TAKEAWAY");
-                setOrderReservationId(null);
-                setGuestCount(null);
-                setActiveReservationId(null);
-                setDineInGuardMessage(null);
-              })();
-            }}
+            onClick={() => handleServiceSwitch("TAKEAWAY")}
           >
             Takeaway
           </Button>
           <Button
             variant={activeOrderContext.service_type === "DINE_IN" ? "primary" : "secondary"}
             size="small"
-            onClick={() => {
-              setServiceType("DINE_IN");
-            }}
+            onClick={() => handleServiceSwitch("DINE_IN")}
           >
             Dine-in
           </Button>
@@ -153,6 +240,8 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
           products={visibleProducts}
           cartQuantities={cartQuantities}
           onAddProduct={handleAddProduct}
+          onRemoveProduct={handleRemoveProduct}
+          canRemoveProduct={canRemoveProduct}
         />
       </div>
 
@@ -202,6 +291,16 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
           Continue to cart
         </Button>
       </footer>
+
+      <ServiceSwitchModal
+        isOpen={serviceSwitchModal.isOpen}
+        fromServiceType={serviceSwitchModal.fromServiceType}
+        toServiceType={serviceSwitchModal.toServiceType}
+        onConfirm={handleServiceSwitchConfirm}
+        onClose={handleServiceSwitchCancel}
+        availableTables={outletTables}
+        hasActiveItems={cartLines.length > 0}
+      />
     </div>
   );
 }
