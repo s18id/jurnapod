@@ -7,6 +7,7 @@ import type {
   ActiveOrderLineRow,
   ActiveOrderRow,
   ActiveOrderUpdateRow,
+  ItemCancellationRow,
   OutboxJobRow,
   PaymentRow,
   SaleItemRow,
@@ -56,6 +57,8 @@ export interface SyncPushTransaction {
   cashier_user_id: number;
   status: "COMPLETED" | "VOID" | "REFUND";
   service_type?: "TAKEAWAY" | "DINE_IN";
+  source_flow?: "WALK_IN" | "RESERVATION" | "PHONE" | "ONLINE" | "MANUAL";
+  settlement_flow?: "IMMEDIATE" | "DEFERRED" | "SPLIT";
   table_id?: number | null;
   reservation_id?: number | null;
   guest_count?: number | null;
@@ -76,6 +79,8 @@ export interface SyncPushRequest {
     company_id: number;
     outlet_id: number;
     service_type: "TAKEAWAY" | "DINE_IN";
+    source_flow?: "WALK_IN" | "RESERVATION" | "PHONE" | "ONLINE" | "MANUAL";
+    settlement_flow?: "IMMEDIATE" | "DEFERRED" | "SPLIT";
     table_id: number | null;
     reservation_id: number | null;
     guest_count: number | null;
@@ -109,7 +114,19 @@ export interface SyncPushRequest {
     actor_user_id: number | null;
     device_id: string;
     event_at: string;
-    created_at: string;
+      created_at: string;
+    }>;
+  item_cancellations?: Array<{
+    cancellation_id: string;
+    update_id?: string;
+    order_id: string;
+    item_id: number;
+    company_id: number;
+    outlet_id: number;
+    cancelled_quantity: number;
+    reason: string;
+    cancelled_by_user_id: number | null;
+    cancelled_at: string;
   }>;
 }
 
@@ -121,6 +138,8 @@ export interface SyncPushResultItem {
 
 export interface SyncPushResponse {
   results: SyncPushResultItem[];
+  order_update_results?: Array<{ update_id: string; result: "OK" | "DUPLICATE" | "ERROR"; message?: string }>;
+  item_cancellation_results?: Array<{ cancellation_id: string; result: "OK" | "DUPLICATE" | "ERROR"; message?: string }>;
 }
 
 interface ParsedOutboxPayload {
@@ -132,6 +151,7 @@ interface ParsedOutboxPayload {
 
 interface ParsedOrderUpdateOutboxPayload {
   update_id: string;
+  cancellation_id?: string | null;
   order_id: string;
   company_id: number;
   outlet_id: number;
@@ -147,6 +167,7 @@ interface HydratedOrderUpdateSnapshot {
   order: ActiveOrderRow;
   lines: ActiveOrderLineRow[];
   update: ActiveOrderUpdateRow;
+  cancellation: ItemCancellationRow | null;
 }
 
 export class OutboxSenderError extends Error {
@@ -227,6 +248,7 @@ function parseOrderUpdateOutboxPayload(job: OutboxJobRow): ParsedOrderUpdateOutb
 
   return {
     update_id: payload.update_id,
+    cancellation_id: typeof payload.cancellation_id === "string" ? payload.cancellation_id : null,
     order_id: payload.order_id,
     company_id: payload.company_id,
     outlet_id: payload.outlet_id
@@ -273,7 +295,7 @@ async function hydrateOrderUpdateSnapshot(
   payload: ParsedOrderUpdateOutboxPayload,
   db: PosOfflineDb
 ): Promise<HydratedOrderUpdateSnapshot> {
-  return db.transaction("r", [db.active_orders, db.active_order_lines, db.active_order_updates], async () => {
+  return db.transaction("r", [db.active_orders, db.active_order_lines, db.active_order_updates, db.item_cancellations], async () => {
     const [order, lines, update] = await Promise.all([
       db.active_orders.get(payload.order_id),
       db.active_order_lines.where("[order_id+item_id]").between([payload.order_id, Dexie.minKey], [payload.order_id, Dexie.maxKey]).toArray(),
@@ -287,10 +309,23 @@ async function hydrateOrderUpdateSnapshot(
       throw new OutboxSenderError("NON_RETRYABLE", "LOCAL_ORDER_UPDATE_NOT_FOUND", `Order update not found ${payload.update_id}`);
     }
 
+    let cancellation: ItemCancellationRow | null = null;
+    if (payload.cancellation_id) {
+      cancellation = await db.item_cancellations.where("cancellation_id").equals(payload.cancellation_id).first() ?? null;
+      if (!cancellation) {
+        throw new OutboxSenderError(
+          "NON_RETRYABLE",
+          "LOCAL_ITEM_CANCELLATION_NOT_FOUND",
+          `Item cancellation not found ${payload.cancellation_id}`
+        );
+      }
+    }
+
     return {
       order,
       lines,
-      update
+      update,
+      cancellation
     };
   });
 }
@@ -316,6 +351,8 @@ function buildSyncRequest(payload: ParsedOutboxPayload, snapshot: HydratedSaleSn
     cashier_user_id: sale.cashier_user_id,
     status: "COMPLETED",
     service_type: sale.service_type ?? "TAKEAWAY",
+    source_flow: sale.source_flow,
+    settlement_flow: sale.settlement_flow,
     table_id: sale.table_id ?? null,
     reservation_id: sale.reservation_id ?? null,
     guest_count: sale.guest_count ?? null,
@@ -359,6 +396,8 @@ function buildOrderUpdateSyncRequest(
         company_id: snapshot.order.company_id,
         outlet_id: snapshot.order.outlet_id,
         service_type: snapshot.order.service_type,
+        source_flow: snapshot.order.source_flow,
+        settlement_flow: snapshot.order.settlement_flow,
         table_id: snapshot.order.table_id,
         reservation_id: snapshot.order.reservation_id,
         guest_count: snapshot.order.guest_count,
@@ -396,7 +435,23 @@ function buildOrderUpdateSyncRequest(
         event_at: snapshot.update.event_at,
         created_at: snapshot.update.created_at
       }
-    ]
+    ],
+    item_cancellations: snapshot.cancellation
+      ? [
+        {
+          cancellation_id: snapshot.cancellation.cancellation_id,
+          update_id: snapshot.update.update_id,
+          order_id: snapshot.cancellation.order_id,
+          item_id: snapshot.cancellation.item_id,
+          company_id: snapshot.cancellation.company_id,
+          outlet_id: snapshot.cancellation.outlet_id,
+          cancelled_quantity: snapshot.cancellation.cancelled_quantity,
+          reason: snapshot.cancellation.reason,
+          cancelled_by_user_id: snapshot.cancellation.cancelled_by_user_id,
+          cancelled_at: snapshot.cancellation.cancelled_at
+        }
+      ]
+      : undefined
   };
 }
 
@@ -492,6 +547,68 @@ function asSyncResultItems(payload: unknown): SyncPushResultItem[] {
   }
 
   return normalized;
+}
+
+function assertOrderUpdateAck(payload: unknown, updateId: string): void {
+  const data = payload && typeof payload === "object" && "data" in payload
+    ? (payload as { data?: unknown }).data
+    : payload;
+  if (!data || typeof data !== "object") {
+    throw new OutboxSenderError("RETRYABLE", "SYNC_RESPONSE_INVALID", "Missing sync push response envelope");
+  }
+
+  const results = (data as { order_update_results?: unknown }).order_update_results;
+  if (!Array.isArray(results)) {
+    throw new OutboxSenderError("RETRYABLE", "SYNC_RESULT_MISSING_ORDER_UPDATE", `Missing order_update_results for ${updateId}`);
+  }
+
+  const match = results.find((row) => row && typeof row === "object" && (row as { update_id?: unknown }).update_id === updateId) as
+    | { result?: unknown; message?: unknown }
+    | undefined;
+  if (!match) {
+    throw new OutboxSenderError("RETRYABLE", "SYNC_RESULT_MISSING_ORDER_UPDATE", `Sync push response missing update_id ${updateId}`);
+  }
+  if (match.result === "OK" || match.result === "DUPLICATE") {
+    return;
+  }
+
+  const message = typeof match.message === "string" ? match.message : `Sync push returned ERROR for update_id ${updateId}`;
+  throw new OutboxSenderError("RETRYABLE", "SYNC_ORDER_UPDATE_ERROR", message);
+}
+
+function assertItemCancellationAck(payload: unknown, cancellationId: string): void {
+  const data = payload && typeof payload === "object" && "data" in payload
+    ? (payload as { data?: unknown }).data
+    : payload;
+  if (!data || typeof data !== "object") {
+    throw new OutboxSenderError("RETRYABLE", "SYNC_RESPONSE_INVALID", "Missing sync push response envelope");
+  }
+
+  const results = (data as { item_cancellation_results?: unknown }).item_cancellation_results;
+  if (!Array.isArray(results)) {
+    throw new OutboxSenderError(
+      "RETRYABLE",
+      "SYNC_RESULT_MISSING_ITEM_CANCELLATION",
+      `Missing item_cancellation_results for ${cancellationId}`
+    );
+  }
+
+  const match = results.find(
+    (row) => row && typeof row === "object" && (row as { cancellation_id?: unknown }).cancellation_id === cancellationId
+  ) as { result?: unknown; message?: unknown } | undefined;
+  if (!match) {
+    throw new OutboxSenderError(
+      "RETRYABLE",
+      "SYNC_RESULT_MISSING_ITEM_CANCELLATION",
+      `Sync push response missing cancellation_id ${cancellationId}`
+    );
+  }
+  if (match.result === "OK" || match.result === "DUPLICATE") {
+    return;
+  }
+
+  const message = typeof match.message === "string" ? match.message : `Sync push returned ERROR for cancellation_id ${cancellationId}`;
+  throw new OutboxSenderError("RETRYABLE", "SYNC_ITEM_CANCELLATION_ERROR", message);
 }
 
 /**
@@ -597,6 +714,12 @@ export async function sendOutboxJobToSyncPush(
 
     ackResult = match.result;
     ackMessage = match.message;
+  } else if (isOrderUpdateJob) {
+    const orderPayload = parseOrderUpdateOutboxPayload(input.job);
+    assertOrderUpdateAck(responseBody, orderPayload.update_id);
+    if (orderPayload.cancellation_id) {
+      assertItemCancellationAck(responseBody, orderPayload.cancellation_id);
+    }
   }
 
   const responseCorrelationId = response.headers.get("x-correlation-id")?.trim();

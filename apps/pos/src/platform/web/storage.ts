@@ -15,6 +15,7 @@ import type {
   ActiveOrderRow,
   ActiveOrderLineRow,
   ActiveOrderUpdateRow,
+  ItemCancellationRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -195,6 +196,23 @@ export class WebStorageAdapter implements PosStoragePort {
       sync_status: input.sync_status,
       sync_error: input.sync_status === "FAILED" ? input.sync_error ?? "SYNC_FAILED" : null
     });
+  }
+
+  async putItemCancellation(cancellation: ItemCancellationRow): Promise<void> {
+    await this.db.item_cancellations.put(cancellation);
+  }
+
+  async listItemCancellationsByOrder(input: {
+    company_id: number;
+    outlet_id: number;
+    order_id: string;
+  }): Promise<ItemCancellationRow[]> {
+    const rows = await this.db.item_cancellations
+      .where("[company_id+outlet_id+order_id]")
+      .equals([input.company_id, input.outlet_id, input.order_id])
+      .toArray();
+
+    return rows.sort((left, right) => left.cancelled_at.localeCompare(right.cancelled_at));
   }
 
   async createSale(sale: SaleRow): Promise<void> {

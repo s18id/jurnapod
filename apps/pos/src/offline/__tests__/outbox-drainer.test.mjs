@@ -503,3 +503,206 @@ test("order update jobs mark active_order_updates as SENT", async () => {
     await db.delete();
   }
 });
+
+test("order update jobs mark item_cancellations as SENT", async () => {
+  const db = createPosOfflineDb(`jp-pos-outbox-drainer-order-cancellation-sent-${crypto.randomUUID()}`);
+  const fixedNow = Date.parse("2026-02-21T18:00:00.000Z");
+  const orderId = crypto.randomUUID();
+  const updateId = crypto.randomUUID();
+  const cancellationId = crypto.randomUUID();
+
+  try {
+    await db.active_orders.add({
+      pk: orderId,
+      order_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      service_type: "TAKEAWAY",
+      source_flow: "WALK_IN",
+      settlement_flow: "IMMEDIATE",
+      table_id: null,
+      reservation_id: null,
+      guest_count: null,
+      is_finalized: true,
+      order_status: "OPEN",
+      order_state: "OPEN",
+      paid_amount: 0,
+      opened_at: nowIso(fixedNow),
+      closed_at: null,
+      notes: null,
+      updated_at: nowIso(fixedNow)
+    });
+    await db.active_order_updates.add({
+      pk: `active_order_update:${updateId}`,
+      update_id: updateId,
+      order_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      base_order_updated_at: null,
+      event_type: "ITEM_CANCELLED",
+      delta_json: "{}",
+      actor_user_id: null,
+      device_id: "WEB_POS",
+      event_at: nowIso(fixedNow),
+      created_at: nowIso(fixedNow),
+      sync_status: "PENDING",
+      sync_error: null
+    });
+    await db.item_cancellations.add({
+      pk: `item_cancellation:${cancellationId}`,
+      cancellation_id: cancellationId,
+      order_id: orderId,
+      item_id: 1,
+      company_id: 2,
+      outlet_id: 20,
+      cancelled_quantity: 1,
+      reason: "Reason",
+      cancelled_by_user_id: null,
+      cancelled_at: nowIso(fixedNow),
+      sync_status: "PENDING",
+      sync_error: null
+    });
+    await db.outbox_jobs.add({
+      job_id: crypto.randomUUID(),
+      sale_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      job_type: "SYNC_POS_ORDER_UPDATE",
+      dedupe_key: updateId,
+      payload_json: JSON.stringify({
+        update_id: updateId,
+        cancellation_id: cancellationId,
+        order_id: orderId,
+        company_id: 2,
+        outlet_id: 20
+      }),
+      status: "PENDING",
+      attempts: 0,
+      lease_owner_id: null,
+      lease_token: null,
+      lease_expires_at: null,
+      next_attempt_at: null,
+      last_error: null,
+      created_at: nowIso(fixedNow),
+      updated_at: nowIso(fixedNow)
+    });
+
+    await drainOutboxJobs(
+      {
+        now: () => fixedNow,
+        sender: async () => ({ result: "OK" })
+      },
+      db
+    );
+
+    const cancellation = await db.item_cancellations.where("cancellation_id").equals(cancellationId).first();
+    assert.equal(cancellation?.sync_status, "SENT");
+    assert.equal(cancellation?.sync_error, null);
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});
+
+test("order update job failure marks item_cancellations as FAILED", async () => {
+  const db = createPosOfflineDb(`jp-pos-outbox-drainer-order-cancellation-failed-${crypto.randomUUID()}`);
+  const fixedNow = Date.parse("2026-02-21T19:00:00.000Z");
+  const orderId = crypto.randomUUID();
+  const updateId = crypto.randomUUID();
+  const cancellationId = crypto.randomUUID();
+
+  try {
+    await db.active_orders.add({
+      pk: orderId,
+      order_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      service_type: "TAKEAWAY",
+      source_flow: "WALK_IN",
+      settlement_flow: "IMMEDIATE",
+      table_id: null,
+      reservation_id: null,
+      guest_count: null,
+      is_finalized: true,
+      order_status: "OPEN",
+      order_state: "OPEN",
+      paid_amount: 0,
+      opened_at: nowIso(fixedNow),
+      closed_at: null,
+      notes: null,
+      updated_at: nowIso(fixedNow)
+    });
+    await db.active_order_updates.add({
+      pk: `active_order_update:${updateId}`,
+      update_id: updateId,
+      order_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      base_order_updated_at: null,
+      event_type: "ITEM_CANCELLED",
+      delta_json: "{}",
+      actor_user_id: null,
+      device_id: "WEB_POS",
+      event_at: nowIso(fixedNow),
+      created_at: nowIso(fixedNow),
+      sync_status: "PENDING",
+      sync_error: null
+    });
+    await db.item_cancellations.add({
+      pk: `item_cancellation:${cancellationId}`,
+      cancellation_id: cancellationId,
+      order_id: orderId,
+      item_id: 1,
+      company_id: 2,
+      outlet_id: 20,
+      cancelled_quantity: 1,
+      reason: "Reason",
+      cancelled_by_user_id: null,
+      cancelled_at: nowIso(fixedNow),
+      sync_status: "PENDING",
+      sync_error: null
+    });
+    await db.outbox_jobs.add({
+      job_id: crypto.randomUUID(),
+      sale_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      job_type: "SYNC_POS_ORDER_UPDATE",
+      dedupe_key: updateId,
+      payload_json: JSON.stringify({
+        update_id: updateId,
+        cancellation_id: cancellationId,
+        order_id: orderId,
+        company_id: 2,
+        outlet_id: 20
+      }),
+      status: "PENDING",
+      attempts: 0,
+      lease_owner_id: null,
+      lease_token: null,
+      lease_expires_at: null,
+      next_attempt_at: null,
+      last_error: null,
+      created_at: nowIso(fixedNow),
+      updated_at: nowIso(fixedNow)
+    });
+
+    await drainOutboxJobs(
+      {
+        now: () => fixedNow,
+        random: () => 0,
+        sender: async () => {
+          throw new OutboxSenderError("RETRYABLE", "SYNC_RESULT_MISSING_ITEM_CANCELLATION", "ack missing");
+        }
+      },
+      db
+    );
+
+    const cancellation = await db.item_cancellations.where("cancellation_id").equals(cancellationId).first();
+    assert.equal(cancellation?.sync_status, "FAILED");
+    assert.match(cancellation?.sync_error ?? "", /SYNC_RESULT_MISSING_ITEM_CANCELLATION/);
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});

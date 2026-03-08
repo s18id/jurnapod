@@ -247,12 +247,42 @@ test("upsertActiveOrderSnapshot emits update log and outbox job", async () => {
     const jobs = await db.outbox_jobs.toArray();
 
     assert.equal(snapshot.order.order_id.length > 0, true);
+    assert.equal(snapshot.order.source_flow, "WALK_IN");
+    assert.equal(snapshot.order.settlement_flow, "IMMEDIATE");
     assert.equal(updates.length, 1);
     assert.equal(updates[0].order_id, snapshot.order.order_id);
     assert.equal(updates[0].sync_status, "PENDING");
     assert.equal(jobs.length, 1);
     assert.equal(jobs[0].job_type, "SYNC_POS_ORDER_UPDATE");
     assert.equal(jobs[0].dedupe_key, updates[0].update_id);
+  } finally {
+    db.close();
+  }
+});
+
+test("resolveActiveOrder defaults settlement flow by service type", async () => {
+  const db = createPosOfflineDb(`jp-pos-runtime-service-flow-defaults-${crypto.randomUUID()}`);
+  const storage = createWebStorageAdapter(db);
+  const runtime = new RuntimeService(storage, createNetworkMock());
+  const scope = { company_id: 1, outlet_id: 21 };
+
+  try {
+    const takeaway = await runtime.resolveActiveOrder(scope, {
+      service_type: "TAKEAWAY"
+    });
+    assert.equal(takeaway.order.source_flow, "WALK_IN");
+    assert.equal(takeaway.order.settlement_flow, "IMMEDIATE");
+
+    const tables = await runtime.getOutletTables(scope);
+    const available = tables.find((table) => table.status === "AVAILABLE");
+    assert.ok(available, "expected at least one available table");
+
+    const dineIn = await runtime.resolveActiveOrder(scope, {
+      service_type: "DINE_IN",
+      table_id: available.table_id
+    });
+    assert.equal(dineIn.order.source_flow, "WALK_IN");
+    assert.equal(dineIn.order.settlement_flow, "DEFERRED");
   } finally {
     db.close();
   }
@@ -313,6 +343,16 @@ test("cancelFinalizedOrderLine reduces committed qty and writes immutable cancel
       .filter((job) => job.dedupe_key === cancelUpdate.update_id);
     assert.equal(outboxJobs.length, 1);
     assert.equal(outboxJobs[0].job_type, "SYNC_POS_ORDER_UPDATE");
+
+    const cancellations = await db.item_cancellations.toArray();
+    assert.equal(cancellations.length, 1);
+    assert.equal(cancellations[0].order_id, created.order.order_id);
+    assert.equal(cancellations[0].item_id, 99);
+    assert.equal(cancellations[0].cancelled_quantity, 2);
+    assert.equal(cancellations[0].sync_status, "PENDING");
+
+    const outboxPayload = JSON.parse(outboxJobs[0].payload_json);
+    assert.equal(typeof outboxPayload.cancellation_id, "string");
   } finally {
     db.close();
   }

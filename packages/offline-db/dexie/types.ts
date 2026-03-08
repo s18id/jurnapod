@@ -9,6 +9,10 @@ export type SaleSyncStatus = "LOCAL_ONLY" | "PENDING" | "SENT" | "FAILED";
 
 export type OrderServiceType = "TAKEAWAY" | "DINE_IN";
 
+export type SourceFlow = "WALK_IN" | "RESERVATION" | "PHONE" | "ONLINE" | "MANUAL";
+
+export type SettlementFlow = "IMMEDIATE" | "DEFERRED" | "SPLIT";
+
 export type OrderStatus = "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
 
 export type ActiveOrderState = "OPEN" | "CLOSED";
@@ -98,6 +102,8 @@ export interface ActiveOrderRow {
   company_id: number;
   outlet_id: number;
   service_type: OrderServiceType;
+  source_flow?: SourceFlow;
+  settlement_flow?: SettlementFlow;
   table_id: number | null;
   reservation_id: number | null;
   guest_count: number | null;
@@ -109,6 +115,21 @@ export interface ActiveOrderRow {
   closed_at: string | null;
   notes: string | null;
   updated_at: string;
+}
+
+export interface ItemCancellationRow {
+  pk: string;
+  cancellation_id: string;
+  order_id: string;
+  item_id: number;
+  company_id: number;
+  outlet_id: number;
+  cancelled_quantity: number;
+  reason: string;
+  cancelled_by_user_id: number | null;
+  cancelled_at: string;
+  sync_status: "PENDING" | "SENT" | "FAILED";
+  sync_error: string | null;
 }
 
 export interface ActiveOrderLineRow {
@@ -171,6 +192,8 @@ export interface SaleRow {
   outlet_id: number;
   cashier_user_id: number;
   service_type?: OrderServiceType;
+  source_flow?: SourceFlow;
+  settlement_flow?: SettlementFlow;
   table_id?: number | null;
   reservation_id?: number | null;
   guest_count?: number | null;

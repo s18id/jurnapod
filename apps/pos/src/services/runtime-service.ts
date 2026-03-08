@@ -17,9 +17,12 @@ import type {
   ActiveOrderRow,
   ActiveOrderLineRow,
   ActiveOrderUpdateRow,
+  ItemCancellationRow,
   OrderUpdateEventType,
   OrderStatus,
-  OrderServiceType
+  OrderServiceType,
+  SourceFlow,
+  SettlementFlow
 } from "@jurnapod/offline-db/dexie";
 
 export type RuntimeSyncBadgeState = "Offline" | "Pending" | "Synced";
@@ -112,6 +115,8 @@ export interface RuntimeActiveOrder {
   company_id: number;
   outlet_id: number;
   service_type: OrderServiceType;
+  source_flow: SourceFlow;
+  settlement_flow: SettlementFlow;
   table_id: number | null;
   reservation_id: number | null;
   guest_count: number | null;
@@ -157,6 +162,8 @@ export interface RuntimeActiveOrderLineInput {
 export interface UpsertRuntimeActiveOrderInput {
   order_id?: string;
   service_type: OrderServiceType;
+  source_flow?: SourceFlow;
+  settlement_flow?: SettlementFlow;
   table_id: number | null;
   reservation_id: number | null;
   guest_count: number | null;
@@ -171,6 +178,8 @@ export interface UpsertRuntimeActiveOrderInput {
 
 export interface ResolveRuntimeActiveOrderInput {
   service_type: OrderServiceType;
+  source_flow?: SourceFlow;
+  settlement_flow?: SettlementFlow;
   table_id?: number | null;
   reservation_id?: number | null;
   guest_count?: number | null;
@@ -347,11 +356,17 @@ function canTransitionReservationStatus(
 }
 
 function mapActiveOrderRow(row: ActiveOrderRow): RuntimeActiveOrder {
+  const sourceFlow: SourceFlow = row.source_flow ?? "WALK_IN";
+  const settlementFlow: SettlementFlow = row.settlement_flow
+    ?? (row.service_type === "DINE_IN" ? "DEFERRED" : "IMMEDIATE");
+
   return {
     order_id: row.order_id,
     company_id: row.company_id,
     outlet_id: row.outlet_id,
     service_type: row.service_type,
+    source_flow: sourceFlow,
+    settlement_flow: settlementFlow,
     table_id: row.table_id,
     reservation_id: row.reservation_id,
     guest_count: row.guest_count,
@@ -411,6 +426,7 @@ export class RuntimeService {
     scope: RuntimeOutletScope;
     orderId: string;
     updateId: string;
+    cancellationId?: string;
     timestamp: string;
   }): Promise<void> {
     await this.storage.createOutboxJob({
@@ -422,6 +438,7 @@ export class RuntimeService {
       dedupe_key: input.updateId,
       payload_json: JSON.stringify({
         update_id: input.updateId,
+        cancellation_id: input.cancellationId ?? null,
         order_id: input.orderId,
         company_id: input.scope.company_id,
         outlet_id: input.scope.outlet_id
@@ -881,6 +898,10 @@ export class RuntimeService {
       throw new Error("Dine-in order requires table_id or reservation_id");
     }
 
+    const sourceFlow: SourceFlow = input.source_flow ?? "WALK_IN";
+    const settlementFlow: SettlementFlow = input.settlement_flow
+      ?? (input.service_type === "DINE_IN" ? "DEFERRED" : "IMMEDIATE");
+
     const rows = await this.storage.getActiveOrdersByOutlet(scope);
     const openOrders = rows.filter(
       (row) => this.isScopeRow(scope, row) && row.order_state === "OPEN"
@@ -929,6 +950,8 @@ export class RuntimeService {
       company_id: scope.company_id,
       outlet_id: scope.outlet_id,
       service_type: input.service_type,
+      source_flow: sourceFlow,
+      settlement_flow: settlementFlow,
       table_id: input.table_id ?? null,
       reservation_id: input.reservation_id ?? null,
       guest_count: input.guest_count ?? null,
@@ -964,6 +987,10 @@ export class RuntimeService {
     const orderId = input.order_id ?? crypto.randomUUID();
     const timestamp = nowIso();
     const existing = await this.storage.getActiveOrder(orderId);
+    const sourceFlow: SourceFlow = input.source_flow ?? existing?.source_flow ?? "WALK_IN";
+    const settlementFlow: SettlementFlow = input.settlement_flow
+      ?? existing?.settlement_flow
+      ?? (input.service_type === "DINE_IN" ? "DEFERRED" : "IMMEDIATE");
     const existingLines = existing ? await this.storage.getActiveOrderLines(orderId) : [];
 
     if (existing && !this.isScopeRow(scope, existing)) {
@@ -994,6 +1021,8 @@ export class RuntimeService {
       company_id: scope.company_id,
       outlet_id: scope.outlet_id,
       service_type: input.service_type,
+      source_flow: sourceFlow,
+      settlement_flow: settlementFlow,
       table_id: input.table_id,
       reservation_id: input.reservation_id,
       guest_count: input.guest_count,
@@ -1069,7 +1098,7 @@ export class RuntimeService {
 
     return await this.storage.transaction(
       "readwrite",
-      ["active_orders", "active_order_lines", "active_order_updates", "outbox_jobs"],
+      ["active_orders", "active_order_lines", "active_order_updates", "item_cancellations", "outbox_jobs"],
       async () => {
         const existingOrder = await this.storage.getActiveOrder(input.order_id);
         if (!existingOrder || !this.isScopeRow(scope, existingOrder)) {
@@ -1127,6 +1156,7 @@ export class RuntimeService {
         };
 
         const updateId = crypto.randomUUID();
+        const cancellationId = crypto.randomUUID();
         const updateEvent: ActiveOrderUpdateRow = {
           pk: this.buildActiveOrderUpdatePk(updateId),
           update_id: updateId,
@@ -1153,13 +1183,30 @@ export class RuntimeService {
           sync_error: null
         };
 
+        const cancellationRow: ItemCancellationRow = {
+          pk: `item_cancellation:${cancellationId}`,
+          cancellation_id: cancellationId,
+          order_id: input.order_id,
+          item_id: input.item_id,
+          company_id: scope.company_id,
+          outlet_id: scope.outlet_id,
+          cancelled_quantity: input.cancel_qty,
+          reason,
+          cancelled_by_user_id: input.actor_user_id ?? null,
+          cancelled_at: timestamp,
+          sync_status: "PENDING",
+          sync_error: null
+        };
+
         await this.storage.upsertActiveOrders([nextOrder]);
         await this.storage.replaceActiveOrderLines(input.order_id, nextLines);
         await this.storage.putActiveOrderUpdate(updateEvent);
+        await this.storage.putItemCancellation(cancellationRow);
         await this.enqueueOrderUpdateOutboxJob({
           scope,
           orderId: input.order_id,
           updateId,
+          cancellationId,
           timestamp
         });
 

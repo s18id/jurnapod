@@ -17,6 +17,7 @@ import type {
   ActiveOrderRow,
   ActiveOrderLineRow,
   ActiveOrderUpdateRow,
+  ItemCancellationRow,
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
@@ -87,6 +88,14 @@ export interface PosStoragePort {
     sync_status: "SENT" | "FAILED";
     sync_error?: string | null;
   }): Promise<void>;
+
+  putItemCancellation(cancellation: ItemCancellationRow): Promise<void>;
+
+  listItemCancellationsByOrder(input: {
+    company_id: number;
+    outlet_id: number;
+    order_id: string;
+  }): Promise<ItemCancellationRow[]>;
 
   // Sale operations
   createSale(sale: SaleRow): Promise<void>;

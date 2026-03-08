@@ -87,6 +87,52 @@ function toMysqlDateTime(value) {
   return new Date(value).toISOString().slice(0, 19).replace("T", " ");
 }
 
+function toDateOnly(value) {
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value === "string" && value.length > 0) {
+    return value.slice(0, 10);
+  }
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function ensureOpenFiscalDate(db, companyId) {
+  const [openRows] = await db.execute(
+    `SELECT id, start_date
+     FROM fiscal_years
+     WHERE company_id = ?
+       AND status = 'OPEN'
+     ORDER BY start_date DESC
+     LIMIT 1`,
+    [companyId]
+  );
+
+  if (openRows.length > 0) {
+    const startDate = toDateOnly(openRows[0].start_date);
+    return {
+      trxAt: `${startDate}T12:00:00.000Z`,
+      createdFiscalYearId: null
+    };
+  }
+
+  const year = new Date().getUTCFullYear();
+  const startDate = `${year}-01-01`;
+  const endDate = `${year}-12-31`;
+  const code = `ITFY${Date.now().toString(36).toUpperCase()}`.slice(0, 32);
+  const name = `Integration Fiscal Year ${year}`;
+  const [insertResult] = await db.execute(
+    `INSERT INTO fiscal_years (company_id, code, name, start_date, end_date, status)
+     VALUES (?, ?, ?, ?, ?, 'OPEN')`,
+    [companyId, code, name, startDate, endDate]
+  );
+
+  return {
+    trxAt: `${startDate}T12:00:00.000Z`,
+    createdFiscalYearId: Number(insertResult.insertId)
+  };
+}
+
 function computeLegacyPayloadSha256(transaction) {
   const canonical = JSON.stringify({
     client_tx_id: transaction.client_tx_id,
@@ -544,6 +590,7 @@ async function ensureOutletAccountMappings(db, companyId, outletId) {
 
   const createdMappingKeys = [];
   const createdAccountIds = [];
+  const createdPaymentMethodCodes = [];
 
   for (const mappingKey of OUTLET_ACCOUNT_MAPPING_KEYS) {
     if (existingKeys.has(mappingKey)) {
@@ -572,13 +619,83 @@ async function ensureOutletAccountMappings(db, companyId, outletId) {
     createdAccountIds.push(accountId);
   }
 
+  const [paymentTableRows] = await db.execute(
+    `SELECT 1 AS present
+     FROM information_schema.tables
+     WHERE table_schema = DATABASE()
+       AND table_name = 'outlet_payment_method_mappings'
+     LIMIT 1`
+  );
+  const hasPaymentMethodMappingTable = paymentTableRows.length > 0;
+
+  if (hasPaymentMethodMappingTable) {
+    const [paymentMappingRows] = await db.execute(
+      `SELECT method_code
+       FROM outlet_payment_method_mappings
+       WHERE company_id = ?
+         AND outlet_id = ?
+         AND method_code IN ('CASH', 'QRIS', 'CARD')`,
+      [companyId, outletId]
+    );
+
+    const existingMethodCodes = new Set(
+      paymentMappingRows
+        .map((row) => String(row.method_code ?? "").toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+
+    const [accountMappingRows] = await db.execute(
+      `SELECT mapping_key, account_id
+       FROM outlet_account_mappings
+       WHERE company_id = ?
+         AND outlet_id = ?
+         AND mapping_key IN ('CASH', 'QRIS', 'CARD')`,
+      [companyId, outletId]
+    );
+    const accountIdByMethodCode = new Map(
+      accountMappingRows
+        .map((row) => [String(row.mapping_key ?? "").toUpperCase(), Number(row.account_id)])
+        .filter((row) => row[0].length > 0 && Number.isFinite(row[1]))
+    );
+
+    for (const methodCode of ["CASH", "QRIS", "CARD"]) {
+      if (existingMethodCodes.has(methodCode)) {
+        continue;
+      }
+
+      const accountId = accountIdByMethodCode.get(methodCode);
+      if (!accountId) {
+        continue;
+      }
+
+      await db.execute(
+        `INSERT INTO outlet_payment_method_mappings (company_id, outlet_id, method_code, account_id)
+         VALUES (?, ?, ?, ?)`,
+        [companyId, outletId, methodCode, accountId]
+      );
+      createdPaymentMethodCodes.push(methodCode);
+    }
+  }
+
   return {
     createdMappingKeys,
-    createdAccountIds
+    createdAccountIds,
+    createdPaymentMethodCodes
   };
 }
 
 async function cleanupCreatedOutletAccountMappings(db, companyId, outletId, fixture) {
+  if (fixture.createdPaymentMethodCodes.length > 0) {
+    const paymentMethodPlaceholders = fixture.createdPaymentMethodCodes.map(() => "?").join(", ");
+    await db.execute(
+      `DELETE FROM outlet_payment_method_mappings
+       WHERE company_id = ?
+         AND outlet_id = ?
+         AND method_code IN (${paymentMethodPlaceholders})`,
+      [companyId, outletId, ...fixture.createdPaymentMethodCodes]
+    );
+  }
+
   if (fixture.createdMappingKeys.length > 0) {
     const mappingPlaceholders = fixture.createdMappingKeys.map(() => "?").join(", ");
     await db.execute(
@@ -644,6 +761,38 @@ async function cleanupSyncPushPersistedArtifacts(db, clientTxId) {
   );
 
   await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [clientTxId]);
+}
+
+async function cleanupOrderSyncArtifacts(db, orderId) {
+  try {
+    await db.execute("DELETE FROM pos_item_cancellations WHERE order_id = ?", [orderId]);
+  } catch (error) {
+    if (error?.code !== "ER_NO_SUCH_TABLE") {
+      throw error;
+    }
+  }
+  try {
+    await db.execute("DELETE FROM pos_order_updates WHERE order_id = ?", [orderId]);
+    await db.execute("DELETE FROM pos_order_snapshot_lines WHERE order_id = ?", [orderId]);
+    await db.execute("DELETE FROM pos_order_snapshots WHERE order_id = ?", [orderId]);
+  } catch (error) {
+    if (error?.code !== "ER_NO_SUCH_TABLE") {
+      throw error;
+    }
+  }
+}
+
+async function hasTable(db, tableName) {
+  const [rows] = await db.execute(
+    `SELECT 1 AS present
+     FROM information_schema.tables
+     WHERE table_schema = DATABASE()
+       AND table_name = ?
+     LIMIT 1`,
+    [tableName]
+  );
+
+  return rows.length > 0;
 }
 
 test(
@@ -799,6 +948,205 @@ test(
 );
 
 localServerTest(
+  "sync push integration: order updates return item_cancellation_results and persist cancellation rows",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_item_cancellations"))) {
+      t.skip("pos_item_cancellations migration not available in current DB");
+      return;
+    }
+
+    let childProcess;
+    let orderId = "";
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      orderId = randomUUID();
+      const updateId = randomUUID();
+      const cancellationId = randomUUID();
+      const now = new Date().toISOString();
+
+      const payload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "DINE_IN",
+            source_flow: "WALK_IN",
+            settlement_flow: "DEFERRED",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 2,
+            is_finalized: true,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: now,
+            closed_at: null,
+            notes: "integration-order",
+            updated_at: now,
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 12500,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: now
+              }
+            ]
+          }
+        ],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_CANCELLED",
+            delta_json: JSON.stringify({ reason: "integration", cancelled_qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: now,
+            created_at: now
+          }
+        ],
+        item_cancellations: [
+          {
+            cancellation_id: cancellationId,
+            update_id: updateId,
+            order_id: orderId,
+            item_id: 1,
+            company_id: companyId,
+            outlet_id: outletId,
+            cancelled_quantity: 1,
+            reason: "integration cancellation",
+            cancelled_by_user_id: ownerUserId,
+            cancelled_at: now
+          }
+        ]
+      };
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(response.status, 200);
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+      assert.deepEqual(body.results, []);
+      assert.deepEqual(body.data.order_update_results, [
+        {
+          update_id: updateId,
+          result: "OK"
+        }
+      ]);
+      assert.deepEqual(body.data.item_cancellation_results, [
+        {
+          cancellation_id: cancellationId,
+          result: "OK"
+        }
+      ]);
+
+      const [snapshotRows] = await db.execute(
+        `SELECT source_flow, settlement_flow
+         FROM pos_order_snapshots
+         WHERE order_id = ?
+         LIMIT 1`,
+        [orderId]
+      );
+      assert.equal(snapshotRows.length, 1);
+      assert.equal(String(snapshotRows[0].source_flow), "WALK_IN");
+      assert.equal(String(snapshotRows[0].settlement_flow), "DEFERRED");
+
+      const [cancellationRows] = await db.execute(
+        `SELECT cancellation_id, update_id, reason, cancelled_quantity
+         FROM pos_item_cancellations
+         WHERE cancellation_id = ?
+         LIMIT 1`,
+        [cancellationId]
+      );
+      assert.equal(cancellationRows.length, 1);
+      assert.equal(String(cancellationRows[0].cancellation_id), cancellationId);
+      assert.equal(String(cancellationRows[0].update_id), updateId);
+      assert.equal(String(cancellationRows[0].reason), "integration cancellation");
+      assert.equal(Number(cancellationRows[0].cancelled_quantity), 1);
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (orderId) {
+        await cleanupOrderSyncArtifacts(db, orderId);
+      }
+    }
+  }
+);
+
+localServerTest(
   "sync push integration: first insert, replay duplicate, mixed batch statuses",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
@@ -860,13 +1208,13 @@ localServerTest(
       adminUserId = Number(adminInsert.insertId);
 
       await db.execute(
-        `INSERT INTO user_roles (user_id, role_id)
-         VALUES (?, ?)`,
+        `INSERT INTO user_role_assignments (user_id, role_id, outlet_id)
+         VALUES (?, ?, NULL)`,
         [adminUserId, Number(adminRoleId)]
       );
 
       await db.execute(
-        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
          VALUES (?, ?, ?)`,
         [adminUserId, Number(owner.outlet_id), Number(adminRoleId)]
       );
@@ -2010,8 +2358,7 @@ localServerTest(
       }
 
       if (adminUserId > 0) {
-        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [adminUserId]);
-        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [adminUserId]);
         await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
 
@@ -2036,8 +2383,10 @@ localServerTest(
     const createdClientTxIds = [];
     let postingFixture = {
       createdMappingKeys: [],
-      createdAccountIds: []
+      createdAccountIds: [],
+      createdPaymentMethodCodes: []
     };
+    let createdFiscalYearId = null;
     let previousPosTaxConfig = null;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
@@ -2070,6 +2419,9 @@ localServerTest(
       companyId = Number(owner.company_id);
       outletId = Number(owner.outlet_id);
       postingFixture = await ensureOutletAccountMappings(db, companyId, outletId);
+      const fiscalContext = await ensureOpenFiscalDate(db, companyId);
+      const postingTrxAt = fiscalContext.trxAt;
+      createdFiscalYearId = fiscalContext.createdFiscalYearId;
 
       const port = await getFreePort();
       const baseUrl = `http://127.0.0.1:${port}`;
@@ -2113,7 +2465,7 @@ localServerTest(
                 companyId,
                 outletId,
                 cashierUserId: ownerUserId,
-                trxAt: new Date().toISOString()
+                  trxAt: postingTrxAt
               }),
               payments: [
                 {
@@ -2173,7 +2525,7 @@ localServerTest(
                 companyId,
                 outletId,
                 cashierUserId: ownerUserId,
-                trxAt: new Date().toISOString()
+                  trxAt: postingTrxAt
               }),
               payments: [
                 {
@@ -2225,7 +2577,7 @@ localServerTest(
             companyId,
             outletId,
             cashierUserId: ownerUserId,
-            trxAt: new Date().toISOString()
+            trxAt: postingTrxAt
           })
         ]
       };
@@ -2300,7 +2652,7 @@ localServerTest(
             companyId,
             outletId,
             cashierUserId: ownerUserId,
-            trxAt: new Date().toISOString()
+            trxAt: postingTrxAt
           })
         ]
       };
@@ -2376,7 +2728,7 @@ localServerTest(
             companyId,
             outletId,
             cashierUserId: ownerUserId,
-            trxAt: new Date().toISOString()
+            trxAt: postingTrxAt
           })
         ]
       };
@@ -2466,6 +2818,10 @@ localServerTest(
         await cleanupCreatedOutletAccountMappings(db, companyId, outletId, postingFixture);
       }
 
+      if (createdFiscalYearId && Number(createdFiscalYearId) > 0) {
+        await db.execute("DELETE FROM fiscal_years WHERE id = ?", [createdFiscalYearId]);
+      }
+
       
     }
   }
@@ -2486,8 +2842,10 @@ localServerTest(
     let ownerUserId = 0;
     let postingFixture = {
       createdMappingKeys: [],
-      createdAccountIds: []
+      createdAccountIds: [],
+      createdPaymentMethodCodes: []
     };
+    let createdFiscalYearId = null;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -2519,6 +2877,9 @@ localServerTest(
       companyId = Number(owner.company_id);
       outletId = Number(owner.outlet_id);
       postingFixture = await ensureOutletAccountMappings(db, companyId, outletId);
+      const fiscalContext = await ensureOpenFiscalDate(db, companyId);
+      const postingTrxAt = fiscalContext.trxAt;
+      createdFiscalYearId = fiscalContext.createdFiscalYearId;
 
       const port = await getFreePort();
       const baseUrl = `http://127.0.0.1:${port}`;
@@ -2562,7 +2923,7 @@ localServerTest(
               companyId,
               outletId,
               cashierUserId: ownerUserId,
-              trxAt: new Date().toISOString()
+              trxAt: postingTrxAt
             })
           ]
         })
@@ -2601,6 +2962,14 @@ localServerTest(
 
       if (companyId > 0 && outletId > 0) {
         await cleanupCreatedOutletAccountMappings(db, companyId, outletId, postingFixture);
+      }
+
+      if (createdFiscalYearId && Number(createdFiscalYearId) > 0) {
+        await db.execute("DELETE FROM fiscal_years WHERE id = ?", [createdFiscalYearId]);
+      }
+
+      if (createdFiscalYearId && Number(createdFiscalYearId) > 0) {
+        await db.execute("DELETE FROM fiscal_years WHERE id = ?", [createdFiscalYearId]);
       }
 
       

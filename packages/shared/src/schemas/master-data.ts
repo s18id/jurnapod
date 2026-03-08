@@ -203,6 +203,8 @@ export const SyncPullOpenOrderSchema = z.object({
   company_id: NumericIdSchema,
   outlet_id: NumericIdSchema,
   service_type: z.enum(["TAKEAWAY", "DINE_IN"]),
+  source_flow: z.enum(["WALK_IN", "RESERVATION", "PHONE", "ONLINE", "MANUAL"]).optional(),
+  settlement_flow: z.enum(["IMMEDIATE", "DEFERRED", "SPLIT"]).optional(),
   table_id: NumericIdSchema.nullable(),
   reservation_id: NumericIdSchema.nullable(),
   guest_count: z.number().int().positive().nullable(),

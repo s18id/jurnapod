@@ -6,6 +6,10 @@ import { NumericIdSchema, PosStatusSchema, UUID } from "./common";
 
 export const PosOrderServiceTypeSchema = z.enum(["TAKEAWAY", "DINE_IN"]);
 
+export const PosSourceFlowSchema = z.enum(["WALK_IN", "RESERVATION", "PHONE", "ONLINE", "MANUAL"]);
+
+export const PosSettlementFlowSchema = z.enum(["IMMEDIATE", "DEFERRED", "SPLIT"]);
+
 export const PosOrderStatusSchema = z.enum(["OPEN", "READY_TO_PAY", "COMPLETED", "CANCELLED"]);
 
 export const OrderUpdateEventTypeSchema = z.enum([
@@ -43,6 +47,8 @@ export const PosTransactionSchema = z.object({
   cashier_user_id: NumericIdSchema,
   status: PosStatusSchema.default("COMPLETED"),
   service_type: PosOrderServiceTypeSchema.default("TAKEAWAY"),
+  source_flow: PosSourceFlowSchema.optional(),
+  settlement_flow: PosSettlementFlowSchema.optional(),
   table_id: NumericIdSchema.nullable().optional(),
   reservation_id: NumericIdSchema.nullable().optional(),
   guest_count: z.coerce.number().int().positive().nullable().optional(),
@@ -66,6 +72,8 @@ export const SyncPushRequestSchema = z.object({
         company_id: NumericIdSchema,
         outlet_id: NumericIdSchema,
         service_type: PosOrderServiceTypeSchema,
+        source_flow: PosSourceFlowSchema.optional(),
+        settlement_flow: PosSettlementFlowSchema.optional(),
         table_id: NumericIdSchema.nullable(),
         reservation_id: NumericIdSchema.nullable(),
         guest_count: z.coerce.number().int().positive().nullable(),
@@ -108,6 +116,22 @@ export const SyncPushRequestSchema = z.object({
         created_at: z.string().datetime()
       })
     )
+    .optional(),
+  item_cancellations: z
+    .array(
+      z.object({
+        cancellation_id: UUID,
+        update_id: UUID.optional(),
+        order_id: UUID,
+        item_id: NumericIdSchema,
+        company_id: NumericIdSchema,
+        outlet_id: NumericIdSchema,
+        cancelled_quantity: z.number().positive(),
+        reason: z.string().trim().min(1).max(500),
+        cancelled_by_user_id: NumericIdSchema.nullable(),
+        cancelled_at: z.string().datetime()
+      })
+    )
     .optional()
 });
 
@@ -127,6 +151,15 @@ export const SyncPushPayloadSchema = z.object({
         message: z.string().optional()
       })
     )
+    .optional(),
+  item_cancellation_results: z
+    .array(
+      z.object({
+        cancellation_id: UUID,
+        result: z.enum(["OK", "DUPLICATE", "ERROR"]),
+        message: z.string().optional()
+      })
+    )
     .optional()
 });
 
@@ -138,6 +171,8 @@ export const SyncPushResponseSchema = z.object({
 export type PosTransaction = z.infer<typeof PosTransactionSchema>;
 export type PosTaxLine = z.infer<typeof PosTaxLineSchema>;
 export type PosOrderServiceType = z.infer<typeof PosOrderServiceTypeSchema>;
+export type PosSourceFlow = z.infer<typeof PosSourceFlowSchema>;
+export type PosSettlementFlow = z.infer<typeof PosSettlementFlowSchema>;
 export type PosOrderStatus = z.infer<typeof PosOrderStatusSchema>;
 export type SyncPushRequest = z.infer<typeof SyncPushRequestSchema>;
 export type SyncPushResultItem = z.infer<typeof SyncPushResultItemSchema>;

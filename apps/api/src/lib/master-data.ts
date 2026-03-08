@@ -2372,7 +2372,7 @@ async function readOpenOrderSyncPayload(
   try {
     const [ordersRows, linesRows, updatesRows] = await Promise.all([
       pool.execute<RowDataPacket[]>(
-        `SELECT order_id, company_id, outlet_id, service_type, table_id, reservation_id, guest_count,
+        `SELECT order_id, company_id, outlet_id, service_type, source_flow, settlement_flow, table_id, reservation_id, guest_count,
                 is_finalized, order_status, order_state, paid_amount, opened_at, closed_at, notes, updated_at
          FROM pos_order_snapshots
          WHERE company_id = ?
@@ -2424,6 +2424,8 @@ async function readOpenOrderSyncPayload(
         company_id: Number(row.company_id),
         outlet_id: Number(row.outlet_id),
         service_type: String(row.service_type) as SyncPullPayload["open_orders"][number]["service_type"],
+        source_flow: row.source_flow == null ? undefined : String(row.source_flow) as SyncPullPayload["open_orders"][number]["source_flow"],
+        settlement_flow: row.settlement_flow == null ? undefined : String(row.settlement_flow) as SyncPullPayload["open_orders"][number]["settlement_flow"],
         table_id: row.table_id == null ? null : Number(row.table_id),
         reservation_id: row.reservation_id == null ? null : Number(row.reservation_id),
         guest_count: row.guest_count == null ? null : Number(row.guest_count),

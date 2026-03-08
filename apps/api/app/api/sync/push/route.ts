@@ -850,6 +850,11 @@ export const POST = withAuth(
         result: "OK" | "DUPLICATE" | "ERROR";
         message?: string;
       }> = [];
+      const itemCancellationResults: Array<{
+        cancellation_id: string;
+        result: "OK" | "DUPLICATE" | "ERROR";
+        message?: string;
+      }> = [];
       try {
         const [companyTaxRates, defaultTaxRates] = await Promise.all([
           listCompanyTaxRates(dbConnection, auth.companyId),
@@ -1254,6 +1259,36 @@ export const POST = withAuth(
             continue;
           }
 
+          const cancellation = (input.item_cancellations ?? []).find((row) => row.update_id === update.update_id);
+          if (cancellation) {
+            if (cancellation.company_id !== update.company_id || cancellation.outlet_id !== update.outlet_id) {
+              orderUpdateResults.push({
+                update_id: update.update_id,
+                result: "ERROR",
+                message: "item_cancellation scope mismatch"
+              });
+              itemCancellationResults.push({
+                cancellation_id: cancellation.cancellation_id,
+                result: "ERROR",
+                message: "item_cancellation scope mismatch"
+              });
+              continue;
+            }
+            if (cancellation.order_id !== update.order_id) {
+              orderUpdateResults.push({
+                update_id: update.update_id,
+                result: "ERROR",
+                message: "item_cancellation order_id mismatch"
+              });
+              itemCancellationResults.push({
+                cancellation_id: cancellation.cancellation_id,
+                result: "ERROR",
+                message: "item_cancellation order_id mismatch"
+              });
+              continue;
+            }
+          }
+
           try {
             await dbConnection.beginTransaction();
 
@@ -1263,6 +1298,8 @@ export const POST = withAuth(
                  company_id,
                  outlet_id,
                  service_type,
+                 source_flow,
+                 settlement_flow,
                  table_id,
                  reservation_id,
                  guest_count,
@@ -1274,10 +1311,12 @@ export const POST = withAuth(
                  closed_at,
                  notes,
                  updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON DUPLICATE KEY UPDATE
-                 service_type = VALUES(service_type),
-                 table_id = VALUES(table_id),
+                  service_type = VALUES(service_type),
+                  source_flow = VALUES(source_flow),
+                  settlement_flow = VALUES(settlement_flow),
+                  table_id = VALUES(table_id),
                  reservation_id = VALUES(reservation_id),
                  guest_count = VALUES(guest_count),
                  is_finalized = VALUES(is_finalized),
@@ -1293,6 +1332,8 @@ export const POST = withAuth(
                 snapshot.company_id,
                 snapshot.outlet_id,
                 snapshot.service_type,
+                snapshot.source_flow ?? "WALK_IN",
+                snapshot.settlement_flow ?? (snapshot.service_type === "DINE_IN" ? "DEFERRED" : "IMMEDIATE"),
                 snapshot.table_id,
                 snapshot.reservation_id,
                 snapshot.guest_count,
@@ -1375,11 +1416,46 @@ export const POST = withAuth(
               ]
             );
 
+            if (cancellation) {
+              await dbConnection.execute(
+                `INSERT INTO pos_item_cancellations (
+                   cancellation_id,
+                   update_id,
+                   order_id,
+                   company_id,
+                   outlet_id,
+                   item_id,
+                   cancelled_quantity,
+                   reason,
+                   cancelled_by_user_id,
+                   cancelled_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+                [
+                  cancellation.cancellation_id,
+                  update.update_id,
+                  cancellation.order_id,
+                  cancellation.company_id,
+                  cancellation.outlet_id,
+                  cancellation.item_id,
+                  cancellation.cancelled_quantity,
+                  cancellation.reason,
+                  cancellation.cancelled_by_user_id,
+                  toMysqlDateTime(cancellation.cancelled_at)
+                ]
+              );
+            }
+
             await dbConnection.commit();
             orderUpdateResults.push({
               update_id: update.update_id,
               result: "OK"
             });
+            if (cancellation) {
+              itemCancellationResults.push({
+                cancellation_id: cancellation.cancellation_id,
+                result: "OK"
+              });
+            }
           } catch (error) {
             await rollbackQuietly(dbConnection);
             if (isMysqlError(error) && error.errno === MYSQL_DUPLICATE_ERROR_CODE) {
@@ -1387,12 +1463,25 @@ export const POST = withAuth(
                 update_id: update.update_id,
                 result: "DUPLICATE"
               });
+              if (cancellation) {
+                itemCancellationResults.push({
+                  cancellation_id: cancellation.cancellation_id,
+                  result: "DUPLICATE"
+                });
+              }
             } else {
               orderUpdateResults.push({
                 update_id: update.update_id,
                 result: "ERROR",
                 message: "order_update insert failed"
               });
+              if (cancellation) {
+                itemCancellationResults.push({
+                  cancellation_id: cancellation.cancellation_id,
+                  result: "ERROR",
+                  message: "item_cancellation insert failed"
+                });
+              }
             }
           }
         }
@@ -1402,7 +1491,8 @@ export const POST = withAuth(
 
       const response = SyncPushPayloadSchema.parse({
         results,
-        order_update_results: orderUpdateResults
+        order_update_results: orderUpdateResults,
+        item_cancellation_results: itemCancellationResults
       });
 
       return successResponse(response, 200, withCorrelationHeaders(correlationId));
