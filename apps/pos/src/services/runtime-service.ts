@@ -182,6 +182,15 @@ export interface ListRuntimeActiveOrdersOptions {
   finalizedOnly?: boolean;
 }
 
+export interface CancelRuntimeActiveOrderLineInput {
+  order_id: string;
+  item_id: number;
+  cancel_qty: number;
+  reason: string;
+  actor_user_id?: number | null;
+  device_id?: string;
+}
+
 export interface CreateRuntimeReservationInput {
   customer_name: string;
   customer_phone?: string | null;
@@ -396,6 +405,37 @@ export class RuntimeService {
 
   private buildActiveOrderUpdatePk(updateId: string): string {
     return `active_order_update:${updateId}`;
+  }
+
+  private async enqueueOrderUpdateOutboxJob(input: {
+    scope: RuntimeOutletScope;
+    orderId: string;
+    updateId: string;
+    timestamp: string;
+  }): Promise<void> {
+    await this.storage.createOutboxJob({
+      job_id: crypto.randomUUID(),
+      sale_id: input.orderId,
+      company_id: input.scope.company_id,
+      outlet_id: input.scope.outlet_id,
+      job_type: "SYNC_POS_ORDER_UPDATE",
+      dedupe_key: input.updateId,
+      payload_json: JSON.stringify({
+        update_id: input.updateId,
+        order_id: input.orderId,
+        company_id: input.scope.company_id,
+        outlet_id: input.scope.outlet_id
+      }),
+      status: "PENDING",
+      attempts: 0,
+      lease_owner_id: null,
+      lease_token: null,
+      lease_expires_at: null,
+      next_attempt_at: null,
+      last_error: null,
+      created_at: input.timestamp,
+      updated_at: input.timestamp
+    });
   }
 
   private createActiveOrderUpdateEvent(input: {
@@ -1000,28 +1040,11 @@ export class RuntimeService {
 
     if (updateEvent) {
       await this.storage.putActiveOrderUpdate(updateEvent);
-      await this.storage.createOutboxJob({
-        job_id: crypto.randomUUID(),
-        sale_id: orderId,
-        company_id: scope.company_id,
-        outlet_id: scope.outlet_id,
-        job_type: "SYNC_POS_ORDER_UPDATE",
-        dedupe_key: updateEvent.update_id,
-        payload_json: JSON.stringify({
-          update_id: updateEvent.update_id,
-          order_id: orderId,
-          company_id: scope.company_id,
-          outlet_id: scope.outlet_id
-        }),
-        status: "PENDING",
-        attempts: 0,
-        lease_owner_id: null,
-        lease_token: null,
-        lease_expires_at: null,
-        next_attempt_at: null,
-        last_error: null,
-        created_at: timestamp,
-        updated_at: timestamp
+      await this.enqueueOrderUpdateOutboxJob({
+        scope,
+        orderId,
+        updateId: updateEvent.update_id,
+        timestamp
       });
     }
 
@@ -1029,6 +1052,123 @@ export class RuntimeService {
       order: mapActiveOrderRow(row),
       lines: lineRows.map(mapActiveOrderLineRow)
     };
+  }
+
+  async cancelFinalizedOrderLine(
+    scope: RuntimeOutletScope,
+    input: CancelRuntimeActiveOrderLineInput
+  ): Promise<RuntimeActiveOrderSnapshot> {
+    const reason = input.reason.trim();
+    if (!reason) {
+      throw new Error("Cancellation reason is required");
+    }
+
+    if (!Number.isInteger(input.cancel_qty) || input.cancel_qty <= 0) {
+      throw new Error("cancel_qty must be a positive integer");
+    }
+
+    return await this.storage.transaction(
+      "readwrite",
+      ["active_orders", "active_order_lines", "active_order_updates", "outbox_jobs"],
+      async () => {
+        const existingOrder = await this.storage.getActiveOrder(input.order_id);
+        if (!existingOrder || !this.isScopeRow(scope, existingOrder)) {
+          throw new Error("Active order not found in current outlet scope");
+        }
+
+        if (existingOrder.order_state !== "OPEN") {
+          throw new Error("Only open active orders can be updated");
+        }
+
+        if (!existingOrder.is_finalized) {
+          throw new Error("Only finalized orders can cancel committed items");
+        }
+
+        const existingLines = await this.storage.getActiveOrderLines(input.order_id);
+        const targetLine = existingLines.find((line) => line.item_id === input.item_id);
+        if (!targetLine) {
+          throw new Error("Order line not found");
+        }
+
+        if (targetLine.qty < input.cancel_qty) {
+          throw new Error("cancel_qty exceeds committed quantity");
+        }
+
+        const timestamp = nowIso();
+        const nextQty = targetLine.qty - input.cancel_qty;
+        const nextDiscountAmount = nextQty === 0
+          ? 0
+          : Math.min(
+            targetLine.unit_price_snapshot * nextQty,
+            Math.round((targetLine.discount_amount * nextQty) / targetLine.qty)
+          );
+
+        const nextLines: ActiveOrderLineRow[] = existingLines
+          .flatMap((line) => {
+            if (line.item_id !== input.item_id) {
+              return [line];
+            }
+
+            if (nextQty === 0) {
+              return [];
+            }
+
+            return [{
+              ...line,
+              qty: nextQty,
+              discount_amount: nextDiscountAmount,
+              updated_at: timestamp
+            }];
+          });
+
+        const nextOrder: ActiveOrderRow = {
+          ...existingOrder,
+          updated_at: timestamp
+        };
+
+        const updateId = crypto.randomUUID();
+        const updateEvent: ActiveOrderUpdateRow = {
+          pk: this.buildActiveOrderUpdatePk(updateId),
+          update_id: updateId,
+          order_id: input.order_id,
+          company_id: scope.company_id,
+          outlet_id: scope.outlet_id,
+          base_order_updated_at: existingOrder.updated_at,
+          event_type: "ITEM_CANCELLED",
+          delta_json: JSON.stringify({
+            reason,
+            item_id: input.item_id,
+            item_name_snapshot: targetLine.name_snapshot,
+            cancelled_qty: input.cancel_qty,
+            previous_qty: targetLine.qty,
+            next_qty: nextQty,
+            previous_discount_amount: targetLine.discount_amount,
+            next_discount_amount: nextDiscountAmount
+          }),
+          actor_user_id: input.actor_user_id ?? null,
+          device_id: input.device_id ?? "WEB_POS",
+          event_at: timestamp,
+          created_at: timestamp,
+          sync_status: "PENDING",
+          sync_error: null
+        };
+
+        await this.storage.upsertActiveOrders([nextOrder]);
+        await this.storage.replaceActiveOrderLines(input.order_id, nextLines);
+        await this.storage.putActiveOrderUpdate(updateEvent);
+        await this.enqueueOrderUpdateOutboxJob({
+          scope,
+          orderId: input.order_id,
+          updateId,
+          timestamp
+        });
+
+        return {
+          order: mapActiveOrderRow(nextOrder),
+          lines: nextLines.map(mapActiveOrderLineRow)
+        };
+      }
+    );
   }
 
   async closeActiveOrder(

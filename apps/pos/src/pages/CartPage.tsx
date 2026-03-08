@@ -33,12 +33,19 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
     outletReservations,
     activeReservationId,
     setOutletTables,
-    setOutletReservations
+    setOutletReservations,
+    staleEditWarning,
+    reloadLatestActiveOrder
   } = usePosAppState();
   const activeReservation = outletReservations.find((row) => row.reservation_id === activeReservationId) ?? null;
   const [transferTargetTableId, setTransferTargetTableId] = useState<string>("");
   const [transferInFlight, setTransferInFlight] = useState(false);
   const [transferMessage, setTransferMessage] = useState<string | null>(null);
+  const [cancelLineItemId, setCancelLineItemId] = useState<string>("");
+  const [cancelQuantity, setCancelQuantity] = useState<string>("1");
+  const [cancelReason, setCancelReason] = useState<string>("");
+  const [cancelInFlight, setCancelInFlight] = useState(false);
+  const [cancelMessage, setCancelMessage] = useState<string | null>(null);
   const [tableOrderSummaryByTableId, setTableOrderSummaryByTableId] = useState<Record<number, {
     order_id: string;
     item_count: number;
@@ -124,6 +131,35 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
     };
   }, [outletTables, tableOrderSummaryByTableId, transferTargetTableId]);
 
+  const cancellableLines = useMemo(
+    () => cartLines.filter((line) => line.committed_qty > 0),
+    [cartLines]
+  );
+
+  const selectedCancelableLine = useMemo(() => {
+    if (!cancelLineItemId) {
+      return null;
+    }
+    return cancellableLines.find((line) => line.product.item_id === Number(cancelLineItemId)) ?? null;
+  }, [cancelLineItemId, cancellableLines]);
+
+  const selectedCancelableMaxQty = selectedCancelableLine ? Math.max(1, selectedCancelableLine.committed_qty) : 1;
+
+  useEffect(() => {
+    if (cancellableLines.length === 0) {
+      setCancelLineItemId("");
+      setCancelQuantity("1");
+      setCancelReason("");
+      return;
+    }
+
+    const selectedExists = cancellableLines.some((line) => String(line.product.item_id) === cancelLineItemId);
+    if (!cancelLineItemId || !selectedExists) {
+      setCancelLineItemId(String(cancellableLines[0].product.item_id));
+      setCancelQuantity("1");
+    }
+  }, [cancelLineItemId, cancellableLines]);
+
   const containerStyles: React.CSSProperties = {
     display: "flex",
     flexDirection: "column",
@@ -182,6 +218,35 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             : ""}
           {activeReservation ? ` • Reservation ${activeReservation.customer_name}` : ""}
         </div>
+        {staleEditWarning ? (
+          <div
+            style={{
+              marginTop: 6,
+              padding: 10,
+              borderRadius: 10,
+              border: "1px solid #f59e0b",
+              background: "#fffbeb",
+              display: "grid",
+              gap: 8
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e" }}>{staleEditWarning}</div>
+            <div style={{ fontSize: 12, color: "#92400e" }}>
+              Reload the latest order snapshot before continuing to avoid stale edits.
+            </div>
+            <div>
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={() => {
+                  void reloadLatestActiveOrder();
+                }}
+              >
+                Reload latest order
+              </Button>
+            </div>
+          </div>
+        ) : null}
         <div
           style={{
             marginTop: 4,
@@ -327,6 +392,142 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             ) : null}
             {transferMessage ? (
               <div style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{transferMessage}</div>
+            ) : null}
+          </div>
+        ) : null}
+        {activeOrderContext.is_finalized && currentActiveOrderId && cancellableLines.length > 0 ? (
+          <div
+            style={{
+              marginTop: 6,
+              padding: 10,
+              borderRadius: 10,
+              border: "1px solid #fca5a5",
+              background: "#fef2f2",
+              display: "grid",
+              gap: 8
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#7f1d1d" }}>Cancel finalized item(s)</div>
+            <div style={{ fontSize: 12, color: "#7f1d1d" }}>
+              Use this for explicit reductions to committed quantities. Every cancellation requires a reason.
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <select
+                value={cancelLineItemId}
+                onChange={(event) => {
+                  setCancelLineItemId(event.target.value);
+                  setCancelMessage(null);
+                  setCancelQuantity("1");
+                }}
+                style={{
+                  minWidth: 180,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  fontSize: 13,
+                  background: "#ffffff"
+                }}
+              >
+                {cancellableLines.map((line) => (
+                  <option key={line.product.item_id} value={String(line.product.item_id)}>
+                    {line.product.name} (committed: {line.committed_qty})
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={1}
+                max={selectedCancelableMaxQty}
+                value={cancelQuantity}
+                onChange={(event) => {
+                  setCancelQuantity(event.target.value);
+                  setCancelMessage(null);
+                }}
+                style={{
+                  width: 120,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  fontSize: 13,
+                  background: "#ffffff"
+                }}
+              />
+              <textarea
+                value={cancelReason}
+                onChange={(event) => {
+                  setCancelReason(event.target.value);
+                  setCancelMessage(null);
+                }}
+                placeholder="Reason for cancellation"
+                rows={3}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  fontSize: 13,
+                  resize: "vertical",
+                  background: "#ffffff"
+                }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <Button
+                  size="small"
+                  variant="danger"
+                  disabled={cancelInFlight}
+                  onClick={() => {
+                    void (async () => {
+                      if (!selectedCancelableLine) {
+                        setCancelMessage("Select an item to cancel.");
+                        return;
+                      }
+
+                      const cancelQty = Number(cancelQuantity);
+                      if (!Number.isInteger(cancelQty) || cancelQty <= 0) {
+                        setCancelMessage("Cancellation quantity must be a positive integer.");
+                        return;
+                      }
+
+                      if (cancelQty > selectedCancelableLine.committed_qty) {
+                        setCancelMessage(`Cannot cancel more than committed qty (${selectedCancelableLine.committed_qty}).`);
+                        return;
+                      }
+
+                      if (!cancelReason.trim()) {
+                        setCancelMessage("Cancellation reason is required.");
+                        return;
+                      }
+
+                      setCancelInFlight(true);
+                      setCancelMessage(null);
+                      try {
+                        await context.runtime.cancelFinalizedOrderLine(scope, {
+                          order_id: currentActiveOrderId,
+                          item_id: selectedCancelableLine.product.item_id,
+                          cancel_qty: cancelQty,
+                          reason: cancelReason.trim()
+                        });
+                        await reloadLatestActiveOrder();
+                        setCancelQuantity("1");
+                        setCancelReason("");
+                        setCancelMessage("Committed quantity cancelled and audit event recorded.");
+                      } catch (error) {
+                        setCancelMessage(error instanceof Error ? error.message : "Failed to cancel committed quantity");
+                      } finally {
+                        setCancelInFlight(false);
+                      }
+                    })();
+                  }}
+                >
+                  {cancelInFlight ? "Cancelling..." : "Confirm cancellation"}
+                </Button>
+                <div style={{ fontSize: 12, color: "#7f1d1d" }}>
+                  Max cancel qty: {selectedCancelableLine?.committed_qty ?? 0}
+                </div>
+              </div>
+            </div>
+            {cancelMessage ? (
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#7f1d1d" }}>{cancelMessage}</div>
             ) : null}
           </div>
         ) : null}

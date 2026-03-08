@@ -216,3 +216,190 @@ test("upsertActiveOrderSnapshot emits update log and outbox job", async () => {
     db.close();
   }
 });
+
+test("cancelFinalizedOrderLine reduces committed qty and writes immutable cancel event", async () => {
+  const db = createPosOfflineDb(`jp-pos-runtime-service-dinein-cancel-line-${crypto.randomUUID()}`);
+  const storage = createWebStorageAdapter(db);
+  const runtime = new RuntimeService(storage, createNetworkMock());
+  const scope = { company_id: 1, outlet_id: 14 };
+
+  try {
+    const created = await runtime.upsertActiveOrderSnapshot(scope, {
+      service_type: "TAKEAWAY",
+      table_id: null,
+      reservation_id: null,
+      guest_count: null,
+      is_finalized: true,
+      order_status: "OPEN",
+      paid_amount: 0,
+      notes: null,
+      lines: [
+        {
+          item_id: 99,
+          sku_snapshot: "SKU-99",
+          name_snapshot: "Nasi Goreng",
+          item_type_snapshot: "PRODUCT",
+          unit_price_snapshot: 25000,
+          qty: 3,
+          discount_amount: 6000
+        }
+      ]
+    });
+
+    const cancelled = await runtime.cancelFinalizedOrderLine(scope, {
+      order_id: created.order.order_id,
+      item_id: 99,
+      cancel_qty: 2,
+      reason: "Customer removed extra portion"
+    });
+
+    assert.equal(cancelled.lines.length, 1);
+    assert.equal(cancelled.lines[0].qty, 1);
+    assert.equal(cancelled.lines[0].discount_amount, 2000);
+
+    const updates = (await db.active_order_updates.toArray())
+      .filter((update) => update.order_id === created.order.order_id);
+    const cancelUpdate = updates.find((update) => update.event_type === "ITEM_CANCELLED");
+
+    assert.ok(cancelUpdate, "expected ITEM_CANCELLED update event");
+    const delta = JSON.parse(cancelUpdate.delta_json);
+    assert.equal(delta.reason, "Customer removed extra portion");
+    assert.equal(delta.cancelled_qty, 2);
+    assert.equal(delta.previous_qty, 3);
+    assert.equal(delta.next_qty, 1);
+
+    const outboxJobs = (await db.outbox_jobs.toArray())
+      .filter((job) => job.dedupe_key === cancelUpdate.update_id);
+    assert.equal(outboxJobs.length, 1);
+    assert.equal(outboxJobs[0].job_type, "SYNC_POS_ORDER_UPDATE");
+  } finally {
+    db.close();
+  }
+});
+
+test("cancelFinalizedOrderLine requires reason and bounded quantity", async () => {
+  const db = createPosOfflineDb(`jp-pos-runtime-service-dinein-cancel-validation-${crypto.randomUUID()}`);
+  const storage = createWebStorageAdapter(db);
+  const runtime = new RuntimeService(storage, createNetworkMock());
+  const scope = { company_id: 1, outlet_id: 15 };
+
+  try {
+    const created = await runtime.upsertActiveOrderSnapshot(scope, {
+      service_type: "TAKEAWAY",
+      table_id: null,
+      reservation_id: null,
+      guest_count: null,
+      is_finalized: true,
+      order_status: "OPEN",
+      paid_amount: 0,
+      notes: null,
+      lines: [
+        {
+          item_id: 11,
+          sku_snapshot: "SKU-11",
+          name_snapshot: "Espresso",
+          item_type_snapshot: "PRODUCT",
+          unit_price_snapshot: 18000,
+          qty: 1,
+          discount_amount: 0
+        }
+      ]
+    });
+
+    await assert.rejects(
+      runtime.cancelFinalizedOrderLine(scope, {
+        order_id: created.order.order_id,
+        item_id: 11,
+        cancel_qty: 1,
+        reason: "   "
+      }),
+      /Cancellation reason is required/
+    );
+
+    await assert.rejects(
+      runtime.cancelFinalizedOrderLine(scope, {
+        order_id: created.order.order_id,
+        item_id: 11,
+        cancel_qty: 2,
+        reason: "customer changed mind"
+      }),
+      /cancel_qty exceeds committed quantity/
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("resume order then cancel item keeps totals consistent and writes update log", async () => {
+  const db = createPosOfflineDb(`jp-pos-runtime-service-dinein-resume-cancel-${crypto.randomUUID()}`);
+  const storage = createWebStorageAdapter(db);
+  const runtime = new RuntimeService(storage, createNetworkMock());
+  const scope = { company_id: 1, outlet_id: 16 };
+
+  try {
+    const tableId = 1;
+    await runtime.setOutletTableStatus(scope, tableId, "AVAILABLE");
+
+    const created = await runtime.upsertActiveOrderSnapshot(scope, {
+      service_type: "DINE_IN",
+      table_id: tableId,
+      reservation_id: null,
+      guest_count: 2,
+      is_finalized: true,
+      order_status: "OPEN",
+      paid_amount: 0,
+      notes: "table order",
+      lines: [
+        {
+          item_id: 201,
+          sku_snapshot: "SKU-201",
+          name_snapshot: "Fried Rice",
+          item_type_snapshot: "PRODUCT",
+          unit_price_snapshot: 25000,
+          qty: 2,
+          discount_amount: 0
+        }
+      ]
+    });
+
+    const resumed = await runtime.resolveActiveOrder(scope, {
+      service_type: "DINE_IN",
+      table_id: tableId
+    });
+    assert.equal(resumed.order.order_id, created.order.order_id);
+
+    const beforeSubtotal = resumed.lines.reduce(
+      (sum, line) => sum + (line.qty * line.unit_price_snapshot) - line.discount_amount,
+      0
+    );
+
+    const afterCancel = await runtime.cancelFinalizedOrderLine(scope, {
+      order_id: resumed.order.order_id,
+      item_id: 201,
+      cancel_qty: 1,
+      reason: "Guest changed order"
+    });
+
+    const afterSubtotal = afterCancel.lines.reduce(
+      (sum, line) => sum + (line.qty * line.unit_price_snapshot) - line.discount_amount,
+      0
+    );
+
+    assert.equal(beforeSubtotal, 50000);
+    assert.equal(afterSubtotal, 25000);
+
+    const updates = (await db.active_order_updates.toArray())
+      .filter((update) => update.order_id === resumed.order.order_id)
+      .sort((a, b) => a.event_at.localeCompare(b.event_at));
+    const latest = updates[updates.length - 1];
+
+    assert.equal(latest.event_type, "ITEM_CANCELLED");
+    const delta = JSON.parse(latest.delta_json);
+    assert.equal(delta.reason, "Guest changed order");
+    assert.equal(delta.cancelled_qty, 1);
+    assert.equal(delta.previous_qty, 2);
+    assert.equal(delta.next_qty, 1);
+  } finally {
+    db.close();
+  }
+});
