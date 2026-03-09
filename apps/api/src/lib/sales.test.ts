@@ -392,4 +392,99 @@ describe("Phase 8: Payment Enhancements", () => {
       assert.strictEqual(result.success, true);
     });
   });
+
+  describe("Payment timestamp schema acceptance", () => {
+    test("same payment_at with milliseconds accepted by schema", () => {
+      const result1 = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00.123Z",
+        amount: 100,
+        splits: [
+          { account_id: 1, amount: 50 },
+          { account_id: 2, amount: 50 }
+        ]
+      });
+      const result2 = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00.000Z",
+        amount: 100,
+        splits: [
+          { account_id: 1, amount: 50 },
+          { account_id: 2, amount: 50 }
+        ]
+      });
+      assert.strictEqual(result1.success, true);
+      assert.strictEqual(result2.success, true);
+      // Note: Full idempotency behavior test requires service layer integration
+    });
+
+    test("accepts timezone variants in schema", () => {
+      const result1 = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100,
+        splits: [{ account_id: 1, amount: 100 }]
+      });
+      const result2 = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00.000Z",
+        amount: 100,
+        splits: [{ account_id: 1, amount: 100 }]
+      });
+      assert.strictEqual(result1.success, true);
+      assert.strictEqual(result2.success, true);
+    });
+  });
+
+  describe("Service precision validation", () => {
+    test("schema rejects amount with more than 2 decimals", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100.123,
+        splits: [
+          { account_id: 1, amount: 50 },
+          { account_id: 2, amount: 50.123 }
+        ]
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("schema rejects split with more than 2 decimals", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100,
+        splits: [
+          { account_id: 1, amount: 33.333 },
+          { account_id: 2, amount: 66.667 }
+        ]
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("schema accepts exactly 2 decimals", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100.99,
+        splits: [
+          { account_id: 1, amount: 50.49 },
+          { account_id: 2, amount: 50.50 }
+        ]
+      });
+      assert.strictEqual(result.success, true);
+    });
+  });
+
+  // Note: Full idempotency behavior tests (same client_ref returns same payment)
+  // and non-split payment precision validation require integration test harness
+  // with database setup. See auth.test.ts for integration test patterns.
 });

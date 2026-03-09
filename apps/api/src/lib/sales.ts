@@ -257,6 +257,14 @@ function sumMoney(values: readonly number[]): number {
   return normalizeMoney(total);
 }
 
+// Patch 1: Service precision guard - check if value has more than 2 decimal places
+function hasMoreThanTwoDecimals(value: number): boolean {
+  const str = value.toFixed(10);
+  const decimalPart = str.split(".")[1];
+  if (!decimalPart) return false;
+  return decimalPart.slice(2).split("").some((d) => d !== "0");
+}
+
 function formatDateOnly(value: Date | string): string {
   if (typeof value === "string") {
     return value.slice(0, 10);
@@ -1325,6 +1333,22 @@ type CanonicalPaymentInput = {
   splits: Array<{ account_id: number; amount_minor: number }>;
 };
 
+// Patch A: Normalize datetimes for idempotency comparison.
+// Incoming payloads are persisted as DATETIME (timezone-less) and then read back through mysql2,
+// which interprets DATETIME in local timezone. We mirror that for stable comparisons.
+function normalizeIncomingDatetimeForCompare(paymentAt: string): string {
+  const persistedValue = toMysqlDateTime(paymentAt);
+  const localInterpreted = new Date(persistedValue.replace(" ", "T"));
+  if (Number.isNaN(localInterpreted.getTime())) {
+    throw new Error("Invalid datetime");
+  }
+  return toMysqlDateTime(localInterpreted.toISOString());
+}
+
+function normalizeExistingDatetimeForCompare(paymentAt: string): string {
+  return toMysqlDateTime(paymentAt);
+}
+
 function buildCanonicalInput(
   input: {
     outlet_id: number;
@@ -1344,7 +1368,7 @@ function buildCanonicalInput(
   return {
     outlet_id: input.outlet_id,
     invoice_id: input.invoice_id,
-    payment_at: new Date(input.payment_at).toISOString(),
+    payment_at: normalizeIncomingDatetimeForCompare(input.payment_at),
     amount_minor: Math.round(input.amount * 100),
     account_id: effectiveAccountId,
     splits
@@ -1359,7 +1383,7 @@ function buildCanonicalFromExisting(payment: SalesPayment): CanonicalPaymentInpu
   return {
     outlet_id: payment.outlet_id,
     invoice_id: payment.invoice_id,
-    payment_at: payment.payment_at,
+    payment_at: normalizeExistingDatetimeForCompare(payment.payment_at),
     amount_minor: Math.round(payment.amount * 100),
     account_id: payment.account_id,
     splits
@@ -1555,10 +1579,20 @@ export async function createPayment(
         throw new PaymentAllocationError("Duplicate account_ids not allowed in splits");
       }
 
-      // Validate split sum equals total amount
-      const splitSum = input.splits!.reduce((sum, s) => sum + s.amount, 0);
-      const amount = normalizeMoney(input.amount);
-      if (Math.abs(splitSum - amount) > 0.001) {
+      // Patch 1: Validate precision - max 2 decimal places
+      if (hasMoreThanTwoDecimals(input.amount)) {
+        throw new PaymentAllocationError("Amount must have at most 2 decimal places");
+      }
+      for (const split of input.splits!) {
+        if (hasMoreThanTwoDecimals(split.amount)) {
+          throw new PaymentAllocationError("Split amount must have at most 2 decimal places");
+        }
+      }
+
+      // Patch B: Validate split sum equals total amount (cent-exact)
+      const splitSumMinor = input.splits!.reduce((sum, s) => sum + Math.round(s.amount * 100), 0);
+      const amountMinor = Math.round(input.amount * 100);
+      if (splitSumMinor !== amountMinor) {
         throw new PaymentAllocationError("Sum of split amounts must equal payment amount");
       }
 
@@ -1588,6 +1622,12 @@ export async function createPayment(
       if (input.account_id === undefined) {
         throw new DatabaseReferenceError("account_id is required when splits not provided");
       }
+
+      // Patch 1: Validate precision for non-split payments
+      if (hasMoreThanTwoDecimals(input.amount)) {
+        throw new PaymentAllocationError("Amount must have at most 2 decimal places");
+      }
+
       effectiveAccountId = input.account_id;
       // Create single split from header data
       splitData = [{ account_id: effectiveAccountId, amount: input.amount }];
@@ -1798,14 +1838,25 @@ export async function updatePayment(
         throw new PaymentAllocationError("Duplicate account_ids not allowed in splits");
       }
 
-      // Validate split sum equals total amount if amount provided, else use split sum
-      const splitSum = input.splits!.reduce((sum, s) => sum + s.amount, 0);
+      // Patch 1: Validate precision - max 2 decimal places
+      if (typeof input.amount === "number" && hasMoreThanTwoDecimals(input.amount)) {
+        throw new PaymentAllocationError("Amount must have at most 2 decimal places");
+      }
+      for (const split of input.splits!) {
+        if (hasMoreThanTwoDecimals(split.amount)) {
+          throw new PaymentAllocationError("Split amount must have at most 2 decimal places");
+        }
+      }
+
+      // Patch B: Validate split sum equals total amount (cent-exact)
+      const splitSumMinor = input.splits!.reduce((sum, s) => sum + Math.round(s.amount * 100), 0);
       if (typeof input.amount === "number") {
-        if (Math.abs(splitSum - nextAmount) > 0.001) {
+        const nextAmountMinor = Math.round(nextAmount * 100);
+        if (splitSumMinor !== nextAmountMinor) {
           throw new PaymentAllocationError("Sum of split amounts must equal payment amount");
         }
       } else {
-        nextAmount = normalizeMoney(splitSum);
+        nextAmount = normalizeMoney(splitSumMinor / 100);
       }
 
       // Validate each split account is payable and belongs to company
@@ -1827,6 +1878,11 @@ export async function updatePayment(
       // Validate header account_id matches first split if provided
       if (input.account_id !== undefined && input.account_id !== nextAccountId) {
         throw new PaymentAllocationError("Header account_id must equal splits[0].account_id");
+      }
+    } else {
+      // Patch 1: Validate precision for non-split payment updates
+      if (typeof input.amount === "number" && hasMoreThanTwoDecimals(input.amount)) {
+        throw new PaymentAllocationError("Amount must have at most 2 decimal places");
       }
     }
 
