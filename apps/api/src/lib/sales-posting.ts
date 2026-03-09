@@ -11,7 +11,7 @@ import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 const SALES_INVOICE_DOC_TYPE = "SALES_INVOICE";
 const SALES_PAYMENT_IN_DOC_TYPE = "SALES_PAYMENT_IN";
 
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
+const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "SALES_TAX", "AR", "SALES_RETURNS"] as const;
 type OutletAccountMappingKey = (typeof OUTLET_ACCOUNT_MAPPING_KEYS)[number];
 type OutletAccountMapping = Record<OutletAccountMappingKey, number>;
 
@@ -50,30 +50,31 @@ async function readOutletAccountMappingByKey(
   companyId: number,
   outletId: number
 ): Promise<OutletAccountMapping> {
-  const placeholders = OUTLET_ACCOUNT_MAPPING_KEYS.map(() => "?").join(", ");
+  const requiredKeys = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
+  const placeholders = requiredKeys.map(() => "?").join(", ");
   const [rows] = await dbExecutor.execute<RowDataPacket[]>(
     `SELECT mapping_key, account_id
      FROM outlet_account_mappings
      WHERE company_id = ?
        AND outlet_id = ?
        AND mapping_key IN (${placeholders})`,
-    [companyId, outletId, ...OUTLET_ACCOUNT_MAPPING_KEYS]
+    [companyId, outletId, ...requiredKeys]
   );
 
-  const accountByKey = new Map<OutletAccountMappingKey, number>();
+  const accountByKey = new Map<string, number>();
   for (const row of rows as Array<{ mapping_key?: string; account_id?: number }>) {
     if (typeof row.mapping_key !== "string" || !Number.isFinite(row.account_id)) {
       continue;
     }
 
-    if (!OUTLET_ACCOUNT_MAPPING_KEYS.includes(row.mapping_key as OutletAccountMappingKey)) {
+    if (!requiredKeys.includes(row.mapping_key as typeof requiredKeys[number])) {
       continue;
     }
 
-    accountByKey.set(row.mapping_key as OutletAccountMappingKey, Number(row.account_id));
+    accountByKey.set(row.mapping_key, Number(row.account_id));
   }
 
-  const missingKeys = OUTLET_ACCOUNT_MAPPING_KEYS.filter((key) => !accountByKey.has(key));
+  const missingKeys = requiredKeys.filter((key) => !accountByKey.has(key));
   if (missingKeys.length > 0) {
     throw new Error(OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE);
   }
@@ -81,7 +82,46 @@ async function readOutletAccountMappingByKey(
   return {
     SALES_REVENUE: accountByKey.get("SALES_REVENUE") as number,
     SALES_TAX: accountByKey.get("SALES_TAX") as number,
-    AR: accountByKey.get("AR") as number
+    AR: accountByKey.get("AR") as number,
+    SALES_RETURNS: accountByKey.get("SALES_REVENUE") as number
+  };
+}
+
+async function readCreditNoteAccountMapping(
+  dbExecutor: QueryExecutor,
+  companyId: number,
+  outletId: number
+): Promise<{ AR: number; SALES_RETURNS: number }> {
+  const [rows] = await dbExecutor.execute<RowDataPacket[]>(
+    `SELECT mapping_key, account_id
+     FROM outlet_account_mappings
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND mapping_key IN ('AR', 'SALES_RETURNS', 'SALES_REVENUE')`,
+    [companyId, outletId]
+  );
+
+  const accountByKey = new Map<string, number>();
+  for (const row of rows as Array<{ mapping_key?: string; account_id?: number }>) {
+    if (typeof row.mapping_key !== "string" || !Number.isFinite(row.account_id)) {
+      continue;
+    }
+    accountByKey.set(row.mapping_key, Number(row.account_id));
+  }
+
+  const arAccountId = accountByKey.get("AR");
+  if (!arAccountId) {
+    throw new Error(OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE);
+  }
+
+  const salesReturnsAccountId = accountByKey.get("SALES_RETURNS") ?? accountByKey.get("SALES_REVENUE");
+  if (!salesReturnsAccountId) {
+    throw new Error(OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE);
+  }
+
+  return {
+    AR: arAccountId,
+    SALES_RETURNS: salesReturnsAccountId
   };
 }
 
@@ -187,25 +227,47 @@ class SalesPaymentPostingMapper implements PostingMapper {
       this.payment.outlet_id
     );
 
-    // Use account_id directly from payment
-    const cashBankAccountId = this.payment.account_id;
-    const accountLabel = this.payment.account_name ?? `Account #${cashBankAccountId}`;
-
     const lines: JournalLine[] = [];
 
-    lines.push({
-      account_id: cashBankAccountId,
-      debit: normalizeMoney(this.payment.amount),
-      credit: 0,
-      description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${accountLabel}`
-    });
+    // Phase 8: Handle split payments
+    const splits = this.payment.splits;
+    if (splits && splits.length > 0) {
+      // Multiple debit lines for split payments
+      for (const split of splits) {
+        const accountLabel = split.account_name ?? `Account #${split.account_id}`;
+        lines.push({
+          account_id: split.account_id,
+          debit: normalizeMoney(split.amount),
+          credit: 0,
+          description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${accountLabel} (Split ${split.split_index + 1}/${splits.length})`
+        });
+      }
+    } else {
+      // Single debit line for non-split payments (backward compatibility)
+      const cashBankAccountId = this.payment.account_id;
+      const accountLabel = this.payment.account_name ?? `Account #${cashBankAccountId}`;
+      lines.push({
+        account_id: cashBankAccountId,
+        debit: normalizeMoney(this.payment.amount),
+        credit: 0,
+        description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${accountLabel}`
+      });
+    }
 
+    // Single credit line to AR for total amount
     lines.push({
       account_id: mapping.AR,
       debit: 0,
       credit: normalizeMoney(this.payment.amount),
       description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - AR`
     });
+
+    // Phase 8: Guard posting balance for split entries
+    const totalDebitsMinor = lines.reduce((sum, line) => sum + toMinorUnits(line.debit), 0);
+    const totalCreditsMinor = lines.reduce((sum, line) => sum + toMinorUnits(line.credit), 0);
+    if (totalDebitsMinor !== totalCreditsMinor) {
+      throw new Error("PAYMENT_SPLIT_IMBALANCE: Debit/Credit totals do not match");
+    }
 
     return lines;
   }
@@ -277,6 +339,10 @@ function toMysqlDateTime(value: string): string {
 }
 
 function toDateOnly(value: string): string {
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     throw new Error("Invalid datetime");
@@ -336,6 +402,147 @@ export async function postSalesPaymentToJournal(
     new SalesPostingRepository(dbExecutor, toMysqlDateTime(payment.updated_at)),
     {
       [SALES_PAYMENT_IN_DOC_TYPE]: new SalesPaymentPostingMapper(dbExecutor, payment, invoiceNo)
+    }
+  );
+
+  return postingService.post(postingRequest, {
+    transactionOwner: "external"
+  });
+}
+
+const SALES_CREDIT_NOTE_DOC_TYPE = "SALES_CREDIT_NOTE";
+
+interface SalesCreditNoteDetail {
+  id: number;
+  company_id: number;
+  outlet_id: number;
+  invoice_id: number;
+  credit_note_no: string;
+  credit_note_date: string;
+  amount: number;
+  updated_at: string;
+}
+
+class SalesCreditNotePostingMapper implements PostingMapper {
+  constructor(
+    private readonly dbExecutor: QueryExecutor,
+    private readonly creditNote: SalesCreditNoteDetail
+  ) {}
+
+  async mapToJournal(_request: PostingRequest): Promise<JournalLine[]> {
+    const mapping = await readCreditNoteAccountMapping(
+      this.dbExecutor,
+      this.creditNote.company_id,
+      this.creditNote.outlet_id
+    );
+
+    const lines: JournalLine[] = [];
+
+    lines.push({
+      account_id: mapping.SALES_RETURNS,
+      debit: normalizeMoney(this.creditNote.amount),
+      credit: 0,
+      description: `Credit Note ${this.creditNote.credit_note_no} - Sales Returns`
+    });
+
+    lines.push({
+      account_id: mapping.AR,
+      debit: 0,
+      credit: normalizeMoney(this.creditNote.amount),
+      description: `Credit Note ${this.creditNote.credit_note_no} - AR`
+    });
+
+    return lines;
+  }
+}
+
+export async function postCreditNoteToJournal(
+  dbExecutor: QueryExecutor,
+  creditNote: SalesCreditNoteDetail
+): Promise<PostingResult> {
+  await ensureDateWithinOpenFiscalYearWithExecutor(
+    dbExecutor,
+    creditNote.company_id,
+    creditNote.credit_note_date
+  );
+
+  const postingRequest: PostingRequest = {
+    doc_type: SALES_CREDIT_NOTE_DOC_TYPE,
+    doc_id: creditNote.id,
+    company_id: creditNote.company_id,
+    outlet_id: creditNote.outlet_id
+  };
+
+  const postingService = new PostingService(
+    new SalesPostingRepository(dbExecutor, toMysqlDateTime(creditNote.updated_at)),
+    {
+      [SALES_CREDIT_NOTE_DOC_TYPE]: new SalesCreditNotePostingMapper(dbExecutor, creditNote)
+    }
+  );
+
+  return postingService.post(postingRequest, {
+    transactionOwner: "external"
+  });
+}
+
+class VoidCreditNotePostingMapper implements PostingMapper {
+  constructor(
+    private readonly dbExecutor: QueryExecutor,
+    private readonly creditNote: SalesCreditNoteDetail
+  ) {}
+
+  async mapToJournal(_request: PostingRequest): Promise<JournalLine[]> {
+    const mapping = await readCreditNoteAccountMapping(
+      this.dbExecutor,
+      this.creditNote.company_id,
+      this.creditNote.outlet_id
+    );
+
+    const lines: JournalLine[] = [];
+
+    // Reverse the original credit note entries
+    // Original: Dr: Sales Returns, Cr: AR
+    // Reversal: Dr: AR, Cr: Sales Returns
+
+    lines.push({
+      account_id: mapping.AR,
+      debit: normalizeMoney(this.creditNote.amount),
+      credit: 0,
+      description: `Void Credit Note ${this.creditNote.credit_note_no} - AR Reversal`
+    });
+
+    lines.push({
+      account_id: mapping.SALES_RETURNS,
+      debit: 0,
+      credit: normalizeMoney(this.creditNote.amount),
+      description: `Void Credit Note ${this.creditNote.credit_note_no} - Sales Returns Reversal`
+    });
+
+    return lines;
+  }
+}
+
+export async function voidCreditNoteToJournal(
+  dbExecutor: QueryExecutor,
+  creditNote: SalesCreditNoteDetail
+): Promise<PostingResult> {
+  await ensureDateWithinOpenFiscalYearWithExecutor(
+    dbExecutor,
+    creditNote.company_id,
+    creditNote.credit_note_date
+  );
+
+  const postingRequest: PostingRequest = {
+    doc_type: `${SALES_CREDIT_NOTE_DOC_TYPE}_VOID`,
+    doc_id: creditNote.id,
+    company_id: creditNote.company_id,
+    outlet_id: creditNote.outlet_id
+  };
+
+  const postingService = new PostingService(
+    new SalesPostingRepository(dbExecutor, toMysqlDateTime(creditNote.updated_at)),
+    {
+      [`${SALES_CREDIT_NOTE_DOC_TYPE}_VOID`]: new VoidCreditNotePostingMapper(dbExecutor, creditNote)
     }
   );
 

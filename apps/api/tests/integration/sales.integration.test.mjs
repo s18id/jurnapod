@@ -70,7 +70,10 @@ function delay(ms) {
 
 function normalizeDateValue(value) {
   if (value instanceof Date) {
-    return value.toISOString().split("T")[0];
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }
   if (typeof value === "string" && value.length > 0) {
     return value.split("T")[0];
@@ -80,7 +83,8 @@ function normalizeDateValue(value) {
 
 async function resolveOpenFiscalDate(db, companyId) {
   const [rows] = await db.execute(
-    `SELECT start_date, end_date
+    `SELECT DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
+            DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date
      FROM fiscal_years
      WHERE company_id = ? AND status = 'OPEN'
      ORDER BY start_date DESC
@@ -246,7 +250,11 @@ async function ensureOutletAccountMappingConstraint(db) {
   );
 
   const clause = rows[0]?.check_clause ?? "";
-  if (typeof clause === "string" && clause.includes("'CARD'")) {
+  if (
+    typeof clause === "string" &&
+    clause.includes("'CARD'") &&
+    clause.includes("'SALES_RETURNS'")
+  ) {
     return;
   }
 
@@ -270,7 +278,7 @@ async function ensureOutletAccountMappingConstraint(db) {
   await db.execute(
     `ALTER TABLE outlet_account_mappings
      ADD CONSTRAINT chk_outlet_account_mappings_mapping_key
-     CHECK (mapping_key IN ('CASH', 'QRIS', 'CARD', 'SALES_REVENUE', 'SALES_TAX', 'AR'))`
+     CHECK (mapping_key IN ('CASH', 'QRIS', 'CARD', 'SALES_REVENUE', 'SALES_TAX', 'SALES_RETURNS', 'AR'))`
   );
 }
 
@@ -280,7 +288,7 @@ function buildTestAccountCode(mappingKey) {
   return base.slice(0, 32);
 }
 
-const OUTLET_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "SALES_TAX", "AR"];
+const OUTLET_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "SALES_TAX", "SALES_RETURNS", "AR"];
 const PAYABLE_MAPPING_KEYS = new Set(["CASH", "QRIS", "CARD"]);
 
 async function ensureOutletAccountMappings(db, companyId, outletId) {
@@ -387,10 +395,128 @@ async function setupTestData(db) {
   return { companyId, outletId, userId, mappingFixture };
 }
 
+async function ensureOpenFiscalYear(db, companyId, userId) {
+  const [rows] = await db.execute(
+    `SELECT id
+     FROM fiscal_years
+     WHERE company_id = ?
+       AND status = 'OPEN'
+     LIMIT 1`,
+    [companyId]
+  );
+
+  if (rows.length > 0) {
+    return;
+  }
+
+  const year = new Date().getUTCFullYear();
+  const startDate = `${year}-01-01`;
+  const endDate = `${year}-12-31`;
+  const code = `ITFY-${year}-${randomUUID().slice(0, 8)}`;
+
+  await db.execute(
+    `INSERT INTO fiscal_years (
+       company_id,
+       code,
+       name,
+       start_date,
+       end_date,
+       status,
+       created_by_user_id,
+       updated_by_user_id
+     ) VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?)`,
+    [companyId, code, `Integration Fiscal Year ${year}`, startDate, endDate, userId, userId]
+  );
+}
+
+async function ensureDefaultNumberingTemplates(db, companyId) {
+  const templates = [
+    { docType: "SALES_INVOICE", pattern: "INV/{{yy}}{{mm}}/{{seq4}}" },
+    { docType: "SALES_PAYMENT", pattern: "PAY/{{yy}}{{mm}}/{{seq4}}" },
+    { docType: "SALES_ORDER", pattern: "SO/{{yy}}{{mm}}/{{seq4}}" },
+    { docType: "CREDIT_NOTE", pattern: "CN/{{yy}}{{mm}}/{{seq4}}" }
+  ];
+
+  for (const template of templates) {
+    const [rows] = await db.execute(
+      `SELECT id
+       FROM numbering_templates
+       WHERE company_id = ?
+         AND doc_type = ?
+         AND outlet_id IS NULL
+       LIMIT 1`,
+      [companyId, template.docType]
+    );
+
+    if (rows.length > 0) {
+      await db.execute(
+        `UPDATE numbering_templates
+         SET is_active = 1,
+             pattern = ?,
+             reset_period = 'MONTHLY',
+             scope_key = 0
+         WHERE id = ?`,
+        [template.pattern, Number(rows[0].id)]
+      );
+      continue;
+    }
+
+    await db.execute(
+      `INSERT INTO numbering_templates (
+         company_id,
+         outlet_id,
+         scope_key,
+         doc_type,
+         pattern,
+         reset_period,
+         current_value,
+         last_reset,
+         is_active
+       ) VALUES (?, NULL, 0, ?, ?, 'MONTHLY', 0, NULL, 1)`,
+      [companyId, template.docType, template.pattern]
+    );
+  }
+}
+
 async function cleanupTestInvoices(db, invoiceNos) {
   if (invoiceNos.length === 0) return;
 
   const placeholders = invoiceNos.map(() => "?").join(", ");
+  const [invoiceRows] = await db.execute(
+    `SELECT id
+     FROM sales_invoices
+     WHERE invoice_no IN (${placeholders})`,
+    invoiceNos
+  );
+  const invoiceIds = invoiceRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
+
+  if (invoiceIds.length > 0) {
+    const invoiceIdPlaceholders = invoiceIds.map(() => "?").join(", ");
+    const [creditNoteRows] = await db.execute(
+      `SELECT id
+       FROM sales_credit_notes
+       WHERE invoice_id IN (${invoiceIdPlaceholders})`,
+      invoiceIds
+    );
+    const creditNoteIds = creditNoteRows
+      .map((row) => Number(row.id))
+      .filter((id) => Number.isFinite(id));
+
+    if (creditNoteIds.length > 0) {
+      const creditNotePlaceholders = creditNoteIds.map(() => "?").join(", ");
+      await db.execute(
+        `DELETE FROM sales_credit_note_lines
+         WHERE credit_note_id IN (${creditNotePlaceholders})`,
+        creditNoteIds
+      );
+      await db.execute(
+        `DELETE FROM sales_credit_notes
+         WHERE id IN (${creditNotePlaceholders})`,
+        creditNoteIds
+      );
+    }
+  }
+
   await db.execute(
     `DELETE FROM sales_invoices WHERE invoice_no IN (${placeholders})`,
     invoiceNos
@@ -444,6 +570,51 @@ async function cleanupTestPayments(db, paymentNos) {
   );
 }
 
+async function cleanupTestCreditNotes(db, companyId, creditNoteNos) {
+  if (!companyId || creditNoteNos.length === 0) return;
+
+  const placeholders = creditNoteNos.map(() => "?").join(", ");
+
+  // Find credit note IDs
+  const [cnRows] = await db.execute(
+    `SELECT id FROM sales_credit_notes
+     WHERE company_id = ? AND credit_note_no IN (${placeholders})`,
+    [companyId, ...creditNoteNos]
+  );
+  const cnIds = cnRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
+  if (cnIds.length === 0) return;
+
+  // Delete related journal lines for credit notes
+  const cnPlaceholders = cnIds.map(() => "?").join(", ");
+  const [cnBatchRows] = await db.execute(
+    `SELECT id FROM journal_batches
+     WHERE company_id = ? AND doc_type IN ('SALES_CREDIT_NOTE', 'SALES_CREDIT_NOTE_VOID') AND doc_id IN (${cnPlaceholders})`,
+    [companyId, ...cnIds]
+  );
+  const cnBatchIds = cnBatchRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
+  if (cnBatchIds.length > 0) {
+    const batchPlaceholders = cnBatchIds.map(() => "?").join(", ");
+    await db.execute(
+      `DELETE FROM journal_lines WHERE journal_batch_id IN (${batchPlaceholders})`,
+      cnBatchIds
+    );
+    await db.execute(
+      `DELETE FROM journal_batches WHERE id IN (${batchPlaceholders})`,
+      cnBatchIds
+    );
+  }
+
+  // Delete credit note lines, then credit notes
+  await db.execute(
+    `DELETE FROM sales_credit_note_lines WHERE credit_note_id IN (${cnPlaceholders})`,
+    cnIds
+  );
+  await db.execute(
+    `DELETE FROM sales_credit_notes WHERE id IN (${cnPlaceholders})`,
+    cnIds
+  );
+}
+
 test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   if (typeof loadEnvFile === "function") {
     try {
@@ -458,6 +629,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const db = testContext.db;
   const testInvoiceNos = [];
   const testPaymentNos = [];
+  const testCreditNoteNos = [];
   const testJournalBatchIds = [];
   let companyId = 0;
   let outletId = 0;
@@ -470,6 +642,8 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
     companyId = setupResult.companyId;
     outletId = setupResult.outletId;
     mappingFixture = setupResult.mappingFixture;
+    await ensureOpenFiscalYear(db, companyId, setupResult.userId);
+    await ensureDefaultNumberingTemplates(db, companyId);
     console.log('Test data setup complete');
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
@@ -483,6 +657,8 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
     });
 
     const authHeaders = { Authorization: `Bearer ${token}` };
+    const openFiscalDate = await resolveOpenFiscalDate(db, companyId);
+    const openFiscalDateTime = `${openFiscalDate}T12:00:00.000Z`;
 
     await t.test("Invoice draft create/update + post creates journal batch", { timeout: 30000 }, async () => {
       const invoiceNo = `TEST-INV-${randomUUID().slice(0, 8)}`;
@@ -548,7 +724,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         headers: authHeaders
       });
 
-      assert.strictEqual(postRes.status, 200);
+      assert.strictEqual(postRes.status, 200, JSON.stringify(postRes.body));
       assert.strictEqual(postRes.body.data.status, "POSTED");
 
       // Verify exactly one journal batch created
@@ -575,6 +751,83 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
 
       assert.strictEqual(totalDebit, totalCredit);
       assert.strictEqual(totalDebit, 1110);
+    });
+
+    await t.test("Invoice due_date defaults to Net 30 and supports common due_term options", { timeout: 30000 }, async () => {
+      const invoiceNoDefault = `TEST-INV-DUE-30-${randomUUID().slice(0, 8)}`;
+      const invoiceNoNet20 = `TEST-INV-DUE-20-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNoDefault, invoiceNoNet20);
+
+      const defaultRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNoDefault,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      assert.strictEqual(defaultRes.status, 201);
+      assert.strictEqual(defaultRes.body.success, true);
+      assert.strictEqual(defaultRes.body.data.due_date, "2024-02-14");
+
+      const net20Res = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNoNet20,
+          invoice_date: "2024-01-15",
+          due_term: "NET_20",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      assert.strictEqual(net20Res.status, 201);
+      assert.strictEqual(net20Res.body.success, true);
+      assert.strictEqual(net20Res.body.data.due_date, "2024-02-04");
+    });
+
+    await t.test("Invoice due_date explicit value overrides due_term and PATCH due_term recalculates", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-DUE-OVR-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+
+      const createRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          due_date: "2024-01-25",
+          due_term: "NET_90",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      assert.strictEqual(createRes.status, 201);
+      assert.strictEqual(createRes.body.success, true);
+      assert.strictEqual(createRes.body.data.due_date, "2024-01-25");
+
+      const invoiceId = createRes.body.data.id;
+      const patchRes = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}`, {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          invoice_date: "2024-01-20",
+          due_term: "NET_45"
+        })
+      });
+
+      assert.strictEqual(patchRes.status, 200);
+      assert.strictEqual(patchRes.body.success, true);
+      assert.strictEqual(patchRes.body.data.invoice_date, "2024-01-20");
+      assert.strictEqual(patchRes.body.data.due_date, "2024-03-05");
     });
 
     await t.test("Payment draft create + post creates journal batch", { timeout: 30000 }, async () => {
@@ -611,7 +864,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           outlet_id: outletId,
           invoice_id: invoiceId,
           payment_no: paymentNo,
-          payment_at: new Date().toISOString(),
+          payment_at: openFiscalDateTime,
           account_id: mappingFixture.accountIdsByKey.CASH,
           method: "CASH",
           amount: 1000
@@ -706,7 +959,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           outlet_id: outletId,
           invoice_id: invoiceId,
           payment_no: paymentNo,
-          payment_at: new Date().toISOString(),
+          payment_at: openFiscalDateTime,
           account_id: mappingFixture.accountIdsByKey.CASH,
           method: "CASH",
           amount: 1000
@@ -715,10 +968,11 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
 
       const paymentId = paymentRes.body.data.id;
 
-      await apiRequest(baseUrl, `/api/sales/payments/${paymentId}/post`, {
+      const postPaymentRes = await apiRequest(baseUrl, `/api/sales/payments/${paymentId}/post`, {
         method: "POST",
         headers: authHeaders
       });
+      assert.strictEqual(postPaymentRes.status, 200, JSON.stringify(postPaymentRes.body));
 
       // Check invoice updated correctly
       getRes = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}`, {
@@ -770,17 +1024,18 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           outlet_id: outletId,
           invoice_id: invoiceId,
           payment_no: payment1No,
-          payment_at: new Date().toISOString(),
+          payment_at: openFiscalDateTime,
           account_id: mappingFixture.accountIdsByKey.CASH,
           method: "CASH",
           amount: 400
         })
       });
 
-      await apiRequest(baseUrl, `/api/sales/payments/${payment1Res.body.data.id}/post`, {
+      const postPayment1Res = await apiRequest(baseUrl, `/api/sales/payments/${payment1Res.body.data.id}/post`, {
         method: "POST",
         headers: authHeaders
       });
+      assert.strictEqual(postPayment1Res.status, 200, JSON.stringify(postPayment1Res.body));
 
       // After first payment: PARTIAL
       getRes = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}`, {
@@ -797,17 +1052,18 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           outlet_id: outletId,
           invoice_id: invoiceId,
           payment_no: payment2No,
-          payment_at: new Date().toISOString(),
+          payment_at: openFiscalDateTime,
           account_id: mappingFixture.accountIdsByKey.QRIS,
           method: "QRIS",
           amount: 600
         })
       });
 
-      await apiRequest(baseUrl, `/api/sales/payments/${payment2Res.body.data.id}/post`, {
+      const postPayment2Res = await apiRequest(baseUrl, `/api/sales/payments/${payment2Res.body.data.id}/post`, {
         method: "POST",
         headers: authHeaders
       });
+      assert.strictEqual(postPayment2Res.status, 200, JSON.stringify(postPayment2Res.body));
 
       // After second payment: PAID
       getRes = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}`, {
@@ -851,7 +1107,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
           outlet_id: outletId,
           invoice_id: invoiceId,
           payment_no: paymentNo,
-          payment_at: new Date().toISOString(),
+          payment_at: openFiscalDateTime,
           account_id: mappingFixture.accountIdsByKey.CASH,
           method: "CASH",
           amount: 1500
@@ -990,7 +1246,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         body: JSON.stringify(payload)
       });
 
-      assert.strictEqual(firstRes.status, 201);
+      assert.strictEqual(firstRes.status, 201, JSON.stringify(firstRes.body));
       assert.strictEqual(firstRes.body.success, true);
       const firstId = firstRes.body.data.id;
 
@@ -1040,7 +1296,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         outlet_id: outletId,
         invoice_id: invoiceId,
         payment_no: paymentNo,
-        payment_at: new Date().toISOString(),
+        payment_at: openFiscalDateTime,
         account_id: mappingFixture.accountIdsByKey.CASH,
         method: "CASH",
         amount: 1000,
@@ -1140,6 +1396,424 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
 
       assert.strictEqual(Number(rows[0].count), 1);
     });
+
+    const SALES_CREDIT_NOTE_DOC_TYPE = "SALES_CREDIT_NOTE";
+    const SALES_CREDIT_NOTE_VOID_DOC_TYPE = "SALES_CREDIT_NOTE_VOID";
+
+    await t.test("Credit note create + post creates balanced journal batch", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-CN-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+
+      // Create and post invoice for 1000
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Create draft credit note for 300
+      const cnRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          credit_note_date: openFiscalDate,
+          amount: 300,
+          lines: [{ description: "Refund", qty: 1, unit_price: 300 }]
+        })
+      });
+
+      assert.strictEqual(cnRes.status, 201);
+      assert.strictEqual(cnRes.body.success, true);
+      assert.strictEqual(cnRes.body.data.status, "DRAFT");
+      assert.strictEqual(cnRes.body.data.amount, 300);
+      testCreditNoteNos.push(cnRes.body.data.credit_note_no);
+
+      const creditNoteId = cnRes.body.data.id;
+
+      // Verify no journal batch yet
+      const [prePostBatches] = await db.execute(
+        `SELECT COUNT(*) as count FROM journal_batches
+         WHERE company_id = ? AND doc_type = ? AND doc_id = ?`,
+        [companyId, SALES_CREDIT_NOTE_DOC_TYPE, creditNoteId]
+      );
+      assert.strictEqual(prePostBatches[0].count, 0);
+
+      // Post credit note
+      const postRes = await apiRequest(baseUrl, `/api/sales/credit-notes/${creditNoteId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      assert.strictEqual(postRes.status, 200, JSON.stringify(postRes.body));
+      assert.strictEqual(postRes.body.data.status, "POSTED");
+
+      // Verify exactly one journal batch created
+      const [batches] = await db.execute(
+        `SELECT id FROM journal_batches
+         WHERE company_id = ? AND doc_type = ? AND doc_id = ?`,
+        [companyId, SALES_CREDIT_NOTE_DOC_TYPE, creditNoteId]
+      );
+      assert.strictEqual(batches.length, 1);
+
+      const batchId = batches[0].id;
+
+      // Verify journal lines are balanced
+      const [lines] = await db.execute(
+        `SELECT account_id, debit, credit, description FROM journal_lines
+         WHERE journal_batch_id = ? ORDER BY id`,
+        [batchId]
+      );
+
+      assert.strictEqual(lines.length, 2); // Sales Returns Dr, AR Cr
+
+      const totalDebit = lines.reduce((sum, line) => sum + Number(line.debit), 0);
+      const totalCredit = lines.reduce((sum, line) => sum + Number(line.credit), 0);
+
+      assert.strictEqual(totalDebit, totalCredit);
+      assert.strictEqual(totalDebit, 300);
+
+      // Verify invoice paid_total reduced
+      const [invRows] = await db.execute(
+        `SELECT paid_total, payment_status FROM sales_invoices WHERE id = ?`,
+        [invoiceId]
+      );
+      assert.strictEqual(Number(invRows[0].paid_total), 0);
+      assert.strictEqual(invRows[0].payment_status, "UNPAID");
+    });
+
+    await t.test("Posted credit note void creates reversal journal", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-CN2-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+
+      // Create and post invoice for 1000, fully pay it
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Pay invoice in full
+      const paymentNo = `TEST-PAY-CN2-${randomUUID().slice(0, 8)}`;
+      testPaymentNos.push(paymentNo);
+      const paymentRes = await apiRequest(baseUrl, "/api/sales/payments", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          payment_no: paymentNo,
+          payment_at: openFiscalDateTime,
+          account_id: mappingFixture.accountIdsByKey.CASH,
+          method: "CASH",
+          amount: 1000
+        })
+      });
+      assert.strictEqual(paymentRes.status, 201, JSON.stringify(paymentRes.body));
+      const paymentId = paymentRes.body.data.id;
+      const paymentPostRes = await apiRequest(baseUrl, `/api/sales/payments/${paymentId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+      assert.strictEqual(paymentPostRes.status, 200, JSON.stringify(paymentPostRes.body));
+
+      // Create and post credit note for 200
+      const cnRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          credit_note_date: openFiscalDate,
+          amount: 200,
+          lines: [{ description: "Refund", qty: 1, unit_price: 200 }]
+        })
+      });
+
+      const creditNoteId = cnRes.body.data.id;
+      testCreditNoteNos.push(cnRes.body.data.credit_note_no);
+
+      await apiRequest(baseUrl, `/api/sales/credit-notes/${creditNoteId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Count batches before void
+      const [beforeBatches] = await db.execute(
+        `SELECT COUNT(*) as count FROM journal_batches
+         WHERE company_id = ? AND doc_id = ? AND doc_type LIKE 'SALES_CREDIT_NOTE%'`,
+        [companyId, creditNoteId]
+      );
+      assert.strictEqual(beforeBatches[0].count, 1);
+
+      // Void the credit note
+      const voidRes = await apiRequest(baseUrl, `/api/sales/credit-notes/${creditNoteId}/void`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      assert.strictEqual(voidRes.status, 200);
+      assert.strictEqual(voidRes.body.data.status, "VOID");
+
+      // Verify reversal batch created
+      const [batches] = await db.execute(
+        `SELECT id, doc_type FROM journal_batches
+         WHERE company_id = ? AND doc_id = ? AND doc_type LIKE 'SALES_CREDIT_NOTE%'
+         ORDER BY id`,
+        [companyId, creditNoteId]
+      );
+      assert.strictEqual(batches.length, 2);
+      assert.strictEqual(batches[1].doc_type, SALES_CREDIT_NOTE_VOID_DOC_TYPE);
+
+      // Verify reversal lines are balanced and reversed
+      const [voidLines] = await db.execute(
+        `SELECT debit, credit FROM journal_lines WHERE journal_batch_id = ? ORDER BY id`,
+        [batches[1].id]
+      );
+
+      const totalDebit = voidLines.reduce((sum, line) => sum + Number(line.debit), 0);
+      const totalCredit = voidLines.reduce((sum, line) => sum + Number(line.credit), 0);
+
+      assert.strictEqual(totalDebit, totalCredit);
+      assert.strictEqual(totalDebit, 200);
+
+      // Verify invoice paid_total restored
+      const [invRows] = await db.execute(
+        `SELECT paid_total, payment_status FROM sales_invoices WHERE id = ?`,
+        [invoiceId]
+      );
+      assert.strictEqual(Number(invRows[0].paid_total), 1000);
+      assert.strictEqual(invRows[0].payment_status, "PAID");
+    });
+
+    await t.test("Over-credit rejected with no journal side effects", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-CN3-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+
+      // Create and post invoice for 500
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 500 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Create first credit note for 300 (should succeed)
+      const cn1Res = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          credit_note_date: openFiscalDate,
+          amount: 300,
+          lines: [{ description: "Partial refund", qty: 1, unit_price: 300 }]
+        })
+      });
+      const cn1Id = cn1Res.body.data.id;
+      testCreditNoteNos.push(cn1Res.body.data.credit_note_no);
+      await apiRequest(baseUrl, `/api/sales/credit-notes/${cn1Id}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Try to create second credit note for 300 (total 600 > 500)
+      const cn2Res = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          credit_note_date: openFiscalDate,
+          amount: 300,
+          lines: [{ description: "Over refund", qty: 1, unit_price: 300 }]
+        })
+      });
+
+      assert.strictEqual(cn2Res.status, 409);
+      assert.strictEqual(cn2Res.body.success, false);
+      assert.strictEqual(cn2Res.body.error.code, "CONFLICT");
+
+      // Verify no credit note was created
+      const [cnRows] = await db.execute(
+        `SELECT COUNT(*) as count FROM sales_credit_notes
+         WHERE company_id = ? AND invoice_id = ?`,
+        [companyId, invoiceId]
+      );
+      assert.strictEqual(cnRows[0].count, 1); // Only the first one
+    });
+
+    await t.test("Credit note create is idempotent with client_ref", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-CN4-${randomUUID().slice(0, 8)}`;
+      const clientRef = randomUUID();
+      testInvoiceNos.push(invoiceNo);
+
+      // Create and post invoice
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      const payload = {
+        outlet_id: outletId,
+        invoice_id: invoiceId,
+        credit_note_date: openFiscalDate,
+        amount: 200,
+        client_ref: clientRef,
+        lines: [{ description: "Refund", qty: 1, unit_price: 200 }]
+      };
+
+      const firstRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(firstRes.status, 201);
+      assert.strictEqual(firstRes.body.success, true);
+      const firstId = firstRes.body.data.id;
+      testCreditNoteNos.push(firstRes.body.data.credit_note_no);
+
+      const retryRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(retryRes.status, 201);
+      assert.strictEqual(retryRes.body.success, true);
+      assert.strictEqual(retryRes.body.data.id, firstId);
+      assert.strictEqual(retryRes.body.data.client_ref, clientRef);
+
+      const [rows] = await db.execute(
+        `SELECT COUNT(*) as count FROM sales_credit_notes
+         WHERE company_id = ? AND client_ref = ?`,
+        [companyId, clientRef]
+      );
+
+      assert.strictEqual(Number(rows[0].count), 1);
+    });
+
+    await t.test("Credit note create without client_ref is non-idempotent", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-CN5-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+
+      // Create and post invoice
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      const payload = {
+        outlet_id: outletId,
+        invoice_id: invoiceId,
+        credit_note_date: openFiscalDate,
+        amount: 100,
+        lines: [{ description: "Refund", qty: 1, unit_price: 100 }]
+      };
+
+      const firstRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(firstRes.status, 201);
+      assert.strictEqual(firstRes.body.success, true);
+      const firstId = firstRes.body.data.id;
+
+      const secondRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(secondRes.status, 201);
+      assert.strictEqual(secondRes.body.success, true);
+      const secondId = secondRes.body.data.id;
+
+      // Without client_ref, two separate credit notes should be created
+      assert.notStrictEqual(firstId, secondId);
+
+      const [rows] = await db.execute(
+        `SELECT COUNT(*) as count FROM sales_credit_notes
+         WHERE company_id = ? AND invoice_id = ?`,
+        [companyId, invoiceId]
+      );
+
+      assert.strictEqual(Number(rows[0].count), 2);
+
+      // Track both for cleanup
+      testCreditNoteNos.push(firstRes.body.data.credit_note_no);
+      testCreditNoteNos.push(secondRes.body.data.credit_note_no);
+    });
   } finally {
     // Cleanup
     console.log('Cleaning up test data...');
@@ -1180,6 +1854,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       }
 
       await cleanupTestPayments(db, testPaymentNos);
+      await cleanupTestCreditNotes(db, companyId, testCreditNoteNos);
       await cleanupTestJournals(db, companyId, testInvoiceNos);
       await cleanupTestInvoices(db, testInvoiceNos);
       if (testJournalBatchIds.length > 0) {

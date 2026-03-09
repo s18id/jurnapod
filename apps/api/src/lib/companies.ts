@@ -585,6 +585,32 @@ async function ensureDefaultFiscalYear(
   );
 }
 
+const DEFAULT_NUMBERING_TEMPLATES = [
+  { doc_type: "SALES_INVOICE", pattern: "INV/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" },
+  { doc_type: "SALES_PAYMENT", pattern: "PAY/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" },
+  { doc_type: "SALES_ORDER", pattern: "SO/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" },
+  { doc_type: "CREDIT_NOTE", pattern: "CN/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" }
+];
+
+async function ensureNumberingTemplates(
+  connection: PoolConnection,
+  companyId: number
+): Promise<void> {
+  for (const template of DEFAULT_NUMBERING_TEMPLATES) {
+    const [existing] = await connection.execute(
+      `SELECT id FROM numbering_templates WHERE company_id = ? AND outlet_id IS NULL AND doc_type = ?`,
+      [companyId, template.doc_type]
+    );
+    if ((existing as any[]).length === 0) {
+      await connection.execute(
+        `INSERT INTO numbering_templates (company_id, outlet_id, scope_key, doc_type, pattern, reset_period, current_value, is_active)
+         VALUES (?, NULL, 0, ?, ?, ?, 0, 1)`,
+        [companyId, template.doc_type, template.pattern, template.reset_period]
+      );
+    }
+  }
+}
+
 async function bootstrapCompanyDefaults(
   connection: PoolConnection,
   params: { companyId: number; actor: CompanyActor }
@@ -597,6 +623,7 @@ async function bootstrapCompanyDefaults(
   await ensureModuleRoles(connection, params.companyId, roleIds);
   await ensureCompanySettings(connection, params.companyId, outletId, params.actor.userId);
   await ensureDefaultFiscalYear(connection, params.companyId, params.actor.userId);
+  await ensureNumberingTemplates(connection, params.companyId);
 }
 
 async function ensureCompanyExists(
