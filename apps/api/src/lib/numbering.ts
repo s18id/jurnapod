@@ -41,7 +41,7 @@ type NumberingTemplateRow = RowDataPacket & {
 };
 
 type NumberingCheckRow = RowDataPacket & {
-  exists: number;
+  row_exists: number;
 };
 
 export class NumberingConflictError extends Error {
@@ -227,7 +227,7 @@ export async function reserveDocumentNumber(
   try {
     await connection.beginTransaction();
     const [existing] = await connection.execute<NumberingCheckRow[]>(
-      `SELECT 1 as exists FROM ${tableConfig.table} 
+      `SELECT 1 as row_exists FROM ${tableConfig.table} 
        WHERE company_id = ? AND ${tableConfig.numberColumn} = ?
        LIMIT 1`,
       [companyId, requestedNumber]

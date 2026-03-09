@@ -4,6 +4,7 @@
 import { NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
+import { FiscalYearNotOpenError } from "../../../../../../src/lib/fiscal-years";
 import { errorResponse, successResponse } from "../../../../../../src/lib/response";
 import {
   DatabaseConflictError,
@@ -48,6 +49,14 @@ export const POST = withAuth(
 
       if (error instanceof DatabaseConflictError) {
         return errorResponse("CONFLICT", (error as Error).message, 409);
+      }
+
+      if (error instanceof FiscalYearNotOpenError) {
+        return errorResponse(
+          "FISCAL_YEAR_CLOSED",
+          "Credit note date is outside any open fiscal year",
+          400
+        );
       }
 
       if (error instanceof Error) {
