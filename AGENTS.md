@@ -2,6 +2,7 @@
 
 Important:
 - Use `opencode-commit-agent` for committing.
+- Use `opencode-*` subagents if the invoker is from OpenCode model.
 - Use `codex-*` subagents if the invoker is from an OpenAI model.
 - Use `claude-*` subagents if the invoker is from an Anthropic model.
 - Never commit unless explicitly asked.

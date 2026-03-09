@@ -254,6 +254,79 @@ export const SalesOrderListQuerySchema = PaginationQuerySchema.extend({
   date_to: DateOnlySchema.optional()
 });
 
+export const SalesCreditNoteStatusSchema = z.enum(["DRAFT", "POSTED", "VOID"]);
+
+export const SalesCreditNoteLineInputSchema = z.object({
+  description: z.string().trim().min(1).max(255),
+  qty: z.coerce.number().finite().positive(),
+  unit_price: MoneyInputNonNegativeSchema
+});
+
+export const SalesCreditNoteCreateRequestSchema = z.object({
+  outlet_id: NumericIdSchema,
+  invoice_id: NumericIdSchema,
+  credit_note_date: DateOnlySchema,
+  client_ref: z.string().uuid().optional(),
+  reason: z.string().max(1000).optional(),
+  notes: z.string().max(1000).optional(),
+  amount: MoneyInputPositiveSchema,
+  lines: z.array(SalesCreditNoteLineInputSchema).min(1)
+});
+
+export const SalesCreditNoteUpdateRequestSchema = z
+  .object({
+    credit_note_date: DateOnlySchema.optional(),
+    reason: z.string().max(1000).optional(),
+    notes: z.string().max(1000).optional(),
+    amount: MoneyInputPositiveSchema.optional(),
+    lines: z.array(SalesCreditNoteLineInputSchema).min(1).optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided"
+  });
+
+export const SalesCreditNoteLineSchema = z.object({
+  id: NumericIdSchema,
+  credit_note_id: NumericIdSchema,
+  line_no: z.coerce.number().int().positive(),
+  description: z.string().min(1),
+  qty: z.number().finite().positive(),
+  unit_price: MoneySchema.nonnegative(),
+  line_total: MoneySchema.nonnegative()
+});
+
+export const SalesCreditNoteSchema = z.object({
+  id: NumericIdSchema,
+  company_id: NumericIdSchema,
+  outlet_id: NumericIdSchema,
+  invoice_id: NumericIdSchema,
+  credit_note_no: z.string().min(1),
+  credit_note_date: DateOnlySchema,
+  client_ref: z.string().uuid().nullable(),
+  status: SalesCreditNoteStatusSchema,
+  reason: z.string().nullable(),
+  notes: z.string().nullable(),
+  amount: MoneySchema.nonnegative(),
+  created_by_user_id: NumericIdSchema.nullable(),
+  updated_by_user_id: NumericIdSchema.nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime()
+});
+
+export const SalesCreditNoteDetailSchema = SalesCreditNoteSchema.extend({
+  lines: z.array(SalesCreditNoteLineSchema)
+});
+
+export const SalesCreditNoteResponseSchema = SalesCreditNoteDetailSchema;
+
+export const SalesCreditNoteListQuerySchema = PaginationQuerySchema.extend({
+  outlet_id: NumericIdSchema.optional(),
+  invoice_id: NumericIdSchema.optional(),
+  status: SalesCreditNoteStatusSchema.optional(),
+  date_from: DateOnlySchema.optional(),
+  date_to: DateOnlySchema.optional()
+});
+
 export type SalesInvoicePaymentStatus = z.infer<
   typeof SalesInvoicePaymentStatusSchema
 >;
@@ -287,3 +360,11 @@ export type SalesOrder = z.infer<typeof SalesOrderSchema>;
 export type SalesOrderDetail = z.infer<typeof SalesOrderDetailSchema>;
 export type SalesOrderResponse = z.infer<typeof SalesOrderResponseSchema>;
 export type SalesOrderListQuery = z.infer<typeof SalesOrderListQuerySchema>;
+export type SalesCreditNoteStatus = z.infer<typeof SalesCreditNoteStatusSchema>;
+export type SalesCreditNoteCreateRequest = z.infer<typeof SalesCreditNoteCreateRequestSchema>;
+export type SalesCreditNoteUpdateRequest = z.infer<typeof SalesCreditNoteUpdateRequestSchema>;
+export type SalesCreditNoteLine = z.infer<typeof SalesCreditNoteLineSchema>;
+export type SalesCreditNote = z.infer<typeof SalesCreditNoteSchema>;
+export type SalesCreditNoteDetail = z.infer<typeof SalesCreditNoteDetailSchema>;
+export type SalesCreditNoteResponse = z.infer<typeof SalesCreditNoteResponseSchema>;
+export type SalesCreditNoteListQuery = z.infer<typeof SalesCreditNoteListQuerySchema>;

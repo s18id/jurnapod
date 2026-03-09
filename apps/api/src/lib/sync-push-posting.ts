@@ -13,7 +13,7 @@ const SYNC_PUSH_POSTING_MODE_ENV_KEY = "SYNC_PUSH_POSTING_MODE";
 const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV_KEY = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
 const POS_SALE_DOC_TYPE = "POS_SALE";
 const MONEY_SCALE = 100;
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
+const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "SALES_TAX", "AR", "SALES_RETURNS"] as const;
 type OutletAccountMappingKey = (typeof OUTLET_ACCOUNT_MAPPING_KEYS)[number];
 
 export const OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE = "OUTLET_ACCOUNT_MAPPING_MISSING";
@@ -201,38 +201,42 @@ async function readOutletAccountMappingByKey(
   dbExecutor: QueryExecutor,
   context: SyncPushPostingContext
 ): Promise<Record<OutletAccountMappingKey, number>> {
-  const placeholders = OUTLET_ACCOUNT_MAPPING_KEYS.map(() => "?").join(", ");
+  const requiredKeys = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
+  const placeholders = requiredKeys.map(() => "?").join(", ");
   const [rows] = await dbExecutor.execute(
     `SELECT mapping_key, account_id
      FROM outlet_account_mappings
      WHERE company_id = ?
        AND outlet_id = ?
        AND mapping_key IN (${placeholders})`,
-    [context.companyId, context.outletId, ...OUTLET_ACCOUNT_MAPPING_KEYS]
+    [context.companyId, context.outletId, ...requiredKeys]
   );
 
-  const accountByKey = new Map<OutletAccountMappingKey, number>();
+  const accountByKey = new Map<string, number>();
   for (const row of rows as Array<{ mapping_key?: string; account_id?: number }>) {
     if (typeof row.mapping_key !== "string" || !Number.isFinite(row.account_id)) {
       continue;
     }
 
-    if (!OUTLET_ACCOUNT_MAPPING_KEYS.includes(row.mapping_key as OutletAccountMappingKey)) {
+    if (!requiredKeys.includes(row.mapping_key as typeof requiredKeys[number])) {
       continue;
     }
 
-    accountByKey.set(row.mapping_key as OutletAccountMappingKey, Number(row.account_id));
+    accountByKey.set(row.mapping_key, Number(row.account_id));
   }
 
-  const missingKeys = OUTLET_ACCOUNT_MAPPING_KEYS.filter((key) => !accountByKey.has(key));
+  const missingKeys = requiredKeys.filter((key) => !accountByKey.has(key));
   if (missingKeys.length > 0) {
     throw new Error(OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE);
   }
 
+  const salesReturnsAccountId = accountByKey.get("SALES_RETURNS") ?? accountByKey.get("SALES_REVENUE");
+
   return {
     SALES_REVENUE: accountByKey.get("SALES_REVENUE") as number,
     SALES_TAX: accountByKey.get("SALES_TAX") as number,
-    AR: accountByKey.get("AR") as number
+    AR: accountByKey.get("AR") as number,
+    SALES_RETURNS: salesReturnsAccountId as number
   };
 }
 

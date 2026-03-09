@@ -444,6 +444,51 @@ async function cleanupTestPayments(db, paymentNos) {
   );
 }
 
+async function cleanupTestCreditNotes(db, companyId, creditNoteNos) {
+  if (!companyId || creditNoteNos.length === 0) return;
+
+  const placeholders = creditNoteNos.map(() => "?").join(", ");
+
+  // Find credit note IDs
+  const [cnRows] = await db.execute(
+    `SELECT id FROM sales_credit_notes
+     WHERE company_id = ? AND credit_note_no IN (${placeholders})`,
+    [companyId, ...creditNoteNos]
+  );
+  const cnIds = cnRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
+  if (cnIds.length === 0) return;
+
+  // Delete related journal lines for credit notes
+  const cnPlaceholders = cnIds.map(() => "?").join(", ");
+  const [cnBatchRows] = await db.execute(
+    `SELECT id FROM journal_batches
+     WHERE company_id = ? AND doc_type IN ('SALES_CREDIT_NOTE', 'SALES_CREDIT_NOTE_VOID') AND doc_id IN (${cnPlaceholders})`,
+    [companyId, ...cnIds]
+  );
+  const cnBatchIds = cnBatchRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
+  if (cnBatchIds.length > 0) {
+    const batchPlaceholders = cnBatchIds.map(() => "?").join(", ");
+    await db.execute(
+      `DELETE FROM journal_lines WHERE journal_batch_id IN (${batchPlaceholders})`,
+      cnBatchIds
+    );
+    await db.execute(
+      `DELETE FROM journal_batches WHERE id IN (${batchPlaceholders})`,
+      cnBatchIds
+    );
+  }
+
+  // Delete credit note lines, then credit notes
+  await db.execute(
+    `DELETE FROM sales_credit_note_lines WHERE credit_note_id IN (${cnPlaceholders})`,
+    cnIds
+  );
+  await db.execute(
+    `DELETE FROM sales_credit_notes WHERE id IN (${cnPlaceholders})`,
+    cnIds
+  );
+}
+
 test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   if (typeof loadEnvFile === "function") {
     try {
@@ -458,6 +503,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const db = testContext.db;
   const testInvoiceNos = [];
   const testPaymentNos = [];
+  const testCreditNoteNos = [];
   const testJournalBatchIds = [];
   let companyId = 0;
   let outletId = 0;
@@ -1140,6 +1186,419 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
 
       assert.strictEqual(Number(rows[0].count), 1);
     });
+
+    const SALES_CREDIT_NOTE_DOC_TYPE = "SALES_CREDIT_NOTE";
+    const SALES_CREDIT_NOTE_VOID_DOC_TYPE = "SALES_CREDIT_NOTE_VOID";
+
+    await t.test("Credit note create + post creates balanced journal batch", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-CN-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+
+      // Create and post invoice for 1000
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Create draft credit note for 300
+      const cnRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          credit_note_date: "2024-01-15",
+          amount: 300,
+          lines: [{ description: "Refund", qty: 1, unit_price: 300 }]
+        })
+      });
+
+      assert.strictEqual(cnRes.status, 201);
+      assert.strictEqual(cnRes.body.success, true);
+      assert.strictEqual(cnRes.body.data.status, "DRAFT");
+      assert.strictEqual(cnRes.body.data.amount, 300);
+      testCreditNoteNos.push(cnRes.body.data.credit_note_no);
+
+      const creditNoteId = cnRes.body.data.id;
+
+      // Verify no journal batch yet
+      const [prePostBatches] = await db.execute(
+        `SELECT COUNT(*) as count FROM journal_batches
+         WHERE company_id = ? AND doc_type = ? AND doc_id = ?`,
+        [companyId, SALES_CREDIT_NOTE_DOC_TYPE, creditNoteId]
+      );
+      assert.strictEqual(prePostBatches[0].count, 0);
+
+      // Post credit note
+      const postRes = await apiRequest(baseUrl, `/api/sales/credit-notes/${creditNoteId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      assert.strictEqual(postRes.status, 200);
+      assert.strictEqual(postRes.body.data.status, "POSTED");
+
+      // Verify exactly one journal batch created
+      const [batches] = await db.execute(
+        `SELECT id FROM journal_batches
+         WHERE company_id = ? AND doc_type = ? AND doc_id = ?`,
+        [companyId, SALES_CREDIT_NOTE_DOC_TYPE, creditNoteId]
+      );
+      assert.strictEqual(batches.length, 1);
+
+      const batchId = batches[0].id;
+
+      // Verify journal lines are balanced
+      const [lines] = await db.execute(
+        `SELECT account_id, debit, credit, description FROM journal_lines
+         WHERE journal_batch_id = ? ORDER BY id`,
+        [batchId]
+      );
+
+      assert.strictEqual(lines.length, 2); // Sales Returns Dr, AR Cr
+
+      const totalDebit = lines.reduce((sum, line) => sum + Number(line.debit), 0);
+      const totalCredit = lines.reduce((sum, line) => sum + Number(line.credit), 0);
+
+      assert.strictEqual(totalDebit, totalCredit);
+      assert.strictEqual(totalDebit, 300);
+
+      // Verify invoice paid_total reduced
+      const [invRows] = await db.execute(
+        `SELECT paid_total, payment_status FROM sales_invoices WHERE id = ?`,
+        [invoiceId]
+      );
+      assert.strictEqual(Number(invRows[0].paid_total), 0);
+      assert.strictEqual(invRows[0].payment_status, "UNPAID");
+    });
+
+    await t.test("Posted credit note void creates reversal journal", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-CN2-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+
+      // Create and post invoice for 1000, fully pay it
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Pay invoice in full
+      const paymentRes = await apiRequest(baseUrl, "/api/sales/payments", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          payment_no: `TEST-PAY-CN2-${randomUUID().slice(0, 8)}`,
+          payment_at: new Date().toISOString(),
+          account_id: mappingFixture.accountIdsByKey.CASH,
+          amount: 1000
+        })
+      });
+      const paymentId = paymentRes.body.data.id;
+      await apiRequest(baseUrl, `/api/sales/payments/${paymentId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Create and post credit note for 200
+      const cnRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          credit_note_date: "2024-01-15",
+          amount: 200,
+          lines: [{ description: "Refund", qty: 1, unit_price: 200 }]
+        })
+      });
+
+      const creditNoteId = cnRes.body.data.id;
+      testCreditNoteNos.push(cnRes.body.data.credit_note_no);
+
+      await apiRequest(baseUrl, `/api/sales/credit-notes/${creditNoteId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Count batches before void
+      const [beforeBatches] = await db.execute(
+        `SELECT COUNT(*) as count FROM journal_batches
+         WHERE company_id = ? AND doc_id = ? AND doc_type LIKE 'SALES_CREDIT_NOTE%'`,
+        [companyId, creditNoteId]
+      );
+      assert.strictEqual(beforeBatches[0].count, 1);
+
+      // Void the credit note
+      const voidRes = await apiRequest(baseUrl, `/api/sales/credit-notes/${creditNoteId}/void`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      assert.strictEqual(voidRes.status, 200);
+      assert.strictEqual(voidRes.body.data.status, "VOID");
+
+      // Verify reversal batch created
+      const [batches] = await db.execute(
+        `SELECT id, doc_type FROM journal_batches
+         WHERE company_id = ? AND doc_id = ? AND doc_type LIKE 'SALES_CREDIT_NOTE%'
+         ORDER BY id`,
+        [companyId, creditNoteId]
+      );
+      assert.strictEqual(batches.length, 2);
+      assert.strictEqual(batches[1].doc_type, SALES_CREDIT_NOTE_VOID_DOC_TYPE);
+
+      // Verify reversal lines are balanced and reversed
+      const [voidLines] = await db.execute(
+        `SELECT debit, credit FROM journal_lines WHERE journal_batch_id = ? ORDER BY id`,
+        [batches[1].id]
+      );
+
+      const totalDebit = voidLines.reduce((sum, line) => sum + Number(line.debit), 0);
+      const totalCredit = voidLines.reduce((sum, line) => sum + Number(line.credit), 0);
+
+      assert.strictEqual(totalDebit, totalCredit);
+      assert.strictEqual(totalDebit, 200);
+
+      // Verify invoice paid_total restored
+      const [invRows] = await db.execute(
+        `SELECT paid_total, payment_status FROM sales_invoices WHERE id = ?`,
+        [invoiceId]
+      );
+      assert.strictEqual(Number(invRows[0].paid_total), 1000);
+      assert.strictEqual(invRows[0].payment_status, "PAID");
+    });
+
+    await t.test("Over-credit rejected with no journal side effects", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-CN3-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+
+      // Create and post invoice for 500
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 500 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Create first credit note for 300 (should succeed)
+      const cn1Res = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          credit_note_date: "2024-01-15",
+          amount: 300,
+          lines: [{ description: "Partial refund", qty: 1, unit_price: 300 }]
+        })
+      });
+      const cn1Id = cn1Res.body.data.id;
+      testCreditNoteNos.push(cn1Res.body.data.credit_note_no);
+      await apiRequest(baseUrl, `/api/sales/credit-notes/${cn1Id}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      // Try to create second credit note for 300 (total 600 > 500)
+      const cn2Res = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          credit_note_date: "2024-01-15",
+          amount: 300,
+          lines: [{ description: "Over refund", qty: 1, unit_price: 300 }]
+        })
+      });
+
+      assert.strictEqual(cn2Res.status, 409);
+      assert.strictEqual(cn2Res.body.success, false);
+      assert.strictEqual(cn2Res.body.error.code, "CONFLICT");
+
+      // Verify no credit note was created
+      const [cnRows] = await db.execute(
+        `SELECT COUNT(*) as count FROM sales_credit_notes
+         WHERE company_id = ? AND invoice_id = ?`,
+        [companyId, invoiceId]
+      );
+      assert.strictEqual(cnRows[0].count, 1); // Only the first one
+    });
+
+    await t.test("Credit note create is idempotent with client_ref", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-CN4-${randomUUID().slice(0, 8)}`;
+      const clientRef = randomUUID();
+      testInvoiceNos.push(invoiceNo);
+
+      // Create and post invoice
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      const payload = {
+        outlet_id: outletId,
+        invoice_id: invoiceId,
+        credit_note_date: "2024-01-15",
+        amount: 200,
+        client_ref: clientRef,
+        lines: [{ description: "Refund", qty: 1, unit_price: 200 }]
+      };
+
+      const firstRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(firstRes.status, 201);
+      assert.strictEqual(firstRes.body.success, true);
+      const firstId = firstRes.body.data.id;
+      testCreditNoteNos.push(firstRes.body.data.credit_note_no);
+
+      const retryRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(retryRes.status, 201);
+      assert.strictEqual(retryRes.body.success, true);
+      assert.strictEqual(retryRes.body.data.id, firstId);
+      assert.strictEqual(retryRes.body.data.client_ref, clientRef);
+
+      const [rows] = await db.execute(
+        `SELECT COUNT(*) as count FROM sales_credit_notes
+         WHERE company_id = ? AND client_ref = ?`,
+        [companyId, clientRef]
+      );
+
+      assert.strictEqual(Number(rows[0].count), 1);
+    });
+
+    await t.test("Credit note create without client_ref is non-idempotent", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-CN5-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+
+      // Create and post invoice
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      const payload = {
+        outlet_id: outletId,
+        invoice_id: invoiceId,
+        credit_note_date: "2024-01-15",
+        amount: 100,
+        lines: [{ description: "Refund", qty: 1, unit_price: 100 }]
+      };
+
+      const firstRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(firstRes.status, 201);
+      assert.strictEqual(firstRes.body.success, true);
+      const firstId = firstRes.body.data.id;
+
+      const secondRes = await apiRequest(baseUrl, "/api/sales/credit-notes", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+
+      assert.strictEqual(secondRes.status, 201);
+      assert.strictEqual(secondRes.body.success, true);
+      const secondId = secondRes.body.data.id;
+
+      // Without client_ref, two separate credit notes should be created
+      assert.notStrictEqual(firstId, secondId);
+
+      const [rows] = await db.execute(
+        `SELECT COUNT(*) as count FROM sales_credit_notes
+         WHERE company_id = ? AND invoice_id = ?`,
+        [companyId, invoiceId]
+      );
+
+      assert.strictEqual(Number(rows[0].count), 2);
+
+      // Track both for cleanup
+      testCreditNoteNos.push(firstRes.body.data.credit_note_no);
+      testCreditNoteNos.push(secondRes.body.data.credit_note_no);
+    });
   } finally {
     // Cleanup
     console.log('Cleaning up test data...');
@@ -1180,6 +1639,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       }
 
       await cleanupTestPayments(db, testPaymentNos);
+      await cleanupTestCreditNotes(db, companyId, testCreditNoteNos);
       await cleanupTestJournals(db, companyId, testInvoiceNos);
       await cleanupTestInvoices(db, testInvoiceNos);
       if (testJournalBatchIds.length > 0) {

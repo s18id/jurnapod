@@ -87,12 +87,16 @@ DRAFT → APPROVED → POSTED → PAID
 
 ---
 
-## Planned Phases
-
-### Phase 4: Credit Notes (Refunds)
+### Phase 4: Credit Notes (Refunds) ✅
 **Priority:** High  
 **Effort:** Medium  
-**Status:** Planned
+**Status:** Complete
+
+**Implementation:**
+- `packages/db/migrations/0075_sales_credit_notes.sql` - Credit notes tables with `client_ref` for idempotency
+- `apps/api/src/lib/sales.ts` - Credit note CRUD, validations, and state machine
+- `apps/api/app/api/sales/credit-notes/` - Credit note management API
+- `apps/api/src/lib/sales-posting.ts` - Journal entry posting and void reversal
 
 **Database:**
 ```sql
@@ -103,6 +107,7 @@ CREATE TABLE sales_credit_notes (
   invoice_id BIGINT UNSIGNED NOT NULL, -- source invoice
   credit_note_no VARCHAR(64) NOT NULL,
   credit_note_date DATE NOT NULL,
+  client_ref CHAR(36) DEFAULT NULL, -- for idempotency
   status VARCHAR(16) DEFAULT 'DRAFT', -- DRAFT|POSTED|VOID
   reason TEXT,
   notes TEXT,
@@ -112,9 +117,12 @@ CREATE TABLE sales_credit_notes (
 ```
 
 **API Endpoints:**
-- POST `/api/sales/credit-notes` - Create credit note
+- GET `/api/sales/credit-notes` - List credit notes
+- POST `/api/sales/credit-notes` - Create credit note (supports `client_ref` for idempotency)
+- GET `/api/sales/credit-notes/:id` - Get credit note detail
+- PATCH `/api/sales/credit-notes/:id` - Update DRAFT credit note
 - POST `/api/sales/credit-notes/:id/post` - Post to journal
-- POST `/api/sales/credit-notes/:id/void` - Void credit note
+- POST `/api/sales/credit-notes/:id/void` - Void credit note (with reversing journal)
 
 **Journal Entries (on POST):**
 ```
@@ -122,14 +130,27 @@ Dr: Sales Returns (contra revenue)  amount
 Cr: Accounts Receivable              amount
 ```
 
+**Journal Entries (on VOID of POSTED):**
+```
+Dr: Accounts Receivable              amount
+Cr: Sales Returns (contra revenue)  amount
+```
+
 **Features:**
-- Link to source invoice
-- Auto-generate credit note number from numbering service
+- Link to source invoice (must be POSTED)
+- Auto-generate credit note number from numbering service (CN/{{yy}}{{mm}}/{{seq4}})
+- **Idempotency (optional)**: When `client_ref` is provided, prevents duplicate credit notes on retries; creates distinct notes when omitted
+- **Data validation**: Line totals must exactly match credit note amount (cent-exact equality)
+- **Amount validation**: Credit note amount cannot exceed cumulative credit capacity (`invoice_total - posted_non_void_credits`), allowing credits even on paid invoices
 - DRAFT → POSTED → VOID lifecycle
-- Reverse journal entries on post
-- Update invoice paid status
+- Update invoice paid status on post/void
+- Void protection: allows voiding from DRAFT or POSTED
+- Reversing journal entries when voiding POSTED credit notes
+- Transaction-safe locking with FOR UPDATE to prevent race over-crediting
 
 ---
+
+## Planned Phases
 
 ### Phase 5: Product/Item Linkage
 **Priority:** Medium  
@@ -307,7 +328,7 @@ CREATE TABLE sales_payment_splits (
 | 1. Numbering Service | Medium | High | ✅ | Complete |
 | 2. Sales Orders | Medium | High | ✅ | Complete |
 | 3. Enhanced Invoice State | Low | Medium | ✅ | Complete |
-| 4. Credit Notes | Medium | High | 🔴 Next | Planned |
+| 4. Credit Notes | Medium | High | ✅ | Complete |
 | 5. Product Linkage | Medium | Medium | 🟡 | Planned |
 | 6. Audit Trail | Low | Medium | 🟢 Optional | Planned |
 | 7. Ageing Report | Low | High | 🔴 Next | Planned |
@@ -317,20 +338,19 @@ CREATE TABLE sales_payment_splits (
 
 ## Recommended Sequence
 
-1. **Phase 4 (Credit Notes)** - High business value for handling returns/refunds
-2. **Phase 7 (Ageing Report)** - Low effort, high value for cash flow management
-3. **Phase 5 (Product Linkage)** - Foundation for inventory integration
-4. **Phase 6 (Audit Trail)** - Nice-to-have for compliance
-5. **Phase 8 (Payment Enhancements)** - Lower priority refinements
+1. **Phase 7 (Ageing Report)** - Low effort, high value for cash flow management
+2. **Phase 5 (Product Linkage)** - Foundation for inventory integration
+3. **Phase 6 (Audit Trail)** - Nice-to-have for compliance
+4. **Phase 8 (Payment Enhancements)** - Lower priority refinements
 
 ---
 
 ## Dependencies
 
-- **Phase 4 (Credit Notes)** requires Phase 1 (Numbering) ✅
+- **Phase 4 (Credit Notes)** requires Phase 1 (Numbering) ✅ Complete
 - **Phase 5 (Product Linkage)** requires existing items table ✅
 - **Phase 7 (Ageing Report)** requires Phase 3 (invoice status) ✅
-- **Phase 8 (Payment Enhancements)** may integrate with Phase 4 (credit notes)
+- **Phase 8 (Payment Enhancements)** may integrate with Phase 4 (credit notes) ✅ Complete
 
 ---
 
