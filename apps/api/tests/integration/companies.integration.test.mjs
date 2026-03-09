@@ -182,7 +182,7 @@ test(
     const companyCode = `T${runId}`.slice(0, 32).toUpperCase();
     const companyName = `Test Company ${runId}`;
 
-    const expectedRoleCodes = ["OWNER", "ADMIN", "CASHIER", "ACCOUNTANT"];
+    const expectedRoleCodes = ["OWNER", "COMPANY_ADMIN", "ADMIN", "CASHIER", "ACCOUNTANT"];
     const expectedModuleCodes = [
       "accounts",
       "inventory",

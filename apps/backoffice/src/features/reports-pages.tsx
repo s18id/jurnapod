@@ -1336,7 +1336,7 @@ export function ProfitLossPage(props: ReportsProps) {
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const accountFilters = useMemo(() => ({ report_group: "LR" as const, is_active: true }), []);
+  const accountFilters = useMemo(() => ({ report_group: "PL" as const, is_active: true }), []);
   const {
     data: fiscalYears,
     loading: fiscalYearsLoading,

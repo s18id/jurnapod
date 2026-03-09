@@ -39,14 +39,14 @@ Jurnapod supports **two role scopes**: global (company-wide) and outlet-scoped.
 ### Storage
 
 **Global roles:**
-- Stored in: `user_roles` table
-- Join: `users → user_roles → roles` (where `roles.is_global = 1`)
+- Stored in: `user_role_assignments` table
+- Join: `users → user_role_assignments → roles` (where `roles.is_global = 1`)
 - Grants access to: All outlets within the user's company
 
 **Outlet-scoped roles:**
-- Stored in: `user_outlet_roles` table
-- Join: `users → user_outlet_roles → outlets + roles` (where `roles.is_global = 0`)
-- Grants access to: Only assigned outlets (via `user_outlet_roles.outlet_id`)
+- Stored in: `user_role_assignments` table
+- Join: `users → user_role_assignments → outlets + roles` (where `roles.is_global = 0`)
+- Grants access to: Only assigned outlets (via `user_role_assignments.outlet_id`)
 
 ### Key Behaviors
 
@@ -58,7 +58,7 @@ Jurnapod supports **two role scopes**: global (company-wide) and outlet-scoped.
 #### Outlet-Scoped Roles
 - **ADMIN, ACCOUNTANT, CASHIER**: Can only access explicitly assigned outlets
 - Outlet roles can still access company-wide routes (e.g., `/api/users`), but permissions control what actions they can perform
-- Outlet access is verified via `user_outlet_roles` table
+- Outlet access is verified via `user_role_assignments` table
 
 ---
 
@@ -86,7 +86,7 @@ Use this decision tree to determine which authorization pattern to apply.
            ├─ Checks: hasRole + hasPermission + hasOutletAccess
            ├─ Global roles bypass outlet access check
            │  (automatically access all outlets)
-           └─ Outlet roles checked against user_outlet_roles
+           └─ Outlet roles checked against user_role_assignments
 
 2. Does route need cross-company access (SUPER_ADMIN)?
    ├─ Check: if (targetCompanyId !== auth.companyId) {
@@ -453,7 +453,7 @@ if (!access.hasPermission && !access.isSuperAdmin) {
 **Example:**
 ```typescript
 test('User with outlet ADMIN role should have hasRole=true', async () => {
-  // Setup: Create user with ADMIN in user_outlet_roles
+  // Setup: Create user with ADMIN in user_role_assignments
   // Assert: checkUserAccess({ allowedRoles: ['ADMIN'] }).hasRole = true
 });
 ```

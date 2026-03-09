@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import type { PoolConnection, QueryResult } from "mysql2/promise";
 import { AuditService } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
 
@@ -10,6 +10,10 @@ export class CompanyNotFoundError extends Error {}
 export class CompanyCodeExistsError extends Error {}
 export class CompanyDeactivatedError extends Error {}
 export class CompanyAlreadyActiveError extends Error {}
+
+type IdRow = RowDataPacket & {
+  id: number;
+};
 
 const DEFAULT_OUTLET_CODE = "MAIN";
 const DEFAULT_OUTLET_NAME = "Main Outlet";
@@ -399,15 +403,19 @@ async function upsertRole(
   isGlobal: boolean,
   roleLevel: number
 ): Promise<number> {
+  const [existing] = await connection.execute<IdRow[]>(
+    `SELECT id FROM roles WHERE code = ?`,
+    [roleCode]
+  );
+
+  if (existing.length > 0) {
+    const id = existing.map(a => a.id)[0]
+    return id
+  }
+
   const [result] = await connection.execute<ResultSetHeader>(
     `INSERT INTO roles (code, name, is_global, role_level)
-     VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       name = VALUES(name),
-       is_global = VALUES(is_global),
-       role_level = VALUES(role_level),
-       id = LAST_INSERT_ID(id),
-       updated_at = CURRENT_TIMESTAMP`,
+     VALUES (?, ?, ?, ?)`,
     [roleCode, roleName, isGlobal ? 1 : 0, roleLevel]
   );
 
@@ -440,7 +448,6 @@ async function upsertModule(
      ON DUPLICATE KEY UPDATE
        name = VALUES(name),
        description = VALUES(description),
-       id = LAST_INSERT_ID(id),
        updated_at = CURRENT_TIMESTAMP`,
     [moduleCode, moduleName, moduleDescription]
   );

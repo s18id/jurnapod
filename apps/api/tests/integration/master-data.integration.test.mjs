@@ -214,9 +214,9 @@ test(
 
       const [ownerRoleAssignmentRows] = await db.execute(
         `SELECT 1
-         FROM user_roles ur
-         INNER JOIN users u ON u.id = ur.user_id
-         INNER JOIN roles r ON r.id = ur.role_id
+         FROM user_role_assignments ura
+         INNER JOIN users u ON u.id = ura.user_id
+         INNER JOIN roles r ON r.id = ura.role_id
          INNER JOIN companies c ON c.id = u.company_id
          WHERE u.email = ?
            AND c.code = ?
@@ -226,7 +226,7 @@ test(
       );
       if (!ownerRoleAssignmentRows[0]) {
         await db.execute(
-          `INSERT INTO user_roles (user_id, role_id)
+          `INSERT INTO user_role_assignments (user_id, role_id)
            SELECT u.id, r.id
            FROM users u
            INNER JOIN roles r ON r.code = 'OWNER'
@@ -239,9 +239,9 @@ test(
 
         const [postInsertRows] = await db.execute(
           `SELECT 1
-           FROM user_roles ur
-           INNER JOIN users u ON u.id = ur.user_id
-           INNER JOIN roles r ON r.id = ur.role_id
+           FROM user_role_assignments ura
+           INNER JOIN users u ON u.id = ura.user_id
+           INNER JOIN roles r ON r.id = ura.role_id
            INNER JOIN companies c ON c.id = u.company_id
            WHERE u.email = ?
              AND c.code = ?
@@ -558,9 +558,9 @@ test(
 
       const [ownerRoleAssignmentRows] = await db.execute(
         `SELECT 1
-         FROM user_roles ur
-         INNER JOIN users u ON u.id = ur.user_id
-         INNER JOIN roles r ON r.id = ur.role_id
+         FROM user_role_assignments ura
+         INNER JOIN users u ON u.id = ura.user_id
+         INNER JOIN roles r ON r.id = ura.role_id
          INNER JOIN companies c ON c.id = u.company_id
          WHERE u.email = ?
            AND c.code = ?
@@ -570,7 +570,7 @@ test(
       );
       if (!ownerRoleAssignmentRows[0]) {
         await db.execute(
-          `INSERT INTO user_roles (user_id, role_id)
+          `INSERT INTO user_role_assignments (user_id, role_id)
            SELECT u.id, r.id
            FROM users u
            INNER JOIN roles r ON r.code = 'OWNER'
@@ -583,9 +583,9 @@ test(
 
         const [postInsertRows] = await db.execute(
           `SELECT 1
-           FROM user_roles ur
-           INNER JOIN users u ON u.id = ur.user_id
-           INNER JOIN roles r ON r.id = ur.role_id
+           FROM user_role_assignments ura
+           INNER JOIN users u ON u.id = ura.user_id
+           INNER JOIN roles r ON r.id = ura.role_id
            INNER JOIN companies c ON c.id = u.company_id
            WHERE u.email = ?
              AND c.code = ?
@@ -940,13 +940,13 @@ test(
       adminUserId = Number(adminInsert.insertId);
 
       await db.execute(
-        `INSERT INTO user_roles (user_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, role_id)
          VALUES (?, ?)`,
         [adminUserId, Number(adminRoleId)]
       );
 
       await db.execute(
-        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
          VALUES (?, ?, ?)`,
         [adminUserId, allowedOutletId, Number(adminRoleId)]
       );
@@ -1082,8 +1082,8 @@ test(
       }
 
       if (adminUserId > 0) {
-        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [adminUserId]);
-        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [adminUserId]);
         await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
 
@@ -1512,13 +1512,13 @@ test(
       adminUserId = Number(adminInsert.insertId);
 
       await db.execute(
-        `INSERT INTO user_roles (user_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, role_id)
          VALUES (?, ?)`,
         [adminUserId, Number(adminRoleId)]
       );
 
       await db.execute(
-        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
          VALUES (?, ?, ?)`,
         [adminUserId, outletId, Number(adminRoleId)]
       );
@@ -1667,8 +1667,8 @@ test(
       }
 
       if (adminUserId > 0) {
-        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [adminUserId]);
-        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [adminUserId]);
         await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
     }

@@ -48,7 +48,7 @@ type UserRow = RowDataPacket & {
   updated_at: Date;
 };
 
-type RoleRow = RowDataPacket & {
+export type RoleRow = RowDataPacket & {
   id: number;
   code: string;
   name: string;

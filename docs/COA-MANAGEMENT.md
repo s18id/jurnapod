@@ -29,7 +29,7 @@ CREATE TABLE accounts (
   name VARCHAR(191) NOT NULL,
   type_name VARCHAR(191) NULL,
   normal_balance CHAR(1) NULL COMMENT 'D=Debit, K=Kredit',
-  report_group VARCHAR(8) NULL COMMENT 'NRC=Neraca, LR=Laba Rugi',
+  report_group VARCHAR(8) NULL COMMENT 'NRC=Neraca, PL=Laba Rugi',
   parent_account_id BIGINT UNSIGNED NULL,
   is_group TINYINT(1) NOT NULL DEFAULT 0,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -405,8 +405,8 @@ GET /api/accounts/1/usage?company_id=1
 
 ```typescript
 type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
-type NormalBalance = "D" | "K"; // D=Debit, K=Kredit
-type ReportGroup = "NRC" | "LR"; // NRC=Neraca, LR=Laba Rugi
+type NormalBalance = "D" | "C"; // D=Debit, C=Credit
+type ReportGroup = "NRC" | "PL"; // NRC=Neraca, PL=Laba Rugi
 
 type AccountResponse = {
   id: number;

@@ -81,6 +81,7 @@ export const SalesInvoiceSchema = z.object({
   company_id: NumericIdSchema,
   outlet_id: NumericIdSchema,
   invoice_no: z.string().min(1),
+  client_ref: z.string().uuid().nullable().optional(),
   invoice_date: DateOnlySchema,
   status: DocumentStatusSchema,
   payment_status: SalesInvoicePaymentStatusSchema,
@@ -88,6 +89,8 @@ export const SalesInvoiceSchema = z.object({
   tax_amount: MoneySchema.nonnegative(),
   grand_total: MoneySchema.nonnegative(),
   paid_total: MoneySchema.nonnegative(),
+  created_by_user_id: NumericIdSchema.nullable().optional(),
+  updated_by_user_id: NumericIdSchema.nullable().optional(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime()
 });
@@ -138,12 +141,15 @@ export const SalesPaymentSchema = z.object({
   outlet_id: NumericIdSchema,
   invoice_id: NumericIdSchema,
   payment_no: z.string().min(1),
+  client_ref: z.string().uuid().nullable().optional(),
   payment_at: z.string().datetime(),
   account_id: NumericIdSchema,
   account_name: z.string().optional(), // joined from accounts table
   method: SalesPaymentMethodSchema.optional(), // deprecated
   status: DocumentStatusSchema,
   amount: MoneySchema.positive(),
+  created_by_user_id: NumericIdSchema.nullable().optional(),
+  updated_by_user_id: NumericIdSchema.nullable().optional(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime()
 });

@@ -14,9 +14,7 @@ type ModuleRow = {
 
 type ModulesResponse = {
   success: true;
-  data: {
-    modules: ModuleRow[];
-  };
+  data: ModuleRow[];
 };
 
 export type ModuleConfig = CachedModuleConfig;
@@ -59,7 +57,7 @@ export function useModules(accessToken: string | null, companyId: number | null)
         accessToken
       );
 
-      const parsed = response.data.modules.map((row) => ({
+      const parsed = response.data.map((row) => ({
         code: row.code,
         enabled: row.enabled,
         config: row.config_json ? JSON.parse(row.config_json) : {}

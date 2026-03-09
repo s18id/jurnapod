@@ -21,7 +21,7 @@ import {
  * Query params:
  * - company_id (required): Company ID
  * - is_active (optional): Filter by active status ("true"/"false")
- * - report_group (optional): Filter by report group ("NRC"/"LR")
+ * - report_group (optional): Filter by report group ("NRC"/"PL")
  * - parent_account_id (optional): Filter by parent account ID
  * - search (optional): Search by code or name
  * 

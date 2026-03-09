@@ -210,7 +210,7 @@ export class AccountsService {
           company_id, code, name, account_type_id, type_name, normal_balance, report_group,
           parent_account_id, is_group, is_payable, is_active, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
       `;
 
       const params = [

@@ -513,6 +513,12 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       assert.strictEqual(createRes.body.data.payment_status, "UNPAID");
       assert.strictEqual(createRes.body.data.subtotal, 1000);
       assert.strictEqual(createRes.body.data.grand_total, 1100);
+      // Verify new fields are present
+      assert.ok(createRes.body.data.hasOwnProperty("client_ref"), "invoice should have client_ref field");
+      assert.ok(createRes.body.data.hasOwnProperty("created_by_user_id"), "invoice should have created_by_user_id field");
+      assert.ok(createRes.body.data.hasOwnProperty("updated_by_user_id"), "invoice should have updated_by_user_id field");
+      assert.strictEqual(typeof createRes.body.data.created_by_user_id, "number", "created_by_user_id should be a number");
+      assert.strictEqual(typeof createRes.body.data.updated_by_user_id, "number", "updated_by_user_id should be a number");
 
       const invoiceId = createRes.body.data.id;
 
@@ -614,6 +620,12 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
 
       assert.strictEqual(createRes.status, 201);
       assert.strictEqual(createRes.body.data.status, "DRAFT");
+      // Verify new fields are present
+      assert.ok(createRes.body.data.hasOwnProperty("client_ref"), "payment should have client_ref field");
+      assert.ok(createRes.body.data.hasOwnProperty("created_by_user_id"), "payment should have created_by_user_id field");
+      assert.ok(createRes.body.data.hasOwnProperty("updated_by_user_id"), "payment should have updated_by_user_id field");
+      assert.strictEqual(typeof createRes.body.data.created_by_user_id, "number", "created_by_user_id should be a number");
+      assert.strictEqual(typeof createRes.body.data.updated_by_user_id, "number", "updated_by_user_id should be a number");
 
       const paymentId = createRes.body.data.id;
 
@@ -991,6 +1003,8 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       assert.strictEqual(retryRes.status, 201);
       assert.strictEqual(retryRes.body.success, true);
       assert.strictEqual(retryRes.body.data.id, firstId);
+      // Verify client_ref is returned in response
+      assert.strictEqual(retryRes.body.data.client_ref, clientRef, "second call should return same client_ref");
 
       const [rows] = await db.execute(
         `SELECT COUNT(*) as count FROM sales_invoices
@@ -1052,6 +1066,8 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       assert.strictEqual(retryRes.status, 201);
       assert.strictEqual(retryRes.body.success, true);
       assert.strictEqual(retryRes.body.data.id, firstId);
+      // Verify client_ref is returned in response
+      assert.strictEqual(retryRes.body.data.client_ref, clientRef, "second call should return same client_ref");
 
       const [rows] = await db.execute(
         `SELECT COUNT(*) as count FROM sales_payments

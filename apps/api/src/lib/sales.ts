@@ -12,6 +12,7 @@ type SalesInvoiceRow = RowDataPacket & {
   company_id: number;
   outlet_id: number;
   invoice_no: string;
+  client_ref?: string | null;
   invoice_date: Date | string;
   status: "DRAFT" | "POSTED" | "VOID";
   payment_status: "UNPAID" | "PARTIAL" | "PAID";
@@ -19,6 +20,8 @@ type SalesInvoiceRow = RowDataPacket & {
   tax_amount: string | number;
   grand_total: string | number;
   paid_total: string | number;
+  created_by_user_id?: number | null;
+  updated_by_user_id?: number | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -99,6 +102,7 @@ export type SalesInvoice = {
   company_id: number;
   outlet_id: number;
   invoice_no: string;
+  client_ref?: string | null;
   invoice_date: string;
   status: "DRAFT" | "POSTED" | "VOID";
   payment_status: "UNPAID" | "PARTIAL" | "PAID";
@@ -106,6 +110,8 @@ export type SalesInvoice = {
   tax_amount: number;
   grand_total: number;
   paid_total: number;
+  created_by_user_id?: number | null;
+  updated_by_user_id?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -138,12 +144,15 @@ type SalesPaymentRow = RowDataPacket & {
   outlet_id: number;
   invoice_id: number;
   payment_no: string;
+  client_ref?: string | null;
   payment_at: Date | string;
   account_id: number;
   account_name?: string;
   method?: "CASH" | "QRIS" | "CARD"; // deprecated
   status: "DRAFT" | "POSTED" | "VOID";
   amount: string | number;
+  created_by_user_id?: number | null;
+  updated_by_user_id?: number | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -154,12 +163,15 @@ export type SalesPayment = {
   outlet_id: number;
   invoice_id: number;
   payment_no: string;
+  client_ref?: string | null;
   payment_at: string;
   account_id: number;
   account_name?: string;
   method?: "CASH" | "QRIS" | "CARD"; // deprecated
   status: "DRAFT" | "POSTED" | "VOID";
   amount: number;
+  created_by_user_id?: number | null;
+  updated_by_user_id?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -210,6 +222,7 @@ function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
     company_id: Number(row.company_id),
     outlet_id: Number(row.outlet_id),
     invoice_no: row.invoice_no,
+    client_ref: row.client_ref ?? null,
     invoice_date: formatDateOnly(row.invoice_date),
     status: row.status,
     payment_status: row.payment_status,
@@ -217,6 +230,8 @@ function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
     tax_amount: Number(row.tax_amount),
     grand_total: Number(row.grand_total),
     paid_total: Number(row.paid_total),
+    created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
+    updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
     created_at: new Date(row.created_at).toISOString(),
     updated_at: new Date(row.updated_at).toISOString()
   };
@@ -340,8 +355,9 @@ async function findInvoiceByIdWithExecutor(
 ): Promise<SalesInvoice | null> {
   const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
   const [rows] = await executor.execute<SalesInvoiceRow[]>(
-    `SELECT id, company_id, outlet_id, invoice_no, invoice_date, status, payment_status,
-            subtotal, tax_amount, grand_total, paid_total, created_at, updated_at
+    `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, status, payment_status,
+            subtotal, tax_amount, grand_total, paid_total,
+            created_by_user_id, updated_by_user_id, created_at, updated_at
      FROM sales_invoices
      WHERE company_id = ?
        AND id = ?
@@ -492,8 +508,9 @@ export async function listInvoices(companyId: number, filters: InvoiceListFilter
   const total = Number(countRows[0]?.total ?? 0);
 
   const [rows] = await pool.execute<SalesInvoiceRow[]>(
-    `SELECT id, company_id, outlet_id, invoice_no, invoice_date, status, payment_status,
-            subtotal, tax_amount, grand_total, paid_total, created_at, updated_at
+    `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, status, payment_status,
+            subtotal, tax_amount, grand_total, paid_total,
+            created_by_user_id, updated_by_user_id, created_at, updated_at
      FROM sales_invoices
      WHERE ${where.clause}
      ORDER BY invoice_date DESC, id DESC
@@ -957,12 +974,15 @@ function normalizePayment(row: SalesPaymentRow): SalesPayment {
     outlet_id: Number(row.outlet_id),
     invoice_id: Number(row.invoice_id),
     payment_no: row.payment_no,
+    client_ref: row.client_ref ?? null,
     payment_at: new Date(row.payment_at).toISOString(),
     account_id: Number(row.account_id),
     account_name: row.account_name,
     method: row.method,
     status: row.status,
     amount: Number(row.amount),
+    created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
+    updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
     created_at: new Date(row.created_at).toISOString(),
     updated_at: new Date(row.updated_at).toISOString()
   };
@@ -976,9 +996,9 @@ async function findPaymentByIdWithExecutor(
 ): Promise<SalesPayment | null> {
   const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
   const [rows] = await executor.execute<SalesPaymentRow[]>(
-    `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.payment_at,
+    `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
             sp.account_id, a.name as account_name, sp.method, sp.status,
-            sp.amount, sp.created_at, sp.updated_at
+            sp.amount, sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
      FROM sales_payments sp
      LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
      WHERE sp.company_id = ?
@@ -1065,9 +1085,9 @@ export async function listPayments(companyId: number, filters: PaymentListFilter
   const total = Number(countRows[0]?.total ?? 0);
 
   const [rows] = await pool.execute<SalesPaymentRow[]>(
-    `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.payment_at,
+    `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
             sp.account_id, a.name as account_name, sp.method, sp.status,
-            sp.amount, sp.created_at, sp.updated_at
+            sp.amount, sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
      FROM sales_payments sp
      LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
      WHERE ${where.clause}

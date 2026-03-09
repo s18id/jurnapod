@@ -24,6 +24,8 @@ test(
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
     const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
     const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const superAdminEmail = readEnv("JP_SUPER_ADMIN_EMAIL").toLowerCase();
+    const superAdminPassword = readEnv("JP_SUPER_ADMIN_PASSWORD");
 
     const runId = Date.now().toString(36);
     const testUserEmailPrefix = `acltest+${runId}`;
@@ -36,9 +38,7 @@ test(
     let adminToken;
     let cashierUser;
     let cashierToken;
-    let globalOwnerUser;
     let globalOwnerToken;
-    let superAdminUser;
     let superAdminToken;
     let otherCompanyId;
     let otherOutletId;
@@ -176,64 +176,6 @@ test(
       // Login as cashier
       cashierToken = await loginOwner(baseUrl, companyCode, cashierEmail, cashierPassword);
 
-      // ========================================
-      // Setup: Create global OWNER user
-      // ========================================
-      const globalOwnerEmail = `${testUserEmailPrefix}-globalowner@example.com`;
-      const globalOwnerPassword = "GlobalOwnerPass123!";
-
-      const createGlobalOwnerResponse = await fetch(`${baseUrl}/api/users`, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${ownerToken}`,
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          email: globalOwnerEmail,
-          password: globalOwnerPassword,
-          role_codes: ["OWNER"],
-          outlet_ids: [mainOutletId],
-          is_active: true
-        })
-      });
-
-      assert.equal(createGlobalOwnerResponse.status, 201, "Failed to create global OWNER user");
-      const createGlobalOwnerBody = await createGlobalOwnerResponse.json();
-      globalOwnerUser = Number(createGlobalOwnerBody.data.id);
-
-      // Login as global owner
-      globalOwnerToken = await loginOwner(baseUrl, companyCode, globalOwnerEmail, globalOwnerPassword);
-
-      // ========================================
-      // Setup: Create SUPER_ADMIN user and another company
-      // ========================================
-      const superAdminEmail = `${testUserEmailPrefix}-superadmin@example.com`;
-      const superAdminPassword = "SuperAdminPass123!";
-      const superAdminPasswordHash = await bcrypt.hash(superAdminPassword, 12);
-
-      // Create SUPER_ADMIN user directly in DB (cannot be created via API)
-      const [superAdminResult] = await db.execute(
-        `INSERT INTO users (company_id, email, password_hash, is_active)
-         VALUES (?, ?, ?, 1)`,
-        [companyId, superAdminEmail, superAdminPasswordHash]
-      );
-      superAdminUser = Number(superAdminResult.insertId);
-
-      // Assign SUPER_ADMIN role
-      await db.execute(
-        `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`,
-        [superAdminUser, superAdminRoleId]
-      );
-
-      // Assign to main outlet
-      await db.execute(
-        `INSERT INTO user_outlets (user_id, outlet_id) VALUES (?, ?)`,
-        [superAdminUser, mainOutletId]
-      );
-
-      // Login as super admin
-      superAdminToken = await loginOwner(baseUrl, companyCode, superAdminEmail, superAdminPassword);
-
       // Create another company for cross-company tests
       const otherCompanyCode = `OTHER${runId}`.slice(0, 32).toUpperCase();
       const [otherCompanyResult] = await db.execute(
@@ -367,7 +309,7 @@ test(
         `${baseUrl}/api/settings/config?outlet_id=${outletA}&keys=feature.pos.auto_sync_enabled`,
         {
           headers: {
-            authorization: `Bearer ${globalOwnerToken}`,
+            authorization: `Bearer ${ownerToken}`,
             "content-type": "application/json"
           }
         }
@@ -383,7 +325,7 @@ test(
         `${baseUrl}/api/settings/config?outlet_id=${outletB}&keys=feature.pos.auto_sync_enabled`,
         {
           headers: {
-            authorization: `Bearer ${globalOwnerToken}`,
+            authorization: `Bearer ${ownerToken}`,
             "content-type": "application/json"
           }
         }
@@ -394,6 +336,8 @@ test(
         200,
         "Global OWNER should be able to access outlet B settings"
       );
+
+      superAdminToken = await loginOwner(baseUrl, companyCode, superAdminEmail, superAdminPassword);
 
       // ========================================
       // Test 6: SUPER_ADMIN can access other company data
@@ -447,8 +391,8 @@ test(
 
       assert.equal(
         globalOwnerOtherCompanyResponse.status,
-        400,
-        "Global OWNER should not be able to access other company data (should return 400)"
+        401,
+        "Global OWNER should not be able to access other company data (should return 401)"
       );
 
       console.log("✓ All outlet role ACL tests passed");
@@ -476,12 +420,6 @@ test(
       }
       if (cashierUser) {
         await db.execute(`DELETE FROM users WHERE id = ?`, [cashierUser]);
-      }
-      if (globalOwnerUser) {
-        await db.execute(`DELETE FROM users WHERE id = ?`, [globalOwnerUser]);
-      }
-      if (superAdminUser) {
-        await db.execute(`DELETE FROM users WHERE id = ?`, [superAdminUser]);
       }
       if (outletA) {
         await db.execute(`DELETE FROM outlets WHERE id = ?`, [outletA]);

@@ -103,7 +103,7 @@ test(
 
       // Assign ADMIN role
       await db.execute(
-        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
          VALUES (?, ?, ?)`,
         [salesUserId, outletId, adminRoleId]
       );
@@ -164,7 +164,7 @@ test(
         `DELETE FROM module_roles WHERE company_id = ? AND role_id = ? AND module = 'sales'`,
         [companyId, adminRoleId]
       );
-      await db.execute(`DELETE FROM user_outlet_roles WHERE user_id = ?`, [salesUserId]);
+      await db.execute(`DELETE FROM user_role_assignments WHERE user_id = ?`, [salesUserId]);
       await db.execute(`DELETE FROM users WHERE id = ?`, [salesUserId]);
       createdUserId = null;
 
@@ -184,7 +184,7 @@ test(
 
       // Assign ADMIN role
       await db.execute(
-        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
          VALUES (?, ?, ?)`,
         [reportsUserId, outletId, adminRoleId]
       );
@@ -224,7 +224,7 @@ test(
       assert.equal(trialBalanceBody.error.code, "FORBIDDEN");
 
       // Cleanup for Test 2
-      await db.execute(`DELETE FROM user_outlet_roles WHERE user_id = ?`, [reportsUserId]);
+      await db.execute(`DELETE FROM user_role_assignments WHERE user_id = ?`, [reportsUserId]);
       await db.execute(`DELETE FROM users WHERE id = ?`, [reportsUserId]);
       createdUserId = null;
 
@@ -244,7 +244,7 @@ test(
 
       // Assign ADMIN role
       await db.execute(
-        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
          VALUES (?, ?, ?)`,
         [journalsUserId, outletId, adminRoleId]
       );
@@ -318,14 +318,14 @@ test(
         `DELETE FROM module_roles WHERE company_id = ? AND role_id = ? AND module = 'journals'`,
         [companyId, adminRoleId]
       );
-      await db.execute(`DELETE FROM user_outlet_roles WHERE user_id = ?`, [journalsUserId]);
+      await db.execute(`DELETE FROM user_role_assignments WHERE user_id = ?`, [journalsUserId]);
       await db.execute(`DELETE FROM users WHERE id = ?`, [journalsUserId]);
       createdUserId = null;
 
     } finally {
       // Final cleanup in case of early exit
       if (createdUserId) {
-        await db.execute(`DELETE FROM user_outlet_roles WHERE user_id = ?`, [createdUserId]);
+        await db.execute(`DELETE FROM user_role_assignments WHERE user_id = ?`, [createdUserId]);
         await db.execute(`DELETE FROM users WHERE id = ?`, [createdUserId]);
       }
 

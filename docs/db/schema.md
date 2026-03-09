@@ -92,7 +92,7 @@ Checks:
 - Owner row exists for configured company/email.
 - Password verifier self-check passes for both hash formats (bcrypt + argon2id).
 - Configured owner password compare succeeds against stored hash (bcrypt or argon2id).
-- `user_roles` contains `OWNER` role relation.
+- `user_role_assignments` contains `OWNER` role relation.
 - `user_outlets` contains default outlet relation.
 - Required seeded modules exist with expected values:
   - `pos` = enabled

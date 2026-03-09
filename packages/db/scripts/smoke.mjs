@@ -302,14 +302,14 @@ async function main() {
 
     const [ownerRoleRows] = await connection.execute(
       `SELECT 1
-       FROM user_roles ur
-       INNER JOIN roles r ON r.id = ur.role_id
-       WHERE ur.user_id = ? AND r.code = 'OWNER'
+       FROM user_role_assignments ura
+       INNER JOIN roles r ON r.id = ura.role_id
+       WHERE ura.user_id = ? AND r.code = 'OWNER'
        LIMIT 1`,
       [owner.id]
     );
     if (ownerRoleRows.length === 0) {
-      throw new Error("user_roles relation missing OWNER membership");
+      throw new Error("user_role_assignments relation missing OWNER membership");
     }
 
     const [ownerOutletRows] = await connection.execute(
