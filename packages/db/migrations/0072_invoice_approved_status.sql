@@ -60,6 +60,42 @@ PREPARE add_fk_stmt FROM @add_fk_sql;
 EXECUTE add_fk_stmt;
 DEALLOCATE PREPARE add_fk_stmt;
 
+-- Add index for approved_by_user_id
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'sales_invoices'
+    AND INDEX_NAME = 'idx_sales_invoices_approved_by_user_id'
+);
+
+SET @add_idx_sql := IF(
+  @idx_exists = 0,
+  'CREATE INDEX idx_sales_invoices_approved_by_user_id ON sales_invoices (approved_by_user_id)',
+  'SELECT 1'
+);
+
+PREPARE add_idx_stmt FROM @add_idx_sql;
+EXECUTE add_idx_stmt;
+DEALLOCATE PREPARE add_idx_stmt;
+
 -- Update CHECK constraint to include APPROVED
-ALTER TABLE sales_invoices DROP CONSTRAINT chk_sales_invoices_status;
+SET @chk_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.TABLE_CONSTRAINTS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'sales_invoices'
+    AND CONSTRAINT_NAME = 'chk_sales_invoices_status'
+);
+
+SET @drop_chk_sql := IF(
+  @chk_exists = 0,
+  'SELECT 1',
+  'ALTER TABLE sales_invoices DROP CONSTRAINT chk_sales_invoices_status'
+);
+
+PREPARE drop_chk_stmt FROM @drop_chk_sql;
+EXECUTE drop_chk_stmt;
+DEALLOCATE PREPARE drop_chk_stmt;
+
 ALTER TABLE sales_invoices ADD CONSTRAINT chk_sales_invoices_status CHECK (status IN ('DRAFT', 'APPROVED', 'POSTED', 'VOID'));

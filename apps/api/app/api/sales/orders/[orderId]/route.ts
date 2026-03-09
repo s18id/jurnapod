@@ -6,12 +6,11 @@ import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
-  confirmOrder,
-  completeOrder,
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError,
-  voidOrder
+  getOrder,
+  updateOrder
 } from "../../../../../src/lib/sales";
 
 function parseOrderId(request: Request): number {
@@ -24,12 +23,24 @@ export const GET = withAuth(
   async (request, auth) => {
     try {
       const orderId = parseOrderId(request);
-      console.log("GET /sales/orders/:id not fully implemented yet - would fetch order", orderId);
-      return errorResponse("NOT_IMPLEMENTED", "Order retrieval not implemented", 501);
+      const order = await getOrder(auth.companyId, orderId, {
+        userId: auth.userId
+      });
+
+      if (!order) {
+        return errorResponse("NOT_FOUND", "Order not found", 404);
+      }
+
+      return successResponse(order);
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
+
+      if (error instanceof DatabaseForbiddenError) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+
       console.error("GET /sales/orders/:id failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Order request failed", 500);
     }
@@ -47,12 +58,35 @@ export const PATCH = withAuth(
   async (request, auth) => {
     try {
       const orderId = parseOrderId(request);
-      console.log("PATCH /sales/orders/:id not fully implemented yet - would update order", orderId);
-      return errorResponse("NOT_IMPLEMENTED", "Order update not implemented", 501);
+      const payload = await request.json();
+      const input = SalesOrderUpdateRequestSchema.parse(payload);
+
+      const order = await updateOrder(auth.companyId, orderId, input, {
+        userId: auth.userId
+      });
+
+      if (!order) {
+        return errorResponse("NOT_FOUND", "Order not found", 404);
+      }
+
+      return successResponse(order);
     } catch (error) {
-      if (error instanceof ZodError) {
+      if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
+
+      if (error instanceof DatabaseForbiddenError) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+
+      if (error instanceof DatabaseReferenceError) {
+        return errorResponse("NOT_FOUND", "Outlet not found", 404);
+      }
+
+      if (error instanceof DatabaseConflictError) {
+        return errorResponse("CONFLICT", error.message, 409);
+      }
+
       console.error("PATCH /sales/orders/:id failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Order request failed", 500);
     }

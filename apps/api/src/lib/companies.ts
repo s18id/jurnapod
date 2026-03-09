@@ -603,8 +603,8 @@ async function ensureNumberingTemplates(
     );
     if ((existing as any[]).length === 0) {
       await connection.execute(
-        `INSERT INTO numbering_templates (company_id, outlet_id, doc_type, pattern, reset_period, current_value, is_active)
-         VALUES (?, NULL, ?, ?, ?, 0, 1)`,
+        `INSERT INTO numbering_templates (company_id, outlet_id, scope_key, doc_type, pattern, reset_period, current_value, is_active)
+         VALUES (?, NULL, 0, ?, ?, ?, 0, 1)`,
         [companyId, template.doc_type, template.pattern, template.reset_period]
       );
     }

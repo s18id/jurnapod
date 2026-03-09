@@ -7,8 +7,21 @@ import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import { getDbPool } from "../../../../../src/lib/db";
 
+const sequencePatternRegex = /{{seq(\d+)?}}/;
+
+function hasSequencePlaceholder(pattern: string): boolean {
+  return sequencePatternRegex.test(pattern);
+}
+
 const NumberingTemplateUpdateSchema = z.object({
-  pattern: z.string().min(1).max(128).optional(),
+  pattern: z
+    .string()
+    .min(1)
+    .max(128)
+    .refine(hasSequencePlaceholder, {
+      message: "Pattern must include {{seq}} or {{seqN}}"
+    })
+    .optional(),
   reset_period: z.enum(["NEVER", "YEARLY", "MONTHLY"]).optional(),
   is_active: z.boolean().optional(),
   current_value: z.number().int().min(0).optional()

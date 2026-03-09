@@ -3,7 +3,12 @@
 
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../../../src/lib/response";
-import { completeOrder, DatabaseConflictError, DatabaseReferenceError } from "../../../../../../src/lib/sales";
+import {
+  completeOrder,
+  DatabaseConflictError,
+  DatabaseForbiddenError,
+  DatabaseReferenceError
+} from "../../../../../../src/lib/sales";
 
 function parseOrderId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -24,6 +29,10 @@ export const POST = withAuth(
     } catch (error) {
       if (error instanceof DatabaseReferenceError) {
         return errorResponse("NOT_FOUND", "Order not found", 404);
+      }
+
+      if (error instanceof DatabaseForbiddenError) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       if (error instanceof DatabaseConflictError) {

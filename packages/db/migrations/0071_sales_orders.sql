@@ -100,7 +100,7 @@ SET @fk_exists := (
 
 SET @add_fk_sql := IF(
   @fk_exists = 0,
-  'ALTER TABLE sales_invoices ADD CONSTRAINT fk_sales_invoices_order_scoped FOREIGN KEY (company_id, outlet_id, order_id) REFERENCES sales_orders(company_id, outlet_id, id) ON DELETE SET NULL',
+  'ALTER TABLE sales_invoices ADD CONSTRAINT fk_sales_invoices_order_scoped FOREIGN KEY (company_id, outlet_id, order_id) REFERENCES sales_orders(company_id, outlet_id, id) ON DELETE RESTRICT',
   'SELECT 1'
 );
 

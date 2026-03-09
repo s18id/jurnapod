@@ -5,8 +5,14 @@ import { z } from "zod";
 import { NumericIdSchema } from "@jurnapod/shared";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../../../src/lib/response";
-import { convertOrderToInvoice, DatabaseConflictError, DatabaseReferenceError } from "../../../../../../src/lib/sales";
-import { NumberingConflictError, NumberingTemplateNotFoundError } from "../../../../../../src/lib/numbering";
+import {
+  convertOrderToInvoice,
+  DatabaseConflictError,
+  DatabaseForbiddenError,
+  DatabaseReferenceError
+} from "../../../../../../src/lib/sales";
+const numberingTemplateConflictMessage =
+  "No numbering template configured. Please configure document numbering in settings.";
 
 const ConvertToInvoiceSchema = z.object({
   outlet_id: NumericIdSchema,
@@ -44,19 +50,18 @@ export const POST = withAuth(
       }
 
       if (error instanceof DatabaseReferenceError) {
+        if (error.message === "Numbering template not configured") {
+          return errorResponse("CONFLICT", numberingTemplateConflictMessage, 409);
+        }
         return errorResponse("NOT_FOUND", error.message, 404);
+      }
+
+      if (error instanceof DatabaseForbiddenError) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       if (error instanceof DatabaseConflictError) {
         return errorResponse("CONFLICT", error.message, 409);
-      }
-
-      if (error instanceof NumberingConflictError) {
-        return errorResponse("CONFLICT", error.message, 409);
-      }
-
-      if (error instanceof NumberingTemplateNotFoundError) {
-        return errorResponse("CONFLICT", "No numbering template configured. Please configure document numbering in settings.", 409);
       }
 
       console.error("POST /sales/orders/:id/convert-to-invoice failed", error);

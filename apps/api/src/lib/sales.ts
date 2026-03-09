@@ -6,7 +6,13 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "./db";
 import { calculateTaxLines, listCompanyDefaultTaxRates } from "./taxes";
 import { postSalesInvoiceToJournal, postSalesPaymentToJournal } from "./sales-posting";
-import { DOCUMENT_TYPES, getNextDocumentNumber, NumberingConflictError, NumberingTemplateNotFoundError } from "./numbering";
+import {
+  DOCUMENT_TYPES,
+  getNextDocumentNumber,
+  NumberingConflictError,
+  NumberingTemplateNotFoundError
+} from "./numbering";
+import type { DocumentType } from "./numbering";
 
 type SalesInvoiceRow = RowDataPacket & {
   id: number;
@@ -298,6 +304,25 @@ async function withTransaction<T>(operation: (connection: PoolConnection) => Pro
   }
 }
 
+async function getNumberWithConflictMapping(
+  companyId: number,
+  outletId: number | null,
+  docType: DocumentType,
+  requestedNumber?: string | null
+): Promise<string> {
+  try {
+    return await getNextDocumentNumber(companyId, outletId, docType, requestedNumber);
+  } catch (error) {
+    if (error instanceof NumberingConflictError) {
+      throw new DatabaseConflictError(error.message);
+    }
+    if (error instanceof NumberingTemplateNotFoundError) {
+      throw new DatabaseReferenceError("Numbering template not configured");
+    }
+    throw error;
+  }
+}
+
 async function ensureCompanyOutletExists(
   executor: QueryExecutor,
   companyId: number,
@@ -364,6 +389,7 @@ async function findInvoiceByIdWithExecutor(
   const [rows] = await executor.execute<SalesInvoiceRow[]>(
     `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, status, payment_status,
             subtotal, tax_amount, grand_total, paid_total,
+            approved_by_user_id, approved_at,
             created_by_user_id, updated_by_user_id, created_at, updated_at
      FROM sales_invoices
      WHERE company_id = ?
@@ -517,6 +543,7 @@ export async function listInvoices(companyId: number, filters: InvoiceListFilter
   const [rows] = await pool.execute<SalesInvoiceRow[]>(
     `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, status, payment_status,
             subtotal, tax_amount, grand_total, paid_total,
+            approved_by_user_id, approved_at,
             created_by_user_id, updated_by_user_id, created_at, updated_at
      FROM sales_invoices
      WHERE ${where.clause}
@@ -566,7 +593,7 @@ export async function createInvoice(
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
     }
 
-    const invoiceNo = await getNextDocumentNumber(
+    const invoiceNo = await getNumberWithConflictMapping(
       companyId,
       input.outlet_id,
       DOCUMENT_TYPES.SALES_INVOICE,
@@ -1175,7 +1202,7 @@ export async function createPayment(
     const amount = normalizeMoney(input.amount);
     const paymentAt = toMysqlDateTime(input.payment_at);
 
-    const paymentNo = await getNextDocumentNumber(
+    const paymentNo = await getNumberWithConflictMapping(
       companyId,
       input.outlet_id,
       DOCUMENT_TYPES.SALES_PAYMENT,
@@ -1549,10 +1576,12 @@ function buildOrderLines(lines: OrderLineInput[]): Array<{ line_no: number; desc
 async function findOrderByIdWithExecutor(
   executor: QueryExecutor,
   companyId: number,
-  orderId: number
+  orderId: number,
+  options?: { forUpdate?: boolean }
 ): Promise<SalesOrderRow | null> {
+  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
   const [rows] = await executor.execute<SalesOrderRow[]>(
-    `SELECT * FROM sales_orders WHERE company_id = ? AND id = ?`,
+    `SELECT * FROM sales_orders WHERE company_id = ? AND id = ?${forUpdateClause}`,
     [companyId, orderId]
   );
   return rows[0] || null;
@@ -1618,6 +1647,23 @@ function normalizeSalesOrderLineRow(row: SalesOrderLineRow): SalesOrderLine {
   };
 }
 
+async function findOrderDetailWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  orderId: number
+): Promise<SalesOrderDetail | null> {
+  const order = await findOrderByIdWithExecutor(executor, companyId, orderId);
+  if (!order) {
+    return null;
+  }
+
+  const lines = await findOrderLinesByOrderId(executor, orderId);
+  return {
+    ...normalizeSalesOrderRow(order),
+    lines: lines.map(normalizeSalesOrderLineRow)
+  };
+}
+
 export async function createOrder(
   companyId: number,
   input: {
@@ -1651,7 +1697,7 @@ export async function createOrder(
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
     }
 
-    const orderNo = await getNextDocumentNumber(
+    const orderNo = await getNumberWithConflictMapping(
       companyId,
       input.outlet_id,
       DOCUMENT_TYPES.SALES_ORDER,
@@ -1729,6 +1775,172 @@ export async function createOrder(
       ...normalizeSalesOrderRow(order),
       lines: lines.map(normalizeSalesOrderLineRow)
     };
+  });
+}
+
+export async function getOrder(
+  companyId: number,
+  orderId: number,
+  actor?: MutationActor
+): Promise<SalesOrderDetail | null> {
+  const pool = getDbPool();
+  const order = await findOrderByIdWithExecutor(pool, companyId, orderId);
+  if (!order) {
+    return null;
+  }
+
+  if (actor) {
+    await ensureUserHasOutletAccess(pool, actor.userId, companyId, order.outlet_id);
+  }
+
+  const lines = await findOrderLinesByOrderId(pool, orderId);
+  return {
+    ...normalizeSalesOrderRow(order),
+    lines: lines.map(normalizeSalesOrderLineRow)
+  };
+}
+
+export async function updateOrder(
+  companyId: number,
+  orderId: number,
+  input: {
+    outlet_id?: number;
+    order_no?: string;
+    order_date?: string;
+    expected_date?: string;
+    notes?: string;
+    lines?: OrderLineInput[];
+  },
+  actor?: MutationActor
+): Promise<SalesOrderDetail | null> {
+  return withTransaction(async (connection) => {
+    const current = await findOrderByIdWithExecutor(connection, companyId, orderId, {
+      forUpdate: true
+    });
+    if (!current) {
+      return null;
+    }
+
+    if (current.status !== "DRAFT") {
+      throw new DatabaseConflictError("Order is not editable");
+    }
+
+    if (actor) {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, current.outlet_id);
+    }
+
+    if (typeof input.outlet_id === "number") {
+      await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+      if (actor) {
+        await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+      }
+    }
+
+    const nextOutletId = input.outlet_id ?? current.outlet_id;
+    const nextOrderNo = input.order_no ?? current.order_no;
+    const nextOrderDate = input.order_date ?? formatDateOnly(current.order_date);
+    const nextExpectedDate = input.expected_date ??
+      (current.expected_date ? formatDateOnly(current.expected_date) : null);
+    const nextNotes = input.notes ?? current.notes;
+
+    let lineRows: Array<{ line_no: number; description: string; qty: number; unit_price: number; line_total: number }> | null = null;
+    let subtotal = Number(current.subtotal);
+
+    if (input.lines) {
+      lineRows = buildOrderLines(input.lines);
+      subtotal = sumMoney(lineRows.map((line) => line.line_total));
+    } else if (nextOutletId !== current.outlet_id) {
+      const existingLines = await findOrderLinesByOrderId(connection, orderId);
+      const lineInputs = existingLines.map((line) => ({
+        description: line.description,
+        qty: Number(line.qty),
+        unit_price: Number(line.unit_price)
+      }));
+      lineRows = buildOrderLines(lineInputs);
+      subtotal = sumMoney(lineRows.map((line) => line.line_total));
+    }
+
+    const taxAmount = Number(current.tax_amount);
+    const grandTotal = normalizeMoney(subtotal + taxAmount);
+
+    if (lineRows) {
+      await connection.execute<ResultSetHeader>(
+        `DELETE FROM sales_order_lines
+         WHERE company_id = ?
+           AND order_id = ?`,
+        [companyId, orderId]
+      );
+    }
+
+    try {
+      await connection.execute<ResultSetHeader>(
+        `UPDATE sales_orders
+         SET outlet_id = ?,
+             order_no = ?,
+             order_date = ?,
+             expected_date = ?,
+             notes = ?,
+             subtotal = ?,
+             tax_amount = ?,
+             grand_total = ?,
+             updated_by_user_id = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE company_id = ?
+           AND id = ?`,
+        [
+          nextOutletId,
+          nextOrderNo,
+          nextOrderDate,
+          nextExpectedDate,
+          nextNotes,
+          subtotal,
+          taxAmount,
+          grandTotal,
+          actor?.userId ?? null,
+          companyId,
+          orderId
+        ]
+      );
+    } catch (error) {
+      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
+        throw new DatabaseConflictError("Duplicate order");
+      }
+
+      throw error;
+    }
+
+    if (lineRows) {
+      const placeholders = lineRows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+      const values: Array<string | number> = [];
+      for (const line of lineRows) {
+        values.push(
+          orderId,
+          companyId,
+          nextOutletId,
+          line.line_no,
+          line.description,
+          line.qty,
+          line.unit_price,
+          line.line_total
+        );
+      }
+
+      await connection.execute(
+        `INSERT INTO sales_order_lines (
+           order_id,
+           company_id,
+           outlet_id,
+           line_no,
+           description,
+           qty,
+           unit_price,
+           line_total
+         ) VALUES ${placeholders}`,
+        values
+      );
+    }
+
+    return findOrderDetailWithExecutor(connection, companyId, orderId);
   });
 }
 
@@ -1833,6 +2045,10 @@ export async function voidOrder(
       throw new DatabaseConflictError("Order is already void");
     }
 
+    if (order.status === "COMPLETED") {
+      throw new DatabaseConflictError("Completed orders cannot be voided");
+    }
+
     if (actor) {
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, order.outlet_id);
     }
@@ -1867,7 +2083,10 @@ export async function listOrders(
   const conditions: string[] = ["company_id = ?"];
   const values: Array<number | string> = [companyId];
 
-  if (filters.outletIds && filters.outletIds.length > 0) {
+  if (filters.outletIds) {
+    if (filters.outletIds.length === 0) {
+      return { total: 0, orders: [] };
+    }
     const placeholders = filters.outletIds.map(() => "?").join(", ");
     conditions.push(`outlet_id IN (${placeholders})`);
     values.push(...filters.outletIds);
@@ -1947,7 +2166,7 @@ export async function convertOrderToInvoice(
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
     }
 
-    const invoiceNo = await getNextDocumentNumber(
+    const invoiceNo = await getNumberWithConflictMapping(
       companyId,
       input.outlet_id,
       DOCUMENT_TYPES.SALES_INVOICE,
@@ -2046,15 +2265,25 @@ export async function convertOrderToInvoice(
       );
     }
 
-    for (const tax of taxLines) {
+    if (taxLines.length > 0) {
+      const placeholders = taxLines.map(() => "(?, ?, ?, ?, ?)").join(", ");
+      const values = taxLines.flatMap((tax) => [
+        invoiceId,
+        companyId,
+        input.outlet_id,
+        tax.tax_rate_id,
+        tax.amount
+      ]);
+
       await connection.execute<ResultSetHeader>(
         `INSERT INTO sales_invoice_taxes (
-          invoice_id,
+          sales_invoice_id,
           company_id,
+          outlet_id,
           tax_rate_id,
           amount
-        ) VALUES (?, ?, ?, ?)`,
-        [invoiceId, companyId, tax.tax_rate_id, tax.amount]
+        ) VALUES ${placeholders}`,
+        values
       );
     }
 
@@ -2084,7 +2313,11 @@ export async function approveInvoice(
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, invoice.outlet_id);
     }
 
-    if (invoice.status === "APPROVED" || invoice.status === "POSTED") {
+    if (invoice.status === "POSTED") {
+      throw new InvoiceStatusError("Posted invoices cannot be approved");
+    }
+
+    if (invoice.status === "APPROVED") {
       return findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
     }
 

@@ -2,7 +2,6 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { DOCUMENT_TYPES, RESET_PERIODS } from "../../../../src/lib/numbering";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import { getDbPool } from "../../../../src/lib/db";
@@ -19,16 +18,31 @@ const NumberingTemplateSchema = z.object({
   is_active: z.boolean()
 });
 
+const sequencePatternRegex = /{{seq(\d+)?}}/;
+
+function hasSequencePlaceholder(pattern: string): boolean {
+  return sequencePatternRegex.test(pattern);
+}
+
 const NumberingTemplateCreateSchema = z.object({
   outlet_id: z.number().nullable().optional(),
   doc_type: z.enum(["SALES_INVOICE", "SALES_PAYMENT", "SALES_ORDER", "CREDIT_NOTE"]),
-  pattern: z.string().min(1).max(128),
+  pattern: z.string().min(1).max(128).refine(hasSequencePlaceholder, {
+    message: "Pattern must include {{seq}} or {{seqN}}"
+  }),
   reset_period: z.enum(["NEVER", "YEARLY", "MONTHLY"]),
   is_active: z.boolean().default(true)
 });
 
 const NumberingTemplateUpdateSchema = z.object({
-  pattern: z.string().min(1).max(128).optional(),
+  pattern: z
+    .string()
+    .min(1)
+    .max(128)
+    .refine(hasSequencePlaceholder, {
+      message: "Pattern must include {{seq}} or {{seqN}}"
+    })
+    .optional(),
   reset_period: z.enum(["NEVER", "YEARLY", "MONTHLY"]).optional(),
   is_active: z.boolean().optional(),
   current_value: z.number().int().min(0).optional()
@@ -71,10 +85,19 @@ async function getTemplate(companyId: number, templateId: number): Promise<Numbe
 
 async function createTemplate(companyId: number, input: z.infer<typeof NumberingTemplateCreateSchema>): Promise<NumberingTemplate> {
   const pool = getDbPool();
+  const scopeKey = input.outlet_id ?? 0;
   const [result] = await pool.execute(
-    `INSERT INTO numbering_templates (company_id, outlet_id, doc_type, pattern, reset_period, current_value, is_active)
-     VALUES (?, ?, ?, ?, ?, 0, ?)`,
-    [companyId, input.outlet_id ?? null, input.doc_type, input.pattern, input.reset_period, input.is_active ? 1 : 0]
+    `INSERT INTO numbering_templates (company_id, outlet_id, scope_key, doc_type, pattern, reset_period, current_value, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+    [
+      companyId,
+      input.outlet_id ?? null,
+      scopeKey,
+      input.doc_type,
+      input.pattern,
+      input.reset_period,
+      input.is_active ? 1 : 0
+    ]
   );
   return {
     id: (result as any).insertId,
@@ -159,6 +182,17 @@ export const POST = withAuth(
     try {
       const payload = await request.json();
       const input = NumberingTemplateCreateSchema.parse(payload);
+
+      if (typeof input.outlet_id === "number") {
+        const pool = getDbPool();
+        const [rows] = await pool.execute(
+          `SELECT id FROM outlets WHERE id = ? AND company_id = ? LIMIT 1`,
+          [input.outlet_id, auth.companyId]
+        );
+        if ((rows as any[]).length === 0) {
+          return errorResponse("INVALID_REQUEST", "Invalid outlet", 400);
+        }
+      }
 
       const existing = await listTemplates(auth.companyId);
       const duplicate = existing.find(

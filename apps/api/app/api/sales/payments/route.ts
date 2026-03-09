@@ -16,7 +16,8 @@ import {
   DatabaseReferenceError,
   listPayments
 } from "../../../../src/lib/sales";
-import { NumberingConflictError, NumberingTemplateNotFoundError } from "../../../../src/lib/numbering";
+const numberingTemplateConflictMessage =
+  "No numbering template configured. Please configure document numbering in settings.";
 
 const outletGuardSchema = SalesPaymentCreateRequestSchema.pick({
   outlet_id: true
@@ -118,19 +119,14 @@ export const POST = withAuth(
       }
 
       if (error instanceof DatabaseReferenceError) {
+        if (error.message === "Numbering template not configured") {
+          return errorResponse("CONFLICT", numberingTemplateConflictMessage, 409);
+        }
         return errorResponse("NOT_FOUND", "Resource not found", 404);
       }
 
       if (error instanceof DatabaseConflictError) {
-        return errorResponse("CONFLICT", "Payment conflict", 409);
-      }
-
-      if (error instanceof NumberingConflictError) {
         return errorResponse("CONFLICT", error.message, 409);
-      }
-
-      if (error instanceof NumberingTemplateNotFoundError) {
-        return errorResponse("CONFLICT", "No numbering template configured. Please configure document numbering in settings.", 409);
       }
 
       console.error("POST /sales/payments failed", error);

@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS numbering_templates (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   company_id BIGINT UNSIGNED NOT NULL,
   outlet_id BIGINT UNSIGNED DEFAULT NULL,
+  scope_key BIGINT UNSIGNED NOT NULL DEFAULT 0,
   doc_type VARCHAR(32) NOT NULL,
   pattern VARCHAR(128) NOT NULL,
   reset_period VARCHAR(16) NOT NULL DEFAULT 'NEVER',
@@ -18,8 +19,10 @@ CREATE TABLE IF NOT EXISTS numbering_templates (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_numbering_templates_company_outlet_doc (company_id, outlet_id, doc_type),
+  UNIQUE KEY uq_numbering_templates_company_scope_doc (company_id, doc_type, scope_key),
   KEY idx_numbering_templates_company_active (company_id, is_active),
   KEY idx_numbering_templates_outlet_active (outlet_id, is_active),
+  KEY idx_numbering_templates_lookup (company_id, doc_type, is_active, outlet_id),
   CONSTRAINT chk_numbering_templates_reset_period CHECK (reset_period IN ('NEVER', 'YEARLY', 'MONTHLY')),
   CONSTRAINT chk_numbering_templates_current_value CHECK (current_value >= 0),
   CONSTRAINT fk_numbering_templates_company FOREIGN KEY (company_id) REFERENCES companies(id),
@@ -33,3 +36,22 @@ CREATE TABLE IF NOT EXISTS numbering_templates (
 -- SALES_PAYMENT: PAY/{{yy}}{{mm}}/{{seq4}}
 -- SALES_ORDER: SO/{{yy}}{{mm}}/{{seq4}}
 -- CREDIT_NOTE: CN/{{yy}}{{mm}}/{{seq4}}
+
+-- Add lookup index if missing
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'numbering_templates'
+    AND INDEX_NAME = 'idx_numbering_templates_lookup'
+);
+
+SET @add_idx_sql := IF(
+  @idx_exists = 0,
+  'CREATE INDEX idx_numbering_templates_lookup ON numbering_templates (company_id, doc_type, is_active, outlet_id)',
+  'SELECT 1'
+);
+
+PREPARE add_idx_stmt FROM @add_idx_sql;
+EXECUTE add_idx_stmt;
+DEALLOCATE PREPARE add_idx_stmt;
