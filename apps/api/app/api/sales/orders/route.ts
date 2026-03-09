@@ -2,23 +2,23 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import {
-  SalesInvoiceCreateRequestSchema,
-  SalesInvoiceListQuerySchema
+  SalesOrderCreateRequestSchema,
+  SalesOrderListQuerySchema
 } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireAccess, requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
-  createInvoice,
+  createOrder,
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError,
-  listInvoices
+  listOrders
 } from "../../../../src/lib/sales";
 import { NumberingConflictError, NumberingTemplateNotFoundError } from "../../../../src/lib/numbering";
 
-const outletGuardSchema = SalesInvoiceCreateRequestSchema.pick({
+const outletGuardSchema = SalesOrderCreateRequestSchema.pick({
   outlet_id: true
 });
 
@@ -47,10 +47,9 @@ export const GET = withAuth(
   async (request, auth) => {
     try {
       const url = new URL(request.url);
-      const parsed = SalesInvoiceListQuerySchema.parse({
+      const parsed = SalesOrderListQuerySchema.parse({
         outlet_id: url.searchParams.get("outlet_id") ?? undefined,
         status: url.searchParams.get("status") ?? undefined,
-        payment_status: url.searchParams.get("payment_status") ?? undefined,
         date_from: url.searchParams.get("date_from") ?? undefined,
         date_to: url.searchParams.get("date_to") ?? undefined,
         limit: url.searchParams.get("limit") ?? undefined,
@@ -68,10 +67,9 @@ export const GET = withAuth(
         outletIds = await listUserOutletIds(auth.userId, auth.companyId);
       }
 
-      const report = await listInvoices(auth.companyId, {
+      const result = await listOrders(auth.companyId, {
         outletIds,
         status: parsed.status,
-        paymentStatus: parsed.payment_status,
         dateFrom: parsed.date_from,
         dateTo: parsed.date_to,
         limit: parsed.limit,
@@ -79,16 +77,16 @@ export const GET = withAuth(
       });
 
       return successResponse({
-        total: report.total,
-        invoices: report.invoices
+        total: result.total,
+        orders: result.orders
       });
     } catch (error) {
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 
-      console.error("GET /sales/invoices failed", error);
-      return errorResponse("INTERNAL_SERVER_ERROR", "Invoices request failed", 500);
+      console.error("GET /sales/orders failed", error);
+      return errorResponse("INTERNAL_SERVER_ERROR", "Orders request failed", 500);
     }
   },
   [
@@ -104,12 +102,12 @@ export const POST = withAuth(
   async (request, auth) => {
     try {
       const payload = await request.json();
-      const input = SalesInvoiceCreateRequestSchema.parse(payload);
-      const invoice = await createInvoice(auth.companyId, input, {
+      const input = SalesOrderCreateRequestSchema.parse(payload);
+      const order = await createOrder(auth.companyId, input, {
         userId: auth.userId
       });
 
-      return successResponse(invoice, 201);
+      return successResponse(order, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
@@ -124,7 +122,7 @@ export const POST = withAuth(
       }
 
       if (error instanceof DatabaseConflictError) {
-        return errorResponse("CONFLICT", "Invoice conflict", 409);
+        return errorResponse("CONFLICT", "Order conflict", 409);
       }
 
       if (error instanceof NumberingConflictError) {
@@ -135,8 +133,8 @@ export const POST = withAuth(
         return errorResponse("CONFLICT", "No numbering template configured. Please configure document numbering in settings.", 409);
       }
 
-      console.error("POST /sales/invoices failed", error);
-      return errorResponse("INTERNAL_SERVER_ERROR", "Invoices request failed", 500);
+      console.error("POST /sales/orders failed", error);
+      return errorResponse("INTERNAL_SERVER_ERROR", "Orders request failed", 500);
     }
   },
   [

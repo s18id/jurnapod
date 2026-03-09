@@ -17,6 +17,13 @@ const PaginationQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0)
 });
 
+export const SalesInvoiceStatusSchema = z.enum([
+  "DRAFT",
+  "APPROVED",
+  "POSTED",
+  "VOID"
+]);
+
 export const SalesInvoicePaymentStatusSchema = z.enum([
   "UNPAID",
   "PARTIAL",
@@ -39,7 +46,7 @@ export const SalesInvoiceTaxInputSchema = z.object({
 export const SalesInvoiceCreateRequestSchema = z.object({
   outlet_id: NumericIdSchema,
   client_ref: z.string().uuid().optional(),
-  invoice_no: z.string().trim().min(1).max(64),
+  invoice_no: z.string().trim().min(1).max(64).optional(),
   invoice_date: DateOnlySchema,
   tax_amount: MoneyInputNonNegativeSchema.default(0),
   lines: z.array(SalesInvoiceLineInputSchema).min(1),
@@ -83,12 +90,14 @@ export const SalesInvoiceSchema = z.object({
   invoice_no: z.string().min(1),
   client_ref: z.string().uuid().nullable().optional(),
   invoice_date: DateOnlySchema,
-  status: DocumentStatusSchema,
+  status: SalesInvoiceStatusSchema,
   payment_status: SalesInvoicePaymentStatusSchema,
   subtotal: MoneySchema.nonnegative(),
   tax_amount: MoneySchema.nonnegative(),
   grand_total: MoneySchema.nonnegative(),
   paid_total: MoneySchema.nonnegative(),
+  approved_by_user_id: NumericIdSchema.nullable().optional(),
+  approved_at: z.string().datetime().nullable().optional(),
   created_by_user_id: NumericIdSchema.nullable().optional(),
   updated_by_user_id: NumericIdSchema.nullable().optional(),
   created_at: z.string().datetime(),
@@ -104,7 +113,7 @@ export const SalesInvoiceResponseSchema = SalesInvoiceDetailSchema;
 
 export const SalesInvoiceListQuerySchema = PaginationQuerySchema.extend({
   outlet_id: NumericIdSchema.optional(),
-  status: DocumentStatusSchema.optional(),
+  status: SalesInvoiceStatusSchema.optional(),
   payment_status: SalesInvoicePaymentStatusSchema.optional(),
   date_from: DateOnlySchema.optional(),
   date_to: DateOnlySchema.optional()
@@ -114,7 +123,7 @@ export const SalesPaymentCreateRequestSchema = z.object({
   outlet_id: NumericIdSchema,
   invoice_id: NumericIdSchema,
   client_ref: z.string().uuid().optional(),
-  payment_no: z.string().trim().min(1).max(64),
+  payment_no: z.string().trim().min(1).max(64).optional(),
   payment_at: z.string().datetime(),
   account_id: NumericIdSchema,
   method: SalesPaymentMethodSchema.optional(), // deprecated, kept for backward compat
@@ -163,6 +172,88 @@ export const SalesPaymentListQuerySchema = PaginationQuerySchema.extend({
   date_to: DateOnlySchema.optional()
 });
 
+export const SalesOrderStatusSchema = z.enum([
+  "DRAFT",
+  "CONFIRMED",
+  "COMPLETED",
+  "VOID"
+]);
+
+export const SalesOrderLineInputSchema = z.object({
+  description: z.string().trim().min(1).max(255),
+  qty: z.coerce.number().finite().positive(),
+  unit_price: MoneyInputNonNegativeSchema
+});
+
+export const SalesOrderCreateRequestSchema = z.object({
+  outlet_id: NumericIdSchema,
+  client_ref: z.string().uuid().optional(),
+  order_no: z.string().trim().min(1).max(64).optional(),
+  order_date: DateOnlySchema,
+  expected_date: DateOnlySchema.optional(),
+  notes: z.string().max(1000).optional(),
+  lines: z.array(SalesOrderLineInputSchema).min(1)
+});
+
+export const SalesOrderUpdateRequestSchema = z
+  .object({
+    outlet_id: NumericIdSchema.optional(),
+    order_no: z.string().trim().min(1).max(64).optional(),
+    order_date: DateOnlySchema.optional(),
+    expected_date: DateOnlySchema.optional(),
+    notes: z.string().max(1000).optional(),
+    lines: z.array(SalesOrderLineInputSchema).min(1).optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided"
+  });
+
+export const SalesOrderLineSchema = z.object({
+  id: NumericIdSchema,
+  order_id: NumericIdSchema,
+  line_no: z.coerce.number().int().positive(),
+  description: z.string().min(1),
+  qty: z.number().finite().positive(),
+  unit_price: MoneySchema.nonnegative(),
+  line_total: MoneySchema.nonnegative()
+});
+
+export const SalesOrderSchema = z.object({
+  id: NumericIdSchema,
+  company_id: NumericIdSchema,
+  outlet_id: NumericIdSchema,
+  order_no: z.string().min(1),
+  client_ref: z.string().uuid().nullable().optional(),
+  order_date: DateOnlySchema,
+  expected_date: DateOnlySchema.nullable(),
+  status: SalesOrderStatusSchema,
+  notes: z.string().nullable(),
+  subtotal: MoneySchema.nonnegative(),
+  tax_amount: MoneySchema.nonnegative(),
+  grand_total: MoneySchema.nonnegative(),
+  confirmed_by_user_id: NumericIdSchema.nullable().optional(),
+  confirmed_at: z.string().datetime().nullable().optional(),
+  completed_by_user_id: NumericIdSchema.nullable().optional(),
+  completed_at: z.string().datetime().nullable().optional(),
+  created_by_user_id: NumericIdSchema.nullable().optional(),
+  updated_by_user_id: NumericIdSchema.nullable().optional(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime()
+});
+
+export const SalesOrderDetailSchema = SalesOrderSchema.extend({
+  lines: z.array(SalesOrderLineSchema)
+});
+
+export const SalesOrderResponseSchema = SalesOrderDetailSchema;
+
+export const SalesOrderListQuerySchema = PaginationQuerySchema.extend({
+  outlet_id: NumericIdSchema.optional(),
+  status: SalesOrderStatusSchema.optional(),
+  date_from: DateOnlySchema.optional(),
+  date_to: DateOnlySchema.optional()
+});
+
 export type SalesInvoicePaymentStatus = z.infer<
   typeof SalesInvoicePaymentStatusSchema
 >;
@@ -178,6 +269,7 @@ export type SalesInvoice = z.infer<typeof SalesInvoiceSchema>;
 export type SalesInvoiceDetail = z.infer<typeof SalesInvoiceDetailSchema>;
 export type SalesInvoiceResponse = z.infer<typeof SalesInvoiceResponseSchema>;
 export type SalesInvoiceListQuery = z.infer<typeof SalesInvoiceListQuerySchema>;
+export type SalesInvoiceStatus = z.infer<typeof SalesInvoiceStatusSchema>;
 export type SalesPaymentCreateRequest = z.infer<
   typeof SalesPaymentCreateRequestSchema
 >;
@@ -187,3 +279,11 @@ export type SalesPaymentUpdateRequest = z.infer<
 export type SalesPayment = z.infer<typeof SalesPaymentSchema>;
 export type SalesPaymentResponse = z.infer<typeof SalesPaymentResponseSchema>;
 export type SalesPaymentListQuery = z.infer<typeof SalesPaymentListQuerySchema>;
+export type SalesOrderStatus = z.infer<typeof SalesOrderStatusSchema>;
+export type SalesOrderCreateRequest = z.infer<typeof SalesOrderCreateRequestSchema>;
+export type SalesOrderUpdateRequest = z.infer<typeof SalesOrderUpdateRequestSchema>;
+export type SalesOrderLine = z.infer<typeof SalesOrderLineSchema>;
+export type SalesOrder = z.infer<typeof SalesOrderSchema>;
+export type SalesOrderDetail = z.infer<typeof SalesOrderDetailSchema>;
+export type SalesOrderResponse = z.infer<typeof SalesOrderResponseSchema>;
+export type SalesOrderListQuery = z.infer<typeof SalesOrderListQuerySchema>;

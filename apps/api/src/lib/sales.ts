@@ -6,6 +6,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "./db";
 import { calculateTaxLines, listCompanyDefaultTaxRates } from "./taxes";
 import { postSalesInvoiceToJournal, postSalesPaymentToJournal } from "./sales-posting";
+import { DOCUMENT_TYPES, getNextDocumentNumber, NumberingConflictError, NumberingTemplateNotFoundError } from "./numbering";
 
 type SalesInvoiceRow = RowDataPacket & {
   id: number;
@@ -14,12 +15,14 @@ type SalesInvoiceRow = RowDataPacket & {
   invoice_no: string;
   client_ref?: string | null;
   invoice_date: Date | string;
-  status: "DRAFT" | "POSTED" | "VOID";
+  status: "DRAFT" | "APPROVED" | "POSTED" | "VOID";
   payment_status: "UNPAID" | "PARTIAL" | "PAID";
   subtotal: string | number;
   tax_amount: string | number;
   grand_total: string | number;
   paid_total: string | number;
+  approved_by_user_id?: number | null;
+  approved_at?: Date | string | null;
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
   created_at: Date;
@@ -80,7 +83,7 @@ type PreparedInvoiceLine = {
 
 type InvoiceListFilters = {
   outletIds?: readonly number[];
-  status?: "DRAFT" | "POSTED" | "VOID";
+  status?: "DRAFT" | "APPROVED" | "POSTED" | "VOID";
   paymentStatus?: "UNPAID" | "PARTIAL" | "PAID";
   dateFrom?: string;
   dateTo?: string;
@@ -104,12 +107,14 @@ export type SalesInvoice = {
   invoice_no: string;
   client_ref?: string | null;
   invoice_date: string;
-  status: "DRAFT" | "POSTED" | "VOID";
+  status: "DRAFT" | "APPROVED" | "POSTED" | "VOID";
   payment_status: "UNPAID" | "PARTIAL" | "PAID";
   subtotal: number;
   tax_amount: number;
   grand_total: number;
   paid_total: number;
+  approved_by_user_id?: number | null;
+  approved_at?: string | null;
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
   created_at: string;
@@ -230,6 +235,8 @@ function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
     tax_amount: Number(row.tax_amount),
     grand_total: Number(row.grand_total),
     paid_total: Number(row.paid_total),
+    approved_by_user_id: row.approved_by_user_id ? Number(row.approved_by_user_id) : null,
+    approved_at: row.approved_at ? toMysqlDateTime(row.approved_at.toString()) : null,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
     created_at: new Date(row.created_at).toISOString(),
@@ -531,7 +538,7 @@ export async function createInvoice(
   input: {
     outlet_id: number;
     client_ref?: string;
-    invoice_no: string;
+    invoice_no?: string;
     invoice_date: string;
     tax_amount: number;
     lines: InvoiceLineInput[];
@@ -558,6 +565,13 @@ export async function createInvoice(
     if (actor) {
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
     }
+
+    const invoiceNo = await getNextDocumentNumber(
+      companyId,
+      input.outlet_id,
+      DOCUMENT_TYPES.SALES_INVOICE,
+      input.invoice_no
+    );
 
     const { lineRows, subtotal } = buildInvoiceLines(input.lines);
     let taxAmount = normalizeMoney(input.tax_amount);
@@ -617,7 +631,7 @@ export async function createInvoice(
         [
           companyId,
           input.outlet_id,
-          input.invoice_no,
+          invoiceNo,
           input.invoice_date,
           input.client_ref ?? null,
           subtotal,
@@ -942,7 +956,7 @@ export async function postInvoice(
       return findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
     }
 
-    if (invoice.status !== "DRAFT") {
+    if (invoice.status !== "DRAFT" && invoice.status !== "APPROVED") {
       throw new InvoiceStatusError("Invoice cannot be posted");
     }
 
@@ -1110,7 +1124,7 @@ export async function createPayment(
     outlet_id: number;
     invoice_id: number;
     client_ref?: string;
-    payment_no: string;
+    payment_no?: string;
     payment_at: string;
     account_id: number;
     method?: "CASH" | "QRIS" | "CARD"; // deprecated
@@ -1161,6 +1175,13 @@ export async function createPayment(
     const amount = normalizeMoney(input.amount);
     const paymentAt = toMysqlDateTime(input.payment_at);
 
+    const paymentNo = await getNextDocumentNumber(
+      companyId,
+      input.outlet_id,
+      DOCUMENT_TYPES.SALES_PAYMENT,
+      input.payment_no
+    );
+
     try {
       const [result] = await connection.execute<ResultSetHeader>(
         `INSERT INTO sales_payments (
@@ -1181,7 +1202,7 @@ export async function createPayment(
           companyId,
           input.outlet_id,
           input.invoice_id,
-          input.payment_no,
+          paymentNo,
           input.client_ref ?? null,
           paymentAt,
           input.account_id,
@@ -1422,5 +1443,706 @@ export async function postPayment(
     await postSalesPaymentToJournal(connection, postedPayment, invoice.invoice_no);
 
     return postedPayment;
+  });
+}
+
+type SalesOrderStatus = "DRAFT" | "CONFIRMED" | "COMPLETED" | "VOID";
+
+type SalesOrderRow = RowDataPacket & {
+  id: number;
+  company_id: number;
+  outlet_id: number;
+  order_no: string;
+  client_ref?: string | null;
+  order_date: Date | string;
+  expected_date: Date | string | null;
+  status: SalesOrderStatus;
+  notes: string | null;
+  subtotal: string | number;
+  tax_amount: string | number;
+  grand_total: string | number;
+  confirmed_by_user_id: number | null;
+  confirmed_at: Date | null;
+  completed_by_user_id: number | null;
+  completed_at: Date | null;
+  created_by_user_id: number | null;
+  updated_by_user_id: number | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+type SalesOrderLineRow = RowDataPacket & {
+  id: number;
+  order_id: number;
+  line_no: number;
+  description: string;
+  qty: string | number;
+  unit_price: string | number;
+  line_total: string | number;
+};
+
+export type SalesOrder = {
+  id: number;
+  company_id: number;
+  outlet_id: number;
+  order_no: string;
+  client_ref?: string | null;
+  order_date: string;
+  expected_date: string | null;
+  status: SalesOrderStatus;
+  notes: string | null;
+  subtotal: number;
+  tax_amount: number;
+  grand_total: number;
+  confirmed_by_user_id?: number | null;
+  confirmed_at?: string | null;
+  completed_by_user_id?: number | null;
+  completed_at?: string | null;
+  created_by_user_id?: number | null;
+  updated_by_user_id?: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SalesOrderLine = {
+  id: number;
+  order_id: number;
+  line_no: number;
+  description: string;
+  qty: number;
+  unit_price: number;
+  line_total: number;
+};
+
+export type SalesOrderDetail = SalesOrder & {
+  lines: SalesOrderLine[];
+};
+
+type OrderLineInput = {
+  description: string;
+  qty: number;
+  unit_price: number;
+};
+
+type OrderListFilters = {
+  outletIds?: readonly number[];
+  status?: SalesOrderStatus;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+  offset?: number;
+};
+
+function buildOrderLines(lines: OrderLineInput[]): Array<{ line_no: number; description: string; qty: number; unit_price: number; line_total: number }> {
+  return lines.map((line, index) => {
+    const lineTotal = normalizeMoney(line.qty * line.unit_price);
+    return {
+      line_no: index + 1,
+      description: line.description.trim(),
+      qty: line.qty,
+      unit_price: normalizeMoney(line.unit_price),
+      line_total: lineTotal
+    };
+  });
+}
+
+async function findOrderByIdWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  orderId: number
+): Promise<SalesOrderRow | null> {
+  const [rows] = await executor.execute<SalesOrderRow[]>(
+    `SELECT * FROM sales_orders WHERE company_id = ? AND id = ?`,
+    [companyId, orderId]
+  );
+  return rows[0] || null;
+}
+
+async function findOrderByClientRefWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  clientRef: string
+): Promise<SalesOrderRow | null> {
+  const [rows] = await executor.execute<SalesOrderRow[]>(
+    `SELECT * FROM sales_orders WHERE company_id = ? AND client_ref = ?`,
+    [companyId, clientRef]
+  );
+  return rows[0] || null;
+}
+
+async function findOrderLinesByOrderId(
+  executor: QueryExecutor,
+  orderId: number
+): Promise<SalesOrderLineRow[]> {
+  const [rows] = await executor.execute<SalesOrderLineRow[]>(
+    `SELECT * FROM sales_order_lines WHERE order_id = ? ORDER BY line_no`,
+    [orderId]
+  );
+  return rows;
+}
+
+function normalizeSalesOrderRow(row: SalesOrderRow): SalesOrder {
+  return {
+    id: row.id,
+    company_id: row.company_id,
+    outlet_id: row.outlet_id,
+    order_no: row.order_no,
+    client_ref: row.client_ref ?? undefined,
+    order_date: formatDateOnly(row.order_date),
+    expected_date: row.expected_date ? formatDateOnly(row.expected_date) : null,
+    status: row.status,
+    notes: row.notes ?? null,
+    subtotal: Number(row.subtotal),
+    tax_amount: Number(row.tax_amount),
+    grand_total: Number(row.grand_total),
+    confirmed_by_user_id: row.confirmed_by_user_id,
+    confirmed_at: row.confirmed_at ? toMysqlDateTime(row.confirmed_at.toString()) : undefined,
+    completed_by_user_id: row.completed_by_user_id,
+    completed_at: row.completed_at ? toMysqlDateTime(row.completed_at.toString()) : undefined,
+    created_by_user_id: row.created_by_user_id,
+    updated_by_user_id: row.updated_by_user_id,
+    created_at: toMysqlDateTime(row.created_at.toString()),
+    updated_at: toMysqlDateTime(row.updated_at.toString())
+  };
+}
+
+function normalizeSalesOrderLineRow(row: SalesOrderLineRow): SalesOrderLine {
+  return {
+    id: row.id,
+    order_id: row.order_id,
+    line_no: row.line_no,
+    description: row.description,
+    qty: Number(row.qty),
+    unit_price: Number(row.unit_price),
+    line_total: Number(row.line_total)
+  };
+}
+
+export async function createOrder(
+  companyId: number,
+  input: {
+    outlet_id: number;
+    client_ref?: string;
+    order_no?: string;
+    order_date: string;
+    expected_date?: string;
+    notes?: string;
+    lines: OrderLineInput[];
+  },
+  actor?: MutationActor
+): Promise<SalesOrderDetail> {
+  return withTransaction(async (connection) => {
+    if (input.client_ref) {
+      const existing = await findOrderByClientRefWithExecutor(connection, companyId, input.client_ref);
+      if (existing) {
+        if (actor) {
+          await ensureUserHasOutletAccess(connection, actor.userId, companyId, existing.outlet_id);
+        }
+        const lines = await findOrderLinesByOrderId(connection, existing.id);
+        return {
+          ...normalizeSalesOrderRow(existing),
+          lines: lines.map(normalizeSalesOrderLineRow)
+        };
+      }
+    }
+
+    await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+    if (actor) {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+    }
+
+    const orderNo = await getNextDocumentNumber(
+      companyId,
+      input.outlet_id,
+      DOCUMENT_TYPES.SALES_ORDER,
+      input.order_no
+    );
+
+    const lineRows = buildOrderLines(input.lines);
+    const subtotal = lineRows.reduce((acc, line) => acc + line.line_total, 0);
+
+    const [result] = await connection.execute<ResultSetHeader>(
+      `INSERT INTO sales_orders (
+        company_id,
+        outlet_id,
+        order_no,
+        order_date,
+        expected_date,
+        client_ref,
+        status,
+        notes,
+        subtotal,
+        tax_amount,
+        grand_total,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, 0, ?, ?, ?)`,
+      [
+        companyId,
+        input.outlet_id,
+        orderNo,
+        input.order_date,
+        input.expected_date ?? null,
+        input.client_ref ?? null,
+        input.notes ?? null,
+        subtotal,
+        subtotal,
+        actor?.userId ?? null,
+        actor?.userId ?? null
+      ]
+    );
+
+    const orderId = Number(result.insertId);
+
+    for (const line of lineRows) {
+      await connection.execute<ResultSetHeader>(
+        `INSERT INTO sales_order_lines (
+          order_id,
+          company_id,
+          outlet_id,
+          line_no,
+          description,
+          qty,
+          unit_price,
+          line_total
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          orderId,
+          companyId,
+          input.outlet_id,
+          line.line_no,
+          line.description,
+          line.qty,
+          line.unit_price,
+          line.line_total
+        ]
+      );
+    }
+
+    const order = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    if (!order) {
+      throw new Error("Created order not found");
+    }
+
+    const lines = await findOrderLinesByOrderId(connection, orderId);
+    return {
+      ...normalizeSalesOrderRow(order),
+      lines: lines.map(normalizeSalesOrderLineRow)
+    };
+  });
+}
+
+export async function confirmOrder(
+  companyId: number,
+  orderId: number,
+  actor?: MutationActor
+): Promise<SalesOrderDetail> {
+  return withTransaction(async (connection) => {
+    const order = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    if (!order) {
+      throw new DatabaseReferenceError("Order not found");
+    }
+
+    if (order.status !== "DRAFT") {
+      throw new DatabaseConflictError(`Cannot confirm order in ${order.status} status`);
+    }
+
+    if (actor) {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, order.outlet_id);
+    }
+
+    await connection.execute<ResultSetHeader>(
+      `UPDATE sales_orders 
+       SET status = 'CONFIRMED', 
+           confirmed_by_user_id = ?, 
+           confirmed_at = CURRENT_TIMESTAMP,
+           updated_by_user_id = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ? AND id = ?`,
+      [actor?.userId ?? null, actor?.userId ?? null, companyId, orderId]
+    );
+
+    const updatedOrder = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    if (!updatedOrder) {
+      throw new Error("Updated order not found");
+    }
+
+    const lines = await findOrderLinesByOrderId(connection, orderId);
+    return {
+      ...normalizeSalesOrderRow(updatedOrder),
+      lines: lines.map(normalizeSalesOrderLineRow)
+    };
+  });
+}
+
+export async function completeOrder(
+  companyId: number,
+  orderId: number,
+  actor?: MutationActor
+): Promise<SalesOrderDetail> {
+  return withTransaction(async (connection) => {
+    const order = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    if (!order) {
+      throw new DatabaseReferenceError("Order not found");
+    }
+
+    if (order.status !== "CONFIRMED") {
+      throw new DatabaseConflictError(`Cannot complete order in ${order.status} status`);
+    }
+
+    if (actor) {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, order.outlet_id);
+    }
+
+    await connection.execute<ResultSetHeader>(
+      `UPDATE sales_orders 
+       SET status = 'COMPLETED', 
+           completed_by_user_id = ?, 
+           completed_at = CURRENT_TIMESTAMP,
+           updated_by_user_id = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ? AND id = ?`,
+      [actor?.userId ?? null, actor?.userId ?? null, companyId, orderId]
+    );
+
+    const updatedOrder = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    if (!updatedOrder) {
+      throw new Error("Updated order not found");
+    }
+
+    const lines = await findOrderLinesByOrderId(connection, orderId);
+    return {
+      ...normalizeSalesOrderRow(updatedOrder),
+      lines: lines.map(normalizeSalesOrderLineRow)
+    };
+  });
+}
+
+export async function voidOrder(
+  companyId: number,
+  orderId: number,
+  actor?: MutationActor
+): Promise<SalesOrderDetail> {
+  return withTransaction(async (connection) => {
+    const order = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    if (!order) {
+      throw new DatabaseReferenceError("Order not found");
+    }
+
+    if (order.status === "VOID") {
+      throw new DatabaseConflictError("Order is already void");
+    }
+
+    if (actor) {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, order.outlet_id);
+    }
+
+    await connection.execute<ResultSetHeader>(
+      `UPDATE sales_orders 
+       SET status = 'VOID',
+           updated_by_user_id = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ? AND id = ?`,
+      [actor?.userId ?? null, companyId, orderId]
+    );
+
+    const updatedOrder = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    if (!updatedOrder) {
+      throw new Error("Updated order not found");
+    }
+
+    const lines = await findOrderLinesByOrderId(connection, orderId);
+    return {
+      ...normalizeSalesOrderRow(updatedOrder),
+      lines: lines.map(normalizeSalesOrderLineRow)
+    };
+  });
+}
+
+export async function listOrders(
+  companyId: number,
+  filters: OrderListFilters
+): Promise<{ total: number; orders: SalesOrderDetail[] }> {
+  const pool = getDbPool();
+  const conditions: string[] = ["company_id = ?"];
+  const values: Array<number | string> = [companyId];
+
+  if (filters.outletIds && filters.outletIds.length > 0) {
+    const placeholders = filters.outletIds.map(() => "?").join(", ");
+    conditions.push(`outlet_id IN (${placeholders})`);
+    values.push(...filters.outletIds);
+  }
+
+  if (filters.status) {
+    conditions.push("status = ?");
+    values.push(filters.status);
+  }
+
+  if (filters.dateFrom) {
+    conditions.push("order_date >= ?");
+    values.push(filters.dateFrom);
+  }
+
+  if (filters.dateTo) {
+    conditions.push("order_date <= ?");
+    values.push(filters.dateTo);
+  }
+
+  const whereClause = conditions.join(" AND ");
+
+  const [countRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT COUNT(*) as total FROM sales_orders WHERE ${whereClause}`,
+    values
+  );
+  const total = Number(countRows[0]?.total ?? 0);
+
+  const limit = filters.limit ?? 50;
+  const offset = filters.offset ?? 0;
+
+  const [orderRows] = await pool.execute<SalesOrderRow[]>(
+    `SELECT * FROM sales_orders WHERE ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    [...values, limit, offset]
+  );
+
+  const orders: SalesOrderDetail[] = [];
+  for (const row of orderRows) {
+    const lines = await findOrderLinesByOrderId(pool, row.id);
+    orders.push({
+      ...normalizeSalesOrderRow(row),
+      lines: lines.map(normalizeSalesOrderLineRow)
+    });
+  }
+
+  return { total, orders };
+}
+
+export async function convertOrderToInvoice(
+  companyId: number,
+  orderId: number,
+  input: {
+    outlet_id: number;
+    invoice_date: string;
+    invoice_no?: string;
+    tax_amount?: number;
+    taxes?: InvoiceTaxInput[];
+  },
+  actor?: MutationActor
+): Promise<SalesInvoiceDetail> {
+  return withTransaction(async (connection) => {
+    const order = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    if (!order) {
+      throw new DatabaseReferenceError("Order not found");
+    }
+
+    if (order.status !== "CONFIRMED" && order.status !== "COMPLETED") {
+      throw new DatabaseConflictError("Only confirmed or completed orders can be converted to invoice");
+    }
+
+    if (order.outlet_id !== input.outlet_id) {
+      throw new DatabaseReferenceError("Outlet mismatch");
+    }
+
+    await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+    if (actor) {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+    }
+
+    const invoiceNo = await getNextDocumentNumber(
+      companyId,
+      input.outlet_id,
+      DOCUMENT_TYPES.SALES_INVOICE,
+      input.invoice_no
+    );
+
+    const orderLines = await findOrderLinesByOrderId(connection, orderId);
+    const invoiceLines = orderLines.map((line, index) => ({
+      line_no: index + 1,
+      description: line.description,
+      qty: Number(line.qty),
+      unit_price: normalizeMoney(Number(line.unit_price)),
+      line_total: normalizeMoney(Number(line.line_total))
+    }));
+
+    const subtotal = Number(order.subtotal);
+    let taxAmount = normalizeMoney(input.tax_amount ?? 0);
+    let taxLines: Array<{ tax_rate_id: number; amount: number }> = [];
+
+    if (input.taxes && input.taxes.length > 0) {
+      const taxRateIds = input.taxes.map((tax) => tax.tax_rate_id);
+      const placeholders = taxRateIds.map(() => "?").join(", ");
+      const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT id FROM tax_rates WHERE company_id = ? AND is_active = 1 AND id IN (${placeholders})`,
+        [companyId, ...taxRateIds]
+      );
+
+      const matched = new Set((rows as Array<{ id?: number }>).map((row) => Number(row.id)));
+      if (matched.size !== taxRateIds.length) {
+        throw new DatabaseReferenceError("Invalid tax rate");
+      }
+
+      taxLines = input.taxes.map((tax) => ({
+        tax_rate_id: tax.tax_rate_id,
+        amount: normalizeMoney(tax.amount)
+      })).filter((tax) => tax.tax_rate_id > 0 && tax.amount > 0);
+      taxAmount = normalizeMoney(taxLines.reduce((acc, tax) => acc + tax.amount, 0));
+    }
+
+    const grandTotal = normalizeMoney(subtotal + taxAmount);
+
+    const [result] = await connection.execute<ResultSetHeader>(
+      `INSERT INTO sales_invoices (
+        company_id,
+        outlet_id,
+        order_id,
+        invoice_no,
+        invoice_date,
+        status,
+        payment_status,
+        subtotal,
+        tax_amount,
+        grand_total,
+        paid_total,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES (?, ?, ?, ?, ?, 'DRAFT', 'UNPAID', ?, ?, ?, 0, ?, ?)`,
+      [
+        companyId,
+        input.outlet_id,
+        orderId,
+        invoiceNo,
+        input.invoice_date,
+        subtotal,
+        taxAmount,
+        grandTotal,
+        actor?.userId ?? null,
+        actor?.userId ?? null
+      ]
+    );
+
+    const invoiceId = Number(result.insertId);
+
+    for (const line of invoiceLines) {
+      await connection.execute<ResultSetHeader>(
+        `INSERT INTO sales_invoice_lines (
+          invoice_id,
+          company_id,
+          outlet_id,
+          line_no,
+          description,
+          qty,
+          unit_price,
+          line_total
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          invoiceId,
+          companyId,
+          input.outlet_id,
+          line.line_no,
+          line.description,
+          line.qty,
+          line.unit_price,
+          line.line_total
+        ]
+      );
+    }
+
+    for (const tax of taxLines) {
+      await connection.execute<ResultSetHeader>(
+        `INSERT INTO sales_invoice_taxes (
+          invoice_id,
+          company_id,
+          tax_rate_id,
+          amount
+        ) VALUES (?, ?, ?, ?)`,
+        [invoiceId, companyId, tax.tax_rate_id, tax.amount]
+      );
+    }
+
+    const invoice = await findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
+    if (!invoice) {
+      throw new Error("Created invoice not found");
+    }
+
+    return invoice;
+  });
+}
+
+export async function approveInvoice(
+  companyId: number,
+  invoiceId: number,
+  actor?: MutationActor
+): Promise<SalesInvoiceDetail | null> {
+  return withTransaction(async (connection) => {
+    const invoice = await findInvoiceByIdWithExecutor(connection, companyId, invoiceId, {
+      forUpdate: true
+    });
+    if (!invoice) {
+      return null;
+    }
+
+    if (actor) {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, invoice.outlet_id);
+    }
+
+    if (invoice.status === "APPROVED" || invoice.status === "POSTED") {
+      return findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
+    }
+
+    if (invoice.status !== "DRAFT") {
+      throw new InvoiceStatusError("Only draft invoices can be approved");
+    }
+
+    await connection.execute<ResultSetHeader>(
+      `UPDATE sales_invoices
+       SET status = 'APPROVED',
+           approved_by_user_id = ?,
+           approved_at = CURRENT_TIMESTAMP,
+           updated_by_user_id = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ?
+         AND id = ?`,
+      [actor?.userId ?? null, actor?.userId ?? null, companyId, invoiceId]
+    );
+
+    return findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
+  });
+}
+
+export async function voidInvoice(
+  companyId: number,
+  invoiceId: number,
+  actor?: MutationActor
+): Promise<SalesInvoiceDetail | null> {
+  return withTransaction(async (connection) => {
+    const invoice = await findInvoiceByIdWithExecutor(connection, companyId, invoiceId, {
+      forUpdate: true
+    });
+    if (!invoice) {
+      return null;
+    }
+
+    if (actor) {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, invoice.outlet_id);
+    }
+
+    if (invoice.status === "VOID") {
+      return findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
+    }
+
+    if (invoice.payment_status === "PARTIAL" || invoice.payment_status === "PAID") {
+      throw new InvoiceStatusError("Cannot void invoice with payments. Process refunds first.");
+    }
+
+    await connection.execute<ResultSetHeader>(
+      `UPDATE sales_invoices
+       SET status = 'VOID',
+           updated_by_user_id = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ?
+         AND id = ?`,
+      [actor?.userId ?? null, companyId, invoiceId]
+    );
+
+    return findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
   });
 }
