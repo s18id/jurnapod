@@ -62,12 +62,6 @@ export function createMobileBootstrapContext(config: MobileBootstrapConfig): Mob
   const syncTransportAdapter = createWebSyncTransportAdapter();
   const printerAdapter = createWebPrinterAdapter(); // TODO: Replace with mobile printer adapter
 
-  // Create services
-  const runtime = new RuntimeService(storageAdapter, networkAdapter);
-  const sync = new SyncService(storageAdapter, syncTransportAdapter);
-  const print = new PrintService(printerAdapter, storageAdapter);
-  const outbox = new OutboxService(storageAdapter);
-
   // Create sync orchestrator with config
   const orchestratorConfig: SyncOrchestratorConfig = {
     apiOrigin: config.apiOrigin,
@@ -83,6 +77,12 @@ export function createMobileBootstrapContext(config: MobileBootstrapConfig): Mob
     syncTransportAdapter,
     orchestratorConfig
   );
+
+  // Create services
+  const runtime = new RuntimeService(storageAdapter, networkAdapter, (reason) => orchestrator.requestPush(reason));
+  const sync = new SyncService(storageAdapter, syncTransportAdapter);
+  const print = new PrintService(printerAdapter, storageAdapter);
+  const outbox = new OutboxService(storageAdapter);
 
   return {
     db,

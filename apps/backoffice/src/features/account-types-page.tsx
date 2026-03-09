@@ -33,7 +33,7 @@ type AccountTypeFormData = {
 const emptyForm: AccountTypeFormData = {
   name: "",
   category: "ASSET",
-  normal_balance: "DEBIT",
+  normal_balance: "D",
   report_group: "NRC"
 };
 
@@ -126,13 +126,13 @@ const CATEGORIES = [
 ];
 
 const NORMAL_BALANCES = [
-  { value: "DEBIT", label: "Debit" },
-  { value: "CREDIT", label: "Credit" }
+  { value: "D", label: "DEBIT" },
+  { value: "C", label: "CREDIT" }
 ];
 
 const REPORT_GROUPS = [
   { value: "NRC", label: "Neraca (Balance Sheet)" },
-  { value: "LR", label: "Laba Rugi (P&L)" }
+  { value: "PL", label: "Laba Rugi (P&L)" }
 ];
 
 export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
@@ -190,7 +190,7 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
     setFormData({
       name: accountType.name,
       category: accountType.category || "ASSET",
-      normal_balance: accountType.normal_balance || "DEBIT",
+      normal_balance: accountType.normal_balance || "D",
       report_group: accountType.report_group || "NRC"
     });
     setEditingId(accountType.id);

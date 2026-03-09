@@ -400,7 +400,7 @@ async function main() {
     );
 
     await connection.execute(
-      `INSERT INTO user_roles (user_id, role_id)
+      `INSERT INTO user_role_assignments (user_id, role_id)
        VALUES (?, ?)
        ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)`,
       [ownerUserId, ownerRoleId]
@@ -439,7 +439,7 @@ async function main() {
         const superAdminUserId = superAdminResult.insertId;
 
         await connection.execute(
-          `INSERT INTO user_roles (user_id, role_id)
+          `INSERT INTO user_role_assignments (user_id, role_id)
            VALUES (?, ?)
            ON DUPLICATE KEY UPDATE role_id = VALUES(role_id)`,
           [superAdminUserId, superAdminRoleId]

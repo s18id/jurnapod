@@ -37,6 +37,7 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
   const { paymentMethod, setPaymentMethod, paymentMethodAllowed, canCompleteSale, completeInFlight, lastCompleteMessage, runCompleteSale } = useCheckout({
     scope,
     activeOrderContext,
+    requestPush: context.orchestrator.requestPush.bind(context.orchestrator),
     runtime: {
       isPaymentMethodAllowed: context.runtime.isPaymentMethodAllowed.bind(context.runtime),
       resolvePaymentMethod: context.runtime.resolvePaymentMethod.bind(context.runtime)

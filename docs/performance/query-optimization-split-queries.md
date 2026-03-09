@@ -1026,7 +1026,7 @@ WHERE u.id = ?
 
 - [ACL Guide](/home/ahmad/jurnapod/docs/acl-guide.md)
 - [Database Schema Guide](/home/ahmad/jurnapod/docs/db/schema.md)
-- [Migration 0062: Merge User Roles](/home/ahmad/jurnapod/packages/db/migrations/0062_merge_user_roles.sql)
+- [Migration 0062: Merge User Roles](/home/ahmad/jurnapod/packages/db/migrations/0062_merge_user_role_assignments.sql)
 
 ### External References
 

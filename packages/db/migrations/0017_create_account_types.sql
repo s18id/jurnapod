@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS account_types (
   company_id BIGINT UNSIGNED NOT NULL,
   name VARCHAR(191) NOT NULL COMMENT 'Account type name (e.g., Kas, Bank, Pendapatan)',
   normal_balance CHAR(1) NULL COMMENT 'D=Debit, K=Kredit',
-  report_group VARCHAR(8) NULL COMMENT 'NRC=Neraca, LR=Laba Rugi',
+  report_group VARCHAR(8) NULL COMMENT 'NRC=Neraca, PL=Laba Rugi',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

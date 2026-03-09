@@ -301,7 +301,7 @@ When POS requests master data for outlet `5`:
 ### Outlet Override Price (`outlet_id = <number>`)
 - **Create/Update/Delete:** Requires:
   1. Outlet-level inventory module permission (OWNER, COMPANY_ADMIN, ADMIN, ACCOUNTANT with inventory `create`/`update`/`delete`).
-  2. User must have access to the specific outlet (via `user_outlet_roles` or global role).
+  2. User must have access to the specific outlet (via `user_role_assignments` or global role).
 - **Read:** User can only see overrides for outlets they have access to.
 - **Enforcement:** 
   - Pre-check outlet access before mutation.

@@ -8,10 +8,13 @@ import type { RuntimeOutletScope } from "../../services/runtime-service.js";
 import type { ActiveOrderContextState } from "../cart/useCart.js";
 import type { CartTotals, CartLine } from "../../shared/utils/money.js";
 
+type SyncPushReason = "MANUAL_PUSH" | "AUTO_REFRESH" | "NETWORK_ONLINE" | "BACKGROUND_SYNC";
+
 export interface UseCheckoutOptions {
   scope: RuntimeOutletScope;
   activeOrderContext: ActiveOrderContextState;
   initialPaymentMethods?: string[];
+  requestPush?: (reason: SyncPushReason) => Promise<void>;
   runtime: {
     isPaymentMethodAllowed: (method: string, methods: readonly string[]) => boolean;
     resolvePaymentMethod: (method: string, methods: readonly string[]) => string;
@@ -40,7 +43,13 @@ export interface UseCheckoutReturn {
     ) => Promise<void>;
 }
 
-export function useCheckout({ scope, activeOrderContext, runtime, initialPaymentMethods = ["CASH"] }: UseCheckoutOptions): UseCheckoutReturn {
+export function useCheckout({
+  scope,
+  activeOrderContext,
+  runtime,
+  requestPush,
+  initialPaymentMethods = ["CASH"]
+}: UseCheckoutOptions): UseCheckoutReturn {
   const [paymentMethod, setPaymentMethod] = useState<string>(initialPaymentMethods[0]);
   const [paymentMethods] = useState<string[]>(initialPaymentMethods);
   const [completeInFlight, setCompleteInFlight] = useState<boolean>(false);
@@ -142,6 +151,9 @@ export function useCheckout({ scope, activeOrderContext, runtime, initialPayment
         });
 
         setLastCompleteMessage(`Sale completed offline (${result.client_tx_id}). Outbox job queued.`);
+        if (requestPush) {
+          void requestPush("BACKGROUND_SYNC").catch(() => {});
+        }
         await options?.onAfterComplete?.();
         options?.setCart?.();
         options?.setPaidAmount?.(0);
@@ -153,7 +165,16 @@ export function useCheckout({ scope, activeOrderContext, runtime, initialPayment
         unlockSaleCompletion(flowId);
       }
     },
-    [activeOrderContext, paymentMethod, paymentMethods, scope, runtime, lockSaleCompletion, unlockSaleCompletion]
+    [
+      activeOrderContext,
+      paymentMethod,
+      paymentMethods,
+      requestPush,
+      scope,
+      runtime,
+      lockSaleCompletion,
+      unlockSaleCompletion
+    ]
   );
 
   return {

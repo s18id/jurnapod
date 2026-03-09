@@ -548,7 +548,7 @@ export function AccountsPage(props: AccountsPageProps) {
           >
             <option value="ALL">All Report Groups</option>
             <option value="NRC">Neraca (NRC)</option>
-            <option value="LR">Laba Rugi (LR)</option>
+            <option value="PL">Laba Rugi (LR)</option>
           </select>
         </div>
       </section>
@@ -662,7 +662,7 @@ export function AccountsPage(props: AccountsPageProps) {
               >
                 <option value="">None</option>
                 <option value="D">D (Debit)</option>
-                <option value="K">K (Kredit/Credit)</option>
+                <option value="C">C (Credit)</option>
               </select>
             </div>
 
@@ -682,7 +682,7 @@ export function AccountsPage(props: AccountsPageProps) {
               >
                 <option value="">None</option>
                 <option value="NRC">NRC (Neraca/Balance Sheet)</option>
-                <option value="LR">LR (Laba Rugi/P&L)</option>
+                <option value="PL">LR (Laba Rugi/P&L)</option>
               </select>
             </div>
 

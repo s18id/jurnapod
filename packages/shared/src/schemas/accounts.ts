@@ -34,7 +34,7 @@ export const NormalBalanceSchema = z.enum(["D", "K"]);
  * NRC = Neraca (Balance Sheet in Indonesian)
  * LR = Laba Rugi (Income Statement/P&L in Indonesian)
  */
-export const ReportGroupSchema = z.enum(["NRC", "LR"]);
+export const ReportGroupSchema = z.enum(["NRC", "PL"]);
 
 /**
  * Account Code Schema
@@ -169,7 +169,7 @@ export const AccountTreeNodeSchema: z.ZodType<{
   account_type_id: number | null;
   type_name: string | null;
   normal_balance: "D" | "K" | null;
-  report_group: "NRC" | "LR" | null;
+  report_group: "NRC" | "PL" | null;
   parent_account_id: number | null;
   is_group: boolean;
   is_payable: boolean;

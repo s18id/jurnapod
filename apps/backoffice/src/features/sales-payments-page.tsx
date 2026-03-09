@@ -6,6 +6,7 @@ import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 import { useAccounts } from "../hooks/use-accounts";
 import { useOutletPaymentMethodMappings } from "../hooks/use-outlet-payment-method-mappings";
+import { useSalesInvoices } from "../hooks/use-sales-invoices";
 import { useOnlineStatus } from "../lib/connection";
 import { OutboxService } from "../lib/outbox-service";
 
@@ -17,11 +18,15 @@ type Payment = {
   outlet_id: number;
   invoice_id: number;
   payment_no: string;
+  client_ref?: string | null;
   payment_at: string;
   account_id: number;
   account_name?: string;
+  method?: string;
   status: PaymentStatus;
   amount: number;
+  created_by_user_id?: number | null;
+  updated_by_user_id?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -88,6 +93,7 @@ type SalesPaymentsPageProps = {
 type PaymentDraft = {
   payment_no: string;
   invoice_id: string;
+  client_ref: string;
   payment_at: string;
   account_id: string;
   amount: string;
@@ -114,6 +120,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
   const [newPayment, setNewPayment] = useState<PaymentDraft>(() => ({
     payment_no: "",
     invoice_id: "",
+    client_ref: "",
     payment_at: toLocalDateTimeInput(new Date()),
     account_id: "",
     amount: "0"
@@ -133,6 +140,25 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
   const { mappings: paymentMappings, loading: mappingsLoading } = useOutletPaymentMethodMappings(
     selectedOutletId,
     props.accessToken
+  );
+
+  // Fetch invoices for the dropdown (only POSTED, unpaid/partial)
+  const invoiceFilters = useMemo(
+    () => ({
+      outlet_id: selectedOutletId,
+      status: "POSTED" as const,
+      limit: 100
+    }),
+    [selectedOutletId]
+  );
+  const { data: allInvoices, loading: invoicesLoading } = useSalesInvoices(
+    props.accessToken,
+    invoiceFilters
+  );
+  // Filter out fully paid invoices
+  const invoices = useMemo(
+    () => allInvoices.filter((inv) => inv.payment_status !== "PAID"),
+    [allInvoices]
   );
 
   async function refreshData(outletId: number) {
@@ -183,6 +209,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     setNewPayment({
       payment_no: "",
       invoice_id: "",
+      client_ref: "",
       payment_at: toLocalDateTimeInput(new Date()),
       account_id: "",
       amount: "0"
@@ -226,6 +253,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
         outlet_id: selectedOutletId,
         invoice_id: Number(newPayment.invoice_id),
         payment_no: newPayment.payment_no.trim(),
+        client_ref: newPayment.client_ref.trim() || undefined,
         payment_at: paymentAtIso,
         account_id: Number(newPayment.account_id),
         amount: Number(newPayment.amount)
@@ -263,6 +291,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
       id: payment.id,
       payment_no: payment.payment_no,
       invoice_id: String(payment.invoice_id),
+      client_ref: payment.client_ref ?? "",
       payment_at: toLocalDateTimeInput(new Date(payment.payment_at)),
       account_id: String(payment.account_id),
       amount: String(payment.amount)
@@ -376,16 +405,43 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
             }
             style={inputStyle}
           />
-          <input
-            placeholder="Invoice ID"
+          <select
             value={newPayment.invoice_id}
+            onChange={(event) => {
+              const selectedInvoice = invoices.find((inv) => inv.id === Number(event.target.value));
+              const outstanding = selectedInvoice ? selectedInvoice.grand_total - selectedInvoice.paid_total : 0;
+              setNewPayment((prev) => ({
+                ...prev,
+                invoice_id: event.target.value,
+                amount: event.target.value ? String(outstanding) : "0"
+              }));
+            }}
+            style={inputStyle}
+            disabled={invoicesLoading}
+          >
+            <option value="">-- Select Invoice --</option>
+            {invoices.map((invoice) => {
+              const outstanding = invoice.grand_total - invoice.paid_total;
+              return (
+                <option key={invoice.id} value={invoice.id}>
+                  {invoice.invoice_no} - {invoice.invoice_date} ({invoice.payment_status}) - Outstanding: {formatCurrency(outstanding)}
+                </option>
+              );
+            })}
+          </select>
+          <input
+            placeholder="Client Ref (optional UUID)"
+            value={newPayment.client_ref}
             onChange={(event) =>
               setNewPayment((prev) => ({
                 ...prev,
-                invoice_id: event.target.value
+                client_ref: event.target.value
               }))
             }
             style={inputStyle}
+            type="text"
+            pattern="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+            title="Must be a valid UUID (e.g., 550e8400-e29b-41d4-a716-446655440000)"
           />
           <input
             type="datetime-local"
@@ -466,6 +522,14 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
                 )
               }
               style={inputStyle}
+            />
+            <input
+              placeholder="Client Ref (readonly)"
+              value={editingPayment.client_ref}
+              readOnly
+              disabled
+              style={{ ...inputStyle, backgroundColor: "#f5f5f5" }}
+              title="Client ref cannot be changed after creation"
             />
             <input
               type="datetime-local"

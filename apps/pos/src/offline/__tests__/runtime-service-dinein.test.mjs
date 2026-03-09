@@ -260,6 +260,45 @@ test("upsertActiveOrderSnapshot emits update log and outbox job", async () => {
   }
 });
 
+test("upsertActiveOrderSnapshot requests background push when update queued", async () => {
+  const db = createPosOfflineDb(`jp-pos-runtime-service-dinein-push-${crypto.randomUUID()}`);
+  const storage = createWebStorageAdapter(db);
+  const pushReasons = [];
+  const runtime = new RuntimeService(storage, createNetworkMock(), async (reason) => {
+    pushReasons.push(reason);
+  });
+  const scope = { company_id: 1, outlet_id: 23 };
+
+  try {
+    await runtime.upsertActiveOrderSnapshot(scope, {
+      service_type: "TAKEAWAY",
+      table_id: null,
+      reservation_id: null,
+      guest_count: null,
+      is_finalized: false,
+      order_status: "OPEN",
+      paid_amount: 0,
+      notes: "auto push",
+      lines: [
+        {
+          item_id: 12,
+          sku_snapshot: "SKU-12",
+          name_snapshot: "Latte",
+          item_type_snapshot: "PRODUCT",
+          unit_price_snapshot: 18000,
+          qty: 1,
+          discount_amount: 0
+        }
+      ]
+    });
+
+    assert.equal(pushReasons.length, 1);
+    assert.equal(pushReasons[0], "BACKGROUND_SYNC");
+  } finally {
+    db.close();
+  }
+});
+
 test("resolveActiveOrder defaults settlement flow by service type", async () => {
   const db = createPosOfflineDb(`jp-pos-runtime-service-flow-defaults-${crypto.randomUUID()}`);
   const storage = createWebStorageAdapter(db);

@@ -27,6 +27,8 @@ import type {
 
 export type RuntimeSyncBadgeState = "Offline" | "Pending" | "Synced";
 
+type SyncPushReason = "MANUAL_PUSH" | "AUTO_REFRESH" | "NETWORK_ONLINE" | "BACKGROUND_SYNC";
+
 export interface RuntimeOutletScope {
   company_id: number;
   outlet_id: number;
@@ -322,10 +324,23 @@ function mapActiveOrderLineRow(row: ActiveOrderLineRow): RuntimeActiveOrderLine 
 }
 
 export class RuntimeService {
+  private requestPush?: (reason: SyncPushReason) => Promise<void>;
+
   constructor(
     private storage: PosStoragePort,
-    private network: NetworkPort
-  ) {}
+    private network: NetworkPort,
+    requestPush?: (reason: SyncPushReason) => Promise<void>
+  ) {
+    this.requestPush = requestPush;
+  }
+
+  private requestBackgroundPush(): void {
+    if (!this.requestPush) {
+      return;
+    }
+
+    void this.requestPush("BACKGROUND_SYNC").catch(() => {});
+  }
 
   private isScopeRow(
     scope: RuntimeOutletScope,
@@ -985,6 +1000,7 @@ export class RuntimeService {
         updateId: updateEvent.update_id,
         timestamp
       });
+      this.requestBackgroundPush();
     }
 
     return {
@@ -1006,7 +1022,7 @@ export class RuntimeService {
       throw new Error("cancel_qty must be a positive integer");
     }
 
-    return await this.storage.transaction(
+    const snapshot = await this.storage.transaction(
       "readwrite",
       ["active_orders", "active_order_lines", "active_order_updates", "item_cancellations", "outbox_jobs"],
       async () => {
@@ -1126,6 +1142,9 @@ export class RuntimeService {
         };
       }
     );
+
+    this.requestBackgroundPush();
+    return snapshot;
   }
 
   async closeActiveOrder(

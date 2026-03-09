@@ -33,7 +33,7 @@ type AlkRow = {
   ref: string | null;
   description: string | null;
   accountCode: string;
-  normalBalance: "D" | "K";
+  normalBalance: "D" | "C";
   amount: number;
 };
 
@@ -52,8 +52,8 @@ type ImportResult = {
 const ACCOUNT_TYPE_MAPPING: Record<
   string,
   {
-    normalBalance: "D" | "K";
-    reportGroup: "NRC" | "LR";
+    normalBalance: "D" | "C";
+    reportGroup: "NRC" | "PL";
   }
 > = {
   Kas: { normalBalance: "D", reportGroup: "NRC" },
@@ -61,15 +61,15 @@ const ACCOUNT_TYPE_MAPPING: Record<
   "Akun Piutang": { normalBalance: "D", reportGroup: "NRC" },
   "Aktiva Lancar Lainnya": { normalBalance: "D", reportGroup: "NRC" },
   "Aktiva Tetap": { normalBalance: "D", reportGroup: "NRC" },
-  "Kontra Aktiva": { normalBalance: "K", reportGroup: "NRC" },
-  "Akun Hutang": { normalBalance: "K", reportGroup: "NRC" },
-  "Akun Hutang Lainnya": { normalBalance: "K", reportGroup: "NRC" },
-  Ekuitas: { normalBalance: "K", reportGroup: "NRC" },
+  "Kontra Aktiva": { normalBalance: "C", reportGroup: "NRC" },
+  "Akun Hutang": { normalBalance: "C", reportGroup: "NRC" },
+  "Akun Hutang Lainnya": { normalBalance: "C", reportGroup: "NRC" },
+  Ekuitas: { normalBalance: "C", reportGroup: "NRC" },
   "Kontra Ekuitas": { normalBalance: "D", reportGroup: "NRC" },
-  Pendapatan: { normalBalance: "K", reportGroup: "LR" },
-  "Beban Administrasi dan Umum": { normalBalance: "D", reportGroup: "LR" },
-  "Beban Lain-lain": { normalBalance: "D", reportGroup: "LR" },
-  "Beban Pajak Perusahaan": { normalBalance: "D", reportGroup: "LR" }
+  Pendapatan: { normalBalance: "C", reportGroup: "PL" },
+  "Beban Administrasi dan Umum": { normalBalance: "D", reportGroup: "PL" },
+  "Beban Lain-lain": { normalBalance: "D", reportGroup: "PL" },
+  "Beban Pajak Perusahaan": { normalBalance: "D", reportGroup: "PL" }
 };
 
 const MONTHS_ID: Record<string, string> = {
@@ -319,7 +319,7 @@ function parseAllocations(text: string): AlkRow[] {
         throw new Error(`Invalid transaction id: ${rawTransactionId}`);
       }
 
-      if (rawSn !== "D" && rawSn !== "K") {
+      if (rawSn !== "D" && rawSn !== "C") {
         throw new Error(`Invalid SN value: ${rawSn}`);
       }
 
@@ -533,7 +533,7 @@ async function insertJournalLines(
     const trns = trnsById.get(row.transactionId);
     const description = row.description ?? trns?.description ?? "";
     const debit = row.normalBalance === "D" ? row.amount : 0;
-    const credit = row.normalBalance === "K" ? row.amount : 0;
+    const credit = row.normalBalance === "C" ? row.amount : 0;
 
     placeholders.push("(?, ?, ?, ?, ?, ?, ?, ?)");
     values.push(

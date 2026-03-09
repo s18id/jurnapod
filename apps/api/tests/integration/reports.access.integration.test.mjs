@@ -89,13 +89,13 @@ test(
       adminUserId = Number(adminInsert.insertId);
 
       await db.execute(
-        `INSERT INTO user_roles (user_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, role_id)
          VALUES (?, ?)`,
         [adminUserId, Number(adminRoleId)]
       );
 
       await db.execute(
-        `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
          VALUES (?, ?, ?)`,
         [adminUserId, allowedOutletId, Number(adminRoleId)]
       );
@@ -136,8 +136,8 @@ test(
       }
 
       if (adminUserId > 0) {
-        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [adminUserId]);
-        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [adminUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [adminUserId]);
         await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
       }
 
@@ -214,13 +214,13 @@ test(
         }
 
         await db.execute(
-          `INSERT INTO user_roles (user_id, role_id)
+          `INSERT INTO user_role_assignments (user_id, role_id)
            VALUES (?, ?)`,
           [userId, roleIdByCode.get(roleCode)]
         );
 
         await db.execute(
-          `INSERT INTO user_outlet_roles (user_id, outlet_id, role_id)
+          `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
            VALUES (?, ?, ?)`,
           [userId, outletId, roleIdByCode.get(roleCode)]
         );
@@ -368,8 +368,8 @@ test(
       }
 
       for (const userId of createdUserIds) {
-        await db.execute("DELETE FROM user_outlet_roles WHERE user_id = ?", [userId]);
-        await db.execute("DELETE FROM user_roles WHERE user_id = ?", [userId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [userId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [userId]);
         await db.execute("DELETE FROM users WHERE id = ?", [userId]);
       }
 
