@@ -225,7 +225,7 @@ Update `apps/api/src/lib/sales.ts`:
 
 - Invoice create flow:
   - include `due_date` in insert columns.
-  - if omitted, set to `invoice_date` before insert.
+  - if omitted, auto-calculate from default term (Net 30).
 - Invoice update flow (DRAFT only):
   - allow updating `due_date`.
 - Invoice read/list/detail queries:

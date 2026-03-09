@@ -109,6 +109,17 @@ type WorksheetRow = RowDataPacket & {
   period_credit: number | string | null;
 };
 
+type ReceivablesAgeingRow = RowDataPacket & {
+  invoice_id: number;
+  invoice_no: string;
+  outlet_id: number;
+  outlet_name: string | null;
+  invoice_date: Date;
+  due_date: Date | null;
+  outstanding_amount: number | string;
+  days_overdue: number | string;
+};
+
 type BaseFilter = {
   companyId: number;
   outletIds: readonly number[];
@@ -151,6 +162,12 @@ type ProfitLossFilter = BaseFilter & {
 
 type WorksheetFilter = BaseFilter & {
   includeUnassignedOutlet?: boolean;
+};
+
+type ReceivablesAgeingFilter = {
+  companyId: number;
+  outletIds: readonly number[];
+  asOfDate: string;
 };
 
 function toNumber(value: number | string | null | undefined): number {
@@ -897,6 +914,94 @@ export async function getProfitLoss(filter: ProfitLossFilter) {
   );
 
   return { rows: mapped, totals };
+}
+
+export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter) {
+  const pool = getDbPool();
+
+  if (filter.outletIds.length === 0) {
+    return {
+      buckets: {
+        current: 0,
+        "1_30_days": 0,
+        "31_60_days": 0,
+        "61_90_days": 0,
+        over_90_days: 0
+      },
+      total_outstanding: 0,
+      invoices: []
+    };
+  }
+
+  const outletClause = buildOutletPredicate("i.outlet_id", filter.outletIds, false);
+
+  const [rows] = await pool.execute<ReceivablesAgeingRow[]>(
+    `SELECT i.id AS invoice_id,
+            i.invoice_no,
+            i.outlet_id,
+            o.name AS outlet_name,
+            i.invoice_date,
+            i.due_date,
+            (i.grand_total - i.paid_total) AS outstanding_amount,
+            DATEDIFF(?, COALESCE(i.due_date, i.invoice_date)) AS days_overdue
+     FROM sales_invoices i
+      LEFT JOIN outlets o ON o.id = i.outlet_id
+     WHERE i.company_id = ?
+       AND i.status = 'POSTED'
+       AND (i.grand_total - i.paid_total) > 0
+       AND ${outletClause.sql}
+     ORDER BY days_overdue DESC, i.invoice_date ASC, i.id ASC`,
+    [filter.asOfDate, filter.companyId, ...outletClause.values]
+  );
+
+  const buckets = {
+    current: 0,
+    "1_30_days": 0,
+    "31_60_days": 0,
+    "61_90_days": 0,
+    over_90_days: 0
+  };
+
+  const invoices = rows.map((row) => {
+    const daysOverdue = Number(row.days_overdue ?? 0);
+    const outstandingAmount = toNumber(row.outstanding_amount);
+    const ageBucket = daysOverdue <= 0
+      ? "current"
+      : daysOverdue <= 30
+        ? "1_30_days"
+        : daysOverdue <= 60
+          ? "31_60_days"
+          : daysOverdue <= 90
+            ? "61_90_days"
+            : "over_90_days";
+
+    buckets[ageBucket] += outstandingAmount;
+
+    return {
+      invoice_id: Number(row.invoice_id),
+      invoice_no: row.invoice_no,
+      outlet_id: Number(row.outlet_id),
+      outlet_name: row.outlet_name,
+      invoice_date: toIsoDate(row.invoice_date),
+      due_date: row.due_date ? toIsoDate(row.due_date) : null,
+      days_overdue: daysOverdue,
+      outstanding_amount: outstandingAmount,
+      age_bucket: ageBucket
+    };
+  });
+
+  const totalOutstanding =
+    buckets.current +
+    buckets["1_30_days"] +
+    buckets["31_60_days"] +
+    buckets["61_90_days"] +
+    buckets.over_90_days;
+
+  return {
+    buckets,
+    total_outstanding: totalOutstanding,
+    invoices
+  };
 }
 
 export async function getTrialBalanceWorksheet(filter: WorksheetFilter) {

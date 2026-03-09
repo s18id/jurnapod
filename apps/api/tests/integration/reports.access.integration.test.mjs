@@ -115,10 +115,13 @@ test(
         "/api/reports/pos-transactions",
         "/api/reports/daily-sales",
         "/api/reports/journals",
-        "/api/reports/trial-balance"
+        "/api/reports/trial-balance",
+        "/api/reports/receivables-ageing"
       ]) {
         const response = await fetch(
-          `${baseUrl}${reportPath}?outlet_id=${deniedOutletId}&date_from=2025-01-01&date_to=2026-12-31`,
+          reportPath === "/api/reports/receivables-ageing"
+            ? `${baseUrl}${reportPath}?outlet_id=${deniedOutletId}&as_of_date=2026-12-31`
+            : `${baseUrl}${reportPath}?outlet_id=${deniedOutletId}&date_from=2025-01-01&date_to=2026-12-31`,
           {
             headers: {
               authorization: `Bearer ${accessToken}`
@@ -299,7 +302,8 @@ test(
         `/api/reports/trial-balance?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
         `/api/reports/general-ledger?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
         `/api/reports/worksheet?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
-        `/api/reports/profit-loss?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`
+        `/api/reports/profit-loss?outlet_id=${outletId}&date_from=2020-01-01&date_to=2030-01-01`,
+        `/api/reports/receivables-ageing?outlet_id=${outletId}&as_of_date=2030-01-01`
       ];
 
       for (const accessToken of [ownerToken, adminToken, accountantToken]) {
