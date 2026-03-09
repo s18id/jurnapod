@@ -30,6 +30,18 @@ export const SalesInvoicePaymentStatusSchema = z.enum([
   "PAID"
 ]);
 
+export const SalesInvoiceDueTermSchema = z.enum([
+  "NET_0",
+  "NET_7",
+  "NET_14",
+  "NET_15",
+  "NET_20",
+  "NET_30",
+  "NET_45",
+  "NET_60",
+  "NET_90"
+]);
+
 export const SalesPaymentMethodSchema = z.enum(["CASH", "QRIS", "CARD"]);
 
 export const SalesInvoiceLineInputSchema = z.object({
@@ -48,6 +60,8 @@ export const SalesInvoiceCreateRequestSchema = z.object({
   client_ref: z.string().uuid().optional(),
   invoice_no: z.string().trim().min(1).max(64).optional(),
   invoice_date: DateOnlySchema,
+  due_date: DateOnlySchema.optional(),
+  due_term: SalesInvoiceDueTermSchema.optional(),
   tax_amount: MoneyInputNonNegativeSchema.default(0),
   lines: z.array(SalesInvoiceLineInputSchema).min(1),
   taxes: z.array(SalesInvoiceTaxInputSchema).optional()
@@ -58,6 +72,8 @@ export const SalesInvoiceUpdateRequestSchema = z
     outlet_id: NumericIdSchema.optional(),
     invoice_no: z.string().trim().min(1).max(64).optional(),
     invoice_date: DateOnlySchema.optional(),
+    due_date: DateOnlySchema.optional(),
+    due_term: SalesInvoiceDueTermSchema.optional(),
     tax_amount: MoneyInputNonNegativeSchema.optional(),
     lines: z.array(SalesInvoiceLineInputSchema).min(1).optional(),
     taxes: z.array(SalesInvoiceTaxInputSchema).optional()
@@ -90,6 +106,7 @@ export const SalesInvoiceSchema = z.object({
   invoice_no: z.string().min(1),
   client_ref: z.string().uuid().nullable().optional(),
   invoice_date: DateOnlySchema,
+  due_date: DateOnlySchema.nullable().optional(),
   status: SalesInvoiceStatusSchema,
   payment_status: SalesInvoicePaymentStatusSchema,
   subtotal: MoneySchema.nonnegative(),

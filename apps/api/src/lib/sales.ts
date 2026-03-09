@@ -21,6 +21,7 @@ type SalesInvoiceRow = RowDataPacket & {
   invoice_no: string;
   client_ref?: string | null;
   invoice_date: Date | string;
+  due_date?: Date | string | null;
   status: "DRAFT" | "APPROVED" | "POSTED" | "VOID";
   payment_status: "UNPAID" | "PARTIAL" | "PAID";
   subtotal: string | number;
@@ -113,6 +114,7 @@ export type SalesInvoice = {
   invoice_no: string;
   client_ref?: string | null;
   invoice_date: string;
+  due_date?: string | null;
   status: "DRAFT" | "APPROVED" | "POSTED" | "VOID";
   payment_status: "UNPAID" | "PARTIAL" | "PAID";
   subtotal: number;
@@ -198,6 +200,20 @@ const mysqlDuplicateErrorCode = 1062;
 
 const MONEY_SCALE = 100;
 
+const INVOICE_DUE_TERM_DAYS = {
+  NET_0: 0,
+  NET_7: 7,
+  NET_14: 14,
+  NET_15: 15,
+  NET_20: 20,
+  NET_30: 30,
+  NET_45: 45,
+  NET_60: 60,
+  NET_90: 90
+} as const;
+
+type InvoiceDueTerm = keyof typeof INVOICE_DUE_TERM_DAYS;
+
 function normalizeMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * MONEY_SCALE) / MONEY_SCALE;
 }
@@ -212,10 +228,36 @@ function sumMoney(values: readonly number[]): number {
 
 function formatDateOnly(value: Date | string): string {
   if (typeof value === "string") {
-    return value;
+    return value.slice(0, 10);
   }
 
-  return value.toISOString().slice(0, 10);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysToDateOnly(dateOnly: string, days: number): string {
+  const baseDate = new Date(`${dateOnly}T00:00:00.000Z`);
+  if (Number.isNaN(baseDate.getTime())) {
+    throw new Error("Invalid date");
+  }
+
+  baseDate.setUTCDate(baseDate.getUTCDate() + days);
+  return baseDate.toISOString().slice(0, 10);
+}
+
+function resolveInvoiceDueDate(input: {
+  invoiceDate: string;
+  dueDate?: string;
+  dueTerm?: InvoiceDueTerm;
+}): string {
+  if (input.dueDate) {
+    return input.dueDate;
+  }
+
+  const term = input.dueTerm ?? "NET_30";
+  return addDaysToDateOnly(input.invoiceDate, INVOICE_DUE_TERM_DAYS[term]);
 }
 
 function toMysqlDateTime(value: string): string {
@@ -235,6 +277,7 @@ function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
     invoice_no: row.invoice_no,
     client_ref: row.client_ref ?? null,
     invoice_date: formatDateOnly(row.invoice_date),
+    due_date: row.due_date ? formatDateOnly(row.due_date) : null,
     status: row.status,
     payment_status: row.payment_status,
     subtotal: Number(row.subtotal),
@@ -387,7 +430,7 @@ async function findInvoiceByIdWithExecutor(
 ): Promise<SalesInvoice | null> {
   const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
   const [rows] = await executor.execute<SalesInvoiceRow[]>(
-    `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, status, payment_status,
+    `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, due_date, status, payment_status,
             subtotal, tax_amount, grand_total, paid_total,
             approved_by_user_id, approved_at,
             created_by_user_id, updated_by_user_id, created_at, updated_at
@@ -541,7 +584,7 @@ export async function listInvoices(companyId: number, filters: InvoiceListFilter
   const total = Number(countRows[0]?.total ?? 0);
 
   const [rows] = await pool.execute<SalesInvoiceRow[]>(
-    `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, status, payment_status,
+    `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, due_date, status, payment_status,
             subtotal, tax_amount, grand_total, paid_total,
             approved_by_user_id, approved_at,
             created_by_user_id, updated_by_user_id, created_at, updated_at
@@ -567,6 +610,8 @@ export async function createInvoice(
     client_ref?: string;
     invoice_no?: string;
     invoice_date: string;
+    due_date?: string;
+    due_term?: InvoiceDueTerm;
     tax_amount: number;
     lines: InvoiceLineInput[];
     taxes?: InvoiceTaxInput[];
@@ -599,6 +644,11 @@ export async function createInvoice(
       DOCUMENT_TYPES.SALES_INVOICE,
       input.invoice_no
     );
+    const dueDate = resolveInvoiceDueDate({
+      invoiceDate: input.invoice_date,
+      dueDate: input.due_date,
+      dueTerm: input.due_term
+    });
 
     const { lineRows, subtotal } = buildInvoiceLines(input.lines);
     let taxAmount = normalizeMoney(input.tax_amount);
@@ -640,26 +690,28 @@ export async function createInvoice(
 
     try {
       const [result] = await connection.execute<ResultSetHeader>(
-         `INSERT INTO sales_invoices (
-           company_id,
-           outlet_id,
-           invoice_no,
-           invoice_date,
-           client_ref,
-           status,
-           payment_status,
-           subtotal,
+          `INSERT INTO sales_invoices (
+            company_id,
+            outlet_id,
+            invoice_no,
+            invoice_date,
+            due_date,
+            client_ref,
+            status,
+            payment_status,
+            subtotal,
            tax_amount,
            grand_total,
            paid_total,
            created_by_user_id,
            updated_by_user_id
-         ) VALUES (?, ?, ?, ?, ?, 'DRAFT', 'UNPAID', ?, ?, ?, 0, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', 'UNPAID', ?, ?, ?, 0, ?, ?)`,
         [
           companyId,
           input.outlet_id,
           invoiceNo,
           input.invoice_date,
+          dueDate,
           input.client_ref ?? null,
           subtotal,
           taxAmount,
@@ -765,6 +817,8 @@ export async function updateInvoice(
     outlet_id?: number;
     invoice_no?: string;
     invoice_date?: string;
+    due_date?: string;
+    due_term?: InvoiceDueTerm;
     tax_amount?: number;
     lines?: InvoiceLineInput[];
     taxes?: InvoiceTaxInput[];
@@ -797,6 +851,15 @@ export async function updateInvoice(
     const nextOutletId = input.outlet_id ?? current.outlet_id;
     const nextInvoiceNo = input.invoice_no ?? current.invoice_no;
     const nextInvoiceDate = input.invoice_date ?? current.invoice_date;
+    const nextDueDate =
+      typeof input.due_date === "string"
+        ? input.due_date
+        : input.due_term
+          ? resolveInvoiceDueDate({
+              invoiceDate: nextInvoiceDate,
+              dueTerm: input.due_term
+            })
+          : current.due_date ?? null;
 
     let lineRows: PreparedInvoiceLine[] | null = null;
     let subtotal = current.subtotal;
@@ -869,6 +932,7 @@ export async function updateInvoice(
          SET outlet_id = ?,
              invoice_no = ?,
              invoice_date = ?,
+             due_date = ?,
              subtotal = ?,
              tax_amount = ?,
              grand_total = ?,
@@ -880,6 +944,7 @@ export async function updateInvoice(
           nextOutletId,
           nextInvoiceNo,
           nextInvoiceDate,
+          nextDueDate,
           subtotal,
           taxAmount,
           grandTotal,
@@ -2141,6 +2206,8 @@ export async function convertOrderToInvoice(
   input: {
     outlet_id: number;
     invoice_date: string;
+    due_date?: string;
+    due_term?: InvoiceDueTerm;
     invoice_no?: string;
     tax_amount?: number;
     taxes?: InvoiceTaxInput[];
@@ -2172,6 +2239,11 @@ export async function convertOrderToInvoice(
       DOCUMENT_TYPES.SALES_INVOICE,
       input.invoice_no
     );
+    const dueDate = resolveInvoiceDueDate({
+      invoiceDate: input.invoice_date,
+      dueDate: input.due_date,
+      dueTerm: input.due_term
+    });
 
     const orderLines = await findOrderLinesByOrderId(connection, orderId);
     const invoiceLines = orderLines.map((line, index) => ({
@@ -2215,6 +2287,7 @@ export async function convertOrderToInvoice(
         order_id,
         invoice_no,
         invoice_date,
+        due_date,
         status,
         payment_status,
         subtotal,
@@ -2223,13 +2296,14 @@ export async function convertOrderToInvoice(
         paid_total,
         created_by_user_id,
         updated_by_user_id
-      ) VALUES (?, ?, ?, ?, ?, 'DRAFT', 'UNPAID', ?, ?, ?, 0, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', 'UNPAID', ?, ?, ?, 0, ?, ?)`,
       [
         companyId,
         input.outlet_id,
         orderId,
         invoiceNo,
         input.invoice_date,
+        dueDate,
         subtotal,
         taxAmount,
         grandTotal,
@@ -2465,7 +2539,7 @@ async function findCreditNoteByIdWithExecutor(
 ): Promise<SalesCreditNoteRow | null> {
   const [rows] = await connection.execute<SalesCreditNoteRow[]>(
     `SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
-            status, reason, notes, amount, created_by_user_id, updated_by_user_id,
+            client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
             created_at, updated_at
      FROM sales_credit_notes
      WHERE company_id = ? AND id = ?${options?.forUpdate ? " FOR UPDATE" : ""}`,
@@ -2506,7 +2580,7 @@ async function findCreditNoteDetailWithExecutor(
     outlet_id: creditNote.outlet_id,
     invoice_id: creditNote.invoice_id,
     credit_note_no: creditNote.credit_note_no,
-    credit_note_date: String(creditNote.credit_note_date).slice(0, 10),
+    credit_note_date: formatDateOnly(creditNote.credit_note_date),
     client_ref: creditNote.client_ref ?? null,
     status: creditNote.status,
     reason: creditNote.reason ?? null,
@@ -2558,7 +2632,7 @@ async function findCreditNoteByClientRef(
 ): Promise<SalesCreditNoteRow | null> {
   const [rows] = await connection.execute<SalesCreditNoteRow[]>(
     `SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
-            status, reason, notes, amount, created_by_user_id, updated_by_user_id,
+            client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
             created_at, updated_at
      FROM sales_credit_notes
      WHERE company_id = ? AND client_ref = ?`,
@@ -2693,7 +2767,11 @@ export async function createCreditNote(
       );
     }
 
-    const creditNoteNo = await getNextDocumentNumber(companyId, input.outlet_id, DOCUMENT_TYPES.CREDIT_NOTE);
+    const creditNoteNo = await getNumberWithConflictMapping(
+      companyId,
+      input.outlet_id,
+      DOCUMENT_TYPES.CREDIT_NOTE
+    );
 
     try {
       const [insertResult] = await connection.execute<ResultSetHeader>(
@@ -2842,7 +2920,7 @@ export async function listCreditNotes(
         outlet_id: row.outlet_id,
         invoice_id: row.invoice_id,
         credit_note_no: row.credit_note_no,
-        credit_note_date: String(row.credit_note_date).slice(0, 10),
+        credit_note_date: formatDateOnly(row.credit_note_date),
         client_ref: row.client_ref ?? null,
         status: row.status,
         reason: row.reason ?? null,
@@ -3025,7 +3103,7 @@ export async function postCreditNote(
       outlet_id: creditNote.outlet_id,
       invoice_id: creditNote.invoice_id,
       credit_note_no: creditNote.credit_note_no,
-      credit_note_date: String(creditNote.credit_note_date).slice(0, 10),
+      credit_note_date: formatDateOnly(creditNote.credit_note_date),
       amount: Number(creditNote.amount),
       updated_at: creditNote.updated_at.toISOString()
     });
@@ -3109,7 +3187,7 @@ export async function voidCreditNote(
         outlet_id: creditNote.outlet_id,
         invoice_id: creditNote.invoice_id,
         credit_note_no: creditNote.credit_note_no,
-        credit_note_date: String(creditNote.credit_note_date).slice(0, 10),
+        credit_note_date: formatDateOnly(creditNote.credit_note_date),
         amount: Number(creditNote.amount),
         updated_at: creditNote.updated_at.toISOString()
       });

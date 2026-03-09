@@ -233,14 +233,19 @@ CREATE TABLE sales_invoice_history (
 **Effort:** Low  
 **Status:** Planned
 
+**Detailed Plan:**
+- See `docs/plans/sales-phase7-receivables-ageing-plan.md`
+
 **API Endpoint:**
 - GET `/api/reports/receivables-ageing?outlet_id=1`
 
 **Response:**
 ```json
 {
-  "outlet_id": 1,
-  "as_of_date": "2026-03-09",
+  "filters": {
+    "outlet_ids": [1],
+    "as_of_date": "2026-03-09"
+  },
   "buckets": {
     "current": 5000000,
     "1_30_days": 2000000,
@@ -251,39 +256,50 @@ CREATE TABLE sales_invoice_history (
   "total_outstanding": 8500000,
   "invoices": [
     {
+      "invoice_id": 1001,
       "invoice_no": "INV/2603/0001",
+      "outlet_id": 1,
+      "outlet_name": "Main Outlet",
       "invoice_date": "2026-03-01",
-      "days_outstanding": 8,
+      "due_date": "2026-03-08",
+      "days_overdue": 1,
       "outstanding_amount": 5000000,
-      "age_bucket": "current"
+      "age_bucket": "1_30_days"
     }
   ]
 }
 ```
 
 **Features:**
+- Add `due_date` to invoices (nullable, backward compatible)
+- Auto-calculate default due date as Net 30 (`invoice_date + 30 days`) when not provided
+- Add common selectable net options: Net 0, 7, 14, 15, 20, 30, 45, 60, 90
 - Group outstanding invoices by age (current, 1-30, 31-60, 61-90, 90+)
+- Ageing basis: `COALESCE(due_date, invoice_date)`
 - Filter by outlet or company-wide
-- Include invoice detail with days outstanding
-- Export to Excel/CSV
+- Include invoice detail with days overdue and outstanding amount
+- Export to CSV
 
 **Implementation:**
 ```sql
 SELECT 
+  i.id AS invoice_id,
   i.invoice_no,
+  i.outlet_id,
   i.invoice_date,
+  i.due_date,
   i.grand_total - i.paid_total AS outstanding,
-  DATEDIFF(CURRENT_DATE, i.invoice_date) AS days_outstanding,
+  DATEDIFF(?, COALESCE(i.due_date, i.invoice_date)) AS days_overdue,
   CASE 
-    WHEN DATEDIFF(CURRENT_DATE, i.invoice_date) <= 30 THEN 'current'
-    WHEN DATEDIFF(CURRENT_DATE, i.invoice_date) <= 60 THEN '1_30_days'
-    WHEN DATEDIFF(CURRENT_DATE, i.invoice_date) <= 90 THEN '31_60_days'
-    WHEN DATEDIFF(CURRENT_DATE, i.invoice_date) <= 120 THEN '61_90_days'
+    WHEN DATEDIFF(?, COALESCE(i.due_date, i.invoice_date)) <= 0 THEN 'current'
+    WHEN DATEDIFF(?, COALESCE(i.due_date, i.invoice_date)) <= 30 THEN '1_30_days'
+    WHEN DATEDIFF(?, COALESCE(i.due_date, i.invoice_date)) <= 60 THEN '31_60_days'
+    WHEN DATEDIFF(?, COALESCE(i.due_date, i.invoice_date)) <= 90 THEN '61_90_days'
     ELSE 'over_90_days'
   END AS age_bucket
 FROM sales_invoices i
 WHERE i.status = 'POSTED'
-  AND i.payment_status IN ('UNPAID', 'PARTIAL')
+  AND i.grand_total - i.paid_total > 0
   AND i.company_id = ?
 ```
 
