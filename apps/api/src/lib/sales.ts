@@ -40,6 +40,8 @@ type SalesInvoiceLineRow = RowDataPacket & {
   id: number;
   invoice_id: number;
   line_no: number;
+  line_type: "SERVICE" | "PRODUCT";
+  item_id: number | null;
   description: string;
   qty: string | number;
   unit_price: string | number;
@@ -70,6 +72,8 @@ type MutationActor = {
 };
 
 type InvoiceLineInput = {
+  line_type?: "SERVICE" | "PRODUCT";
+  item_id?: number;
   description: string;
   qty: number;
   unit_price: number;
@@ -82,6 +86,8 @@ type InvoiceTaxInput = {
 
 type PreparedInvoiceLine = {
   line_no: number;
+  line_type: "SERVICE" | "PRODUCT";
+  item_id: number | null;
   description: string;
   qty: number;
   unit_price: number;
@@ -133,6 +139,8 @@ export type SalesInvoiceLine = {
   id: number;
   invoice_id: number;
   line_no: number;
+  line_type: "SERVICE" | "PRODUCT";
+  item_id: number | null;
   description: string;
   qty: number;
   unit_price: number;
@@ -298,6 +306,8 @@ function normalizeInvoiceLine(row: SalesInvoiceLineRow): SalesInvoiceLine {
     id: Number(row.id),
     invoice_id: Number(row.invoice_id),
     line_no: Number(row.line_no),
+    line_type: row.line_type,
+    item_id: row.item_id !== null ? Number(row.item_id) : null,
     description: row.description,
     qty: Number(row.qty),
     unit_price: Number(row.unit_price),
@@ -305,19 +315,45 @@ function normalizeInvoiceLine(row: SalesInvoiceLineRow): SalesInvoiceLine {
   };
 }
 
-function buildInvoiceLines(lines: readonly InvoiceLineInput[]): {
+function buildInvoiceLines(
+  lines: readonly InvoiceLineInput[],
+  itemLookups: Map<number, ItemLookup>
+): {
   lineRows: PreparedInvoiceLine[];
   subtotal: number;
 } {
   const lineRows: PreparedInvoiceLine[] = [];
 
   for (const [index, line] of lines.entries()) {
-    const lineTotal = normalizeMoney(line.qty * line.unit_price);
+    const lineType = line.line_type ?? "SERVICE";
+    const itemId = line.item_id ?? null;
+
+    let description = line.description;
+    let unitPrice = line.unit_price;
+
+    // Auto-populate from item if PRODUCT and fields are missing/empty
+    if (lineType === "PRODUCT" && itemId !== null) {
+      const item = itemLookups.get(itemId);
+      if (item) {
+        // Only auto-fill if description is empty or whitespace
+        if (!description || description.trim() === "") {
+          description = item.name;
+        }
+        // Only auto-fill if unit_price is 0 or not provided
+        if (unitPrice === 0 && item.default_price !== null) {
+          unitPrice = item.default_price;
+        }
+      }
+    }
+
+    const lineTotal = normalizeMoney(line.qty * unitPrice);
     lineRows.push({
       line_no: index + 1,
-      description: line.description,
+      line_type: lineType,
+      item_id: itemId,
+      description: description.trim(),
       qty: line.qty,
-      unit_price: line.unit_price,
+      unit_price: unitPrice,
       line_total: lineTotal
     });
   }
@@ -422,6 +458,61 @@ async function ensureUserHasOutletAccess(
   }
 }
 
+type ItemLookup = {
+  id: number;
+  name: string;
+  sku: string | null;
+  type: string;
+  default_price: number | null;
+};
+
+async function findItemByIdWithExecutor(
+  executor: QueryExecutor,
+  companyId: number,
+  itemId: number
+): Promise<ItemLookup | null> {
+  const [rows] = await executor.execute<RowDataPacket[]>(
+    `SELECT i.id, i.name, i.sku, i.item_type as type,
+            (SELECT price FROM item_prices
+             WHERE item_id = i.id AND company_id = i.company_id
+             ORDER BY outlet_id IS NULL DESC, is_active DESC, id ASC
+             LIMIT 1) as default_price
+     FROM items i
+     WHERE i.id = ? AND i.company_id = ? AND i.is_active = 1
+     LIMIT 1`,
+    [itemId, companyId]
+  );
+  return rows[0] ? {
+    id: Number(rows[0].id),
+    name: rows[0].name,
+    sku: rows[0].sku,
+    type: rows[0].type,
+    default_price: rows[0].default_price !== null ? Number(rows[0].default_price) : null
+  } : null;
+}
+
+async function validateAndGetItemForLine(
+  executor: QueryExecutor,
+  companyId: number,
+  itemId: number | undefined,
+  lineType: "SERVICE" | "PRODUCT"
+): Promise<ItemLookup | null> {
+  if (lineType !== "PRODUCT") {
+    return null;
+  }
+
+  if (typeof itemId !== "number" || itemId <= 0) {
+    throw new DatabaseReferenceError("Product lines require a valid item_id");
+  }
+
+  const item = await findItemByIdWithExecutor(executor, companyId, itemId);
+  if (!item) {
+    throw new DatabaseReferenceError("Item not found or not active");
+  }
+
+  return item;
+}
+
 async function findInvoiceByIdWithExecutor(
   executor: QueryExecutor,
   companyId: number,
@@ -475,7 +566,7 @@ async function listInvoiceLinesWithExecutor(
   invoiceId: number
 ): Promise<SalesInvoiceLine[]> {
   const [rows] = await executor.execute<SalesInvoiceLineRow[]>(
-    `SELECT id, invoice_id, line_no, description, qty, unit_price, line_total
+    `SELECT id, invoice_id, line_no, line_type, item_id, description, qty, unit_price, line_total
      FROM sales_invoice_lines
      WHERE company_id = ?
        AND invoice_id = ?
@@ -638,6 +729,18 @@ export async function createInvoice(
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
     }
 
+    // Validate and fetch items for PRODUCT lines
+    const itemLookups = new Map<number, ItemLookup>();
+    for (const line of input.lines) {
+      const lineType = line.line_type ?? "SERVICE";
+      if (lineType === "PRODUCT") {
+        const item = await validateAndGetItemForLine(connection, companyId, line.item_id, lineType);
+        if (item) {
+          itemLookups.set(item.id, item);
+        }
+      }
+    }
+
     const invoiceNo = await getNumberWithConflictMapping(
       companyId,
       input.outlet_id,
@@ -650,7 +753,7 @@ export async function createInvoice(
       dueTerm: input.due_term
     });
 
-    const { lineRows, subtotal } = buildInvoiceLines(input.lines);
+    const { lineRows, subtotal } = buildInvoiceLines(input.lines, itemLookups);
     let taxAmount = normalizeMoney(input.tax_amount);
     let taxLines: Array<{ tax_rate_id: number; amount: number }> = [];
 
@@ -724,14 +827,16 @@ export async function createInvoice(
       const invoiceId = Number(result.insertId);
 
       if (lineRows.length > 0) {
-        const placeholders = lineRows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-        const values: Array<string | number> = [];
+        const placeholders = lineRows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+        const values: Array<string | number | null> = [];
         for (const line of lineRows) {
           values.push(
             invoiceId,
             companyId,
             input.outlet_id,
             line.line_no,
+            line.line_type,
+            line.item_id,
             line.description,
             line.qty,
             line.unit_price,
@@ -745,6 +850,8 @@ export async function createInvoice(
              company_id,
              outlet_id,
              line_no,
+             line_type,
+             item_id,
              description,
              qty,
              unit_price,
@@ -861,21 +968,37 @@ export async function updateInvoice(
             })
           : current.due_date ?? null;
 
+    // Validate and fetch items for PRODUCT lines
+    const itemLookups = new Map<number, ItemLookup>();
+    if (input.lines) {
+      for (const line of input.lines) {
+        const lineType = line.line_type ?? "SERVICE";
+        if (lineType === "PRODUCT") {
+          const item = await validateAndGetItemForLine(connection, companyId, line.item_id, lineType);
+          if (item) {
+            itemLookups.set(item.id, item);
+          }
+        }
+      }
+    }
+
     let lineRows: PreparedInvoiceLine[] | null = null;
     let subtotal = current.subtotal;
 
     if (input.lines) {
-      const computed = buildInvoiceLines(input.lines);
+      const computed = buildInvoiceLines(input.lines, itemLookups);
       lineRows = computed.lineRows;
       subtotal = computed.subtotal;
     } else if (nextOutletId !== current.outlet_id) {
       const existingLines = await listInvoiceLinesWithExecutor(connection, companyId, invoiceId);
       const inputs = existingLines.map((line) => ({
+        line_type: line.line_type,
+        item_id: line.item_id ?? undefined,
         description: line.description,
         qty: line.qty,
         unit_price: line.unit_price
       }));
-      const computed = buildInvoiceLines(inputs);
+      const computed = buildInvoiceLines(inputs, itemLookups);
       lineRows = computed.lineRows;
       subtotal = computed.subtotal;
     }
@@ -962,14 +1085,16 @@ export async function updateInvoice(
     }
 
     if (lineRows) {
-      const placeholders = lineRows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-      const values: Array<string | number> = [];
+      const placeholders = lineRows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+      const values: Array<string | number | null> = [];
       for (const line of lineRows) {
         values.push(
           invoiceId,
           companyId,
           nextOutletId,
           line.line_no,
+          line.line_type,
+          line.item_id,
           line.description,
           line.qty,
           line.unit_price,
@@ -983,6 +1108,8 @@ export async function updateInvoice(
            company_id,
            outlet_id,
            line_no,
+           line_type,
+           item_id,
            description,
            qty,
            unit_price,
@@ -1567,6 +1694,8 @@ type SalesOrderLineRow = RowDataPacket & {
   id: number;
   order_id: number;
   line_no: number;
+  line_type: "SERVICE" | "PRODUCT";
+  item_id: number | null;
   description: string;
   qty: string | number;
   unit_price: string | number;
@@ -1600,6 +1729,8 @@ export type SalesOrderLine = {
   id: number;
   order_id: number;
   line_no: number;
+  line_type: "SERVICE" | "PRODUCT";
+  item_id: number | null;
   description: string;
   qty: number;
   unit_price: number;
@@ -1611,6 +1742,8 @@ export type SalesOrderDetail = SalesOrder & {
 };
 
 type OrderLineInput = {
+  line_type?: "SERVICE" | "PRODUCT";
+  item_id?: number;
   description: string;
   qty: number;
   unit_price: number;
@@ -1625,14 +1758,45 @@ type OrderListFilters = {
   offset?: number;
 };
 
-function buildOrderLines(lines: OrderLineInput[]): Array<{ line_no: number; description: string; qty: number; unit_price: number; line_total: number }> {
+function buildOrderLines(
+  lines: OrderLineInput[],
+  itemLookups: Map<number, ItemLookup>
+): Array<{
+  line_no: number;
+  line_type: "SERVICE" | "PRODUCT";
+  item_id: number | null;
+  description: string;
+  qty: number;
+  unit_price: number;
+  line_total: number
+}> {
   return lines.map((line, index) => {
-    const lineTotal = normalizeMoney(line.qty * line.unit_price);
+    const lineType = line.line_type ?? "SERVICE";
+    const itemId = line.item_id ?? null;
+
+    let description = line.description.trim();
+    let unitPrice = normalizeMoney(line.unit_price);
+
+    if (lineType === "PRODUCT" && itemId !== null) {
+      const item = itemLookups.get(itemId);
+      if (item) {
+        if (!description || description.trim() === "") {
+          description = item.name;
+        }
+        if (unitPrice === 0 && item.default_price !== null) {
+          unitPrice = item.default_price;
+        }
+      }
+    }
+
+    const lineTotal = normalizeMoney(line.qty * unitPrice);
     return {
       line_no: index + 1,
-      description: line.description.trim(),
+      line_type: lineType,
+      item_id: itemId,
+      description,
       qty: line.qty,
-      unit_price: normalizeMoney(line.unit_price),
+      unit_price: unitPrice,
       line_total: lineTotal
     };
   });
@@ -1669,7 +1833,8 @@ async function findOrderLinesByOrderId(
   orderId: number
 ): Promise<SalesOrderLineRow[]> {
   const [rows] = await executor.execute<SalesOrderLineRow[]>(
-    `SELECT * FROM sales_order_lines WHERE order_id = ? ORDER BY line_no`,
+    `SELECT id, order_id, line_no, line_type, item_id, description, qty, unit_price, line_total
+     FROM sales_order_lines WHERE order_id = ? ORDER BY line_no`,
     [orderId]
   );
   return rows;
@@ -1705,6 +1870,8 @@ function normalizeSalesOrderLineRow(row: SalesOrderLineRow): SalesOrderLine {
     id: row.id,
     order_id: row.order_id,
     line_no: row.line_no,
+    line_type: row.line_type,
+    item_id: row.item_id !== null ? Number(row.item_id) : null,
     description: row.description,
     qty: Number(row.qty),
     unit_price: Number(row.unit_price),
@@ -1762,6 +1929,18 @@ export async function createOrder(
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
     }
 
+    // Validate and fetch items for PRODUCT lines
+    const itemLookups = new Map<number, ItemLookup>();
+    for (const line of input.lines) {
+      const lineType = line.line_type ?? "SERVICE";
+      if (lineType === "PRODUCT") {
+        const item = await validateAndGetItemForLine(connection, companyId, line.item_id, lineType);
+        if (item) {
+          itemLookups.set(item.id, item);
+        }
+      }
+    }
+
     const orderNo = await getNumberWithConflictMapping(
       companyId,
       input.outlet_id,
@@ -1769,7 +1948,7 @@ export async function createOrder(
       input.order_no
     );
 
-    const lineRows = buildOrderLines(input.lines);
+    const lineRows = buildOrderLines(input.lines, itemLookups);
     const subtotal = lineRows.reduce((acc, line) => acc + line.line_total, 0);
 
     const [result] = await connection.execute<ResultSetHeader>(
@@ -1812,16 +1991,20 @@ export async function createOrder(
           company_id,
           outlet_id,
           line_no,
+          line_type,
+          item_id,
           description,
           qty,
           unit_price,
           line_total
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderId,
           companyId,
           input.outlet_id,
           line.line_no,
+          line.line_type,
+          line.item_id,
           line.description,
           line.qty,
           line.unit_price,
@@ -1908,20 +2091,44 @@ export async function updateOrder(
       (current.expected_date ? formatDateOnly(current.expected_date) : null);
     const nextNotes = input.notes ?? current.notes;
 
-    let lineRows: Array<{ line_no: number; description: string; qty: number; unit_price: number; line_total: number }> | null = null;
+    // Validate and fetch items for PRODUCT lines
+    const itemLookups = new Map<number, ItemLookup>();
+    if (input.lines) {
+      for (const line of input.lines) {
+        const lineType = line.line_type ?? "SERVICE";
+        if (lineType === "PRODUCT") {
+          const item = await validateAndGetItemForLine(connection, companyId, line.item_id, lineType);
+          if (item) {
+            itemLookups.set(item.id, item);
+          }
+        }
+      }
+    }
+
+    let lineRows: Array<{
+      line_no: number;
+      line_type: "SERVICE" | "PRODUCT";
+      item_id: number | null;
+      description: string;
+      qty: number;
+      unit_price: number;
+      line_total: number
+    }> | null = null;
     let subtotal = Number(current.subtotal);
 
     if (input.lines) {
-      lineRows = buildOrderLines(input.lines);
+      lineRows = buildOrderLines(input.lines, itemLookups);
       subtotal = sumMoney(lineRows.map((line) => line.line_total));
     } else if (nextOutletId !== current.outlet_id) {
       const existingLines = await findOrderLinesByOrderId(connection, orderId);
       const lineInputs = existingLines.map((line) => ({
+        line_type: line.line_type,
+        item_id: line.item_id ?? undefined,
         description: line.description,
         qty: Number(line.qty),
         unit_price: Number(line.unit_price)
       }));
-      lineRows = buildOrderLines(lineInputs);
+      lineRows = buildOrderLines(lineInputs, itemLookups);
       subtotal = sumMoney(lineRows.map((line) => line.line_total));
     }
 
@@ -1975,14 +2182,16 @@ export async function updateOrder(
     }
 
     if (lineRows) {
-      const placeholders = lineRows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-      const values: Array<string | number> = [];
+      const placeholders = lineRows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+      const values: Array<string | number | null> = [];
       for (const line of lineRows) {
         values.push(
           orderId,
           companyId,
           nextOutletId,
           line.line_no,
+          line.line_type,
+          line.item_id,
           line.description,
           line.qty,
           line.unit_price,
@@ -1996,6 +2205,8 @@ export async function updateOrder(
            company_id,
            outlet_id,
            line_no,
+           line_type,
+           item_id,
            description,
            qty,
            unit_price,
@@ -2248,6 +2459,8 @@ export async function convertOrderToInvoice(
     const orderLines = await findOrderLinesByOrderId(connection, orderId);
     const invoiceLines = orderLines.map((line, index) => ({
       line_no: index + 1,
+      line_type: line.line_type,
+      item_id: line.item_id !== null ? Number(line.item_id) : null,
       description: line.description,
       qty: Number(line.qty),
       unit_price: normalizeMoney(Number(line.unit_price)),
@@ -2321,16 +2534,20 @@ export async function convertOrderToInvoice(
           company_id,
           outlet_id,
           line_no,
+          line_type,
+          item_id,
           description,
           qty,
           unit_price,
           line_total
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           invoiceId,
           companyId,
           input.outlet_id,
           line.line_no,
+          line.line_type,
+          line.item_id,
           line.description,
           line.qty,
           line.unit_price,

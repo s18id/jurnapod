@@ -42,12 +42,24 @@ export const SalesInvoiceDueTermSchema = z.enum([
   "NET_90"
 ]);
 
+export const SalesLineTypeSchema = z.enum(["SERVICE", "PRODUCT"]).default("SERVICE");
+
 export const SalesPaymentMethodSchema = z.enum(["CASH", "QRIS", "CARD"]);
 
 export const SalesInvoiceLineInputSchema = z.object({
+  line_type: SalesLineTypeSchema,
+  item_id: NumericIdSchema.optional(),
   description: z.string().trim().min(1).max(255),
   qty: z.coerce.number().finite().positive(),
   unit_price: MoneyInputNonNegativeSchema
+}).refine((data) => {
+  if (data.line_type === "PRODUCT") {
+    return typeof data.item_id === "number" && data.item_id > 0;
+  }
+  return true;
+}, {
+  message: "Product lines require item_id",
+  path: ["item_id"]
 });
 
 export const SalesInvoiceTaxInputSchema = z.object({
@@ -86,6 +98,8 @@ export const SalesInvoiceLineSchema = z.object({
   id: NumericIdSchema,
   invoice_id: NumericIdSchema,
   line_no: z.coerce.number().int().positive(),
+  line_type: z.enum(["SERVICE", "PRODUCT"]),
+  item_id: NumericIdSchema.nullable(),
   description: z.string().min(1),
   qty: z.number().finite().positive(),
   unit_price: MoneySchema.nonnegative(),
@@ -197,9 +211,19 @@ export const SalesOrderStatusSchema = z.enum([
 ]);
 
 export const SalesOrderLineInputSchema = z.object({
+  line_type: SalesLineTypeSchema,
+  item_id: NumericIdSchema.optional(),
   description: z.string().trim().min(1).max(255),
   qty: z.coerce.number().finite().positive(),
   unit_price: MoneyInputNonNegativeSchema
+}).refine((data) => {
+  if (data.line_type === "PRODUCT") {
+    return typeof data.item_id === "number" && data.item_id > 0;
+  }
+  return true;
+}, {
+  message: "Product lines require item_id",
+  path: ["item_id"]
 });
 
 export const SalesOrderCreateRequestSchema = z.object({
@@ -229,6 +253,8 @@ export const SalesOrderLineSchema = z.object({
   id: NumericIdSchema,
   order_id: NumericIdSchema,
   line_no: z.coerce.number().int().positive(),
+  line_type: z.enum(["SERVICE", "PRODUCT"]),
+  item_id: NumericIdSchema.nullable(),
   description: z.string().min(1),
   qty: z.number().finite().positive(),
   unit_price: MoneySchema.nonnegative(),
@@ -385,3 +411,4 @@ export type SalesCreditNote = z.infer<typeof SalesCreditNoteSchema>;
 export type SalesCreditNoteDetail = z.infer<typeof SalesCreditNoteDetailSchema>;
 export type SalesCreditNoteResponse = z.infer<typeof SalesCreditNoteResponseSchema>;
 export type SalesCreditNoteListQuery = z.infer<typeof SalesCreditNoteListQuerySchema>;
+export type SalesLineType = z.infer<typeof SalesLineTypeSchema>;

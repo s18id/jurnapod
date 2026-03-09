@@ -152,47 +152,56 @@ Cr: Sales Returns (contra revenue)  amount
 
 ## Planned Phases
 
-### Phase 5: Product/Item Linkage
+### Phase 5: Product/Item Linkage ✅
 **Priority:** Medium  
 **Effort:** Medium  
-**Status:** Planned
+**Status:** Complete
+
+**Implementation:**
+- `packages/db/migrations/0077_sales_lines_item_linkage.sql` - Added line_type and item_id columns
+- `packages/shared/src/schemas/sales.ts` - Updated line input/output schemas
+- `apps/api/src/lib/sales.ts` - Added item validation and auto-population logic
 
 **Database Changes:**
-```sql
--- Add to sales_invoice_lines and sales_order_lines
-ALTER TABLE sales_invoice_lines 
-  ADD COLUMN item_id BIGINT UNSIGNED DEFAULT NULL,
-  ADD COLUMN line_type VARCHAR(16) DEFAULT 'SERVICE'; -- SERVICE|PRODUCT
-
--- FK to items table
-ALTER TABLE sales_invoice_lines
-  ADD CONSTRAINT fk_invoice_lines_item 
-  FOREIGN KEY (item_id) REFERENCES items(id);
-```
+- Added `line_type VARCHAR(16) NOT NULL DEFAULT 'SERVICE'` to `sales_invoice_lines` and `sales_order_lines`
+- Added `item_id BIGINT UNSIGNED DEFAULT NULL` to both line tables
+- Added CHECK constraints for valid line_type values
+- Added scoped FK constraints to `items(company_id, id)` with RESTRICT
+- Added indexes on `item_id` for query performance
 
 **Schema Updates:**
-```typescript
-SalesInvoiceLineInputSchema = z.object({
-  line_type: z.enum(["SERVICE", "PRODUCT"]).default("SERVICE"),
-  item_id: NumericIdSchema.optional(),
-  description: z.string().trim().min(1).max(255),
-  qty: z.coerce.number().finite().positive(),
-  unit_price: MoneyInputNonNegativeSchema
-}).refine((data) => {
-  if (data.line_type === "PRODUCT") return !!data.item_id;
-  return true;
-}, "Product lines require item_id");
-```
+- `SalesInvoiceLineInputSchema` now includes `line_type` and `item_id`
+- `SalesOrderLineInputSchema` now includes `line_type` and `item_id`
+- Refinement: PRODUCT lines require valid `item_id`
+- Output schemas include new fields
 
 **Features:**
-- Optional item selection for invoice lines
-- When line_type = PRODUCT, require item_id
-- Auto-populate description and price from item
-- Future-ready for inventory deduction (not in this phase)
+- Optional item selection for invoice/order lines
+- When `line_type = PRODUCT`, `item_id` is required (enforced by schema validation and DB CHECK constraints)
+- Auto-populate `description` from item name when empty
+- Auto-populate `unit_price` from item price when zero
+- Explicit user overrides are preserved
+- Cross-tenant item validation enforced (DB scoped FK + service-layer validation)
+- Inactive items rejected
 
-**Documentation:**
-- Add hooks/comments for automatic inventory sync
-- Note: Full inventory integration deferred to later phase
+**Security & Integrity:**
+- DB-level tenant isolation via scoped FK `(company_id, item_id) -> items(company_id, id)`
+- DB-level constraint: PRODUCT lines must have `item_id IS NOT NULL`
+- Service-layer validation: All PRODUCT lines validated regardless of item_id presence
+
+**Inventory Integration Hooks:**
+- `line_type` and `item_id` fields are now available for future inventory deduction
+- Stock movement logic should be added in a future phase
+- Consider adding `inventory_deducted_at` timestamp in future migration
+
+**Backward Compatibility:**
+- Existing lines default to `line_type = 'SERVICE'`
+- Existing lines default to `item_id = NULL`
+- No breaking changes to API contracts
+
+**Tests:**
+- Schema validation tests added (`apps/api/src/lib/sales.test.ts`)
+- Integration tests for full flow coverage pending
 
 ---
 
@@ -345,7 +354,7 @@ CREATE TABLE sales_payment_splits (
 | 2. Sales Orders | Medium | High | ✅ | Complete |
 | 3. Enhanced Invoice State | Low | Medium | ✅ | Complete |
 | 4. Credit Notes | Medium | High | ✅ | Complete |
-| 5. Product Linkage | Medium | Medium | 🟡 | Planned |
+| 5. Product Linkage | Medium | Medium | ✅ | Complete |
 | 6. Audit Trail | Low | Medium | 🟢 Optional | Planned |
 | 7. Ageing Report | Low | High | 🔴 Next | Planned |
 | 8. Payment Enhancements | Medium | Medium | 🟢 Low | Planned |
