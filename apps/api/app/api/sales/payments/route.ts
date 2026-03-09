@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import {
+  NumericIdSchema,
   SalesPaymentCreateRequestSchema,
   SalesPaymentListQuerySchema
 } from "@jurnapod/shared";
@@ -14,13 +15,14 @@ import {
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError,
-  listPayments
+  listPayments,
+  PaymentAllocationError
 } from "../../../../src/lib/sales";
 const numberingTemplateConflictMessage =
   "No numbering template configured. Please configure document numbering in settings.";
 
-const outletGuardSchema = SalesPaymentCreateRequestSchema.pick({
-  outlet_id: true
+const outletGuardSchema = z.object({
+  outlet_id: NumericIdSchema
 });
 
 const invalidJsonGuardError = new ZodError([
@@ -127,6 +129,10 @@ export const POST = withAuth(
 
       if (error instanceof DatabaseConflictError) {
         return errorResponse("CONFLICT", error.message, 409);
+      }
+
+      if (error instanceof PaymentAllocationError) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
       }
 
       console.error("POST /sales/payments failed", error);

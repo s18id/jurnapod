@@ -314,33 +314,76 @@ WHERE i.status = 'POSTED'
 
 ---
 
-### Phase 8: Payment Enhancements
+### Phase 8: Payment Enhancements ✅
 **Priority:** Low  
 **Effort:** Medium  
-**Status:** Planned
+**Status:** Complete
+
+**Implementation:**
+- `packages/db/migrations/0078_sales_payment_splits.sql` - Splits table with tenant-safe FKs
+- `packages/db/migrations/0079_sales_payment_splits_backfill.sql` - Rerunnable backfill for legacy payments
+- `packages/shared/src/schemas/sales.ts` - Cent-exact split validation in schemas
+- `apps/api/src/lib/sales.ts` - Payment service with split CRUD + idempotency enforcement
+- `apps/api/src/lib/sales-posting.ts` - Multi-account GL posting with balance guard
 
 **Features:**
 1. **Multi-Payment Support:**
-   - Allow splitting single invoice payment across multiple methods
+   - Split single invoice payment across up to 10 accounts
    - Example: ₹10,000 invoice → ₹7,000 CASH + ₹3,000 QRIS
+   - Exact cent-match validation (no rounding tolerance)
+   - Duplicate account rejection
 
-2. **Payment Refunds:**
-   - Integrate with credit note system
-   - Track refund method (reverse to original payment method)
+2. **Idempotency Contract:**
+   - Same `client_ref` + identical payload → return existing payment
+   - Same `client_ref` + different payload → 409 Conflict
 
-3. **Payment Method Improvements:**
-   - Deprecate old `method` field fully
-   - Ensure all payments use `account_id` for GL mapping
-   - Migration script to backfill legacy data
+3. **API Schema:**
+   ```json
+   POST /api/sales/payments
+   {
+     "outlet_id": 1,
+     "invoice_id": 1,
+     "payment_at": "2026-03-10T10:00:00Z",
+     "amount": 100000,
+     "splits": [
+       { "account_id": 1, "amount": 70000 },
+       { "account_id": 2, "amount": 30000 }
+     ]
+   }
+   ```
+
+4. **Backward Compatibility:**
+   - Legacy payments without splits continue to work
+   - Single-split auto-created for non-split payments
+   - Header `account_id` derived from first split when omitted
+
+5. **GL Posting:**
+   - Multiple debit lines (one per split account)
+   - Single credit line to AR for total amount
+   - Split metadata in journal descriptions
+   - Posting balance guard: throws if debit != credit
+
+**Validation:**
+- Split sum must exactly equal payment amount (cent-exact, no tolerance)
+- Amounts must have at most 2 decimal places
+- Maximum 10 splits per payment
+- No duplicate account_ids in splits
+- Header account_id must match splits[0] if provided
+- All split accounts must be payable and belong to tenant
+- List API returns splits consistently with detail API
 
 **Database:**
 ```sql
 CREATE TABLE sales_payment_splits (
   id BIGINT UNSIGNED AUTO_INCREMENT,
   payment_id BIGINT UNSIGNED NOT NULL,
+  company_id BIGINT UNSIGNED NOT NULL,
+  outlet_id BIGINT UNSIGNED NOT NULL,
+  split_index INT UNSIGNED NOT NULL,
   account_id BIGINT UNSIGNED NOT NULL,
   amount DECIMAL(18,2) NOT NULL,
-  PRIMARY KEY (id)
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_sales_payment_splits_payment_index (payment_id, split_index)
 );
 ```
 
@@ -357,25 +400,23 @@ CREATE TABLE sales_payment_splits (
 | 5. Product Linkage | Medium | Medium | ✅ | Complete |
 | 6. Audit Trail | Low | Medium | 🟢 Optional | Planned |
 | 7. Ageing Report | Low | High | 🔴 Next | Planned |
-| 8. Payment Enhancements | Medium | Medium | 🟢 Low | Planned |
+| 8. Payment Enhancements | Medium | Medium | ✅ | Complete |
 
 ---
 
 ## Recommended Sequence
 
 1. **Phase 7 (Ageing Report)** - Low effort, high value for cash flow management
-2. **Phase 5 (Product Linkage)** - Foundation for inventory integration
-3. **Phase 6 (Audit Trail)** - Nice-to-have for compliance
-4. **Phase 8 (Payment Enhancements)** - Lower priority refinements
+2. **Phase 6 (Audit Trail)** - Nice-to-have for compliance
 
 ---
 
 ## Dependencies
 
 - **Phase 4 (Credit Notes)** requires Phase 1 (Numbering) ✅ Complete
-- **Phase 5 (Product Linkage)** requires existing items table ✅
-- **Phase 7 (Ageing Report)** requires Phase 3 (invoice status) ✅
-- **Phase 8 (Payment Enhancements)** may integrate with Phase 4 (credit notes) ✅ Complete
+- **Phase 5 (Product Linkage)** requires existing items table ✅ Complete
+- **Phase 7 (Ageing Report)** requires Phase 3 (invoice status) ✅ Complete
+- **Phase 8 (Payment Enhancements)** integrates with Phase 4 (credit notes) ✅ Complete
 
 ---
 
@@ -389,6 +430,7 @@ After completing all phases:
 - ✅ Product-based invoicing (foundation for inventory)
 - ✅ Comprehensive receivables visibility
 - ✅ Full audit trail for compliance
+- ✅ Split payment support (multi-method payments)
 
 ---
 

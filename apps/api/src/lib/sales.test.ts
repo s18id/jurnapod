@@ -3,7 +3,12 @@
 
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
-import { SalesInvoiceLineInputSchema, SalesOrderLineInputSchema } from "@jurnapod/shared";
+import {
+  SalesInvoiceLineInputSchema,
+  SalesOrderLineInputSchema,
+  SalesPaymentCreateRequestSchema,
+  SalesPaymentUpdateRequestSchema
+} from "@jurnapod/shared";
 
 describe("Phase 5: Product/Item Linkage", () => {
   describe("Schema Validation", () => {
@@ -151,6 +156,240 @@ describe("Phase 5: Product/Item Linkage", () => {
         });
         assert.strictEqual(result.success, true);
       });
+    });
+  });
+});
+
+describe("Phase 8: Payment Enhancements", () => {
+  describe("SalesPaymentCreateRequestSchema", () => {
+    test("accepts payment without splits (backward compatibility)", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        account_id: 1,
+        amount: 100000
+      });
+      assert.strictEqual(result.success, true);
+    });
+
+    test("accepts payment with valid splits", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100000,
+        splits: [
+          { account_id: 1, amount: 60000 },
+          { account_id: 2, amount: 40000 }
+        ]
+      });
+      assert.strictEqual(result.success, true);
+    });
+
+    test("accepts payment with splits and matching header account_id", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        account_id: 1,
+        amount: 100000,
+        splits: [
+          { account_id: 1, amount: 60000 },
+          { account_id: 2, amount: 40000 }
+        ]
+      });
+      assert.strictEqual(result.success, true);
+    });
+
+    test("rejects payment without account_id and without splits", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100000
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("rejects payment when split sum does not equal total amount", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100000,
+        splits: [
+          { account_id: 1, amount: 50000 },
+          { account_id: 2, amount: 40000 }
+        ]
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("rejects payment with duplicate account_ids in splits", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100000,
+        splits: [
+          { account_id: 1, amount: 60000 },
+          { account_id: 1, amount: 40000 }
+        ]
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("rejects payment with more than 10 splits", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100000,
+        splits: Array.from({ length: 11 }, (_, i) => ({
+          account_id: i + 1,
+          amount: 9091
+        }))
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("rejects payment with header account_id not matching first split", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        account_id: 99,
+        amount: 100000,
+        splits: [
+          { account_id: 1, amount: 60000 },
+          { account_id: 2, amount: 40000 }
+        ]
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("accepts payment with exactly 10 splits", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100000,
+        splits: Array.from({ length: 10 }, (_, i) => ({
+          account_id: i + 1,
+          amount: 10000
+        }))
+      });
+      assert.strictEqual(result.success, true);
+    });
+  });
+
+  describe("SalesPaymentUpdateRequestSchema", () => {
+    test("accepts update with valid splits", () => {
+      const result = SalesPaymentUpdateRequestSchema.safeParse({
+        splits: [
+          { account_id: 1, amount: 60000 },
+          { account_id: 2, amount: 40000 }
+        ],
+        amount: 100000
+      });
+      assert.strictEqual(result.success, true);
+    });
+
+    test("rejects update when split sum does not equal amount", () => {
+      const result = SalesPaymentUpdateRequestSchema.safeParse({
+        splits: [
+          { account_id: 1, amount: 50000 },
+          { account_id: 2, amount: 40000 }
+        ],
+        amount: 100000
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("rejects update with duplicate account_ids in splits", () => {
+      const result = SalesPaymentUpdateRequestSchema.safeParse({
+        splits: [
+          { account_id: 1, amount: 60000 },
+          { account_id: 1, amount: 40000 }
+        ],
+        amount: 100000
+      });
+      assert.strictEqual(result.success, false);
+    });
+  });
+
+  describe("Cent-exact validation", () => {
+    test("accepts valid split sum", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100,
+        splits: [
+          { account_id: 1, amount: 33.34 },
+          { account_id: 2, amount: 33.33 },
+          { account_id: 3, amount: 33.33 }
+        ]
+      });
+      assert.strictEqual(result.success, true);
+    });
+
+    test("rejects split sum mismatch by 0.01", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100,
+        splits: [
+          { account_id: 1, amount: 33.33 },
+          { account_id: 2, amount: 33.33 },
+          { account_id: 3, amount: 33.33 }
+        ]
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("rejects amount with more than 2 decimals", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100.123,
+        splits: [
+          { account_id: 1, amount: 50 },
+          { account_id: 2, amount: 50.123 }
+        ]
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("rejects split with more than 2 decimals", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100,
+        splits: [
+          { account_id: 1, amount: 33.333 },
+          { account_id: 2, amount: 66.667 }
+        ]
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    test("accepts exactly 2 decimals", () => {
+      const result = SalesPaymentCreateRequestSchema.safeParse({
+        outlet_id: 1,
+        invoice_id: 1,
+        payment_at: "2026-03-10T10:00:00Z",
+        amount: 100.99,
+        splits: [
+          { account_id: 1, amount: 50.49 },
+          { account_id: 2, amount: 50.50 }
+        ]
+      });
+      assert.strictEqual(result.success, true);
     });
   });
 });

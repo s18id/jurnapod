@@ -159,6 +159,17 @@ export type SalesInvoiceDetail = SalesInvoice & {
   taxes: SalesInvoiceTax[];
 };
 
+type SalesPaymentSplitRow = RowDataPacket & {
+  id: number;
+  payment_id: number;
+  company_id: number;
+  outlet_id: number;
+  split_index: number;
+  account_id: number;
+  account_name?: string;
+  amount: string | number;
+};
+
 type SalesPaymentRow = RowDataPacket & {
   id: number;
   company_id: number;
@@ -178,6 +189,17 @@ type SalesPaymentRow = RowDataPacket & {
   updated_at: Date;
 };
 
+export type SalesPaymentSplit = {
+  id: number;
+  payment_id: number;
+  company_id: number;
+  outlet_id: number;
+  split_index: number;
+  account_id: number;
+  account_name?: string;
+  amount: number;
+};
+
 export type SalesPayment = {
   id: number;
   company_id: number;
@@ -191,6 +213,7 @@ export type SalesPayment = {
   method?: "CASH" | "QRIS" | "CARD"; // deprecated
   status: "DRAFT" | "POSTED" | "VOID";
   amount: number;
+  splits?: SalesPaymentSplit[]; // Phase 8: split allocations
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
   created_at: string;
@@ -1200,6 +1223,19 @@ export async function postInvoice(
   });
 }
 
+function normalizePaymentSplit(row: SalesPaymentSplitRow): SalesPaymentSplit {
+  return {
+    id: Number(row.id),
+    payment_id: Number(row.payment_id),
+    company_id: Number(row.company_id),
+    outlet_id: Number(row.outlet_id),
+    split_index: Number(row.split_index),
+    account_id: Number(row.account_id),
+    account_name: row.account_name,
+    amount: normalizeMoney(Number(row.amount))
+  };
+}
+
 function normalizePayment(row: SalesPaymentRow): SalesPayment {
   return {
     id: Number(row.id),
@@ -1213,7 +1249,7 @@ function normalizePayment(row: SalesPaymentRow): SalesPayment {
     account_name: row.account_name,
     method: row.method,
     status: row.status,
-    amount: Number(row.amount),
+    amount: normalizeMoney(Number(row.amount)),
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
     created_at: new Date(row.created_at).toISOString(),
@@ -1221,11 +1257,137 @@ function normalizePayment(row: SalesPaymentRow): SalesPayment {
   };
 }
 
+async function fetchPaymentSplits(
+  executor: QueryExecutor,
+  companyId: number,
+  paymentId: number
+): Promise<SalesPaymentSplit[]> {
+  const [rows] = await executor.execute<SalesPaymentSplitRow[]>(
+    `SELECT sps.id, sps.payment_id, sps.company_id, sps.outlet_id, sps.split_index,
+            sps.account_id, a.name as account_name, sps.amount
+     FROM sales_payment_splits sps
+     LEFT JOIN accounts a ON a.id = sps.account_id AND a.company_id = sps.company_id
+     WHERE sps.company_id = ?
+       AND sps.payment_id = ?
+     ORDER BY sps.split_index`,
+    [companyId, paymentId]
+  );
+  return rows.map(normalizePaymentSplit);
+}
+
+async function fetchPaymentSplitsForMultiple(
+  executor: QueryExecutor,
+  companyId: number,
+  paymentIds: number[]
+): Promise<Map<number, SalesPaymentSplit[]>> {
+  if (paymentIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = paymentIds.map(() => "?").join(", ");
+  const [rows] = await executor.execute<SalesPaymentSplitRow[]>(
+    `SELECT sps.id, sps.payment_id, sps.company_id, sps.outlet_id, sps.split_index,
+            sps.account_id, a.name as account_name, sps.amount
+     FROM sales_payment_splits sps
+     LEFT JOIN accounts a ON a.id = sps.account_id AND a.company_id = sps.company_id
+     WHERE sps.company_id = ?
+       AND sps.payment_id IN (${placeholders})
+     ORDER BY sps.payment_id, sps.split_index`,
+    [companyId, ...paymentIds]
+  );
+
+  const splitsByPaymentId = new Map<number, SalesPaymentSplit[]>();
+  for (const row of rows) {
+    const paymentId = Number(row.payment_id);
+    if (!splitsByPaymentId.has(paymentId)) {
+      splitsByPaymentId.set(paymentId, []);
+    }
+    splitsByPaymentId.get(paymentId)!.push(normalizePaymentSplit(row));
+  }
+
+  return splitsByPaymentId;
+}
+
+function attachSplitsToPayment(
+  payment: SalesPayment,
+  splits: SalesPaymentSplit[]
+): SalesPayment {
+  return { ...payment, splits };
+}
+
+// Phase 8: Helper to build canonical payment comparison data
+type CanonicalPaymentInput = {
+  outlet_id: number;
+  invoice_id: number;
+  payment_at: string;
+  amount_minor: number;
+  account_id: number;
+  splits: Array<{ account_id: number; amount_minor: number }>;
+};
+
+function buildCanonicalInput(
+  input: {
+    outlet_id: number;
+    invoice_id: number;
+    payment_at: string;
+    amount: number;
+    account_id?: number;
+    splits?: Array<{ account_id: number; amount: number }>;
+  }
+): CanonicalPaymentInput {
+  const hasSplits = input.splits && input.splits.length > 0;
+  const effectiveAccountId = hasSplits ? input.splits![0].account_id : input.account_id!;
+  const splits = hasSplits
+    ? input.splits!.map(s => ({ account_id: s.account_id, amount_minor: Math.round(s.amount * 100) }))
+    : [{ account_id: effectiveAccountId, amount_minor: Math.round(input.amount * 100) }];
+
+  return {
+    outlet_id: input.outlet_id,
+    invoice_id: input.invoice_id,
+    payment_at: new Date(input.payment_at).toISOString(),
+    amount_minor: Math.round(input.amount * 100),
+    account_id: effectiveAccountId,
+    splits
+  };
+}
+
+function buildCanonicalFromExisting(payment: SalesPayment): CanonicalPaymentInput {
+  const splits = payment.splits && payment.splits.length > 0
+    ? payment.splits.map(s => ({ account_id: s.account_id, amount_minor: Math.round(s.amount * 100) }))
+    : [{ account_id: payment.account_id, amount_minor: Math.round(payment.amount * 100) }];
+
+  return {
+    outlet_id: payment.outlet_id,
+    invoice_id: payment.invoice_id,
+    payment_at: payment.payment_at,
+    amount_minor: Math.round(payment.amount * 100),
+    account_id: payment.account_id,
+    splits
+  };
+}
+
+function canonicalPaymentsEqual(a: CanonicalPaymentInput, b: CanonicalPaymentInput): boolean {
+  if (a.outlet_id !== b.outlet_id) return false;
+  if (a.invoice_id !== b.invoice_id) return false;
+  if (a.payment_at !== b.payment_at) return false;
+  if (a.amount_minor !== b.amount_minor) return false;
+  if (a.account_id !== b.account_id) return false;
+  if (a.splits.length !== b.splits.length) return false;
+
+  // Compare splits in order (order matters per spec)
+  for (let i = 0; i < a.splits.length; i++) {
+    if (a.splits[i].account_id !== b.splits[i].account_id) return false;
+    if (a.splits[i].amount_minor !== b.splits[i].amount_minor) return false;
+  }
+
+  return true;
+}
+
 async function findPaymentByIdWithExecutor(
   executor: QueryExecutor,
   companyId: number,
   paymentId: number,
-  options?: { forUpdate?: boolean }
+  options?: { forUpdate?: boolean; includeSplits?: boolean }
 ): Promise<SalesPayment | null> {
   const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
   const [rows] = await executor.execute<SalesPaymentRow[]>(
@@ -1244,7 +1406,17 @@ async function findPaymentByIdWithExecutor(
     return null;
   }
 
-  return normalizePayment(rows[0]);
+  const payment = normalizePayment(rows[0]);
+
+  // Phase 8: Fetch splits if requested
+  if (options?.includeSplits !== false) {
+    const splits = await fetchPaymentSplits(executor, companyId, paymentId);
+    if (splits.length > 0) {
+      return attachSplitsToPayment(payment, splits);
+    }
+  }
+
+  return payment;
 }
 
 async function findPaymentByClientRefWithExecutor(
@@ -1329,7 +1501,20 @@ export async function listPayments(companyId: number, filters: PaymentListFilter
     [...where.values, limit, offset]
   );
 
-  return { total, payments: rows.map(normalizePayment) };
+  // Phase 8: Batch fetch splits for all payments
+  const paymentIds = rows.map(r => Number(r.id));
+  const splitsByPaymentId = await fetchPaymentSplitsForMultiple(pool, companyId, paymentIds);
+
+  const payments = rows.map(row => {
+    const payment = normalizePayment(row);
+    const splits = splitsByPaymentId.get(payment.id);
+    if (splits && splits.length > 0) {
+      return attachSplitsToPayment(payment, splits);
+    }
+    return payment;
+  });
+
+  return { total, payments };
 }
 
 export async function getPayment(companyId: number, paymentId: number) {
@@ -1345,13 +1530,69 @@ export async function createPayment(
     client_ref?: string;
     payment_no?: string;
     payment_at: string;
-    account_id: number;
+    account_id?: number;
     method?: "CASH" | "QRIS" | "CARD"; // deprecated
     amount: number;
+    splits?: Array<{ account_id: number; amount: number }>;
   },
   actor?: MutationActor
 ): Promise<SalesPayment> {
   return withTransaction(async (connection) => {
+    // Phase 8: Handle splits - determine effective account_id and validate splits
+    const hasSplits = input.splits && input.splits.length > 0;
+    let effectiveAccountId: number;
+    let splitData: Array<{ account_id: number; amount: number }> = [];
+
+    if (hasSplits) {
+      // Validate splits
+      if (input.splits!.length > 10) {
+        throw new PaymentAllocationError("Maximum 10 splits allowed");
+      }
+
+      // Check for duplicate account_ids
+      const accountIds = input.splits!.map(s => s.account_id);
+      if (new Set(accountIds).size !== accountIds.length) {
+        throw new PaymentAllocationError("Duplicate account_ids not allowed in splits");
+      }
+
+      // Validate split sum equals total amount
+      const splitSum = input.splits!.reduce((sum, s) => sum + s.amount, 0);
+      const amount = normalizeMoney(input.amount);
+      if (Math.abs(splitSum - amount) > 0.001) {
+        throw new PaymentAllocationError("Sum of split amounts must equal payment amount");
+      }
+
+      // Validate each split account is payable and belongs to company
+      for (const split of input.splits!) {
+        const [accountRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT id FROM accounts
+           WHERE id = ? AND company_id = ? AND is_payable = 1
+           LIMIT 1`,
+          [split.account_id, companyId]
+        );
+        if (accountRows.length === 0) {
+          throw new DatabaseReferenceError(`Account ${split.account_id} not found or not payable`);
+        }
+      }
+
+      // Use first split's account_id as header account_id
+      effectiveAccountId = input.splits![0].account_id;
+      splitData = input.splits!;
+
+      // Validate header account_id matches first split if provided
+      if (input.account_id !== undefined && input.account_id !== effectiveAccountId) {
+        throw new PaymentAllocationError("Header account_id must equal splits[0].account_id");
+      }
+    } else {
+      // No splits: require account_id
+      if (input.account_id === undefined) {
+        throw new DatabaseReferenceError("account_id is required when splits not provided");
+      }
+      effectiveAccountId = input.account_id;
+      // Create single split from header data
+      splitData = [{ account_id: effectiveAccountId, amount: input.amount }];
+    }
+
     if (input.client_ref) {
       const existing = await findPaymentByClientRefWithExecutor(
         connection,
@@ -1359,6 +1600,14 @@ export async function createPayment(
         input.client_ref
       );
       if (existing) {
+        // Phase 8: Enforce idempotency contract - compare canonical payloads
+        const incomingCanonical = buildCanonicalInput(input);
+        const existingCanonical = buildCanonicalFromExisting(existing);
+
+        if (!canonicalPaymentsEqual(incomingCanonical, existingCanonical)) {
+          throw new DatabaseConflictError("Idempotency conflict: payload mismatch");
+        }
+
         if (actor) {
           await ensureUserHasOutletAccess(connection, actor.userId, companyId, existing.outlet_id);
         }
@@ -1371,12 +1620,12 @@ export async function createPayment(
       await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
     }
 
-    // Verify account exists, belongs to company, and is payable
+    // Verify header account exists, belongs to company, and is payable
     const [accountRows] = await connection.execute<RowDataPacket[]>(
       `SELECT id FROM accounts
        WHERE id = ? AND company_id = ? AND is_payable = 1
        LIMIT 1`,
-      [input.account_id, companyId]
+      [effectiveAccountId, companyId]
     );
     if (accountRows.length === 0) {
       throw new DatabaseReferenceError("Account not found or not payable");
@@ -1424,7 +1673,7 @@ export async function createPayment(
           paymentNo,
           input.client_ref ?? null,
           paymentAt,
-          input.account_id,
+          effectiveAccountId,
           input.method ?? null,
           amount,
           actor?.userId ?? null,
@@ -1433,6 +1682,25 @@ export async function createPayment(
       );
 
       const paymentId = Number(result.insertId);
+
+      // Phase 8: Insert split rows
+      for (let i = 0; i < splitData.length; i++) {
+        const split = splitData[i];
+        await connection.execute<ResultSetHeader>(
+          `INSERT INTO sales_payment_splits (
+             payment_id, company_id, outlet_id, split_index, account_id, amount
+           ) VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            paymentId,
+            companyId,
+            input.outlet_id,
+            i,
+            split.account_id,
+            normalizeMoney(split.amount)
+          ]
+        );
+      }
+
       const payment = await findPaymentByIdWithExecutor(connection, companyId, paymentId);
       if (!payment) {
         throw new Error("Created payment not found");
@@ -1448,6 +1716,14 @@ export async function createPayment(
             input.client_ref
           );
           if (existing) {
+            // Phase 8: Enforce idempotency contract - compare canonical payloads
+            const incomingCanonical = buildCanonicalInput(input);
+            const existingCanonical = buildCanonicalFromExisting(existing);
+
+            if (!canonicalPaymentsEqual(incomingCanonical, existingCanonical)) {
+              throw new DatabaseConflictError("Idempotency conflict: payload mismatch");
+            }
+
             if (actor) {
               await ensureUserHasOutletAccess(
                 connection,
@@ -1478,6 +1754,7 @@ export async function updatePayment(
     account_id?: number;
     method?: "CASH" | "QRIS" | "CARD"; // deprecated
     amount?: number;
+    splits?: Array<{ account_id: number; amount: number }>;
   },
   actor?: MutationActor
 ): Promise<SalesPayment | null> {
@@ -1504,8 +1781,57 @@ export async function updatePayment(
       }
     }
 
-    // Verify account if provided
-    if (typeof input.account_id === "number") {
+    // Phase 8: Handle splits update
+    const hasSplits = input.splits && input.splits.length > 0;
+    let nextAccountId = input.account_id ?? current.account_id;
+    let nextAmount = typeof input.amount === "number" ? normalizeMoney(input.amount) : current.amount;
+
+    if (hasSplits) {
+      // Validate splits
+      if (input.splits!.length > 10) {
+        throw new PaymentAllocationError("Maximum 10 splits allowed");
+      }
+
+      // Check for duplicate account_ids
+      const accountIds = input.splits!.map(s => s.account_id);
+      if (new Set(accountIds).size !== accountIds.length) {
+        throw new PaymentAllocationError("Duplicate account_ids not allowed in splits");
+      }
+
+      // Validate split sum equals total amount if amount provided, else use split sum
+      const splitSum = input.splits!.reduce((sum, s) => sum + s.amount, 0);
+      if (typeof input.amount === "number") {
+        if (Math.abs(splitSum - nextAmount) > 0.001) {
+          throw new PaymentAllocationError("Sum of split amounts must equal payment amount");
+        }
+      } else {
+        nextAmount = normalizeMoney(splitSum);
+      }
+
+      // Validate each split account is payable and belongs to company
+      for (const split of input.splits!) {
+        const [accountRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT id FROM accounts
+           WHERE id = ? AND company_id = ? AND is_payable = 1
+           LIMIT 1`,
+          [split.account_id, companyId]
+        );
+        if (accountRows.length === 0) {
+          throw new DatabaseReferenceError(`Account ${split.account_id} not found or not payable`);
+        }
+      }
+
+      // Use first split's account_id as header account_id
+      nextAccountId = input.splits![0].account_id;
+
+      // Validate header account_id matches first split if provided
+      if (input.account_id !== undefined && input.account_id !== nextAccountId) {
+        throw new PaymentAllocationError("Header account_id must equal splits[0].account_id");
+      }
+    }
+
+    // Verify account if provided (and not already validated via splits)
+    if (!hasSplits && typeof input.account_id === "number") {
       const [accountRows] = await connection.execute<RowDataPacket[]>(
         `SELECT id FROM accounts
          WHERE id = ? AND company_id = ? AND is_payable = 1
@@ -1521,10 +1847,7 @@ export async function updatePayment(
     const nextInvoiceId = input.invoice_id ?? current.invoice_id;
     const nextPaymentNo = input.payment_no ?? current.payment_no;
     const nextPaymentAt = toMysqlDateTime(input.payment_at ?? current.payment_at);
-    const nextAccountId = input.account_id ?? current.account_id;
     const nextMethod = input.method ?? current.method;
-    const nextAmount =
-      typeof input.amount === "number" ? normalizeMoney(input.amount) : current.amount;
 
     if (typeof input.invoice_id === "number" || typeof input.outlet_id === "number") {
       const invoice = await findInvoiceByIdWithExecutor(connection, companyId, nextInvoiceId);
@@ -1564,6 +1887,34 @@ export async function updatePayment(
           paymentId
         ]
       );
+
+      // Phase 8: Update splits if provided
+      if (hasSplits) {
+        // Delete existing splits
+        await connection.execute(
+          `DELETE FROM sales_payment_splits
+           WHERE company_id = ? AND payment_id = ?`,
+          [companyId, paymentId]
+        );
+
+        // Insert new splits
+        for (let i = 0; i < input.splits!.length; i++) {
+          const split = input.splits![i];
+          await connection.execute<ResultSetHeader>(
+            `INSERT INTO sales_payment_splits (
+               payment_id, company_id, outlet_id, split_index, account_id, amount
+             ) VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              paymentId,
+              companyId,
+              nextOutletId,
+              i,
+              split.account_id,
+              normalizeMoney(split.amount)
+            ]
+          );
+        }
+      }
 
       return findPaymentByIdWithExecutor(connection, companyId, paymentId);
     } catch (error) {

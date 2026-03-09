@@ -13,6 +13,7 @@ import {
   DatabaseForbiddenError,
   DatabaseReferenceError,
   getPayment,
+  PaymentAllocationError,
   PaymentStatusError,
   updatePayment
 } from "../../../../../src/lib/sales";
@@ -91,6 +92,10 @@ export const PATCH = withAuth(
 
       if (error instanceof DatabaseConflictError) {
         return errorResponse("CONFLICT", "Payment conflict", 409);
+      }
+
+      if (error instanceof PaymentAllocationError) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
       }
 
       console.error("PATCH /sales/payments/:id failed", error);

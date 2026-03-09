@@ -6,6 +6,21 @@ import { DocumentStatusSchema, MoneySchema, NumericIdSchema } from "./common";
 
 const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
+// Money helpers for cent-exact validation
+const MONEY_SCALE = 100;
+
+function toMinorUnits(value: number): number {
+  return Math.round(value * MONEY_SCALE);
+}
+
+function hasMoreThanTwoDecimals(value: number): boolean {
+  const str = value.toFixed(10);
+  const decimalPart = str.split(".")[1];
+  if (!decimalPart) return false;
+  // Check if any digit beyond 2nd decimal place is non-zero
+  return decimalPart.slice(2).split("").some((d) => d !== "0");
+}
+
 const MoneyInputSchema = z.coerce.number().finite();
 const MoneyInputNonNegativeSchema = MoneyInputSchema.pipe(
   MoneySchema.nonnegative()
@@ -150,15 +165,63 @@ export const SalesInvoiceListQuerySchema = PaginationQuerySchema.extend({
   date_to: DateOnlySchema.optional()
 });
 
+// Phase 8: Payment split input schema
+export const SalesPaymentSplitInputSchema = z.object({
+  account_id: NumericIdSchema,
+  amount: MoneyInputPositiveSchema.refine(
+    (val) => !hasMoreThanTwoDecimals(val),
+    { message: "Split amount must have at most 2 decimal places" }
+  )
+});
+
 export const SalesPaymentCreateRequestSchema = z.object({
   outlet_id: NumericIdSchema,
   invoice_id: NumericIdSchema,
   client_ref: z.string().uuid().optional(),
   payment_no: z.string().trim().min(1).max(64).optional(),
   payment_at: z.string().datetime(),
-  account_id: NumericIdSchema,
+  account_id: NumericIdSchema.optional(), // optional when splits provided
   method: SalesPaymentMethodSchema.optional(), // deprecated, kept for backward compat
-  amount: MoneyInputPositiveSchema
+  amount: MoneyInputPositiveSchema.refine(
+    (val) => !hasMoreThanTwoDecimals(val),
+    { message: "Amount must have at most 2 decimal places" }
+  ),
+  splits: z.array(SalesPaymentSplitInputSchema).min(1).max(10).optional()
+}).refine((data) => {
+  // Either account_id or splits must be provided, not both ambiguously
+  if (data.splits && data.splits.length > 0) {
+    // If splits provided, account_id is optional but must match first split if provided
+    if (data.account_id !== undefined) {
+      return data.account_id === data.splits[0].account_id;
+    }
+    return true;
+  }
+  // No splits: account_id is required
+  return data.account_id !== undefined;
+}, {
+  message: "Either account_id or splits must be provided. If both, account_id must equal splits[0].account_id",
+  path: ["account_id"]
+}).refine((data) => {
+  // Cent-exact validation: sum of splits must equal total amount
+  if (data.splits && data.splits.length > 0) {
+    const splitSumMinor = data.splits.reduce((sum, split) => sum + toMinorUnits(split.amount), 0);
+    const amountMinor = toMinorUnits(data.amount);
+    return splitSumMinor === amountMinor;
+  }
+  return true;
+}, {
+  message: "Sum of split amounts must equal payment amount",
+  path: ["splits"]
+}).refine((data) => {
+  // Validate no duplicate account_ids in splits
+  if (data.splits && data.splits.length > 0) {
+    const accountIds = data.splits.map(s => s.account_id);
+    return new Set(accountIds).size === accountIds.length;
+  }
+  return true;
+}, {
+  message: "Duplicate account_ids not allowed in splits",
+  path: ["splits"]
 });
 
 export const SalesPaymentUpdateRequestSchema = z
@@ -169,11 +232,50 @@ export const SalesPaymentUpdateRequestSchema = z
     payment_at: z.string().datetime().optional(),
     account_id: NumericIdSchema.optional(),
     method: SalesPaymentMethodSchema.optional(), // deprecated
-    amount: MoneyInputPositiveSchema.optional()
+    amount: MoneyInputPositiveSchema.optional().refine(
+      (val) => val === undefined || !hasMoreThanTwoDecimals(val),
+      { message: "Amount must have at most 2 decimal places" }
+    ),
+    splits: z.array(SalesPaymentSplitInputSchema).min(1).max(10).optional() // Phase 8
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided"
+  })
+  .refine((data) => {
+    // Cent-exact validation: sum of splits must equal amount
+    if (data.splits && data.splits.length > 0 && data.amount !== undefined) {
+      const splitSumMinor = data.splits.reduce((sum, split) => sum + toMinorUnits(split.amount), 0);
+      const amountMinor = toMinorUnits(data.amount);
+      return splitSumMinor === amountMinor;
+    }
+    return true;
+  }, {
+    message: "Sum of split amounts must equal payment amount",
+    path: ["splits"]
+  })
+  .refine((data) => {
+    // Validate no duplicate account_ids in splits
+    if (data.splits && data.splits.length > 0) {
+      const accountIds = data.splits.map(s => s.account_id);
+      return new Set(accountIds).size === accountIds.length;
+    }
+    return true;
+  }, {
+    message: "Duplicate account_ids not allowed in splits",
+    path: ["splits"]
   });
+
+// Phase 8: Payment split response schema
+export const SalesPaymentSplitSchema = z.object({
+  id: NumericIdSchema,
+  payment_id: NumericIdSchema,
+  company_id: NumericIdSchema,
+  outlet_id: NumericIdSchema,
+  split_index: z.number().int().min(0).max(9),
+  account_id: NumericIdSchema,
+  account_name: z.string().optional(),
+  amount: MoneySchema.positive()
+});
 
 export const SalesPaymentSchema = z.object({
   id: NumericIdSchema,
@@ -188,6 +290,7 @@ export const SalesPaymentSchema = z.object({
   method: SalesPaymentMethodSchema.optional(), // deprecated
   status: DocumentStatusSchema,
   amount: MoneySchema.positive(),
+  splits: z.array(SalesPaymentSplitSchema).optional(), // Phase 8: split allocations
   created_by_user_id: NumericIdSchema.nullable().optional(),
   updated_by_user_id: NumericIdSchema.nullable().optional(),
   created_at: z.string().datetime(),

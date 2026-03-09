@@ -227,25 +227,47 @@ class SalesPaymentPostingMapper implements PostingMapper {
       this.payment.outlet_id
     );
 
-    // Use account_id directly from payment
-    const cashBankAccountId = this.payment.account_id;
-    const accountLabel = this.payment.account_name ?? `Account #${cashBankAccountId}`;
-
     const lines: JournalLine[] = [];
 
-    lines.push({
-      account_id: cashBankAccountId,
-      debit: normalizeMoney(this.payment.amount),
-      credit: 0,
-      description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${accountLabel}`
-    });
+    // Phase 8: Handle split payments
+    const splits = this.payment.splits;
+    if (splits && splits.length > 0) {
+      // Multiple debit lines for split payments
+      for (const split of splits) {
+        const accountLabel = split.account_name ?? `Account #${split.account_id}`;
+        lines.push({
+          account_id: split.account_id,
+          debit: normalizeMoney(split.amount),
+          credit: 0,
+          description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${accountLabel} (Split ${split.split_index + 1}/${splits.length})`
+        });
+      }
+    } else {
+      // Single debit line for non-split payments (backward compatibility)
+      const cashBankAccountId = this.payment.account_id;
+      const accountLabel = this.payment.account_name ?? `Account #${cashBankAccountId}`;
+      lines.push({
+        account_id: cashBankAccountId,
+        debit: normalizeMoney(this.payment.amount),
+        credit: 0,
+        description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${accountLabel}`
+      });
+    }
 
+    // Single credit line to AR for total amount
     lines.push({
       account_id: mapping.AR,
       debit: 0,
       credit: normalizeMoney(this.payment.amount),
       description: `Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - AR`
     });
+
+    // Phase 8: Guard posting balance for split entries
+    const totalDebitsMinor = lines.reduce((sum, line) => sum + toMinorUnits(line.debit), 0);
+    const totalCreditsMinor = lines.reduce((sum, line) => sum + toMinorUnits(line.credit), 0);
+    if (totalDebitsMinor !== totalCreditsMinor) {
+      throw new Error("PAYMENT_SPLIT_IMBALANCE: Debit/Credit totals do not match");
+    }
 
     return lines;
   }
