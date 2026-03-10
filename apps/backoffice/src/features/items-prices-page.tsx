@@ -1143,37 +1143,26 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
                           </Table.Td>
                           <Table.Td>
                             {isOverride ? (
-                              price.is_active ? (
-                                <Group gap="xs">
-                                  <Button
-                                    size="xs"
-                                    variant="light"
-                                    onClick={() => savePrice(price)}
-                                    loading={savingPrice === price.id}
-                                  >
-                                    Save
-                                  </Button>
-                                  <ActionIcon
-                                    aria-label="Delete price"
-                                    variant="light"
-                                    color="red"
-                                    size="sm"
-                                    onClick={() => handleDeleteClick("price", price.id)}
-                                    loading={deletingPrice === price.id}
-                                  >
-                                    <IconTrash size={16} />
-                                  </ActionIcon>
-                                </Group>
-                              ) : (
+                              <Group gap="xs">
                                 <Button
                                   size="xs"
-                                  color="green"
-                                  onClick={() => setOutletAvailabilityFromDefault(price, true)}
+                                  variant="light"
+                                  onClick={() => savePrice(price)}
                                   loading={savingPrice === price.id}
                                 >
-                                  Make Available
+                                  Save
                                 </Button>
-                              )
+                                <ActionIcon
+                                  aria-label="Delete price"
+                                  variant="light"
+                                  color="red"
+                                  size="sm"
+                                  onClick={() => handleDeleteClick("price", price.id)}
+                                  loading={deletingPrice === price.id}
+                                >
+                                  <IconTrash size={16} />
+                                </ActionIcon>
+                              </Group>
                             ) : (
                               (() => {
                                 const hasOverride = prices.some(
