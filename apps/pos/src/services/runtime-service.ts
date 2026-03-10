@@ -522,6 +522,31 @@ export class RuntimeService {
     };
   }
 
+  /**
+   * Load scoped checkout config from synced outlet configuration.
+   * Falls back to defaults if no scoped config exists.
+   */
+  async resolveScopedCheckoutConfig(
+    scope: RuntimeOutletScope
+  ): Promise<RuntimeCheckoutConfig> {
+    const scopedConfig = await this.storage.getSyncScopeConfig({
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id
+    });
+
+    if (!scopedConfig) {
+      return this.resolveCheckoutConfig(null);
+    }
+
+    return {
+      tax: {
+        rate: scopedConfig.tax_rate,
+        inclusive: scopedConfig.tax_inclusive
+      },
+      payment_methods: this.normalizePaymentMethods(scopedConfig.payment_methods)
+    };
+  }
+
   isPaymentMethodAllowed(
     method: string,
     paymentMethods: readonly string[]

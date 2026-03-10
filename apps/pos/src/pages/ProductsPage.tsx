@@ -9,7 +9,7 @@ import type { RuntimeProductCatalogItem } from "../services/runtime-service.js";
 import { ProductSearch } from "../features/products/ProductSearch.js";
 import { ProductGrid } from "../features/products/ProductGrid.js";
 import { useProducts } from "../features/products/useProducts.js";
-import { Button } from "../shared/components/index.js";
+import { Button, InlineAlert } from "../shared/components/index.js";
 import { routes } from "../router/routes.js";
 import { formatMoney } from "../shared/utils/money.js";
 import { usePosAppState } from "../router/pos-app-state.js";
@@ -44,6 +44,7 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
   } = usePosAppState();
   const { visibleProducts, searchTerm, setSearchTerm } = useProducts({ catalog });
   const [dineInGuardMessage, setDineInGuardMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [serviceSwitchModal, setServiceSwitchModal] = useState<{
     isOpen: boolean;
     fromServiceType: OrderServiceType;
@@ -56,9 +57,12 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
 
   const loadProducts = React.useCallback(async () => {
     try {
+      setLoadError(null);
       const products = await context.runtime.getProductCatalog(scope);
       setCatalog(products);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load products";
+      setLoadError(message);
       console.error("Failed to load products:", error);
     }
   }, [context.runtime, scope]);
@@ -179,6 +183,15 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
       </IonRefresher>
 
       <h1 style={{ margin: "0 0 16px", fontSize: "20px", fontWeight: 700 }}>Start Order</h1>
+
+      {loadError && (
+        <InlineAlert
+          title="Failed to load products"
+          message={loadError}
+          tone="error"
+          onRetry={() => void loadProducts()}
+        />
+      )}
 
       <section
         style={{

@@ -12,7 +12,7 @@ import {
   IonToggle
 } from "@ionic/react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
-import { Button } from "../shared/components/index.js";
+import { Button, ConfirmationModal } from "../shared/components/index.js";
 import { SyncControls } from "../features/sync/SyncControls.js";
 import { usePosAppState } from "../router/pos-app-state.js";
 import { POLL_INTERVAL_MS } from "../shared/utils/constants.js";
@@ -46,6 +46,7 @@ export function SettingsPage({ context, onLogout }: SettingsPageProps): JSX.Elem
   const [cacheResetInFlight, setCacheResetInFlight] = React.useState(false);
   const [cacheResetMessage, setCacheResetMessage] = React.useState<string | null>(null);
   const [cacheResetConfirmText, setCacheResetConfirmText] = React.useState("");
+  const [showCacheResetConfirm, setShowCacheResetConfirm] = React.useState(false);
 
   const containerStyles: React.CSSProperties = {
     display: "flex",
@@ -300,29 +301,7 @@ export function SettingsPage({ context, onLogout }: SettingsPageProps): JSX.Elem
             disabled={cacheResetInFlight || cacheResetConfirmText.trim() !== "RESET"}
             style={{ marginTop: 10 }}
             onClick={() => {
-              const shouldReset = window.confirm(
-                "Reset local master cache for this outlet? Open orders and transactions will be kept."
-              );
-              if (!shouldReset) {
-                return;
-              }
-
-              void (async () => {
-                setCacheResetInFlight(true);
-                setCacheResetMessage(null);
-                try {
-                  await context.runtime.clearLocalMasterCache(scope);
-                  await runSyncPullNow();
-                  setCacheResetMessage("Local master cache reset and synced.");
-                  setCacheResetConfirmText("");
-                } catch (error) {
-                  setCacheResetMessage(
-                    error instanceof Error ? error.message : "Failed to reset local master cache"
-                  );
-                } finally {
-                  setCacheResetInFlight(false);
-                }
-              })();
+              setShowCacheResetConfirm(true);
             }}
           >
             {cacheResetInFlight ? "Resetting..." : "Reset Local Cache"}
@@ -336,6 +315,36 @@ export function SettingsPage({ context, onLogout }: SettingsPageProps): JSX.Elem
           Logout
         </Button>
       </section>
+
+      {/* Cache Reset Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={showCacheResetConfirm}
+        onClose={() => setShowCacheResetConfirm(false)}
+        onConfirm={() => {
+          void (async () => {
+            setShowCacheResetConfirm(false);
+            setCacheResetInFlight(true);
+            setCacheResetMessage(null);
+            try {
+              await context.runtime.clearLocalMasterCache(scope);
+              await runSyncPullNow();
+              setCacheResetMessage("Local master cache reset and synced.");
+              setCacheResetConfirmText("");
+            } catch (error) {
+              setCacheResetMessage(
+                error instanceof Error ? error.message : "Failed to reset local master cache"
+              );
+            } finally {
+              setCacheResetInFlight(false);
+            }
+          })();
+        }}
+        title="Reset local master cache?"
+        message="Reset local master cache for this outlet? Open orders and transactions will be kept."
+        confirmText="Yes, reset cache"
+        cancelText="Cancel"
+        variant="danger"
+      />
     </div>
   );
 }

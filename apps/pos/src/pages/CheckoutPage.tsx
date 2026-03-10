@@ -1,16 +1,22 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { useCheckout } from "../features/checkout/useCheckout.js";
 import { CheckoutForm } from "../features/checkout/CheckoutForm.js";
 import { normalizeMoney, formatMoney } from "../shared/utils/money.js";
 import { usePosAppState } from "../router/pos-app-state.js";
+import type { RuntimeCheckoutConfig } from "../services/runtime-service.js";
 
 interface CheckoutPageProps {
   context: WebBootstrapContext;
 }
+
+const DEFAULT_CHECKOUT_CONFIG: RuntimeCheckoutConfig = {
+  tax: { rate: 0, inclusive: false },
+  payment_methods: ["CASH"]
+};
 
 export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
   const {
@@ -20,7 +26,7 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
     cartLines,
     cartTotals,
     setPaidAmount,
-    clearCart,
+    resetCartStatePreserveOrderStatus,
     activeOrderContext,
     setOrderStatus,
     currentActiveOrderId,
@@ -33,47 +39,75 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
   } = usePosAppState();
   const activeReservation = outletReservations.find((row) => row.reservation_id === activeReservationId) ?? null;
 
-  const checkoutConfig = context.runtime.resolveCheckoutConfig(null);
+  const [checkoutConfig, setCheckoutConfig] = useState<RuntimeCheckoutConfig>(DEFAULT_CHECKOUT_CONFIG);
+  const [configLoading, setConfigLoading] = useState(true);
+
+  useEffect(() => {
+    let disposed = false;
+    setConfigLoading(true);
+    void (async () => {
+      try {
+        const config = await context.runtime.resolveScopedCheckoutConfig(scope);
+        if (!disposed) {
+          setCheckoutConfig(config);
+        }
+      } catch (error) {
+        console.error("Failed to load scoped checkout config:", error);
+        // Keep default config on error
+      } finally {
+        if (!disposed) {
+          setConfigLoading(false);
+        }
+      }
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [context.runtime, scope.company_id, scope.outlet_id]);
+
+  const checkoutRuntime = useMemo(
+    () => ({
+      isPaymentMethodAllowed: context.runtime.isPaymentMethodAllowed.bind(context.runtime),
+      resolvePaymentMethod: context.runtime.resolvePaymentMethod.bind(context.runtime)
+    }),
+    [context.runtime]
+  );
+
   const { paymentMethod, setPaymentMethod, paymentMethodAllowed, canCompleteSale, completeInFlight, lastCompleteMessage, runCompleteSale } = useCheckout({
     scope,
     activeOrderContext,
     requestPush: context.orchestrator.requestPush.bind(context.orchestrator),
-    runtime: {
-      isPaymentMethodAllowed: context.runtime.isPaymentMethodAllowed.bind(context.runtime),
-      resolvePaymentMethod: context.runtime.resolvePaymentMethod.bind(context.runtime)
-    },
+    runtime: checkoutRuntime,
     initialPaymentMethods: checkoutConfig.payment_methods
   });
 
   const offlineCacheMissing = syncBadgeState === "Offline" && !hasProductCache;
   const dineInTableMissing = activeOrderContext.service_type === "DINE_IN" && !activeOrderContext.table_id;
   const orderNotFinalized = !activeOrderContext.kitchen_sent;
-  const canComplete = !offlineCacheMissing && !dineInTableMissing && !orderNotFinalized && canCompleteSale(cartLines, cartTotals);
+  const canComplete = !configLoading && !offlineCacheMissing && !dineInTableMissing && !orderNotFinalized && canCompleteSale(cartLines, cartTotals);
 
   return (
     <main
       style={{
         minHeight: "100vh",
         margin: 0,
-        padding: 24,
-        background: "linear-gradient(135deg, #ecfeff 0%, #fef3c7 100%)",
-        color: "#0f172a",
-        fontFamily: '"Avenir Next", "Trebuchet MS", sans-serif'
+        padding: 16,
+        background: "#f8fafc",
+        color: "#0f172a"
       }}
     >
       <section
         style={{
           maxWidth: 680,
           margin: "0 auto",
-          padding: 20,
-          borderRadius: 14,
-          background: "rgba(255, 255, 255, 0.9)",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 6px 24px rgba(15, 23, 42, 0.08)"
+          padding: 16,
+          borderRadius: 10,
+          background: "#ffffff",
+          border: "1px solid #e2e8f0"
         }}
       >
-        <header style={{ marginBottom: 14 }}>
-          <h1 style={{ margin: 0, fontSize: 24 }}>Payment</h1>
+        <header style={{ marginBottom: 16 }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Payment</h1>
           <div style={{ marginTop: 8, fontSize: 13, color: "#334155" }}>
             Final order: {cartLines.length} item(s) • Due {formatMoney(cartTotals.grand_total)}
           </div>
@@ -154,6 +188,23 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
           </p>
         ) : null}
 
+        {configLoading ? (
+          <p
+            role="status"
+            style={{
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 10,
+              background: "#eff6ff",
+              border: "1px solid #93c5fd",
+              color: "#1e3a8a",
+              fontWeight: 600
+            }}
+          >
+            Loading outlet configuration...
+          </p>
+        ) : null}
+
         <CheckoutForm
           paymentMethod={paymentMethod}
           paymentMethods={checkoutConfig.payment_methods}
@@ -193,12 +244,12 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
                 setOrderStatus("COMPLETED");
                 setOrderReservationId(null);
                 setActiveReservationId(null);
-                clearCart();
+                resetCartStatePreserveOrderStatus();
               };
 
             void runCompleteSale(cartLines, cartTotals, {
               setPaidAmount,
-              setCart: clearOrderContext
+              onAfterSaleCommit: clearOrderContext
             });
           }}
         />

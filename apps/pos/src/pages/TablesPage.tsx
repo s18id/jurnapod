@@ -16,7 +16,7 @@ import {
 } from "@ionic/react";
 import { useNavigate } from "react-router-dom";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
-import { Button } from "../shared/components/index.js";
+import { Button, InlineAlert } from "../shared/components/index.js";
 import { routes } from "../router/routes.js";
 import type {
   RuntimeTableStatus,
@@ -25,6 +25,7 @@ import type {
   RuntimeOutletScope
 } from "../services/runtime-service.js";
 import { usePosAppState } from "../router/pos-app-state.js";
+import { useRouterContext } from "../router/router-context.js";
 import { formatMoney } from "../shared/utils/money.js";
 
 interface TablesPageProps {
@@ -204,6 +205,7 @@ function getTableActionLabel(
 
 export function TablesPage({ context }: TablesPageProps): JSX.Element {
   const navigate = useNavigate();
+  const { authToken } = useRouterContext();
   const {
     scope,
     outletTables,
@@ -217,7 +219,15 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
   } = usePosAppState();
   const [tableOrderSummaryByTableId, setTableOrderSummaryByTableId] = useState<Record<number, TableOrderSummary>>({});
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const autoSyncScopesRef = useRef<Set<string>>(new Set());
+
+  async function pullWithAuth(): Promise<void> {
+    if (!authToken) {
+      throw new Error("Missing access token. Please sign in again.");
+    }
+    await context.sync.pull(scope, { accessToken: authToken });
+  }
 
   useEffect(() => {
     let disposed = false;
@@ -235,11 +245,13 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
       );
 
       if (shouldAutoSync) {
-        autoSyncScopesRef.current.add(scopeKey);
         try {
-          await context.sync.pull(scope);
+          await pullWithAuth();
           ({ tables, reservations, activeOrders } = await fetchTablesAndReservations(context, scope));
+          autoSyncScopesRef.current.add(scopeKey);
         } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to sync";
+          setSyncError(message);
           console.error("Failed to auto-sync tables/reservations:", error);
         }
       }
@@ -257,7 +269,7 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
     return () => {
       disposed = true;
     };
-  }, [context.runtime, scope, setOutletReservations, setOutletTables]);
+  }, [context.runtime, scope, setOutletReservations, setOutletTables, authToken]);
 
   const currentOrderTableId = useMemo(() => {
     for (const [tableIdRaw, summary] of Object.entries(tableOrderSummaryByTableId)) {
@@ -285,11 +297,17 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
 
   async function handleSyncTables() {
     setIsSyncing(true);
+    setSyncError(null);
     try {
-      await context.sync.pull(scope);
-      const tables = await context.runtime.getOutletTables(scope);
+      await pullWithAuth();
+      const { tables, reservations, activeOrders } = await fetchTablesAndReservations(context, scope);
+      const nextSummaryByTableId = await buildTableOrderSummaries(context, scope, activeOrders);
       setOutletTables(tables);
+      setOutletReservations(reservations);
+      setTableOrderSummaryByTableId(nextSummaryByTableId);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to refresh tables";
+      setSyncError(message);
       console.error("Failed to sync tables:", error);
     } finally {
       setIsSyncing(false);
@@ -327,6 +345,15 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
           </IonButton>
         </div>
       </header>
+
+      {syncError && (
+        <InlineAlert
+          title="Failed to refresh tables"
+          message={syncError}
+          tone="error"
+          onRetry={() => void handleSyncTables()}
+        />
+      )}
 
       {outletTables.length === 0 ? (
         <div style={STYLES.emptyState}>
