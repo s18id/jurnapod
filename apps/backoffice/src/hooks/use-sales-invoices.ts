@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
 
 type SalesInvoice = {
@@ -49,8 +49,12 @@ export function useSalesInvoices(
   const [data, setData] = useState<SalesInvoice[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestSeqRef = useRef(0);
 
   const refetch = useCallback(async () => {
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
+
     setLoading(true);
     setError(null);
     try {
@@ -65,8 +69,14 @@ export function useSalesInvoices(
         {},
         accessToken
       );
+      if (requestSeq !== requestSeqRef.current) {
+        return;
+      }
       setData(response.data.invoices);
     } catch (fetchError) {
+      if (requestSeq !== requestSeqRef.current) {
+        return;
+      }
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
       } else {
@@ -74,7 +84,9 @@ export function useSalesInvoices(
       }
       setData([]);
     } finally {
-      setLoading(false);
+      if (requestSeq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [accessToken, options.outlet_id, options.status, options.payment_status, options.limit]);
 
