@@ -155,6 +155,47 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     is_company_default: false
   });
 
+  // Row editing state for tables
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [editingDefaultPriceId, setEditingDefaultPriceId] = useState<number | null>(null);
+  const [editingOutletPriceId, setEditingOutletPriceId] = useState<number | null>(null);
+
+  // Draft state for editing
+  const [itemDraft, setItemDraft] = useState<Partial<Item>>({});
+  const [defaultPriceDraft, setDefaultPriceDraft] = useState<Partial<ItemPrice>>({});
+  const [outletPriceDraft, setOutletPriceDraft] = useState<Partial<ItemPrice>>({});
+
+  // Row edit helpers
+  function startEditItem(item: Item) {
+    setItemDraft({ ...item });
+    setEditingItemId(item.id);
+  }
+
+  function cancelEditItem() {
+    setItemDraft({});
+    setEditingItemId(null);
+  }
+
+  function startEditDefaultPrice(price: ItemPrice) {
+    setDefaultPriceDraft({ ...price });
+    setEditingDefaultPriceId(price.id);
+  }
+
+  function cancelEditDefaultPrice() {
+    setDefaultPriceDraft({});
+    setEditingDefaultPriceId(null);
+  }
+
+  function startEditOutletPrice(price: ItemPrice) {
+    setOutletPriceDraft({ ...price });
+    setEditingOutletPriceId(price.id);
+  }
+
+  function cancelEditOutletPrice() {
+    setOutletPriceDraft({});
+    setEditingOutletPriceId(null);
+  }
+
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const groupMap = useMemo(() => new Map(itemGroups.map((group) => [group.id, group])), [itemGroups]);
 
@@ -716,105 +757,121 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
                     </Table.Td>
                   </Table.Tr>
                 ) : (
-                  items.map((item) => (
-                    <Table.Tr key={item.id}>
-                      <Table.Td>{item.id}</Table.Td>
-                      <Table.Td>
-                        <TextInput
-                          size="sm"
-                          value={item.sku ?? ""}
-                          onChange={(event) =>
-                            setItems((prev) =>
-                              prev.map((entry) =>
-                                entry.id === item.id ? { ...entry, sku: event.target.value || null } : entry
-                              )
-                            )
-                          }
-                        />
-                      </Table.Td>
-                      <Table.Td>
-                        <TextInput
-                          size="sm"
-                          value={item.name}
-                          onChange={(event) =>
-                            setItems((prev) =>
-                              prev.map((entry) =>
-                                entry.id === item.id ? { ...entry, name: event.target.value } : entry
-                              )
-                            )
-                          }
-                        />
-                      </Table.Td>
-                      <Table.Td>
-                        <Select
-                          size="sm"
-                          value={item.item_group_id ? String(item.item_group_id) : ""}
-                          onChange={(value) =>
-                            setItems((prev) =>
-                              prev.map((entry) =>
-                                entry.id === item.id
-                                  ? { ...entry, item_group_id: value ? Number(value) : null }
-                                  : entry
-                              )
-                            )
-                          }
-                          data={itemGroupSelectOptions}
-                        />
-                      </Table.Td>
-                      <Table.Td>
-                        <Select
-                          size="sm"
-                          value={item.type}
-                          onChange={(value) =>
-                            setItems((prev) =>
-                              prev.map((entry) =>
-                                entry.id === item.id
-                                  ? { ...entry, type: (value as ItemType) || item.type }
-                                  : entry
-                              )
-                            )
-                          }
-                          data={itemTypeSelectOptions}
-                        />
-                      </Table.Td>
-                      <Table.Td>
-                        <Checkbox
-                          checked={item.is_active}
-                          onChange={(event) =>
-                            setItems((prev) =>
-                              prev.map((entry) =>
-                                entry.id === item.id
-                                  ? { ...entry, is_active: event.currentTarget.checked }
-                                  : entry
-                              )
-                            )
-                          }
-                        />
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap="xs">
-                          <Button
-                            size="xs"
-                            variant="light"
-                            onClick={() => saveItem(item)}
-                            loading={savingItem === item.id}
-                          >
-                            Save
-                          </Button>
-                          <ActionIcon
-                            aria-label="Delete item"
-                            variant="light"
-                            color="red"
-                            size="sm"
-                            onClick={() => handleDeleteClick("item", item.id)}
-                            loading={deletingItem === item.id}
-                          >
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))
+                  items.map((item) => {
+                    const isEditing = editingItemId === item.id;
+                    const draft = isEditing ? itemDraft : null;
+
+                    return (
+                      <Table.Tr key={item.id}>
+                        <Table.Td>{item.id}</Table.Td>
+                        <Table.Td>
+                          {isEditing ? (
+                            <TextInput
+                              size="sm"
+                              value={draft?.sku ?? ""}
+                              onChange={(event) =>
+                                setItemDraft((prev) => ({ ...prev, sku: event.target.value || null }))
+                              }
+                            />
+                          ) : (
+                            <Text size="sm">{item.sku ?? "-"}</Text>
+                          )}
+                        </Table.Td>
+                        <Table.Td>
+                          {isEditing ? (
+                            <TextInput
+                              size="sm"
+                              value={draft?.name ?? ""}
+                              onChange={(event) =>
+                                setItemDraft((prev) => ({ ...prev, name: event.target.value }))
+                              }
+                            />
+                          ) : (
+                            <Text size="sm">{item.name}</Text>
+                          )}
+                        </Table.Td>
+                        <Table.Td>
+                          {isEditing ? (
+                            <Select
+                              size="sm"
+                              value={draft?.item_group_id ? String(draft.item_group_id) : ""}
+                              onChange={(value) =>
+                                setItemDraft((prev) => ({ ...prev, item_group_id: value ? Number(value) : null }))
+                              }
+                              data={itemGroupSelectOptions}
+                            />
+                          ) : (
+                            <Text size="sm">{getGroupPath(item.item_group_id)}</Text>
+                          )}
+                        </Table.Td>
+                        <Table.Td>
+                          {isEditing ? (
+                            <Select
+                              size="sm"
+                              value={draft?.type ?? "PRODUCT"}
+                              onChange={(value) =>
+                                setItemDraft((prev) => ({ ...prev, type: (value as ItemType) || "PRODUCT" }))
+                              }
+                              data={itemTypeSelectOptions}
+                            />
+                          ) : (
+                            <Badge variant="light">{item.type}</Badge>
+                          )}
+                        </Table.Td>
+                        <Table.Td>
+                          {isEditing ? (
+                            <Checkbox
+                              checked={draft?.is_active ?? true}
+                              onChange={(event) =>
+                                setItemDraft((prev) => ({ ...prev, is_active: event.currentTarget.checked }))
+                              }
+                            />
+                          ) : (
+                            <Badge color={item.is_active ? "green" : "red"} variant="light">
+                              {item.is_active ? "Active" : "Inactive"}
+                            </Badge>
+                          )}
+                        </Table.Td>
+                        <Table.Td>
+                          {isEditing ? (
+                            <Group gap="xs">
+                              <Button
+                                size="xs"
+                                color="green"
+                                onClick={async () => {
+                                  const merged = { ...item, ...itemDraft };
+                                  await saveItem(merged);
+                                  cancelEditItem();
+                                }}
+                                loading={savingItem === item.id}
+                              >
+                                Save
+                              </Button>
+                              <Button size="xs" variant="light" onClick={cancelEditItem}>
+                                Cancel
+                              </Button>
+                            </Group>
+                          ) : (
+                            <Group gap="xs">
+                              <Button size="xs" variant="light" onClick={() => startEditItem(item)}>
+                                Edit
+                              </Button>
+                              <ActionIcon
+                                aria-label="Delete item"
+                                variant="light"
+                                color="red"
+                                size="sm"
+                                onClick={() => handleDeleteClick("item", item.id)}
+                                loading={deletingItem === item.id}
+                              >
+                                <IconTrash size={16} />
+                              </ActionIcon>
+                            </Group>
+                          )}
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })
                 )}
               </Table.Tbody>
             </Table>
@@ -924,107 +981,127 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {companyDefaults.map((price) => (
-                      <Table.Tr key={price.id}>
-                        <Table.Td>{price.id}</Table.Td>
-                        <Table.Td>
-                          <Select
-                            size="sm"
-                            value={String(price.item_id)}
-                            onChange={(value) => {
-                              if (!value) return;
-                              setCompanyDefaults((prev) =>
-                                prev.map((entry) =>
-                                  entry.id === price.id
-                                    ? { ...entry, item_id: Number(value) }
-                                    : entry
-                                )
-                              );
-                            }}
-                            data={itemSelectOptions.filter(opt => opt.value !== "0")}
-                          />
-                        </Table.Td>
-                        <Table.Td>
-                          {(() => {
-                            const item = itemMap.get(price.item_id);
-                            if (!item) return "-";
-                            return getGroupPath(item.item_group_id);
-                          })()}
-                        </Table.Td>
-                        <Table.Td>
-                          <NumberInput
-                            size="sm"
-                            value={price.price}
-                            onChange={(value) =>
-                              setCompanyDefaults((prev) =>
-                                prev.map((entry) =>
-                                  entry.id === price.id
-                                    ? { ...entry, price: Number(value) || 0 }
-                                    : entry
-                                )
-                              )
-                            }
-                            min={0}
-                            decimalScale={2}
-                          />
-                        </Table.Td>
-                        <Table.Td>
-                          <Checkbox
-                            checked={price.is_active}
-                            onChange={(event) =>
-                              setCompanyDefaults((prev) =>
-                                prev.map((entry) =>
-                                  entry.id === price.id
-                                    ? { ...entry, is_active: event.currentTarget.checked }
-                                    : entry
-                                )
-                              )
-                            }
-                          />
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap="xs">
-                            <Button
-                              size="xs"
-                              variant="light"
-                              onClick={async () => {
-                                setSavingPrice(price.id);
-                                try {
-                                  await apiRequest(`/inventory/item-prices/${price.id}`, {
-                                    method: "PATCH",
-                                    body: JSON.stringify({
-                                      item_id: price.item_id,
-                                      price: price.price,
-                                      is_active: price.is_active
-                                    })
-                                  }, props.accessToken);
-                                  await refreshData(selectedOutletId);
-                                } catch (err) {
-                                  if (err instanceof ApiError) {
-                                    setError(err.message);
-                                  }
-                                } finally {
-                                  setSavingPrice(null);
+                    {companyDefaults.map((price) => {
+                      const isEditing = editingDefaultPriceId === price.id;
+                      const draft = isEditing ? defaultPriceDraft : null;
+
+                      return (
+                        <Table.Tr key={price.id}>
+                          <Table.Td>{price.id}</Table.Td>
+                          <Table.Td>
+                            {isEditing ? (
+                              <Select
+                                size="sm"
+                                value={draft?.item_id ? String(draft.item_id) : ""}
+                                onChange={(value) => {
+                                  if (!value) return;
+                                  setDefaultPriceDraft((prev) => ({ ...prev, item_id: Number(value) }));
+                                }}
+                                data={itemSelectOptions.filter((opt) => opt.value !== "0")}
+                              />
+                            ) : (
+                              <Text size="sm">
+                                {(() => {
+                                  const item = itemMap.get(price.item_id);
+                                  return item ? `${item.name} (${item.type})` : "-";
+                                })()}
+                              </Text>
+                            )}
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="sm">
+                              {(() => {
+                                const item = itemMap.get(price.item_id);
+                                if (!item) return "-";
+                                return getGroupPath(item.item_group_id);
+                              })()}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            {isEditing ? (
+                              <NumberInput
+                                size="sm"
+                                value={draft?.price ?? 0}
+                                onChange={(value) =>
+                                  setDefaultPriceDraft((prev) => ({ ...prev, price: Number(value) || 0 }))
                                 }
-                              }}
-                              loading={savingPrice === price.id}
-                            >
-                              Save
-                            </Button>
-                            <ActionIcon
-                              aria-label="Delete price"
-                              variant="light"
-                              color="red"
-                              size="sm"
-                              onClick={() => handleDeleteClick("price", price.id)}
-                              loading={deletingPrice === price.id}
-                            >
-                              <IconTrash size={16} />
-                            </ActionIcon>
-                          </Group>
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
+                                min={0}
+                                decimalScale={2}
+                              />
+                            ) : (
+                              <Text size="sm">{price.price}</Text>
+                            )}
+                          </Table.Td>
+                          <Table.Td>
+                            {isEditing ? (
+                              <Checkbox
+                                checked={draft?.is_active ?? true}
+                                onChange={(event) =>
+                                  setDefaultPriceDraft((prev) => ({ ...prev, is_active: event.currentTarget.checked }))
+                                }
+                              />
+                            ) : (
+                              <Badge color={price.is_active ? "green" : "red"} variant="light">
+                                {price.is_active ? "Active" : "Inactive"}
+                              </Badge>
+                            )}
+                          </Table.Td>
+                          <Table.Td>
+                            {isEditing ? (
+                              <Group gap="xs">
+                                <Button
+                                  size="xs"
+                                  color="green"
+                                  onClick={async () => {
+                                    setSavingPrice(price.id);
+                                    try {
+                                      await apiRequest(`/inventory/item-prices/${price.id}`, {
+                                        method: "PATCH",
+                                        body: JSON.stringify({
+                                          item_id: draft!.item_id,
+                                          price: draft!.price,
+                                          is_active: draft!.is_active
+                                        })
+                                      }, props.accessToken);
+                                      await refreshData(selectedOutletId);
+                                      cancelEditDefaultPrice();
+                                    } catch (err) {
+                                      if (err instanceof ApiError) {
+                                        setError(err.message);
+                                      }
+                                    } finally {
+                                      setSavingPrice(null);
+                                    }
+                                  }}
+                                  loading={savingPrice === price.id}
+                                >
+                                  Save
+                                </Button>
+                                <Button size="xs" variant="light" onClick={cancelEditDefaultPrice}>
+                                  Cancel
+                                </Button>
+                              </Group>
+                            ) : (
+                              <Group gap="xs">
+                                <Button size="xs" variant="light" onClick={() => startEditDefaultPrice(price)}>
+                                  Edit
+                                </Button>
+                                <ActionIcon
+                                  aria-label="Delete price"
+                                  variant="light"
+                                  color="red"
+                                  size="sm"
+                                  onClick={() => handleDeleteClick("price", price.id)}
+                                  loading={deletingPrice === price.id}
+                                >
+                                  <IconTrash size={16} />
+                                </ActionIcon>
+                              </Group>
+                            )}
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
                   </Table.Tbody>
                 </Table>
               </ScrollArea>
@@ -1060,32 +1137,40 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
                   <Table.Tbody>
                     {prices.map((price) => {
                       const isOverride = price.outlet_id !== null;
+                      const isEditing = editingOutletPriceId === price.id;
+                      const draft = isEditing ? outletPriceDraft : null;
+
                       return (
                         <Table.Tr key={price.id} bg={isOverride ? undefined : "gray.0"}>
                           <Table.Td>{price.id}</Table.Td>
                           <Table.Td>
-                            <Select
-                              size="sm"
-                              value={String(price.item_id)}
-                              onChange={(value) => {
-                                if (!value) return;
-                                setPrices((prev) =>
-                                  prev.map((entry) =>
-                                    entry.id === price.id
-                                      ? { ...entry, item_id: Number(value) }
-                                      : entry
-                                  )
-                                );
-                              }}
-                              data={itemSelectOptions.filter(opt => opt.value !== "0")}
-                            />
+                            {isEditing ? (
+                              <Select
+                                size="sm"
+                                value={draft?.item_id ? String(draft.item_id) : ""}
+                                onChange={(value) => {
+                                  if (!value) return;
+                                  setOutletPriceDraft((prev) => ({ ...prev, item_id: Number(value) }));
+                                }}
+                                data={itemSelectOptions.filter((opt) => opt.value !== "0")}
+                              />
+                            ) : (
+                              <Text size="sm">
+                                {(() => {
+                                  const item = itemMap.get(price.item_id);
+                                  return item ? `${item.name} (${item.type})` : "-";
+                                })()}
+                              </Text>
+                            )}
                           </Table.Td>
                           <Table.Td>
-                            {(() => {
-                              const item = itemMap.get(price.item_id);
-                              if (!item) return "-";
-                              return getGroupPath(item.item_group_id);
-                            })()}
+                            <Text size="sm">
+                              {(() => {
+                                const item = itemMap.get(price.item_id);
+                                if (!item) return "-";
+                                return getGroupPath(item.item_group_id);
+                              })()}
+                            </Text>
                           </Table.Td>
                           <Table.Td>
                             {isOverride ? (
@@ -1099,42 +1184,32 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
                             )}
                           </Table.Td>
                           <Table.Td>
-                            {isOverride ? (
+                            {isEditing ? (
                               <NumberInput
                                 size="sm"
-                                value={price.price}
+                                value={draft?.price ?? 0}
                                 onChange={(value) =>
-                                  setPrices((prev) =>
-                                    prev.map((entry) =>
-                                      entry.id === price.id
-                                        ? { ...entry, price: Number(value) || 0 }
-                                        : entry
-                                    )
-                                  )
+                                  setOutletPriceDraft((prev) => ({ ...prev, price: Number(value) || 0 }))
                                 }
                                 min={0}
                                 decimalScale={2}
                               />
                             ) : (
-                              <Text fs="italic" c="dimmed">
-                                {price.price}
-                              </Text>
+                              <Text size="sm">{price.price}</Text>
                             )}
                           </Table.Td>
                           <Table.Td>
-                            {isOverride ? (
+                            {isEditing ? (
                               <Checkbox
-                                checked={price.is_active}
+                                checked={draft?.is_active ?? true}
                                 onChange={(event) =>
-                                  setPrices((prev) =>
-                                    prev.map((entry) =>
-                                      entry.id === price.id
-                                        ? { ...entry, is_active: event.currentTarget.checked }
-                                        : entry
-                                    )
-                                  )
+                                  setOutletPriceDraft((prev) => ({ ...prev, is_active: event.currentTarget.checked }))
                                 }
                               />
+                            ) : isOverride ? (
+                              <Badge color={price.is_active ? "green" : "red"} variant="light">
+                                {price.is_active ? "Active" : "Inactive"}
+                              </Badge>
                             ) : (
                               <Text fs="italic" c="dimmed">
                                 {price.is_active ? "Yes" : "No"}
@@ -1142,16 +1217,38 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
                             )}
                           </Table.Td>
                           <Table.Td>
-                            {isOverride ? (
+                            {isEditing ? (
                               <Group gap="xs">
                                 <Button
                                   size="xs"
-                                  variant="light"
-                                  onClick={() => savePrice(price)}
+                                  color="green"
+                                  onClick={async () => {
+                                    await savePrice({ ...price, ...outletPriceDraft });
+                                    cancelEditOutletPrice();
+                                  }}
                                   loading={savingPrice === price.id}
                                 >
                                   Save
                                 </Button>
+                                <Button size="xs" variant="light" onClick={cancelEditOutletPrice}>
+                                  Cancel
+                                </Button>
+                              </Group>
+                            ) : isOverride ? (
+                              <Group gap="xs">
+                                <Button size="xs" variant="light" onClick={() => startEditOutletPrice(price)}>
+                                  Edit
+                                </Button>
+                                {!price.is_active && (
+                                  <Button
+                                    size="xs"
+                                    color="green"
+                                    variant="light"
+                                    onClick={() => setOutletAvailabilityFromDefault(price, true)}
+                                  >
+                                    Make Available
+                                  </Button>
+                                )}
                                 <ActionIcon
                                   aria-label="Delete price"
                                   variant="light"
