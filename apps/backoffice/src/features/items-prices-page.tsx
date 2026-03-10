@@ -424,7 +424,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
     }
   }
 
-  async function createOutletOverride(itemId: number, price: number) {
+  async function createOutletOverride(itemId: number, price: number, isActive = true) {
     setCreatingOverride(true);
     try {
       await apiRequest("/inventory/item-prices", {
@@ -433,7 +433,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
           item_id: itemId,
           outlet_id: selectedOutletId,
           price: price,
-          is_active: true
+          is_active: isActive
         })
       }, props.accessToken);
       await refreshData(selectedOutletId);
@@ -443,6 +443,35 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
       }
     } finally {
       setCreatingOverride(false);
+    }
+  }
+
+  async function setOutletAvailabilityFromDefault(price: ItemPrice, isActive: boolean) {
+    const existing = prices.find(
+      (p) => p.item_id === price.item_id && p.outlet_id === selectedOutletId
+    );
+    if (existing) {
+      setSavingPrice(existing.id);
+      try {
+        await apiRequest(`/inventory/item-prices/${existing.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            item_id: existing.item_id,
+            outlet_id: existing.outlet_id,
+            price: existing.price,
+            is_active: isActive
+          })
+        }, props.accessToken);
+        await refreshData(selectedOutletId);
+      } catch (saveError) {
+        if (saveError instanceof ApiError) {
+          setError(saveError.message);
+        }
+      } finally {
+        setSavingPrice(null);
+      }
+    } else {
+      await createOutletOverride(price.item_id, price.price, isActive);
     }
   }
 
@@ -1060,7 +1089,11 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
                           </Table.Td>
                           <Table.Td>
                             {isOverride ? (
-                              <Badge color="green">Override</Badge>
+                              price.is_active ? (
+                                <Badge color="green">Override</Badge>
+                              ) : (
+                                <Badge color="red">Unavailable</Badge>
+                              )
                             ) : (
                               <Badge variant="light" color="gray">Default</Badge>
                             )}
@@ -1131,14 +1164,38 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
                                 </ActionIcon>
                               </Group>
                             ) : (
-                              <Button
-                                size="xs"
-                                color="green"
-                                leftSection={<IconEdit size={14} />}
-                                onClick={() => handleSetOverrideClick(price)}
-                              >
-                                Set Override
-                              </Button>
+                              (() => {
+                                const hasOverride = prices.some(
+                                  (p) => p.item_id === price.item_id && p.outlet_id === selectedOutletId
+                                );
+                                if (hasOverride) {
+                                  return (
+                                    <Text size="xs" c="dimmed">
+                                      Overridden
+                                    </Text>
+                                  );
+                                }
+                                return (
+                                  <Group gap="xs">
+                                    <Button
+                                      size="xs"
+                                      color="green"
+                                      leftSection={<IconEdit size={14} />}
+                                      onClick={() => handleSetOverrideClick(price)}
+                                    >
+                                      Set Override
+                                    </Button>
+                                    <Button
+                                      size="xs"
+                                      color="red"
+                                      variant="light"
+                                      onClick={() => setOutletAvailabilityFromDefault(price, false)}
+                                    >
+                                      Mark Unavailable
+                                    </Button>
+                                  </Group>
+                                );
+                              })()
                             )}
                           </Table.Td>
                         </Table.Tr>
