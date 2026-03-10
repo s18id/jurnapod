@@ -308,10 +308,6 @@ export class AccountsService {
 
     // Track classification state for inheritance resolution
     let newParentId = before.parent_account_id;
-    const hasExplicitClassification = 
-      (data.type_name !== undefined) || 
-      (data.normal_balance !== undefined) || 
-      (data.report_group !== undefined);
     
     // Track if we're clearing classification to re-enable inheritance
     const isClearingClassification = 
@@ -381,42 +377,48 @@ export class AccountsService {
     }
 
     // Inheritance resolution: if classification was cleared or parent changed while inheriting
-    const isInheritingClassification = 
-      !before.type_name && !before.normal_balance && !before.report_group;
+    const isReparenting = data.parent_account_id !== undefined;
 
-    // Detect "likely inherited" on parent change:
-    // If parent changed and classification fields not explicitly provided,
-    // check if current values match old ancestor classification
-    let likelyInherited = false;
-    if (data.parent_account_id !== undefined && !hasExplicitClassification && !isInheritingClassification) {
-      // Get old ancestor classification (from before.parent_account_id)
-      const oldAncestor = before.parent_account_id 
-        ? await this.findNearestAncestorWithType(before.parent_account_id, companyId)
-        : null;
-      
-      if (oldAncestor) {
-        // Compare current values with old ancestor - if they match, likely inherited
-        const matchesOldAncestor = 
-          (before.type_name === oldAncestor.name || (!before.type_name && !oldAncestor.name)) &&
-          (before.normal_balance === oldAncestor.normal_balance || (!before.normal_balance && !oldAncestor.normal_balance)) &&
-          (before.report_group === oldAncestor.report_group || (!before.report_group && !oldAncestor.report_group));
-        
-        likelyInherited = matchesOldAncestor;
-      }
-    }
+    // Detect likely inherited values per field on parent change.
+    // This supports mixed state accounts where some fields are explicit overrides
+    // while other fields still mirror inherited ancestor values.
+    const oldAncestor = (isReparenting && before.parent_account_id)
+      ? await this.findNearestAncestorWithType(before.parent_account_id, companyId)
+      : null;
 
-    const shouldRecomputeOnReparent =
-      data.parent_account_id !== undefined && (isInheritingClassification || likelyInherited);
+    const isInheritingTypeName = !before.type_name;
+    const isInheritingNormalBalance = !before.normal_balance;
+    const isInheritingReportGroup = !before.report_group;
+
+    const likelyInheritedTypeName =
+      oldAncestor != null &&
+      (before.type_name === oldAncestor.name || (!before.type_name && !oldAncestor.name));
+    const likelyInheritedNormalBalance =
+      oldAncestor != null &&
+      (before.normal_balance === oldAncestor.normal_balance || (!before.normal_balance && !oldAncestor.normal_balance));
+    const likelyInheritedReportGroup =
+      oldAncestor != null &&
+      (before.report_group === oldAncestor.report_group || (!before.report_group && !oldAncestor.report_group));
+
+    const shouldRecomputeTypeNameOnReparent =
+      isReparenting && data.type_name === undefined && (isInheritingTypeName || likelyInheritedTypeName);
+    const shouldRecomputeNormalBalanceOnReparent =
+      isReparenting && data.normal_balance === undefined && (isInheritingNormalBalance || likelyInheritedNormalBalance);
+    const shouldRecomputeReportGroupOnReparent =
+      isReparenting && data.report_group === undefined && (isInheritingReportGroup || likelyInheritedReportGroup);
+
     const shouldResolveTypeName =
-      data.type_name === null || (shouldRecomputeOnReparent && data.type_name === undefined);
+      data.type_name === null || shouldRecomputeTypeNameOnReparent;
     const shouldResolveNormalBalance =
-      data.normal_balance === null || (shouldRecomputeOnReparent && data.normal_balance === undefined);
+      data.normal_balance === null || shouldRecomputeNormalBalanceOnReparent;
     const shouldResolveReportGroup =
-      data.report_group === null || (shouldRecomputeOnReparent && data.report_group === undefined);
+      data.report_group === null || shouldRecomputeReportGroupOnReparent;
 
     const needsInheritanceResolution =
       isClearingClassification ||
-      shouldRecomputeOnReparent;
+      shouldResolveTypeName ||
+      shouldResolveNormalBalance ||
+      shouldResolveReportGroup;
 
     if (needsInheritanceResolution) {
       const updatedFieldsSet = new Set(updateFields.map(f => f.split(" = ?")[0]));
