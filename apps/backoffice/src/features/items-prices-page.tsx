@@ -2,6 +2,32 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  Stack,
+  Card,
+  Title,
+  Text,
+  Group,
+  SimpleGrid,
+  Select,
+  TextInput,
+  NumberInput,
+  Checkbox,
+  Button,
+  Accordion,
+  Table,
+  ScrollArea,
+  Badge,
+  Alert,
+  Loader,
+  Modal,
+  ActionIcon,
+  Divider,
+  SegmentedControl,
+  Box
+} from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
+import { IconAlertCircle, IconTrash, IconInfoCircle, IconEdit } from "@tabler/icons-react";
 import { apiRequest, ApiError } from "../lib/api-client";
 import { CacheService, buildCacheKey } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
@@ -35,14 +61,14 @@ type Item = {
 type ItemPrice = {
   id: number;
   company_id: number;
-  outlet_id: number | null;  // null = company default
+  outlet_id: number | null;
   item_id: number;
   price: number;
   is_active: boolean;
   item_group_id: number | null;
   item_group_name: string | null;
   updated_at: string;
-  is_override?: boolean;  // computed field from API
+  is_override?: boolean;
 };
 
 const itemTypeOptions: readonly ItemType[] = ["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"];
@@ -63,10 +89,10 @@ const itemTypeExamples: Record<ItemType, string> = {
 
 function getItemTypeWarning(type: ItemType, hasPrice: boolean): string | null {
   if (type === "RECIPE" && hasPrice) {
-    return "⚠️ RECIPE items typically don't need prices. Consider pricing the PRODUCT instead.";
+    return "RECIPE items typically don't need prices. Consider pricing the PRODUCT instead.";
   }
   if (type === "INGREDIENT" && hasPrice) {
-    return "💡 Selling ingredients directly? You may want to create a PRODUCT item for retail sales.";
+    return "Selling ingredients directly? You may want to create a PRODUCT item for retail sales.";
   }
   return null;
 }
@@ -80,30 +106,6 @@ function isCompanyDefault(price: ItemPrice): boolean {
 }
 
 type PricingViewMode = "defaults" | "outlet";
-
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const inputStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 8px"
-} as const;
 
 type ItemsPricesPageProps = {
   user: SessionUser;
@@ -119,8 +121,25 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedOutletId, setSelectedOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
   const [pricingViewMode, setPricingViewMode] = useState<PricingViewMode>("outlet");
+  const [savingItem, setSavingItem] = useState<number | null>(null);
+  const [deletingItem, setDeletingItem] = useState<number | null>(null);
+  const [savingPrice, setSavingPrice] = useState<number | null>(null);
+  const [deletingPrice, setDeletingPrice] = useState<number | null>(null);
+  const [creatingItem, setCreatingItem] = useState(false);
+  const [creatingPrice, setCreatingPrice] = useState(false);
   const canManageDefaults = canManageCompanyDefaults(props.user);
   const isOnline = useOnlineStatus();
+
+  // Modal states for override creation
+  const [overrideModalOpened, { open: openOverrideModal, close: closeOverrideModal }] = useDisclosure(false);
+  const [overrideTarget, setOverrideTarget] = useState<{ itemId: number; defaultPrice: number } | null>(null);
+  const [overridePriceValue, setOverridePriceValue] = useState<string>("");
+  const [creatingOverride, setCreatingOverride] = useState(false);
+
+  // Modal states for delete confirmation
+  const [deleteModalOpened, { open: openDeleteModal, close: closeDeleteModal }] = useDisclosure(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: "item" | "price"; id: number } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [newItem, setNewItem] = useState({
     sku: "",
@@ -138,6 +157,47 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
 
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const groupMap = useMemo(() => new Map(itemGroups.map((group) => [group.id, group])), [itemGroups]);
+
+  const outletOptions = useMemo(() =>
+    props.user.outlets.map((outlet) => ({
+      value: String(outlet.id),
+      label: `${outlet.code} - ${outlet.name}`
+    })),
+    [props.user.outlets]
+  );
+
+  const itemTypeSelectOptions = useMemo(() =>
+    itemTypeOptions.map((type) => ({
+      value: type,
+      label: type
+    })),
+    []
+  );
+
+  const itemGroupSelectOptions = useMemo(() =>
+    [
+      { value: "", label: "No group" },
+      ...itemGroups.map((group) => ({
+        value: String(group.id),
+        label: formatGroupOption(group)
+      }))
+    ],
+    [itemGroups]
+  );
+
+  const itemSelectOptions = useMemo(() =>
+    [
+      { value: "0", label: "Select item" },
+      ...items.map((item) => {
+        const groupName = getGroupPath(item.item_group_id);
+        return {
+          value: String(item.id),
+          label: `${groupName} - ${item.name} (${item.type})`
+        };
+      })
+    ],
+    [items]
+  );
 
   function getGroupPath(groupId: number | null | undefined): string {
     if (!groupId) {
@@ -235,6 +295,7 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
   }, [selectedOutletId, isOnline]);
 
   async function createItem() {
+    setCreatingItem(true);
     try {
       await apiRequest("/inventory/items", {
         method: "POST",
@@ -252,10 +313,13 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
       if (createError instanceof ApiError) {
         setError(createError.message);
       }
+    } finally {
+      setCreatingItem(false);
     }
   }
 
   async function saveItem(item: Item) {
+    setSavingItem(item.id);
     try {
       await apiRequest(`/inventory/items/${item.id}`, {
         method: "PATCH",
@@ -272,25 +336,34 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
       if (saveError instanceof ApiError) {
         setError(saveError.message);
       }
+    } finally {
+      setSavingItem(null);
     }
   }
 
-  async function deleteItem(itemId: number) {
+  async function deleteItem(itemId: number): Promise<boolean> {
+    setDeletingItem(itemId);
     try {
       await apiRequest(`/inventory/items/${itemId}`, { method: "DELETE" }, props.accessToken);
       await refreshData(selectedOutletId);
+      return true;
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {
         setError(deleteError.message);
       }
+      return false;
+    } finally {
+      setDeletingItem(null);
     }
   }
 
   async function createPrice() {
-    if (newPrice.item_id <= 0 || !newPrice.price.trim()) {
+    const parsedPrice = Number(newPrice.price);
+    if (newPrice.item_id <= 0 || !newPrice.price.trim() || Number.isNaN(parsedPrice) || parsedPrice < 0) {
       return;
     }
 
+    setCreatingPrice(true);
     try {
       const outletId = newPrice.is_company_default ? null : selectedOutletId;
       await apiRequest("/inventory/item-prices", {
@@ -298,20 +371,23 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
         body: JSON.stringify({
           item_id: newPrice.item_id,
           outlet_id: outletId,
-          price: Number(newPrice.price),
+          price: parsedPrice,
           is_active: newPrice.is_active
         })
       }, props.accessToken);
-      setNewPrice((prev) => ({ ...prev, price: "", is_active: true }));
+      setNewPrice((prev) => ({ ...prev, price: "", is_active: true, is_company_default: false }));
       await refreshData(selectedOutletId);
     } catch (createError) {
       if (createError instanceof ApiError) {
         setError(createError.message);
       }
+    } finally {
+      setCreatingPrice(false);
     }
   }
 
   async function savePrice(price: ItemPrice) {
+    setSavingPrice(price.id);
     try {
       await apiRequest(`/inventory/item-prices/${price.id}`, {
         method: "PATCH",
@@ -327,21 +403,29 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
       if (saveError instanceof ApiError) {
         setError(saveError.message);
       }
+    } finally {
+      setSavingPrice(null);
     }
   }
 
-  async function deletePrice(priceId: number) {
+  async function deletePrice(priceId: number): Promise<boolean> {
+    setDeletingPrice(priceId);
     try {
       await apiRequest(`/inventory/item-prices/${priceId}`, { method: "DELETE" }, props.accessToken);
       await refreshData(selectedOutletId);
+      return true;
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {
         setError(deleteError.message);
       }
+      return false;
+    } finally {
+      setDeletingPrice(null);
     }
   }
 
   async function createOutletOverride(itemId: number, price: number) {
+    setCreatingOverride(true);
     try {
       await apiRequest("/inventory/item-prices", {
         method: "POST",
@@ -357,7 +441,47 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
       if (createError instanceof ApiError) {
         setError(createError.message);
       }
+    } finally {
+      setCreatingOverride(false);
     }
+  }
+
+  function handleDeleteClick(type: "item" | "price", id: number) {
+    setDeleteTarget({ type, id });
+    openDeleteModal();
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+
+    setDeleting(true);
+    const ok = deleteTarget.type === "item"
+      ? await deleteItem(deleteTarget.id)
+      : await deletePrice(deleteTarget.id);
+
+    setDeleting(false);
+
+    if (!ok) return; // keep modal open on failure
+    closeDeleteModal();
+    setDeleteTarget(null);
+  }
+
+  function handleSetOverrideClick(price: ItemPrice) {
+    setOverrideTarget({ itemId: price.item_id, defaultPrice: price.price });
+    setOverridePriceValue(String(price.price));
+    openOverrideModal();
+  }
+
+  async function confirmOverride() {
+    if (!overrideTarget) return;
+
+    const priceValue = Number(overridePriceValue);
+    if (isNaN(priceValue) || priceValue < 0) return;
+
+    await createOutletOverride(overrideTarget.itemId, priceValue);
+    closeOverrideModal();
+    setOverrideTarget(null);
+    setOverridePriceValue("");
   }
 
   if (!isOnline) {
@@ -370,659 +494,730 @@ export function ItemsPricesPage(props: ItemsPricesPageProps) {
   }
 
   return (
-    <div>
-      <section style={boxStyle}>
-        <h2 style={{ marginTop: 0 }}>Items + Prices Management</h2>
-        
-        <details style={{ marginBottom: "16px", padding: "12px", backgroundColor: "#f8f6f3", borderRadius: "6px" }}>
-          <summary style={{ cursor: "pointer", fontWeight: "bold", color: "#2f5f4a" }}>
-            📖 Item Types Guide
-          </summary>
-          <div style={{ marginTop: "12px", fontSize: "13px", lineHeight: "1.6" }}>
-            <ul style={{ margin: "8px 0", paddingLeft: "20px" }}>
-              <li><strong>SERVICE:</strong> Non-tangible offerings like delivery fees, labor, consulting</li>
-              <li><strong>PRODUCT:</strong> Finished goods sold to customers (coffee, pastries, retail items) - Default type</li>
-              <li><strong>INGREDIENT:</strong> Raw materials used in production (beans, milk, sugar, cups)</li>
-              <li><strong>RECIPE:</strong> Bill of Materials / formulas for making products (requires inventory level 2+)</li>
-            </ul>
-            <p style={{ margin: "8px 0", fontSize: "12px", color: "#6b5d48" }}>
-              ℹ️ All types can be sold via POS. INGREDIENT and RECIPE types will have special behavior when inventory module is enabled.
-            </p>
-          </div>
-        </details>
+    <Stack gap="md">
+      {/* Header and Controls */}
+      <Card>
+        <Stack gap="md">
+          <Title order={2}>Items + Prices Management</Title>
 
-        <p style={{ marginTop: 0 }}>Outlet scope for prices:</p>
-        <select
-          value={selectedOutletId}
-          onChange={(event) => setSelectedOutletId(Number(event.target.value))}
-          style={inputStyle}
-        >
-          {props.user.outlets.map((outlet) => (
-            <option key={outlet.id} value={outlet.id}>
-              {outlet.code} - {outlet.name}
-            </option>
-          ))}
-        </select>
-        <div style={{ marginTop: "12px", display: "flex", gap: "8px", alignItems: "center" }}>
-          <label style={{ fontWeight: 600 }}>Pricing view:</label>
-          <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-            <input
-              type="radio"
-              name="pricingViewMode"
-              checked={pricingViewMode === "outlet"}
-              onChange={() => setPricingViewMode("outlet")}
+          {/* Item Types Guide Accordion */}
+          <Accordion variant="filled" radius="md">
+            <Accordion.Item value="guide">
+              <Accordion.Control icon={<IconInfoCircle size={16} />}>
+                <Text fw={600} c="green.7">Item Types Guide</Text>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="xs">
+                  <Text size="sm">
+                    <strong>SERVICE:</strong> Non-tangible offerings like delivery fees, labor, consulting
+                  </Text>
+                  <Text size="sm">
+                    <strong>PRODUCT:</strong> Finished goods sold to customers (coffee, pastries, retail items) - Default type
+                  </Text>
+                  <Text size="sm">
+                    <strong>INGREDIENT:</strong> Raw materials used in production (beans, milk, sugar, cups)
+                  </Text>
+                  <Text size="sm">
+                    <strong>RECIPE:</strong> Bill of Materials / formulas for making products (requires inventory level 2+)
+                  </Text>
+                  <Alert variant="light" color="blue" mt="xs">
+                    All types can be sold via POS. INGREDIENT and RECIPE types will have special behavior when inventory module is enabled.
+                  </Alert>
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
+
+          <Divider />
+
+          {/* Outlet and Pricing View Controls */}
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+            <Select
+              label="Outlet scope for prices"
+              value={String(selectedOutletId)}
+              onChange={(value) => {
+                if (!value) return;
+                setSelectedOutletId(Number(value));
+              }}
+              data={outletOptions}
+              disabled={loading}
             />
-            Outlet Prices
-          </label>
-          {canManageDefaults && (
-            <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-              <input
-                type="radio"
-                name="pricingViewMode"
-                checked={pricingViewMode === "defaults"}
-                onChange={() => setPricingViewMode("defaults")}
-              />
-              Company Defaults
-            </label>
-          )}
-        </div>
-        {pricingViewMode === "defaults" && !canManageDefaults && (
-          <p style={{ fontSize: "12px", color: "#6b5d48", marginTop: "8px" }}>
-            ℹ️ Only OWNER and COMPANY_ADMIN can manage company default prices.
-          </p>
-        )}
-        <StaleDataWarning
-          cacheKey={buildCacheKey("items", { companyId: props.user.company_id })}
-          label="items"
-        />
-        <StaleDataWarning
-          cacheKey={buildCacheKey("item_groups", { companyId: props.user.company_id })}
-          label="item groups"
-        />
-        <StaleDataWarning
-          cacheKey={buildCacheKey("item_prices", {
-            companyId: props.user.company_id,
-            outletId: selectedOutletId
-          })}
-          label={`prices for outlet #${selectedOutletId}`}
-        />
-        {loading ? <p>Loading data...</p> : null}
-        {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
-      </section>
 
-      <section style={boxStyle}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-          <h3 style={{ marginTop: 0 }}>Create Item</h3>
-          <a
-            href="#/item-groups"
-            style={{ color: "#2f5f4a", fontWeight: 600, textDecoration: "none" }}
-          >
-            Manage groups
-          </a>
-        </div>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-start" }}>
-          <input
-            placeholder="SKU"
-            value={newItem.sku}
-            onChange={(event) => setNewItem((prev) => ({ ...prev, sku: event.target.value }))}
-            style={inputStyle}
-          />
-          <input
-            placeholder="Name"
-            value={newItem.name}
-            onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
-            style={inputStyle}
-          />
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <select
+            <Box>
+              <Text size="sm" fw={500} mb="xs">Pricing view</Text>
+              <SegmentedControl
+                value={pricingViewMode}
+                onChange={(value) => setPricingViewMode(value as PricingViewMode)}
+                data={[
+                  { value: "outlet", label: "Outlet Prices" },
+                  ...(canManageDefaults ? [{ value: "defaults", label: "Company Defaults" }] : [])
+                ]}
+              />
+              {pricingViewMode === "defaults" && !canManageDefaults && (
+                <Text size="xs" c="dimmed" mt="xs">
+                  Only OWNER and COMPANY_ADMIN can manage company default prices.
+                </Text>
+              )}
+            </Box>
+          </SimpleGrid>
+
+          {/* Stale Data Warnings */}
+          <Stack gap="xs">
+            <StaleDataWarning
+              cacheKey={buildCacheKey("items", { companyId: props.user.company_id })}
+              label="items"
+            />
+            <StaleDataWarning
+              cacheKey={buildCacheKey("item_groups", { companyId: props.user.company_id })}
+              label="item groups"
+            />
+            <StaleDataWarning
+              cacheKey={buildCacheKey("item_prices", {
+                companyId: props.user.company_id,
+                outletId: selectedOutletId
+              })}
+              label={`prices for outlet #${selectedOutletId}`}
+            />
+          </Stack>
+
+          {/* Loading and Error States */}
+          {loading && (
+            <Group gap="xs">
+              <Loader size="sm" />
+              <Text size="sm" c="dimmed">Loading data...</Text>
+            </Group>
+          )}
+          {error && (
+            <Alert icon={<IconAlertCircle size={16} />} title="Error" color="red">
+              {error}
+            </Alert>
+          )}
+        </Stack>
+      </Card>
+
+      {/* Create Item Form */}
+      <Card>
+        <Stack gap="md">
+          <Group justify="space-between" align="flex-start">
+            <Title order={3}>Create Item</Title>
+            <Button
+              variant="subtle"
+              component="a"
+              href="#/item-groups"
+              size="sm"
+            >
+              Manage groups
+            </Button>
+          </Group>
+
+          <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
+            <TextInput
+              label="SKU"
+              placeholder="SKU"
+              value={newItem.sku}
+              onChange={(event) => setNewItem((prev) => ({ ...prev, sku: event.target.value }))}
+            />
+            <TextInput
+              label="Name"
+              placeholder="Name"
+              value={newItem.name}
+              onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
+              required
+            />
+            <Select
+              label="Type"
               value={newItem.type}
-              onChange={(event) =>
-                setNewItem((prev) => ({
-                  ...prev,
-                  type: event.target.value as ItemType
-                }))
-              }
-              style={inputStyle}
-              title={itemTypeDescriptions[newItem.type]}
-            >
-              {itemTypeOptions.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-            <small style={{ color: "#6b5d48", fontSize: "11px", maxWidth: "200px" }}>
-              {itemTypeDescriptions[newItem.type]}
-            </small>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <select
-              value={newItem.item_group_id ?? ""}
-              onChange={(event) =>
-                setNewItem((prev) => ({
-                  ...prev,
-                  item_group_id: event.target.value ? Number(event.target.value) : null
-                }))
-              }
-              style={inputStyle}
-            >
-              <option value="">No group</option>
-              {itemGroups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {formatGroupOption(group)}
-                </option>
-              ))}
-            </select>
-            <small style={{ color: "#6b5d48", fontSize: "11px", maxWidth: "200px" }}>
-              Optional grouping for POS and reports.
-            </small>
-          </div>
-          <label>
-            <input
-              type="checkbox"
+              onChange={(value) => setNewItem((prev) => ({ ...prev, type: (value as ItemType) || "PRODUCT" }))}
+              data={itemTypeSelectOptions}
+              description={itemTypeDescriptions[newItem.type]}
+            />
+            <Select
+              label="Group"
+              value={newItem.item_group_id ? String(newItem.item_group_id) : ""}
+              onChange={(value) => setNewItem((prev) => ({ ...prev, item_group_id: value ? Number(value) : null }))}
+              data={itemGroupSelectOptions}
+              description="Optional grouping for POS and reports"
+            />
+          </SimpleGrid>
+
+          <Group justify="space-between" align="flex-start">
+            <Checkbox
+              label="Active"
               checked={newItem.is_active}
-              onChange={(event) =>
-                setNewItem((prev) => ({
-                  ...prev,
-                  is_active: event.target.checked
-                }))
-              }
+              onChange={(event) => setNewItem((prev) => ({ ...prev, is_active: event.currentTarget.checked }))}
             />
-            Active
-          </label>
-          <button type="button" onClick={() => createItem()}>
-            Add item
-          </button>
-        </div>
-        <p style={{ fontSize: "12px", color: "#6b5d48", marginBottom: 0, marginTop: "8px" }}>
-          💡 {itemTypeExamples[newItem.type]}
-        </p>
-      </section>
+            <Button
+              onClick={createItem}
+              loading={creatingItem}
+              disabled={!newItem.name.trim()}
+            >
+              Add item
+            </Button>
+          </Group>
 
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Items</h3>
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={cellStyle}>ID</th>
-              <th style={cellStyle}>SKU</th>
-              <th style={cellStyle}>Name</th>
-              <th style={cellStyle}>Group</th>
-              <th style={cellStyle}>Type</th>
-              <th style={cellStyle}>Active</th>
-              <th style={cellStyle}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td style={cellStyle}>{item.id}</td>
-                <td style={cellStyle}>
-                  <input
-                    value={item.sku ?? ""}
-                    onChange={(event) =>
-                      setItems((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id ? { ...entry, sku: event.target.value || null } : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <input
-                    value={item.name}
-                    onChange={(event) =>
-                      setItems((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id ? { ...entry, name: event.target.value } : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <select
-                    value={item.item_group_id ?? ""}
-                    onChange={(event) =>
-                      setItems((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id
-                            ? {
-                              ...entry,
-                              item_group_id: event.target.value ? Number(event.target.value) : null
-                            }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  >
-                    <option value="">No group</option>
-                    {itemGroups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {formatGroupOption(group)}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td style={cellStyle}>
-                  <select
-                    value={item.type}
-                    onChange={(event) =>
-                      setItems((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id
-                            ? { ...entry, type: event.target.value as ItemType }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  >
-                    {itemTypeOptions.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td style={cellStyle}>
-                  <input
-                    type="checkbox"
-                    checked={item.is_active}
-                    onChange={(event) =>
-                      setItems((prev) =>
-                        prev.map((entry) =>
-                          entry.id === item.id
-                            ? { ...entry, is_active: event.target.checked }
-                            : entry
-                        )
-                      )
-                    }
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <button type="button" onClick={() => saveItem(item)}>
-                    Save
-                  </button>
-                  <button type="button" onClick={() => deleteItem(item.id)}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+          <Text size="sm" c="dimmed">
+            {itemTypeExamples[newItem.type]}
+          </Text>
+        </Stack>
+      </Card>
 
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>
-          {pricingViewMode === "defaults" ? "Create Company Default Price" : "Create Price"}
-        </h3>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <select
-            value={newPrice.item_id}
-            onChange={(event) =>
-              setNewPrice((prev) => ({
-                ...prev,
-                item_id: Number(event.target.value)
-              }))
-            }
-            style={inputStyle}
-          >
-            <option value={0}>Select item</option>
-            {items.map((item) => {
-              const groupName = getGroupPath(item.item_group_id);
-              return (
-                <option key={item.id} value={item.id}>
-                  {groupName} - {item.name} ({item.type})
-                </option>
-              );
-            })}
-          </select>
-          <input
-            placeholder="Price"
-            value={newPrice.price}
-            onChange={(event) => setNewPrice((prev) => ({ ...prev, price: event.target.value }))}
-            style={inputStyle}
-          />
-          {pricingViewMode === "outlet" && canManageDefaults && (
-            <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <input
-                type="checkbox"
-                checked={newPrice.is_company_default}
-                onChange={(event) =>
-                  setNewPrice((prev) => ({
-                    ...prev,
-                    is_company_default: event.target.checked
-                  }))
-                }
-              />
-              Company default
-            </label>
-          )}
-          <label>
-            <input
-              type="checkbox"
-              checked={newPrice.is_active}
-              onChange={(event) =>
-                setNewPrice((prev) => ({
-                  ...prev,
-                  is_active: event.target.checked
-                }))
-              }
-            />
-            Active
-          </label>
-          <button type="button" onClick={() => createPrice()}>
-            Add price
-          </button>
-        </div>
-        {pricingViewMode === "defaults" && (
-          <p style={{ fontSize: "12px", color: "#6b5d48", marginTop: "8px", marginBottom: 0 }}>
-            ℹ️ Company default prices apply to all outlets unless overridden.
-          </p>
-        )}
-        {newPrice.item_id > 0 && (() => {
-          const selectedItem = itemMap.get(newPrice.item_id);
-          if (!selectedItem) return null;
-          const warning = getItemTypeWarning(selectedItem.type, newPrice.price.trim().length > 0);
-          if (!warning) return null;
-          return (
-            <p style={{ fontSize: "12px", color: "#a67c00", marginBottom: 0, marginTop: "8px", backgroundColor: "#fff9e6", padding: "8px", borderRadius: "4px" }}>
-              {warning}
-            </p>
-          );
-        })()}
-      </section>
+      {/* Items Table */}
+      <Card>
+        <Stack gap="md">
+          <Title order={3}>Items</Title>
 
-      {pricingViewMode === "defaults" ? (
-        <section style={boxStyle}>
-          <h3 style={{ marginTop: 0 }}>
-            Company Default Prices
-            <span style={{ fontWeight: "normal", fontSize: "12px", marginLeft: "8px", color: "#6b5d48" }}>
-              (applies to all outlets)
-            </span>
-          </h3>
-          {companyDefaults.length === 0 ? (
-            <p>No company default prices. Create one above.</p>
-          ) : (
-            <table style={tableStyle}>
-              <thead>
-                <tr>
-                  <th style={cellStyle}>ID</th>
-                  <th style={cellStyle}>Item</th>
-                  <th style={cellStyle}>Group</th>
-                  <th style={cellStyle}>Price</th>
-                  <th style={cellStyle}>Active</th>
-                  <th style={cellStyle}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {companyDefaults.map((price) => (
-                  <tr key={price.id}>
-                    <td style={cellStyle}>{price.id}</td>
-                    <td style={cellStyle}>
-                      <select
-                        value={price.item_id}
-                        onChange={(event) =>
-                          setCompanyDefaults((prev) =>
-                            prev.map((entry) =>
-                              entry.id === price.id
-                                ? { ...entry, item_id: Number(event.target.value) }
-                                : entry
-                            )
-                          )
-                        }
-                        style={inputStyle}
-                      >
-                        {items.map((item) => {
-                          const groupName = getGroupPath(item.item_group_id);
-                          return (
-                            <option key={item.id} value={item.id}>
-                              {groupName} - {item.name}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </td>
-                    <td style={cellStyle}>
-                      {(() => {
-                        const item = itemMap.get(price.item_id);
-                        if (!item) return "-";
-                        return getGroupPath(item.item_group_id);
-                      })()}
-                    </td>
-                    <td style={cellStyle}>
-                      <input
-                        value={price.price}
-                        onChange={(event) =>
-                          setCompanyDefaults((prev) =>
-                            prev.map((entry) =>
-                              entry.id === price.id
-                                ? { ...entry, price: Number(event.target.value || "0") }
-                                : entry
-                            )
-                          )
-                        }
-                        style={inputStyle}
-                      />
-                    </td>
-                    <td style={cellStyle}>
-                      <input
-                        type="checkbox"
-                        checked={price.is_active}
-                        onChange={(event) =>
-                          setCompanyDefaults((prev) =>
-                            prev.map((entry) =>
-                              entry.id === price.id
-                                ? { ...entry, is_active: event.target.checked }
-                                : entry
-                            )
-                          )
-                        }
-                      />
-                    </td>
-                    <td style={cellStyle}>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await apiRequest(`/inventory/item-prices/${price.id}`, {
-                              method: "PATCH",
-                              body: JSON.stringify({
-                                item_id: price.item_id,
-                                price: price.price,
-                                is_active: price.is_active
-                              })
-                            }, props.accessToken);
-                            await refreshData(selectedOutletId);
-                          } catch (err) {
-                            if (err instanceof ApiError) {
-                              setError(err.message);
-                            }
-                          }
-                        }}
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deletePrice(price.id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
-      ) : (
-        <section style={boxStyle}>
-          <h3 style={{ marginTop: 0 }}>
-            Outlet Prices: {props.user.outlets.find((o) => o.id === selectedOutletId)?.name ?? selectedOutletId}
-            <span style={{ fontWeight: "normal", fontSize: "12px", marginLeft: "8px", color: "#6b5d48" }}>
-              (outlet override or company default fallback)
-            </span>
-          </h3>
-          {prices.length === 0 ? (
-            <p>No prices for this outlet. Set a company default or create an outlet override above.</p>
-          ) : (
-            <table style={tableStyle}>
-              <thead>
-                <tr>
-                  <th style={cellStyle}>ID</th>
-                  <th style={cellStyle}>Item</th>
-                  <th style={cellStyle}>Group</th>
-                  <th style={cellStyle}>Scope</th>
-                  <th style={cellStyle}>Price</th>
-                  <th style={cellStyle}>Active</th>
-                  <th style={cellStyle}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {prices.map((price) => {
-                  const isOverride = price.outlet_id !== null;
-                  return (
-                    <tr
-                      key={price.id}
-                      style={isOverride ? {} : { backgroundColor: "#f8f6f3" }}
-                    >
-                      <td style={cellStyle}>{price.id}</td>
-                      <td style={cellStyle}>
-                        <select
-                          value={price.item_id}
+          <ScrollArea>
+            <Table highlightOnHover striped>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>ID</Table.Th>
+                  <Table.Th>SKU</Table.Th>
+                  <Table.Th>Name</Table.Th>
+                  <Table.Th>Group</Table.Th>
+                  <Table.Th>Type</Table.Th>
+                  <Table.Th>Active</Table.Th>
+                  <Table.Th>Actions</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {items.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={7}>
+                      <Text c="dimmed" ta="center">No items found. Create one above.</Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : (
+                  items.map((item) => (
+                    <Table.Tr key={item.id}>
+                      <Table.Td>{item.id}</Table.Td>
+                      <Table.Td>
+                        <TextInput
+                          size="sm"
+                          value={item.sku ?? ""}
                           onChange={(event) =>
-                            setPrices((prev) =>
+                            setItems((prev) =>
                               prev.map((entry) =>
-                                entry.id === price.id
-                                  ? { ...entry, item_id: Number(event.target.value) }
+                                entry.id === item.id ? { ...entry, sku: event.target.value || null } : entry
+                              )
+                            )
+                          }
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <TextInput
+                          size="sm"
+                          value={item.name}
+                          onChange={(event) =>
+                            setItems((prev) =>
+                              prev.map((entry) =>
+                                entry.id === item.id ? { ...entry, name: event.target.value } : entry
+                              )
+                            )
+                          }
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <Select
+                          size="sm"
+                          value={item.item_group_id ? String(item.item_group_id) : ""}
+                          onChange={(value) =>
+                            setItems((prev) =>
+                              prev.map((entry) =>
+                                entry.id === item.id
+                                  ? { ...entry, item_group_id: value ? Number(value) : null }
                                   : entry
                               )
                             )
                           }
-                          style={inputStyle}
-                        >
-                          {items.map((item) => {
-                            const groupName = getGroupPath(item.item_group_id);
-                            return (
-                              <option key={item.id} value={item.id}>
-                                {groupName} - {item.name}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </td>
-                      <td style={cellStyle}>
-                        {(() => {
-                          const item = itemMap.get(price.item_id);
-                          if (!item) return "-";
-                          return getGroupPath(item.item_group_id);
-                        })()}
-                      </td>
-                      <td style={cellStyle}>
-                        {isOverride ? (
-                          <span style={{ color: "#2f5f4a", fontWeight: 600 }}>Override</span>
-                        ) : (
-                          <span style={{ fontStyle: "italic", color: "#6b5d48" }}>
-                            Default
-                          </span>
-                        )}
-                      </td>
-                      <td style={cellStyle}>
-                        {isOverride ? (
-                          <input
-                            value={price.price}
-                            onChange={(event) =>
-                              setPrices((prev) =>
+                          data={itemGroupSelectOptions}
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <Select
+                          size="sm"
+                          value={item.type}
+                          onChange={(value) =>
+                            setItems((prev) =>
+                              prev.map((entry) =>
+                                entry.id === item.id
+                                  ? { ...entry, type: (value as ItemType) || item.type }
+                                  : entry
+                              )
+                            )
+                          }
+                          data={itemTypeSelectOptions}
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <Checkbox
+                          checked={item.is_active}
+                          onChange={(event) =>
+                            setItems((prev) =>
+                              prev.map((entry) =>
+                                entry.id === item.id
+                                  ? { ...entry, is_active: event.currentTarget.checked }
+                                  : entry
+                              )
+                            )
+                          }
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="xs">
+                          <Button
+                            size="xs"
+                            variant="light"
+                            onClick={() => saveItem(item)}
+                            loading={savingItem === item.id}
+                          >
+                            Save
+                          </Button>
+                          <ActionIcon
+                            aria-label="Delete item"
+                            variant="light"
+                            color="red"
+                            size="sm"
+                            onClick={() => handleDeleteClick("item", item.id)}
+                            loading={deletingItem === item.id}
+                          >
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))
+                )}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        </Stack>
+      </Card>
+
+      {/* Create Price Form */}
+      <Card>
+        <Stack gap="md">
+          <Title order={3}>
+            {pricingViewMode === "defaults" ? "Create Company Default Price" : "Create Price"}
+          </Title>
+
+          <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
+            <Select
+              label="Item"
+              value={String(newPrice.item_id)}
+              onChange={(value) => {
+                if (!value) return;
+                setNewPrice((prev) => ({ ...prev, item_id: Number(value) }));
+              }}
+              data={itemSelectOptions}
+              required
+            />
+            <NumberInput
+              label="Price"
+              placeholder="Price"
+              value={newPrice.price}
+              onChange={(value) => setNewPrice((prev) => ({ ...prev, price: value == null ? "" : String(value) }))}
+              min={0}
+              decimalScale={2}
+              required
+            />
+            {pricingViewMode === "outlet" && canManageDefaults && (
+              <Checkbox
+                label="Company default"
+                checked={newPrice.is_company_default}
+                onChange={(event) =>
+                  setNewPrice((prev) => ({ ...prev, is_company_default: event.currentTarget.checked }))
+                }
+                mt="lg"
+              />
+            )}
+            <Checkbox
+              label="Active"
+              checked={newPrice.is_active}
+              onChange={(event) =>
+                setNewPrice((prev) => ({ ...prev, is_active: event.currentTarget.checked }))
+              }
+              mt="lg"
+            />
+          </SimpleGrid>
+
+          <Group justify="flex-end">
+            <Button
+              onClick={createPrice}
+              loading={creatingPrice}
+              disabled={newPrice.item_id <= 0 || !newPrice.price.trim() || Number.isNaN(Number(newPrice.price)) || Number(newPrice.price) < 0}
+            >
+              Add price
+            </Button>
+          </Group>
+
+          {pricingViewMode === "defaults" && (
+            <Alert variant="light" color="blue">
+              Company default prices apply to all outlets unless overridden.
+            </Alert>
+          )}
+
+          {newPrice.item_id > 0 && (() => {
+            const selectedItem = itemMap.get(newPrice.item_id);
+            if (!selectedItem) return null;
+            const warning = getItemTypeWarning(selectedItem.type, newPrice.price.trim().length > 0);
+            if (!warning) return null;
+            return (
+              <Alert icon={<IconAlertCircle size={16} />} color="yellow">
+                {warning}
+              </Alert>
+            );
+          })()}
+        </Stack>
+      </Card>
+
+      {/* Prices Table */}
+      {pricingViewMode === "defaults" ? (
+        <Card>
+          <Stack gap="md">
+            <Group gap="xs">
+              <Title order={3}>Company Default Prices</Title>
+              <Badge variant="light" color="gray">applies to all outlets</Badge>
+            </Group>
+
+            {companyDefaults.length === 0 ? (
+              <Text c="dimmed">No company default prices. Create one above.</Text>
+            ) : (
+              <ScrollArea>
+                <Table highlightOnHover striped>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>ID</Table.Th>
+                      <Table.Th>Item</Table.Th>
+                      <Table.Th>Group</Table.Th>
+                      <Table.Th>Price</Table.Th>
+                      <Table.Th>Active</Table.Th>
+                      <Table.Th>Actions</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {companyDefaults.map((price) => (
+                      <Table.Tr key={price.id}>
+                        <Table.Td>{price.id}</Table.Td>
+                        <Table.Td>
+                          <Select
+                            size="sm"
+                            value={String(price.item_id)}
+                            onChange={(value) => {
+                              if (!value) return;
+                              setCompanyDefaults((prev) =>
                                 prev.map((entry) =>
                                   entry.id === price.id
-                                    ? { ...entry, price: Number(event.target.value || "0") }
+                                    ? { ...entry, item_id: Number(value) }
+                                    : entry
+                                )
+                              );
+                            }}
+                            data={itemSelectOptions.filter(opt => opt.value !== "0")}
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          {(() => {
+                            const item = itemMap.get(price.item_id);
+                            if (!item) return "-";
+                            return getGroupPath(item.item_group_id);
+                          })()}
+                        </Table.Td>
+                        <Table.Td>
+                          <NumberInput
+                            size="sm"
+                            value={price.price}
+                            onChange={(value) =>
+                              setCompanyDefaults((prev) =>
+                                prev.map((entry) =>
+                                  entry.id === price.id
+                                    ? { ...entry, price: Number(value) || 0 }
                                     : entry
                                 )
                               )
                             }
-                            style={inputStyle}
+                            min={0}
+                            decimalScale={2}
                           />
-                        ) : (
-                          <span style={{ fontStyle: "italic", color: "#6b5d48" }}>
-                            {price.price}
-                          </span>
-                        )}
-                      </td>
-                      <td style={cellStyle}>
-                        {isOverride ? (
-                          <input
-                            type="checkbox"
+                        </Table.Td>
+                        <Table.Td>
+                          <Checkbox
                             checked={price.is_active}
                             onChange={(event) =>
-                              setPrices((prev) =>
+                              setCompanyDefaults((prev) =>
                                 prev.map((entry) =>
                                   entry.id === price.id
-                                    ? { ...entry, is_active: event.target.checked }
+                                    ? { ...entry, is_active: event.currentTarget.checked }
                                     : entry
                                 )
                               )
                             }
                           />
-                        ) : (
-                          <span style={{ fontStyle: "italic", color: "#6b5d48" }}>
-                            {price.is_active ? "Yes" : "No"}
-                          </span>
-                        )}
-                      </td>
-                      <td style={cellStyle}>
-                        {isOverride ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => savePrice(price)}
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap="xs">
+                            <Button
+                              size="xs"
+                              variant="light"
+                              onClick={async () => {
+                                setSavingPrice(price.id);
+                                try {
+                                  await apiRequest(`/inventory/item-prices/${price.id}`, {
+                                    method: "PATCH",
+                                    body: JSON.stringify({
+                                      item_id: price.item_id,
+                                      price: price.price,
+                                      is_active: price.is_active
+                                    })
+                                  }, props.accessToken);
+                                  await refreshData(selectedOutletId);
+                                } catch (err) {
+                                  if (err instanceof ApiError) {
+                                    setError(err.message);
+                                  }
+                                } finally {
+                                  setSavingPrice(null);
+                                }
+                              }}
+                              loading={savingPrice === price.id}
                             >
                               Save
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deletePrice(price.id)}
+                            </Button>
+                            <ActionIcon
+                              aria-label="Delete price"
+                              variant="light"
+                              color="red"
+                              size="sm"
+                              onClick={() => handleDeleteClick("price", price.id)}
+                              loading={deletingPrice === price.id}
                             >
-                              Delete
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const overridePrice = prompt(`Set override price for this item:`, String(price.price));
-                              if (overridePrice && !isNaN(Number(overridePrice))) {
-                                createOutletOverride(price.item_id, Number(overridePrice));
-                              }
-                            }}
-                            style={{ backgroundColor: "#2f5f4a", color: "white" }}
-                          >
-                            Set Override
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </section>
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            )}
+          </Stack>
+        </Card>
+      ) : (
+        <Card>
+          <Stack gap="md">
+            <Group gap="xs">
+              <Title order={3}>
+                Outlet Prices: {props.user.outlets.find((o) => o.id === selectedOutletId)?.name ?? selectedOutletId}
+              </Title>
+              <Badge variant="light" color="gray">outlet override or company default fallback</Badge>
+            </Group>
+
+            {prices.length === 0 ? (
+              <Text c="dimmed">No prices for this outlet. Set a company default or create an outlet override above.</Text>
+            ) : (
+              <ScrollArea>
+                <Table highlightOnHover striped>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>ID</Table.Th>
+                      <Table.Th>Item</Table.Th>
+                      <Table.Th>Group</Table.Th>
+                      <Table.Th>Scope</Table.Th>
+                      <Table.Th>Price</Table.Th>
+                      <Table.Th>Active</Table.Th>
+                      <Table.Th>Actions</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {prices.map((price) => {
+                      const isOverride = price.outlet_id !== null;
+                      return (
+                        <Table.Tr key={price.id} bg={isOverride ? undefined : "gray.0"}>
+                          <Table.Td>{price.id}</Table.Td>
+                          <Table.Td>
+                            <Select
+                              size="sm"
+                              value={String(price.item_id)}
+                              onChange={(value) => {
+                                if (!value) return;
+                                setPrices((prev) =>
+                                  prev.map((entry) =>
+                                    entry.id === price.id
+                                      ? { ...entry, item_id: Number(value) }
+                                      : entry
+                                  )
+                                );
+                              }}
+                              data={itemSelectOptions.filter(opt => opt.value !== "0")}
+                            />
+                          </Table.Td>
+                          <Table.Td>
+                            {(() => {
+                              const item = itemMap.get(price.item_id);
+                              if (!item) return "-";
+                              return getGroupPath(item.item_group_id);
+                            })()}
+                          </Table.Td>
+                          <Table.Td>
+                            {isOverride ? (
+                              <Badge color="green">Override</Badge>
+                            ) : (
+                              <Badge variant="light" color="gray">Default</Badge>
+                            )}
+                          </Table.Td>
+                          <Table.Td>
+                            {isOverride ? (
+                              <NumberInput
+                                size="sm"
+                                value={price.price}
+                                onChange={(value) =>
+                                  setPrices((prev) =>
+                                    prev.map((entry) =>
+                                      entry.id === price.id
+                                        ? { ...entry, price: Number(value) || 0 }
+                                        : entry
+                                    )
+                                  )
+                                }
+                                min={0}
+                                decimalScale={2}
+                              />
+                            ) : (
+                              <Text fs="italic" c="dimmed">
+                                {price.price}
+                              </Text>
+                            )}
+                          </Table.Td>
+                          <Table.Td>
+                            {isOverride ? (
+                              <Checkbox
+                                checked={price.is_active}
+                                onChange={(event) =>
+                                  setPrices((prev) =>
+                                    prev.map((entry) =>
+                                      entry.id === price.id
+                                        ? { ...entry, is_active: event.currentTarget.checked }
+                                        : entry
+                                    )
+                                  )
+                                }
+                              />
+                            ) : (
+                              <Text fs="italic" c="dimmed">
+                                {price.is_active ? "Yes" : "No"}
+                              </Text>
+                            )}
+                          </Table.Td>
+                          <Table.Td>
+                            {isOverride ? (
+                              <Group gap="xs">
+                                <Button
+                                  size="xs"
+                                  variant="light"
+                                  onClick={() => savePrice(price)}
+                                  loading={savingPrice === price.id}
+                                >
+                                  Save
+                                </Button>
+                                <ActionIcon
+                                  aria-label="Delete price"
+                                  variant="light"
+                                  color="red"
+                                  size="sm"
+                                  onClick={() => handleDeleteClick("price", price.id)}
+                                  loading={deletingPrice === price.id}
+                                >
+                                  <IconTrash size={16} />
+                                </ActionIcon>
+                              </Group>
+                            ) : (
+                              <Button
+                                size="xs"
+                                color="green"
+                                leftSection={<IconEdit size={14} />}
+                                onClick={() => handleSetOverrideClick(price)}
+                              >
+                                Set Override
+                              </Button>
+                            )}
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            )}
+          </Stack>
+        </Card>
       )}
 
-      <section style={boxStyle}>
-        <strong>Quick checks</strong>
-        <p style={{ marginBottom: 0 }}>
-          Loaded {items.length} items, {itemGroups.length} groups, and {prices.length} prices for outlet
-          #{selectedOutletId}. First visible item: {itemMap.get(items[0]?.id ?? -1)?.name ?? "-"}
-        </p>
-      </section>
-    </div>
+      {/* Quick Checks */}
+      <Card bg="gray.0">
+        <Stack gap="xs">
+          <Text fw={600}>Quick checks</Text>
+          <Text size="sm" c="dimmed">
+            Loaded {items.length} items, {itemGroups.length} groups, and {prices.length} prices for outlet
+            #{selectedOutletId}. First visible item: {itemMap.get(items[0]?.id ?? -1)?.name ?? "-"}
+          </Text>
+        </Stack>
+      </Card>
+
+      {/* Override Modal */}
+      <Modal
+        opened={overrideModalOpened}
+        onClose={closeOverrideModal}
+        title="Set Outlet Override Price"
+        centered
+      >
+        <Stack>
+          <Text size="sm">
+            Create an outlet-specific price override. Default price: {overrideTarget?.defaultPrice}
+          </Text>
+          <NumberInput
+            label="Override Price"
+            value={overridePriceValue}
+            onChange={(value) => setOverridePriceValue(value == null ? "" : String(value))}
+            min={0}
+            decimalScale={2}
+            required
+          />
+          <Group justify="flex-end" mt="md">
+            <Button variant="subtle" onClick={closeOverrideModal}>
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmOverride}
+              loading={creatingOverride}
+              disabled={!overridePriceValue.trim() || Number.isNaN(Number(overridePriceValue)) || Number(overridePriceValue) < 0}
+            >
+              Create Override
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        opened={deleteModalOpened}
+        onClose={closeDeleteModal}
+        title={`Delete ${deleteTarget?.type === "item" ? "Item" : "Price"}?`}
+        centered
+      >
+        <Stack>
+          <Text>
+            Are you sure you want to delete this {deleteTarget?.type}? This action cannot be undone.
+          </Text>
+          <Group justify="flex-end" mt="md">
+            <Button variant="subtle" onClick={closeDeleteModal}>
+              Cancel
+            </Button>
+            <Button color="red" onClick={confirmDelete} loading={deleting}>
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </Stack>
   );
 }
