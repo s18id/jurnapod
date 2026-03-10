@@ -1296,6 +1296,7 @@ export async function listItemPrices(
 /**
  * List effective item prices for a specific outlet.
  * Returns outlet overrides when available, otherwise company defaults.
+ * Override takes precedence regardless of active state - inactive override hides item.
  * Filters out items without any price (neither override nor default).
  */
 export async function listEffectiveItemPricesForOutlet(
@@ -1306,19 +1307,20 @@ export async function listEffectiveItemPricesForOutlet(
   const pool = getDbPool();
   const values: Array<number> = [outletId, outletId, companyId];
 
-  // Resolve outlet override first, then fall back to company default.
+  // Override takes precedence regardless of active state.
+  // If override exists but is inactive, item is hidden from active prices.
   let sql = `
     SELECT 
-      COALESCE(CASE WHEN override.is_active = 1 THEN override.id END, def.id) AS id,
+      COALESCE(override.id, def.id) AS id,
       COALESCE(override.company_id, def.company_id) AS company_id,
-      COALESCE(CASE WHEN override.is_active = 1 THEN override.outlet_id END, ?) AS outlet_id,
+      COALESCE(override.outlet_id, ?) AS outlet_id,
       COALESCE(override.item_id, def.item_id) AS item_id,
-      COALESCE(CASE WHEN override.is_active = 1 THEN override.price END, def.price) AS price,
-      COALESCE(CASE WHEN override.is_active = 1 THEN override.is_active END, def.is_active) AS is_active,
-      COALESCE(CASE WHEN override.is_active = 1 THEN override.updated_at END, def.updated_at) AS updated_at,
+      COALESCE(override.price, def.price) AS price,
+      COALESCE(override.is_active, def.is_active) AS is_active,
+      COALESCE(override.updated_at, def.updated_at) AS updated_at,
       i.item_group_id,
       ig.name AS item_group_name,
-      CASE WHEN override.id IS NOT NULL AND override.is_active = 1 THEN 1 ELSE 0 END AS is_override
+      CASE WHEN override.id IS NOT NULL THEN 1 ELSE 0 END AS is_override
     FROM items i
     LEFT JOIN item_prices override ON override.item_id = i.id 
       AND override.company_id = i.company_id 
@@ -1332,8 +1334,7 @@ export async function listEffectiveItemPricesForOutlet(
   `;
 
   if (typeof filters?.isActive === "boolean") {
-    sql +=
-      " AND COALESCE(CASE WHEN override.is_active = 1 THEN override.is_active END, def.is_active) = ?";
+    sql += " AND COALESCE(override.is_active, def.is_active) = ?";
     values.push(filters.isActive ? 1 : 0);
   }
 
