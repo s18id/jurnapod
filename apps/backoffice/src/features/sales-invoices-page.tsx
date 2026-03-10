@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Paper,
   Title,
@@ -18,10 +18,15 @@ import {
   Menu,
   Text,
   Grid,
-  Box,
   Flex,
   Divider,
-  Loader
+  Loader,
+  SimpleGrid,
+  ScrollArea,
+  Modal,
+  Card,
+  ThemeIcon,
+  SegmentedControl
 } from "@mantine/core";
 import {
   IconPlus,
@@ -33,15 +38,25 @@ import {
   IconEdit,
   IconDotsVertical,
   IconAlertCircle,
-  IconFileInvoice
+  IconFileInvoice,
+  IconCalendar
 } from "@tabler/icons-react";
 import { apiRequest, ApiError, getApiBaseUrl } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 import { useOnlineStatus } from "../lib/connection";
 import { OutboxService } from "../lib/outbox-service";
+import { CacheService } from "../lib/cache-service";
 
 type InvoiceStatus = "DRAFT" | "APPROVED" | "POSTED" | "VOID";
 type PaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
+type LineType = "SERVICE" | "PRODUCT";
+
+type InventoryItem = {
+  id: number;
+  name: string;
+  type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+  is_active: boolean;
+};
 
 type Invoice = {
   id: number;
@@ -66,6 +81,8 @@ type InvoiceLine = {
   id: number;
   invoice_id: number;
   line_no: number;
+  line_type: LineType;
+  item_id: number | null;
   description: string;
   qty: number;
   unit_price: number;
@@ -89,6 +106,18 @@ const DUE_TERM_OPTIONS = [
   { value: "NET_90", label: "Net 90 days" }
 ];
 
+const LINE_TYPE_OPTIONS = [
+  { value: "SERVICE", label: "Service" },
+  { value: "PRODUCT", label: "Product" }
+];
+
+const PAYMENT_STATUS_OPTIONS = [
+  { value: "", label: "All Payment Statuses" },
+  { value: "UNPAID", label: "Unpaid" },
+  { value: "PARTIAL", label: "Partial" },
+  { value: "PAID", label: "Paid" }
+];
+
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -98,8 +127,35 @@ function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
-function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleDateString("id-ID");
+function formatDateOnly(value: string): string {
+  return parseDateOnly(value).toLocaleDateString("id-ID");
+}
+
+// Date-only helpers to avoid timezone issues
+function parseDateOnly(value: string): Date {
+  const [y, m, d] = value.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function formatDateOnlyLocal(date: Date): string {
+  const y = date.getFullYear();
+  const mo = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${d}`;
+}
+
+function getTodayDateOnlyLocal(): string {
+  return formatDateOnlyLocal(new Date());
+}
+
+function addDaysToDateOnly(value: string, days: number): string {
+  const dt = parseDateOnly(value);
+  dt.setDate(dt.getDate() + days);
+  return formatDateOnlyLocal(dt);
+}
+
+function effectiveDueDate(invoice: Invoice): string {
+  return invoice.due_date ?? invoice.invoice_date;
 }
 
 function getStatusBadgeColor(status: InvoiceStatus): string {
@@ -120,14 +176,15 @@ function getStatusBadgeColor(status: InvoiceStatus): string {
 function getDaysOverdue(dueDate: string | null, invoiceDate: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const due = new Date(dueDate ?? invoiceDate);
+  const due = parseDateOnly(dueDate ?? invoiceDate);
   due.setHours(0, 0, 0, 0);
   const diff = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
   return diff;
 }
 
-function isOverdue(dueDate: string | null, invoiceDate: string, status: InvoiceStatus): boolean {
-  if (status === "VOID" || status === "POSTED") return false;
+function isOverdue(dueDate: string | null, invoiceDate: string, status: InvoiceStatus, paymentStatus: PaymentStatus): boolean {
+  if (status !== "POSTED") return false;
+  if (paymentStatus === "PAID") return false;
   return getDaysOverdue(dueDate, invoiceDate) > 0;
 }
 
@@ -165,6 +222,8 @@ type SalesInvoicesPageProps = {
 };
 
 type InvoiceLineDraft = {
+  line_type: LineType;
+  item_id: number | null;
   description: string;
   qty: string;
   unit_price: string;
@@ -184,6 +243,8 @@ type InvoiceEditDraft = InvoiceDraft & {
 };
 
 const emptyLineDraft: InvoiceLineDraft = {
+  line_type: "SERVICE",
+  item_id: null,
   description: "",
   qty: "1",
   unit_price: "0"
@@ -191,40 +252,110 @@ const emptyLineDraft: InvoiceLineDraft = {
 
 export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoicesTotal, setInvoicesTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ color: "yellow" | "blue"; message: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [selectedOutletId, setSelectedOutletId] = useState<number>(
     props.user.outlets[0]?.id ?? 0
   );
+  
+  // Filters
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("");
+  const [dateFromFilter, setDateFromFilter] = useState<string>("");
+  const [dateToFilter, setDateToFilter] = useState<string>("");
+  
+  // Items for product selection
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  
+  // Confirmation dialogs
+  const [confirmAction, setConfirmAction] = useState<{ type: "post" | "void"; invoiceId: number } | null>(null);
+
+  const isOnline = useOnlineStatus();
+
+  // Load items for product selection (works offline via cache)
+  useEffect(() => {
+    async function loadItems() {
+      setItemsLoading(true);
+      try {
+        const itemsData = await CacheService.getCachedItems(
+          props.user.company_id,
+          props.accessToken,
+          { allowStale: true }
+        );
+        // Normalize items to expected shape
+        const normalizedItems: InventoryItem[] = (itemsData as unknown[]).map((item: unknown) => {
+          const i = item as Record<string, unknown>;
+          return {
+            id: Number(i.id),
+            name: String(i.name ?? ""),
+            type: (i.type as InventoryItem["type"]) ?? "PRODUCT",
+            is_active: Boolean(i.is_active ?? true)
+          };
+        });
+        setItems(normalizedItems);
+      } catch {
+        // Silently fail - items are optional
+      } finally {
+        setItemsLoading(false);
+      }
+    }
+    loadItems();
+  }, [props.user.company_id, props.accessToken]);
+
+  // Product items only (for dropdown)
+  const productItems = useMemo(() => {
+    return items.filter((item) => item.type === "PRODUCT" && item.is_active);
+  }, [items]);
+
+  // Item options for select
+  const itemOptions = useMemo(() => {
+    return [
+      { value: "", label: "Select item..." },
+      ...productItems.map((item) => ({ value: String(item.id), label: item.name }))
+    ];
+  }, [productItems]);
 
   function getDefaultDueDate(date: string): string {
-    const d = new Date(date);
-    d.setDate(d.getDate() + 30);
-    return d.toISOString().slice(0, 10);
+    return addDaysToDateOnly(date, 30);
   }
 
-  const [newInvoice, setNewInvoice] = useState<InvoiceDraft>(() => ({
-    invoice_no: "",
-    invoice_date: new Date().toISOString().slice(0, 10),
-    due_date: getDefaultDueDate(new Date().toISOString().slice(0, 10)),
-    due_term: "NET_30",
-    tax_amount: "0",
-    lines: [{ ...emptyLineDraft }]
-  }));
+  const [newInvoice, setNewInvoice] = useState<InvoiceDraft>(() => {
+    const today = getTodayDateOnlyLocal();
+    return {
+      invoice_no: "",
+      invoice_date: today,
+      due_date: getDefaultDueDate(today),
+      due_term: "NET_30",
+      tax_amount: "0",
+      lines: [{ ...emptyLineDraft }]
+    };
+  });
   const [editingInvoice, setEditingInvoice] = useState<InvoiceEditDraft | null>(null);
-  const isOnline = useOnlineStatus();
 
   async function refreshData(outletId: number) {
     setLoading(true);
     setError(null);
+    setNotice(null);
     try {
+      const params = new URLSearchParams();
+      params.set("outlet_id", String(outletId));
+      params.set("limit", "100");
+      if (statusFilter) params.set("status", statusFilter);
+      if (paymentStatusFilter) params.set("payment_status", paymentStatusFilter);
+      if (dateFromFilter) params.set("date_from", dateFromFilter);
+      if (dateToFilter) params.set("date_to", dateToFilter);
+
       const response = await apiRequest<InvoicesResponse>(
-        `/sales/invoices?outlet_id=${outletId}&limit=100`,
+        `/sales/invoices?${params.toString()}`,
         {},
         props.accessToken
       );
       setInvoices(response.data.invoices);
+      setInvoicesTotal(response.data.total);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -240,7 +371,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     if (selectedOutletId > 0) {
       refreshData(selectedOutletId).catch(console.error);
     }
-  }, [selectedOutletId]);
+  }, [selectedOutletId, statusFilter, paymentStatusFilter, dateFromFilter, dateToFilter]);
 
   function handleOutletChange(value: string | null) {
     if (value) {
@@ -249,7 +380,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
   }
 
   function resetNewInvoice() {
-    const invoiceDate = new Date().toISOString().slice(0, 10);
+    const invoiceDate = getTodayDateOnlyLocal();
     setNewInvoice({
       invoice_no: "",
       invoice_date: invoiceDate,
@@ -261,42 +392,83 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
   }
 
   function buildLinePayload(line: InvoiceLineDraft) {
-    return {
+    const payload: {
+      line_type: LineType;
+      item_id?: number;
+      description: string;
+      qty: number;
+      unit_price: number;
+    } = {
+      line_type: line.line_type,
       description: line.description.trim(),
       qty: Number(line.qty),
       unit_price: Number(line.unit_price)
     };
+    
+    if (line.line_type === "PRODUCT" && line.item_id) {
+      payload.item_id = line.item_id;
+    }
+    
+    return payload;
+  }
+
+  function validateInvoiceDraft(invoice: InvoiceDraft): string | null {
+    if (!invoice.invoice_date.trim()) {
+      return "Invoice date is required";
+    }
+
+    const lines = invoice.lines;
+    if (lines.length === 0) {
+      return "Invoice must have at least one line item";
+    }
+
+    for (const line of lines) {
+      // Validate quantity for all lines
+      if (Number(line.qty) <= 0) {
+        return "Quantity must be greater than 0";
+      }
+
+      // All lines require description per API contract
+      if (!line.description.trim()) {
+        return "All lines must include a description";
+      }
+
+      // PRODUCT lines require item_id
+      if (line.line_type === "PRODUCT" && !line.item_id) {
+        return "Product lines must have an item selected";
+      }
+    }
+
+    return null;
   }
 
   async function createInvoice() {
-    if (!newInvoice.invoice_no.trim()) {
-      setError("Invoice number is required");
-      return;
-    }
-
-    if (!newInvoice.invoice_date.trim()) {
-      setError("Invoice date is required");
+    const validationError = validateInvoiceDraft(newInvoice);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
     const lines = newInvoice.lines.map(buildLinePayload);
-    if (lines.length === 0 || lines.some((line) => !line.description || line.qty <= 0)) {
-      setError("Invoice lines must include description and qty");
-      return;
-    }
 
     setSubmitting(true);
     setError(null);
+    setNotice(null);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         outlet_id: selectedOutletId,
-        invoice_no: newInvoice.invoice_no.trim(),
         invoice_date: newInvoice.invoice_date,
         due_date: newInvoice.due_date || newInvoice.invoice_date,
         due_term: newInvoice.due_term,
         tax_amount: Number(newInvoice.tax_amount || "0"),
         lines
       };
+
+      // Only send invoice_no if provided (otherwise server auto-generates)
+      const trimmedInvoiceNo = newInvoice.invoice_no.trim();
+      if (trimmedInvoiceNo) {
+        payload.invoice_no = trimmedInvoiceNo;
+      }
 
       if (isOnline) {
         await apiRequest(
@@ -312,7 +484,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
       } else {
         await OutboxService.queueTransaction("invoice", payload, props.user.id);
         resetNewInvoice();
-        setError("Invoice queued for sync (offline)");
+        setNotice({ color: "yellow", message: "Invoice queued for sync while offline." });
       }
     } catch (createError) {
       if (createError instanceof ApiError) {
@@ -342,6 +514,8 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         due_term: response.data.due_term ?? "NET_30",
         tax_amount: String(response.data.tax_amount ?? 0),
         lines: response.data.lines.map((line) => ({
+          line_type: line.line_type ?? "SERVICE",
+          item_id: line.item_id,
           description: line.description,
           qty: String(line.qty),
           unit_price: String(line.unit_price)
@@ -363,37 +537,37 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
       return;
     }
 
-    if (!editingInvoice.invoice_no.trim()) {
-      setError("Invoice number is required");
-      return;
-    }
-
-    if (!editingInvoice.invoice_date.trim()) {
-      setError("Invoice date is required");
+    const validationError = validateInvoiceDraft(editingInvoice);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
     const lines = editingInvoice.lines.map(buildLinePayload);
-    if (lines.length === 0 || lines.some((line) => !line.description || line.qty <= 0)) {
-      setError("Invoice lines must include description and qty");
-      return;
-    }
 
     setSubmitting(true);
     setError(null);
+    setNotice(null);
     try {
+      const payload: Record<string, unknown> = {
+        invoice_date: editingInvoice.invoice_date,
+        due_date: editingInvoice.due_date || editingInvoice.invoice_date,
+        due_term: editingInvoice.due_term,
+        tax_amount: Number(editingInvoice.tax_amount || "0"),
+        lines
+      };
+
+      // Only send invoice_no if provided (otherwise preserve existing)
+      const trimmedInvoiceNo = editingInvoice.invoice_no.trim();
+      if (trimmedInvoiceNo) {
+        payload.invoice_no = trimmedInvoiceNo;
+      }
+
       await apiRequest(
         `/sales/invoices/${editingInvoice.id}`,
         {
           method: "PATCH",
-          body: JSON.stringify({
-            invoice_no: editingInvoice.invoice_no.trim(),
-            invoice_date: editingInvoice.invoice_date,
-            due_date: editingInvoice.due_date || editingInvoice.invoice_date,
-            due_term: editingInvoice.due_term,
-            tax_amount: Number(editingInvoice.tax_amount || "0"),
-            lines
-          })
+          body: JSON.stringify(payload)
         },
         props.accessToken
       );
@@ -461,6 +635,25 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     }
   }
 
+  function handlePostClick(invoiceId: number) {
+    setConfirmAction({ type: "post", invoiceId });
+  }
+
+  function handleVoidClick(invoiceId: number) {
+    setConfirmAction({ type: "void", invoiceId });
+  }
+
+  async function executeConfirmedAction() {
+    if (!confirmAction) return;
+    
+    if (confirmAction.type === "post") {
+      await postInvoiceById(confirmAction.invoiceId);
+    } else {
+      await voidInvoiceById(confirmAction.invoiceId);
+    }
+    setConfirmAction(null);
+  }
+
   async function handleViewPrint(invoiceId: number) {
     setError(null);
     try {
@@ -514,6 +707,19 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     label: outlet.name
   }));
 
+  // Calculate KPIs
+  const totalOutstanding = useMemo(() => {
+    return invoices
+      .filter((inv) => inv.status === "POSTED" && inv.payment_status !== "PAID")
+      .reduce((sum, inv) => sum + Math.max(inv.grand_total - inv.paid_total, 0), 0);
+  }, [invoices]);
+
+  const overdueCount = useMemo(() => {
+    return invoices.filter((inv) => 
+      isOverdue(inv.due_date, inv.invoice_date, inv.status, inv.payment_status)
+    ).length;
+  }, [invoices]);
+
   const renderInvoiceForm = (
     invoice: InvoiceDraft,
     setInvoice: React.Dispatch<React.SetStateAction<InvoiceDraft>>,
@@ -538,12 +744,12 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
           <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
             <TextInput
               label="Invoice Number"
-              placeholder="INV-001"
+              placeholder="Leave blank for auto-number"
+              description="Optional - auto-generated if empty"
               value={invoice.invoice_no}
               onChange={(e) =>
                 setInvoice((prev) => ({ ...prev, invoice_no: e.target.value }))
               }
-              required
             />
           </Grid.Col>
           <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
@@ -553,12 +759,11 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
               value={invoice.invoice_date}
               onChange={(e) => {
                 const newDate = e.target.value;
-                const dueDate = new Date(newDate);
-                dueDate.setDate(dueDate.getDate() + getTermDays(invoice.due_term));
+                const dueDate = addDaysToDateOnly(newDate, getTermDays(invoice.due_term));
                 setInvoice((prev) => ({
                   ...prev,
                   invoice_date: newDate,
-                  due_date: dueDate.toISOString().slice(0, 10)
+                  due_date: dueDate
                 }));
               }}
               required
@@ -571,12 +776,11 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
               value={invoice.due_term}
               onChange={(value) => {
                 if (value) {
-                  const dueDate = new Date(invoice.invoice_date);
-                  dueDate.setDate(dueDate.getDate() + getTermDays(value));
+                  const dueDate = addDaysToDateOnly(invoice.invoice_date, getTermDays(value));
                   setInvoice((prev) => ({
                     ...prev,
                     due_term: value,
-                    due_date: dueDate.toISOString().slice(0, 10)
+                    due_date: dueDate
                   }));
                 }
               }}
@@ -612,63 +816,146 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
 
         <Stack gap="xs">
           {invoice.lines.map((line, index) => (
-            <Group key={`line-${index}`} gap="xs" align="flex-start">
-              <TextInput
-                placeholder="Description"
-                value={line.description}
-                onChange={(e) =>
-                  setInvoice((prev) => ({
-                    ...prev,
-                    lines: prev.lines.map((entry, lineIndex) =>
-                      lineIndex === index ? { ...entry, description: e.target.value } : entry
-                    )
-                  }))
-                }
-                style={{ flex: 2 }}
-              />
-              <TextInput
-                placeholder="Qty"
-                type="number"
-                value={line.qty}
-                onChange={(e) =>
-                  setInvoice((prev) => ({
-                    ...prev,
-                    lines: prev.lines.map((entry, lineIndex) =>
-                      lineIndex === index ? { ...entry, qty: e.target.value } : entry
-                    )
-                  }))
-                }
-                style={{ flex: 1 }}
-              />
-              <TextInput
-                placeholder="Unit Price"
-                type="number"
-                value={line.unit_price}
-                onChange={(e) =>
-                  setInvoice((prev) => ({
-                    ...prev,
-                    lines: prev.lines.map((entry, lineIndex) =>
-                      lineIndex === index ? { ...entry, unit_price: e.target.value } : entry
-                    )
-                  }))
-                }
-                style={{ flex: 1 }}
-              />
-              {invoice.lines.length > 1 && (
-                <ActionIcon
-                  color="red"
-                  variant="light"
-                  onClick={() =>
+            <Grid key={`line-${index}`} align="flex-start" gutter="xs">
+              <Grid.Col span={{ base: 12, sm: 2 }}>
+                <Select
+                  label={index === 0 ? "Type" : undefined}
+                  data={LINE_TYPE_OPTIONS}
+                  value={line.line_type}
+                  onChange={(value) => {
+                    const newType = (value as LineType) ?? "SERVICE";
                     setInvoice((prev) => ({
                       ...prev,
-                      lines: prev.lines.filter((_, lineIndex) => lineIndex !== index)
+                      lines: prev.lines.map((entry, lineIndex) =>
+                        lineIndex === index 
+                          ? { ...entry, line_type: newType, item_id: newType === "SERVICE" ? null : entry.item_id } 
+                          : entry
+                      )
+                    }));
+                  }}
+                  size="sm"
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {line.line_type === "PRODUCT" ? (
+                  <Select
+                    label={index === 0 ? "Item" : undefined}
+                    data={itemOptions}
+                    value={line.item_id ? String(line.item_id) : ""}
+                    onChange={(value) => {
+                      const itemId = value ? Number(value) : null;
+                      const selectedItem = itemId ? productItems.find(i => i.id === itemId) : null;
+                      setInvoice((prev) => ({
+                        ...prev,
+                        lines: prev.lines.map((entry, lineIndex) =>
+                          lineIndex === index 
+                            ? { 
+                                ...entry, 
+                                item_id: itemId,
+                                description: selectedItem ? selectedItem.name : entry.description
+                              } 
+                            : entry
+                        )
+                      }));
+                    }}
+                    disabled={itemsLoading || productItems.length === 0}
+                    placeholder={itemsLoading ? "Loading..." : "Select item"}
+                    size="sm"
+                  />
+                ) : (
+                  <TextInput
+                    label={index === 0 ? "Description" : undefined}
+                    placeholder="Description"
+                    value={line.description}
+                    onChange={(e) =>
+                      setInvoice((prev) => ({
+                        ...prev,
+                        lines: prev.lines.map((entry, lineIndex) =>
+                          lineIndex === index ? { ...entry, description: e.target.value } : entry
+                        )
+                      }))
+                    }
+                    size="sm"
+                  />
+                )}
+              </Grid.Col>
+              {line.line_type === "PRODUCT" && (
+                <Grid.Col span={{ base: 12, sm: 2 }}>
+                  <TextInput
+                    label={index === 0 ? "Description" : undefined}
+                    placeholder="Description"
+                    value={line.description}
+                    onChange={(e) =>
+                      setInvoice((prev) => ({
+                        ...prev,
+                        lines: prev.lines.map((entry, lineIndex) =>
+                          lineIndex === index ? { ...entry, description: e.target.value } : entry
+                        )
+                      }))
+                    }
+                    size="sm"
+                  />
+                </Grid.Col>
+              )}
+              <Grid.Col span={{ base: 6, sm: 2 }}>
+                <NumberInput
+                  label={index === 0 ? "Qty" : undefined}
+                  placeholder="Qty"
+                  value={Number(line.qty) || 0}
+                  onChange={(value) =>
+                    setInvoice((prev) => ({
+                      ...prev,
+                      lines: prev.lines.map((entry, lineIndex) =>
+                        lineIndex === index ? { ...entry, qty: String(value ?? 0) } : entry
+                      )
                     }))
                   }
-                >
-                  <IconTrash size={16} />
-                </ActionIcon>
-              )}
-            </Group>
+                  min={0.01}
+                  step={1}
+                  decimalScale={2}
+                  hideControls
+                  size="sm"
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 6, sm: 2 }}>
+                <NumberInput
+                  label={index === 0 ? "Unit Price" : undefined}
+                  placeholder="Unit Price"
+                  value={Number(line.unit_price) || 0}
+                  onChange={(value) =>
+                    setInvoice((prev) => ({
+                      ...prev,
+                      lines: prev.lines.map((entry, lineIndex) =>
+                        lineIndex === index ? { ...entry, unit_price: String(value ?? 0) } : entry
+                      )
+                    }))
+                  }
+                  min={0}
+                  prefix="Rp "
+                  thousandSeparator="."
+                  decimalSeparator=","
+                  hideControls
+                  size="sm"
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 1 }}>
+                {invoice.lines.length > 1 && (
+                  <ActionIcon
+                    color="red"
+                    variant="light"
+                    onClick={() =>
+                      setInvoice((prev) => ({
+                        ...prev,
+                        lines: prev.lines.filter((_, lineIndex) => lineIndex !== index)
+                      }))
+                    }
+                    mt={index === 0 ? 24 : 0}
+                  >
+                    <IconTrash size={16} />
+                  </ActionIcon>
+                )}
+              </Grid.Col>
+            </Grid>
           ))}
         </Stack>
 
@@ -707,14 +994,39 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
 
   return (
     <Stack gap="lg" p="md">
-      <Group justify="space-between" align="center">
-        <Title order={2}>
-          <Group gap="xs">
-            <IconFileInvoice size={32} />
-            Sales Invoices
+      {/* Header Card */}
+      <Card withBorder shadow="sm" padding="lg">
+        <Group justify="space-between" align="flex-start">
+          <Stack gap="xs">
+            <Group gap="xs">
+              <ThemeIcon size={40} radius="md" variant="light" color="blue">
+                <IconFileInvoice size={24} />
+              </ThemeIcon>
+              <div>
+                <Title order={2}>Sales Invoices</Title>
+                <Text size="sm" c="dimmed">
+                  Manage sales invoices with approval workflow and payment tracking
+                </Text>
+              </div>
+            </Group>
+          </Stack>
+          <Group gap="md" align="center">
+            <Select
+              label="Outlet"
+              data={outletOptions}
+              value={String(selectedOutletId)}
+              onChange={handleOutletChange}
+              style={{ minWidth: 180 }}
+            />
+            <Badge size="lg" variant="light">
+              {invoicesTotal > invoices.length
+                ? `Loaded ${invoices.length} of ${invoicesTotal}`
+                : `${invoicesTotal} invoice${invoicesTotal !== 1 ? "s" : ""}`}
+            </Badge>
+            {!isOnline && <Badge color="yellow" variant="light">Offline</Badge>}
           </Group>
-        </Title>
-      </Group>
+        </Group>
+      </Card>
 
       {!isOnline && (
         <Alert color="yellow" icon={<IconAlertCircle size={16} />}>
@@ -728,6 +1040,62 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         </Alert>
       )}
 
+      {notice && (
+        <Alert color={notice.color} icon={<IconAlertCircle size={16} />} onClose={() => setNotice(null)} withCloseButton>
+          {notice.message}
+        </Alert>
+      )}
+
+      {/* KPI Cards */}
+      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
+        <Card withBorder padding="md">
+          <Stack gap={0}>
+            <Text size="xs" c="dimmed" tt="uppercase" fw={500}>
+              Total Invoices
+            </Text>
+            <Text size="xl" fw={700}>{invoicesTotal}</Text>
+            <Text size="xs" c="dimmed">Loaded {invoices.length}</Text>
+          </Stack>
+        </Card>
+        <Card withBorder padding="md">
+          <Stack gap={0}>
+            <Text size="xs" c="dimmed" tt="uppercase" fw={500}>
+              Loaded Outstanding
+            </Text>
+            <Text size="xl" fw={700} c={totalOutstanding > 0 ? "red" : "green"}>
+              {formatCurrency(totalOutstanding)}
+            </Text>
+            <Text size="xs" c="dimmed">Based on loaded rows</Text>
+          </Stack>
+        </Card>
+        <Card withBorder padding="md">
+          <Stack gap={0}>
+            <Text size="xs" c="dimmed" tt="uppercase" fw={500}>
+              Loaded Overdue Invoices
+            </Text>
+            <Text size="xl" fw={700} c={overdueCount > 0 ? "red" : "green"}>
+              {overdueCount}
+            </Text>
+            <Text size="xs" c="dimmed">
+              Based on loaded rows
+            </Text>
+          </Stack>
+        </Card>
+        <Card withBorder padding="md">
+          <Stack gap={0}>
+            <Text size="xs" c="dimmed" tt="uppercase" fw={500}>
+              Posted Amount (Loaded)
+            </Text>
+            <Text size="xl" fw={700} c="blue">
+              {formatCurrency(
+                invoices.filter((i) => i.status === "POSTED").reduce((sum, i) => sum + i.grand_total, 0)
+              )}
+            </Text>
+          </Stack>
+        </Card>
+      </SimpleGrid>
+
+      {/* Invoice Form */}
       {!editingInvoice && renderInvoiceForm(newInvoice, setNewInvoice, createInvoice)}
 
       {editingInvoice && renderInvoiceForm(
@@ -738,20 +1106,67 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         true
       )}
 
-      <Paper p="md" withBorder>
+      {/* Invoice List */}
+      <Card withBorder shadow="sm" padding="md">
         <Stack gap="md">
-          <Group justify="space-between" align="center">
-            <Select
-              label="Outlet"
-              data={outletOptions}
-              value={String(selectedOutletId)}
-              onChange={handleOutletChange}
-              style={{ minWidth: 200 }}
-            />
-            <Text size="sm" c="dimmed">
-              {invoices.length} invoice{invoices.length !== 1 ? "s" : ""}
-            </Text>
+          {/* Filters */}
+          <Group justify="space-between" align="flex-start" wrap="wrap" gap="md">
+            <Title order={4}>Invoice History</Title>
+            <Group gap="sm" align="flex-start" wrap="wrap">
+              <Select
+                label="Payment"
+                data={PAYMENT_STATUS_OPTIONS}
+                value={paymentStatusFilter}
+                onChange={(value) => setPaymentStatusFilter(value ?? "")}
+                style={{ minWidth: 160 }}
+              />
+              <TextInput
+                label="From"
+                type="date"
+                value={dateFromFilter}
+                onChange={(e) => setDateFromFilter(e.target.value)}
+                leftSection={<IconCalendar size={16} />}
+                style={{ minWidth: 140 }}
+              />
+              <TextInput
+                label="To"
+                type="date"
+                value={dateToFilter}
+                onChange={(e) => setDateToFilter(e.target.value)}
+                leftSection={<IconCalendar size={16} />}
+                style={{ minWidth: 140 }}
+              />
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => {
+                  setStatusFilter("");
+                  setPaymentStatusFilter("");
+                  setDateFromFilter("");
+                  setDateToFilter("");
+                }}
+                disabled={!statusFilter && !paymentStatusFilter && !dateFromFilter && !dateToFilter}
+                mt={26}
+              >
+                Reset
+              </Button>
+            </Group>
           </Group>
+
+          {/* Status Filter Tabs */}
+          <SegmentedControl
+            value={statusFilter || "ALL"}
+            onChange={(value) => setStatusFilter(value === "ALL" ? "" : value)}
+            data={[
+              { label: "All", value: "ALL" },
+              { label: "Draft", value: "DRAFT" },
+              { label: "Approved", value: "APPROVED" },
+              { label: "Posted", value: "POSTED" },
+              { label: "Void", value: "VOID" }
+            ]}
+          />
+
+          <Divider />
 
           {loading ? (
             <Flex justify="center" p="xl">
@@ -762,68 +1177,79 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
               No invoices found for this outlet.
             </Alert>
           ) : (
-            <Box style={{ overflowX: "auto" }}>
+            <ScrollArea>
               <Table striped highlightOnHover withTableBorder>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>Invoice No</Table.Th>
                     <Table.Th>Date</Table.Th>
-                    <Table.Th style={{ textAlign: "center" }}>Status</Table.Th>
-                    <Table.Th style={{ textAlign: "center" }}>Payment</Table.Th>
+                    <Table.Th ta="center">Status</Table.Th>
+                    <Table.Th ta="center">Payment</Table.Th>
                     <Table.Th>Due Date</Table.Th>
-                    <Table.Th style={{ textAlign: "center" }}>Overdue</Table.Th>
-                    <Table.Th style={{ textAlign: "right" }}>Grand Total</Table.Th>
-                    <Table.Th style={{ textAlign: "right" }}>Paid</Table.Th>
-                    <Table.Th style={{ textAlign: "right" }}>Outstanding</Table.Th>
-                    <Table.Th style={{ textAlign: "center" }}>Actions</Table.Th>
+                    <Table.Th ta="center">Overdue</Table.Th>
+                    <Table.Th ta="right">Grand Total</Table.Th>
+                    <Table.Th ta="right">Paid</Table.Th>
+                    <Table.Th ta="right">Outstanding</Table.Th>
+                    <Table.Th ta="center">Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {invoices.map((invoice) => (
                     <Table.Tr key={invoice.id}>
                       <Table.Td>{invoice.invoice_no}</Table.Td>
-                      <Table.Td>{formatDate(invoice.invoice_date)}</Table.Td>
-                      <Table.Td style={{ textAlign: "center" }}>
+                      <Table.Td>{formatDateOnly(invoice.invoice_date)}</Table.Td>
+                      <Table.Td ta="center">
                         <Badge color={getStatusBadgeColor(invoice.status)} size="sm">
                           {invoice.status}
                         </Badge>
                       </Table.Td>
-                      <Table.Td style={{ textAlign: "center" }}>
+                      <Table.Td ta="center">
                         <Badge color={getPaymentStatusBadgeColor(invoice.payment_status)} size="sm">
                           {invoice.payment_status}
                         </Badge>
                       </Table.Td>
                       <Table.Td>
-                        {invoice.due_date ? formatDate(invoice.due_date) : "—"}
+                        {invoice.due_date ? (
+                          formatDateOnly(invoice.due_date)
+                        ) : (
+                          <span>
+                            {formatDateOnly(invoice.invoice_date)}{" "}
+                            <Text span size="xs" c="dimmed">
+                              (invoice date)
+                            </Text>
+                          </span>
+                        )}
                       </Table.Td>
-                      <Table.Td style={{ textAlign: "center" }}>
-                        {isOverdue(invoice.due_date, invoice.invoice_date, invoice.status) ? (
-                          <Badge color="red" size="sm">
-                            {getDaysOverdue(invoice.due_date, invoice.invoice_date)}d
-                          </Badge>
-                        ) : invoice.due_date ? (
-                          <Badge color="green" size="sm">
-                            Current
-                          </Badge>
+                      <Table.Td ta="center">
+                        {invoice.status === "POSTED" ? (
+                          isOverdue(effectiveDueDate(invoice), invoice.invoice_date, invoice.status, invoice.payment_status) ? (
+                            <Badge color="red" size="sm">
+                              {getDaysOverdue(effectiveDueDate(invoice), invoice.invoice_date)}d
+                            </Badge>
+                          ) : (
+                            <Badge color="green" size="sm">
+                              Current
+                            </Badge>
+                          )
                         ) : (
                           "—"
                         )}
                       </Table.Td>
-                      <Table.Td style={{ textAlign: "right" }}>
+                      <Table.Td ta="right">
                         <Text fw={500}>{formatCurrency(invoice.grand_total)}</Text>
                       </Table.Td>
-                      <Table.Td style={{ textAlign: "right" }}>
+                      <Table.Td ta="right">
                         {formatCurrency(invoice.paid_total)}
                       </Table.Td>
-                      <Table.Td style={{ textAlign: "right" }}>
+                      <Table.Td ta="right">
                         <Text c={invoice.grand_total - invoice.paid_total > 0 ? "red" : "green"}>
                           {formatCurrency(invoice.grand_total - invoice.paid_total)}
                         </Text>
                       </Table.Td>
-                      <Table.Td style={{ textAlign: "center" }}>
+                      <Table.Td ta="center">
                         <Menu position="bottom-end" withArrow>
                           <Menu.Target>
-                            <ActionIcon variant="subtle">
+                            <ActionIcon variant="subtle" disabled={submitting}>
                               <IconDotsVertical size={16} />
                             </ActionIcon>
                           </Menu.Target>
@@ -839,7 +1265,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
                             {(invoice.status === "DRAFT" || invoice.status === "APPROVED") && (
                               <Menu.Item
                                 leftSection={<IconCheck size={14} />}
-                                onClick={() => postInvoiceById(invoice.id)}
+                                onClick={() => handlePostClick(invoice.id)}
                               >
                                 Post
                               </Menu.Item>
@@ -856,7 +1282,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
                               <Menu.Item
                                 leftSection={<IconX size={14} />}
                                 color="red"
-                                onClick={() => voidInvoiceById(invoice.id)}
+                                onClick={() => handleVoidClick(invoice.id)}
                               >
                                 Void
                               </Menu.Item>
@@ -881,10 +1307,39 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
                   ))}
                 </Table.Tbody>
               </Table>
-            </Box>
+            </ScrollArea>
           )}
         </Stack>
-      </Paper>
+      </Card>
+
+      {/* Confirmation Modal */}
+      <Modal
+        opened={confirmAction !== null}
+        onClose={() => setConfirmAction(null)}
+        title={confirmAction?.type === "post" ? "Confirm Post Invoice" : "Confirm Void Invoice"}
+        centered
+      >
+        <Stack gap="md">
+          <Text>
+            {confirmAction?.type === "post" 
+              ? "Are you sure you want to post this invoice? This action will create journal entries."
+              : "Are you sure you want to void this invoice? This action cannot be undone."
+            }
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmAction(null)}>
+              Cancel
+            </Button>
+            <Button 
+              color={confirmAction?.type === "void" ? "red" : "blue"}
+              onClick={executeConfirmedAction}
+              loading={submitting}
+            >
+              Confirm
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }
