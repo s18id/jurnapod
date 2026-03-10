@@ -21,6 +21,7 @@ import {
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import type { RuntimeReservation, RuntimeReservationStatus } from "../services/runtime-service.js";
 import { usePosAppState } from "../router/pos-app-state.js";
+import { useRouterContext } from "../router/Router.js";
 import { useNavigate } from "react-router-dom";
 import { routes } from "../router/routes.js";
 import { InlineAlert } from "../shared/components/index.js";
@@ -67,6 +68,7 @@ function formatReservationTime(value: string): string {
 
 export function ReservationsPage({ context }: ReservationsPageProps): JSX.Element {
   const navigate = useNavigate();
+  const { authToken } = useRouterContext();
   const {
     scope,
     outletTables,
@@ -83,6 +85,13 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
   const [actionSheetReservation, setActionSheetReservation] = useState<RuntimeReservation | null>(null);
   const autoSyncScopesRef = useRef<Set<string>>(new Set());
   const disposedRef = useRef(false);
+
+  async function pullWithAuth(): Promise<void> {
+    if (!authToken) {
+      throw new Error("Missing access token. Please sign in again.");
+    }
+    await context.sync.pull(scope, { accessToken: authToken });
+  }
   const [form, setForm] = useState<CreateReservationForm>(() => ({
     customer_name: "",
     customer_phone: "",
@@ -109,7 +118,7 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
 
       if (shouldAutoSync) {
         try {
-          await context.sync.pull(scope);
+          await pullWithAuth();
           [tables, reservations] = await Promise.all([
             context.runtime.getOutletTables(scope),
             context.runtime.getOutletReservations(scope)
@@ -135,7 +144,7 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
       }
       console.error("Failed to load tables/reservations:", error);
     }
-  }, [context.runtime, scope, setOutletReservations, setOutletTables]);
+  }, [context.runtime, scope, setOutletReservations, setOutletTables, authToken]);
 
   useEffect(() => {
     disposedRef.current = false;

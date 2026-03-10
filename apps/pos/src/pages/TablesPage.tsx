@@ -25,6 +25,7 @@ import type {
   RuntimeOutletScope
 } from "../services/runtime-service.js";
 import { usePosAppState } from "../router/pos-app-state.js";
+import { useRouterContext } from "../router/Router.js";
 import { formatMoney } from "../shared/utils/money.js";
 
 interface TablesPageProps {
@@ -204,6 +205,7 @@ function getTableActionLabel(
 
 export function TablesPage({ context }: TablesPageProps): JSX.Element {
   const navigate = useNavigate();
+  const { authToken } = useRouterContext();
   const {
     scope,
     outletTables,
@@ -219,6 +221,13 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const autoSyncScopesRef = useRef<Set<string>>(new Set());
+
+  async function pullWithAuth(): Promise<void> {
+    if (!authToken) {
+      throw new Error("Missing access token. Please sign in again.");
+    }
+    await context.sync.pull(scope, { accessToken: authToken });
+  }
 
   useEffect(() => {
     let disposed = false;
@@ -237,7 +246,7 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
 
       if (shouldAutoSync) {
         try {
-          await context.sync.pull(scope);
+          await pullWithAuth();
           ({ tables, reservations, activeOrders } = await fetchTablesAndReservations(context, scope));
           autoSyncScopesRef.current.add(scopeKey);
         } catch (error) {
@@ -260,7 +269,7 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
     return () => {
       disposed = true;
     };
-  }, [context.runtime, scope, setOutletReservations, setOutletTables]);
+  }, [context.runtime, scope, setOutletReservations, setOutletTables, authToken]);
 
   const currentOrderTableId = useMemo(() => {
     for (const [tableIdRaw, summary] of Object.entries(tableOrderSummaryByTableId)) {
@@ -290,7 +299,7 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
     setIsSyncing(true);
     setSyncError(null);
     try {
-      await context.sync.pull(scope);
+      await pullWithAuth();
       const { tables, reservations, activeOrders } = await fetchTablesAndReservations(context, scope);
       const nextSummaryByTableId = await buildTableOrderSummaries(context, scope, activeOrders);
       setOutletTables(tables);
