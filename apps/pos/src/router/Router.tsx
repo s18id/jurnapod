@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React, { Suspense, createContext, useContext, useMemo, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import React, { Suspense, useMemo, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -12,10 +12,14 @@ import {
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import type { RuntimeOutletScope, RuntimeOutletTable, RuntimeReservation } from "../services/runtime-service.js";
 import { routes, type RouterContextValue, type ProtectedRouteProps } from "./routes.js";
+import { RouterContext } from "./router-context.js";
 import { readAccessToken, clearAccessToken } from "../offline/auth-session.js";
 import { useCart, type ActiveOrderContextState, type CartState } from "../features/cart/useCart.js";
 import { API_CONFIG, POLL_INTERVAL_MS } from "../shared/utils/constants.js";
 import { PosAppStateContext, usePosAppState } from "./pos-app-state.js";
+
+// Re-export for backward compatibility; prefer importing from ./router-context.js
+export { useRouterContext } from "./router-context.js";
 
 const PLACEHOLDER_OUTLETS = [{ outlet_id: 1, label: "Outlet 1 (placeholder)" }];
 const AUTO_REFRESH_STORAGE_KEY = "jurnapod_pos_auto_refresh_enabled";
@@ -106,16 +110,6 @@ interface MeResponse {
     company_id: number;
     outlets: Array<{ id: number; code: string; name: string }>;
   };
-}
-
-const RouterContext = createContext<RouterContextValue | null>(null);
-
-export function useRouterContext(): RouterContextValue {
-  const ctx = useContext(RouterContext);
-  if (!ctx) {
-    throw new Error("useRouterContext must be used within RouterProvider");
-  }
-  return ctx;
 }
 
 function ProtectedRoute({ children, context, authToken }: ProtectedRouteProps): JSX.Element {

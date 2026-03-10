@@ -21,7 +21,7 @@ import {
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import type { RuntimeReservation, RuntimeReservationStatus } from "../services/runtime-service.js";
 import { usePosAppState } from "../router/pos-app-state.js";
-import { useRouterContext } from "../router/Router.js";
+import { useRouterContext } from "../router/router-context.js";
 import { useNavigate } from "react-router-dom";
 import { routes } from "../router/routes.js";
 import { InlineAlert } from "../shared/components/index.js";

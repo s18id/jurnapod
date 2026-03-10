@@ -25,7 +25,7 @@ import type {
   RuntimeOutletScope
 } from "../services/runtime-service.js";
 import { usePosAppState } from "../router/pos-app-state.js";
-import { useRouterContext } from "../router/Router.js";
+import { useRouterContext } from "../router/router-context.js";
 import { formatMoney } from "../shared/utils/money.js";
 
 interface TablesPageProps {
