@@ -2,6 +2,25 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Container,
+  Group,
+  Loader,
+  Modal,
+  ScrollArea,
+  Select,
+  SimpleGrid,
+  Stack,
+  Switch,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
 import { apiRequest, ApiError } from "../lib/api-client";
 import { CacheService, buildCacheKey } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
@@ -19,30 +38,6 @@ type ItemGroup = {
   updated_at: string;
 };
 
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const inputStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 8px"
-} as const;
-
 type ItemGroupsPageProps = {
   user: SessionUser;
   accessToken: string;
@@ -52,12 +47,16 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
   const [itemGroups, setItemGroups] = useState<ItemGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [confirmDeleteGroup, setConfirmDeleteGroup] = useState<ItemGroup | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [newGroup, setNewGroup] = useState({
     code: "",
     name: "",
     parent_id: null as number | null,
     is_active: true
   });
+  const [createError, setCreateError] = useState<string | null>(null);
   const isOnline = useOnlineStatus();
 
   const groupMap = useMemo(() => new Map(itemGroups.map((group) => [group.id, group])), [itemGroups]);
@@ -66,6 +65,19 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
     () => [...itemGroups].sort((a, b) => a.name.localeCompare(b.name)),
     [itemGroups]
   );
+
+  const filteredGroups = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return sortedGroups;
+    return sortedGroups.filter((group) => {
+      const path = getGroupPath(group.id).toLowerCase();
+      return (
+        group.name.toLowerCase().includes(query) ||
+        (group.code?.toLowerCase().includes(query) ?? false) ||
+        path.includes(query)
+      );
+    });
+  }, [sortedGroups, searchQuery]);
 
   const childrenMap = useMemo(() => {
     const map = new Map<number, number[]>();
@@ -187,8 +199,9 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
   }, [isOnline]);
 
   async function createGroup() {
+    setCreateError(null);
     if (!newGroup.name.trim()) {
-      setError("Group name is required");
+      setCreateError("Group name is required");
       return;
     }
 
@@ -210,7 +223,7 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
       await refreshData();
     } catch (createError) {
       if (createError instanceof ApiError) {
-        setError(createError.message);
+        setCreateError(createError.message);
       }
     }
   }
@@ -243,14 +256,20 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
     }
   }
 
-  async function deleteGroup(groupId: number) {
+  async function handleConfirmDelete() {
+    if (!confirmDeleteGroup) return;
+
+    setDeleting(true);
     try {
-      await apiRequest(`/inventory/item-groups/${groupId}`, { method: "DELETE" }, props.accessToken);
+      await apiRequest(`/inventory/item-groups/${confirmDeleteGroup.id}`, { method: "DELETE" }, props.accessToken);
+      setConfirmDeleteGroup(null);
       await refreshData();
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {
         setError(deleteError.message);
       }
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -263,175 +282,281 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
     );
   }
 
+  const parentSelectData = [
+    { value: "", label: "No parent" },
+    ...sortedGroups.map((group) => ({
+      value: String(group.id),
+      label: formatGroupOption(group)
+    }))
+  ];
+
+  const createNameMissing = !newGroup.name.trim();
+  const canCreate = !loading && !createNameMissing;
+
   return (
-    <div>
-      <section style={boxStyle}>
-        <h2 style={{ marginTop: 0 }}>Item Groups</h2>
-        <p style={{ marginTop: 0, color: "#6b5d48" }}>
-          Organize items by optional groups for reporting and POS catalogs.
-        </p>
-        <StaleDataWarning
-          cacheKey={buildCacheKey("item_groups", { companyId: props.user.company_id })}
-          label="item groups"
-        />
-        {loading ? <p>Loading data...</p> : null}
-        {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
-      </section>
-
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Create Group</h3>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-start" }}>
-          <input
-            placeholder="Code"
-            value={newGroup.code}
-            onChange={(event) => setNewGroup((prev) => ({ ...prev, code: event.target.value }))}
-            style={inputStyle}
-          />
-          <input
-            placeholder="Group name"
-            value={newGroup.name}
-            onChange={(event) => setNewGroup((prev) => ({ ...prev, name: event.target.value }))}
-            style={inputStyle}
-          />
-          <select
-            value={newGroup.parent_id ?? ""}
-            onChange={(event) =>
-              setNewGroup((prev) => ({
-                ...prev,
-                parent_id: event.target.value ? Number(event.target.value) : null
-              }))
-            }
-            style={inputStyle}
-          >
-            <option value="">No parent</option>
-            {sortedGroups.map((group) => (
-              <option key={group.id} value={group.id}>
-                {formatGroupOption(group)}
-              </option>
-            ))}
-          </select>
-          <label>
-            <input
-              type="checkbox"
-              checked={newGroup.is_active}
-              onChange={(event) =>
-                setNewGroup((prev) => ({
-                  ...prev,
-                  is_active: event.target.checked
-                }))
-              }
+    <Container size="lg" py="md">
+      <Stack gap="md">
+        {/* Header Card */}
+        <Card>
+          <Stack gap="sm">
+            <Group justify="space-between" align="flex-start" wrap="wrap">
+              <div>
+                <Title order={2}>Item Groups</Title>
+                <Text c="dimmed" size="sm">
+                  Organize items by optional groups for reporting and POS catalogs.
+                </Text>
+              </div>
+            </Group>
+            <StaleDataWarning
+              cacheKey={buildCacheKey("item_groups", { companyId: props.user.company_id })}
+              label="item groups"
             />
-            Active
-          </label>
-          <button type="button" onClick={() => createGroup()}>
-            Add group
-          </button>
-        </div>
-      </section>
+            {loading && (
+              <Group gap="xs">
+                <Loader size="xs" />
+                <Text size="sm" c="dimmed">Loading data...</Text>
+              </Group>
+            )}
+            {error && (
+              <Alert color="red" title="Error">
+                {error}
+              </Alert>
+            )}
+          </Stack>
+        </Card>
 
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Groups</h3>
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={cellStyle}>ID</th>
-              <th style={cellStyle}>Code</th>
-              <th style={cellStyle}>Name</th>
-              <th style={cellStyle}>Parent</th>
-              <th style={cellStyle}>Hierarchy</th>
-              <th style={cellStyle}>Active</th>
-              <th style={cellStyle}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {itemGroups.map((group) => (
-              <tr key={group.id}>
-                <td style={cellStyle}>{group.id}</td>
-                <td style={cellStyle}>
-                  <input
-                    value={group.code ?? ""}
-                    onChange={(event) =>
-                      setItemGroups((prev) =>
-                        prev.map((entry) =>
-                          entry.id === group.id ? { ...entry, code: event.target.value || null } : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <input
-                    value={group.name}
-                    onChange={(event) =>
-                      setItemGroups((prev) =>
-                        prev.map((entry) =>
-                          entry.id === group.id ? { ...entry, name: event.target.value } : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <select
-                    value={group.parent_id ?? ""}
-                    onChange={(event) =>
-                      setItemGroups((prev) =>
-                        prev.map((entry) =>
-                          entry.id === group.id
-                            ? {
-                              ...entry,
-                              parent_id: event.target.value ? Number(event.target.value) : null
+        {/* Create Group Card */}
+        <Card>
+          <Stack gap="sm">
+            <Title order={4}>Create Group</Title>
+            <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="sm">
+              <TextInput
+                label="Code"
+                placeholder="Optional code"
+                value={newGroup.code}
+                onChange={(event) => setNewGroup((prev) => ({ ...prev, code: event.currentTarget.value }))}
+              />
+              <TextInput
+                label="Name"
+                placeholder="Group name"
+                value={newGroup.name}
+                onChange={(event) => {
+                  setCreateError(null);
+                  setNewGroup((prev) => ({ ...prev, name: event.currentTarget.value }));
+                }}
+                error={!newGroup.name.trim() && createError ? "Group name is required" : null}
+                withAsterisk
+              />
+              <Select
+                label="Parent"
+                placeholder="Select parent"
+                data={parentSelectData}
+                value={newGroup.parent_id != null ? String(newGroup.parent_id) : ""}
+                onChange={(value) =>
+                  setNewGroup((prev) => ({
+                    ...prev,
+                    parent_id: value ? Number(value) : null
+                  }))
+                }
+                clearable
+              />
+              <Group gap="sm" align="flex-end" style={{ height: 36 }}>
+                <Switch
+                  label="Active"
+                  checked={newGroup.is_active}
+                  onChange={(event) =>
+                    setNewGroup((prev) => ({
+                      ...prev,
+                      is_active: event.currentTarget.checked
+                    }))
+                  }
+                />
+                <Button onClick={() => createGroup()} disabled={canCreate === false}>
+                  Add group
+                </Button>
+              </Group>
+            </SimpleGrid>
+            {createError && newGroup.name.trim() && (
+              <Alert color="red" withCloseButton onClose={() => setCreateError(null)} role="alert">
+                {createError}
+              </Alert>
+            )}
+          </Stack>
+        </Card>
+
+        {/* Groups Table Card */}
+        <Card>
+          <Stack gap="sm">
+            <Group justify="space-between" wrap="wrap">
+              <Title order={4}>Groups ({filteredGroups.length})</Title>
+              <TextInput
+                placeholder="Search by name, code, or path"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.currentTarget.value)}
+                style={{ width: 280 }}
+                aria-label="Search item groups"
+              />
+            </Group>
+
+            {filteredGroups.length === 0 ? (
+              <Text c="dimmed" ta="center" py="xl">
+                {searchQuery ? "No groups match your search." : "No item groups yet."}
+              </Text>
+            ) : (
+              <ScrollArea type="auto" scrollbarSize={8}>
+                <Table striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th style={{ width: 60 }}>ID</Table.Th>
+                      <Table.Th style={{ width: 100 }}>Code</Table.Th>
+                      <Table.Th>Name</Table.Th>
+                      <Table.Th style={{ width: 180 }}>Parent</Table.Th>
+                      <Table.Th>Hierarchy</Table.Th>
+                      <Table.Th style={{ width: 80 }}>Status</Table.Th>
+                      <Table.Th style={{ width: 140 }}>Actions</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {filteredGroups.map((group) => (
+                      <Table.Tr key={group.id}>
+                        <Table.Td>{group.id}</Table.Td>
+                        <Table.Td>
+                          <TextInput
+                            size="xs"
+                            value={group.code ?? ""}
+                            onChange={(event) =>
+                              setItemGroups((prev) =>
+                                prev.map((entry) =>
+                                  entry.id === group.id ? { ...entry, code: event.currentTarget.value || null } : entry
+                                )
+                              )
                             }
-                            : entry
-                        )
-                      )
-                    }
-                    style={inputStyle}
-                  >
-                    <option value="">No parent</option>
-                    {getParentOptions(group.id).map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {formatGroupOption(option)}
-                      </option>
+                            aria-label={`Code for ${group.name}`}
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <TextInput
+                            size="xs"
+                            value={group.name}
+                            onChange={(event) =>
+                              setItemGroups((prev) =>
+                                prev.map((entry) =>
+                                  entry.id === group.id ? { ...entry, name: event.currentTarget.value } : entry
+                                )
+                              )
+                            }
+                            aria-label={`Name for ${group.name}`}
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <Select
+                            size="xs"
+                            data={[
+                              { value: "", label: "No parent" },
+                              ...getParentOptions(group.id).map((opt) => ({
+                                value: String(opt.id),
+                                label: formatGroupOption(opt)
+                              }))
+                            ]}
+                            value={group.parent_id != null ? String(group.parent_id) : ""}
+                            onChange={(value) =>
+                              setItemGroups((prev) =>
+                                prev.map((entry) =>
+                                  entry.id === group.id
+                                    ? {
+                                        ...entry,
+                                        parent_id: value ? Number(value) : null
+                                      }
+                                    : entry
+                                )
+                              )
+                            }
+                            aria-label={`Parent for ${group.name}`}
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed">
+                            {getGroupPath(group.id)}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap="xs">
+                            <Switch
+                              size="sm"
+                              checked={group.is_active}
+                              onChange={(event) =>
+                                setItemGroups((prev) =>
+                                  prev.map((entry) =>
+                                    entry.id === group.id
+                                      ? { ...entry, is_active: event.currentTarget.checked }
+                                      : entry
+                                  )
+                                )
+                              }
+                              aria-label={`Active status for ${group.name}`}
+                            />
+                            <Badge
+                              size="sm"
+                              color={group.is_active ? "green" : "gray"}
+                              variant="light"
+                            >
+                              {group.is_active ? "Active" : "Inactive"}
+                            </Badge>
+                          </Group>
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap="xs">
+                            <Button
+                              size="xs"
+                              onClick={() => saveGroup(group)}
+                              aria-label={`Save ${group.name}`}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              size="xs"
+                              color="red"
+                              variant="light"
+                              onClick={() => setConfirmDeleteGroup(group)}
+                              aria-label={`Delete ${group.name}`}
+                            >
+                              Delete
+                            </Button>
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
                     ))}
-                  </select>
-                </td>
-                <td style={cellStyle}>
-                  <span style={{ color: "#6b5d48", fontSize: "12px" }}>
-                    {getGroupPath(group.id)}
-                  </span>
-                </td>
-                <td style={cellStyle}>
-                  <input
-                    type="checkbox"
-                    checked={group.is_active}
-                    onChange={(event) =>
-                      setItemGroups((prev) =>
-                        prev.map((entry) =>
-                          entry.id === group.id
-                            ? { ...entry, is_active: event.target.checked }
-                            : entry
-                        )
-                      )
-                    }
-                  />
-                </td>
-                <td style={cellStyle}>
-                  <button type="button" onClick={() => saveGroup(group)}>
-                    Save
-                  </button>
-                  <button type="button" onClick={() => deleteGroup(group.id)}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {itemGroups.length === 0 ? <p>No item groups yet.</p> : null}
-      </section>
-    </div>
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            )}
+          </Stack>
+        </Card>
+
+        {/* Delete Confirmation Modal */}
+        <Modal
+          opened={confirmDeleteGroup !== null}
+          onClose={() => setConfirmDeleteGroup(null)}
+          title={<Title order={4}>Delete Item Group</Title>}
+          centered
+        >
+          <Stack>
+            <Text size="sm">
+              Are you sure you want to delete group{" "}
+              <Text span fw={600}>"{confirmDeleteGroup?.name}"</Text>? 
+              This action cannot be undone.
+            </Text>
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setConfirmDeleteGroup(null)} disabled={deleting}>
+                Cancel
+              </Button>
+              <Button color="red" onClick={handleConfirmDelete} loading={deleting}>
+                Delete
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+      </Stack>
+    </Container>
   );
 }
