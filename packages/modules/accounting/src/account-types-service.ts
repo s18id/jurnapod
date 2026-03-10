@@ -369,6 +369,20 @@ export class AccountTypesService {
   }
 
   /**
+   * Normalize report_group value for compatibility
+   * Legacy data may contain 'LR' (Laba Rugi), normalize to canonical 'PL'
+   */
+  private normalizeReportGroup(reportGroup: string | null): "NRC" | "PL" | null {
+    if (reportGroup === "LR") {
+      return "PL";
+    }
+    if (reportGroup === "NRC" || reportGroup === "PL") {
+      return reportGroup;
+    }
+    return null;
+  }
+
+  /**
    * Map database row to AccountTypeResponse
    */
   private mapRowToAccountTypeResponse(row: any): AccountTypeResponse {
@@ -378,7 +392,7 @@ export class AccountTypesService {
       name: row.name,
       category: row.category,
       normal_balance: row.normal_balance,
-      report_group: row.report_group,
+      report_group: this.normalizeReportGroup(row.report_group),
       is_active: Boolean(row.is_active),
       created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
       updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at

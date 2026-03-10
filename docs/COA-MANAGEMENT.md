@@ -126,7 +126,7 @@ GET /api/accounts?company_id=1&is_active=true&search=cash
 **Query Parameters:**
 - `company_id` (required) - Company ID
 - `is_active` (optional) - Filter by active status
-- `report_group` (optional) - Filter by NRC or LR
+- `report_group` (optional) - Filter by NRC or PL (PL = Laba Rugi/P&L)
 - `parent_account_id` (optional) - Filter by parent
 - `search` (optional) - Search by code or name
 
@@ -459,7 +459,7 @@ type AccountTreeNode = AccountResponse & {
    - **Parent Account** - Select parent for hierarchy
    - **Type** - Select account type (ASSET, LIABILITY, etc.)
    - **Normal Balance** - D (Debit) or K (Kredit)
-   - **Report Group** - NRC (Neraca/Balance Sheet) or LR (Laba Rugi/P&L)
+   - **Report Group** - NRC (Neraca/Balance Sheet) or PL (Laba Rugi/P&L)
    - **Is Group** - Check if this account can have children
 4. Click **"Save Account"**
 
@@ -498,7 +498,7 @@ type AccountTreeNode = AccountResponse & {
 **Report Group:**
 - **All** - Show all accounts
 - **Neraca (NRC)** - Show only balance sheet accounts
-- **Laba Rugi (LR)** - Show only P&L accounts
+- **Laba Rugi (PL)** - Show only P&L accounts
 
 ### Tree Navigation
 
@@ -557,7 +557,9 @@ Cost and expense accounts (COGS, operating expenses)
 ## Report Groups
 
 - **NRC (Neraca)** - Balance Sheet accounts (Assets, Liabilities, Equity)
-- **LR (Laba Rugi)** - Profit & Loss accounts (Revenue, Expenses)
+- **PL (Laba Rugi)** - Profit & Loss accounts (Revenue, Expenses)
+
+Note: Legacy data may contain `LR` which is normalized to `PL`.
 
 ## Integration with Other Modules
 

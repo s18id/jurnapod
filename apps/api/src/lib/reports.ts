@@ -887,7 +887,7 @@ export async function getProfitLoss(filter: ProfitLossFilter) {
       AND at.company_id = a.company_id
      WHERE jl.company_id = ?
        AND jl.line_date BETWEEN ? AND ?
-       AND COALESCE(a.report_group, at.report_group) = 'LR'
+       AND COALESCE(a.report_group, at.report_group) IN ('PL', 'LR')
        AND a.is_group = 0
        AND ${outletClause.sql}
      GROUP BY a.id, a.code, a.name

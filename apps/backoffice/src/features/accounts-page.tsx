@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { SessionUser } from "../lib/session";
 import { useAccountTree, useAccountTypes } from "../hooks/use-accounts";
 import {
@@ -35,10 +35,10 @@ type AccountFormData = {
   name: string;
   parent_account_id: number | null;
   is_group: boolean;
-  account_type_id: number | null;
-  type_name: string | null; // Legacy field, kept for backward compatibility
-  normal_balance: NormalBalance | null; // Legacy field
-  report_group: ReportGroup | null; // Legacy field
+  account_type_id: number | null; // Optional template reference
+  type_name: string | null; // Classification (primary source of truth)
+  normal_balance: NormalBalance | null; // Classification (primary source of truth)
+  report_group: ReportGroup | null; // Classification (primary source of truth)
   is_payable: boolean;
   is_active: boolean;
 };
@@ -152,7 +152,8 @@ export function AccountsPage(props: AccountsPageProps) {
 
   const { data: accountTypes, loading: accountTypesLoading } = useAccountTypes(
     props.user.company_id,
-    props.accessToken
+    props.accessToken,
+    { is_active: undefined } // Fetch all types for display (including inactive)
   );
 
   if (!isOnline) {
@@ -218,6 +219,48 @@ export function AccountsPage(props: AccountsPageProps) {
 
     return filterTree(tree);
   }, [tree, searchTerm, reportGroupFilter]);
+
+  // Auto-expand branches when searching
+  useEffect(() => {
+    if (!searchTerm || !filteredTree.length) {
+      return;
+    }
+
+    // Find all parent IDs that have matching descendants
+    function collectExpandedIds(nodes: AccountTreeNode[]): Set<number> {
+      const expanded = new Set<number>();
+      for (const node of nodes) {
+        if (node.children && node.children.length > 0) {
+          const childExpanded = collectExpandedIds(node.children);
+          if (childExpanded.size > 0) {
+            expanded.add(node.id);
+            childExpanded.forEach(id => expanded.add(id));
+          }
+        }
+        // If node itself matches, expand its parents
+        if (node.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            node.name.toLowerCase().includes(searchTerm.toLowerCase())) {
+          expanded.add(node.id);
+        }
+      }
+      return expanded;
+    }
+
+    const nodesToExpand = collectExpandedIds(filteredTree);
+    
+    // Only update state if there are new nodes to expand
+    setExpandedNodes(prev => {
+      const newSet = new Set(prev);
+      let hasNew = false;
+      nodesToExpand.forEach(id => {
+        if (!newSet.has(id)) {
+          newSet.add(id);
+          hasNew = true;
+        }
+      });
+      return hasNew ? newSet : prev;
+    });
+  }, [searchTerm, filteredTree]);
 
   function toggleNode(nodeId: number) {
     setExpandedNodes((prev) => {
@@ -300,9 +343,9 @@ export function AccountsPage(props: AccountsPageProps) {
             parent_account_id: formData.parent_account_id,
             is_group: formData.is_group,
             account_type_id: formData.account_type_id,
-            type_name: formData.type_name, // Legacy field for backward compatibility
-            normal_balance: formData.normal_balance, // Legacy field
-            report_group: formData.report_group, // Legacy field
+            type_name: formData.type_name,
+            normal_balance: formData.normal_balance,
+            report_group: formData.report_group,
             is_payable: formData.is_payable,
             is_active: formData.is_active
           },
@@ -318,9 +361,9 @@ export function AccountsPage(props: AccountsPageProps) {
             parent_account_id: formData.parent_account_id,
             is_group: formData.is_group,
             account_type_id: formData.account_type_id,
-            type_name: formData.type_name, // Legacy field for backward compatibility
-            normal_balance: formData.normal_balance, // Legacy field
-            report_group: formData.report_group, // Legacy field
+            type_name: formData.type_name,
+            normal_balance: formData.normal_balance,
+            report_group: formData.report_group,
             is_payable: formData.is_payable,
             is_active: formData.is_active
           },
@@ -439,15 +482,16 @@ export function AccountsPage(props: AccountsPageProps) {
                     {node.report_group}
                   </span>
                 )}
-                {/* Show account type name if account_type_id is set, fallback to legacy type_name */}
-                {node.account_type_id && accountTypes.length > 0 && (
-                  <span style={{ fontSize: "11px", color: "#6b5d48", marginLeft: "4px" }}>
-                    {accountTypes.find(t => t.id === node.account_type_id)?.name}
-                  </span>
-                )}
-                {!node.account_type_id && node.type_name && (
+                {/* Show type_name from account row first (runtime source of truth) */}
+                {node.type_name && (
                   <span style={{ fontSize: "11px", color: "#6b5d48", marginLeft: "4px" }}>
                     {node.type_name}
+                  </span>
+                )}
+                {/* Fallback to template name if no direct type_name */}
+                {!node.type_name && node.account_type_id && accountTypes.length > 0 && (
+                  <span style={{ fontSize: "11px", color: "#6b5d48", marginLeft: "4px" }}>
+                    {accountTypes.find(t => t.id === node.account_type_id)?.name}
                   </span>
                 )}
                 {node.normal_balance && (
@@ -548,7 +592,7 @@ export function AccountsPage(props: AccountsPageProps) {
           >
             <option value="ALL">All Report Groups</option>
             <option value="NRC">Neraca (NRC)</option>
-            <option value="PL">Laba Rugi (LR)</option>
+            <option value="PL">Laba Rugi (PL)</option>
           </select>
         </div>
       </section>
@@ -619,20 +663,26 @@ export function AccountsPage(props: AccountsPageProps) {
 
             <div>
               <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                Account Type (Optional)
+                Classification (Optional Template)
               </label>
               <select
                 value={formData.account_type_id ?? ""}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const typeId = e.target.value ? Number(e.target.value) : null;
+                  const selectedType = accountTypes.find(t => t.id === typeId);
                   setFormData({
                     ...formData,
-                    account_type_id: e.target.value ? Number(e.target.value) : null
-                  })
-                }
+                    account_type_id: typeId,
+                    // Auto-fill from template
+                    type_name: selectedType?.name ?? formData.type_name,
+                    normal_balance: selectedType?.normal_balance ?? formData.normal_balance,
+                    report_group: selectedType?.report_group ?? formData.report_group
+                  });
+                }}
                 style={{ ...inputStyle, width: "100%" }}
                 disabled={accountTypesLoading}
               >
-                <option value="">None (No Type)</option>
+                <option value="">None (manual entry)</option>
                 {accountTypes.map((type) => (
                   <option key={type.id} value={type.id}>
                     {type.category ? `[${type.category}] ` : ""}{type.name}
@@ -642,7 +692,28 @@ export function AccountsPage(props: AccountsPageProps) {
                 ))}
               </select>
               <small style={{ color: "#6b5d48", fontSize: "11px", display: "block", marginTop: "2px" }}>
-                {accountTypesLoading ? "Loading account types..." : "Select a predefined account type"}
+                Select a template to auto-fill classification below, or enter manually
+              </small>
+            </div>
+
+            <div>
+              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+                Type Name
+              </label>
+              <input
+                type="text"
+                value={formData.type_name ?? ""}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    type_name: e.target.value || null
+                  })
+                }
+                style={{ ...inputStyle, width: "100%" }}
+                placeholder="e.g., Kas, Bank, Pendapatan"
+              />
+              <small style={{ color: "#6b5d48", fontSize: "11px", display: "block", marginTop: "2px" }}>
+                Leave empty to inherit from parent account
               </small>
             </div>
 
@@ -655,14 +726,14 @@ export function AccountsPage(props: AccountsPageProps) {
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    normal_balance: e.target.value ? (e.target.value as NormalBalance) : null
+                    normal_balance: (e.target.value as NormalBalance) || null
                   })
                 }
                 style={{ ...inputStyle, width: "100%" }}
               >
-                <option value="">None</option>
+                <option value="">Inherit from parent</option>
                 <option value="D">D (Debit)</option>
-                <option value="C">C (Credit)</option>
+                <option value="K">K (Kredit)</option>
               </select>
             </div>
 
@@ -675,14 +746,14 @@ export function AccountsPage(props: AccountsPageProps) {
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    report_group: e.target.value ? (e.target.value as ReportGroup) : null
+                    report_group: (e.target.value as ReportGroup) || null
                   })
                 }
                 style={{ ...inputStyle, width: "100%" }}
               >
-                <option value="">None</option>
+                <option value="">Inherit from parent</option>
                 <option value="NRC">NRC (Neraca/Balance Sheet)</option>
-                <option value="PL">LR (Laba Rugi/P&L)</option>
+                <option value="PL">PL (Laba Rugi/P&L)</option>
               </select>
             </div>
 

@@ -18,6 +18,7 @@ import {
  * Query params:
  * - company_id (required): Company ID
  * - is_active (optional): Filter by active status ("true"/"false")
+ * - category (optional): Filter by category (ASSET/LIABILITY/EQUITY/REVENUE/EXPENSE)
  * - search (optional): Search by name
  * 
  * Required role: OWNER, ADMIN, or ACCOUNTANT
@@ -29,6 +30,7 @@ export const GET = withAuth(
       const query = AccountTypeListQuerySchema.parse({
         company_id: url.searchParams.get("company_id") || String(auth.companyId),
         is_active: url.searchParams.get("is_active") || undefined,
+        category: url.searchParams.get("category") || undefined,
         search: url.searchParams.get("search") || undefined
       });
 

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { SessionUser } from "../lib/session";
 import { useAccountTypes } from "../hooks/use-accounts";
 import {
@@ -127,7 +127,7 @@ const CATEGORIES = [
 
 const NORMAL_BALANCES = [
   { value: "D", label: "DEBIT" },
-  { value: "C", label: "CREDIT" }
+  { value: "K", label: "KREDIT" }
 ];
 
 const REPORT_GROUPS = [
@@ -138,7 +138,6 @@ const REPORT_GROUPS = [
 export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
   const isOnline = useOnlineStatus();
   const companyId = user.company_id;
-  const { data: accountTypes, loading, error, refetch } = useAccountTypes(companyId, accessToken);
 
   const [formMode, setFormMode] = useState<FormMode>(null);
   const [formData, setFormData] = useState<AccountTypeFormData>(emptyForm);
@@ -147,6 +146,17 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+
+  const typeFilters = useMemo(() => ({
+    is_active: showInactive ? undefined : true,
+    search: searchQuery || undefined
+  }), [showInactive, searchQuery]);
+
+  const { data: accountTypes, loading, error, refetch } = useAccountTypes(
+    companyId,
+    accessToken,
+    typeFilters
+  );
 
   if (!isOnline) {
     return (
@@ -157,21 +167,8 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
     );
   }
 
-  // Filter account types
-  const filteredAccountTypes = accountTypes.filter((type) => {
-    if (!showInactive && !type.is_active) return false;
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      return (
-        type.name.toLowerCase().includes(query) ||
-        type.category?.toLowerCase().includes(query)
-      );
-    }
-    return true;
-  });
-
-  // Group by category
-  const groupedByCategory = filteredAccountTypes.reduce((acc, type) => {
+  // Group by category (now server-filtered)
+  const groupedByCategory = accountTypes.reduce((acc, type) => {
     const category = type.category || "OTHER";
     if (!acc[category]) acc[category] = [];
     acc[category].push(type);
@@ -266,9 +263,9 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
   return (
     <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
       <div style={{ marginBottom: "20px" }}>
-        <h1 style={{ marginBottom: "8px" }}>Account Types</h1>
+        <h1 style={{ marginBottom: "8px" }}>Account Type Templates</h1>
         <p style={{ color: "#666", margin: 0 }}>
-          Manage account type categories for your chart of accounts
+          Optional templates for account classification. Accounts can inherit classification directly from parent accounts.
         </p>
         <StaleDataWarning
           cacheKey={buildCacheKey("account_types", { companyId: user.company_id })}
