@@ -882,9 +882,12 @@ export async function getProfitLoss(filter: ProfitLossFilter) {
             SUM(jl.credit) AS total_credit
      FROM journal_lines jl
      INNER JOIN accounts a ON a.id = jl.account_id
+     LEFT JOIN account_types at
+       ON at.id = a.account_type_id
+      AND at.company_id = a.company_id
      WHERE jl.company_id = ?
        AND jl.line_date BETWEEN ? AND ?
-       AND a.report_group IN ('PL', 'LR')
+       AND COALESCE(a.report_group, at.report_group) IN ('PL', 'LR')
        AND a.is_group = 0
        AND ${outletClause.sql}
      GROUP BY a.id, a.code, a.name
