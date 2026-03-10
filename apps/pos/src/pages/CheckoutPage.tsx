@@ -1,16 +1,22 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { useCheckout } from "../features/checkout/useCheckout.js";
 import { CheckoutForm } from "../features/checkout/CheckoutForm.js";
 import { normalizeMoney, formatMoney } from "../shared/utils/money.js";
 import { usePosAppState } from "../router/pos-app-state.js";
+import type { RuntimeCheckoutConfig } from "../services/runtime-service.js";
 
 interface CheckoutPageProps {
   context: WebBootstrapContext;
 }
+
+const DEFAULT_CHECKOUT_CONFIG: RuntimeCheckoutConfig = {
+  tax: { rate: 0, inclusive: false },
+  payment_methods: ["CASH"]
+};
 
 export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
   const {
@@ -33,7 +39,31 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
   } = usePosAppState();
   const activeReservation = outletReservations.find((row) => row.reservation_id === activeReservationId) ?? null;
 
-  const checkoutConfig = context.runtime.resolveCheckoutConfig(null);
+  const [checkoutConfig, setCheckoutConfig] = useState<RuntimeCheckoutConfig>(DEFAULT_CHECKOUT_CONFIG);
+  const [configLoading, setConfigLoading] = useState(true);
+
+  useEffect(() => {
+    let disposed = false;
+    setConfigLoading(true);
+    void (async () => {
+      try {
+        const config = await context.runtime.resolveScopedCheckoutConfig(scope);
+        if (!disposed) {
+          setCheckoutConfig(config);
+        }
+      } catch (error) {
+        console.error("Failed to load scoped checkout config:", error);
+        // Keep default config on error
+      } finally {
+        if (!disposed) {
+          setConfigLoading(false);
+        }
+      }
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [context.runtime, scope.company_id, scope.outlet_id]);
   const { paymentMethod, setPaymentMethod, paymentMethodAllowed, canCompleteSale, completeInFlight, lastCompleteMessage, runCompleteSale } = useCheckout({
     scope,
     activeOrderContext,
@@ -48,7 +78,7 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
   const offlineCacheMissing = syncBadgeState === "Offline" && !hasProductCache;
   const dineInTableMissing = activeOrderContext.service_type === "DINE_IN" && !activeOrderContext.table_id;
   const orderNotFinalized = !activeOrderContext.kitchen_sent;
-  const canComplete = !offlineCacheMissing && !dineInTableMissing && !orderNotFinalized && canCompleteSale(cartLines, cartTotals);
+  const canComplete = !configLoading && !offlineCacheMissing && !dineInTableMissing && !orderNotFinalized && canCompleteSale(cartLines, cartTotals);
 
   return (
     <main
@@ -152,6 +182,23 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
           </p>
         ) : null}
 
+        {configLoading ? (
+          <p
+            role="status"
+            style={{
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 10,
+              background: "#eff6ff",
+              border: "1px solid #93c5fd",
+              color: "#1e3a8a",
+              fontWeight: 600
+            }}
+          >
+            Loading outlet configuration...
+          </p>
+        ) : null}
+
         <CheckoutForm
           paymentMethod={paymentMethod}
           paymentMethods={checkoutConfig.payment_methods}
@@ -196,7 +243,7 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
 
             void runCompleteSale(cartLines, cartTotals, {
               setPaidAmount,
-              setCart: clearOrderContext
+              onAfterSaleCommit: clearOrderContext
             });
           }}
         />
