@@ -2,12 +2,45 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useEffect, useState } from "react";
+import {
+  Paper,
+  Title,
+  Stack,
+  Group,
+  Table,
+  Badge,
+  Button,
+  TextInput,
+  Select,
+  NumberInput,
+  Alert,
+  ActionIcon,
+  Menu,
+  Text,
+  Grid,
+  Box,
+  Flex,
+  Divider,
+  Loader
+} from "@mantine/core";
+import {
+  IconPlus,
+  IconTrash,
+  IconPrinter,
+  IconFileTypePdf,
+  IconCheck,
+  IconX,
+  IconEdit,
+  IconDotsVertical,
+  IconAlertCircle,
+  IconFileInvoice
+} from "@tabler/icons-react";
 import { apiRequest, ApiError, getApiBaseUrl } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 import { useOnlineStatus } from "../lib/connection";
 import { OutboxService } from "../lib/outbox-service";
 
-type InvoiceStatus = "DRAFT" | "POSTED" | "VOID";
+type InvoiceStatus = "DRAFT" | "APPROVED" | "POSTED" | "VOID";
 type PaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
 
 type Invoice = {
@@ -16,12 +49,15 @@ type Invoice = {
   outlet_id: number;
   invoice_no: string;
   invoice_date: string;
+  due_date: string | null;
   status: InvoiceStatus;
   payment_status: PaymentStatus;
   subtotal: number;
   tax_amount: number;
   grand_total: number;
   paid_total: number;
+  approved_by_user_id: number | null;
+  approved_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -36,40 +72,22 @@ type InvoiceLine = {
   line_total: number;
 };
 
-type InvoiceDetail = Invoice & { lines: InvoiceLine[] };
+type InvoiceDetail = Invoice & { lines: InvoiceLine[]; due_term?: string };
 
 type InvoicesResponse = { success: true; data: { total: number; invoices: Invoice[] } };
 type InvoiceDetailResponse = { success: true; data: InvoiceDetail };
 
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const inputStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 8px"
-} as const;
-
-const linkStyle = {
-  color: "#2563eb",
-  textDecoration: "none",
-  cursor: "pointer"
-} as const;
+const DUE_TERM_OPTIONS = [
+  { value: "NET_0", label: "Due on receipt" },
+  { value: "NET_7", label: "Net 7 days" },
+  { value: "NET_14", label: "Net 14 days" },
+  { value: "NET_15", label: "Net 15 days" },
+  { value: "NET_20", label: "Net 20 days" },
+  { value: "NET_30", label: "Net 30 days" },
+  { value: "NET_45", label: "Net 45 days" },
+  { value: "NET_60", label: "Net 60 days" },
+  { value: "NET_90", label: "Net 90 days" }
+];
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("id-ID", {
@@ -87,27 +105,58 @@ function formatDate(dateString: string): string {
 function getStatusBadgeColor(status: InvoiceStatus): string {
   switch (status) {
     case "POSTED":
-      return "#4caf50";
+      return "green";
     case "DRAFT":
-      return "#ff9800";
+      return "yellow";
+    case "APPROVED":
+      return "blue";
     case "VOID":
-      return "#9e9e9e";
+      return "gray";
     default:
-      return "#666";
+      return "gray";
   }
+}
+
+function getDaysOverdue(dueDate: string | null, invoiceDate: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(dueDate ?? invoiceDate);
+  due.setHours(0, 0, 0, 0);
+  const diff = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+  return diff;
+}
+
+function isOverdue(dueDate: string | null, invoiceDate: string, status: InvoiceStatus): boolean {
+  if (status === "VOID" || status === "POSTED") return false;
+  return getDaysOverdue(dueDate, invoiceDate) > 0;
 }
 
 function getPaymentStatusBadgeColor(status: PaymentStatus): string {
   switch (status) {
     case "PAID":
-      return "#2196f3";
+      return "blue";
     case "PARTIAL":
-      return "#ff9800";
+      return "yellow";
     case "UNPAID":
-      return "#f44336";
+      return "red";
     default:
-      return "#666";
+      return "gray";
   }
+}
+
+function getTermDays(term: string): number {
+  const daysMap: Record<string, number> = {
+    NET_0: 0,
+    NET_7: 7,
+    NET_14: 14,
+    NET_15: 15,
+    NET_20: 20,
+    NET_30: 30,
+    NET_45: 45,
+    NET_60: 60,
+    NET_90: 90
+  };
+  return daysMap[term] ?? 30;
 }
 
 type SalesInvoicesPageProps = {
@@ -124,6 +173,8 @@ type InvoiceLineDraft = {
 type InvoiceDraft = {
   invoice_no: string;
   invoice_date: string;
+  due_date: string;
+  due_term: string;
   tax_amount: string;
   lines: InvoiceLineDraft[];
 };
@@ -146,9 +197,18 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
   const [selectedOutletId, setSelectedOutletId] = useState<number>(
     props.user.outlets[0]?.id ?? 0
   );
+
+  function getDefaultDueDate(date: string): string {
+    const d = new Date(date);
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().slice(0, 10);
+  }
+
   const [newInvoice, setNewInvoice] = useState<InvoiceDraft>(() => ({
     invoice_no: "",
     invoice_date: new Date().toISOString().slice(0, 10),
+    due_date: getDefaultDueDate(new Date().toISOString().slice(0, 10)),
+    due_term: "NET_30",
     tax_amount: "0",
     lines: [{ ...emptyLineDraft }]
   }));
@@ -182,14 +242,19 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     }
   }, [selectedOutletId]);
 
-  function handleOutletChange(event: React.ChangeEvent<HTMLSelectElement>) {
-    setSelectedOutletId(Number(event.target.value));
+  function handleOutletChange(value: string | null) {
+    if (value) {
+      setSelectedOutletId(Number(value));
+    }
   }
 
   function resetNewInvoice() {
+    const invoiceDate = new Date().toISOString().slice(0, 10);
     setNewInvoice({
       invoice_no: "",
-      invoice_date: new Date().toISOString().slice(0, 10),
+      invoice_date: invoiceDate,
+      due_date: getDefaultDueDate(invoiceDate),
+      due_term: "NET_30",
       tax_amount: "0",
       lines: [{ ...emptyLineDraft }]
     });
@@ -227,6 +292,8 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         outlet_id: selectedOutletId,
         invoice_no: newInvoice.invoice_no.trim(),
         invoice_date: newInvoice.invoice_date,
+        due_date: newInvoice.due_date || newInvoice.invoice_date,
+        due_term: newInvoice.due_term,
         tax_amount: Number(newInvoice.tax_amount || "0"),
         lines
       };
@@ -271,6 +338,8 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         id: response.data.id,
         invoice_no: response.data.invoice_no,
         invoice_date: response.data.invoice_date,
+        due_date: response.data.due_date ?? response.data.invoice_date,
+        due_term: response.data.due_term ?? "NET_30",
         tax_amount: String(response.data.tax_amount ?? 0),
         lines: response.data.lines.map((line) => ({
           description: line.description,
@@ -320,6 +389,8 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
           body: JSON.stringify({
             invoice_no: editingInvoice.invoice_no.trim(),
             invoice_date: editingInvoice.invoice_date,
+            due_date: editingInvoice.due_date || editingInvoice.invoice_date,
+            due_term: editingInvoice.due_term,
             tax_amount: Number(editingInvoice.tax_amount || "0"),
             lines
           })
@@ -350,6 +421,40 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         setError(postError.message);
       } else {
         setError("Failed to post invoice");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function approveInvoiceById(invoiceId: number) {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await apiRequest(`/sales/invoices/${invoiceId}/approve`, { method: "POST" }, props.accessToken);
+      await refreshData(selectedOutletId);
+    } catch (approveError) {
+      if (approveError instanceof ApiError) {
+        setError(approveError.message);
+      } else {
+        setError("Failed to approve invoice");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function voidInvoiceById(invoiceId: number) {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await apiRequest(`/sales/invoices/${invoiceId}/void`, { method: "POST" }, props.accessToken);
+      await refreshData(selectedOutletId);
+    } catch (voidError) {
+      if (voidError instanceof ApiError) {
+        setError(voidError.message);
+      } else {
+        setError("Failed to void invoice");
       }
     } finally {
       setSubmitting(false);
@@ -404,403 +509,382 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     }
   }
 
-  return (
-    <div>
-      <h2 style={{ marginTop: 0, marginBottom: "16px" }}>Sales Invoices</h2>
+  const outletOptions = props.user.outlets.map((outlet) => ({
+    value: String(outlet.id),
+    label: outlet.name
+  }));
 
-      <div style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Create Invoice</h3>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
-          <input
-            placeholder="Invoice No"
-            value={newInvoice.invoice_no}
-            onChange={(event) =>
-              setNewInvoice((prev) => ({
-                ...prev,
-                invoice_no: event.target.value
-              }))
-            }
-            style={inputStyle}
-          />
-          <input
-            type="date"
-            value={newInvoice.invoice_date}
-            onChange={(event) =>
-              setNewInvoice((prev) => ({
-                ...prev,
-                invoice_date: event.target.value
-              }))
-            }
-            style={inputStyle}
-          />
-          <input
-            placeholder="Tax amount"
-            value={newInvoice.tax_amount}
-            onChange={(event) =>
-              setNewInvoice((prev) => ({
-                ...prev,
-                tax_amount: event.target.value
-              }))
-            }
-            style={inputStyle}
-          />
-        </div>
-        <div style={{ marginBottom: "12px" }}>
-          <strong>Lines</strong>
-          {newInvoice.lines.map((line, index) => (
-            <div key={`new-line-${index}`} style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
-              <input
+  const renderInvoiceForm = (
+    invoice: InvoiceDraft,
+    setInvoice: React.Dispatch<React.SetStateAction<InvoiceDraft>>,
+    onSubmit: () => void,
+    onCancel?: () => void,
+    isEdit = false
+  ) => (
+    <Paper p="md" withBorder>
+      <Stack gap="md">
+        <Group justify="space-between" align="center">
+          <Title order={4}>{isEdit ? `Edit Draft Invoice #${(invoice as InvoiceEditDraft).id}` : "Create New Invoice"}</Title>
+          {isEdit && (
+            <Button variant="subtle" color="gray" onClick={onCancel} size="sm">
+              Cancel
+            </Button>
+          )}
+        </Group>
+
+        <Divider />
+
+        <Grid>
+          <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+            <TextInput
+              label="Invoice Number"
+              placeholder="INV-001"
+              value={invoice.invoice_no}
+              onChange={(e) =>
+                setInvoice((prev) => ({ ...prev, invoice_no: e.target.value }))
+              }
+              required
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+            <TextInput
+              label="Invoice Date"
+              type="date"
+              value={invoice.invoice_date}
+              onChange={(e) => {
+                const newDate = e.target.value;
+                const dueDate = new Date(newDate);
+                dueDate.setDate(dueDate.getDate() + getTermDays(invoice.due_term));
+                setInvoice((prev) => ({
+                  ...prev,
+                  invoice_date: newDate,
+                  due_date: dueDate.toISOString().slice(0, 10)
+                }));
+              }}
+              required
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+            <Select
+              label="Payment Terms"
+              data={DUE_TERM_OPTIONS}
+              value={invoice.due_term}
+              onChange={(value) => {
+                if (value) {
+                  const dueDate = new Date(invoice.invoice_date);
+                  dueDate.setDate(dueDate.getDate() + getTermDays(value));
+                  setInvoice((prev) => ({
+                    ...prev,
+                    due_term: value,
+                    due_date: dueDate.toISOString().slice(0, 10)
+                  }));
+                }
+              }}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+            <TextInput
+              label="Due Date"
+              type="date"
+              value={invoice.due_date}
+              onChange={(e) =>
+                setInvoice((prev) => ({ ...prev, due_date: e.target.value }))
+              }
+            />
+          </Grid.Col>
+        </Grid>
+
+        <NumberInput
+          label="Tax Amount"
+          placeholder="0"
+          value={Number(invoice.tax_amount) || 0}
+          onChange={(value) =>
+            setInvoice((prev) => ({ ...prev, tax_amount: String(value ?? 0) }))
+          }
+          min={0}
+          prefix="Rp "
+          thousandSeparator="."
+          decimalSeparator=","
+          hideControls
+        />
+
+        <Divider label="Line Items" labelPosition="left" />
+
+        <Stack gap="xs">
+          {invoice.lines.map((line, index) => (
+            <Group key={`line-${index}`} gap="xs" align="flex-start">
+              <TextInput
                 placeholder="Description"
                 value={line.description}
-                onChange={(event) =>
-                  setNewInvoice((prev) => ({
+                onChange={(e) =>
+                  setInvoice((prev) => ({
                     ...prev,
                     lines: prev.lines.map((entry, lineIndex) =>
-                      lineIndex === index ? { ...entry, description: event.target.value } : entry
+                      lineIndex === index ? { ...entry, description: e.target.value } : entry
                     )
                   }))
                 }
-                style={{ ...inputStyle, minWidth: "200px" }}
+                style={{ flex: 2 }}
               />
-              <input
+              <TextInput
                 placeholder="Qty"
+                type="number"
                 value={line.qty}
-                onChange={(event) =>
-                  setNewInvoice((prev) => ({
+                onChange={(e) =>
+                  setInvoice((prev) => ({
                     ...prev,
                     lines: prev.lines.map((entry, lineIndex) =>
-                      lineIndex === index ? { ...entry, qty: event.target.value } : entry
+                      lineIndex === index ? { ...entry, qty: e.target.value } : entry
                     )
                   }))
                 }
-                style={inputStyle}
+                style={{ flex: 1 }}
               />
-              <input
-                placeholder="Unit price"
+              <TextInput
+                placeholder="Unit Price"
+                type="number"
                 value={line.unit_price}
-                onChange={(event) =>
-                  setNewInvoice((prev) => ({
+                onChange={(e) =>
+                  setInvoice((prev) => ({
                     ...prev,
                     lines: prev.lines.map((entry, lineIndex) =>
-                      lineIndex === index ? { ...entry, unit_price: event.target.value } : entry
+                      lineIndex === index ? { ...entry, unit_price: e.target.value } : entry
                     )
                   }))
                 }
-                style={inputStyle}
+                style={{ flex: 1 }}
               />
-              {newInvoice.lines.length > 1 ? (
-                <button
-                  type="button"
+              {invoice.lines.length > 1 && (
+                <ActionIcon
+                  color="red"
+                  variant="light"
                   onClick={() =>
-                    setNewInvoice((prev) => ({
+                    setInvoice((prev) => ({
                       ...prev,
                       lines: prev.lines.filter((_, lineIndex) => lineIndex !== index)
                     }))
                   }
                 >
-                  Remove
-                </button>
-              ) : null}
-            </div>
+                  <IconTrash size={16} />
+                </ActionIcon>
+              )}
+            </Group>
           ))}
-          <div style={{ marginTop: "8px" }}>
-            <button
-              type="button"
-              onClick={() =>
-                setNewInvoice((prev) => ({
-                  ...prev,
-                  lines: [...prev.lines, { ...emptyLineDraft }]
-                }))
-              }
-            >
-              Add line
-            </button>
-          </div>
-        </div>
-        <button type="button" onClick={() => createInvoice()} disabled={submitting}>
-          Create invoice
-        </button>
-      </div>
+        </Stack>
 
-      {editingInvoice ? (
-        <div style={boxStyle}>
-          <h3 style={{ marginTop: 0 }}>Edit Draft Invoice #{editingInvoice.id}</h3>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
-            <input
-              placeholder="Invoice No"
-              value={editingInvoice.invoice_no}
-              onChange={(event) =>
-                setEditingInvoice((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        invoice_no: event.target.value
-                      }
-                    : prev
-                )
-              }
-              style={inputStyle}
-            />
-            <input
-              type="date"
-              value={editingInvoice.invoice_date}
-              onChange={(event) =>
-                setEditingInvoice((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        invoice_date: event.target.value
-                      }
-                    : prev
-                )
-              }
-              style={inputStyle}
-            />
-            <input
-              placeholder="Tax amount"
-              value={editingInvoice.tax_amount}
-              onChange={(event) =>
-                setEditingInvoice((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        tax_amount: event.target.value
-                      }
-                    : prev
-                )
-              }
-              style={inputStyle}
-            />
-          </div>
-          <div style={{ marginBottom: "12px" }}>
-            <strong>Lines</strong>
-            {editingInvoice.lines.map((line, index) => (
-              <div key={`edit-line-${index}`} style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
-                <input
-                  placeholder="Description"
-                  value={line.description}
-                  onChange={(event) =>
-                    setEditingInvoice((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            lines: prev.lines.map((entry, lineIndex) =>
-                              lineIndex === index ? { ...entry, description: event.target.value } : entry
-                            )
-                          }
-                        : prev
-                    )
-                  }
-                  style={{ ...inputStyle, minWidth: "200px" }}
-                />
-                <input
-                  placeholder="Qty"
-                  value={line.qty}
-                  onChange={(event) =>
-                    setEditingInvoice((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            lines: prev.lines.map((entry, lineIndex) =>
-                              lineIndex === index ? { ...entry, qty: event.target.value } : entry
-                            )
-                          }
-                        : prev
-                    )
-                  }
-                  style={inputStyle}
-                />
-                <input
-                  placeholder="Unit price"
-                  value={line.unit_price}
-                  onChange={(event) =>
-                    setEditingInvoice((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            lines: prev.lines.map((entry, lineIndex) =>
-                              lineIndex === index ? { ...entry, unit_price: event.target.value } : entry
-                            )
-                          }
-                        : prev
-                    )
-                  }
-                  style={inputStyle}
-                />
-                {editingInvoice.lines.length > 1 ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEditingInvoice((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              lines: prev.lines.filter((_, lineIndex) => lineIndex !== index)
-                            }
-                          : prev
-                      )
-                    }
-                  >
-                    Remove
-                  </button>
-                ) : null}
-              </div>
-            ))}
-            <div style={{ marginTop: "8px" }}>
-              <button
-                type="button"
-                onClick={() =>
-                  setEditingInvoice((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          lines: [...prev.lines, { ...emptyLineDraft }]
-                        }
-                      : prev
-                  )
-                }
-              >
-                Add line
-              </button>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button type="button" onClick={() => saveInvoiceEdit()} disabled={submitting}>
-              Save draft
-            </button>
-            <button type="button" onClick={() => setEditingInvoice(null)}>
+        <Button
+          variant="light"
+          leftSection={<IconPlus size={16} />}
+          onClick={() =>
+            setInvoice((prev) => ({
+              ...prev,
+              lines: [...prev.lines, { ...emptyLineDraft }]
+            }))
+          }
+          size="sm"
+          style={{ alignSelf: "flex-start" }}
+        >
+          Add Line
+        </Button>
+
+        <Group justify="flex-end" gap="sm">
+          {isEdit && (
+            <Button variant="default" onClick={onCancel}>
               Cancel
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      <div style={boxStyle}>
-        <div style={{ marginBottom: "12px" }}>
-          <label htmlFor="outlet-select" style={{ marginRight: "8px", fontWeight: 500 }}>
-            Outlet:
-          </label>
-          <select
-            id="outlet-select"
-            value={selectedOutletId}
-            onChange={handleOutletChange}
-            style={{
-              border: "1px solid #cabfae",
-              borderRadius: "6px",
-              padding: "6px 8px"
-            }}
+            </Button>
+          )}
+          <Button
+            onClick={onSubmit}
+            loading={submitting}
+            leftSection={isEdit ? <IconCheck size={16} /> : <IconPlus size={16} />}
           >
-            {props.user.outlets.map((outlet) => (
-              <option key={outlet.id} value={outlet.id}>
-                {outlet.name}
-              </option>
-            ))}
-          </select>
-        </div>
+            {isEdit ? "Save Changes" : "Create Invoice"}
+          </Button>
+        </Group>
+      </Stack>
+    </Paper>
+  );
 
-        {error && (
-          <div
-            style={{
-              backgroundColor: "#fee",
-              border: "1px solid #fcc",
-              borderRadius: "6px",
-              padding: "12px",
-              marginBottom: "12px",
-              color: "#c00"
-            }}
-          >
-            {error}
-          </div>
-        )}
+  return (
+    <Stack gap="lg" p="md">
+      <Group justify="space-between" align="center">
+        <Title order={2}>
+          <Group gap="xs">
+            <IconFileInvoice size={32} />
+            Sales Invoices
+          </Group>
+        </Title>
+      </Group>
 
-        {loading ? (
-          <p>Loading invoices...</p>
-        ) : invoices.length === 0 ? (
-          <p style={{ color: "#666" }}>No invoices found for this outlet.</p>
-        ) : (
-          <table style={tableStyle}>
-            <thead>
-              <tr style={{ backgroundColor: "#f5f0e8" }}>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Invoice No</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>Date</th>
-                <th style={{ ...cellStyle, textAlign: "center" }}>Status</th>
-                <th style={{ ...cellStyle, textAlign: "center" }}>Payment</th>
-                <th style={{ ...cellStyle, textAlign: "right" }}>Grand Total</th>
-                <th style={{ ...cellStyle, textAlign: "right" }}>Paid</th>
-                <th style={{ ...cellStyle, textAlign: "right" }}>Outstanding</th>
-                <th style={{ ...cellStyle, textAlign: "center" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map((invoice) => (
-                <tr key={invoice.id}>
-                  <td style={cellStyle}>{invoice.invoice_no}</td>
-                  <td style={cellStyle}>{formatDate(invoice.invoice_date)}</td>
-                  <td style={{ ...cellStyle, textAlign: "center" }}>
-                    <span
-                      style={{
-                        display: "inline-block",
-                        padding: "2px 8px",
-                        borderRadius: "4px",
-                        fontSize: "12px",
-                        fontWeight: 500,
-                        backgroundColor: getStatusBadgeColor(invoice.status),
-                        color: "white"
-                      }}
-                    >
-                      {invoice.status}
-                    </span>
-                  </td>
-                  <td style={{ ...cellStyle, textAlign: "center" }}>
-                    <span
-                      style={{
-                        display: "inline-block",
-                        padding: "2px 8px",
-                        borderRadius: "4px",
-                        fontSize: "12px",
-                        fontWeight: 500,
-                        backgroundColor: getPaymentStatusBadgeColor(invoice.payment_status),
-                        color: "white"
-                      }}
-                    >
-                      {invoice.payment_status}
-                    </span>
-                  </td>
-                  <td style={{ ...cellStyle, textAlign: "right" }}>
-                    {formatCurrency(invoice.grand_total)}
-                  </td>
-                  <td style={{ ...cellStyle, textAlign: "right" }}>
-                    {formatCurrency(invoice.paid_total)}
-                  </td>
-                  <td style={{ ...cellStyle, textAlign: "right" }}>
-                    {formatCurrency(invoice.grand_total - invoice.paid_total)}
-                  </td>
-                  <td style={{ ...cellStyle, textAlign: "center" }}>
-                    <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap" }}>
-                      {invoice.status === "DRAFT" ? (
-                        <a style={linkStyle} onClick={() => loadInvoiceForEdit(invoice.id)}>
-                          Edit
-                        </a>
-                      ) : null}
-                      {invoice.status === "DRAFT" ? (
-                        <a style={linkStyle} onClick={() => postInvoiceById(invoice.id)}>
-                          Post
-                        </a>
-                      ) : null}
-                      <a style={linkStyle} onClick={() => handleViewPrint(invoice.id)}>
-                        Print
-                      </a>
-                      <a style={linkStyle} onClick={() => handleViewPdf(invoice.id)}>
-                        PDF
-                      </a>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
+      {!isOnline && (
+        <Alert color="yellow" icon={<IconAlertCircle size={16} />}>
+          You are offline. Invoices will be queued for sync when connection is restored.
+        </Alert>
+      )}
+
+      {error && (
+        <Alert color="red" icon={<IconAlertCircle size={16} />} onClose={() => setError(null)} withCloseButton>
+          {error}
+        </Alert>
+      )}
+
+      {!editingInvoice && renderInvoiceForm(newInvoice, setNewInvoice, createInvoice)}
+
+      {editingInvoice && renderInvoiceForm(
+        editingInvoice,
+        setEditingInvoice as React.Dispatch<React.SetStateAction<InvoiceDraft>>,
+        saveInvoiceEdit,
+        () => setEditingInvoice(null),
+        true
+      )}
+
+      <Paper p="md" withBorder>
+        <Stack gap="md">
+          <Group justify="space-between" align="center">
+            <Select
+              label="Outlet"
+              data={outletOptions}
+              value={String(selectedOutletId)}
+              onChange={handleOutletChange}
+              style={{ minWidth: 200 }}
+            />
+            <Text size="sm" c="dimmed">
+              {invoices.length} invoice{invoices.length !== 1 ? "s" : ""}
+            </Text>
+          </Group>
+
+          {loading ? (
+            <Flex justify="center" p="xl">
+              <Loader />
+            </Flex>
+          ) : invoices.length === 0 ? (
+            <Alert color="blue" variant="light">
+              No invoices found for this outlet.
+            </Alert>
+          ) : (
+            <Box style={{ overflowX: "auto" }}>
+              <Table striped highlightOnHover withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Invoice No</Table.Th>
+                    <Table.Th>Date</Table.Th>
+                    <Table.Th style={{ textAlign: "center" }}>Status</Table.Th>
+                    <Table.Th style={{ textAlign: "center" }}>Payment</Table.Th>
+                    <Table.Th>Due Date</Table.Th>
+                    <Table.Th style={{ textAlign: "center" }}>Overdue</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Grand Total</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Paid</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Outstanding</Table.Th>
+                    <Table.Th style={{ textAlign: "center" }}>Actions</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {invoices.map((invoice) => (
+                    <Table.Tr key={invoice.id}>
+                      <Table.Td>{invoice.invoice_no}</Table.Td>
+                      <Table.Td>{formatDate(invoice.invoice_date)}</Table.Td>
+                      <Table.Td style={{ textAlign: "center" }}>
+                        <Badge color={getStatusBadgeColor(invoice.status)} size="sm">
+                          {invoice.status}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "center" }}>
+                        <Badge color={getPaymentStatusBadgeColor(invoice.payment_status)} size="sm">
+                          {invoice.payment_status}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        {invoice.due_date ? formatDate(invoice.due_date) : "—"}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "center" }}>
+                        {isOverdue(invoice.due_date, invoice.invoice_date, invoice.status) ? (
+                          <Badge color="red" size="sm">
+                            {getDaysOverdue(invoice.due_date, invoice.invoice_date)}d
+                          </Badge>
+                        ) : invoice.due_date ? (
+                          <Badge color="green" size="sm">
+                            Current
+                          </Badge>
+                        ) : (
+                          "—"
+                        )}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <Text fw={500}>{formatCurrency(invoice.grand_total)}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        {formatCurrency(invoice.paid_total)}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <Text c={invoice.grand_total - invoice.paid_total > 0 ? "red" : "green"}>
+                          {formatCurrency(invoice.grand_total - invoice.paid_total)}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "center" }}>
+                        <Menu position="bottom-end" withArrow>
+                          <Menu.Target>
+                            <ActionIcon variant="subtle">
+                              <IconDotsVertical size={16} />
+                            </ActionIcon>
+                          </Menu.Target>
+                          <Menu.Dropdown>
+                            {invoice.status === "DRAFT" && (
+                              <Menu.Item
+                                leftSection={<IconEdit size={14} />}
+                                onClick={() => loadInvoiceForEdit(invoice.id)}
+                              >
+                                Edit
+                              </Menu.Item>
+                            )}
+                            {(invoice.status === "DRAFT" || invoice.status === "APPROVED") && (
+                              <Menu.Item
+                                leftSection={<IconCheck size={14} />}
+                                onClick={() => postInvoiceById(invoice.id)}
+                              >
+                                Post
+                              </Menu.Item>
+                            )}
+                            {invoice.status === "DRAFT" && (
+                              <Menu.Item
+                                leftSection={<IconCheck size={14} />}
+                                onClick={() => approveInvoiceById(invoice.id)}
+                              >
+                                Approve
+                              </Menu.Item>
+                            )}
+                            {invoice.status !== "VOID" && (
+                              <Menu.Item
+                                leftSection={<IconX size={14} />}
+                                color="red"
+                                onClick={() => voidInvoiceById(invoice.id)}
+                              >
+                                Void
+                              </Menu.Item>
+                            )}
+                            <Menu.Divider />
+                            <Menu.Item
+                              leftSection={<IconPrinter size={14} />}
+                              onClick={() => handleViewPrint(invoice.id)}
+                            >
+                              Print
+                            </Menu.Item>
+                            <Menu.Item
+                              leftSection={<IconFileTypePdf size={14} />}
+                              onClick={() => handleViewPdf(invoice.id)}
+                            >
+                              Download PDF
+                            </Menu.Item>
+                          </Menu.Dropdown>
+                        </Menu>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Box>
+          )}
+        </Stack>
+      </Paper>
+    </Stack>
   );
 }
