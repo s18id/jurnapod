@@ -12,11 +12,12 @@ export interface SyncBadgeProps {
 
 export function SyncBadge({ status, pendingCount }: SyncBadgeProps): JSX.Element {
   const badgeStatus: BadgeStatus = status === "Offline" ? "offline" : status === "Pending" ? "pending" : "synced";
+  const showCount = pendingCount > 0;
   
   return (
     <Badge
       status={badgeStatus}
-      text={`Sync: ${status}${status === "Pending" ? ` (${pendingCount})` : ""}`}
+      text={`Sync: ${status}${showCount ? ` (${pendingCount})` : ""}`}
     />
   );
 }

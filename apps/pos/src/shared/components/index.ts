@@ -19,6 +19,9 @@ export type { ModalProps } from "./Modal.js";
 export { ConfirmationModal, ThreeWayConfirmationModal } from "./ConfirmationModal.js";
 export type { ConfirmationModalProps, ThreeWayConfirmationModalProps } from "./ConfirmationModal.js";
 
+export { InlineAlert } from "./InlineAlert.js";
+export type { InlineAlertProps, AlertTone } from "./InlineAlert.js";
+
 export { TabBar } from "./TabBar.js";
 export type { TabBarProps, Tab } from "./TabBar.js";
 

@@ -20,7 +20,7 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
     cartLines,
     cartTotals,
     setPaidAmount,
-    clearCart,
+    resetCartStatePreserveOrderStatus,
     activeOrderContext,
     setOrderStatus,
     currentActiveOrderId,
@@ -55,25 +55,23 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
       style={{
         minHeight: "100vh",
         margin: 0,
-        padding: 24,
-        background: "linear-gradient(135deg, #ecfeff 0%, #fef3c7 100%)",
-        color: "#0f172a",
-        fontFamily: '"Avenir Next", "Trebuchet MS", sans-serif'
+        padding: 16,
+        background: "#f8fafc",
+        color: "#0f172a"
       }}
     >
       <section
         style={{
           maxWidth: 680,
           margin: "0 auto",
-          padding: 20,
-          borderRadius: 14,
-          background: "rgba(255, 255, 255, 0.9)",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 6px 24px rgba(15, 23, 42, 0.08)"
+          padding: 16,
+          borderRadius: 10,
+          background: "#ffffff",
+          border: "1px solid #e2e8f0"
         }}
       >
-        <header style={{ marginBottom: 14 }}>
-          <h1 style={{ margin: 0, fontSize: 24 }}>Payment</h1>
+        <header style={{ marginBottom: 16 }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Payment</h1>
           <div style={{ marginTop: 8, fontSize: 13, color: "#334155" }}>
             Final order: {cartLines.length} item(s) • Due {formatMoney(cartTotals.grand_total)}
           </div>
@@ -193,7 +191,7 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
                 setOrderStatus("COMPLETED");
                 setOrderReservationId(null);
                 setActiveReservationId(null);
-                clearCart();
+                resetCartStatePreserveOrderStatus();
               };
 
             void runCompleteSale(cartLines, cartTotals, {

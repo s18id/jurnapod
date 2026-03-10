@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IonActionSheet,
   IonBadge,
@@ -23,6 +23,7 @@ import type { RuntimeReservation, RuntimeReservationStatus } from "../services/r
 import { usePosAppState } from "../router/pos-app-state.js";
 import { useNavigate } from "react-router-dom";
 import { routes } from "../router/routes.js";
+import { InlineAlert } from "../shared/components/index.js";
 
 interface ReservationsPageProps {
   context: WebBootstrapContext;
@@ -81,6 +82,7 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionSheetReservation, setActionSheetReservation] = useState<RuntimeReservation | null>(null);
   const autoSyncScopesRef = useRef<Set<string>>(new Set());
+  const disposedRef = useRef(false);
   const [form, setForm] = useState<CreateReservationForm>(() => ({
     customer_name: "",
     customer_phone: "",
@@ -91,10 +93,9 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
     notes: ""
   }));
 
-  useEffect(() => {
-    let disposed = false;
-
-    async function loadData() {
+  const loadData = useCallback(async () => {
+    try {
+      setErrorMessage(null);
       let [tables, reservations] = await Promise.all([
         context.runtime.getOutletTables(scope),
         context.runtime.getOutletReservations(scope)
@@ -107,31 +108,42 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
         !autoSyncScopesRef.current.has(scopeKey);
 
       if (shouldAutoSync) {
-        autoSyncScopesRef.current.add(scopeKey);
         try {
           await context.sync.pull(scope);
           [tables, reservations] = await Promise.all([
             context.runtime.getOutletTables(scope),
             context.runtime.getOutletReservations(scope)
           ]);
+          autoSyncScopesRef.current.add(scopeKey);
         } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to sync";
+          setErrorMessage(message);
           console.error("Failed to auto-sync tables/reservations:", error);
         }
       }
 
-      if (disposed) {
+      if (disposedRef.current) {
         return;
       }
 
       setOutletTables(tables);
       setOutletReservations(reservations);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load reservations";
+      if (!disposedRef.current) {
+        setErrorMessage(message);
+      }
+      console.error("Failed to load tables/reservations:", error);
     }
+  }, [context.runtime, scope, setOutletReservations, setOutletTables]);
 
+  useEffect(() => {
+    disposedRef.current = false;
     void loadData();
     return () => {
-      disposed = true;
+      disposedRef.current = true;
     };
-  }, [context.runtime, scope, setOutletReservations, setOutletTables]);
+  }, [loadData]);
 
   const sortedReservations = useMemo(
     () => [...outletReservations].sort((left, right) => left.reservation_at.localeCompare(right.reservation_at)),
@@ -223,6 +235,10 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
     return buttons;
   }, [actionSheetReservation, context.runtime, navigate, scope]);
 
+  const handleRetryLoad = () => {
+    void loadData();
+  };
+
   return (
     <div style={{ padding: 16, display: "grid", gap: 12 }}>
       <header>
@@ -231,6 +247,15 @@ export function ReservationsPage({ context }: ReservationsPageProps): JSX.Elemen
           Create, check-in, seat, or close outlet reservations.
         </p>
       </header>
+
+      {errorMessage && (
+        <InlineAlert
+          title="Failed to load data"
+          message={errorMessage}
+          tone="error"
+          onRetry={handleRetryLoad}
+        />
+      )}
 
       <IonCard>
         <IonCardContent>

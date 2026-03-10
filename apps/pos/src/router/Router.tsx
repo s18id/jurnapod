@@ -532,6 +532,16 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     }
   }, [cartState.clearCart, context.runtime, currentActiveOrderId, scope]);
 
+  /**
+   * Resets cart UI state without closing the active order.
+   * Use after successful order completion to preserve COMPLETED status.
+   */
+  const resetCartStatePreserveOrderStatus = useCallback(() => {
+    setCurrentActiveOrderId(null);
+    setActiveReservationId(null);
+    cartState.clearCart();
+  }, [cartState.clearCart]);
+
   const setServiceType = useCallback((serviceType: ActiveOrderContextState["service_type"]) => {
     if (serviceType === "TAKEAWAY") {
       setActiveReservationId(null);
@@ -793,6 +803,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       setPaidAmount: cartState.setPaidAmount,
       upsertCartLine: cartState.upsertCartLine,
       clearCart,
+      resetCartStatePreserveOrderStatus,
       activeOrderContext: cartState.activeOrderContext,
       setServiceType,
       setDineInContext,
@@ -833,6 +844,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       runSyncPushNow,
       cartState,
       clearCart,
+      resetCartStatePreserveOrderStatus,
       setServiceType,
       setDineInContext,
       setActiveTableId,

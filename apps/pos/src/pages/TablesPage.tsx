@@ -16,7 +16,7 @@ import {
 } from "@ionic/react";
 import { useNavigate } from "react-router-dom";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
-import { Button } from "../shared/components/index.js";
+import { Button, InlineAlert } from "../shared/components/index.js";
 import { routes } from "../router/routes.js";
 import type {
   RuntimeTableStatus,
@@ -217,6 +217,7 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
   } = usePosAppState();
   const [tableOrderSummaryByTableId, setTableOrderSummaryByTableId] = useState<Record<number, TableOrderSummary>>({});
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const autoSyncScopesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -235,11 +236,13 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
       );
 
       if (shouldAutoSync) {
-        autoSyncScopesRef.current.add(scopeKey);
         try {
           await context.sync.pull(scope);
           ({ tables, reservations, activeOrders } = await fetchTablesAndReservations(context, scope));
+          autoSyncScopesRef.current.add(scopeKey);
         } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to sync";
+          setSyncError(message);
           console.error("Failed to auto-sync tables/reservations:", error);
         }
       }
@@ -285,11 +288,17 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
 
   async function handleSyncTables() {
     setIsSyncing(true);
+    setSyncError(null);
     try {
       await context.sync.pull(scope);
-      const tables = await context.runtime.getOutletTables(scope);
+      const { tables, reservations, activeOrders } = await fetchTablesAndReservations(context, scope);
+      const nextSummaryByTableId = await buildTableOrderSummaries(context, scope, activeOrders);
       setOutletTables(tables);
+      setOutletReservations(reservations);
+      setTableOrderSummaryByTableId(nextSummaryByTableId);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to refresh tables";
+      setSyncError(message);
       console.error("Failed to sync tables:", error);
     } finally {
       setIsSyncing(false);
@@ -327,6 +336,15 @@ export function TablesPage({ context }: TablesPageProps): JSX.Element {
           </IonButton>
         </div>
       </header>
+
+      {syncError && (
+        <InlineAlert
+          title="Failed to refresh tables"
+          message={syncError}
+          tone="error"
+          onRetry={() => void handleSyncTables()}
+        />
+      )}
 
       {outletTables.length === 0 ? (
         <div style={STYLES.emptyState}>

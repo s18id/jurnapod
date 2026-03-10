@@ -45,6 +45,7 @@ export interface PosAppStateValue {
   setPaidAmount: (amount: number) => void;
   upsertCartLine: (product: RuntimeProductCatalogItem, patch: Partial<Pick<CartLineState, "qty" | "discount_amount">>) => void;
   clearCart: () => void;
+  resetCartStatePreserveOrderStatus: () => void;
   activeOrderContext: ActiveOrderContextState;
   setServiceType: (serviceType: OrderServiceType) => void;
   setDineInContext: (input: {

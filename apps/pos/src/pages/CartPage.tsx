@@ -6,7 +6,7 @@ import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { useNavigate } from "react-router-dom";
 import { CartList } from "../features/cart/CartList.js";
 import { CartSummary } from "../features/cart/CartSummary.js";
-import { Button } from "../shared/components/index.js";
+import { Button, ConfirmationModal } from "../shared/components/index.js";
 import { routes } from "../router/routes.js";
 import { usePosAppState } from "../router/pos-app-state.js";
 import { formatMoney } from "../shared/utils/money.js";
@@ -46,6 +46,8 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
   const [cancelReason, setCancelReason] = useState<string>("");
   const [cancelInFlight, setCancelInFlight] = useState(false);
   const [cancelMessage, setCancelMessage] = useState<string | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
   const [tableOrderSummaryByTableId, setTableOrderSummaryByTableId] = useState<Record<number, {
     order_id: string;
     item_count: number;
@@ -193,9 +195,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             variant="secondary"
             size="small"
             onClick={() => {
-              void (async () => {
-                clearCart();
-              })();
+              setShowClearConfirm(true);
             }}
           >
             Clear All
@@ -271,12 +271,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                   return;
                 }
 
-                const confirmed = window.confirm(
-                  `Finalize this order with ${cartLines.length} item(s) and total ${formatMoney(cartTotals.grand_total)}?`
-                );
-                if (confirmed) {
-                  setOrderFinalized(true);
-                }
+                setShowFinalizeConfirm(true);
               }}
             >
               {activeOrderContext.kitchen_sent ? "Mark as draft" : "Finalize order"}
@@ -586,6 +581,36 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
           </Button>
         </footer>
       ) : null}
+
+      {/* Clear All Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={showClearConfirm}
+        onClose={() => setShowClearConfirm(false)}
+        onConfirm={() => {
+          clearCart();
+          setShowClearConfirm(false);
+        }}
+        title="Cancel active order?"
+        message={`This will clear all items from the cart and cancel the current unpaid order.\n\n${cartLines.length} item(s) with total ${formatMoney(cartTotals.grand_total)} will be removed.`}
+        confirmText="Yes, cancel order"
+        cancelText="No, keep order"
+        variant="danger"
+      />
+
+      {/* Finalize Order Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={showFinalizeConfirm}
+        onClose={() => setShowFinalizeConfirm(false)}
+        onConfirm={() => {
+          setOrderFinalized(true);
+          setShowFinalizeConfirm(false);
+        }}
+        title="Finalize order?"
+        message={`Finalize this order with ${cartLines.length} item(s) and total ${formatMoney(cartTotals.grand_total)}?`}
+        confirmText="Yes, finalize"
+        cancelText="Cancel"
+        variant="primary"
+      />
     </div>
   );
 }

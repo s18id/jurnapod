@@ -86,7 +86,7 @@ export function useCheckout({
       cartTotals: CartTotals,
       options?: {
         setPaymentMethod?: (method: string) => void;
-        setCart?: () => void;
+        setCart?: () => Promise<void> | void;
         setPaidAmount?: (amount: number) => void;
         setCurrentFlowId?: (id: string) => void;
         onAfterComplete?: () => Promise<void> | void;
@@ -155,7 +155,7 @@ export function useCheckout({
           void requestPush("BACKGROUND_SYNC").catch(() => {});
         }
         await options?.onAfterComplete?.();
-        options?.setCart?.();
+        await options?.setCart?.();
         options?.setPaidAmount?.(0);
         options?.setCurrentFlowId?.(crypto.randomUUID());
       } catch (error) {

@@ -1,12 +1,13 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React, { useEffect, useMemo, useState, type ReactNode } from "react";
+import React, { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IonBadge, IonContent, IonLabel, IonPage, IonTabBar, IonTabButton } from "@ionic/react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { SyncBadge } from "../features/sync/SyncBadge.js";
 import { OutletContextSwitcher } from "../features/outlet/OutletContextSwitcher.js";
+import { Button, Modal } from "../shared/components/index.js";
 import { MOBILE_BREAKPOINT } from "../shared/utils/constants.js";
 import { routes, mobileTabs } from "./routes.js";
 import { usePosAppState } from "./pos-app-state.js";
@@ -36,6 +37,9 @@ export function AppLayout({ children, cartItemCount, context }: AppLayoutProps):
     isOpen: false,
     targetPath: ""
   });
+  const [guardActionInFlight, setGuardActionInFlight] = useState(false);
+  // Ref lock for same-tick dedupe (stronger than state for rapid clicks)
+  const guardActionLockRef = useRef(false);
   const {
     scope,
     setScope,
@@ -126,21 +130,42 @@ export function AppLayout({ children, cartItemCount, context }: AppLayoutProps):
 
   // Modal action handlers
   const handleSendToKitchenAndNavigate = () => {
+    if (guardActionLockRef.current || guardActionInFlight) return;
+    guardActionLockRef.current = true;
+    setGuardActionInFlight(true);
     createOrderCheckpoint();
     navigate(navigationGuard.targetPath);
     setNavigationGuard({ isOpen: false, targetPath: "" });
+    setGuardActionInFlight(false);
+    guardActionLockRef.current = false;
   };
 
   const handleDiscardAndNavigate = () => {
+    if (guardActionLockRef.current || guardActionInFlight) return;
+    guardActionLockRef.current = true;
+    setGuardActionInFlight(true);
     void (async () => {
-      clearCart();
-      navigate(navigationGuard.targetPath);
-      setNavigationGuard({ isOpen: false, targetPath: "" });
+      try {
+        discardDraftItems();
+        navigate(navigationGuard.targetPath);
+        setNavigationGuard({ isOpen: false, targetPath: "" });
+      } finally {
+        setGuardActionInFlight(false);
+        guardActionLockRef.current = false;
+      }
     })();
   };
 
   const handleCancelNavigation = () => {
-    setNavigationGuard({ isOpen: false, targetPath: "" });
+    if (guardActionLockRef.current || guardActionInFlight) return;
+    guardActionLockRef.current = true;
+    setGuardActionInFlight(true);
+    try {
+      setNavigationGuard({ isOpen: false, targetPath: "" });
+    } finally {
+      setGuardActionInFlight(false);
+      guardActionLockRef.current = false;
+    }
   };
 
   return (
@@ -364,92 +389,50 @@ export function AppLayout({ children, cartItemCount, context }: AppLayoutProps):
       ) : null}
 
       {/* Navigation Guard Modal */}
-      {navigationGuard.isOpen ? (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 9999
-          }}
-          onClick={handleCancelNavigation}
-        >
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: 8,
-              padding: 24,
-              maxWidth: 400,
-              margin: 16,
-              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)"
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#0f172a", marginBottom: 12 }}>
-              Unsent items in order
-            </h2>
-            <p style={{ fontSize: 14, color: "#64748b", marginBottom: 20 }}>
-              You have unsent items in this order. What would you like to do?
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button
-                type="button"
-                onClick={handleSendToKitchenAndNavigate}
-                style={{
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: "#ffffff",
-                  background: "#2563eb",
-                  border: "1px solid #1d4ed8",
-                  borderRadius: 6,
-                  padding: "10px 16px",
-                  cursor: "pointer"
-                }}
-              >
-                Send to kitchen and continue
-              </button>
-              <button
-                type="button"
-                onClick={handleDiscardAndNavigate}
-                style={{
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: "#ffffff",
-                  background: "#dc2626",
-                  border: "1px solid #b91c1c",
-                  borderRadius: 6,
-                  padding: "10px 16px",
-                  cursor: "pointer"
-                }}
-              >
-                Discard unsent items
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelNavigation}
-                style={{
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: "#0f172a",
-                  background: "#f1f5f9",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: 6,
-                  padding: "10px 16px",
-                  cursor: "pointer"
-                }}
-              >
-                Stay on this page
-              </button>
-            </div>
+      <Modal
+        isOpen={navigationGuard.isOpen}
+        onClose={handleCancelNavigation}
+        title="Unsent items in order"
+        titleId="guard-modal-title"
+      >
+        <div style={{ paddingTop: 8 }}>
+          <p id="guard-modal-description" style={{ fontSize: 14, color: "#64748b", marginBottom: 20 }}>
+            You have unsent items in this order. What would you like to do?
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <Button
+              id="guard-stay-on-page"
+              name="guardStayOnPage"
+              variant="secondary"
+              fullWidth
+              disabled={guardActionInFlight}
+              onClick={handleCancelNavigation}
+            >
+              Stay on this page
+            </Button>
+            <Button
+              id="guard-send-to-kitchen"
+              name="guardSendToKitchen"
+              variant="primary"
+              fullWidth
+              disabled={guardActionInFlight}
+              onClick={handleSendToKitchenAndNavigate}
+            >
+              {guardActionInFlight ? "Processing..." : "Send to kitchen and continue"}
+            </Button>
+            <Button
+              id="guard-discard-unsent"
+              name="guardDiscardUnsent"
+              variant="danger"
+              fullWidth
+              disabled={guardActionInFlight}
+              onClick={handleDiscardAndNavigate}
+            >
+              {guardActionInFlight ? "Processing..." : "Discard unsent items"}
+            </Button>
           </div>
         </div>
-      ) : null}
+      </Modal>
     </IonPage>
   );
 }
