@@ -90,9 +90,17 @@ function flattenTree(nodes: AccountTreeNode[]): AccountResponse[] {
 
 /**
  * Hook: useAccountTypes
- * Fetches list of account types for a company
+ * Fetches list of account types for a company with optional filters
  */
-export function useAccountTypes(companyId: number, accessToken: string) {
+export function useAccountTypes(
+  companyId: number,
+  accessToken: string,
+  filters?: {
+    is_active?: boolean;
+    search?: string;
+    category?: string;
+  }
+) {
   const [data, setData] = useState<AccountTypeResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,9 +112,18 @@ export function useAccountTypes(companyId: number, accessToken: string) {
     try {
       if (isOnline) {
         const params = new URLSearchParams({ 
-          company_id: String(companyId),
-          is_active: "true"
+          company_id: String(companyId)
         });
+
+        if (filters?.is_active !== undefined) {
+          params.set("is_active", String(filters.is_active));
+        }
+        if (filters?.search) {
+          params.set("search", filters.search);
+        }
+        if (filters?.category) {
+          params.set("category", filters.category);
+        }
 
         const response = await apiRequest<AccountTypesListResponse>(
           `/accounts/types?${params.toString()}`,
@@ -129,7 +146,7 @@ export function useAccountTypes(companyId: number, accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [companyId, accessToken, isOnline]);
+  }, [companyId, accessToken, isOnline, filters?.is_active, filters?.search, filters?.category]);
 
   useEffect(() => {
     refetch();

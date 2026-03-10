@@ -32,7 +32,8 @@ export const NormalBalanceSchema = z.enum(["D", "K"]);
 /**
  * Report Group
  * NRC = Neraca (Balance Sheet in Indonesian)
- * LR = Laba Rugi (Income Statement/P&L in Indonesian)
+ * PL = Laba Rugi (Income Statement/P&L in Indonesian)
+ * Note: Legacy data may contain 'LR' which is normalized to 'PL'
  */
 export const ReportGroupSchema = z.enum(["NRC", "PL"]);
 
@@ -63,17 +64,18 @@ const AccountNameSchema = z
 /**
  * Full Account Entity Response
  * Contains all fields from the database
- * Note: Includes both old (type_name, normal_balance, report_group) and new (account_type_id) fields
+ * Note: Accounts table is runtime source of truth for classification (type_name, normal_balance, report_group)
+ * account_type_id is optional template metadata only
  */
 export const AccountResponseSchema = z.object({
   id: NumericIdSchema,
   company_id: NumericIdSchema,
   code: AccountCodeSchema,
   name: AccountNameSchema,
-  account_type_id: NumericIdSchema.nullable(),
-  type_name: AccountTypeNameSchema, // Legacy field, kept for backward compatibility
-  normal_balance: NormalBalanceSchema.nullable(), // Legacy field
-  report_group: ReportGroupSchema.nullable(), // Legacy field
+  account_type_id: NumericIdSchema.nullable(), // Optional template reference
+  type_name: AccountTypeNameSchema, // Classification (can inherit from parent)
+  normal_balance: NormalBalanceSchema.nullable(), // Classification (can inherit from parent)
+  report_group: ReportGroupSchema.nullable(), // Classification (can inherit from parent)
   parent_account_id: NumericIdSchema.nullable(),
   is_group: z.boolean(),
   is_payable: z.boolean(),
@@ -85,16 +87,21 @@ export const AccountResponseSchema = z.object({
 /**
  * Account Create Request
  * For creating new accounts
- * Supports both new (account_type_id) and legacy (type_name/normal_balance/report_group) fields
+ * Classification fields (type_name, normal_balance, report_group) are primary source of truth
+ * account_type_id is optional template reference
+ * 
+ * Per-field inheritance: each classification field is resolved independently:
+ * - explicit value > template value (if account_type_id) > parent inherited value > null
+ * - Example: provide type_name but omit normal_balance → type_name used, normal_balance inherited
  */
 export const AccountCreateRequestSchema = z.object({
   company_id: NumericIdSchema,
   code: AccountCodeSchema,
   name: AccountNameSchema,
-  account_type_id: NumericIdSchema.optional().nullable(),
-  type_name: AccountTypeNameSchema.optional(), // Legacy field
-  normal_balance: NormalBalanceSchema.optional().nullable(), // Legacy field
-  report_group: ReportGroupSchema.optional().nullable(), // Legacy field
+  account_type_id: NumericIdSchema.optional().nullable(), // Optional template
+  type_name: AccountTypeNameSchema.optional().nullable(), // Classification (omit/null = inherit)
+  normal_balance: NormalBalanceSchema.optional().nullable(), // Classification (omit/null = inherit)
+  report_group: ReportGroupSchema.optional().nullable(), // Classification (omit/null = inherit)
   parent_account_id: NumericIdSchema.optional().nullable(),
   is_group: z.boolean().default(false),
   is_payable: z.boolean().optional().default(false),
@@ -104,16 +111,21 @@ export const AccountCreateRequestSchema = z.object({
 /**
  * Account Update Request
  * For updating existing accounts (partial updates allowed)
- * Supports both new (account_type_id) and legacy fields
+ * 
+ * Per-field inheritance on update:
+ * - provide value → explicit override
+ * - provide null → re-enable inheritance from parent/template
+ * - omit field → keep current value (no inheritance change)
+ * - reparent while inheriting → recomputes from new parent
  */
 export const AccountUpdateRequestSchema = z
   .object({
     code: AccountCodeSchema.optional(),
     name: AccountNameSchema.optional(),
-    account_type_id: NumericIdSchema.optional().nullable(),
-    type_name: AccountTypeNameSchema.optional(), // Legacy field
-    normal_balance: NormalBalanceSchema.optional().nullable(), // Legacy field
-    report_group: ReportGroupSchema.optional().nullable(), // Legacy field
+    account_type_id: NumericIdSchema.optional().nullable(), // Optional template
+    type_name: AccountTypeNameSchema.optional().nullable(), // Classification (null = inherit)
+    normal_balance: NormalBalanceSchema.optional().nullable(), // Classification (null = inherit)
+    report_group: ReportGroupSchema.optional().nullable(), // Classification (null = inherit)
     parent_account_id: NumericIdSchema.optional().nullable(),
     is_group: z.boolean().optional(),
     is_payable: z.boolean().optional(),
