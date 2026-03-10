@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
 
 export type PaymentMethodConfig = {
@@ -36,15 +36,20 @@ export function useOutletPaymentMethodMappings(outletId: number, accessToken: st
   const [mappings, setMappings] = useState<PaymentMethodMapping[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestSeqRef = useRef(0);
 
   const refetch = useCallback(async () => {
     if (!outletId) {
+      requestSeqRef.current += 1;
       setPaymentMethods([]);
       setMappings([]);
       setError(null);
       setLoading(false);
       return;
     }
+
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
 
     setLoading(true);
     setError(null);
@@ -54,9 +59,15 @@ export function useOutletPaymentMethodMappings(outletId: number, accessToken: st
         {},
         accessToken
       );
+      if (requestSeq !== requestSeqRef.current) {
+        return;
+      }
       setPaymentMethods(response.data.payment_methods);
       setMappings(response.data.mappings);
     } catch (fetchError) {
+      if (requestSeq !== requestSeqRef.current) {
+        return;
+      }
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
       } else {
@@ -65,7 +76,9 @@ export function useOutletPaymentMethodMappings(outletId: number, accessToken: st
       setPaymentMethods([]);
       setMappings([]);
     } finally {
-      setLoading(false);
+      if (requestSeq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [outletId, accessToken]);
 

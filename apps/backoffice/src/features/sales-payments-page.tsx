@@ -362,10 +362,96 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     }
   }, [mappingsLoading, paymentMappings, newPayment.splits.length]);
 
-  function handleOutletChange(value: string | null) {
-    if (value) {
-      setSelectedOutletId(Number(value));
+  // Backfill split account when invoice was selected before mappings finished loading.
+  // This closes the race where buildPaymentFromInvoiceSelection creates a placeholder
+  // split with empty account_id while mappings are still loading.
+  useEffect(() => {
+    if (mappingsLoading || paymentMappings.length === 0) {
+      return;
     }
+
+    const invoiceDefault = paymentMappings.find((m) => m.is_invoice_default === true);
+    if (!invoiceDefault) {
+      return;
+    }
+
+    setNewPayment((prev) => {
+      if (!prev.invoice_id.trim()) {
+        return prev;
+      }
+
+      if (prev.splits.length !== 1) {
+        return prev;
+      }
+
+      const [firstSplit] = prev.splits;
+      if (firstSplit.account_id.trim()) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        splits: [
+          {
+            ...firstSplit,
+            account_id: String(invoiceDefault.account_id)
+          }
+        ]
+      };
+    });
+  }, [mappingsLoading, paymentMappings]);
+
+  // Mirror late-mapping backfill for edit form invoice reselection.
+  useEffect(() => {
+    if (mappingsLoading || paymentMappings.length === 0) {
+      return;
+    }
+
+    const invoiceDefault = paymentMappings.find((m) => m.is_invoice_default === true);
+    if (!invoiceDefault) {
+      return;
+    }
+
+    setEditingPayment((prev) => {
+      if (!prev) {
+        return prev;
+      }
+
+      if (!prev.invoice_id.trim()) {
+        return prev;
+      }
+
+      if (prev.splits.length !== 1) {
+        return prev;
+      }
+
+      const [firstSplit] = prev.splits;
+      if (firstSplit.account_id.trim()) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        splits: [
+          {
+            ...firstSplit,
+            account_id: String(invoiceDefault.account_id)
+          }
+        ]
+      };
+    });
+  }, [mappingsLoading, paymentMappings]);
+
+  function handleOutletChange(value: string | null) {
+    if (!value) return;
+    const nextOutletId = Number(value);
+    if (!nextOutletId || nextOutletId === selectedOutletId) return;
+
+    setSelectedOutletId(nextOutletId);
+    setExpandedPaymentId(null);
+    setError(null);
+    resetNewPayment();
+    setEditingPayment(null);
   }
 
   function resetNewPayment() {
