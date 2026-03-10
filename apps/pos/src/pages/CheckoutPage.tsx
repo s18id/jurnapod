@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { useCheckout } from "../features/checkout/useCheckout.js";
 import { CheckoutForm } from "../features/checkout/CheckoutForm.js";
@@ -64,14 +64,20 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
       disposed = true;
     };
   }, [context.runtime, scope.company_id, scope.outlet_id]);
+
+  const checkoutRuntime = useMemo(
+    () => ({
+      isPaymentMethodAllowed: context.runtime.isPaymentMethodAllowed.bind(context.runtime),
+      resolvePaymentMethod: context.runtime.resolvePaymentMethod.bind(context.runtime)
+    }),
+    [context.runtime]
+  );
+
   const { paymentMethod, setPaymentMethod, paymentMethodAllowed, canCompleteSale, completeInFlight, lastCompleteMessage, runCompleteSale } = useCheckout({
     scope,
     activeOrderContext,
     requestPush: context.orchestrator.requestPush.bind(context.orchestrator),
-    runtime: {
-      isPaymentMethodAllowed: context.runtime.isPaymentMethodAllowed.bind(context.runtime),
-      resolvePaymentMethod: context.runtime.resolvePaymentMethod.bind(context.runtime)
-    },
+    runtime: checkoutRuntime,
     initialPaymentMethods: checkoutConfig.payment_methods
   });
 

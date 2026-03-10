@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { CASHIER_USER_ID } from "../../shared/utils/constants.js";
 import { createSaleDraft, completeSale } from "../../offline/sales.js";
 import type { RuntimeOutletScope } from "../../services/runtime-service.js";
@@ -43,6 +43,13 @@ export interface UseCheckoutReturn {
     ) => Promise<void>;
 }
 
+function areStringArraysEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
+}
+
 export function useCheckout({
   scope,
   activeOrderContext,
@@ -56,9 +63,7 @@ export function useCheckout({
   const [lastCompleteMessage, setLastCompleteMessage] = useState<string | null>(null);
   const inFlightFlowIdsRef = useRef<Set<string>>(new Set());
 
-  // React to initialPaymentMethods changes (e.g., when scoped config loads)
-  React.useEffect(() => {
-    // Normalize: deduplicate and filter empty strings (matches runtime behavior)
+  const normalizedInitialMethods = useMemo(() => {
     const seen = new Set<string>();
     const normalizedMethods: string[] = [];
     for (const method of initialPaymentMethods) {
@@ -68,18 +73,32 @@ export function useCheckout({
         normalizedMethods.push(trimmed);
       }
     }
-    
-    setPaymentMethods(normalizedMethods);
-    
-    // If current method is no longer allowed, auto-resolve to allowed method
-    if (normalizedMethods.length > 0 && !runtime.isPaymentMethodAllowed(paymentMethod, normalizedMethods)) {
-      const nextMethod = runtime.resolvePaymentMethod(paymentMethod, normalizedMethods);
+    return normalizedMethods;
+  }, [initialPaymentMethods]);
+
+  React.useEffect(() => {
+    setPaymentMethods((previous) =>
+      areStringArraysEqual(previous, normalizedInitialMethods) ? previous : normalizedInitialMethods
+    );
+  }, [normalizedInitialMethods]);
+
+  React.useEffect(() => {
+    if (
+      paymentMethods.length > 0 &&
+      !runtime.isPaymentMethodAllowed(paymentMethod, paymentMethods)
+    ) {
+      const nextMethod = runtime.resolvePaymentMethod(paymentMethod, paymentMethods);
       setPaymentMethod(nextMethod);
       setLastCompleteMessage(
         `Payment method ${paymentMethod} is no longer allowed for this outlet. Switched to ${nextMethod}.`
       );
     }
-  }, [initialPaymentMethods, runtime, paymentMethod]);
+  }, [
+    paymentMethod,
+    paymentMethods,
+    runtime.isPaymentMethodAllowed,
+    runtime.resolvePaymentMethod
+  ]);
 
   const lockSaleCompletion = useCallback((flowId: string): boolean => {
     if (inFlightFlowIdsRef.current.has(flowId)) {
