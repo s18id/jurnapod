@@ -440,3 +440,89 @@ test(
     }
   }
 );
+
+test(
+  "PUT /api/accounts: clearing one classification field keeps omitted fields unchanged",
+  { concurrency: false, timeout: TEST_TIMEOUT_MS },
+  async () => {
+    const { db, baseUrl } = testContext;
+    const runId = Date.now().toString(36);
+
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+    const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD", "password123");
+
+    let companyId = 0;
+    const createdAccountIds = [];
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id FROM users u INNER JOIN companies c ON c.id = u.company_id WHERE c.code = ? AND u.email = ? AND u.is_active = 1 LIMIT 1`,
+        [companyCode, ownerEmail]
+      );
+      assert.ok(ownerRows.length > 0, "Owner fixture not found");
+      companyId = Number(ownerRows[0].company_id);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await loginResponse.json();
+      const accessToken = loginBody.data.access_token;
+
+      const [parentResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name, type_name, normal_balance, report_group, is_group, is_active) VALUES (?, ?, ?, 'TemplateType', 'D', 'PL', 1, 1)`,
+        [companyId, `PCH-${runId}`, `Parent ${runId}`]
+      );
+      const parentId = Number(parentResult.insertId);
+      createdAccountIds.push(parentId);
+
+      const [childResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name, parent_account_id, type_name, normal_balance, report_group, is_group, is_active) VALUES (?, ?, ?, ?, 'ManualType', 'K', 'NRC', 0, 1)`,
+        [companyId, `CCH-${runId}`, `Child ${runId}`, parentId]
+      );
+      const childId = Number(childResult.insertId);
+      createdAccountIds.push(childId);
+
+      const [beforeRes] = await db.execute(
+        `SELECT type_name, normal_balance, report_group FROM accounts WHERE id = ?`,
+        [childId]
+      );
+      assert.strictEqual(beforeRes[0].type_name, "ManualType");
+      assert.strictEqual(beforeRes[0].normal_balance, "K");
+      assert.strictEqual(beforeRes[0].report_group, "NRC");
+
+      const updateResponse = await fetch(`${baseUrl}/api/accounts/${childId}`, {
+        method: "PUT",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          report_group: null
+        })
+      });
+
+      assert.equal(updateResponse.status, 200, "PUT /api/accounts/:id should return 200");
+      const updateBody = await updateResponse.json();
+      assert.equal(updateBody.success, true, "PUT should succeed");
+
+      const [afterRes] = await db.execute(
+        `SELECT type_name, normal_balance, report_group FROM accounts WHERE id = ?`,
+        [childId]
+      );
+
+      assert.strictEqual(afterRes[0].type_name, "ManualType", "Omitted type_name must remain unchanged");
+      assert.strictEqual(afterRes[0].normal_balance, "K", "Omitted normal_balance must remain unchanged");
+      assert.strictEqual(afterRes[0].report_group, "PL", "Cleared report_group should resolve from inheritance");
+    } finally {
+      for (const id of createdAccountIds) {
+        try {
+          await db.execute(`DELETE FROM accounts WHERE id = ?`, [id]);
+        } catch (e) { /* ignore */ }
+      }
+    }
+  }
+);

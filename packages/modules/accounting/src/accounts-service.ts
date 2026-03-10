@@ -405,9 +405,18 @@ export class AccountsService {
       }
     }
 
-    const needsInheritanceResolution = 
-      isClearingClassification || 
-      (data.parent_account_id !== undefined && (isInheritingClassification || likelyInherited));
+    const shouldRecomputeOnReparent =
+      data.parent_account_id !== undefined && (isInheritingClassification || likelyInherited);
+    const shouldResolveTypeName =
+      data.type_name === null || (shouldRecomputeOnReparent && data.type_name === undefined);
+    const shouldResolveNormalBalance =
+      data.normal_balance === null || (shouldRecomputeOnReparent && data.normal_balance === undefined);
+    const shouldResolveReportGroup =
+      data.report_group === null || (shouldRecomputeOnReparent && data.report_group === undefined);
+
+    const needsInheritanceResolution =
+      isClearingClassification ||
+      shouldRecomputeOnReparent;
 
     if (needsInheritanceResolution) {
       const updatedFieldsSet = new Set(updateFields.map(f => f.split(" = ?")[0]));
@@ -417,17 +426,17 @@ export class AccountsService {
       if (templateAccountTypeId) {
         const typeMeta = await this.getAccountTypeMetadata(templateAccountTypeId, companyId);
         if (typeMeta) {
-          if ((data.type_name === null || data.type_name === undefined) && !updatedFieldsSet.has("type_name")) {
+          if (shouldResolveTypeName && !updatedFieldsSet.has("type_name")) {
             updateFields.push("type_name = ?");
             params.push(typeMeta.name);
             updatedFieldsSet.add("type_name");
           }
-          if ((data.normal_balance === null || data.normal_balance === undefined) && !updatedFieldsSet.has("normal_balance")) {
+          if (shouldResolveNormalBalance && !updatedFieldsSet.has("normal_balance")) {
             updateFields.push("normal_balance = ?");
             params.push(typeMeta.normal_balance);
             updatedFieldsSet.add("normal_balance");
           }
-          if ((data.report_group === null || data.report_group === undefined) && !updatedFieldsSet.has("report_group")) {
+          if (shouldResolveReportGroup && !updatedFieldsSet.has("report_group")) {
             updateFields.push("report_group = ?");
             params.push(typeMeta.report_group);
             updatedFieldsSet.add("report_group");
@@ -438,33 +447,33 @@ export class AccountsService {
       if (newParentId) {
         const ancestor = await this.findNearestAncestorWithType(newParentId, companyId);
         if (ancestor) {
-          if ((data.type_name === null || data.type_name === undefined) && !updatedFieldsSet.has("type_name")) {
+          if (shouldResolveTypeName && !updatedFieldsSet.has("type_name")) {
             updateFields.push("type_name = ?");
             params.push(ancestor.name);
             updatedFieldsSet.add("type_name");
           }
-          if ((data.normal_balance === null || data.normal_balance === undefined) && !updatedFieldsSet.has("normal_balance")) {
+          if (shouldResolveNormalBalance && !updatedFieldsSet.has("normal_balance")) {
             updateFields.push("normal_balance = ?");
             params.push(ancestor.normal_balance);
             updatedFieldsSet.add("normal_balance");
           }
-          if ((data.report_group === null || data.report_group === undefined) && !updatedFieldsSet.has("report_group")) {
+          if (shouldResolveReportGroup && !updatedFieldsSet.has("report_group")) {
             updateFields.push("report_group = ?");
             params.push(ancestor.report_group);
             updatedFieldsSet.add("report_group");
           }
         } else if (!templateAccountTypeId) {
-          if ((data.type_name === null || data.type_name === undefined) && !updatedFieldsSet.has("type_name")) {
+          if (shouldResolveTypeName && !updatedFieldsSet.has("type_name")) {
             updateFields.push("type_name = ?");
             params.push(null);
             updatedFieldsSet.add("type_name");
           }
-          if ((data.normal_balance === null || data.normal_balance === undefined) && !updatedFieldsSet.has("normal_balance")) {
+          if (shouldResolveNormalBalance && !updatedFieldsSet.has("normal_balance")) {
             updateFields.push("normal_balance = ?");
             params.push(null);
             updatedFieldsSet.add("normal_balance");
           }
-          if ((data.report_group === null || data.report_group === undefined) && !updatedFieldsSet.has("report_group")) {
+          if (shouldResolveReportGroup && !updatedFieldsSet.has("report_group")) {
             updateFields.push("report_group = ?");
             params.push(null);
             updatedFieldsSet.add("report_group");
@@ -477,17 +486,17 @@ export class AccountsService {
           updatedFieldsSet.has("report_group");
         
         if (!hasTemplateApplied && !templateAccountTypeId) {
-          if ((data.type_name === null || data.type_name === undefined) && !updatedFieldsSet.has("type_name")) {
+          if (shouldResolveTypeName && !updatedFieldsSet.has("type_name")) {
             updateFields.push("type_name = ?");
             params.push(null);
             updatedFieldsSet.add("type_name");
           }
-          if ((data.normal_balance === null || data.normal_balance === undefined) && !updatedFieldsSet.has("normal_balance")) {
+          if (shouldResolveNormalBalance && !updatedFieldsSet.has("normal_balance")) {
             updateFields.push("normal_balance = ?");
             params.push(null);
             updatedFieldsSet.add("normal_balance");
           }
-          if ((data.report_group === null || data.report_group === undefined) && !updatedFieldsSet.has("report_group")) {
+          if (shouldResolveReportGroup && !updatedFieldsSet.has("report_group")) {
             updateFields.push("report_group = ?");
             params.push(null);
             updatedFieldsSet.add("report_group");
