@@ -12,6 +12,7 @@ import {
   filterRoutesByModules
 } from "./routes";
 import { useModules } from "../hooks/use-modules";
+import { useHeaderAlerts } from "../hooks/use-header-alerts";
 import { ApiError, getApiBaseUrl } from "../lib/api-client";
 import { setupMasterDataRefresh } from "../lib/cache-service";
 import { setupAutoSync } from "../lib/auto-sync";
@@ -260,6 +261,16 @@ export function AppRouter() {
     loading: modulesLoading,
     source: modulesSource
   } = useModules(accessToken, user?.company_id ?? null);
+
+  const {
+    count: alertCount,
+    items: alertItems,
+    readItems: alertReadItems,
+    loading: alertsLoading,
+    refreshing: alertsRefreshing,
+    refresh: refreshAlerts,
+    markAllAsRead: markAllAlertsRead
+  } = useHeaderAlerts(user?.id ?? null);
 
   useEffect(() => {
     const nextPath = resolvePathFromLocation();
@@ -559,6 +570,13 @@ export function AppRouter() {
         activePath={route?.path ?? DEFAULT_ROUTE_PATH}
         onNavigate={ensureHash}
         onSignOut={handleSignOut}
+        alertCount={alertCount}
+        alertItems={alertItems}
+        alertReadItems={alertReadItems}
+        alertsLoading={alertsLoading}
+        alertsRefreshing={alertsRefreshing}
+        onRefreshAlerts={refreshAlerts}
+        onMarkAllAlertsRead={markAllAlertsRead}
       >
         {warningSource ? <ModuleConfigWarning source={warningSource} /> : null}
         {canAccess && route ? (
