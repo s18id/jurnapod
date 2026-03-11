@@ -149,12 +149,15 @@ export function useOutletPaymentMethodMappings(
       throw new Error("Outlet ID required for outlet scope");
     }
 
-    const filteredMappings = nextMappings.map((m) => ({
-      method_code: m.method_code,
-      account_id: m.account_id,
-      label: m.label?.trim() || undefined,
-      is_invoice_default: m.is_invoice_default
-    }));
+    const filteredMappings = nextMappings.map((m) => {
+      const hasAccount = m.account_id !== "";
+      return {
+        method_code: m.method_code,
+        account_id: m.account_id,
+        label: m.label?.trim() || undefined,
+        is_invoice_default: hasAccount ? m.is_invoice_default : false
+      };
+    });
 
     const response = await apiRequest<SaveResponse>(
       `/settings/outlet-payment-method-mappings`,

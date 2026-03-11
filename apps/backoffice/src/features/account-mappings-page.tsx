@@ -60,6 +60,10 @@ const mappingGroups: Array<{
 
 const allMappingKeys = mappingGroups.flatMap((group) => group.keys.map((entry) => entry.key));
 
+function hasMappedPaymentAccount(value: number | "" | undefined | null): value is number {
+  return typeof value === "number" && value > 0;
+}
+
 function buildDefaultMappings(): Record<OutletAccountMappingKey, number | ""> {
   return allMappingKeys.reduce(
     (acc, key) => {
@@ -171,7 +175,8 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
         if (m.label) {
           nextLabels[m.method_code] = m.label;
         }
-        if (m.is_invoice_default) {
+        const accountId = (m.account_id ?? "") as number | "";
+        if (m.is_invoice_default && hasMappedPaymentAccount(accountId)) {
           invoiceDefault = m.method_code;
         }
       }
@@ -356,12 +361,17 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
 
     setPaymentSaving(true);
     try {
-      const payload = effectivePaymentMethods.map((method) => ({
-        method_code: method.code,
-        account_id: paymentFormState[method.code],
-        label: paymentLabelState[method.code]?.trim() || undefined,
-        is_invoice_default: invoiceDefaultMethod === method.code
-      }));
+      const payload = effectivePaymentMethods.map((method) => {
+        const accountId = paymentFormState[method.code];
+        const hasAccount = hasMappedPaymentAccount(accountId);
+
+        return {
+          method_code: method.code,
+          account_id: accountId,
+          label: paymentLabelState[method.code]?.trim() || undefined,
+          is_invoice_default: hasAccount && invoiceDefaultMethod === method.code
+        };
+      });
       await savePayment(payload);
       await refetchPayment();
       setDraftMethods([]);
@@ -595,7 +605,7 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
                 </Table.Thead>
                 <Table.Tbody>
                   {effectivePaymentMethods.map((method) => {
-                    const isAccountSelected = !!paymentFormState[method.code] && paymentFormState[method.code] !== "";
+                    const isAccountSelected = hasMappedPaymentAccount(paymentFormState[method.code]);
                     const source = paymentSourceState[method.code];
                     return (
                       <Table.Tr key={method.code} data-testid={`payment-method-${method.code}`}>
@@ -630,12 +640,17 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
                         <Table.Td>
                           <Select
                             value={String(paymentFormState[method.code] ?? "")}
-                            onChange={(value) =>
+                            onChange={(value) => {
+                              const nextAccount = value ? Number(value) : "";
                               setPaymentFormState((prev) => ({
                                 ...prev,
-                                [method.code]: value ? Number(value) : ""
-                              }))
-                            }
+                                [method.code]: nextAccount
+                              }));
+
+                              if (!hasMappedPaymentAccount(nextAccount) && invoiceDefaultMethod === method.code) {
+                                setInvoiceDefaultMethod(null);
+                              }
+                            }}
                             placeholder={scope === "outlet" && source === "company" ? "Inherited from company" : "Select account"}
                             data={paymentAccountOptions.map((account) => ({
                               value: String(account.id),
