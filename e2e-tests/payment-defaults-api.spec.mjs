@@ -4,9 +4,26 @@
  * More reliable than UI tests, based on MANUAL_TESTING_GUIDE.md
  * 
  * Run with: node e2e-tests/payment-defaults-api.spec.mjs
+ * 
+ * Environment variables:
+ *   API_BASE         - API base URL (default: http://localhost:3001/api)
+ *   JP_COMPANY_CODE  - Company code for login (default: JP)
+ *   JP_OWNER_EMAIL  - Owner email for login
+ *   JP_OWNER_PASSWORD - Owner password for login
  */
 
 const API_BASE = process.env.API_BASE || "http://localhost:3001/api";
+
+function readEnv(name, fallback = null) {
+  const value = process.env[name];
+  if (value == null || value.length === 0) {
+    if (fallback != null) {
+      return fallback;
+    }
+    throw new Error(`${name} is required for E2E test`);
+  }
+  return value;
+}
 
 const testResults = {
   passed: 0,
@@ -31,12 +48,16 @@ async function apiRequest(path, options = {}, token = null) {
 }
 
 async function login() {
+  const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+  const email = readEnv("JP_OWNER_EMAIL").toLowerCase();
+  const password = readEnv("JP_OWNER_PASSWORD");
+
   const { response, data } = await apiRequest("/auth/login", {
     method: "POST",
     body: JSON.stringify({
-      company_code: "JP",
-      email: "ahmad@signal18.id",
-      password: "ChangeMe123!"
+      company_code: companyCode,
+      email,
+      password
     })
   });
 
@@ -76,7 +97,7 @@ async function testAuthentication() {
 // Test 2: Fetch Payment Method Mappings
 async function testFetchMappings(token, outletId) {
   const { response, data } = await apiRequest(
-    `/outlet-payment-method-mappings?outlet_id=${outletId}`,
+    `/settings/outlet-payment-method-mappings?scope=outlet&outlet_id=${outletId}`,
     {},
     token
   );
@@ -115,10 +136,11 @@ async function testSetInvoiceDefault(token, outletId, mappings) {
   }));
 
   const { response, data } = await apiRequest(
-    `/outlet-payment-method-mappings`,
+    `/settings/outlet-payment-method-mappings`,
     {
       method: "PUT",
       body: JSON.stringify({
+        scope: "outlet",
         outlet_id: outletId,
         mappings: updatedMappings
       })
@@ -159,10 +181,11 @@ async function testMultipleDefaultsValidation(token, outletId, mappings) {
   }));
 
   const { response, data } = await apiRequest(
-    `/outlet-payment-method-mappings`,
+    `/settings/outlet-payment-method-mappings`,
     {
       method: "PUT",
       body: JSON.stringify({
+        scope: "outlet",
         outlet_id: outletId,
         mappings: invalidMappings
       })
@@ -192,10 +215,11 @@ async function testUnsetDefault(token, outletId, mappings) {
   }));
 
   const { response, data } = await apiRequest(
-    `/outlet-payment-method-mappings`,
+    `/settings/outlet-payment-method-mappings`,
     {
       method: "PUT",
       body: JSON.stringify({
+        scope: "outlet",
         outlet_id: outletId,
         mappings: updatedMappings
       })
@@ -232,10 +256,11 @@ async function testChangeDefault(token, outletId, mappings) {
   }));
 
   const { response, data } = await apiRequest(
-    `/outlet-payment-method-mappings`,
+    `/settings/outlet-payment-method-mappings`,
     {
       method: "PUT",
       body: JSON.stringify({
+        scope: "outlet",
         outlet_id: outletId,
         mappings: updatedMappings
       })

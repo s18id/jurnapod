@@ -2,6 +2,21 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  Container,
+  Group,
+  Select,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
 import type { SessionUser } from "../lib/session";
 import { useOnlineStatus } from "../lib/connection";
 import { OfflinePage } from "../components/offline-page";
@@ -9,12 +24,14 @@ import { useAccounts } from "../hooks/use-accounts";
 import {
   useOutletAccountMappings,
   type OutletAccountMappingKey,
-  type OutletAccountMapping
+  type OutletAccountMapping,
+  type EffectiveOutletAccountMapping
 } from "../hooks/use-outlet-account-mappings";
 import {
   useOutletPaymentMethodMappings,
   type PaymentMethodConfig,
-  type PaymentMethodMapping
+  type PaymentMethodMapping,
+  type EffectivePaymentMethodMapping
 } from "../hooks/use-outlet-payment-method-mappings";
 import { ApiError } from "../lib/api-client";
 
@@ -23,45 +40,7 @@ type AccountMappingsPageProps = {
   accessToken: string;
 };
 
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const inputStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 8px",
-  width: "100%"
-} as const;
-
-const buttonStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "8px 12px",
-  backgroundColor: "#fff",
-  cursor: "pointer"
-} as const;
-
-const primaryButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#2f5f4a",
-  color: "#fff",
-  border: "1px solid #2f5f4a"
-} as const;
+type MappingScope = "company" | "outlet";
 
 const mappingGroups: Array<{
   title: string;
@@ -81,6 +60,10 @@ const mappingGroups: Array<{
 
 const allMappingKeys = mappingGroups.flatMap((group) => group.keys.map((entry) => entry.key));
 
+function hasMappedPaymentAccount(value: number | "" | undefined | null): value is number {
+  return typeof value === "number" && value > 0;
+}
+
 function buildDefaultMappings(): Record<OutletAccountMappingKey, number | ""> {
   return allMappingKeys.reduce(
     (acc, key) => {
@@ -93,9 +76,16 @@ function buildDefaultMappings(): Record<OutletAccountMappingKey, number | ""> {
 
 export function AccountMappingsPage({ user, accessToken }: AccountMappingsPageProps) {
   const isOnline = useOnlineStatus();
+  const [scope, setScope] = useState<MappingScope>("outlet");
   const [outletId, setOutletId] = useState<number>(user.outlets[0]?.id ?? 0);
   const [formState, setFormState] = useState<Record<OutletAccountMappingKey, number | "">>(
     buildDefaultMappings()
+  );
+  const [sourceState, setSourceState] = useState<Record<OutletAccountMappingKey, "outlet" | "company" | null>>(
+    {} as Record<OutletAccountMappingKey, "outlet" | "company" | null>
+  );
+  const [companyDefaultsAvailable, setCompanyDefaultsAvailable] = useState<Record<OutletAccountMappingKey, boolean>>(
+    {} as Record<OutletAccountMappingKey, boolean>
   );
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [paymentSubmitError, setPaymentSubmitError] = useState<string | null>(null);
@@ -106,7 +96,11 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
   const [draftMethods, setDraftMethods] = useState<PaymentMethodConfig[]>([]);
   const [paymentLabelState, setPaymentLabelState] = useState<Record<string, string>>({});
 
-  const { data: mappings, loading, error, refetch, save } = useOutletAccountMappings(outletId, accessToken);
+  const { data: mappings, loading, error, refetch, save } = useOutletAccountMappings(
+    scope === "outlet" ? outletId : null,
+    accessToken,
+    scope
+  );
   const {
     paymentMethods,
     mappings: paymentMappings,
@@ -114,7 +108,11 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
     error: paymentError,
     refetch: refetchPayment,
     save: savePayment
-  } = useOutletPaymentMethodMappings(outletId, accessToken);
+  } = useOutletPaymentMethodMappings(
+    scope === "outlet" ? outletId : null,
+    accessToken,
+    scope
+  );
   const accountFilters = useMemo(() => ({ is_active: true }), []);
   const { data: accounts } = useAccounts(user.company_id, accessToken, accountFilters);
 
@@ -132,19 +130,34 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
     [accountOptions]
   );
   const [paymentFormState, setPaymentFormState] = useState<Record<string, number | "">>({});
+  const [paymentSourceState, setPaymentSourceState] = useState<Record<string, "outlet" | "company">>({});
+  const [paymentCompanyDefaultsAvailable, setPaymentCompanyDefaultsAvailable] = useState<Record<string, boolean>>({});
   const [invoiceDefaultMethod, setInvoiceDefaultMethod] = useState<string | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
 
   useEffect(() => {
     const nextState = buildDefaultMappings();
+    const nextSource: Record<string, "outlet" | "company" | null> = {};
+    const nextCompanyDefaults: Record<string, boolean> = {};
+    
     mappings.forEach((mapping) => {
-      nextState[mapping.mapping_key] = mapping.account_id;
+      const m = mapping as EffectiveOutletAccountMapping;
+      nextState[m.mapping_key] = (m.account_id ?? "") as number | "";
+      nextSource[m.mapping_key] = m.source;
+      if (m.company_account_id !== null && m.company_account_id !== undefined) {
+        nextCompanyDefaults[m.mapping_key] = true;
+      }
     });
     setFormState(nextState);
+    setSourceState(nextSource as Record<OutletAccountMappingKey, "outlet" | "company" | null>);
+    setCompanyDefaultsAvailable(nextCompanyDefaults as Record<OutletAccountMappingKey, boolean>);
   }, [mappings]);
 
   useEffect(() => {
     const nextState: Record<string, number | ""> = {};
     const nextLabels: Record<string, string> = {};
+    const nextSource: Record<string, "outlet" | "company"> = {};
+    const nextCompanyDefaults: Record<string, boolean> = {};
     let invoiceDefault: string | null = null;
     
     paymentMethods.forEach((method) => {
@@ -152,40 +165,29 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
       nextLabels[method.code] = method.label;
     });
     paymentMappings.forEach((mapping) => {
-      if (mapping.method_code) {
-        nextState[mapping.method_code] = mapping.account_id;
-        if (mapping.label) {
-          nextLabels[mapping.method_code] = mapping.label;
+      const m = mapping as EffectivePaymentMethodMapping;
+      if (m.method_code) {
+        nextState[m.method_code] = (m.account_id ?? "") as number | "";
+        nextSource[m.method_code] = m.source;
+        if (m.company_account_id !== null && m.company_account_id !== undefined) {
+          nextCompanyDefaults[m.method_code] = true;
         }
-        if (mapping.is_invoice_default) {
-          invoiceDefault = mapping.method_code;
+        if (m.label) {
+          nextLabels[m.method_code] = m.label;
+        }
+        const accountId = (m.account_id ?? "") as number | "";
+        if (m.is_invoice_default && hasMappedPaymentAccount(accountId)) {
+          invoiceDefault = m.method_code;
         }
       }
     });
     setPaymentFormState(nextState);
     setPaymentLabelState(nextLabels);
+    setPaymentSourceState(nextSource);
+    setPaymentCompanyDefaultsAvailable(nextCompanyDefaults);
     setInvoiceDefaultMethod(invoiceDefault);
   }, [paymentMethods, paymentMappings]);
 
-  useEffect(() => {
-    setDraftMethods([]);
-    setDraftMethodCode("");
-    setDraftMethodLabel("");
-    setPaymentSubmitError(null);
-    setPaymentLabelState({});
-    setInvoiceDefaultMethod(null);
-  }, [outletId]);
-
-  if (!isOnline) {
-    return (
-      <OfflinePage
-        title="Connect to Manage Settings"
-        message="Account mapping changes require a connection."
-      />
-    );
-  }
-
-  const missingKeys = allMappingKeys.filter((key) => !formState[key]);
   const effectivePaymentMethods = useMemo(() => {
     const methodMap = new Map(paymentMethods.map((method) => [method.code, method]));
     draftMethods.forEach((method) => {
@@ -196,10 +198,128 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
     return Array.from(methodMap.values());
   }, [paymentMethods, draftMethods]);
 
-  const missingPaymentMethods = effectivePaymentMethods.filter((method) => !paymentFormState[method.code]);
+  const missingPaymentMethods = effectivePaymentMethods.filter((method) => {
+    const value = paymentFormState[method.code];
+    const isBlank = !value;
+    if (!isBlank) {
+      return false;
+    }
+    if (scope === "outlet") {
+      const source = paymentSourceState[method.code];
+      if (source === "company") {
+        return false;
+      }
+      if (source === "outlet") {
+        const hasCompanyDefault = paymentCompanyDefaultsAvailable[method.code];
+        if (hasCompanyDefault) {
+          return false;
+        }
+        return true;
+      }
+    }
+    return true;
+  });
+
+  const mappingLabelByKey = useMemo(() => {
+    const map = new Map<OutletAccountMappingKey, string>();
+    mappingGroups.forEach((group) => {
+      group.keys.forEach((entry) => {
+        map.set(entry.key, entry.label);
+      });
+    });
+    return map;
+  }, []);
+
+  const missingKeys = allMappingKeys.filter((key) => {
+    const value = formState[key];
+    const isBlank = value === "" || value === 0 || value === undefined || value === null;
+    if (!isBlank) {
+      return false;
+    }
+    if (scope === "outlet") {
+      const source = sourceState[key];
+      if (source === "company") {
+        return false;
+      }
+      if (source === "outlet") {
+        const hasCompanyDefault = companyDefaultsAvailable[key];
+        if (hasCompanyDefault) {
+          return false;
+        }
+        return true;
+      }
+    }
+    return true;
+  });
+  const missingKeyLabels = missingKeys.map((key) => mappingLabelByKey.get(key) ?? key);
+
+  const isCompanyScope = scope === "company";
+  const effectiveOutletId = isCompanyScope ? null : outletId;
+  const accountDataLoading = loading || paymentLoading;
+  const canSaveSales = (isCompanyScope || (effectiveOutletId && effectiveOutletId > 0)) && !accountDataLoading && !saving;
+  const canSavePayments = (isCompanyScope || (effectiveOutletId && effectiveOutletId > 0)) && !accountDataLoading && !paymentSaving;
+
+  const scopeSelectorValue = isCompanyScope ? "company" : `outlet:${outletId}`;
+
+  function handleScopeChange(value: string) {
+    if (value === "company") {
+      setScope("company");
+      setOutletId(user.outlets[0]?.id ?? 0);
+    } else if (value.startsWith("outlet:")) {
+      const outletId = Number(value.replace("outlet:", ""));
+      setScope("outlet");
+      setOutletId(outletId);
+    }
+    setFormState(buildDefaultMappings());
+    setSourceState({} as Record<OutletAccountMappingKey, "outlet" | "company" | null>);
+    setPaymentFormState({});
+    setPaymentLabelState({});
+    setPaymentSourceState({});
+    setInvoiceDefaultMethod(null);
+    setDraftMethods([]);
+    setDraftMethodCode("");
+    setDraftMethodLabel("");
+    setSubmitError(null);
+    setPaymentSubmitError(null);
+  }
+
+  async function handleReload() {
+    setReloadError(null);
+    try {
+      await Promise.all([refetch(), refetchPayment()]);
+    } catch {
+      setReloadError("Failed to reload data. Please try again.");
+    }
+  }
+
+  useEffect(() => {
+    setDraftMethods([]);
+    setDraftMethodCode("");
+    setDraftMethodLabel("");
+    setPaymentSubmitError(null);
+    setPaymentLabelState({});
+    setInvoiceDefaultMethod(null);
+  }, [scope, outletId]);
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to Manage Settings"
+        message="Account mapping changes require a connection."
+      />
+    );
+  }
 
   async function handleSave() {
     setSubmitError(null);
+    if (scope === "outlet" && outletId <= 0) {
+      setSubmitError("Please select an outlet.");
+      return;
+    }
+    if (accountDataLoading) {
+      setSubmitError("Please wait for data to load.");
+      return;
+    }
     if (missingKeys.length > 0) {
       setSubmitError("Please select an account for every sales mapping.");
       return;
@@ -207,9 +327,9 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
 
     setSaving(true);
     try {
-      const payload: OutletAccountMapping[] = allMappingKeys.map((key) => ({
+      const payload = allMappingKeys.map((key) => ({
         mapping_key: key,
-        account_id: Number(formState[key])
+        account_id: formState[key]
       }));
       await save(payload);
       await refetch();
@@ -226,6 +346,14 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
 
   async function handlePaymentSave() {
     setPaymentSubmitError(null);
+    if (scope === "outlet" && outletId <= 0) {
+      setPaymentSubmitError("Please select an outlet.");
+      return;
+    }
+    if (accountDataLoading) {
+      setPaymentSubmitError("Please wait for data to load.");
+      return;
+    }
     if (missingPaymentMethods.length > 0) {
       setPaymentSubmitError("Please select an account for every payment method.");
       return;
@@ -233,18 +361,22 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
 
     setPaymentSaving(true);
     try {
-      const payload: PaymentMethodMapping[] = effectivePaymentMethods.map((method) => ({
-        method_code: method.code,
-        account_id: Number(paymentFormState[method.code]),
-        label: paymentLabelState[method.code]?.trim() || undefined,
-        is_invoice_default: invoiceDefaultMethod === method.code
-      }));
+      const payload = effectivePaymentMethods.map((method) => {
+        const accountId = paymentFormState[method.code];
+        const hasAccount = hasMappedPaymentAccount(accountId);
+
+        return {
+          method_code: method.code,
+          account_id: accountId,
+          label: paymentLabelState[method.code]?.trim() || undefined,
+          is_invoice_default: hasAccount && invoiceDefaultMethod === method.code
+        };
+      });
       await savePayment(payload);
       await refetchPayment();
       setDraftMethods([]);
       setDraftMethodCode("");
       setDraftMethodLabel("");
-      setPaymentLabelState({});
     } catch (err) {
       if (err instanceof ApiError) {
         setPaymentSubmitError(err.message);
@@ -263,6 +395,10 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
       setPaymentSubmitError("Payment method code is required.");
       return;
     }
+    if (!/^[A-Z0-9_]+$/.test(normalizedCode)) {
+      setPaymentSubmitError("Payment method code must use A-Z, 0-9, or underscore.");
+      return;
+    }
     const exists = effectivePaymentMethods.some((method) => method.code === normalizedCode);
     if (exists) {
       setPaymentSubmitError("Payment method code already exists.");
@@ -277,194 +413,294 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
   }
 
   function renderMappingRow(entry: { key: OutletAccountMappingKey; label: string }) {
+    const source = sourceState[entry.key];
+    
     return (
-      <tr key={entry.key}>
-        <td style={cellStyle}>{entry.label}</td>
-        <td style={cellStyle}>
-          <select
-            value={formState[entry.key]}
-            onChange={(event) =>
+      <Table.Tr key={entry.key}>
+        <Table.Td>
+          <Group gap="xs">
+            {entry.label}
+            {scope === "outlet" && source && (
+              <Badge 
+                size="xs" 
+                color={source === "outlet" ? "blue" : "gray"}
+                variant="light"
+              >
+                {source === "outlet" ? "Outlet" : "Company"}
+              </Badge>
+            )}
+          </Group>
+        </Table.Td>
+        <Table.Td>
+          <Select
+            value={String(formState[entry.key] ?? "")}
+            onChange={(value) =>
               setFormState((prev) => ({
                 ...prev,
-                [entry.key]: event.target.value ? Number(event.target.value) : ""
+                [entry.key]: value ? Number(value) : ""
               }))
             }
-            style={inputStyle}
-          >
-            <option value="">Select account</option>
-            {accountOptions.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.label}
-              </option>
-            ))}
-          </select>
-        </td>
-      </tr>
+            placeholder={scope === "outlet" && source === "company" ? "Inherited from company" : "Select account"}
+            data={accountOptions.map((account) => ({
+              value: String(account.id),
+              label: account.label
+            }))}
+            clearable
+            allowDeselect={scope === "outlet"}
+            styles={{
+              input: { minHeight: "36px" }
+            }}
+          />
+        </Table.Td>
+      </Table.Tr>
     );
   }
 
   return (
-    <div style={{ padding: "20px", maxWidth: "1100px", margin: "0 auto" }}>
-      <div style={{ marginBottom: "20px" }}>
-        <h1 style={{ marginBottom: "8px" }}>Account Mapping Settings</h1>
-        <p style={{ color: "#666", margin: 0 }}>
-          Configure default accounts for Sales and POS posting by outlet.
-        </p>
-      </div>
-
-      <section style={boxStyle}>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-          <select value={outletId} onChange={(event) => setOutletId(Number(event.target.value))} style={inputStyle}>
-            {user.outlets.map((outlet) => (
-              <option key={outlet.id} value={outlet.id}>
-                {outlet.code} - {outlet.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={refetch} style={buttonStyle} disabled={loading || paymentLoading}>
-            {loading || paymentLoading ? "Loading..." : "Reload"}
-          </button>
+    <Container size="lg" py="md">
+      <Stack gap="md">
+        <div>
+          <Title order={1}>Account Mapping Settings</Title>
+          <Text c="dimmed" size="sm">
+            Configure default accounts for Sales and POS posting. Set company-wide defaults or override per outlet.
+          </Text>
         </div>
-        {error ? <p style={{ color: "#8d2626" }}>{error}</p> : null}
-        {paymentError ? <p style={{ color: "#8d2626" }}>{paymentError}</p> : null}
-      </section>
 
-      {mappingGroups.map((group) => (
-        <section key={group.title} style={boxStyle}>
-          <h2 style={{ marginTop: 0 }}>{group.title}</h2>
-          <p style={{ color: "#5b6664", marginTop: 0 }}>{group.description}</p>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={cellStyle}>Mapping</th>
-                <th style={cellStyle}>Account</th>
-              </tr>
-            </thead>
-            <tbody>{group.keys.map((entry) => renderMappingRow(entry))}</tbody>
-          </table>
-        </section>
-      ))}
+        <Card withBorder>
+          <Group justify="space-between" wrap="wrap" align="flex-end">
+            <Stack gap="xs">
+              <Select
+                label="Scope"
+                value={scopeSelectorValue}
+                onChange={(value) => value && handleScopeChange(value)}
+                data={[
+                  { value: "company", label: "Company Default" },
+                  ...user.outlets.map((outlet) => ({
+                    value: `outlet:${String(outlet.id)}`,
+                    label: `${outlet.code} - ${outlet.name}`
+                  }))
+                ]}
+                style={{ minWidth: 200 }}
+              />
+            </Stack>
+            <Button
+              variant="light"
+              onClick={handleReload}
+              loading={loading || paymentLoading}
+            >
+              {loading || paymentLoading ? "Loading..." : "Reload"}
+            </Button>
+          </Group>
+          {error && (
+            <Alert color="red" mt="sm">
+              {error}
+            </Alert>
+          )}
+          {paymentError && (
+            <Alert color="red" mt="sm">
+              {paymentError}
+            </Alert>
+          )}
+          {reloadError && (
+            <Alert color="red" mt="sm">
+              {reloadError}
+            </Alert>
+          )}
+        </Card>
 
-      {submitError ? <p style={{ color: "#8d2626" }}>{submitError}</p> : null}
-      {missingKeys.length > 0 ? (
-        <p style={{ color: "#8d2626" }}>
-          Missing sales mappings: {missingKeys.join(", ")}
-        </p>
-      ) : null}
-      <button type="button" style={primaryButtonStyle} onClick={handleSave} disabled={saving}>
-        {saving ? "Saving..." : "Save Sales Mappings"}
-      </button>
+        {mappingGroups.map((group) => (
+          <Card key={group.title} withBorder>
+            <Stack gap="sm">
+              <div>
+                <Title order={3}>{group.title}</Title>
+                <Text c="dimmed" size="sm">
+                  {scope === "outlet" 
+                    ? "Override company defaults for this outlet. Leave blank to inherit company settings."
+                    : group.description}
+                </Text>
+              </div>
+              <Table>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Mapping</Table.Th>
+                    <Table.Th>Account</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {group.keys.map((entry) => renderMappingRow(entry))}
+                </Table.Tbody>
+              </Table>
+            </Stack>
+          </Card>
+        ))}
 
-      <section style={boxStyle} data-testid="payment-methods-section">
-        <h2 style={{ marginTop: 0 }}>POS Payment Methods</h2>
-        <p style={{ color: "#5b6664", marginTop: 0 }}>
-          Map each POS payment method to a cash/bank account. Set the default payment method for invoice payments.
-        </p>
-        <p style={{ color: "#5b6664", fontSize: "13px", marginTop: "8px", marginBottom: "12px" }}>
-          <strong>Invoice Default:</strong> Pre-selected payment account when creating sales payments in backoffice. Cashiers will manually select payment methods in POS.
-        </p>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
-          <input
-            type="text"
-            placeholder="Method code (e.g., CARD_BCA)"
-            value={draftMethodCode}
-            onChange={(event) => setDraftMethodCode(event.target.value)}
-            style={{ ...inputStyle, flex: "1 1 220px" }}
-          />
-          <input
-            type="text"
-            placeholder="Label (optional)"
-            value={draftMethodLabel}
-            onChange={(event) => setDraftMethodLabel(event.target.value)}
-            style={{ ...inputStyle, flex: "1 1 220px" }}
-          />
-          <button type="button" onClick={handleAddPaymentMethod} style={buttonStyle}>
-            Add Method
-          </button>
-        </div>
-        {effectivePaymentMethods.length === 0 ? (
-          <p style={{ color: "#5b6664" }}>No payment methods configured.</p>
-        ) : (
-          <table style={tableStyle} data-testid="payment-methods-table">
-            <thead>
-              <tr>
-                <th style={cellStyle}>Method Code</th>
-                <th style={cellStyle}>Label</th>
-                <th style={cellStyle}>Account</th>
-                <th style={cellStyle} data-testid="invoice-default-header">Invoice Default</th>
-              </tr>
-            </thead>
-            <tbody>
-              {effectivePaymentMethods.map((method) => (
-                <tr key={method.code} data-testid={`payment-method-${method.code}`}>
-                  <td style={cellStyle}>{method.code}</td>
-                  <td style={cellStyle}>
-                    <input
-                      type="text"
-                      value={paymentLabelState[method.code] ?? method.label}
-                      onChange={(event) =>
-                        setPaymentLabelState((prev) => ({
-                          ...prev,
-                          [method.code]: event.target.value
-                        }))
-                      }
-                      style={inputStyle}
-                    />
-                  </td>
-                  <td style={cellStyle}>
-                    <select
-                      value={paymentFormState[method.code] ?? ""}
-                      onChange={(event) =>
-                        setPaymentFormState((prev) => ({
-                          ...prev,
-                          [method.code]: event.target.value ? Number(event.target.value) : ""
-                        }))
-                      }
-                      style={inputStyle}
-                    >
-                      <option value="">Select account</option>
-                      {paymentAccountOptions.map((account) => (
-                        <option key={account.id} value={account.id}>
-                          {account.label}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td style={{ ...cellStyle, textAlign: "center" }}>
-                    <input
-                      type="checkbox"
-                      data-testid={`payment-method-${method.code}-invoice-default`}
-                      checked={invoiceDefaultMethod === method.code}
-                      onChange={(event) => {
-                        setInvoiceDefaultMethod(event.target.checked ? method.code : null);
-                      }}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {submitError && (
+          <Alert color="red">
+            {submitError}
+          </Alert>
         )}
-        {paymentSubmitError ? (
-          <p style={{ color: "#8d2626" }} data-testid="payment-mappings-error">
-            {paymentSubmitError}
-          </p>
-        ) : null}
-        {missingPaymentMethods.length > 0 ? (
-          <p style={{ color: "#8d2626" }}>
-            Missing payment mappings: {missingPaymentMethods.map((method) => method.label).join(", ")}
-          </p>
-        ) : null}
-        <button
-          type="button"
-          style={primaryButtonStyle}
-          onClick={handlePaymentSave}
-          disabled={paymentSaving}
-          data-testid="save-payment-mappings"
+        {missingKeys.length > 0 && (
+          <Alert color="orange">
+            Missing sales mappings: {missingKeyLabels.join(", ")}
+          </Alert>
+        )}
+        <Button
+          onClick={handleSave}
+          disabled={!canSaveSales}
+          loading={saving}
         >
-          {paymentSaving ? "Saving..." : "Save Payment Mappings"}
-        </button>
-      </section>
-    </div>
+          {scope === "company" ? "Save Company Defaults" : "Save Outlet Overrides"}
+        </Button>
+
+        <Card withBorder data-testid="payment-methods-section">
+          <Stack gap="sm">
+            <div>
+              <Title order={3}>POS Payment Methods</Title>
+              <Text c="dimmed" size="sm">
+                Map each POS payment method to a cash/bank account. Set the default payment method for invoice payments.
+              </Text>
+              {scope === "outlet" && (
+                <Text c="dimmed" size="xs" mt="xs">
+                  Override company defaults for this outlet. Leave blank to inherit company settings.
+                </Text>
+              )}
+              <Text c="dimmed" size="xs" mt="xs">
+                <strong>Invoice Default:</strong> Pre-selected payment account when creating sales payments in backoffice. Cashiers will manually select payment methods in POS.
+              </Text>
+            </div>
+
+            <Group>
+              <TextInput
+                label="Method code"
+                placeholder="Method code (e.g., CARD_BCA)"
+                value={draftMethodCode}
+                onChange={(event) => setDraftMethodCode(event.currentTarget.value)}
+                style={{ flex: "1 1 220px" }}
+              />
+              <TextInput
+                label="Label (optional)"
+                placeholder="Label (optional)"
+                value={draftMethodLabel}
+                onChange={(event) => setDraftMethodLabel(event.currentTarget.value)}
+                style={{ flex: "1 1 220px" }}
+              />
+              <Button variant="light" onClick={handleAddPaymentMethod} mt="lg">
+                Add Method
+              </Button>
+            </Group>
+
+            {effectivePaymentMethods.length === 0 ? (
+              <Text c="dimmed" ta="center" py="md">
+                No payment methods configured.
+              </Text>
+            ) : (
+              <Table data-testid="payment-methods-table">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Method Code</Table.Th>
+                    <Table.Th>Label</Table.Th>
+                    <Table.Th>Account</Table.Th>
+                    <Table.Th data-testid="invoice-default-header">Invoice Default</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {effectivePaymentMethods.map((method) => {
+                    const isAccountSelected = hasMappedPaymentAccount(paymentFormState[method.code]);
+                    const source = paymentSourceState[method.code];
+                    return (
+                      <Table.Tr key={method.code} data-testid={`payment-method-${method.code}`}>
+                        <Table.Td>
+                          <Group gap="xs">
+                            {method.code}
+                            {scope === "outlet" && source && (
+                              <Badge 
+                                size="xs" 
+                                color={source === "outlet" ? "blue" : "gray"}
+                                variant="light"
+                              >
+                                {source === "outlet" ? "Outlet" : "Company"}
+                              </Badge>
+                            )}
+                          </Group>
+                        </Table.Td>
+                        <Table.Td>
+                          <TextInput
+                            value={paymentLabelState[method.code] ?? method.label}
+                            onChange={(event) =>
+                              setPaymentLabelState((prev) => ({
+                                ...prev,
+                                [method.code]: event.currentTarget.value
+                              }))
+                            }
+                            styles={{
+                              input: { minHeight: "36px" }
+                            }}
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <Select
+                            value={String(paymentFormState[method.code] ?? "")}
+                            onChange={(value) => {
+                              const nextAccount = value ? Number(value) : "";
+                              setPaymentFormState((prev) => ({
+                                ...prev,
+                                [method.code]: nextAccount
+                              }));
+
+                              if (!hasMappedPaymentAccount(nextAccount) && invoiceDefaultMethod === method.code) {
+                                setInvoiceDefaultMethod(null);
+                              }
+                            }}
+                            placeholder={scope === "outlet" && source === "company" ? "Inherited from company" : "Select account"}
+                            data={paymentAccountOptions.map((account) => ({
+                              value: String(account.id),
+                              label: account.label
+                            }))}
+                            clearable
+                            allowDeselect={scope === "outlet"}
+                            styles={{
+                              input: { minHeight: "36px" }
+                            }}
+                          />
+                        </Table.Td>
+                        <Table.Td ta="center">
+                          <Checkbox
+                            data-testid={`payment-method-${method.code}-invoice-default`}
+                            checked={invoiceDefaultMethod === method.code}
+                            disabled={!isAccountSelected}
+                            onChange={(event) => {
+                              setInvoiceDefaultMethod(event.currentTarget.checked ? method.code : null);
+                            }}
+                          />
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+                </Table.Tbody>
+              </Table>
+            )}
+
+            {paymentSubmitError && (
+              <Alert color="red" data-testid="payment-mappings-error">
+                {paymentSubmitError}
+              </Alert>
+            )}
+            {missingPaymentMethods.length > 0 && (
+              <Alert color="orange">
+                Missing payment mappings: {missingPaymentMethods.map((method) => method.label).join(", ")}
+              </Alert>
+            )}
+            <Button
+              onClick={handlePaymentSave}
+              disabled={!canSavePayments}
+              loading={paymentSaving}
+              data-testid="save-payment-mappings"
+            >
+              {scope === "company" ? "Save Company Defaults" : "Save Outlet Overrides"}
+            </Button>
+          </Stack>
+        </Card>
+      </Stack>
+    </Container>
   );
 }

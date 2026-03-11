@@ -101,6 +101,7 @@ async function ensurePaymentMethods() {
   const outletId = 1;
 
   const mappingsPayload = {
+    scope: "outlet",
     outlet_id: outletId,
     mappings: [
       {
@@ -119,7 +120,7 @@ async function ensurePaymentMethods() {
   };
 
   const { response: saveResponse, data: saveData } = await apiRequest(
-    `/outlet-payment-method-mappings`,
+    `/settings/outlet-payment-method-mappings`,
     {
       method: "PUT",
       body: JSON.stringify(mappingsPayload)

@@ -33,6 +33,7 @@ type FiscalYearRow = {
   end_date: string;
   status: "OPEN" | "CLOSED";
   isNew?: boolean;
+  temp_key?: string;
 };
 
 type FiscalYearsResponse = {
@@ -50,8 +51,13 @@ const STATUS_OPTIONS = [
   { value: "CLOSED", label: "Closed" }
 ] as const;
 
+function createTempKey(): string {
+  return `fy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function buildNewRow(): FiscalYearRow {
   return {
+    temp_key: createTempKey(),
     code: "",
     name: "",
     start_date: "",
@@ -59,6 +65,26 @@ function buildNewRow(): FiscalYearRow {
     status: "OPEN",
     isNew: true
   };
+}
+
+function getRowKey(row: FiscalYearRow): string {
+  if (row.id !== undefined) {
+    return String(row.id);
+  }
+  if (row.temp_key) {
+    return row.temp_key;
+  }
+  throw new Error("FiscalYearRow missing id or temp_key for unsaved row");
+}
+
+function isDraftDirty(original: FiscalYearRow, draft: FiscalYearRow): boolean {
+  return (
+    original.code.trim() !== draft.code.trim() ||
+    original.name.trim() !== draft.name.trim() ||
+    original.start_date.trim() !== draft.start_date.trim() ||
+    original.end_date.trim() !== draft.end_date.trim() ||
+    original.status !== draft.status
+  );
 }
 
 export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
@@ -70,13 +96,91 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
 
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<FiscalYearRow | null>(null);
+
+  const isSaving = savingKey !== null;
+  const currentEditingRow = editingKey
+    ? fiscalYears.find((r) => getRowKey(r) === editingKey) ?? null
+    : null;
+  const isCurrentDraftDirty =
+    currentEditingRow !== null && editDraft !== null && isDraftDirty(currentEditingRow, editDraft);
+  const shouldDiscardCurrentEdit =
+    currentEditingRow?.isNew === true || isCurrentDraftDirty;
+
   const sortedYears = useMemo(
     () =>
-      [...fiscalYears].sort((a, b) =>
-        `${b.start_date}-${b.id ?? 0}`.localeCompare(`${a.start_date}-${a.id ?? 0}`)
-      ),
+      [...fiscalYears].sort((a, b) => {
+        if (a.start_date && b.start_date) {
+          const dateCompare = b.start_date.localeCompare(a.start_date);
+          if (dateCompare !== 0) return dateCompare;
+        }
+        if (a.id !== undefined && b.id !== undefined) {
+          return b.id - a.id;
+        }
+        if (a.id !== undefined) return -1;
+        if (b.id !== undefined) return 1;
+        return (a.temp_key ?? "").localeCompare(b.temp_key ?? "");
+      }),
     [fiscalYears]
   );
+
+  function discardCurrentUnsavedRowIfAny(): void {
+    if (!editingKey) return;
+
+    const currentRow = fiscalYears.find((r) => getRowKey(r) === editingKey);
+    if (currentRow && currentRow.isNew) {
+      setFiscalYears((prev) => prev.filter((row) => getRowKey(row) !== editingKey));
+    }
+  }
+
+  function confirmDiscardIfNeeded(): boolean {
+    if (!editingKey || !editDraft) return true;
+    if (!shouldDiscardCurrentEdit) return true;
+
+    const isNewRow = currentEditingRow?.isNew === true;
+    const message = isNewRow
+      ? "You have an unsaved fiscal year. Discard it and continue?"
+      : "You have unsaved changes. Discard and continue?";
+
+    const confirmed = window.confirm(message);
+    if (!confirmed) return false;
+
+    discardCurrentUnsavedRowIfAny();
+    return true;
+  }
+
+  function startEdit(row: FiscalYearRow) {
+    if (isSaving) return;
+
+    const key = getRowKey(row);
+
+    if (editingKey === key) {
+      return;
+    }
+
+    if (!confirmDiscardIfNeeded()) return;
+
+    setEditingKey(key);
+    setEditDraft({ ...row });
+    setSaveError(null);
+    setSaveSuccess(null);
+  }
+
+  function cancelEdit() {
+    if (editingKey && editDraft?.isNew) {
+      setFiscalYears((prev) => prev.filter((row) => getRowKey(row) !== editingKey));
+    }
+    setEditingKey(null);
+    setEditDraft(null);
+    setSaveError(null);
+    setSaveSuccess(null);
+  }
+
+  function updateDraft(patch: Partial<FiscalYearRow>) {
+    if (!editDraft) return;
+    setEditDraft({ ...editDraft, ...patch });
+  }
 
   useEffect(() => {
     async function fetchFiscalYears() {
@@ -112,65 +216,74 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
     );
   }
 
-  function updateRow(index: number, patch: Partial<FiscalYearRow>) {
-    setFiscalYears((prev) => prev.map((row, idx) => (idx === index ? { ...row, ...patch } : row)));
-  }
-
-  async function handleSave(index: number) {
+  async function handleSaveActiveRow(rowKey: string) {
     setSaveError(null);
     setSaveSuccess(null);
-    const row = fiscalYears[index];
-    if (!row) {
+    const draft = editDraft;
+    if (!draft) {
       return;
     }
 
-    if (!row.code.trim() || !row.name.trim()) {
+    const rowIndex = fiscalYears.findIndex((r) => getRowKey(r) === rowKey);
+    if (rowIndex === -1) {
+      setSaveError("Record not found");
+      return;
+    }
+
+    if (!draft.code.trim() || !draft.name.trim()) {
       setSaveError("Code and name are required.");
       return;
     }
 
-    if (!row.start_date.trim() || !row.end_date.trim()) {
+    if (!draft.start_date.trim() || !draft.end_date.trim()) {
       setSaveError("Start date and end date are required.");
       return;
     }
 
-    const key = row.id ?? `new-${index}`;
-    setSavingKey(key);
+    setSavingKey(rowKey);
     try {
-      if (row.isNew || !row.id) {
+      if (draft.isNew || !draft.id) {
         const response = await apiRequest<FiscalYearResponse>(
           "/accounts/fiscal-years",
           {
             method: "POST",
             body: JSON.stringify({
               company_id: user.company_id,
-              code: row.code.trim(),
-              name: row.name.trim(),
-              start_date: row.start_date.trim(),
-              end_date: row.end_date.trim(),
-              status: row.status
+              code: draft.code.trim(),
+              name: draft.name.trim(),
+              start_date: draft.start_date.trim(),
+              end_date: draft.end_date.trim(),
+              status: draft.status
             })
           },
           accessToken
         );
-        updateRow(index, { ...response.data, isNew: false });
+        setFiscalYears((prev) =>
+          prev.map((r, idx) => (idx === rowIndex ? { ...response.data, isNew: false } : r))
+        );
+        setEditingKey(null);
+        setEditDraft(null);
         setSaveSuccess("Fiscal year created.");
       } else {
         const response = await apiRequest<FiscalYearResponse>(
-          `/accounts/fiscal-years/${row.id}`,
+          `/accounts/fiscal-years/${draft.id}`,
           {
             method: "PUT",
             body: JSON.stringify({
-              code: row.code.trim(),
-              name: row.name.trim(),
-              start_date: row.start_date.trim(),
-              end_date: row.end_date.trim(),
-              status: row.status
+              code: draft.code.trim(),
+              name: draft.name.trim(),
+              start_date: draft.start_date.trim(),
+              end_date: draft.end_date.trim(),
+              status: draft.status
             })
           },
           accessToken
         );
-        updateRow(index, response.data);
+        setFiscalYears((prev) =>
+          prev.map((r, idx) => (idx === rowIndex ? response.data : r))
+        );
+        setEditingKey(null);
+        setEditDraft(null);
         setSaveSuccess("Fiscal year updated.");
       }
     } catch (saveErr) {
@@ -185,9 +298,17 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
   }
 
   function handleAdd() {
+    if (isSaving) return;
+
+    if (!confirmDiscardIfNeeded()) return;
+
     setSaveError(null);
     setSaveSuccess(null);
-    setFiscalYears((prev) => [buildNewRow(), ...prev]);
+    const newRow = buildNewRow();
+    const newKey = getRowKey(newRow);
+    setFiscalYears((prev) => [newRow, ...prev]);
+    setEditingKey(newKey);
+    setEditDraft({ ...newRow });
   }
 
   return (
@@ -201,7 +322,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
         </div>
 
         <Group justify="space-between" wrap="wrap">
-          <Button onClick={handleAdd} variant="light">
+          <Button onClick={handleAdd} variant="light" disabled={isSaving}>
             Add Fiscal Year
           </Button>
           {loading ? (
@@ -229,61 +350,117 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
           </Alert>
         ) : null}
 
-        {sortedYears.map((row, index) => {
-          const key = row.id ?? `new-${index}`;
+        {sortedYears.map((row) => {
+          const key = getRowKey(row);
+          const isEditing = editingKey === key;
           const saving = savingKey === key;
+          const draft = isEditing ? editDraft : row;
+
+          if (!draft) return null;
+
           return (
             <Card key={key} withBorder>
               <Stack gap="sm">
                 <Group justify="space-between" align="center">
-                  <Text fw={600}>{row.name || "New fiscal year"}</Text>
-                  <Badge color={row.status === "OPEN" ? "green" : "gray"} variant="light">
-                    {row.status}
+                  {isEditing ? (
+                    <Text fw={600}>{draft.isNew ? "New fiscal year" : "Edit fiscal year"}</Text>
+                  ) : (
+                    <Text fw={600}>{draft.name || "New fiscal year"}</Text>
+                  )}
+                  <Badge color={draft.status === "OPEN" ? "green" : "gray"} variant="light">
+                    {draft.status}
                   </Badge>
                 </Group>
-                <Group grow align="flex-end" wrap="wrap">
-                  <TextInput
-                    label="Code"
-                    placeholder="FY2026"
-                    value={row.code}
-                    onChange={(event) => updateRow(index, { code: event.currentTarget.value })}
-                  />
-                  <TextInput
-                    label="Name"
-                    placeholder="Fiscal Year 2026"
-                    value={row.name}
-                    onChange={(event) => updateRow(index, { name: event.currentTarget.value })}
-                  />
-                </Group>
-                <Group grow align="flex-end" wrap="wrap">
-                  <TextInput
-                    label="Start date"
-                    placeholder="YYYY-MM-DD"
-                    value={row.start_date}
-                    onChange={(event) =>
-                      updateRow(index, { start_date: event.currentTarget.value })
-                    }
-                  />
-                  <TextInput
-                    label="End date"
-                    placeholder="YYYY-MM-DD"
-                    value={row.end_date}
-                    onChange={(event) => updateRow(index, { end_date: event.currentTarget.value })}
-                  />
-                  <Select
-                    label="Status"
-                    data={STATUS_OPTIONS}
-                    value={row.status}
-                    onChange={(value) =>
-                      updateRow(index, { status: (value as FiscalYearRow["status"]) ?? "OPEN" })
-                    }
-                  />
-                </Group>
-                <Group justify="flex-end">
-                  <Button onClick={() => handleSave(index)} loading={saving}>
-                    {row.isNew ? "Create" : "Save"}
-                  </Button>
-                </Group>
+
+                {isEditing ? (
+                  <>
+                    <Group grow align="flex-end" wrap="wrap">
+                      <TextInput
+                        label="Code"
+                        placeholder="FY2026"
+                        value={draft.code}
+                        onChange={(event) => updateDraft({ code: event.currentTarget.value })}
+                        required
+                      />
+                      <TextInput
+                        label="Name"
+                        placeholder="Fiscal Year 2026"
+                        value={draft.name}
+                        onChange={(event) => updateDraft({ name: event.currentTarget.value })}
+                        required
+                      />
+                    </Group>
+                    <Group grow align="flex-end" wrap="wrap">
+                      <TextInput
+                        label="Start date"
+                        placeholder="YYYY-MM-DD"
+                        type="date"
+                        value={draft.start_date}
+                        onChange={(event) =>
+                          updateDraft({ start_date: event.currentTarget.value })
+                        }
+                        required
+                      />
+                      <TextInput
+                        label="End date"
+                        placeholder="YYYY-MM-DD"
+                        type="date"
+                        value={draft.end_date}
+                        onChange={(event) => updateDraft({ end_date: event.currentTarget.value })}
+                        required
+                      />
+                      <Select
+                        label="Status"
+                        data={STATUS_OPTIONS}
+                        value={draft.status}
+                        onChange={(value) =>
+                          updateDraft({ status: (value as FiscalYearRow["status"]) ?? "OPEN" })
+                        }
+                      />
+                    </Group>
+                    <Group justify="flex-end">
+                      <Button
+                        variant="light"
+                        onClick={cancelEdit}
+                        disabled={isSaving}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={() => handleSaveActiveRow(key)}
+                        loading={saving}
+                      >
+                        {draft.isNew ? "Create" : "Save"}
+                      </Button>
+                    </Group>
+                  </>
+                ) : (
+                  <>
+                    <Group gap="xl" wrap="wrap">
+                      <div>
+                        <Text size="xs" c="dimmed">Code</Text>
+                        <Text size="sm">{draft.code || "—"}</Text>
+                      </div>
+                      <div>
+                        <Text size="xs" c="dimmed">Period</Text>
+                        <Text size="sm">
+                          {draft.start_date && draft.end_date
+                            ? `${draft.start_date} → ${draft.end_date}`
+                            : "—"}
+                        </Text>
+                      </div>
+                    </Group>
+                    <Group justify="flex-end">
+                      <Button
+                        variant="light"
+                        onClick={() => startEdit(row)}
+                        disabled={isSaving}
+                      >
+                        Edit
+                      </Button>
+                    </Group>
+                  </>
+                )}
               </Stack>
             </Card>
           );
