@@ -59,11 +59,14 @@ const mappingGroups: Array<{
 ];
 
 const allMappingKeys = mappingGroups.flatMap((group) => group.keys.map((entry) => entry.key));
+const persistedMappingKeys: OutletAccountMappingKey[] = Array.from(
+  new Set<OutletAccountMappingKey>([...allMappingKeys, "INVOICE_PAYMENT_BANK"])
+);
 
 const requiredSalesMappingKeys: OutletAccountMappingKey[] = ["AR", "SALES_REVENUE", "SALES_TAX"];
 
 function buildDefaultMappings(): Record<OutletAccountMappingKey, number | ""> {
-  return allMappingKeys.reduce(
+  return persistedMappingKeys.reduce(
     (acc, key) => {
       acc[key] = "";
       return acc;
@@ -317,7 +320,7 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
 
     setSaving(true);
     try {
-      const payload = allMappingKeys.map((key) => ({
+      const payload = persistedMappingKeys.map((key) => ({
         mapping_key: key,
         account_id: formState[key]
       }));
