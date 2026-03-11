@@ -17,12 +17,31 @@ export type PaymentMethodMapping = {
   is_invoice_default?: boolean;
 };
 
-type MappingResponse = {
+export type EffectivePaymentMethodMapping = {
+  method_code: string;
+  account_id: number;
+  label?: string;
+  is_invoice_default?: boolean;
+  source: "outlet" | "company";
+  company_account_id: number | null;
+};
+
+type CompanyMappingResponse = {
   success: true;
   data: {
-    outlet_id: number;
+    scope: "company";
     payment_methods: PaymentMethodConfig[];
     mappings: PaymentMethodMapping[];
+  };
+};
+
+type OutletMappingResponse = {
+  success: true;
+  data: {
+    scope: "outlet";
+    outlet_id: number;
+    payment_methods: PaymentMethodConfig[];
+    mappings: EffectivePaymentMethodMapping[];
   };
 };
 
@@ -31,13 +50,44 @@ type SaveResponse = {
   data: null;
 };
 
-export function useOutletPaymentMethodMappings(outletId: number, accessToken: string) {
+type MappingScope = "company" | "outlet";
+
+export function useOutletPaymentMethodMappings(
+  outletId: number | null,
+  accessToken: string,
+  scope: MappingScope = "outlet"
+) {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodConfig[]>([]);
-  const [mappings, setMappings] = useState<PaymentMethodMapping[]>([]);
+  const [mappings, setMappings] = useState<PaymentMethodMapping[] | EffectivePaymentMethodMapping[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
+    if (scope === "company") {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await apiRequest<CompanyMappingResponse>(
+          `/settings/outlet-payment-method-mappings?scope=company`,
+          {},
+          accessToken
+        );
+        setPaymentMethods(response.data.payment_methods);
+        setMappings(response.data.mappings);
+      } catch (fetchError) {
+        if (fetchError instanceof ApiError) {
+          setError(fetchError.message);
+        } else {
+          setError("Failed to load company payment method mappings");
+        }
+        setPaymentMethods([]);
+        setMappings([]);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (!outletId) {
       setPaymentMethods([]);
       setMappings([]);
@@ -49,8 +99,8 @@ export function useOutletPaymentMethodMappings(outletId: number, accessToken: st
     setLoading(true);
     setError(null);
     try {
-      const response = await apiRequest<MappingResponse>(
-        `/settings/outlet-payment-method-mappings?outlet_id=${outletId}`,
+      const response = await apiRequest<OutletMappingResponse>(
+        `/settings/outlet-payment-method-mappings?scope=outlet&outlet_id=${outletId}`,
         {},
         accessToken
       );
@@ -67,23 +117,55 @@ export function useOutletPaymentMethodMappings(outletId: number, accessToken: st
     } finally {
       setLoading(false);
     }
-  }, [outletId, accessToken]);
+  }, [outletId, accessToken, scope]);
 
   useEffect(() => {
     refetch();
   }, [refetch]);
 
-  async function save(nextMappings: PaymentMethodMapping[]) {
+  async function save(nextMappings: Array<{ method_code: string; account_id: number | ""; label?: string; is_invoice_default?: boolean }>) {
+    if (scope === "company") {
+      const filteredMappings = nextMappings
+        .filter((m): m is { method_code: string; account_id: number; label?: string; is_invoice_default?: boolean } => m.account_id !== "")
+        .map((m) => ({
+          method_code: m.method_code,
+          account_id: m.account_id,
+          label: m.label?.trim() || undefined,
+          is_invoice_default: m.is_invoice_default
+        }));
+
+      const response = await apiRequest<SaveResponse>(
+        `/settings/outlet-payment-method-mappings`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ scope: "company", mappings: filteredMappings })
+        },
+        accessToken
+      );
+      return response;
+    }
+
+    if (!outletId) {
+      throw new Error("Outlet ID required for outlet scope");
+    }
+
+    const filteredMappings = nextMappings.map((m) => ({
+      method_code: m.method_code,
+      account_id: m.account_id,
+      label: m.label?.trim() || undefined,
+      is_invoice_default: m.is_invoice_default
+    }));
+
     const response = await apiRequest<SaveResponse>(
       `/settings/outlet-payment-method-mappings`,
       {
         method: "PUT",
-        body: JSON.stringify({ outlet_id: outletId, mappings: nextMappings })
+        body: JSON.stringify({ scope: "outlet", outlet_id: outletId, mappings: filteredMappings })
       },
       accessToken
     );
     return response;
   }
 
-  return { paymentMethods, mappings, loading, error, refetch, save };
+  return { paymentMethods, mappings, loading, error, refetch, save, scope };
 }

@@ -11,11 +11,27 @@ export type OutletAccountMapping = {
   account_id: number;
 };
 
-type MappingResponse = {
+export type EffectiveOutletAccountMapping = {
+  mapping_key: OutletAccountMappingKey;
+  account_id: number | null;
+  source: "outlet" | "company" | null;
+  company_account_id: number | null;
+};
+
+type CompanyMappingResponse = {
   success: true;
   data: {
-    outlet_id: number;
+    scope: "company";
     mappings: OutletAccountMapping[];
+  };
+};
+
+type OutletMappingResponse = {
+  success: true;
+  data: {
+    scope: "outlet";
+    outlet_id: number;
+    mappings: EffectiveOutletAccountMapping[];
   };
 };
 
@@ -24,12 +40,41 @@ type SaveResponse = {
   data: null;
 };
 
-export function useOutletAccountMappings(outletId: number, accessToken: string) {
-  const [data, setData] = useState<OutletAccountMapping[]>([]);
+type MappingScope = "company" | "outlet";
+
+export function useOutletAccountMappings(
+  outletId: number | null,
+  accessToken: string,
+  scope: MappingScope = "outlet"
+) {
+  const [data, setData] = useState<OutletAccountMapping[] | EffectiveOutletAccountMapping[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
+    if (scope === "company") {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await apiRequest<CompanyMappingResponse>(
+          `/settings/outlet-account-mappings?scope=company`,
+          {},
+          accessToken
+        );
+        setData(response.data.mappings);
+      } catch (fetchError) {
+        if (fetchError instanceof ApiError) {
+          setError(fetchError.message);
+        } else {
+          setError("Failed to load company account mappings");
+        }
+        setData([]);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (!outletId) {
       setData([]);
       setError(null);
@@ -40,8 +85,8 @@ export function useOutletAccountMappings(outletId: number, accessToken: string) 
     setLoading(true);
     setError(null);
     try {
-      const response = await apiRequest<MappingResponse>(
-        `/settings/outlet-account-mappings?outlet_id=${outletId}`,
+      const response = await apiRequest<OutletMappingResponse>(
+        `/settings/outlet-account-mappings?scope=outlet&outlet_id=${outletId}`,
         {},
         accessToken
       );
@@ -56,23 +101,39 @@ export function useOutletAccountMappings(outletId: number, accessToken: string) 
     } finally {
       setLoading(false);
     }
-  }, [outletId, accessToken]);
+  }, [outletId, accessToken, scope]);
 
   useEffect(() => {
     refetch();
   }, [refetch]);
 
-  async function save(mappings: OutletAccountMapping[]) {
+  async function save(mappings: Array<{ mapping_key: OutletAccountMappingKey; account_id: number | "" }>) {
+    if (scope === "company") {
+      const response = await apiRequest<SaveResponse>(
+        `/settings/outlet-account-mappings`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ scope: "company", mappings })
+        },
+        accessToken
+      );
+      return response;
+    }
+
+    if (!outletId) {
+      throw new Error("Outlet ID required for outlet scope");
+    }
+
     const response = await apiRequest<SaveResponse>(
       `/settings/outlet-account-mappings`,
       {
         method: "PUT",
-        body: JSON.stringify({ outlet_id: outletId, mappings })
+        body: JSON.stringify({ scope: "outlet", outlet_id: outletId, mappings })
       },
       accessToken
     );
     return response;
   }
 
-  return { data, loading, error, refetch, save };
+  return { data, loading, error, refetch, save, scope };
 }

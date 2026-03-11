@@ -225,6 +225,28 @@ async function readOutletAccountMappingByKey(
     accountByKey.set(row.mapping_key, Number(row.account_id));
   }
 
+  const [companyRows] = await dbExecutor.execute(
+    `SELECT mapping_key, account_id
+     FROM company_account_mappings
+     WHERE company_id = ?
+       AND mapping_key IN (${placeholders})`,
+    [context.companyId, ...requiredKeys]
+  );
+
+  for (const row of companyRows as Array<{ mapping_key?: string; account_id?: number }>) {
+    if (typeof row.mapping_key !== "string" || !Number.isFinite(row.account_id)) {
+      continue;
+    }
+
+    if (!requiredKeys.includes(row.mapping_key as typeof requiredKeys[number])) {
+      continue;
+    }
+
+    if (!accountByKey.has(row.mapping_key)) {
+      accountByKey.set(row.mapping_key, Number(row.account_id));
+    }
+  }
+
   const missingKeys = requiredKeys.filter((key) => !accountByKey.has(key));
   if (missingKeys.length > 0) {
     throw new Error(OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE);
@@ -285,6 +307,23 @@ async function readOutletPaymentMethodMappings(
       continue;
     }
     const methodCode = normalizePaymentMethodCode(String(row.mapping_key));
+    if (!accountByMethod.has(methodCode)) {
+      accountByMethod.set(methodCode, Number(row.account_id));
+    }
+  }
+
+  const [companyRows] = await dbExecutor.execute(
+    `SELECT method_code, account_id
+     FROM company_payment_method_mappings
+     WHERE company_id = ?`,
+    [context.companyId]
+  );
+
+  for (const row of companyRows as Array<{ method_code?: string; account_id?: number }>) {
+    if (!row.method_code || !Number.isFinite(row.account_id)) {
+      continue;
+    }
+    const methodCode = normalizePaymentMethodCode(String(row.method_code));
     if (!accountByMethod.has(methodCode)) {
       accountByMethod.set(methodCode, Number(row.account_id));
     }
