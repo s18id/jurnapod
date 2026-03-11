@@ -3,6 +3,7 @@
 
 import type { ReactNode } from "react";
 import {
+  ActionIcon,
   AppShell,
   Badge,
   Box,
@@ -11,15 +12,18 @@ import {
   Container,
   Group,
   NavLink,
+  Popover,
   ScrollArea,
   Stack,
   Text,
   Title,
   useMantineTheme
 } from "@mantine/core";
+import { IconBell, IconRefresh, IconAlertTriangle } from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
 import type { AppRoute } from "./routes";
 import type { SessionUser } from "../lib/session";
+import type { OutboxItem, AlertReadHistory } from "../lib/offline-db";
 import { useOnlineStatus } from "../lib/connection";
 
 type AppLayoutProps = {
@@ -28,6 +32,13 @@ type AppLayoutProps = {
   activePath: string;
   onNavigate: (path: string) => void;
   onSignOut: () => void;
+  alertCount: number;
+  alertItems: OutboxItem[];
+  alertReadItems: AlertReadHistory[];
+  alertsLoading: boolean;
+  alertsRefreshing: boolean;
+  onRefreshAlerts: () => void;
+  onMarkAllAlertsRead: () => Promise<void>;
   children: ReactNode;
 };
 
@@ -154,6 +165,168 @@ export function AppLayout(props: AppLayoutProps) {
             </Box>
           </Group>
           <Group gap="xs" wrap="wrap" justify="flex-end">
+            <Popover
+              width={320}
+              position="bottom-end"
+              shadow="md"
+              withArrow
+            >
+              <Popover.Target>
+                <ActionIcon
+                  variant={props.alertCount > 0 ? "filled" : "light"}
+                  color={props.alertCount > 0 ? "red" : "gray"}
+                  size="lg"
+                  radius="xl"
+                  title={`${props.alertCount} sync alert${props.alertCount === 1 ? "" : "s"}`}
+                  aria-label={`${props.alertCount} sync alert${props.alertCount === 1 ? "" : "s"}`}
+                >
+                  <IconBell size={18} />
+                  {props.alertCount > 0 && (
+                    <Badge
+                      size="xs"
+                      circle
+                      color="red"
+                      style={{
+                        position: "absolute",
+                        top: -4,
+                        right: -4,
+                        minWidth: 16,
+                        height: 16,
+                        padding: 0,
+                        fontSize: 10,
+                        fontWeight: 700
+                      }}
+                    >
+                      {props.alertCount > 99 ? "99+" : props.alertCount}
+                    </Badge>
+                  )}
+                </ActionIcon>
+              </Popover.Target>
+              <Popover.Dropdown>
+                <Stack gap="xs">
+                  <Group justify="space-between">
+                    <Text fw={600} size="sm">
+                      Alerts
+                    </Text>
+                    <ActionIcon
+                      variant="subtle"
+                      size="sm"
+                      onClick={props.onRefreshAlerts}
+                      loading={props.alertsLoading || props.alertsRefreshing}
+                      title="Refresh"
+                    >
+                      <IconRefresh size={14} />
+                    </ActionIcon>
+                  </Group>
+                  {props.alertItems.length === 0 && props.alertReadItems.length === 0 ? (
+                    <Text c="dimmed" size="sm" ta="center" py="md">
+                      No alerts right now
+                    </Text>
+                  ) : (
+                    <>
+                      {props.alertItems.length > 0 && (
+                        <>
+                          <Text size="xs" fw={500} c="dimmed">
+                            Unread
+                          </Text>
+                          <ScrollArea.Autosize mah={180}>
+                            <Stack gap="xs">
+                              {props.alertItems.map((item) => (
+                                <Box
+                                  key={item.id}
+                                  p="xs"
+                                  style={{
+                                    borderRadius: 6,
+                                    backgroundColor: "#fef2f2",
+                                    border: "1px solid #fecaca",
+                                    cursor: "pointer"
+                                  }}
+                                  onClick={() => props.onNavigate("/sync-queue")}
+                                >
+                                  <Group gap="xs" justify="space-between">
+                                    <Group gap={4}>
+                                      <IconAlertTriangle size={14} color="#dc2626" />
+                                      <Text size="xs" fw={500} tt="capitalize">
+                                        {item.type}
+                                      </Text>
+                                    </Group>
+                                    <Text size="xs" c="dimmed">
+                                      {new Date(item.timestamp).toLocaleDateString("id-ID")}
+                                    </Text>
+                                  </Group>
+                                  <Text size="xs" c="dimmed" lineClamp={1} mt={4}>
+                                    {item.error ?? "Sync failed"}
+                                  </Text>
+                                </Box>
+                              ))}
+                            </Stack>
+                          </ScrollArea.Autosize>
+                          <Button
+                            variant="light"
+                            color="red"
+                            size="xs"
+                            fullWidth
+                            onClick={() => {
+                              void props.onMarkAllAlertsRead().catch(() => undefined);
+                            }}
+                            loading={props.alertsRefreshing}
+                          >
+                            Mark all as read
+                          </Button>
+                        </>
+                      )}
+                      {props.alertReadItems.length > 0 && (
+                        <>
+                          <Text size="xs" fw={500} c="dimmed">
+                            Recently read
+                          </Text>
+                          <ScrollArea.Autosize mah={180}>
+                            <Stack gap="xs">
+                              {props.alertReadItems.map((item) => (
+                                <Box
+                                  key={item.id}
+                                  p="xs"
+                                  style={{
+                                    borderRadius: 6,
+                                    backgroundColor: "#f9fafb",
+                                    border: "1px solid #e5e7eb"
+                                  }}
+                                  onClick={() => props.onNavigate("/sync-queue")}
+                                >
+                                  <Group gap="xs" justify="space-between">
+                                    <Group gap={4}>
+                                      <Text size="xs" fw={500} tt="capitalize">
+                                        {item.type}
+                                      </Text>
+                                    </Group>
+                                    <Text size="xs" c="dimmed">
+                                      {new Date(item.readAt).toLocaleDateString("id-ID")}
+                                    </Text>
+                                  </Group>
+                                  <Text size="xs" c="dimmed" lineClamp={1} mt={4}>
+                                    {item.error ?? "Sync failed"}
+                                  </Text>
+                                </Box>
+                              ))}
+                            </Stack>
+                          </ScrollArea.Autosize>
+                        </>
+                      )}
+                    </>
+                  )}
+                  {props.alertCount > 0 && (
+                    <Button
+                      variant="light"
+                      size="xs"
+                      fullWidth
+                      onClick={() => props.onNavigate("/sync-queue")}
+                    >
+                      View all ({props.alertCount})
+                    </Button>
+                  )}
+                </Stack>
+              </Popover.Dropdown>
+            </Popover>
             <ConnectionStatusBadge />
             <Button component="a" href={posBaseUrl} target="_blank" rel="noopener noreferrer" size="sm">
               Open POS
