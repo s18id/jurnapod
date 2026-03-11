@@ -75,7 +75,10 @@ export class OutboxService {
     if (!item || item.userId !== userId) {
       return;
     }
-    await db.outbox.delete(id);
+    await Promise.all([
+      db.outbox.delete(id),
+      db.alertReadState.delete([userId, id] as [number, string])
+    ]);
   }
 
   static async updateStatus(

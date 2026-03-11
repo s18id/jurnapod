@@ -3,6 +3,7 @@
 
 import { ApiError, apiRequest } from "./api-client";
 import { db, type OutboxItem } from "./offline-db";
+import { OutboxService } from "./outbox-service";
 import { ERROR_MESSAGES } from "./error-messages";
 
 export type SyncResult = {
@@ -86,7 +87,7 @@ export class SyncService {
           });
           const result = await this.syncOne(item, accessToken);
           if (result.success) {
-            await db.outbox.delete(item.id);
+            await OutboxService.deleteItem(item.id, userId);
             success += 1;
           } else if (result.conflict) {
             await db.outbox.update(item.id, {
