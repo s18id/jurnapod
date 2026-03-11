@@ -46,6 +46,7 @@ import {
 import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 import { useAccounts } from "../hooks/use-accounts";
+import { useOutletAccountMappings } from "../hooks/use-outlet-account-mappings";
 import { useOutletPaymentMethodMappings } from "../hooks/use-outlet-payment-method-mappings";
 import { useSalesInvoices } from "../hooks/use-sales-invoices";
 import { useOnlineStatus } from "../lib/connection";
@@ -230,10 +231,17 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     accountFilter
   );
 
-  // Fetch payment method mappings to get the invoice default
+  // Fetch payment method mappings (legacy fallback for is_invoice_default)
   const { mappings: paymentMappings, loading: mappingsLoading } = useOutletPaymentMethodMappings(
     selectedOutletId,
     props.accessToken
+  );
+
+  // Fetch account mappings to get INVOICE_PAYMENT_BANK
+  const { data: accountMappings, loading: accountMappingsLoading } = useOutletAccountMappings(
+    selectedOutletId > 0 ? selectedOutletId : null,
+    props.accessToken,
+    selectedOutletId > 0 ? "outlet" : "company"
   );
 
   // Fetch invoices for the dropdown (only POSTED, unpaid/partial)
@@ -344,23 +352,43 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     }
   }, [selectedOutletId, statusFilter, dateFromFilter, dateToFilter, activeQueryKey]);
 
-  // Set default account_id from invoice default payment method mapping
+  // Set default account_id from INVOICE_PAYMENT_BANK mapping (with legacy fallback)
   useEffect(() => {
-    if (!mappingsLoading && paymentMappings.length > 0 && newPayment.splits.length === 0) {
-      const invoiceDefault = paymentMappings.find((m) => m.is_invoice_default === true);
-      if (invoiceDefault) {
-        setNewPayment((prev) => ({
-          ...prev,
-          splits: [
-            {
-              account_id: String(invoiceDefault.account_id),
-              amount: prev.amount
-            }
-          ]
-        }));
-      }
+    if (newPayment.splits.length > 0) return;
+    
+    const dataLoading = mappingsLoading || accountMappingsLoading;
+    if (dataLoading) return;
+
+    // First priority: INVOICE_PAYMENT_BANK from account mappings
+    const invoiceBankMapping = accountMappings?.find((m) => m.mapping_key === "INVOICE_PAYMENT_BANK" && m.account_id);
+    
+    if (invoiceBankMapping && typeof invoiceBankMapping.account_id === "number") {
+      setNewPayment((prev) => ({
+        ...prev,
+        splits: [
+          {
+            account_id: String(invoiceBankMapping.account_id),
+            amount: prev.amount
+          }
+        ]
+      }));
+      return;
     }
-  }, [mappingsLoading, paymentMappings, newPayment.splits.length]);
+
+    // Legacy fallback: is_invoice_default from payment method mappings
+    const legacyInvoiceDefault = paymentMappings.find((m) => m.is_invoice_default === true);
+    if (legacyInvoiceDefault) {
+      setNewPayment((prev) => ({
+        ...prev,
+        splits: [
+          {
+            account_id: String(legacyInvoiceDefault.account_id),
+            amount: prev.amount
+          }
+        ]
+      }));
+    }
+  }, [mappingsLoading, accountMappingsLoading, paymentMappings, accountMappings, newPayment.splits.length]);
 
   // Backfill split account when invoice was selected before mappings finished loading.
   // This closes the race where buildPaymentFromInvoiceSelection creates a placeholder
@@ -777,7 +805,8 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     value: string | null,
     prev: T,
     availableInvoices: typeof invoices,
-    mappings: typeof paymentMappings
+    mappings: typeof paymentMappings,
+    accMappings?: typeof accountMappings
   ): T {
     if (!value) {
       return { ...prev, invoice_id: "", amount: "0", splits: [] };
@@ -785,10 +814,19 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
 
     const selectedInvoice = availableInvoices.find((inv) => inv.id === Number(value));
     const outstanding = selectedInvoice ? selectedInvoice.grand_total - selectedInvoice.paid_total : 0;
-    const invoiceDefault = mappings.find((m) => m.is_invoice_default === true);
 
-    const defaultSplits: PaymentSplitDraft[] = invoiceDefault
-      ? [{ account_id: String(invoiceDefault.account_id), amount: String(outstanding) }]
+    // First priority: INVOICE_PAYMENT_BANK from account mappings
+    const invoiceBankMapping = accMappings?.find((m) => m.mapping_key === "INVOICE_PAYMENT_BANK" && m.account_id);
+    const invoiceBankAccountId = typeof invoiceBankMapping?.account_id === "number" ? invoiceBankMapping.account_id : null;
+
+    // Legacy fallback: is_invoice_default from payment method mappings
+    const legacyInvoiceDefault = mappings.find((m) => m.is_invoice_default === true);
+    const legacyAccountId = legacyInvoiceDefault ? legacyInvoiceDefault.account_id : null;
+
+    const defaultAccountId = invoiceBankAccountId ?? legacyAccountId;
+
+    const defaultSplits: PaymentSplitDraft[] = defaultAccountId
+      ? [{ account_id: String(defaultAccountId), amount: String(outstanding) }]
       : outstanding > 0
         ? [{ account_id: "", amount: String(outstanding) }]
         : [];
@@ -999,7 +1037,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
                 data={invoiceOptions}
                 value={payment.invoice_id}
                 onChange={(value) =>
-                  handlers.onChangeField((prev) => buildPaymentFromInvoiceSelection(value, prev, invoices, paymentMappings))
+                  handlers.onChangeField((prev) => buildPaymentFromInvoiceSelection(value, prev, invoices, paymentMappings, accountMappings))
                 }
                 disabled={invoicesLoading}
                 searchable
@@ -1141,7 +1179,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
                 data={invoiceOptions}
                 value={payment.invoice_id}
                 onChange={(value) =>
-                  handlers.onChangeField((prev) => buildPaymentFromInvoiceSelection(value, prev, invoices, paymentMappings))
+                  handlers.onChangeField((prev) => buildPaymentFromInvoiceSelection(value, prev, invoices, paymentMappings, accountMappings))
                 }
                 disabled={invoicesLoading}
                 searchable

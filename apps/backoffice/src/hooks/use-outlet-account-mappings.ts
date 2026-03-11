@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
 
-export type OutletAccountMappingKey = "SALES_REVENUE" | "SALES_TAX" | "AR";
+export type OutletAccountMappingKey = "SALES_REVENUE" | "SALES_TAX" | "AR" | "INVOICE_PAYMENT_BANK";
 
 export type OutletAccountMapping = {
   mapping_key: OutletAccountMappingKey;

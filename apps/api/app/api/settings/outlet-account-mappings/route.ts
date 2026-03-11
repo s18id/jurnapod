@@ -8,7 +8,7 @@ import { userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 
-const mappingKeys = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
+const mappingKeys = ["SALES_REVENUE", "SALES_TAX", "AR", "INVOICE_PAYMENT_BANK"] as const;
 const mappingKeySchema = z.enum(mappingKeys);
 const scopeSchema = z.enum(["company", "outlet"]);
 
@@ -188,7 +188,7 @@ export const PUT = withAuth(
       const pool = getDbPool();
 
       if (parsed.scope === "company") {
-        const requiredKeys: readonly typeof mappingKeys[number][] = ["AR", "SALES_REVENUE", "SALES_TAX"];
+        const requiredKeys: readonly ("AR" | "SALES_REVENUE" | "SALES_TAX")[] = ["AR", "SALES_REVENUE", "SALES_TAX"];
         const providedKeys = new Set(parsed.mappings.map((m) => m.mapping_key));
         const missingKeys = requiredKeys.filter((key) => !providedKeys.has(key));
         
