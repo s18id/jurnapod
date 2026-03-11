@@ -613,3 +613,129 @@ test(
     }
   }
 );
+
+test(
+  "GET /api/accounts/tree returns hierarchical entries for multi-level accounts",
+  { concurrency: false, timeout: TEST_TIMEOUT_MS },
+  async () => {
+    const { db, baseUrl } = testContext;
+    const runId = Date.now().toString(36);
+
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+    const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD", "password123");
+
+    let companyId = 0;
+    const createdAccountIds = [];
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id FROM users u INNER JOIN companies c ON c.id = u.company_id WHERE c.code = ? AND u.email = ? AND u.is_active = 1 LIMIT 1`,
+        [companyCode, ownerEmail]
+      );
+      assert.ok(ownerRows.length > 0, "Owner fixture not found");
+      companyId = Number(ownerRows[0].company_id);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await loginResponse.json();
+      const accessToken = loginBody.data.access_token;
+
+      const rootCode = `TR-${runId}`;
+      const parentCode = `TP-${runId}`;
+      const childCode = `TC-${runId}`;
+
+      const createRootResponse = await fetch(`${baseUrl}/api/accounts`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          company_id: companyId,
+          code: rootCode,
+          name: `Tree Root ${runId}`,
+          type_name: "Kas",
+          normal_balance: "D",
+          report_group: "NRC",
+          is_group: true
+        })
+      });
+      assert.equal(createRootResponse.status, 201, "Root account create should return 201");
+      const createRootBody = await createRootResponse.json();
+      assert.equal(createRootBody.success, true);
+      const rootId = Number(createRootBody.data.id);
+      createdAccountIds.push(rootId);
+
+      const createParentResponse = await fetch(`${baseUrl}/api/accounts`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          company_id: companyId,
+          code: parentCode,
+          name: `Tree Parent ${runId}`,
+          parent_account_id: rootId,
+          is_group: true
+        })
+      });
+      assert.equal(createParentResponse.status, 201, "Parent account create should return 201");
+      const createParentBody = await createParentResponse.json();
+      assert.equal(createParentBody.success, true);
+      const parentId = Number(createParentBody.data.id);
+      createdAccountIds.push(parentId);
+
+      const createChildResponse = await fetch(`${baseUrl}/api/accounts`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          company_id: companyId,
+          code: childCode,
+          name: `Tree Child ${runId}`,
+          parent_account_id: parentId,
+          is_group: false
+        })
+      });
+      assert.equal(createChildResponse.status, 201, "Child account create should return 201");
+      const createChildBody = await createChildResponse.json();
+      assert.equal(createChildBody.success, true);
+      const childId = Number(createChildBody.data.id);
+      createdAccountIds.push(childId);
+
+      const treeResponse = await fetch(
+        `${baseUrl}/api/accounts/tree?company_id=${companyId}&include_inactive=false`,
+        { headers: { authorization: `Bearer ${accessToken}` } }
+      );
+      assert.equal(treeResponse.status, 200, "GET /api/accounts/tree should return 200");
+      const treeBody = await treeResponse.json();
+      assert.equal(treeBody.success, true, "GET /api/accounts/tree should succeed");
+
+      const rootNode = treeBody.data.find((node) => node.code === rootCode);
+      assert.ok(rootNode, "Root account should appear at tree root");
+
+      const parentNode = rootNode.children.find((node) => node.code === parentCode);
+      assert.ok(parentNode, "Parent account should appear under root children");
+
+      const childNode = parentNode.children.find((node) => node.code === childCode);
+      assert.ok(childNode, "Child account should appear under parent children");
+
+      assert.strictEqual(childNode.normal_balance, "D", "Child should inherit normal_balance from nearest classified ancestor");
+      assert.strictEqual(childNode.report_group, "NRC", "Child should inherit report_group from nearest classified ancestor");
+    } finally {
+      for (const id of createdAccountIds.slice().reverse()) {
+        try {
+          await db.execute(`DELETE FROM accounts WHERE id = ?`, [id]);
+        } catch (e) { /* ignore */ }
+      }
+    }
+  }
+);

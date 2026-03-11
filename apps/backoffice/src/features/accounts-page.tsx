@@ -2,6 +2,30 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useState, useMemo, useEffect } from "react";
+import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  Collapse,
+  Container,
+  Divider,
+  Group,
+  Loader,
+  Paper,
+  ScrollArea,
+  Select,
+  SimpleGrid,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+  ThemeIcon,
+  Title
+} from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import type { SessionUser } from "../lib/session";
 import { useAccountTree, useAccountTypes } from "../hooks/use-accounts";
 import {
@@ -18,7 +42,6 @@ import { OfflinePage } from "../components/offline-page";
 import type {
   AccountResponse,
   AccountTreeNode,
-  AccountTypeResponse,
   NormalBalance,
   ReportGroup
 } from "@jurnapod/shared";
@@ -35,10 +58,10 @@ type AccountFormData = {
   name: string;
   parent_account_id: number | null;
   is_group: boolean;
-  account_type_id: number | null; // Optional template reference
-  type_name: string | null; // Classification (primary source of truth)
-  normal_balance: NormalBalance | null; // Classification (primary source of truth)
-  report_group: ReportGroup | null; // Classification (primary source of truth)
+  account_type_id: number | null;
+  type_name: string | null;
+  normal_balance: NormalBalance | null;
+  report_group: ReportGroup | null;
   is_payable: boolean;
   is_active: boolean;
 };
@@ -56,78 +79,15 @@ const emptyForm: AccountFormData = {
   is_active: true
 };
 
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
+const reportGroupOptions = [
+  { value: "NRC", label: "NRC (Neraca/Balance Sheet)" },
+  { value: "PL", label: "PL (Laba Rugi/P&L)" }
+];
 
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const inputStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 8px"
-} as const;
-
-const buttonStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 12px",
-  backgroundColor: "#fff",
-  cursor: "pointer",
-  marginRight: "8px"
-} as const;
-
-const primaryButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#2f5f4a",
-  color: "#fff",
-  border: "1px solid #2f5f4a"
-} as const;
-
-const badgeStyle = {
-  display: "inline-block",
-  padding: "2px 6px",
-  borderRadius: "4px",
-  fontSize: "11px",
-  fontWeight: "bold" as const,
-  marginRight: "4px"
-} as const;
-
-const activeBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#d4edda",
-  color: "#155724"
-} as const;
-
-const inactiveBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#f8d7da",
-  color: "#721c24"
-} as const;
-
-const groupBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#d1ecf1",
-  color: "#0c5460"
-} as const;
-
-const payableBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#efe3c2",
-  color: "#5b4b2f"
-} as const;
+const normalBalanceOptions = [
+  { value: "D", label: "D (Debit)" },
+  { value: "K", label: "K (Kredit)" }
+];
 
 export function AccountsPage(props: AccountsPageProps) {
   const isOnline = useOnlineStatus();
@@ -144,6 +104,8 @@ export function AccountsPage(props: AccountsPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  const [formOpened, { open: openForm, close: closeForm }] = useDisclosure(false);
+
   const { data: tree, loading, error: treeError, refetch } = useAccountTree(
     props.user.company_id,
     props.accessToken,
@@ -153,7 +115,7 @@ export function AccountsPage(props: AccountsPageProps) {
   const { data: accountTypes, loading: accountTypesLoading } = useAccountTypes(
     props.user.company_id,
     props.accessToken,
-    { is_active: undefined } // Fetch all types for display (including inactive)
+    { is_active: undefined }
   );
 
   if (!isOnline) {
@@ -165,7 +127,6 @@ export function AccountsPage(props: AccountsPageProps) {
     );
   }
 
-  // Flatten tree for parent dropdown and search
   const flatAccounts = useMemo(() => {
     if (!tree) return [];
     const result: AccountResponse[] = [];
@@ -181,7 +142,6 @@ export function AccountsPage(props: AccountsPageProps) {
     return result;
   }, [tree]);
 
-  // Filter tree based on search and report group
   const filteredTree = useMemo(() => {
     if (!tree) return [];
     if (!searchTerm && reportGroupFilter === "ALL") {
@@ -220,13 +180,11 @@ export function AccountsPage(props: AccountsPageProps) {
     return filterTree(tree);
   }, [tree, searchTerm, reportGroupFilter]);
 
-  // Auto-expand branches when searching
   useEffect(() => {
     if (!searchTerm || !filteredTree.length) {
       return;
     }
 
-    // Find all parent IDs that have matching descendants
     function collectExpandedIds(nodes: AccountTreeNode[]): Set<number> {
       const expanded = new Set<number>();
       for (const node of nodes) {
@@ -237,7 +195,6 @@ export function AccountsPage(props: AccountsPageProps) {
             childExpanded.forEach(id => expanded.add(id));
           }
         }
-        // If node itself matches, expand its parents
         if (node.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
             node.name.toLowerCase().includes(searchTerm.toLowerCase())) {
           expanded.add(node.id);
@@ -248,7 +205,6 @@ export function AccountsPage(props: AccountsPageProps) {
 
     const nodesToExpand = collectExpandedIds(filteredTree);
     
-    // Only update state if there are new nodes to expand
     setExpandedNodes(prev => {
       const newSet = new Set(prev);
       let hasNew = false;
@@ -274,6 +230,37 @@ export function AccountsPage(props: AccountsPageProps) {
     });
   }
 
+  function collectExpandableNodeIds(nodes: AccountTreeNode[]): number[] {
+    const ids: number[] = [];
+    function walk(items: AccountTreeNode[]) {
+      for (const item of items) {
+        if (item.children && item.children.length > 0) {
+          ids.push(item.id);
+          walk(item.children);
+        }
+      }
+    }
+    walk(nodes);
+    return ids;
+  }
+
+  const expandableFilteredNodeIds = useMemo(
+    () => collectExpandableNodeIds(filteredTree),
+    [filteredTree]
+  );
+
+  function handleExpandAll() {
+    setExpandedNodes(new Set(expandableFilteredNodeIds));
+  }
+
+  function handleExpandFirstLevel() {
+    setExpandedNodes(new Set(filteredTree.filter((node) => node.children && node.children.length > 0).map((node) => node.id)));
+  }
+
+  function handleCollapseAll() {
+    setExpandedNodes(new Set());
+  }
+
   function openCreateForm() {
     setFormMode("create");
     setEditingId(null);
@@ -281,6 +268,8 @@ export function AccountsPage(props: AccountsPageProps) {
     setFormErrors({});
     setError(null);
     setSuccessMessage(null);
+    setExpandedNodes(new Set());
+    openForm();
   }
 
   function openEditForm(account: AccountTreeNode) {
@@ -301,13 +290,15 @@ export function AccountsPage(props: AccountsPageProps) {
     setFormErrors({});
     setError(null);
     setSuccessMessage(null);
+    openForm();
   }
 
-  function closeForm() {
+  function closeFormHandler() {
     setFormMode(null);
     setEditingId(null);
     setFormData(emptyForm);
     setFormErrors({});
+    closeForm();
   }
 
   function validateForm(): boolean {
@@ -373,7 +364,7 @@ export function AccountsPage(props: AccountsPageProps) {
       }
 
       await refetch();
-      closeForm();
+      closeFormHandler();
     } catch (submitError) {
       if (submitError instanceof ApiError) {
         setError(submitError.message);
@@ -430,106 +421,129 @@ export function AccountsPage(props: AccountsPageProps) {
   function renderTreeNode(node: AccountTreeNode, level: number) {
     const isExpanded = expandedNodes.has(node.id);
     const hasChildren = node.children && node.children.length > 0;
-    const indentPx = level * 20;
+    const indentPx = level * 24;
 
     return (
       <div key={node.id}>
-        <div
+        <Paper
+          p="sm"
+          withBorder
           style={{
-            ...cellStyle,
-            paddingLeft: `${8 + indentPx}px`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            backgroundColor: level % 2 === 0 ? "#fcfbf8" : "#f8f6f3"
+            marginBottom: 4,
+            marginLeft: indentPx,
+            backgroundColor: level % 2 === 0 ? undefined : "var(--mantine-color-gray-light)",
+            transition: "background-color 0.15s ease"
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
-            {hasChildren ? (
-              <button
-                type="button"
-                onClick={() => toggleNode(node.id)}
-                style={{
-                  border: "none",
-                  background: "none",
-                  cursor: "pointer",
-                  padding: "0 8px 0 0",
-                  fontSize: "14px"
-                }}
-              >
-                {isExpanded ? "▼" : "▶"}
-              </button>
-            ) : (
-              <span style={{ paddingRight: "18px" }} />
-            )}
-            
-            <span style={{ marginRight: "8px", fontSize: "16px" }}>
-              {node.is_group ? "📁" : "📄"}
-            </span>
-
-            <div style={{ flex: 1 }}>
-              <strong>{node.code}</strong> - {node.name}
-              <div style={{ marginTop: "4px" }}>
-                {node.is_active ? (
-                  <span style={activeBadgeStyle}>Active</span>
+          <Stack gap="xs">
+            <Group justify="space-between" wrap="wrap">
+              <Group gap="xs" wrap="wrap">
+                {hasChildren ? (
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    onClick={() => toggleNode(node.id)}
+                    aria-label={isExpanded ? "Collapse" : "Expand"}
+                  >
+                    <Text size="xs" fw={600}>
+                      {isExpanded ? "▼" : "▶"}
+                    </Text>
+                  </ActionIcon>
                 ) : (
-                  <span style={inactiveBadgeStyle}>Inactive</span>
+                  <div style={{ width: 22 }} />
                 )}
-                {node.is_group && <span style={groupBadgeStyle}>Group</span>}
-                {node.is_payable && <span style={payableBadgeStyle}>Payable</span>}
-                {node.report_group && (
-                  <span style={{ ...badgeStyle, backgroundColor: "#e7e7e7", color: "#333" }}>
-                    {node.report_group}
-                  </span>
-                )}
-                {/* Show type_name from account row first (runtime source of truth) */}
-                {node.type_name && (
-                  <span style={{ fontSize: "11px", color: "#6b5d48", marginLeft: "4px" }}>
-                    {node.type_name}
-                  </span>
-                )}
-                {/* Fallback to template name if no direct type_name */}
-                {!node.type_name && node.account_type_id && accountTypes.length > 0 && (
-                  <span style={{ fontSize: "11px", color: "#6b5d48", marginLeft: "4px" }}>
-                    {accountTypes.find(t => t.id === node.account_type_id)?.name}
-                  </span>
-                )}
-                {node.normal_balance && (
-                  <span style={{ fontSize: "11px", color: "#6b5d48", marginLeft: "4px" }}>
-                    [{node.normal_balance}]
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
+                
+                <ThemeIcon
+                  size="sm"
+                  variant="light"
+                  color={node.is_group ? "blue" : "gray"}
+                >
+                  {node.is_group ? "📁" : "📄"}
+                </ThemeIcon>
 
-          <div style={{ display: "flex", gap: "4px" }}>
-            <button
-              type="button"
-              onClick={() => openEditForm(node)}
-              style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
-            >
-              Edit
-            </button>
-            {node.is_active ? (
-              <button
-                type="button"
-                onClick={() => handleDeactivate(node)}
-                style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
-              >
-                Deactivate
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => handleReactivate(node)}
-                style={{ ...buttonStyle, fontSize: "12px", padding: "4px 8px" }}
-              >
-                Reactivate
-              </button>
-            )}
-          </div>
-        </div>
+                <Text size="sm" fw={600}>
+                  {node.code}
+                </Text>
+                
+                <Text size="sm" c="dimmed">-</Text>
+                
+                <Text size="sm" style={{ flex: 1 }} truncate>
+                  {node.name}
+                </Text>
+              </Group>
+            </Group>
+
+            <Group justify="space-between" wrap="wrap">
+              <Group gap={4} wrap="wrap">
+                <Badge
+                  size="xs"
+                  color={node.is_active ? "green" : "red"}
+                  variant="light"
+                >
+                  {node.is_active ? "Active" : "Inactive"}
+                </Badge>
+                {node.is_group && (
+                  <Badge size="xs" color="blue" variant="light">
+                    Group
+                  </Badge>
+                )}
+                {node.is_payable && (
+                  <Badge size="xs" color="yellow" variant="light">
+                    Payable
+                  </Badge>
+                )}
+                {node.report_group && (
+                  <Badge size="xs" variant="outline">
+                    {node.report_group}
+                  </Badge>
+                )}
+                
+                <Text size="xs" c="dimmed">
+                  {node.type_name && (
+                    <span>{node.type_name}</span>
+                  )}
+                  {!node.type_name && node.account_type_id && accountTypes.length > 0 && (
+                    <span>
+                      {accountTypes.find(t => t.id === node.account_type_id)?.name}
+                    </span>
+                  )}
+                  {node.normal_balance && (
+                    <span> [{node.normal_balance}]</span>
+                  )}
+                </Text>
+              </Group>
+
+              <Group gap={4}>
+                <Button
+                  size="xs"
+                  variant="light"
+                  onClick={() => openEditForm(node)}
+                >
+                  Edit
+                </Button>
+                {node.is_active ? (
+                  <Button
+                    size="xs"
+                    variant="light"
+                    color="red"
+                    onClick={() => handleDeactivate(node)}
+                  >
+                    Deactivate
+                  </Button>
+                ) : (
+                  <Button
+                    size="xs"
+                    variant="light"
+                    color="green"
+                    onClick={() => handleReactivate(node)}
+                  >
+                    Reactivate
+                  </Button>
+                )}
+              </Group>
+            </Group>
+          </Stack>
+        </Paper>
 
         {isExpanded && hasChildren && (
           <div>
@@ -540,302 +554,329 @@ export function AccountsPage(props: AccountsPageProps) {
     );
   }
 
+  const parentAccountData = [
+    { value: "", label: "None (Top Level)" },
+    ...flatAccounts
+      .filter((acc) => formMode === "edit" ? acc.id !== editingId : true)
+      .map((acc) => ({
+        value: String(acc.id),
+        label: `${acc.code} - ${acc.name}`
+      }))
+  ];
+
+  const accountTypeData = [
+    { value: "", label: "None (manual entry)" },
+    ...accountTypes.map((type) => ({
+      value: String(type.id),
+      label: `${type.category ? `[${type.category}] ` : ""}${type.name}${type.normal_balance ? ` [${type.normal_balance}]` : ""}${type.report_group ? ` - ${type.report_group}` : ""}`
+    }))
+  ];
+
   return (
-    <div>
-      <section style={boxStyle}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <h2 style={{ marginTop: 0, marginBottom: 0 }}>Chart of Accounts</h2>
-          <button type="button" onClick={openCreateForm} style={primaryButtonStyle}>
-            Create Account
-          </button>
-        </div>
+    <Container size="lg" py="md">
+      <Stack gap="md">
+        {/* Header + Status Card */}
+        <Card>
+          <Stack gap="sm">
+            <Group justify="space-between" wrap="wrap">
+              <div>
+                <Title order={2}>Chart of Accounts</Title>
+                <Text c="dimmed" size="sm">
+                  Manage your company's chart of accounts for financial reporting.
+                </Text>
+              </div>
+              <Button onClick={openCreateForm}>
+                Create Account
+              </Button>
+            </Group>
 
-        <StaleDataWarning
-          cacheKey={buildCacheKey("accounts", { companyId: props.user.company_id })}
-          label="accounts"
-        />
-
-        {loading && <p>Loading accounts...</p>}
-        {treeError && <p style={{ color: "#8d2626" }}>{treeError}</p>}
-        {error && <p style={{ color: "#8d2626" }}>{error}</p>}
-        {successMessage && (
-          <p style={{ color: "#155724", backgroundColor: "#d4edda", padding: "8px", borderRadius: "4px" }}>
-            {successMessage}
-          </p>
-        )}
-      </section>
-
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Filters</h3>
-        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
-          <input
-            type="text"
-            placeholder="Search by code or name..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ ...inputStyle, minWidth: "250px" }}
-          />
-
-          <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
+            <StaleDataWarning
+              cacheKey={buildCacheKey("accounts", { companyId: props.user.company_id })}
+              label="accounts"
             />
-            Show Inactive
-          </label>
+            
+            {loading && (
+              <Group gap="xs">
+                <Loader size="xs" />
+                <Text size="sm" c="dimmed">Loading accounts...</Text>
+              </Group>
+            )}
+            
+            {treeError && (
+              <Alert color="red" title="Error loading accounts">
+                {treeError}
+              </Alert>
+            )}
+            
+            {error && (
+              <Alert color="red" withCloseButton onClose={() => setError(null)}>
+                {error}
+              </Alert>
+            )}
+            
+            {successMessage && (
+              <Alert color="green" withCloseButton onClose={() => setSuccessMessage(null)}>
+                {successMessage}
+              </Alert>
+            )}
+          </Stack>
+        </Card>
 
-          <select
-            value={reportGroupFilter}
-            onChange={(e) => setReportGroupFilter(e.target.value as ReportGroup | "ALL")}
-            style={inputStyle}
-          >
-            <option value="ALL">All Report Groups</option>
-            <option value="NRC">Neraca (NRC)</option>
-            <option value="PL">Laba Rugi (PL)</option>
-          </select>
-        </div>
-      </section>
-
-      {formMode && (
-        <section style={{ ...boxStyle, backgroundColor: "#fff9e6", border: "2px solid #2f5f4a" }}>
-          <h3 style={{ marginTop: 0 }}>
-            {formMode === "create" ? "Create New Account" : "Edit Account"}
-          </h3>
-
-          <div style={{ display: "grid", gap: "12px", gridTemplateColumns: "1fr 1fr", marginBottom: "16px" }}>
-            <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                Code <span style={{ color: "#8d2626" }}>*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.code}
-                onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                style={{ ...inputStyle, width: "100%" }}
-                placeholder="e.g., 1000, CASH-01"
+        {/* Filters Card */}
+        <Card>
+          <Stack gap="sm">
+            <Title order={4}>Filters</Title>
+            <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="sm">
+              <TextInput
+                placeholder="Search by code or name..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.currentTarget.value)}
+                aria-label="Search accounts"
               />
-              {formErrors.code && (
-                <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.code}</small>
+              
+              <Select
+                placeholder="All Report Groups"
+                data={[
+                  { value: "ALL", label: "All Report Groups" },
+                  ...reportGroupOptions
+                ]}
+                value={reportGroupFilter}
+                onChange={(value) => setReportGroupFilter((value as ReportGroup | "ALL") || "ALL")}
+                aria-label="Filter by report group"
+              />
+              
+              <Switch
+                label="Show Inactive"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.currentTarget.checked)}
+              />
+            </SimpleGrid>
+          </Stack>
+        </Card>
+
+        {/* Account Form Card */}
+        <Collapse in={formOpened}>
+          <Card>
+            <Stack gap="md">
+              <Group justify="space-between">
+                <Title order={4}>
+                  {formMode === "create" ? "Create New Account" : "Edit Account"}
+                </Title>
+                <Button variant="subtle" size="xs" onClick={closeFormHandler}>
+                  Close
+                </Button>
+              </Group>
+              
+              <Divider />
+              
+              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+                <TextInput
+                  label="Code"
+                  placeholder="e.g., 1000, CASH-01"
+                  value={formData.code}
+                  onChange={(e) => setFormData({ ...formData, code: e.currentTarget.value })}
+                  error={formErrors.code}
+                  withAsterisk
+                />
+                
+                <TextInput
+                  label="Name"
+                  placeholder="e.g., Cash in Bank"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.currentTarget.value })}
+                  error={formErrors.name}
+                  withAsterisk
+                />
+                
+                <Select
+                  label="Parent Account"
+                  placeholder="Select parent account"
+                  data={parentAccountData}
+                  value={formData.parent_account_id != null ? String(formData.parent_account_id) : ""}
+                  onChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      parent_account_id: value ? Number(value) : null
+                    })
+                  }
+                  clearable
+                  searchable
+                />
+                
+                <Select
+                  label="Classification (Template)"
+                  placeholder="Select a template"
+                  data={accountTypeData}
+                  value={formData.account_type_id != null ? String(formData.account_type_id) : ""}
+                  onChange={(value) => {
+                    const typeId = value ? Number(value) : null;
+                    const selectedType = accountTypes.find(t => t.id === typeId);
+                    setFormData({
+                      ...formData,
+                      account_type_id: typeId,
+                      type_name: selectedType?.name ?? formData.type_name,
+                      normal_balance: selectedType?.normal_balance ?? formData.normal_balance,
+                      report_group: selectedType?.report_group ?? formData.report_group
+                    });
+                  }}
+                  disabled={accountTypesLoading}
+                  clearable
+                  searchable
+                />
+                
+                <TextInput
+                  label="Type Name"
+                  placeholder="e.g., Kas, Bank, Pendapatan"
+                  value={formData.type_name ?? ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      type_name: e.currentTarget.value || null
+                    })
+                  }
+                  description="Leave empty to inherit from parent account"
+                />
+                
+                <Select
+                  label="Normal Balance"
+                  placeholder="Select normal balance"
+                  data={[
+                    { value: "", label: "Inherit from parent" },
+                    ...normalBalanceOptions
+                  ]}
+                  value={formData.normal_balance ?? ""}
+                  onChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      normal_balance: (value as NormalBalance) || null
+                    })
+                  }
+                  clearable
+                />
+                
+                <Select
+                  label="Report Group"
+                  placeholder="Select report group"
+                  data={[
+                    { value: "", label: "Inherit from parent" },
+                    ...reportGroupOptions
+                  ]}
+                  value={formData.report_group ?? ""}
+                  onChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      report_group: (value as ReportGroup) || null
+                    })
+                  }
+                  clearable
+                />
+                
+                <div />
+                
+                <Stack gap="xs">
+                  <Checkbox
+                    label="Is Group Account"
+                    description="Group accounts can have child accounts"
+                    checked={formData.is_group}
+                    onChange={(e) => setFormData({ ...formData, is_group: e.currentTarget.checked })}
+                  />
+                  
+                  <Checkbox
+                    label="Active"
+                    checked={formData.is_active}
+                    onChange={(e) => setFormData({ ...formData, is_active: e.currentTarget.checked })}
+                  />
+                  
+                  <Checkbox
+                    label="Payment Destination"
+                    description="Allow this account to receive POS and sales payments"
+                    checked={formData.is_payable}
+                    onChange={(e) => setFormData({ ...formData, is_payable: e.currentTarget.checked })}
+                  />
+                </Stack>
+              </SimpleGrid>
+              
+              <Divider />
+              
+              <Group justify="flex-end">
+                <Button variant="default" onClick={closeFormHandler} disabled={submitLoading}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSubmit} loading={submitLoading}>
+                  Save
+                </Button>
+              </Group>
+            </Stack>
+          </Card>
+        </Collapse>
+
+        {/* Accounts Tree Card */}
+        <Card>
+          <Stack gap="sm">
+            <Group justify="space-between" align="center" wrap="wrap">
+              <Title order={4}>
+                Accounts Tree ({filteredTree.length})
+              </Title>
+
+              <Group gap="xs" wrap="wrap">
+                <Badge variant="light" color="gray">
+                  Expanded {Math.min(expandedNodes.size, expandableFilteredNodeIds.length)}/{expandableFilteredNodeIds.length}
+                </Badge>
+                <Button
+                  size="xs"
+                  variant="default"
+                  onClick={handleExpandAll}
+                  disabled={expandableFilteredNodeIds.length === 0}
+                >
+                  Expand all
+                </Button>
+                <Button
+                  size="xs"
+                  variant="default"
+                  onClick={handleExpandFirstLevel}
+                  disabled={filteredTree.length === 0}
+                >
+                  Expand first level
+                </Button>
+                <Button
+                  size="xs"
+                  variant="default"
+                  onClick={handleCollapseAll}
+                  disabled={expandedNodes.size === 0}
+                >
+                  Collapse all
+                </Button>
+              </Group>
+            </Group>
+            
+            {filteredTree.length === 0 ? (
+              <Text c="dimmed" ta="center" py="xl">
+                {searchTerm || reportGroupFilter !== "ALL" 
+                  ? "No accounts match your filters. Try adjusting your search criteria."
+                  : "No accounts found. Create your first account to get started."}
+              </Text>
+            ) : (
+              <ScrollArea type="auto" scrollbarSize={8}>
+                <Stack gap={0}>
+                  {filteredTree.map((node) => renderTreeNode(node, 0))}
+                </Stack>
+              </ScrollArea>
+            )}
+          </Stack>
+        </Card>
+
+        {/* Summary Card */}
+        <Card>
+          <Group justify="space-between">
+            <Text size="sm" c="dimmed">
+              Loaded {flatAccounts.length} accounts total.
+              {(searchTerm || reportGroupFilter !== "ALL") && (
+                <> Showing {filteredTree.length} after filters.</>
               )}
-            </div>
-
-            <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                Name <span style={{ color: "#8d2626" }}>*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                style={{ ...inputStyle, width: "100%" }}
-                placeholder="e.g., Cash in Bank"
-              />
-              {formErrors.name && (
-                <small style={{ color: "#8d2626", fontSize: "11px" }}>{formErrors.name}</small>
-              )}
-            </div>
-
-            <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                Parent Account
-              </label>
-              <select
-                value={formData.parent_account_id ?? ""}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    parent_account_id: e.target.value ? Number(e.target.value) : null
-                  })
-                }
-                style={{ ...inputStyle, width: "100%" }}
-              >
-                <option value="">None (Top Level)</option>
-                {flatAccounts
-                  .filter((acc) => formMode === "edit" ? acc.id !== editingId : true)
-                  .map((acc) => (
-                    <option key={acc.id} value={acc.id}>
-                      {acc.code} - {acc.name}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                Classification (Optional Template)
-              </label>
-              <select
-                value={formData.account_type_id ?? ""}
-                onChange={(e) => {
-                  const typeId = e.target.value ? Number(e.target.value) : null;
-                  const selectedType = accountTypes.find(t => t.id === typeId);
-                  setFormData({
-                    ...formData,
-                    account_type_id: typeId,
-                    // Auto-fill from template
-                    type_name: selectedType?.name ?? formData.type_name,
-                    normal_balance: selectedType?.normal_balance ?? formData.normal_balance,
-                    report_group: selectedType?.report_group ?? formData.report_group
-                  });
-                }}
-                style={{ ...inputStyle, width: "100%" }}
-                disabled={accountTypesLoading}
-              >
-                <option value="">None (manual entry)</option>
-                {accountTypes.map((type) => (
-                  <option key={type.id} value={type.id}>
-                    {type.category ? `[${type.category}] ` : ""}{type.name}
-                    {type.normal_balance && ` [${type.normal_balance}]`}
-                    {type.report_group && ` - ${type.report_group}`}
-                  </option>
-                ))}
-              </select>
-              <small style={{ color: "#6b5d48", fontSize: "11px", display: "block", marginTop: "2px" }}>
-                Select a template to auto-fill classification below, or enter manually
-              </small>
-            </div>
-
-            <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                Type Name
-              </label>
-              <input
-                type="text"
-                value={formData.type_name ?? ""}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    type_name: e.target.value || null
-                  })
-                }
-                style={{ ...inputStyle, width: "100%" }}
-                placeholder="e.g., Kas, Bank, Pendapatan"
-              />
-              <small style={{ color: "#6b5d48", fontSize: "11px", display: "block", marginTop: "2px" }}>
-                Leave empty to inherit from parent account
-              </small>
-            </div>
-
-            <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                Normal Balance
-              </label>
-              <select
-                value={formData.normal_balance ?? ""}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    normal_balance: (e.target.value as NormalBalance) || null
-                  })
-                }
-                style={{ ...inputStyle, width: "100%" }}
-              >
-                <option value="">Inherit from parent</option>
-                <option value="D">D (Debit)</option>
-                <option value="K">K (Kredit)</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                Report Group
-              </label>
-              <select
-                value={formData.report_group ?? ""}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    report_group: (e.target.value as ReportGroup) || null
-                  })
-                }
-                style={{ ...inputStyle, width: "100%" }}
-              >
-                <option value="">Inherit from parent</option>
-                <option value="NRC">NRC (Neraca/Balance Sheet)</option>
-                <option value="PL">PL (Laba Rugi/P&L)</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "bold" }}>
-                <input
-                  type="checkbox"
-                  checked={formData.is_group}
-                  onChange={(e) => setFormData({ ...formData, is_group: e.target.checked })}
-                />
-                Is Group Account
-              </label>
-              <small style={{ color: "#6b5d48", fontSize: "11px", display: "block", marginTop: "4px" }}>
-                Group accounts can have child accounts
-              </small>
-            </div>
-
-            <div>
-              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "bold" }}>
-                <input
-                  type="checkbox"
-                  checked={formData.is_active}
-                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                />
-                Active
-              </label>
-            </div>
-
-            <div>
-              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "bold" }}>
-                <input
-                  type="checkbox"
-                  checked={formData.is_payable}
-                  onChange={(e) => setFormData({ ...formData, is_payable: e.target.checked })}
-                />
-                Payment Destination
-              </label>
-              <small style={{ color: "#6b5d48", fontSize: "11px", display: "block", marginTop: "4px" }}>
-                Allow this account to receive POS and sales payments
-              </small>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={submitLoading}
-              style={primaryButtonStyle}
-            >
-              {submitLoading ? "Saving..." : "Save"}
-            </button>
-            <button type="button" onClick={closeForm} style={buttonStyle} disabled={submitLoading}>
-              Cancel
-            </button>
-          </div>
-        </section>
-      )}
-
-      <section style={boxStyle}>
-        <h3 style={{ marginTop: 0 }}>Accounts Tree</h3>
-        
-        {filteredTree.length === 0 ? (
-          <p style={{ color: "#6b5d48", textAlign: "center", padding: "20px" }}>
-            No accounts found. {searchTerm || reportGroupFilter !== "ALL" ? "Try adjusting your filters." : "Create your first account to get started."}
-          </p>
-        ) : (
-          <div style={{ border: "1px solid #e2ddd2", borderRadius: "6px", overflow: "hidden" }}>
-            {filteredTree.map((node) => renderTreeNode(node, 0))}
-          </div>
-        )}
-      </section>
-
-      <section style={boxStyle}>
-        <strong>Summary</strong>
-        <p style={{ marginBottom: 0 }}>
-          Loaded {flatAccounts.length} accounts total.
-          {searchTerm || reportGroupFilter !== "ALL"
-            ? ` Showing ${filteredTree.length} after filters.`
-            : ""}
-        </p>
-      </section>
-    </div>
+            </Text>
+          </Group>
+        </Card>
+      </Stack>
+    </Container>
   );
 }

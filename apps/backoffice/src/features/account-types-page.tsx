@@ -2,6 +2,26 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useState, useMemo } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Container,
+  Group,
+  Loader,
+  Modal,
+  ScrollArea,
+  Select,
+  SimpleGrid,
+  Stack,
+  Switch,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import type { SessionUser } from "../lib/session";
 import { useAccountTypes } from "../hooks/use-accounts";
 import {
@@ -10,11 +30,11 @@ import {
   deactivateAccountType
 } from "../hooks/use-accounts";
 import { ApiError } from "../lib/api-client";
-import type { AccountTypeResponse } from "@jurnapod/shared";
 import { StaleDataWarning } from "../components/stale-data-warning";
 import { buildCacheKey } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
 import { OfflinePage } from "../components/offline-page";
+import type { AccountTypeResponse } from "@jurnapod/shared";
 
 type AccountTypesPageProps = {
   user: SessionUser;
@@ -37,87 +57,7 @@ const emptyForm: AccountTypeFormData = {
   report_group: "NRC"
 };
 
-const boxStyle = {
-  border: "1px solid #e2ddd2",
-  borderRadius: "10px",
-  padding: "16px",
-  backgroundColor: "#fcfbf8",
-  marginBottom: "14px"
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const
-};
-
-const cellStyle = {
-  borderBottom: "1px solid #ece7dc",
-  padding: "8px"
-} as const;
-
-const inputStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 8px",
-  width: "100%"
-} as const;
-
-const selectStyle = {
-  ...inputStyle,
-  width: "100%"
-} as const;
-
-const buttonStyle = {
-  border: "1px solid #cabfae",
-  borderRadius: "6px",
-  padding: "6px 12px",
-  backgroundColor: "#fff",
-  cursor: "pointer",
-  marginRight: "8px"
-} as const;
-
-const primaryButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#2f5f4a",
-  color: "#fff",
-  border: "1px solid #2f5f4a"
-} as const;
-
-const dangerButtonStyle = {
-  ...buttonStyle,
-  backgroundColor: "#d32f2f",
-  color: "#fff",
-  border: "1px solid #d32f2f"
-} as const;
-
-const badgeStyle = {
-  display: "inline-block",
-  padding: "2px 6px",
-  borderRadius: "4px",
-  fontSize: "11px",
-  fontWeight: "bold" as const,
-  marginRight: "4px"
-} as const;
-
-const activeBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#d4edda",
-  color: "#155724"
-} as const;
-
-const inactiveBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#f8d7da",
-  color: "#721c24"
-} as const;
-
-const categoryBadgeStyle = {
-  ...badgeStyle,
-  backgroundColor: "#d1ecf1",
-  color: "#0c5460"
-} as const;
-
-const CATEGORIES = [
+const CATEGORY_OPTIONS = [
   { value: "ASSET", label: "Asset" },
   { value: "LIABILITY", label: "Liability" },
   { value: "EQUITY", label: "Equity" },
@@ -125,12 +65,12 @@ const CATEGORIES = [
   { value: "EXPENSE", label: "Expense" }
 ];
 
-const NORMAL_BALANCES = [
+const NORMAL_BALANCE_OPTIONS = [
   { value: "D", label: "DEBIT" },
   { value: "K", label: "KREDIT" }
 ];
 
-const REPORT_GROUPS = [
+const REPORT_GROUP_OPTIONS = [
   { value: "NRC", label: "Neraca (Balance Sheet)" },
   { value: "PL", label: "Laba Rugi (P&L)" }
 ];
@@ -143,9 +83,15 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
   const [formData, setFormData] = useState<AccountTypeFormData>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [uiError, setUiError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+
+  const [formOpened, { open: openForm, close: closeForm }] = useDisclosure(false);
+  const [confirmOpened, { open: openConfirm, close: closeConfirm }] = useDisclosure(false);
+  const [deactivateTarget, setDeactivateTarget] = useState<AccountTypeResponse | null>(null);
 
   const typeFilters = useMemo(() => ({
     is_active: showInactive ? undefined : true,
@@ -167,7 +113,6 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
     );
   }
 
-  // Group by category (now server-filtered)
   const groupedByCategory = accountTypes.reduce((acc, type) => {
     const category = type.category || "OTHER";
     if (!acc[category]) acc[category] = [];
@@ -175,11 +120,19 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
     return acc;
   }, {} as Record<string, AccountTypeResponse[]>);
 
+  const hasFiltersActive = searchQuery.trim() !== "" || showInactive;
+
+  function resetFilters() {
+    setSearchQuery("");
+    setShowInactive(false);
+  }
+
   function openCreateForm() {
     setFormMode("create");
     setFormData(emptyForm);
     setEditingId(null);
-    setSubmitError(null);
+    setFormError(null);
+    openForm();
   }
 
   function openEditForm(accountType: AccountTypeResponse) {
@@ -191,20 +144,24 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
       report_group: accountType.report_group || "NRC"
     });
     setEditingId(accountType.id);
-    setSubmitError(null);
+    setFormError(null);
+    openForm();
   }
 
-  function closeForm() {
+  function closeFormHandler() {
     setFormMode(null);
     setFormData(emptyForm);
     setEditingId(null);
-    setSubmitError(null);
+    setFormError(null);
+    closeForm();
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    setSubmitError(null);
+    setFormError(null);
+    setUiError(null);
+    setSuccessMessage(null);
 
     try {
       if (formMode === "create") {
@@ -218,6 +175,7 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
           },
           accessToken
         );
+        setSuccessMessage("Account type created successfully");
       } else if (formMode === "edit" && editingId) {
         await updateAccountType(
           editingId,
@@ -229,302 +187,347 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
           },
           accessToken
         );
+        setSuccessMessage("Account type updated successfully");
       }
-      closeForm();
+      closeFormHandler();
       refetch();
     } catch (err) {
       if (err instanceof ApiError) {
-        setSubmitError(err.message);
+        setFormError(err.message);
       } else {
-        setSubmitError("An unexpected error occurred");
+        setFormError("An unexpected error occurred");
       }
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function handleDeactivate(accountTypeId: number) {
-    if (!confirm("Are you sure you want to deactivate this account type?")) {
-      return;
-    }
+  function confirmDeactivate(accountType: AccountTypeResponse) {
+    setDeactivateTarget(accountType);
+    openConfirm();
+  }
+
+  async function handleDeactivate() {
+    if (!deactivateTarget) return;
+
+    setUiError(null);
+    setSuccessMessage(null);
 
     try {
-      await deactivateAccountType(accountTypeId, accessToken);
+      await deactivateAccountType(deactivateTarget.id, accessToken);
+      setSuccessMessage("Account type deactivated successfully");
       refetch();
     } catch (err) {
       if (err instanceof ApiError) {
-        alert(`Failed to deactivate: ${err.message}`);
+        setUiError(err.message);
       } else {
-        alert("An unexpected error occurred");
+        setUiError("An unexpected error occurred");
       }
+    } finally {
+      setDeactivateTarget(null);
+      closeConfirm();
     }
   }
 
+  const activeCount = accountTypes.filter((t) => t.is_active).length;
+  const categoryCount = Object.keys(groupedByCategory).length;
+
   return (
-    <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
-      <div style={{ marginBottom: "20px" }}>
-        <h1 style={{ marginBottom: "8px" }}>Account Type Templates</h1>
-        <p style={{ color: "#666", margin: 0 }}>
-          Optional templates for account classification. Accounts can inherit classification directly from parent accounts.
-        </p>
-        <StaleDataWarning
-          cacheKey={buildCacheKey("account_types", { companyId: user.company_id })}
-          label="account types"
-        />
-      </div>
+    <Container size="lg" py="md">
+      <Stack gap="md">
+        {/* Header + Status Card */}
+        <Card>
+          <Stack gap="sm">
+            <Group justify="space-between" wrap="wrap">
+              <div>
+                <Title order={2}>Account Type Templates</Title>
+                <Text c="dimmed" size="sm">
+                  Optional templates for account classification. Accounts can inherit classification directly from parent accounts.
+                </Text>
+              </div>
+              <Button onClick={openCreateForm}>
+                Create Account Type
+              </Button>
+            </Group>
 
-      {/* Filters and Actions */}
-      <div style={boxStyle}>
-        <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-          <input
-            type="text"
-            placeholder="Search by name or category..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ ...inputStyle, flexGrow: 1, minWidth: "200px" }}
-          />
-          
-          <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
+            <StaleDataWarning
+              cacheKey={buildCacheKey("account_types", { companyId })}
+              label="account types"
             />
-            Show Inactive
-          </label>
 
-          <button onClick={openCreateForm} style={primaryButtonStyle}>
-            + Create Account Type
-          </button>
-        </div>
-      </div>
+            {loading && (
+              <Group gap="xs">
+                <Loader size="xs" />
+                <Text size="sm" c="dimmed">Loading account types...</Text>
+              </Group>
+            )}
 
-      {/* Loading/Error States */}
-      {loading && <div style={boxStyle}>Loading account types...</div>}
-      {error && (
-        <div style={{ ...boxStyle, backgroundColor: "#f8d7da", color: "#721c24" }}>
-          Error: {error}
-        </div>
-      )}
+            {error && (
+              <Alert color="red" title="Error loading account types">
+                {error}
+              </Alert>
+            )}
+
+            {uiError && (
+              <Alert color="red" withCloseButton onClose={() => setUiError(null)}>
+                {uiError}
+              </Alert>
+            )}
+
+            {successMessage && (
+              <Alert color="green" withCloseButton onClose={() => setSuccessMessage(null)}>
+                {successMessage}
+              </Alert>
+            )}
+          </Stack>
+        </Card>
+
+        {/* Filters Card */}
+        <Card>
+          <Group justify="space-between" wrap="wrap">
+            <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="sm">
+              <TextInput
+                placeholder="Search by name or category..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.currentTarget.value)}
+                aria-label="Search account types"
+              />
+
+              <Switch
+                label="Show Inactive"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.currentTarget.checked)}
+              />
+            </SimpleGrid>
+
+            {hasFiltersActive && (
+              <Button variant="subtle" size="sm" onClick={resetFilters}>
+                Reset filters
+              </Button>
+            )}
+          </Group>
+        </Card>
+
+        {/* Account Types List */}
+        {!loading && !error && (
+          <>
+            {Object.keys(groupedByCategory).length === 0 ? (
+              <Card>
+                <Text c="dimmed" ta="center" py="xl">
+                  {hasFiltersActive
+                    ? "No account types match your filters. Try adjusting your search criteria."
+                    : "No account types found. Create one to get started."}
+                </Text>
+              </Card>
+            ) : (
+              Object.entries(groupedByCategory)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([category, types]) => (
+                  <Card key={category}>
+                    <Stack gap="sm">
+                      <Group gap="xs">
+                        <Badge size="lg" variant="light" color="blue">
+                          {category}
+                        </Badge>
+                        <Text size="sm" c="dimmed">
+                          ({types.length} {types.length === 1 ? "type" : "types"})
+                        </Text>
+                      </Group>
+
+                      <ScrollArea type="auto" scrollbarSize={8}>
+                        <Table striped highlightOnHover>
+                          <Table.Thead>
+                            <Table.Tr>
+                              <Table.Th>Name</Table.Th>
+                              <Table.Th>Normal Balance</Table.Th>
+                              <Table.Th>Report Group</Table.Th>
+                              <Table.Th>Status</Table.Th>
+                              <Table.Th style={{ width: 140 }}>Actions</Table.Th>
+                            </Table.Tr>
+                          </Table.Thead>
+                          <Table.Tbody>
+                            {types.map((type) => (
+                              <Table.Tr key={type.id}>
+                                <Table.Td>
+                                  <Text fw={500}>{type.name}</Text>
+                                </Table.Td>
+                                <Table.Td>
+                                  <Text size="sm">{type.normal_balance || "-"}</Text>
+                                </Table.Td>
+                                <Table.Td>
+                                  <Text size="sm">{type.report_group || "-"}</Text>
+                                </Table.Td>
+                                <Table.Td>
+                                  <Badge
+                                    size="sm"
+                                    color={type.is_active ? "green" : "red"}
+                                    variant="light"
+                                  >
+                                    {type.is_active ? "Active" : "Inactive"}
+                                  </Badge>
+                                </Table.Td>
+                                <Table.Td>
+                                  <Group gap="xs">
+                                    <Button
+                                      size="xs"
+                                      variant="light"
+                                      onClick={() => openEditForm(type)}
+                                      disabled={!type.is_active}
+                                    >
+                                      Edit
+                                    </Button>
+                                    {type.is_active && (
+                                      <Button
+                                        size="xs"
+                                        variant="light"
+                                        color="red"
+                                        onClick={() => confirmDeactivate(type)}
+                                      >
+                                        Deactivate
+                                      </Button>
+                                    )}
+                                  </Group>
+                                </Table.Td>
+                              </Table.Tr>
+                            ))}
+                          </Table.Tbody>
+                        </Table>
+                      </ScrollArea>
+                    </Stack>
+                  </Card>
+                ))
+            )}
+          </>
+        )}
+
+        {/* Summary Stats Card */}
+        <Card>
+          <SimpleGrid cols={{ base: 3, sm: 3 }} spacing="md">
+            <div>
+              <Text size="xl" fw={700}>
+                {accountTypes.length}
+              </Text>
+              <Text size="sm" c="dimmed">
+                Total Types
+              </Text>
+            </div>
+            <div>
+              <Text size="xl" fw={700} c="green">
+                {activeCount}
+              </Text>
+              <Text size="sm" c="dimmed">
+                Active
+              </Text>
+            </div>
+            <div>
+              <Text size="xl" fw={700} c="blue">
+                {categoryCount}
+              </Text>
+              <Text size="sm" c="dimmed">
+                Categories
+              </Text>
+            </div>
+          </SimpleGrid>
+        </Card>
+      </Stack>
 
       {/* Form Modal */}
-      {formMode && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000
-          }}
-          onClick={closeForm}
-        >
-          <div
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: "10px",
-              padding: "24px",
-              width: "90%",
-              maxWidth: "500px",
-              maxHeight: "90vh",
-              overflow: "auto"
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 style={{ marginTop: 0 }}>
-              {formMode === "create" ? "Create Account Type" : "Edit Account Type"}
-            </h2>
+      <Modal
+        opened={formOpened}
+        onClose={closeFormHandler}
+        title={
+          <Title order={4}>
+            {formMode === "create" ? "Create Account Type" : "Edit Account Type"}
+          </Title>
+        }
+        centered
+      >
+        <form onSubmit={handleSubmit}>
+          <Stack gap="md">
+            <TextInput
+              label="Name"
+              placeholder="e.g., Current Assets, Fixed Assets"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.currentTarget.value })}
+              withAsterisk
+              required
+            />
 
-            <form onSubmit={handleSubmit}>
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  Name *
-                </label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  required
-                  style={inputStyle}
-                  placeholder="e.g., Current Assets, Fixed Assets"
-                />
-              </div>
+            <Select
+              label="Category"
+              placeholder="Select category"
+              data={CATEGORY_OPTIONS}
+              value={formData.category}
+              onChange={(value) => setFormData({ ...formData, category: value || "ASSET" })}
+              required
+            />
 
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  Category *
-                </label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  required
-                  style={selectStyle}
-                >
-                  {CATEGORIES.map((cat) => (
-                    <option key={cat.value} value={cat.value}>
-                      {cat.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <Select
+              label="Normal Balance"
+              placeholder="Select normal balance"
+              data={NORMAL_BALANCE_OPTIONS}
+              value={formData.normal_balance}
+              onChange={(value) => setFormData({ ...formData, normal_balance: value || "D" })}
+            />
 
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  Normal Balance
-                </label>
-                <select
-                  value={formData.normal_balance}
-                  onChange={(e) => setFormData({ ...formData, normal_balance: e.target.value })}
-                  style={selectStyle}
-                >
-                  {NORMAL_BALANCES.map((bal) => (
-                    <option key={bal.value} value={bal.value}>
-                      {bal.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <Select
+              label="Report Group"
+              placeholder="Select report group"
+              data={REPORT_GROUP_OPTIONS}
+              value={formData.report_group}
+              onChange={(value) => setFormData({ ...formData, report_group: value || "NRC" })}
+            />
 
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-                  Report Group
-                </label>
-                <select
-                  value={formData.report_group}
-                  onChange={(e) => setFormData({ ...formData, report_group: e.target.value })}
-                  style={selectStyle}
-                >
-                  {REPORT_GROUPS.map((group) => (
-                    <option key={group.value} value={group.value}>
-                      {group.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {formError && (
+              <Alert color="red">
+                {formError}
+              </Alert>
+            )}
 
-              {submitError && (
-                <div
-                  style={{
-                    padding: "8px",
-                    marginBottom: "16px",
-                    backgroundColor: "#f8d7da",
-                    color: "#721c24",
-                    borderRadius: "6px",
-                    fontSize: "14px"
-                  }}
-                >
-                  {submitError}
-                </div>
-              )}
+            <Group justify="flex-end">
+              <Button variant="default" onClick={closeFormHandler} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={submitting}>
+                {submitting ? "Saving..." : formMode === "create" ? "Create" : "Save"}
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Modal>
 
-              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                <button type="button" onClick={closeForm} style={buttonStyle} disabled={submitting}>
-                  Cancel
-                </button>
-                <button type="submit" style={primaryButtonStyle} disabled={submitting}>
-                  {submitting ? "Saving..." : formMode === "create" ? "Create" : "Save"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Account Types List */}
-      {!loading && !error && (
-        <>
-          {Object.keys(groupedByCategory).length === 0 ? (
-            <div style={boxStyle}>
-              <p style={{ margin: 0, textAlign: "center", color: "#666" }}>
-                No account types found. Create one to get started.
-              </p>
-            </div>
-          ) : (
-            Object.entries(groupedByCategory)
-              .sort(([a], [b]) => a.localeCompare(b))
-              .map(([category, types]) => (
-                <div key={category} style={boxStyle}>
-                  <h3 style={{ marginTop: 0, marginBottom: "12px" }}>
-                    <span style={categoryBadgeStyle}>{category}</span>
-                  </h3>
-                  <table style={tableStyle}>
-                    <thead>
-                      <tr style={{ backgroundColor: "#f5f1ea" }}>
-                        <th style={{ ...cellStyle, textAlign: "left", fontWeight: "bold" }}>Name</th>
-                        <th style={{ ...cellStyle, textAlign: "left", fontWeight: "bold" }}>
-                          Normal Balance
-                        </th>
-                        <th style={{ ...cellStyle, textAlign: "left", fontWeight: "bold" }}>
-                          Report Group
-                        </th>
-                        <th style={{ ...cellStyle, textAlign: "left", fontWeight: "bold" }}>Status</th>
-                        <th style={{ ...cellStyle, textAlign: "right", fontWeight: "bold" }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {types.map((type) => (
-                        <tr key={type.id}>
-                          <td style={cellStyle}>{type.name}</td>
-                          <td style={cellStyle}>{type.normal_balance || "-"}</td>
-                          <td style={cellStyle}>{type.report_group || "-"}</td>
-                          <td style={cellStyle}>
-                            <span style={type.is_active ? activeBadgeStyle : inactiveBadgeStyle}>
-                              {type.is_active ? "Active" : "Inactive"}
-                            </span>
-                          </td>
-                          <td style={{ ...cellStyle, textAlign: "right" }}>
-                            <button
-                              onClick={() => openEditForm(type)}
-                              style={buttonStyle}
-                              disabled={!type.is_active}
-                            >
-                              Edit
-                            </button>
-                            {type.is_active && (
-                              <button
-                                onClick={() => handleDeactivate(type.id)}
-                                style={dangerButtonStyle}
-                              >
-                                Deactivate
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))
-          )}
-        </>
-      )}
-
-      {/* Summary */}
-      <div style={{ ...boxStyle, backgroundColor: "#e8f5e9" }}>
-        <div style={{ display: "flex", gap: "20px", justifyContent: "space-around" }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "24px", fontWeight: "bold" }}>{accountTypes.length}</div>
-            <div style={{ fontSize: "12px", color: "#666" }}>Total Types</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "24px", fontWeight: "bold" }}>
-              {accountTypes.filter((t) => t.is_active).length}
-            </div>
-            <div style={{ fontSize: "12px", color: "#666" }}>Active</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "24px", fontWeight: "bold" }}>
-              {Object.keys(groupedByCategory).length}
-            </div>
-            <div style={{ fontSize: "12px", color: "#666" }}>Categories</div>
-          </div>
-        </div>
-      </div>
-    </div>
+      {/* Deactivate Confirmation Modal */}
+      <Modal
+        opened={confirmOpened}
+        onClose={() => {
+          setDeactivateTarget(null);
+          closeConfirm();
+        }}
+        title={<Title order={4}>Confirm Deactivation</Title>}
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Are you sure you want to deactivate account type{" "}
+            <Text span fw={600}>"{deactivateTarget?.name}"</Text>? 
+            This will prevent new accounts from using this classification template.
+          </Text>
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => {
+                setDeactivateTarget(null);
+                closeConfirm();
+              }}
+            >
+              Cancel
+            </Button>
+            <Button color="red" onClick={handleDeactivate}>
+              Deactivate
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </Container>
   );
 }
