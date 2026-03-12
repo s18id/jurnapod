@@ -14,12 +14,14 @@ import {
   Switch,
   Text,
   TextInput,
-  Title
+  Title,
+  Select
 } from "@mantine/core";
 import type { SessionUser } from "../lib/session";
 import { apiRequest, ApiError } from "../lib/api-client";
 import { useOnlineStatus } from "../lib/connection";
 import { OfflinePage } from "../components/offline-page";
+import { useAccounts } from "../hooks/use-accounts";
 
 type TaxRatesPageProps = {
   user: SessionUser;
@@ -31,6 +33,7 @@ type TaxRateRow = {
   code: string;
   name: string;
   rate_percent: number;
+  account_id?: number | null;
   is_inclusive: boolean;
   is_active: boolean;
   isNew?: boolean;
@@ -43,6 +46,7 @@ type TaxRatesResponse = {
     code: string;
     name: string;
     rate_percent: number;
+    account_id?: number | null;
     is_inclusive: boolean;
     is_active: boolean;
   }>;
@@ -58,13 +62,14 @@ function buildNewRow(): TaxRateRow {
     code: "",
     name: "",
     rate_percent: 0,
+    account_id: null,
     is_inclusive: false,
     is_active: true,
     isNew: true
   };
 }
 
-export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
+export function TaxRatesPage({ user, accessToken }: TaxRatesPageProps) {
   const isOnline = useOnlineStatus();
   const [rates, setRates] = useState<TaxRateRow[]>([]);
   const [defaultIds, setDefaultIds] = useState<string[]>([]);
@@ -74,6 +79,20 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [defaultError, setDefaultError] = useState<string | null>(null);
   const [defaultSaved, setDefaultSaved] = useState(false);
+
+  const accountFilters = useMemo(() => ({ is_active: true }), []);
+  const { data: accounts } = useAccounts(user.company_id, accessToken, accountFilters);
+
+  const accountOptions = useMemo(
+    () => [
+      { value: "", label: "No account (posting will fail)" },
+      ...accounts.map((account) => ({
+        value: String(account.id),
+        label: `${account.code} - ${account.name}`
+      }))
+    ],
+    [accounts]
+  );
 
   const activeOptions = useMemo(
     () =>
@@ -101,6 +120,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
             code: row.code,
             name: row.name,
             rate_percent: row.rate_percent,
+            account_id: row.account_id,
             is_inclusive: row.is_inclusive,
             is_active: row.is_active
           }))
@@ -157,6 +177,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
               code: rate.code.trim(),
               name: rate.name.trim(),
               rate_percent: rate.rate_percent,
+              account_id: rate.account_id || null,
               is_inclusive: rate.is_inclusive,
               is_active: rate.is_active
             })
@@ -173,6 +194,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
               code: rate.code.trim(),
               name: rate.name.trim(),
               rate_percent: rate.rate_percent,
+              account_id: rate.account_id || null,
               is_inclusive: rate.is_inclusive,
               is_active: rate.is_active
             })
@@ -249,6 +271,7 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
           <Title order={2}>Tax Rates</Title>
           <Text c="dimmed" size="sm">
             Manage tax rates and choose company defaults used when tax lines are not provided.
+            Each tax rate can optionally specify a liability account for tax posting.
           </Text>
         </div>
 
@@ -332,6 +355,19 @@ export function TaxRatesPage({ accessToken }: TaxRatesPageProps) {
                       updateRate(index, { rate_percent: Number(value) || 0 })
                     }
                   />
+                  <Select
+                    label="Liability Account"
+                    value={rate.account_id ? String(rate.account_id) : ""}
+                    onChange={(value) =>
+                      updateRate(index, { account_id: value ? Number(value) : null })
+                    }
+                    data={accountOptions}
+                    clearable
+                    placeholder="Select liability account"
+                    searchable
+                  />
+                </Group>
+                <Group grow wrap="wrap">
                   <Switch
                     label="Inclusive"
                     checked={rate.is_inclusive}

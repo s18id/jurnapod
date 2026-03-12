@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { db, type OutboxItem, type AlertReadHistory, type AlertReadState } from "./offline-db";
+import { canDeleteFailedOutboxItem } from "./outbox-guards";
 
 export class OutboxService {
   static async queueTransaction(
@@ -83,7 +84,7 @@ export class OutboxService {
 
   static async deleteFailedItem(id: string, userId: number): Promise<boolean> {
     const item = await db.outbox.get(id);
-    if (!item || item.userId !== userId || item.status !== "failed") {
+    if (!canDeleteFailedOutboxItem(item, userId)) {
       return false;
     }
     await Promise.all([

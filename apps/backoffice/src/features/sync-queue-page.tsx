@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Stack, Table, Button, Group, Text, Badge, Alert } from "@mantine/core";
 import { PageCard } from "../components/PageCard";
 import { OutboxService } from "../lib/outbox-service";
+import { canShowSyncQueueActions } from "../lib/outbox-guards";
 import type { SessionUser } from "../lib/session";
 import type { OutboxItem } from "../lib/offline-db";
 import { ConflictDialog } from "../components/conflict-dialog";
@@ -92,7 +93,7 @@ export function SyncQueuePage({ user }: SyncQueuePageProps) {
                   <Table.Td>{item.error ?? "-"}</Table.Td>
                   <Table.Td>
                     <Group gap="xs" justify="center">
-                      {item.status === "failed" ? (
+                      {canShowSyncQueueActions(item.status) ? (
                         <>
                           <Button size="xs" variant="light" onClick={() => setConflictItem(item)}>
                             Review

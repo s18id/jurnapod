@@ -60,7 +60,8 @@ import {
   OutletsPage,
   PlatformSettingsPage,
   FiscalYearsPage,
-  AuditLogsPage
+  AuditLogsPage,
+  CashBankPage
 } from "../features/pages";
 import { PublicStaticPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
@@ -242,6 +243,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/audit-logs") {
     return <AuditLogsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/cash-bank") {
+    return <CashBankPage user={props.user} accessToken={props.accessToken} />;
   }
   return <ItemsPricesPage user={props.user} accessToken={props.accessToken} />;
 }

@@ -36,6 +36,7 @@ const MODULE_LABELS: Record<Module, string> = {
   roles: "Roles",
   accounts: "Accounts",
   journals: "Journals",
+  cash_bank: "Cash & Bank",
   sales: "Sales",
   inventory: "Inventory",
   purchasing: "Purchasing",

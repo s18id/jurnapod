@@ -60,6 +60,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
+    path: "/tax-rates",
+    label: "Tax Rates",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
+  },
+  {
     path: "/transaction-templates",
     label: "Transaction Templates",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
@@ -67,6 +72,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/transactions",
     label: "Transaction Input",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
+  },
+  {
+    path: "/cash-bank",
+    label: "Cash & Bank",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
 
@@ -194,11 +204,6 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/modules",
     label: "Modules",
-    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
-  },
-  {
-    path: "/tax-rates",
-    label: "Tax Rates",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
