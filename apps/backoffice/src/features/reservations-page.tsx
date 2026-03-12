@@ -155,10 +155,15 @@ export function ReservationsPage(props: ReservationsPageProps) {
   // Data hooks
   const outlets = useOutletsFull(userCompanyId, accessToken);
   const tables = useOutletTables(selectedOutletId, accessToken);
-  const reservations = useReservations(
-    selectedOutletId ? { outlet_id: selectedOutletId, status: statusFilter || undefined } : null,
-    accessToken
+
+  const reservationQuery = useMemo(
+    () =>
+      selectedOutletId
+        ? { outlet_id: selectedOutletId, status: statusFilter || undefined }
+        : null,
+    [selectedOutletId, statusFilter]
   );
+  const reservations = useReservations(reservationQuery, accessToken);
 
   // Search/filter
   const [searchTerm, setSearchTerm] = useState("");
@@ -182,6 +187,8 @@ export function ReservationsPage(props: ReservationsPageProps) {
     return map;
   }, [tables.data]);
 
+  const editingReservationTableId = editingReservation?.table_id ?? null;
+
   const assignableTableOptions = useMemo(
     () =>
       tables.data
@@ -195,9 +202,9 @@ export function ReservationsPage(props: ReservationsPageProps) {
 
   const modalTableOptions = useMemo(() => {
     const base = assignableTableOptions;
-    if (dialogMode !== "edit" || !editingReservation?.table_id) return base;
+    if (dialogMode !== "edit" || !editingReservationTableId) return base;
 
-    const currentId = editingReservation.table_id;
+    const currentId = editingReservationTableId;
     const hasCurrent = base.some((o) => o.value === currentId.toString());
     if (hasCurrent) return base;
 
@@ -207,7 +214,7 @@ export function ReservationsPage(props: ReservationsPageProps) {
       : `Table #${currentId}`;
 
     return [{ value: currentId.toString(), label: currentLabel }, ...base];
-  }, [assignableTableOptions, dialogMode, editingReservation, tableById]);
+  }, [assignableTableOptions, dialogMode, editingReservationTableId, tableById]);
 
   // Close dialog helper
   const closeDialog = useCallback(() => {
@@ -338,7 +345,8 @@ export function ReservationsPage(props: ReservationsPageProps) {
     accessToken,
     validateForm,
     reservations,
-    closeDialog
+    closeDialog,
+    tableById
   ]);
 
   // Handle cancel reservation
@@ -737,7 +745,7 @@ export function ReservationsPage(props: ReservationsPageProps) {
             data={modalTableOptions}
             value={formData.table_id?.toString() || null}
             onChange={(value) => {
-              setFormData({ ...formData, table_id: value ? Number(value) : null });
+              setFormData((prev) => ({ ...prev, table_id: value ? Number(value) : null }));
               setFormErrors((prev) => {
                 if (!prev.table_id) {
                   return prev;

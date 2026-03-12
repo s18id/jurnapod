@@ -21,10 +21,18 @@ export function useReservations(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const outletId = query?.outlet_id ?? null;
+  const status = query?.status;
+  const from = query?.from;
+  const to = query?.to;
+  const limit = query?.limit;
+  const offset = query?.offset;
+
   const refetch = useCallback(async () => {
-    if (!query?.outlet_id) {
+    if (!outletId) {
       setData([]);
       setError(null);
+      setLoading(false);
       return;
     }
 
@@ -33,12 +41,12 @@ export function useReservations(
 
     try {
       const params = new URLSearchParams();
-      params.set("outlet_id", query.outlet_id.toString());
-      if (query.status) params.set("status", query.status);
-      if (query.from) params.set("from", query.from);
-      if (query.to) params.set("to", query.to);
-      if (query.limit) params.set("limit", query.limit.toString());
-      if (query.offset) params.set("offset", query.offset.toString());
+      params.set("outlet_id", outletId.toString());
+      if (status) params.set("status", status);
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      if (limit) params.set("limit", limit.toString());
+      if (offset) params.set("offset", offset.toString());
 
       const response = await apiRequest<{ success: true; data: ReservationRow[] }>(
         `/reservations?${params.toString()}`,
@@ -52,7 +60,7 @@ export function useReservations(
     } finally {
       setLoading(false);
     }
-  }, [query, accessToken]);
+  }, [accessToken, outletId, status, from, to, limit, offset]);
 
   useEffect(() => {
     refetch();
