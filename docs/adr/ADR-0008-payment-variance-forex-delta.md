@@ -33,7 +33,37 @@ Post journal:
 - **Exact settlement:** delta = 0 → no variance entry
 - **Overpayment:** delta > 0 → posts to variance gain account
 - **Underpayment (partial):** delta = 0 (capped at outstanding) → remaining AR stays open, no variance loss
-- **Underpayment with final settlement:** not default; requires explicit configuration
+- **Underpayment with final settlement:** not default; requires explicit configuration (see Manual Shortfall Loss below)
+
+**Manual Shortfall Loss Settlement:**
+
+For cases where the business decides to write-off an underpayment as a loss (e.g., customer dispute, uncollectible remainder), a manual settlement option is available:
+
+- **API:** POST `/api/sales/payments/:id/post` with optional body:
+  ```json
+  {
+    "settle_shortfall_as_loss": true,
+    "shortfall_reason": "Customer dispute write-off"
+  }
+  ```
+- **Behavior:** When `settle_shortfall_as_loss: true` is provided on an underpayment:
+  - `invoice_amount_idr` is set to full outstanding (not capped to payment amount)
+  - `payment_delta_idr` becomes negative (payment - outstanding)
+  - Invoice is marked `PAID` (AR fully settled)
+  - Journal includes variance loss entry (Dr Loss, Cr AR)
+- **Requirements:**
+  - Requires `PAYMENT_VARIANCE_LOSS` account mapping to be configured
+  - `shortfall_reason` is mandatory (1-500 characters) — for audit trail
+  - Actor user ID and timestamp are recorded
+- **Access:** Requires `OWNER`, `COMPANY_ADMIN`, `ADMIN`, or `ACCOUNTANT` role with `sales.update` permission (same as regular payment post).
+
+Data model: `sales_payments` table includes:
+- `shortfall_settled_as_loss` (TINYINT, 0/1)
+- `shortfall_reason` (VARCHAR 500)
+- `shortfall_settled_by_user_id` (BIGINT UNSIGNED)
+- `shortfall_settled_at` (DATETIME)
+
+This feature is **manual-only** — automatic underpayment flow remains unchanged (partial payments keep AR open).
 
 Data model support: Store `payment_amount_idr` (received amount) and compute `invoice_amount_idr` and `payment_delta_idr` at posting time as persisted columns (not generated). These fields capture the variance for audit trail.
 
