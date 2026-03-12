@@ -363,6 +363,25 @@ async function main() {
       throw new Error("module inventory config_json.level must be 0");
     }
 
+    const [ownerPosPermRows] = await connection.execute(
+      `SELECT mr.permission_mask
+       FROM module_roles mr
+       INNER JOIN roles r ON r.id = mr.role_id
+       WHERE mr.company_id = ?
+         AND r.code = 'OWNER'
+         AND mr.module = 'pos'
+       LIMIT 1`,
+      [owner.company_id]
+    );
+
+    if (ownerPosPermRows.length === 0) {
+      throw new Error("OWNER role missing pos module_roles permission");
+    }
+
+    if ((Number(ownerPosPermRows[0].permission_mask) & 1) === 0) {
+      throw new Error("OWNER role missing pos:create permission bit");
+    }
+
     await assertItemPricesCompanyScopedForeignKeys(connection);
 
     console.log("smoke checks passed");

@@ -13,7 +13,9 @@
     "db:seed:settings": "node ./scripts/seed-settings-from-env.mjs",
     "db:smoke": "node ./scripts/smoke.mjs",
     "db:backfill:pos-journals": "node ./scripts/backfill-pos-journals.mjs",
-    "db:reconcile:pos-journals": "node ./scripts/reconcile-pos-journals.mjs"
+    "db:reconcile:pos-journals": "node ./scripts/reconcile-pos-journals.mjs",
+    "db:audit:system-roles": "node ./scripts/audit-system-roles.mjs",
+    "db:consolidate:system-roles": "node ./scripts/consolidate-system-role-duplicates.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
