@@ -185,13 +185,29 @@ export function ReservationsPage(props: ReservationsPageProps) {
   const assignableTableOptions = useMemo(
     () =>
       tables.data
-        .filter((table) => table.status !== "OCCUPIED" && table.status !== "UNAVAILABLE")
+        .filter((table) => table.status === "AVAILABLE")
         .map((table) => ({
           value: table.id.toString(),
           label: `${table.code} - ${table.name} (${table.zone || "No zone"})`
         })),
     [tables.data]
   );
+
+  const modalTableOptions = useMemo(() => {
+    const base = assignableTableOptions;
+    if (dialogMode !== "edit" || !editingReservation?.table_id) return base;
+
+    const currentId = editingReservation.table_id;
+    const hasCurrent = base.some((o) => o.value === currentId.toString());
+    if (hasCurrent) return base;
+
+    const currentTable = tableById.get(currentId);
+    const currentLabel = currentTable
+      ? `${currentTable.code} - ${currentTable.name} (${currentTable.zone || "No zone"})`
+      : `Table #${currentId}`;
+
+    return [{ value: currentId.toString(), label: currentLabel }, ...base];
+  }, [assignableTableOptions, dialogMode, editingReservation, tableById]);
 
   // Close dialog helper
   const closeDialog = useCallback(() => {
@@ -252,6 +268,23 @@ export function ReservationsPage(props: ReservationsPageProps) {
     if (!selectedOutletId) {
       setError("No outlet selected");
       return;
+    }
+
+    const selectedTableId = formData.table_id;
+    if (selectedTableId != null) {
+      const isCurrentAssignedInEdit =
+        dialogMode === "edit" && editingReservation?.table_id === selectedTableId;
+
+      const selectedTable = tableById.get(selectedTableId);
+      const isAvailableNow = selectedTable?.status === "AVAILABLE";
+
+      if (!isCurrentAssignedInEdit && !isAvailableNow) {
+        setFormErrors((prev) => ({
+          ...prev,
+          table_id: "Selected table is no longer available"
+        }));
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -701,13 +734,20 @@ export function ReservationsPage(props: ReservationsPageProps) {
           <Select
             label="Table (Optional)"
             placeholder="Select a table"
-            data={tables.data.map((t: any) => ({
-              value: t.id.toString(),
-              label: `${t.code} - ${t.name} (${t.zone || "No zone"})`
-            }))}
+            data={modalTableOptions}
             value={formData.table_id?.toString() || null}
-            onChange={(value) => setFormData({ ...formData, table_id: value ? Number(value) : null })}
+            onChange={(value) => {
+              setFormData({ ...formData, table_id: value ? Number(value) : null });
+              setFormErrors((prev) => {
+                if (!prev.table_id) {
+                  return prev;
+                }
+                const { table_id, ...rest } = prev;
+                return rest;
+              });
+            }}
             clearable
+            error={formErrors.table_id}
           />
 
           <Textarea
