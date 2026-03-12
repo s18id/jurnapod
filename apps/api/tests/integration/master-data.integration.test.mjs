@@ -296,6 +296,15 @@ test(
       assert.equal(baselinePullResponse.status, 200);
       const baselinePullBody = await baselinePullResponse.json();
       assert.equal(baselinePullBody.success, true);
+
+      for (const rate of baselinePullBody.data.config.tax_rates ?? []) {
+        assert.equal(
+          Object.prototype.hasOwnProperty.call(rate, "account_id"),
+          true,
+          "sync pull tax rate must include account_id"
+        );
+      }
+
       const baselineVersion = Number(baselinePullBody.data.data_version);
 
       const createItemResponse = await fetch(`${baseUrl}/api/inventory/items`, {
