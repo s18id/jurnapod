@@ -42,6 +42,7 @@ export interface SyncOrchestratorConfig {
   onPushError?: (error: Error) => void;
   onPushStatusChange?: (inFlight: boolean) => void;
   onPullStatusChange?: (inFlight: boolean) => void;
+  pushSendConcurrency?: number;
 }
 
 /**
@@ -473,6 +474,7 @@ export class SyncOrchestrator {
         const drainReason = reasons.slice().sort().join(",");
         return drainOutboxJobs({
           drain_reason: drainReason,
+          send_concurrency: this.config.pushSendConcurrency,
           sender: async ({ job, db }) => {
             return sendOutboxJobToSyncPush(
               {

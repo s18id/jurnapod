@@ -706,3 +706,243 @@ test("order update job failure marks item_cancellations as FAILED", async () => 
     await db.delete();
   }
 });
+
+test("tx jobs respect send_concurrency cap", async () => {
+  const db = createPosOfflineDb(`jp-pos-outbox-drainer-concurrency-${crypto.randomUUID()}`);
+  const fixedNow = Date.parse("2026-02-21T20:00:00.000Z");
+
+  try {
+    const jobs = [];
+    for (let i = 0; i < 5; i++) {
+      const saleId = crypto.randomUUID();
+      const clientTxId = crypto.randomUUID();
+      await db.sales.add(buildCompletedSale(saleId, clientTxId, nowIso(fixedNow - 1_000)));
+      const job = await enqueueOutboxJob({ sale_id: saleId }, db);
+      jobs.push(job);
+    }
+
+    let maxInFlight = 0;
+    let currentInFlight = 0;
+
+    const result = await drainOutboxJobs(
+      {
+        now: () => fixedNow,
+        send_concurrency: 2,
+        sender: async () => {
+          currentInFlight++;
+          maxInFlight = Math.max(maxInFlight, currentInFlight);
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          currentInFlight--;
+          return { result: "OK" };
+        }
+      },
+      db
+    );
+
+    assert.ok(maxInFlight <= 2, "max in-flight must not exceed concurrency cap");
+    assert.ok(maxInFlight >= 1, "at least one job should run");
+    assert.equal(result.sent_count, 5);
+    assert.equal(result.failed_count, 0);
+
+    for (const job of jobs) {
+      const persisted = await db.outbox_jobs.get(job.job_id);
+      assert.equal(persisted?.status, "SENT");
+    }
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});
+
+test("order update jobs remain sequential even with high send_concurrency", async () => {
+  const db = createPosOfflineDb(`jp-pos-outbox-drainer-order-seq-${crypto.randomUUID()}`);
+  const fixedNow = Date.parse("2026-02-21T21:00:00.000Z");
+
+  try {
+    const updates = [];
+    for (let i = 0; i < 3; i++) {
+      const orderId = crypto.randomUUID();
+      const updateId = crypto.randomUUID();
+
+      await db.active_orders.add({
+        pk: orderId,
+        order_id: orderId,
+        company_id: 2,
+        outlet_id: 20,
+        service_type: "TAKEAWAY",
+        table_id: null,
+        reservation_id: null,
+        guest_count: null,
+        is_finalized: false,
+        order_status: "OPEN",
+        order_state: "OPEN",
+        paid_amount: 0,
+        opened_at: nowIso(fixedNow),
+        closed_at: null,
+        notes: null,
+        updated_at: nowIso(fixedNow)
+      });
+      await db.active_order_updates.add({
+        pk: `active_order_update:${updateId}`,
+        update_id: updateId,
+        order_id: orderId,
+        company_id: 2,
+        outlet_id: 20,
+        base_order_updated_at: null,
+        event_type: "SNAPSHOT_FINALIZED",
+        delta_json: "{}",
+        actor_user_id: null,
+        device_id: "WEB_POS",
+        event_at: nowIso(fixedNow),
+        created_at: nowIso(fixedNow),
+        sync_status: "PENDING",
+        sync_error: null
+      });
+      await db.outbox_jobs.add({
+        job_id: crypto.randomUUID(),
+        sale_id: orderId,
+        company_id: 2,
+        outlet_id: 20,
+        job_type: "SYNC_POS_ORDER_UPDATE",
+        dedupe_key: updateId,
+        payload_json: JSON.stringify({ update_id: updateId, order_id: orderId }),
+        status: "PENDING",
+        attempts: 0,
+        lease_owner_id: null,
+        lease_token: null,
+        lease_expires_at: null,
+        next_attempt_at: null,
+        last_error: null,
+        created_at: nowIso(fixedNow),
+        updated_at: nowIso(fixedNow)
+      });
+      updates.push({ updateId });
+    }
+
+    let maxOrderUpdateInFlight = 0;
+    let currentOrderUpdateInFlight = 0;
+
+    await drainOutboxJobs(
+      {
+        now: () => fixedNow,
+        send_concurrency: 5,
+        sender: async ({ job }) => {
+          if (job.job_type === "SYNC_POS_ORDER_UPDATE") {
+            currentOrderUpdateInFlight++;
+            maxOrderUpdateInFlight = Math.max(maxOrderUpdateInFlight, currentOrderUpdateInFlight);
+            await new Promise((r) => setTimeout(r, 10));
+            currentOrderUpdateInFlight--;
+          }
+          return { result: "OK" };
+        }
+      },
+      db
+    );
+
+    assert.equal(maxOrderUpdateInFlight, 1, "order updates should be sequential");
+
+    for (const { updateId } of updates) {
+      const update = await db.active_order_updates.where("update_id").equals(updateId).first();
+      assert.equal(update?.sync_status, "SENT");
+    }
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});
+
+test("mixed jobs keep counter integrity under concurrency", async () => {
+  const db = createPosOfflineDb(`jp-pos-outbox-drainer-mixed-${crypto.randomUUID()}`);
+  const fixedNow = Date.parse("2026-02-21T22:00:00.000Z");
+
+  try {
+    const orderId = crypto.randomUUID();
+    const updateId = crypto.randomUUID();
+
+    await db.active_orders.add({
+      pk: orderId,
+      order_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      service_type: "TAKEAWAY",
+      table_id: null,
+      reservation_id: null,
+      guest_count: null,
+      is_finalized: false,
+      order_status: "OPEN",
+      order_state: "OPEN",
+      paid_amount: 0,
+      opened_at: nowIso(fixedNow),
+      closed_at: null,
+      notes: null,
+      updated_at: nowIso(fixedNow)
+    });
+    await db.active_order_updates.add({
+      pk: `active_order_update:${updateId}`,
+      update_id: updateId,
+      order_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      base_order_updated_at: null,
+      event_type: "SNAPSHOT_FINALIZED",
+      delta_json: "{}",
+      actor_user_id: null,
+      device_id: "WEB_POS",
+      event_at: nowIso(fixedNow),
+      created_at: nowIso(fixedNow),
+      sync_status: "PENDING",
+      sync_error: null
+    });
+    await db.outbox_jobs.add({
+      job_id: crypto.randomUUID(),
+      sale_id: orderId,
+      company_id: 2,
+      outlet_id: 20,
+      job_type: "SYNC_POS_ORDER_UPDATE",
+      dedupe_key: updateId,
+      payload_json: JSON.stringify({ update_id: updateId, order_id: orderId }),
+      status: "PENDING",
+      attempts: 0,
+      lease_owner_id: null,
+      lease_token: null,
+      lease_expires_at: null,
+      next_attempt_at: null,
+      last_error: null,
+      created_at: nowIso(fixedNow),
+      updated_at: nowIso(fixedNow)
+    });
+
+    const saleId = crypto.randomUUID();
+    const clientTxId = crypto.randomUUID();
+    await db.sales.add(buildCompletedSale(saleId, clientTxId, nowIso(fixedNow - 1_000)));
+    await enqueueOutboxJob({ sale_id: saleId }, db);
+
+    let failFirst = true;
+    const result = await drainOutboxJobs(
+      {
+        now: () => fixedNow,
+        send_concurrency: 3,
+        sender: async ({ job, attempt_token }) => {
+          if (job.job_type === "SYNC_POS_TX" && failFirst && attempt_token === 1) {
+            failFirst = false;
+            throw new Error("simulated failure");
+          }
+          return { result: "OK" };
+        }
+      },
+      db
+    );
+
+    assert.equal(
+      result.selected_count,
+      result.sent_count + result.failed_count + result.stale_count + result.skipped_count,
+      "counter integrity: selected = sent + failed + stale + skipped"
+    );
+
+    const orderUpdate = await db.active_order_updates.where("update_id").equals(updateId).first();
+    assert.equal(orderUpdate?.sync_status, "SENT");
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});
