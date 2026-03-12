@@ -104,4 +104,24 @@ describe("listCompanyDefaultTaxRates company_id scoping", () => {
 
     assert.equal(result.length, 0);
   });
+
+  test("preserves null account_id as null", async () => {
+    const db = makeExecutor(() => [[
+      {
+        id: 3,
+        company_id: 8,
+        code: "NULL_ACCOUNT",
+        name: "Tax Without Account",
+        rate_percent: 15,
+        account_id: null,
+        is_inclusive: 0,
+        is_active: 1
+      }
+    ], []]);
+
+    const result = await listCompanyDefaultTaxRates(db, 8);
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].account_id, null);
+  });
 });
