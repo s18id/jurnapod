@@ -13,7 +13,7 @@
     "test:unit:auth": "node --test --test-concurrency=1 --import tsx src/lib/auth.test.ts",
     "test:integration": "node --test --test-concurrency=1 ",
     "test:integration:all": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
-    "test:integration:fast": "JP_TEST_BASE_URL=http://127.0.0.1:3005 node --test --test-concurrency=8 tests/integration/*.test.mjs",
+    "test:integration:fast": "JP_TEST_BASE_URL=http://127.0.0.1:3001 node --test --test-concurrency=8 tests/integration/*.test.mjs",
     "test:integration:local": "node --test --test-concurrency=1 tests/integration/auth.integration.test.mjs tests/integration/sync-push.integration.test.mjs"
   },
   "dependencies": {

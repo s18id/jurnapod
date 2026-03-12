@@ -180,9 +180,12 @@ type SalesPaymentRow = RowDataPacket & {
   payment_at: Date | string;
   account_id: number;
   account_name?: string;
-  method?: "CASH" | "QRIS" | "CARD"; // deprecated
+  method?: "CASH" | "QRIS" | "CARD";
   status: "DRAFT" | "POSTED" | "VOID";
   amount: string | number;
+  invoice_amount_idr?: string | number | null;
+  payment_amount_idr?: string | number | null;
+  payment_delta_idr?: string | number;
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
   created_at: Date;
@@ -210,10 +213,14 @@ export type SalesPayment = {
   payment_at: string;
   account_id: number;
   account_name?: string;
-  method?: "CASH" | "QRIS" | "CARD"; // deprecated
+  method?: "CASH" | "QRIS" | "CARD";
   status: "DRAFT" | "POSTED" | "VOID";
   amount: number;
-  splits?: SalesPaymentSplit[]; // Phase 8: split allocations
+  actual_amount_idr?: number | null;
+  invoice_amount_idr?: number | null;
+  payment_amount_idr?: number | null;
+  payment_delta_idr?: number;
+  splits?: SalesPaymentSplit[];
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
   created_at: string;
@@ -1258,6 +1265,18 @@ function normalizePayment(row: SalesPaymentRow): SalesPayment {
     method: row.method,
     status: row.status,
     amount: normalizeMoney(Number(row.amount)),
+    actual_amount_idr: row.actual_amount_idr !== undefined && row.actual_amount_idr !== null 
+      ? normalizeMoney(Number(row.actual_amount_idr)) 
+      : undefined,
+    invoice_amount_idr: row.invoice_amount_idr !== undefined && row.invoice_amount_idr !== null 
+      ? normalizeMoney(Number(row.invoice_amount_idr)) 
+      : undefined,
+    payment_amount_idr: row.payment_amount_idr !== undefined && row.payment_amount_idr !== null 
+      ? normalizeMoney(Number(row.payment_amount_idr)) 
+      : undefined,
+    payment_delta_idr: row.payment_delta_idr !== undefined 
+      ? normalizeMoney(Number(row.payment_delta_idr)) 
+      : undefined,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
     created_at: new Date(row.created_at).toISOString(),
@@ -1417,7 +1436,8 @@ async function findPaymentByIdWithExecutor(
   const [rows] = await executor.execute<SalesPaymentRow[]>(
     `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
             sp.account_id, a.name as account_name, sp.method, sp.status,
-            sp.amount, sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
+            sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
+            sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
      FROM sales_payments sp
      LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
      WHERE sp.company_id = ?
@@ -1516,7 +1536,8 @@ export async function listPayments(companyId: number, filters: PaymentListFilter
   const [rows] = await pool.execute<SalesPaymentRow[]>(
     `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
             sp.account_id, a.name as account_name, sp.method, sp.status,
-            sp.amount, sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
+            sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
+            sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
      FROM sales_payments sp
      LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
      WHERE ${where.clause}
@@ -1555,8 +1576,9 @@ export async function createPayment(
     payment_no?: string;
     payment_at: string;
     account_id?: number;
-    method?: "CASH" | "QRIS" | "CARD"; // deprecated
+    method?: "CASH" | "QRIS" | "CARD";
     amount: number;
+    actual_amount_idr?: number;
     splits?: Array<{ account_id: number; amount: number }>;
   },
   actor?: MutationActor
@@ -1616,6 +1638,13 @@ export async function createPayment(
       // Validate header account_id matches first split if provided
       if (input.account_id !== undefined && input.account_id !== effectiveAccountId) {
         throw new PaymentAllocationError("Header account_id must equal splits[0].account_id");
+      }
+
+      // Scope 1: Guard - when splits provided, actual_amount_idr must equal amount (same minor units)
+      if (typeof input.actual_amount_idr === "number") {
+        if (Math.round(input.actual_amount_idr * 100) !== Math.round(input.amount * 100)) {
+          throw new PaymentAllocationError("When splits are provided, actual_amount_idr must equal amount");
+        }
       }
     } else {
       // No splits: require account_id
@@ -1681,6 +1710,7 @@ export async function createPayment(
     }
 
     const amount = normalizeMoney(input.amount);
+    const effectivePaymentAmount = normalizeMoney(input.actual_amount_idr ?? input.amount);
     const paymentAt = toMysqlDateTime(input.payment_at);
 
     const paymentNo = await getNumberWithConflictMapping(
@@ -1703,9 +1733,10 @@ export async function createPayment(
            method,
            status,
            amount,
+           payment_amount_idr,
            created_by_user_id,
            updated_by_user_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?)`,
         [
           companyId,
           input.outlet_id,
@@ -1716,6 +1747,7 @@ export async function createPayment(
           effectiveAccountId,
           input.method ?? null,
           amount,
+          effectivePaymentAmount,
           actor?.userId ?? null,
           actor?.userId ?? null
         ]
@@ -1792,8 +1824,9 @@ export async function updatePayment(
     payment_no?: string;
     payment_at?: string;
     account_id?: number;
-    method?: "CASH" | "QRIS" | "CARD"; // deprecated
+    method?: "CASH" | "QRIS" | "CARD";
     amount?: number;
+    actual_amount_idr?: number;
     splits?: Array<{ account_id: number; amount: number }>;
   },
   actor?: MutationActor
@@ -1825,6 +1858,9 @@ export async function updatePayment(
     const hasSplits = input.splits && input.splits.length > 0;
     let nextAccountId = input.account_id ?? current.account_id;
     let nextAmount = typeof input.amount === "number" ? normalizeMoney(input.amount) : current.amount;
+    let nextPaymentAmountIdr = typeof input.actual_amount_idr === "number" 
+      ? normalizeMoney(input.actual_amount_idr) 
+      : current.payment_amount_idr ?? current.amount;
 
     if (hasSplits) {
       // Validate splits
@@ -1879,6 +1915,13 @@ export async function updatePayment(
       if (input.account_id !== undefined && input.account_id !== nextAccountId) {
         throw new PaymentAllocationError("Header account_id must equal splits[0].account_id");
       }
+
+      // Scope 1: Guard - when splits provided, actual_amount_idr must equal amount (same minor units)
+      if (typeof input.actual_amount_idr === "number" && typeof input.amount === "number") {
+        if (Math.round(input.actual_amount_idr * 100) !== Math.round(input.amount * 100)) {
+          throw new PaymentAllocationError("When splits are provided, actual_amount_idr must equal amount");
+        }
+      }
     } else {
       // Patch 1: Validate precision for non-split payment updates
       if (typeof input.amount === "number" && hasMoreThanTwoDecimals(input.amount)) {
@@ -1926,6 +1969,7 @@ export async function updatePayment(
              account_id = ?,
              method = ?,
              amount = ?,
+             payment_amount_idr = ?,
              updated_by_user_id = ?,
              updated_at = CURRENT_TIMESTAMP
          WHERE company_id = ?
@@ -1938,6 +1982,7 @@ export async function updatePayment(
           nextAccountId,
           nextMethod ?? null,
           nextAmount,
+          nextPaymentAmountIdr,
           actor?.userId ?? null,
           companyId,
           paymentId
@@ -2028,21 +2073,28 @@ export async function postPayment(
       throw new PaymentAllocationError("Invoice is fully paid");
     }
 
-    if (payment.amount > outstanding) {
-      throw new PaymentAllocationError("Payment amount exceeds invoice outstanding");
-    }
+    // Phase 2 (ADR-0008): Variance is computed against outstanding AR, not full invoice.
+    // This ensures correct behavior for multi-payment sequences.
+    // - Exact settlement: delta = 0
+    // - Overpayment: delta > 0 (posts to variance gain)
+    // - Underpayment (partial): delta = 0 (AR remains open, no loss posted)
+    const paymentAmount = payment.payment_amount_idr ?? payment.amount;
+    const invoiceAmountApplied = Math.min(paymentAmount, outstanding);
+    const delta = normalizeMoney(paymentAmount - invoiceAmountApplied);
 
     await connection.execute<ResultSetHeader>(
       `UPDATE sales_payments
        SET status = 'POSTED',
+           invoice_amount_idr = ?,
+           payment_delta_idr = ?,
            updated_by_user_id = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE company_id = ?
          AND id = ?`,
-      [actor?.userId ?? null, companyId, paymentId]
+      [invoiceAmountApplied, delta, actor?.userId ?? null, companyId, paymentId]
     );
 
-    const newPaidTotal = normalizeMoney(invoice.paid_total + payment.amount);
+    const newPaidTotal = normalizeMoney(Math.min(invoice.grand_total, invoice.paid_total + invoiceAmountApplied));
     const newPaymentStatus =
       newPaidTotal >= invoice.grand_total
         ? "PAID"

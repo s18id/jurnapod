@@ -12,6 +12,7 @@ import {
   PaymentStatusError,
   postPayment
 } from "../../../../../../src/lib/sales";
+import { PaymentVarianceConfigError } from "../../../../../../src/lib/sales-posting";
 
 function parsePaymentId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -46,7 +47,7 @@ export const POST = withAuth(
       }
 
       if (error instanceof PaymentAllocationError) {
-        return errorResponse("ALLOCATION_ERROR", error.message, 409);
+        return errorResponse("ALLOCATION_ERROR", (error as Error).message, 409);
       }
 
       if (error instanceof DatabaseForbiddenError) {
@@ -59,6 +60,17 @@ export const POST = withAuth(
           "Payment date is outside any open fiscal year",
           400
         );
+      }
+
+      if (error instanceof PaymentVarianceConfigError) {
+        const errMsg = error.message;
+        const businessCode = errMsg === "PAYMENT_VARIANCE_GAIN_MISSING"
+          ? "PAYMENT_VARIANCE_GAIN_MISSING"
+          : "PAYMENT_VARIANCE_LOSS_MISSING";
+        const message = errMsg === "PAYMENT_VARIANCE_GAIN_MISSING"
+          ? "Payment variance gain account not configured. Configure it in Account Mappings under company scope."
+          : "Payment variance loss account not configured. Configure it in Account Mappings under company scope.";
+        return errorResponse(businessCode, message, 409);
       }
 
       console.error("POST /sales/payments/:id/post failed", error);
