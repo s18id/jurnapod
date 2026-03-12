@@ -97,11 +97,11 @@ SET @column_check = (
     AND column_name = 'invoice_amount_idr'
 );
 
-IF @column_check = 1 THEN
-  UPDATE sales_payments 
-  SET invoice_amount_idr = amount, 
-      payment_amount_idr = amount, 
-      payment_delta_idr = 0 
-  WHERE status = 'POSTED' 
-    AND (invoice_amount_idr IS NULL OR payment_amount_idr IS NULL);
-END IF;
+SET @stmt = IF(
+  @column_check = 1,
+  'UPDATE sales_payments SET invoice_amount_idr = amount, payment_amount_idr = amount, payment_delta_idr = 0 WHERE status = ''POSTED'' AND (invoice_amount_idr IS NULL OR payment_amount_idr IS NULL)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

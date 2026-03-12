@@ -18,16 +18,14 @@ SET @backfill_needed = (
     AND column_name = 'account_id'
 );
 
-IF @backfill_needed = 1 THEN
-  -- For each company with a SALES_TAX mapping, backfill all their tax rates
-  -- that don't have an account_id yet
-  UPDATE tax_rates tr
-  INNER JOIN company_account_mappings cam 
-    ON cam.company_id = tr.company_id 
-    AND cam.mapping_key = 'SALES_TAX'
-  SET tr.account_id = cam.account_id
-  WHERE tr.account_id IS NULL;
-END IF;
+SET @stmt = IF(
+  @backfill_needed = 1,
+  'UPDATE tax_rates tr INNER JOIN company_account_mappings cam ON cam.company_id = tr.company_id AND cam.mapping_key = ''SALES_TAX'' SET tr.account_id = cam.account_id WHERE tr.account_id IS NULL',
+  'SELECT 1'
+);
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ============================================================
 -- Clean up existing SALES_TAX rows (required before constraint change)
