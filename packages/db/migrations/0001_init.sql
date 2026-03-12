@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS pos_transactions (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_pos_transactions_client_tx_id (client_tx_id),
+  UNIQUE KEY uq_pos_transactions_client_tx_id (company_id, client_tx_id),
   KEY idx_pos_transactions_company_trx_at (company_id, trx_at),
   KEY idx_pos_transactions_outlet_trx_at (outlet_id, trx_at),
   CONSTRAINT chk_pos_transactions_status CHECK (status IN ('COMPLETED', 'VOID', 'REFUND')),

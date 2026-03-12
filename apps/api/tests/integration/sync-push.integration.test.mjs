@@ -1184,6 +1184,9 @@ localServerTest(
     const createdClientTxIds = [];
     let deniedOutletId = 0;
     let adminUserId = 0;
+    let foreignCompanyId = 0;
+    let foreignOutletId = 0;
+    let foreignUserId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -2349,6 +2352,197 @@ localServerTest(
       );
       assert.equal(Number(deniedOutletCountRows[0].total), 0);
       assert.equal(await countAcceptedSyncPushEvents(db, deniedOutletTxId), 0);
+
+      const foreignCompanyCode = `FRGN${Date.now().toString(36)}`.slice(0, 12).toUpperCase();
+      const foreignOutletCode = "MAIN";
+      const [foreignCompanyResult] = await db.execute(
+        `INSERT INTO companies (code, name) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = VALUES(name), id = LAST_INSERT_ID(id)`,
+        [foreignCompanyCode, `Foreign Company ${foreignCompanyCode}`]
+      );
+      foreignCompanyId = Number(foreignCompanyResult.insertId);
+
+      const [foreignOutletResult] = await db.execute(
+        `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE name = VALUES(name), id = LAST_INSERT_ID(id)`,
+        [foreignCompanyId, foreignOutletCode, "Foreign Main Outlet"]
+      );
+      foreignOutletId = Number(foreignOutletResult.insertId);
+
+      const foreignUserEmail = `foreigncashier${Date.now().toString(36)}@example.com`;
+      const [foreignUserResult] = await db.execute(
+        `INSERT INTO users (company_id, email, password_hash, is_active)
+         VALUES (?, ?, (SELECT password_hash FROM users WHERE email = ? LIMIT 1), 1)`,
+        [foreignCompanyId, foreignUserEmail, ownerEmail]
+      );
+      foreignUserId = Number(foreignUserResult.insertId);
+
+      await db.execute(
+        `INSERT INTO user_outlets (user_id, outlet_id) VALUES (?, ?)`,
+        [foreignUserId, foreignOutletId]
+      );
+
+      const [cashierMismatchRoleRows] = await db.execute(
+        `SELECT id FROM roles WHERE code = 'CASHIER' LIMIT 1`
+      );
+      const cashierRoleId = cashierMismatchRoleRows[0]?.id;
+      if (cashierRoleId) {
+        await db.execute(
+          `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`,
+          [foreignUserId, cashierRoleId, foreignOutletId]
+        );
+      }
+
+      const cashierMismatchTxId = randomUUID();
+      const cashierMismatchResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            buildSyncTransaction({
+              clientTxId: cashierMismatchTxId,
+              companyId,
+              outletId,
+              cashierUserId: foreignUserId,
+              trxAt
+            })
+          ]
+        })
+      });
+      assert.equal(cashierMismatchResponse.status, 200);
+      const cashierMismatchBody = await parseJsonResponse(cashierMismatchResponse);
+      assert.equal(cashierMismatchBody.success, true);
+      assert.deepEqual(cashierMismatchBody.results, [
+        {
+          client_tx_id: cashierMismatchTxId,
+          result: "ERROR",
+          message: "cashier_user_id mismatch"
+        }
+      ]);
+
+      const [cashierMismatchCountRows] = await db.execute(
+        `SELECT COUNT(*) AS total
+         FROM pos_transactions
+         WHERE company_id = ? AND client_tx_id = ?`,
+        [companyId, cashierMismatchTxId]
+      );
+      assert.equal(Number(cashierMismatchCountRows[0].total), 0);
+
+      const replayStabilityTxId = randomUUID();
+      const replayStabilityPayload = {
+        outlet_id: outletId,
+        transactions: [
+          buildSyncTransaction({
+            clientTxId: replayStabilityTxId,
+            companyId,
+            outletId,
+            cashierUserId: ownerUserId,
+            trxAt
+          })
+        ]
+      };
+
+      const firstStabilityResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(replayStabilityPayload)
+      });
+      assert.equal(firstStabilityResponse.status, 200);
+      const firstStabilityBody = await parseJsonResponse(firstStabilityResponse);
+      assert.equal(firstStabilityBody.success, true);
+      assert.deepEqual(firstStabilityBody.results, [
+        {
+          client_tx_id: replayStabilityTxId,
+          result: "OK"
+        }
+      ]);
+      createdClientTxIds.push(replayStabilityTxId);
+
+      await db.execute("UPDATE users SET is_active = 0 WHERE id = ?", [ownerUserId]);
+
+      try {
+        const replayStabilityResponse = await fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(replayStabilityPayload)
+        });
+        assert.equal(replayStabilityResponse.status, 200);
+        const replayStabilityBody = await parseJsonResponse(replayStabilityResponse);
+        assert.equal(replayStabilityBody.success, true);
+        assert.deepEqual(replayStabilityBody.results, [
+          {
+            client_tx_id: replayStabilityTxId,
+            result: "DUPLICATE"
+          }
+        ]);
+      } finally {
+        await db.execute("UPDATE users SET is_active = 1 WHERE id = ?", [ownerUserId]);
+      }
+
+      const crossTenantClientTxId = randomUUID();
+      const crossTenantPayload = {
+        outlet_id: outletId,
+        transactions: [
+          buildSyncTransaction({
+            clientTxId: crossTenantClientTxId,
+            companyId,
+            outletId,
+            cashierUserId: ownerUserId,
+            trxAt
+          })
+        ]
+      };
+
+      await db.execute(
+        `INSERT INTO pos_transactions (company_id, outlet_id, client_tx_id, status, trx_at, payload_sha256, payload_hash_version)
+         VALUES (?, ?, ?, 'COMPLETED', ?, '', 1)`,
+        [foreignCompanyId, foreignOutletId, crossTenantClientTxId, toMysqlDateTime(trxAt)]
+      );
+      createdClientTxIds.push(crossTenantClientTxId);
+
+      const crossTenantResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(crossTenantPayload)
+      });
+      assert.equal(crossTenantResponse.status, 200);
+      const crossTenantBody = await parseJsonResponse(crossTenantResponse);
+      assert.equal(crossTenantBody.success, true);
+      assert.deepEqual(crossTenantBody.results, [
+        {
+          client_tx_id: crossTenantClientTxId,
+          result: "OK"
+        }
+      ]);
+
+      const [crossTenantCountRows] = await db.execute(
+        `SELECT COUNT(*) AS total
+         FROM pos_transactions
+         WHERE company_id = ? AND client_tx_id = ?`,
+        [companyId, crossTenantClientTxId]
+      );
+      assert.equal(Number(crossTenantCountRows[0].total), 1);
+
+      const [foreignTenantCountRows] = await db.execute(
+        `SELECT COUNT(*) AS total
+         FROM pos_transactions
+         WHERE company_id = ? AND client_tx_id = ?`,
+        [foreignCompanyId, crossTenantClientTxId]
+      );
+      assert.equal(Number(foreignTenantCountRows[0].total), 1);
     } finally {
       await stopApiServer(childProcess);
 
@@ -2385,6 +2579,19 @@ localServerTest(
       if (adminUserId > 0) {
         await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [adminUserId]);
         await db.execute("DELETE FROM users WHERE id = ?", [adminUserId]);
+      }
+
+      try {
+        await db.execute("DELETE FROM pos_transaction_items WHERE company_id = ?", [foreignCompanyId]);
+        await db.execute("DELETE FROM pos_transaction_payments WHERE company_id = ?", [foreignCompanyId]);
+        await db.execute("DELETE FROM pos_transactions WHERE company_id = ?", [foreignCompanyId]);
+        await db.execute("DELETE FROM user_outlets WHERE user_id = ?", [foreignUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [foreignUserId]);
+        await db.execute("DELETE FROM users WHERE id = ?", [foreignUserId]);
+        await db.execute("DELETE FROM outlets WHERE id = ?", [foreignOutletId]);
+        await db.execute("DELETE FROM companies WHERE id = ?", [foreignCompanyId]);
+      } catch (e) {
+        // Ignore cleanup errors for foreign fixtures
       }
 
       
@@ -2444,6 +2651,19 @@ localServerTest(
       ownerUserId = Number(owner.id);
       companyId = Number(owner.company_id);
       outletId = Number(owner.outlet_id);
+
+      const [ownerActiveCheck] = await db.execute(
+        `SELECT is_active FROM users WHERE id = ?`,
+        [ownerUserId]
+      );
+      assert.equal(ownerActiveCheck[0]?.is_active, 1, "owner user must be active for this test");
+
+      const [ownerOutletCheck] = await db.execute(
+        `SELECT 1 FROM user_outlets WHERE user_id = ? AND outlet_id = ?`,
+        [ownerUserId, outletId]
+      );
+      assert.equal(ownerOutletCheck.length, 1, "owner must have outlet access for this test");
+
       postingFixture = await ensureOutletAccountMappings(db, companyId, outletId);
       const fiscalContext = await ensureOpenFiscalDate(db, companyId);
       const postingTrxAt = fiscalContext.trxAt;
