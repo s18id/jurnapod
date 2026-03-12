@@ -29,10 +29,11 @@ const RETRYABLE_DB_DEADLOCK_MESSAGE = "RETRYABLE_DB_DEADLOCK";
 const TEST_FORCE_DB_ERRNO_HEADER = "x-jp-sync-push-force-db-errno";
 const TEST_FAIL_AFTER_HEADER_INSERT_HEADER = "x-jp-sync-push-fail-after-header";
 const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
+const SYNC_PUSH_CONCURRENCY_ENV = "JP_SYNC_PUSH_CONCURRENCY";
 const SYNC_PUSH_POSTING_MODE_ENV = "SYNC_PUSH_POSTING_MODE";
 const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
 const POS_SALE_DOC_TYPE = "POS_SALE";
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "SALES_TAX", "AR"];
+const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "AR"];
 
 const testContext = setupIntegrationTests(test);
 const localServerTest =
@@ -182,7 +183,10 @@ async function getFreePort() {
 
 function startApiServer(port, options = {}) {
   const enableSyncPushTestHooks = options.enableSyncPushTestHooks === true;
-  const envOverrides = options.envOverrides ?? {};
+  const envOverrides = {
+    ...(options.envOverrides ?? {}),
+    [SYNC_PUSH_CONCURRENCY_ENV]: options.envOverrides?.[SYNC_PUSH_CONCURRENCY_ENV] ?? "3"
+  };
   const childEnv = {
     ...process.env,
     NODE_ENV: "test",
@@ -449,8 +453,8 @@ async function readSyncPushJournalSummary(db, clientTxId) {
     `SELECT
        COALESCE(SUM(jl.debit), 0) AS debit_total,
        COALESCE(SUM(jl.credit), 0) AS credit_total,
-       COALESCE(SUM(CASE WHEN jl.description = 'POS sales tax' THEN jl.credit ELSE 0 END), 0) AS tax_credit_total,
-       COALESCE(SUM(CASE WHEN jl.description = 'POS sales tax' THEN 1 ELSE 0 END), 0) AS tax_line_total
+       COALESCE(SUM(CASE WHEN jl.description LIKE 'POS sales tax%' THEN jl.credit ELSE 0 END), 0) AS tax_credit_total,
+       COALESCE(SUM(CASE WHEN jl.description LIKE 'POS sales tax%' THEN 1 ELSE 0 END), 0) AS tax_line_total
      FROM journal_lines jl
      INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
      INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
@@ -476,11 +480,23 @@ async function setCompanyDefaultTaxRate(db, companyId, config) {
   );
   const previousDefaults = defaultRows.map((row) => Number(row.tax_rate_id)).filter((id) => id > 0);
 
+  const createAccount = config.withAccount !== false;
+  let createdAccountId = null;
+  if (createAccount) {
+    const accountCode = `ITTAX${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+    const [accountInsertResult] = await db.execute(
+      `INSERT INTO accounts (company_id, code, name)
+       VALUES (?, ?, ?)`,
+      [companyId, accountCode, "Integration Test Tax Liability"]
+    );
+    createdAccountId = Number(accountInsertResult.insertId);
+  }
+
   const code = `SYNC_TAX_${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
   const [insertResult] = await db.execute(
-    `INSERT INTO tax_rates (company_id, code, name, rate_percent, is_inclusive, is_active)
-     VALUES (?, ?, ?, ?, ?, 1)`,
-    [companyId, code, "Sync Tax", config.rate, config.inclusive ? 1 : 0]
+    `INSERT INTO tax_rates (company_id, code, name, rate_percent, is_inclusive, is_active, account_id)
+     VALUES (?, ?, ?, ?, ?, 1, ?)`,
+    [companyId, code, "Sync Tax", config.rate, config.inclusive ? 1 : 0, createdAccountId]
   );
   const taxRateId = Number(insertResult.insertId);
 
@@ -494,7 +510,7 @@ async function setCompanyDefaultTaxRate(db, companyId, config) {
     [companyId, taxRateId]
   );
 
-  return { previousDefaults, taxRateId };
+  return { previousDefaults, taxRateId, createdAccountId };
 }
 
 async function restoreCompanyDefaultTaxRate(db, companyId, previous) {
@@ -529,6 +545,15 @@ async function restoreCompanyDefaultTaxRate(db, companyId, previous) {
     await db.execute(
       `DELETE FROM tax_rates WHERE id = ? AND company_id = ?`,
       [previous.taxRateId, companyId]
+    );
+  }
+
+  if (Number.isFinite(previous.createdAccountId) && Number(previous.createdAccountId) > 0) {
+    await db.execute(
+      `DELETE FROM accounts
+       WHERE company_id = ?
+         AND id = ?`,
+      [companyId, previous.createdAccountId]
     );
   }
 }
@@ -570,7 +595,7 @@ async function ensureOutletAccountMappings(db, companyId, outletId) {
     await db.execute(
       `ALTER TABLE outlet_account_mappings
        ADD CONSTRAINT chk_outlet_account_mappings_mapping_key
-       CHECK (mapping_key IN ('CASH', 'QRIS', 'CARD', 'SALES_REVENUE', 'SALES_TAX', 'AR'))`
+       CHECK (mapping_key IN ('CASH', 'QRIS', 'CARD', 'SALES_REVENUE', 'AR'))`
     );
   }
 
@@ -2388,6 +2413,7 @@ localServerTest(
     };
     let createdFiscalYearId = null;
     let previousPosTaxConfig = null;
+    let missingTaxAccountConfig = null;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -2563,10 +2589,70 @@ localServerTest(
       assert.equal(taxedSummary.tax_credit_total, 1250);
       assert.equal(taxedSummary.debit_total, taxedSummary.credit_total);
 
-      if (previousPosTaxConfig) {
-        await restoreCompanyDefaultTaxRate(db, companyId, previousPosTaxConfig);
-        previousPosTaxConfig = null;
-      }
+      missingTaxAccountConfig = await setCompanyDefaultTaxRate(db, companyId, {
+        rate: 10,
+        inclusive: false,
+        withAccount: false
+      });
+
+      const taxAccountMissingClientTxId = randomUUID();
+      const taxAccountMissingResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            {
+              ...buildSyncTransaction({
+                clientTxId: taxAccountMissingClientTxId,
+                companyId,
+                outletId,
+                cashierUserId: ownerUserId,
+                trxAt: postingTrxAt
+              }),
+              payments: [
+                {
+                  method: "CASH",
+                  amount: 13750
+                }
+              ]
+            }
+          ]
+        })
+      });
+      assert.equal(taxAccountMissingResponse.status, 200);
+      const taxAccountMissingBody = await parseJsonResponse(taxAccountMissingResponse);
+      assert.equal(taxAccountMissingBody.success, true);
+      assert.deepEqual(taxAccountMissingBody.results, [
+        {
+          client_tx_id: taxAccountMissingClientTxId,
+          result: "ERROR",
+          message: "insert failed"
+        }
+      ]);
+      createdClientTxIds.push(taxAccountMissingClientTxId);
+
+      const taxAccountMissingAudit = await readPostingHookFailureAuditPayload(db, taxAccountMissingClientTxId);
+      assert.notEqual(taxAccountMissingAudit, null);
+      assert.equal(taxAccountMissingAudit.posting_mode, "active");
+      assert.equal(taxAccountMissingAudit.balance_ok, false);
+      assert.equal(
+        String(taxAccountMissingAudit.reason ?? "").startsWith("TAX_ACCOUNT_MISSING:"),
+        true
+      );
+
+      assert.deepEqual(await countSyncPushPersistedRows(db, taxAccountMissingClientTxId), {
+        tx_total: 0,
+        item_total: 0,
+        payment_total: 0
+      });
+      assert.deepEqual(await countSyncPushJournalRows(db, taxAccountMissingClientTxId), {
+        batch_total: 0,
+        line_total: 0
+      });
 
       const duplicateClientTxId = randomUUID();
       const duplicatePayload = {
@@ -2810,8 +2896,14 @@ localServerTest(
         await cleanupSyncPushPersistedArtifacts(db, clientTxId);
       }
 
+      if (companyId > 0 && missingTaxAccountConfig) {
+        await restoreCompanyDefaultTaxRate(db, companyId, missingTaxAccountConfig);
+        missingTaxAccountConfig = null;
+      }
+
       if (companyId > 0 && previousPosTaxConfig) {
         await restoreCompanyDefaultTaxRate(db, companyId, previousPosTaxConfig);
+        previousPosTaxConfig = null;
       }
 
       if (companyId > 0 && outletId > 0) {

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import type { ResultSetHeader } from "mysql2";
 import type { RowDataPacket } from "mysql2";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { getDbPool } from "./db";
+import { closeDbPool, getDbPool } from "./db";
 import {
   ReservationValidationError,
   createReservation,
@@ -62,6 +62,7 @@ test(
   async () => {
     const pool = getDbPool();
     const runId = Date.now().toString(36);
+    const openOrderId = `ord-${runId}-open`;
     const { companyId, outletId } = await resolveFixtureContext();
     const createdTableIds: number[] = [];
     const createdReservationIds: number[] = [];
@@ -145,7 +146,80 @@ test(
           return true;
         }
       );
+
+      const [table3Insert] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        [companyId, outletId, `T3-${runId}`.slice(0, 32), `Table Three ${runId}`, "Main", 4]
+      );
+      const table3Id = Number(table3Insert.insertId);
+      createdTableIds.push(table3Id);
+
+      const reservationWithOpenOrder = await createReservation(companyId, {
+        outlet_id: outletId,
+        table_id: table3Id,
+        customer_name: `Reservation Open Order ${runId}`,
+        customer_phone: "08123456789",
+        guest_count: 2,
+        reservation_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+        duration_minutes: 90,
+        notes: "With open order"
+      });
+      createdReservationIds.push(reservationWithOpenOrder.reservation_id);
+
+      await pool.execute(
+        `INSERT INTO pos_order_snapshots (
+           order_id,
+           company_id,
+           outlet_id,
+           service_type,
+           source_flow,
+           settlement_flow,
+           table_id,
+           reservation_id,
+           guest_count,
+           is_finalized,
+           order_status,
+           order_state,
+           paid_amount,
+           opened_at,
+           closed_at,
+           notes,
+           updated_at
+         ) VALUES (?, ?, ?, 'DINE_IN', 'WALK_IN', 'DEFERRED', ?, ?, ?, 0, 'OPEN', 'OPEN', 0, NOW(), NULL, NULL, NOW())`,
+        [
+          openOrderId,
+          companyId,
+          outletId,
+          table3Id,
+          reservationWithOpenOrder.reservation_id,
+          reservationWithOpenOrder.guest_count
+        ]
+      );
+
+      await updateReservation(companyId, reservationWithOpenOrder.reservation_id, {
+        status: "ARRIVED"
+      });
+      await updateReservation(companyId, reservationWithOpenOrder.reservation_id, {
+        status: "SEATED"
+      });
+      assert.equal(await readTableStatus(companyId, outletId, table3Id), "OCCUPIED");
+
+      await updateReservation(companyId, reservationWithOpenOrder.reservation_id, {
+        status: "COMPLETED"
+      });
+      assert.equal(
+        await readTableStatus(companyId, outletId, table3Id),
+        "OCCUPIED",
+        "table should remain OCCUPIED while open dine-in order exists"
+      );
     } finally {
+      await pool.execute(`DELETE FROM pos_order_snapshots WHERE order_id = ? AND company_id = ? AND outlet_id = ?`, [
+        openOrderId,
+        companyId,
+        outletId
+      ]);
+
       if (createdReservationIds.length > 0) {
         const placeholders = createdReservationIds.map(() => "?").join(", ");
         await pool.execute(
@@ -162,7 +236,7 @@ test(
         );
       }
 
-      await pool.end();
+      await closeDbPool();
     }
   }
 );

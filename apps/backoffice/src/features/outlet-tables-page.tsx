@@ -52,7 +52,7 @@ interface BulkFormData {
   count: number;
   zone: string | null;
   capacity: number | null;
-  status: OutletTableStatus;
+  status: "AVAILABLE" | "UNAVAILABLE";
 }
 
 const emptyForm: FormData = {
@@ -80,6 +80,15 @@ const STATUS_OPTIONS: Array<{ value: OutletTableStatus; label: string; color: st
   { value: "UNAVAILABLE", label: "Unavailable", color: "gray" }
 ];
 
+const OPERATIONAL_STATUS_OPTIONS: Array<{ value: OutletTableStatus; label: string }> = [
+  { value: "AVAILABLE", label: "Available" },
+  { value: "UNAVAILABLE", label: "Unavailable" }
+];
+
+function isDerivedStatus(status: OutletTableStatus): boolean {
+  return status === "RESERVED" || status === "OCCUPIED";
+}
+
 export function OutletTablesPage(props: OutletTablesPageProps) {
   const { user, accessToken } = props;
   const isSuperAdminOrOwner = user.global_roles.includes("SUPER_ADMIN") || user.global_roles.includes("OWNER");
@@ -89,8 +98,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
     user.global_roles.includes("COMPANY_ADMIN");
   const userCompanyId = user.company_id;
 
-  // Selected company/outlet filters
-  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(userCompanyId);
+  // Selected outlet filter
   const [selectedOutletId, setSelectedOutletId] = useState<number | null>(null);
 
   // Dialog state
@@ -111,8 +119,29 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Data hooks
-  const outlets = useOutletsFull(selectedCompanyId, accessToken);
+  const outlets = useOutletsFull(userCompanyId, accessToken);
   const tables = useOutletTables(selectedOutletId, accessToken);
+
+  // Auto-select first outlet (handle empty list and stale IDs)
+  useEffect(() => {
+    if (outlets.loading) {
+      return;
+    }
+
+    if (outlets.data.length === 0) {
+      if (selectedOutletId !== null) {
+        setSelectedOutletId(null);
+      }
+      return;
+    }
+
+    const exists =
+      selectedOutletId !== null && outlets.data.some((outlet) => outlet.id === selectedOutletId);
+
+    if (!exists) {
+      setSelectedOutletId(outlets.data[0]!.id);
+    }
+  }, [outlets.loading, outlets.data, selectedOutletId]);
 
   // Search/filter
   const [searchTerm, setSearchTerm] = useState("");
@@ -274,6 +303,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
         );
         setSuccessMessage("Table created successfully");
       } else if (dialogMode === "edit" && editingTable) {
+        const isCurrentlyDerived = isDerivedStatus(editingTable.status);
         await updateOutletTable(
           selectedOutletId,
           editingTable.id,
@@ -282,7 +312,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
             name: formData.name.trim(),
             zone: formData.zone?.trim() || null,
             capacity: formData.capacity,
-            status: formData.status
+            ...(isCurrentlyDerived ? {} : { status: formData.status })
           },
           accessToken
         );
@@ -432,7 +462,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
       >
         <Stack gap="sm">
           <FilterBar>
-            {isSuperAdminOrOwner && (
+            {outlets.data.length > 0 && (
               <Select
                 label="Outlet"
                 placeholder="Select outlet"
@@ -442,21 +472,6 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
                 }))}
                 value={selectedOutletId?.toString() || null}
                 onChange={(value) => setSelectedOutletId(value ? Number(value) : null)}
-                clearable
-              />
-            )}
-
-            {!isSuperAdminOrOwner && outlets.data.length > 0 && (
-              <Select
-                label="Outlet"
-                placeholder="Select outlet"
-                data={outlets.data.map((o: any) => ({
-                  value: o.id.toString(),
-                  label: `${o.code} - ${o.name}`
-                }))}
-                value={selectedOutletId?.toString() || null}
-                onChange={(value) => setSelectedOutletId(value ? Number(value) : null)}
-                clearable
               />
             )}
 
@@ -551,15 +566,21 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
             max={100}
           />
 
-          <Select
-            label="Status"
-            data={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
-            value={formData.status}
-            onChange={(value) =>
-              setFormData({ ...formData, status: (value as OutletTableStatus) || "AVAILABLE" })
-            }
-            required
-          />
+          {dialogMode === "edit" && editingTable && isDerivedStatus(editingTable.status) ? (
+            <Alert color="blue" title="Status Managed">
+              Status is currently managed by active reservation or order. Editing disabled.
+            </Alert>
+          ) : (
+            <Select
+              label="Status"
+              data={OPERATIONAL_STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+              value={formData.status}
+              onChange={(value) =>
+                setFormData({ ...formData, status: (value as OutletTableStatus) || "AVAILABLE" })
+              }
+              required
+            />
+          )}
 
           <Group justify="flex-end">
             <Button variant="default" onClick={closeDialog}>
@@ -658,10 +679,10 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
 
           <Select
             label="Status"
-            data={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+            data={OPERATIONAL_STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
             value={bulkFormData.status}
             onChange={(value) =>
-              setBulkFormData({ ...bulkFormData, status: (value as OutletTableStatus) || "AVAILABLE" })
+              setBulkFormData({ ...bulkFormData, status: (value as "AVAILABLE" | "UNAVAILABLE") || "AVAILABLE" })
             }
             required
           />

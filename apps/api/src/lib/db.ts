@@ -43,3 +43,10 @@ export function getDbPool(): Pool {
   globalForDb.__jurnapodApiDbPool = pool;
   return pool;
 }
+
+export async function closeDbPool(): Promise<void> {
+  if (globalForDb.__jurnapodApiDbPool) {
+    await globalForDb.__jurnapodApiDbPool.end();
+    globalForDb.__jurnapodApiDbPool = undefined;
+  }
+}

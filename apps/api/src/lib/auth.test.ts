@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import { buildPermissionMask, checkUserAccess } from "./auth";
-import { getDbPool } from "./db";
+import { closeDbPool, getDbPool } from "./db";
 import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
@@ -361,7 +361,7 @@ test(
         );
       }
 
-      await pool.end();
+      await closeDbPool();
     }
   }
 );

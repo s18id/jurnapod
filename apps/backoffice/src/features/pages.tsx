@@ -35,6 +35,7 @@ import { InventorySettingsPage as InventorySettingsFeaturePage } from "./invento
 import { PlatformSettingsPage as PlatformSettingsManagementPage } from "./platform-settings-page";
 import { FiscalYearsPage as FiscalYearsManagementPage } from "./fiscal-years-page";
 import { AuditLogsPage as AuditLogsManagementPage } from "./audit-logs-page";
+import { CashBankPage as CashBankManagementPage } from "./cash-bank-page";
 
 type PlaceholderProps = {
   title: string;
@@ -120,6 +121,8 @@ export const PlatformSettingsPage = PlatformSettingsManagementPage;
 export const FiscalYearsPage = FiscalYearsManagementPage;
 
 export const AuditLogsPage = AuditLogsManagementPage;
+
+export const CashBankPage = CashBankManagementPage;
 
 export function ForbiddenPage() {
   return (

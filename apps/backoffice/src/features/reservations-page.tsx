@@ -155,10 +155,15 @@ export function ReservationsPage(props: ReservationsPageProps) {
   // Data hooks
   const outlets = useOutletsFull(userCompanyId, accessToken);
   const tables = useOutletTables(selectedOutletId, accessToken);
-  const reservations = useReservations(
-    selectedOutletId ? { outlet_id: selectedOutletId, status: statusFilter || undefined } : null,
-    accessToken
+
+  const reservationQuery = useMemo(
+    () =>
+      selectedOutletId
+        ? { outlet_id: selectedOutletId, status: statusFilter || undefined }
+        : null,
+    [selectedOutletId, statusFilter]
   );
+  const reservations = useReservations(reservationQuery, accessToken);
 
   // Search/filter
   const [searchTerm, setSearchTerm] = useState("");
@@ -182,16 +187,34 @@ export function ReservationsPage(props: ReservationsPageProps) {
     return map;
   }, [tables.data]);
 
+  const editingReservationTableId = editingReservation?.table_id ?? null;
+
   const assignableTableOptions = useMemo(
     () =>
       tables.data
-        .filter((table) => table.status !== "OCCUPIED" && table.status !== "UNAVAILABLE")
+        .filter((table) => table.status === "AVAILABLE")
         .map((table) => ({
           value: table.id.toString(),
           label: `${table.code} - ${table.name} (${table.zone || "No zone"})`
         })),
     [tables.data]
   );
+
+  const modalTableOptions = useMemo(() => {
+    const base = assignableTableOptions;
+    if (dialogMode !== "edit" || !editingReservationTableId) return base;
+
+    const currentId = editingReservationTableId;
+    const hasCurrent = base.some((o) => o.value === currentId.toString());
+    if (hasCurrent) return base;
+
+    const currentTable = tableById.get(currentId);
+    const currentLabel = currentTable
+      ? `${currentTable.code} - ${currentTable.name} (${currentTable.zone || "No zone"})`
+      : `Table #${currentId}`;
+
+    return [{ value: currentId.toString(), label: currentLabel }, ...base];
+  }, [assignableTableOptions, dialogMode, editingReservationTableId, tableById]);
 
   // Close dialog helper
   const closeDialog = useCallback(() => {
@@ -254,6 +277,23 @@ export function ReservationsPage(props: ReservationsPageProps) {
       return;
     }
 
+    const selectedTableId = formData.table_id;
+    if (selectedTableId != null) {
+      const isCurrentAssignedInEdit =
+        dialogMode === "edit" && editingReservation?.table_id === selectedTableId;
+
+      const selectedTable = tableById.get(selectedTableId);
+      const isAvailableNow = selectedTable?.status === "AVAILABLE";
+
+      if (!isCurrentAssignedInEdit && !isAvailableNow) {
+        setFormErrors((prev) => ({
+          ...prev,
+          table_id: "Selected table is no longer available"
+        }));
+        return;
+      }
+    }
+
     setSubmitting(true);
     setError(null);
 
@@ -305,7 +345,8 @@ export function ReservationsPage(props: ReservationsPageProps) {
     accessToken,
     validateForm,
     reservations,
-    closeDialog
+    closeDialog,
+    tableById
   ]);
 
   // Handle cancel reservation
@@ -701,13 +742,20 @@ export function ReservationsPage(props: ReservationsPageProps) {
           <Select
             label="Table (Optional)"
             placeholder="Select a table"
-            data={tables.data.map((t: any) => ({
-              value: t.id.toString(),
-              label: `${t.code} - ${t.name} (${t.zone || "No zone"})`
-            }))}
+            data={modalTableOptions}
             value={formData.table_id?.toString() || null}
-            onChange={(value) => setFormData({ ...formData, table_id: value ? Number(value) : null })}
+            onChange={(value) => {
+              setFormData((prev) => ({ ...prev, table_id: value ? Number(value) : null }));
+              setFormErrors((prev) => {
+                if (!prev.table_id) {
+                  return prev;
+                }
+                const { table_id, ...rest } = prev;
+                return rest;
+              });
+            }}
             clearable
+            error={formErrors.table_id}
           />
 
           <Textarea

@@ -243,18 +243,20 @@ export function createIntegrationTestContext(options = {}) {
   const serverOptions = options.serverOptions ?? {};
   const hasServerOptions = Object.keys(serverOptions).length > 0;
   const useDb = options.useDb !== false;
-  const externalBaseUrl = process.env.JP_TEST_BASE_URL;
-  const allowExternal = Boolean(externalBaseUrl) && !hasServerOptions && options.forceLocalServer !== true;
 
   let db = options.dbPool ?? null;
   let manageDb = useDb && !options.dbPool;
-  let baseUrl = externalBaseUrl ?? null;
+  let baseUrl = null;
   let server = null;
-  let isExternal = allowExternal;
+  let isExternal = false;
 
   return {
     async start() {
       loadEnvIfPresent();
+
+      const externalBaseUrl = process.env.JP_TEST_BASE_URL;
+      const allowExternal = Boolean(externalBaseUrl) && !hasServerOptions && options.forceLocalServer !== true;
+
       if (useDb && !db) {
         db = createDbPool(options.dbPoolOptions ?? {});
         manageDb = true;

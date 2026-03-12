@@ -4,15 +4,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiRequest, ApiError } from "../lib/api-client";
 
-export type OutletAccountMappingKey = "SALES_REVENUE" | "SALES_TAX" | "AR" | "INVOICE_PAYMENT_BANK";
+export type OutletAccountMappingKey = "SALES_REVENUE" | "AR" | "INVOICE_PAYMENT_BANK";
+
+export type CompanyOnlyMappingKey = "PAYMENT_VARIANCE_GAIN" | "PAYMENT_VARIANCE_LOSS";
+
+export type AnyMappingKey = OutletAccountMappingKey | CompanyOnlyMappingKey;
 
 export type OutletAccountMapping = {
-  mapping_key: OutletAccountMappingKey;
+  mapping_key: AnyMappingKey;
   account_id: number;
 };
 
 export type EffectiveOutletAccountMapping = {
-  mapping_key: OutletAccountMappingKey;
+  mapping_key: AnyMappingKey;
   account_id: number | null;
   source: "outlet" | "company" | null;
   company_account_id: number | null;
@@ -107,7 +111,7 @@ export function useOutletAccountMappings(
     refetch();
   }, [refetch]);
 
-  async function save(mappings: Array<{ mapping_key: OutletAccountMappingKey; account_id: number | "" }>) {
+  async function save(mappings: Array<{ mapping_key: AnyMappingKey; account_id: number | "" }>) {
     if (scope === "company") {
       const response = await apiRequest<SaveResponse>(
         `/settings/outlet-account-mappings`,

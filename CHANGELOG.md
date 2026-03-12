@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Manual Shortfall Loss Settlement (Invoice Payments)**: New optional feature for manual underpayment write-off.
+  - POST `/api/sales/payments/:id/post` now accepts optional body:
+    ```json
+    {
+      "settle_shortfall_as_loss": true,
+      "shortfall_reason": "Customer dispute write-off"
+    }
+    ```
+  - When enabled on underpayment: full outstanding is applied to AR, remaining difference is posted as variance loss.
+  - Requires `PAYMENT_VARIANCE_LOSS` account mapping to be configured.
+  - Reason is mandatory (1-500 chars) for audit trail.
+  - Actor user and timestamp are recorded.
+  - Invoice is marked PAID (AR fully settled).
+  - Files:
+    - `packages/db/migrations/0092_sales_payments_manual_shortfall_loss.sql`
+    - `packages/shared/src/schemas/sales.ts`
+    - `apps/api/src/lib/sales.ts`
+    - `apps/api/app/api/sales/payments/[paymentId]/post/route.ts`
+
 - **Account Mappings Page (Backoffice)**: Split settings into tabs for clearer separation between Invoice and POS configuration.
   - **Invoice Tab**: Sales account mappings (AR, Sales Revenue, Sales Tax) + "Default Payment Bank Account" setting.
   - **POS Tab**: POS payment method mappings (method code, label, account).

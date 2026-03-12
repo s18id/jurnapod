@@ -165,22 +165,27 @@ async function upsertOutlet(connection, companyId, outletCode, outletName) {
   return Number(result.insertId);
 }
 
-async function upsertRole(connection, roleCode, roleName) {
-  // First check if role exists
+async function upsertRole(connection, roleCode, roleName, isGlobal, roleLevel) {
+  // Resolve only system role rows (company_id IS NULL)
   const [existing] = await connection.execute(
-    `SELECT id FROM roles WHERE code = ? LIMIT 1`,
+    `SELECT id
+     FROM roles
+     WHERE code = ?
+       AND company_id IS NULL
+     ORDER BY id ASC
+     LIMIT 1`,
     [roleCode]
   );
-  
+
   if (existing.length > 0) {
     return Number(existing[0].id);
   }
-  
-  // Only insert if doesn't exist - don't update to preserve is_global and role_level from migrations
+
+  // Insert as explicit system role when missing
   const [result] = await connection.execute(
-    `INSERT INTO roles (code, name)
-     VALUES (?, ?)`,
-    [roleCode, roleName]
+    `INSERT INTO roles (company_id, code, name, is_global, role_level)
+     VALUES (NULL, ?, ?, ?, ?)`,
+    [roleCode, roleName, isGlobal ? 1 : 0, roleLevel]
   );
 
   return Number(result.insertId);
@@ -288,19 +293,26 @@ async function main() {
     );
 
     const roleDefinitions = [
-      ["SUPER_ADMIN", "Super Admin"],
-      ["OWNER", "Owner"],
-      ["ADMIN", "Admin"],
-      ["CASHIER", "Cashier"],
-      ["ACCOUNTANT", "Accountant"]
+      { code: "SUPER_ADMIN", name: "Super Admin", isGlobal: true, roleLevel: 100 },
+      { code: "OWNER", name: "Owner", isGlobal: true, roleLevel: 90 },
+      { code: "COMPANY_ADMIN", name: "Company Admin", isGlobal: true, roleLevel: 80 },
+      { code: "ADMIN", name: "Admin", isGlobal: false, roleLevel: 60 },
+      { code: "ACCOUNTANT", name: "Accountant", isGlobal: false, roleLevel: 40 },
+      { code: "CASHIER", name: "Cashier", isGlobal: false, roleLevel: 20 }
     ];
 
     let ownerRoleId = 0;
     let roleIds = {};
-    for (const [roleCode, roleName] of roleDefinitions) {
-      const roleId = await upsertRole(connection, roleCode, roleName);
-      roleIds[roleCode] = roleId;
-      if (roleCode === "OWNER") {
+    for (const roleDef of roleDefinitions) {
+      const roleId = await upsertRole(
+        connection,
+        roleDef.code,
+        roleDef.name,
+        roleDef.isGlobal,
+        roleDef.roleLevel
+      );
+      roleIds[roleDef.code] = roleId;
+      if (roleDef.code === "OWNER") {
         ownerRoleId = roleId;
       }
     }
@@ -319,6 +331,7 @@ async function main() {
       { roleCode: "SUPER_ADMIN", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "SUPER_ADMIN", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "SUPER_ADMIN", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "SUPER_ADMIN", module: "pos", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "SUPER_ADMIN", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "SUPER_ADMIN", module: "purchasing", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "SUPER_ADMIN", module: "reports", create: 1, read: 1, update: 1, delete: 1 },
@@ -330,11 +343,27 @@ async function main() {
       { roleCode: "OWNER", module: "outlets", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "OWNER", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "OWNER", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "cash_bank", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "OWNER", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "OWNER", module: "pos", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "OWNER", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "OWNER", module: "purchasing", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "OWNER", module: "reports", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "OWNER", module: "settings", create: 1, read: 1, update: 1, delete: 1 },
+      // COMPANY_ADMIN - scoped admin defaults (match API bootstrap defaults)
+      { roleCode: "COMPANY_ADMIN", module: "companies", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "COMPANY_ADMIN", module: "users", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "COMPANY_ADMIN", module: "roles", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "COMPANY_ADMIN", module: "outlets", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "COMPANY_ADMIN", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "COMPANY_ADMIN", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "COMPANY_ADMIN", module: "cash_bank", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "COMPANY_ADMIN", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "COMPANY_ADMIN", module: "pos", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "COMPANY_ADMIN", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "COMPANY_ADMIN", module: "purchasing", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "COMPANY_ADMIN", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "COMPANY_ADMIN", module: "settings", create: 0, read: 1, update: 1, delete: 0 },
       // ADMIN - same as owner
       { roleCode: "ADMIN", module: "companies", create: 0, read: 1, update: 0, delete: 0 },
       { roleCode: "ADMIN", module: "users", create: 1, read: 1, update: 1, delete: 1 },
@@ -342,7 +371,9 @@ async function main() {
       { roleCode: "ADMIN", module: "outlets", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "ADMIN", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "ADMIN", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "ADMIN", module: "cash_bank", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "ADMIN", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
+      { roleCode: "ADMIN", module: "pos", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "ADMIN", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "ADMIN", module: "purchasing", create: 1, read: 1, update: 1, delete: 1 },
       { roleCode: "ADMIN", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
@@ -354,7 +385,9 @@ async function main() {
       { roleCode: "CASHIER", module: "outlets", create: 0, read: 1, update: 0, delete: 0 },
       { roleCode: "CASHIER", module: "accounts", create: 0, read: 0, update: 0, delete: 0 },
       { roleCode: "CASHIER", module: "journals", create: 0, read: 0, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "cash_bank", create: 0, read: 0, update: 0, delete: 0 },
       { roleCode: "CASHIER", module: "sales", create: 1, read: 1, update: 0, delete: 0 },
+      { roleCode: "CASHIER", module: "pos", create: 1, read: 1, update: 0, delete: 0 },
       { roleCode: "CASHIER", module: "inventory", create: 0, read: 1, update: 0, delete: 0 },
       { roleCode: "CASHIER", module: "purchasing", create: 0, read: 0, update: 0, delete: 0 },
       { roleCode: "CASHIER", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
@@ -366,7 +399,9 @@ async function main() {
       { roleCode: "ACCOUNTANT", module: "outlets", create: 0, read: 1, update: 0, delete: 0 },
       { roleCode: "ACCOUNTANT", module: "accounts", create: 0, read: 1, update: 0, delete: 0 },
       { roleCode: "ACCOUNTANT", module: "journals", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "cash_bank", create: 1, read: 1, update: 0, delete: 0 },
       { roleCode: "ACCOUNTANT", module: "sales", create: 0, read: 1, update: 0, delete: 0 },
+      { roleCode: "ACCOUNTANT", module: "pos", create: 0, read: 1, update: 0, delete: 0 },
       { roleCode: "ACCOUNTANT", module: "inventory", create: 0, read: 0, update: 0, delete: 0 },
       { roleCode: "ACCOUNTANT", module: "purchasing", create: 0, read: 1, update: 0, delete: 0 },
       { roleCode: "ACCOUNTANT", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
@@ -416,7 +451,12 @@ async function main() {
     // Create SUPER_ADMIN user if configured
     if (seedConfig.superAdminEmail && seedConfig.superAdminPassword) {
       const [superAdminRoleRows] = await connection.execute(
-        `SELECT id FROM roles WHERE code = ?`,
+        `SELECT id
+         FROM roles
+         WHERE code = ?
+           AND company_id IS NULL
+         ORDER BY id ASC
+         LIMIT 1`,
         ["SUPER_ADMIN"]
       );
       const superAdminRoleId = superAdminRoleRows[0]?.id;
@@ -525,13 +565,32 @@ async function main() {
         throw new Error(`module id not found for ${moduleEntry.code}`);
       }
 
-      await upsertCompanyModule(
-        connection,
-        companyId,
-        moduleId,
-        moduleEntry.enabled,
-        JSON.stringify(moduleEntry.config ?? {}),
-        ownerUserId
+    await upsertCompanyModule(
+      connection,
+      companyId,
+      moduleId,
+      moduleEntry.enabled,
+      JSON.stringify(moduleEntry.config ?? {}),
+      ownerUserId
+    );
+    }
+
+    const numberingTemplates = [
+      { doc_type: "SALES_INVOICE", pattern: "INV/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" },
+      { doc_type: "SALES_PAYMENT", pattern: "PAY/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" },
+      { doc_type: "SALES_ORDER", pattern: "SO/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" },
+      { doc_type: "CREDIT_NOTE", pattern: "CN/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" }
+    ];
+
+    for (const tmpl of numberingTemplates) {
+      await connection.execute(
+        `INSERT INTO numbering_templates (company_id, outlet_id, scope_key, doc_type, pattern, reset_period, current_value, is_active)
+         VALUES (?, NULL, 0, ?, ?, ?, 0, 1)
+         ON DUPLICATE KEY UPDATE
+           pattern = VALUES(pattern),
+           reset_period = VALUES(reset_period),
+           updated_at = CURRENT_TIMESTAMP`,
+        [companyId, tmpl.doc_type, tmpl.pattern, tmpl.reset_period]
       );
     }
 

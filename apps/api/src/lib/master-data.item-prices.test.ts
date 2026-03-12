@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import { listEffectiveItemPricesForOutlet } from "./master-data";
-import { getDbPool } from "./db";
+import { closeDbPool, getDbPool } from "./db";
 import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
@@ -216,6 +216,5 @@ test(
 );
 
 test.after(async () => {
-  const pool = getDbPool();
-  await pool.end();
+  await closeDbPool();
 });

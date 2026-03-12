@@ -79,6 +79,10 @@ type Payment = {
   method?: string;
   status: PaymentStatus;
   amount: number;
+  actual_amount_idr?: number | null;
+  invoice_amount_idr?: number | null;
+  payment_amount_idr?: number | null;
+  payment_delta_idr?: number;
   splits?: PaymentSplit[];
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
@@ -1118,6 +1122,48 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
             }
           />
 
+          {payment.invoice_id && Number(payment.amount) > 0 && (
+            (() => {
+              const selectedInvoice = invoices.find((inv) => inv.id === Number(payment.invoice_id));
+              if (!selectedInvoice) return null;
+              
+              const invoiceOutstanding = selectedInvoice.grand_total - selectedInvoice.paid_total;
+              const paymentAmount = Number(payment.amount);
+              const variance = paymentAmount - invoiceOutstanding;
+              
+              return (
+                <Card withBorder padding="sm" bg="gray.0">
+                  <Stack gap="xs">
+                    <Text size="xs" fw={500} c="dimmed">Payment Variance Preview</Text>
+                    <Group justify="space-between">
+                      <Text size="sm">Invoice Outstanding:</Text>
+                      <Text size="sm" fw={500}>{formatCurrency(invoiceOutstanding)}</Text>
+                    </Group>
+                    <Group justify="space-between">
+                      <Text size="sm">Payment Amount:</Text>
+                      <Text size="sm" fw={500}>{formatCurrency(paymentAmount)}</Text>
+                    </Group>
+                    <Divider />
+                    <Group justify="space-between">
+                      <Text size="sm" fw={500}>Variance:</Text>
+                      <Text size="sm" fw={700} c={variance > 0 ? "green" : variance < 0 ? "blue" : "gray"}>
+                        {variance > 0 ? "+" : ""}{formatCurrency(variance)}
+                        {variance > 0 ? " (Gain)" : variance < 0 ? " (Partial)" : " (Exact)"}
+                      </Text>
+                    </Group>
+                    {variance !== 0 && (
+                      <Alert color={variance > 0 ? "green" : "blue"} variant="light">
+                        {variance > 0 
+                          ? "Payment exceeds outstanding. Variance will be posted as gain on final settlement."
+                          : "Payment less than outstanding. This is a partial payment - remaining AR stays open."}
+                      </Alert>
+                    )}
+                  </Stack>
+                </Card>
+              );
+            })()
+          )}
+
           {renderPaymentSplitsSection(payment, handlers, currentSplitTotal, currentDifference)}
 
           <Group justify="flex-end" gap="sm">
@@ -1440,6 +1486,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
                     <Table.Th>Date & Time</Table.Th>
                     <Table.Th style={{ textAlign: "center" }}>Status</Table.Th>
                     <Table.Th style={{ textAlign: "right" }}>Amount</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Variance</Table.Th>
                     <Table.Th style={{ textAlign: "center" }}>Invoice</Table.Th>
                     <Table.Th>Splits</Table.Th>
                     <Table.Th style={{ textAlign: "center" }}>Actions</Table.Th>
@@ -1465,6 +1512,21 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
                         </Table.Td>
                         <Table.Td style={{ textAlign: "right" }}>
                           <Text fw={500}>{formatCurrency(payment.amount)}</Text>
+                        </Table.Td>
+                        <Table.Td style={{ textAlign: "right" }}>
+                          {payment.payment_delta_idr !== undefined && payment.payment_delta_idr !== null && payment.payment_delta_idr !== 0 ? (
+                            <Badge 
+                              color={payment.payment_delta_idr > 0 ? "green" : "blue"} 
+                              variant="light"
+                              size="sm"
+                            >
+                              {payment.payment_delta_idr > 0 ? "+" : ""}{formatCurrency(payment.payment_delta_idr)}
+                            </Badge>
+                          ) : payment.status === "POSTED" ? (
+                            <Text size="sm" c="dimmed">-</Text>
+                          ) : (
+                            <Text size="sm" c="dimmed">Pending</Text>
+                          )}
                         </Table.Td>
                         <Table.Td style={{ textAlign: "center" }}>
                           <Tooltip label="View Invoice">
@@ -1530,7 +1592,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
                         </Table.Td>
                       </Table.Tr>
                       <Table.Tr>
-                        <Table.Td colSpan={7} style={{ padding: 0, border: 0 }}>
+                        <Table.Td colSpan={8} style={{ padding: 0, border: 0 }}>
                           <Collapse in={expandedPaymentId === payment.id}>
                             <Box p="md" bg="gray.0">
                               <Text fw={500} size="sm" mb="xs">

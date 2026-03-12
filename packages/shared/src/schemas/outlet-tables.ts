@@ -6,13 +6,15 @@ import { NumericIdSchema } from "./common";
 
 export const OutletTableStatusSchema = z.enum(["AVAILABLE", "RESERVED", "OCCUPIED", "UNAVAILABLE"]);
 
+export const OutletTableOperationalStatusSchema = z.enum(["AVAILABLE", "UNAVAILABLE"]);
+
 export const OutletTableCreateRequestSchema = z.object({
   outlet_id: NumericIdSchema,
   code: z.string().trim().min(1).max(32),
   name: z.string().trim().min(1).max(191),
   zone: z.string().trim().max(64).nullable().optional(),
   capacity: z.number().int().positive().nullable().optional(),
-  status: OutletTableStatusSchema.optional().default("AVAILABLE")
+  status: OutletTableOperationalStatusSchema.optional().default("AVAILABLE")
 });
 
 export const OutletTableBulkCreateRequestSchema = z.object({
@@ -37,7 +39,7 @@ export const OutletTableBulkCreateRequestSchema = z.object({
   count: z.number().int().min(1).max(200),
   zone: z.string().trim().max(64).nullable().optional(),
   capacity: z.number().int().positive().nullable().optional(),
-  status: OutletTableStatusSchema.optional().default("AVAILABLE")
+  status: OutletTableOperationalStatusSchema.optional().default("AVAILABLE")
 });
 
 export const OutletTableUpdateRequestSchema = z.object({
@@ -45,7 +47,7 @@ export const OutletTableUpdateRequestSchema = z.object({
   name: z.string().trim().min(1).max(191).optional(),
   zone: z.string().trim().max(64).nullable().optional(),
   capacity: z.number().int().positive().nullable().optional(),
-  status: OutletTableStatusSchema.optional()
+  status: OutletTableOperationalStatusSchema.optional()
 });
 
 export const OutletTableResponseSchema = z.object({
@@ -62,6 +64,7 @@ export const OutletTableResponseSchema = z.object({
 });
 
 export type OutletTableStatus = z.infer<typeof OutletTableStatusSchema>;
+export type OutletTableOperationalStatus = z.infer<typeof OutletTableOperationalStatusSchema>;
 export type OutletTableCreateRequest = z.infer<typeof OutletTableCreateRequestSchema>;
 export type OutletTableBulkCreateRequest = z.infer<typeof OutletTableBulkCreateRequestSchema>;
 export type OutletTableUpdateRequest = z.infer<typeof OutletTableUpdateRequestSchema>;

@@ -13,11 +13,12 @@ const SYNC_PUSH_POSTING_MODE_ENV_KEY = "SYNC_PUSH_POSTING_MODE";
 const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV_KEY = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
 const POS_SALE_DOC_TYPE = "POS_SALE";
 const MONEY_SCALE = 100;
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "SALES_TAX", "AR", "SALES_RETURNS"] as const;
+const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "AR", "SALES_RETURNS"] as const;
 type OutletAccountMappingKey = (typeof OUTLET_ACCOUNT_MAPPING_KEYS)[number];
 
 export const OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE = "OUTLET_ACCOUNT_MAPPING_MISSING";
 export const OUTLET_PAYMENT_MAPPING_MISSING_MESSAGE = "OUTLET_PAYMENT_MAPPING_MISSING";
+export const TAX_ACCOUNT_MISSING_MESSAGE = "TAX_ACCOUNT_MISSING";
 export const UNSUPPORTED_PAYMENT_METHOD_MESSAGE = "UNSUPPORTED_PAYMENT_METHOD";
 const POS_EMPTY_PAYMENT_SET_MESSAGE = "POS_EMPTY_PAYMENT_SET";
 const POS_OVERPAYMENT_NOT_SUPPORTED_MESSAGE = "POS_OVERPAYMENT_NOT_SUPPORTED";
@@ -201,7 +202,7 @@ async function readOutletAccountMappingByKey(
   dbExecutor: QueryExecutor,
   context: SyncPushPostingContext
 ): Promise<Record<OutletAccountMappingKey, number>> {
-  const requiredKeys = ["SALES_REVENUE", "SALES_TAX", "AR"] as const;
+  const requiredKeys = ["SALES_REVENUE", "AR"] as const;
   const placeholders = requiredKeys.map(() => "?").join(", ");
   const [rows] = await dbExecutor.execute(
     `SELECT mapping_key, account_id
@@ -256,7 +257,6 @@ async function readOutletAccountMappingByKey(
 
   return {
     SALES_REVENUE: accountByKey.get("SALES_REVENUE") as number,
-    SALES_TAX: accountByKey.get("SALES_TAX") as number,
     AR: accountByKey.get("AR") as number,
     SALES_RETURNS: salesReturnsAccountId as number
   };
@@ -376,18 +376,21 @@ async function readPosGrossSalesAmount(dbExecutor: QueryExecutor, context: SyncP
 async function readPosTaxSummary(
   dbExecutor: QueryExecutor,
   context: SyncPushPostingContext
-): Promise<{ total: number; inclusive: boolean } | null> {
+): Promise<{ total: number; inclusive: boolean; lines: Array<{ tax_rate_id: number; amount: number; code: string; account_id: number | null }> } | null> {
   const [rows] = await dbExecutor.execute(
-    `SELECT ptt.amount, tr.is_inclusive
+    `SELECT ptt.tax_rate_id, ptt.amount, tr.is_inclusive, tr.code, tr.account_id
      FROM pos_transaction_taxes ptt
      INNER JOIN tax_rates tr ON tr.id = ptt.tax_rate_id
-     WHERE ptt.pos_transaction_id = ?`,
-    [context.posTransactionId]
+     WHERE ptt.pos_transaction_id = ? AND tr.company_id = ?`,
+    [context.posTransactionId, context.companyId]
   );
 
-  const parsed = (rows as Array<{ amount?: number | string; is_inclusive?: number }>).map((row) => ({
+  const parsed = (rows as Array<{ tax_rate_id?: number; amount?: number | string; is_inclusive?: number; code?: string; account_id?: number | null }>).map((row) => ({
+    tax_rate_id: Number(row.tax_rate_id),
     amount: normalizeMoney(Number(row.amount ?? 0)),
-    is_inclusive: row.is_inclusive === 1
+    is_inclusive: row.is_inclusive === 1,
+    code: String(row.code ?? ""),
+    account_id: row.account_id ? Number(row.account_id) : null
   })).filter((row) => row.amount > 0);
 
   if (parsed.length === 0) {
@@ -402,7 +405,8 @@ async function readPosTaxSummary(
   const total = normalizeMoney(parsed.reduce((acc, row) => acc + row.amount, 0));
   return {
     total,
-    inclusive: inclusiveFlag
+    inclusive: inclusiveFlag,
+    lines: parsed
   };
 }
 
@@ -478,12 +482,71 @@ async function buildPosSaleJournalLines(
   });
 
   if (salesTaxAmount > 0) {
-    lines.push({
-      account_id: mapping.SALES_TAX,
-      debit: 0,
-      credit: salesTaxAmount,
-      description: "POS sales tax"
-    });
+    if (taxSummary && taxSummary.lines.length > 0) {
+      for (const taxLine of taxSummary.lines) {
+        if (taxLine.amount <= 0) continue;
+        if (!taxLine.account_id) {
+          throw new Error(`${TAX_ACCOUNT_MISSING_MESSAGE}:${taxLine.code}`);
+        }
+        lines.push({
+          account_id: taxLine.account_id,
+          debit: 0,
+          credit: normalizeMoney(taxLine.amount),
+          description: `POS sales tax (${taxLine.code})`
+        });
+      }
+    } else {
+      const defaultTaxRates = await listCompanyDefaultTaxRates(dbExecutor, context.companyId);
+      const taxableRates = defaultTaxRates.filter(tr => tr.rate_percent > 0);
+      
+      if (taxableRates.length === 0) {
+        throw new Error(`${TAX_ACCOUNT_MISSING_MESSAGE}:NO_DEFAULT_TAX`);
+      }
+      
+      for (const taxRate of taxableRates) {
+        if (!taxRate.account_id) {
+          throw new Error(`${TAX_ACCOUNT_MISSING_MESSAGE}:${taxRate.code}`);
+        }
+      }
+      
+      const validTaxRates = taxableRates.filter(tr => tr.account_id !== null);
+      const totalRatePercent = validTaxRates.reduce((sum, tr) => sum + tr.rate_percent, 0);
+      if (totalRatePercent <= 0) {
+        throw new Error(`${TAX_ACCOUNT_MISSING_MESSAGE}:INVALID_RATE`);
+      }
+      
+      const taxLines: Array<{ account_id: number; amount: number; code: string }> = [];
+      let runningTotal = 0;
+      
+      for (let i = 0; i < validTaxRates.length; i++) {
+        const taxRate = validTaxRates[i];
+        let taxLineAmount: number;
+        
+        if (i === validTaxRates.length - 1) {
+          taxLineAmount = normalizeMoney(salesTaxAmount - runningTotal);
+        } else {
+          taxLineAmount = normalizeMoney(salesTaxAmount * (taxRate.rate_percent / totalRatePercent));
+        }
+        
+        if (taxLineAmount > 0) {
+          taxLines.push({
+            account_id: taxRate.account_id!,
+            amount: taxLineAmount,
+            code: taxRate.code
+          });
+          runningTotal += taxLineAmount;
+        }
+      }
+      
+      for (const taxLine of taxLines) {
+        lines.push({
+          account_id: taxLine.account_id,
+          debit: 0,
+          credit: taxLine.amount,
+          description: `POS sales tax (${taxLine.code})`
+        });
+      }
+    }
   }
 
   if (isTestUnbalancedPostingEnabled() && lines.length > 0) {

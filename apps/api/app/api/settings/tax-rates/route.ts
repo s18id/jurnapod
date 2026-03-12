@@ -20,20 +20,21 @@ export const GET = withAuth(
     try {
       const pool = getDbPool();
       const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id, company_id, code, name, rate_percent, is_inclusive, is_active, created_at, updated_at
+        `SELECT id, company_id, code, name, rate_percent, account_id, is_inclusive, is_active, created_at, updated_at
          FROM tax_rates
          WHERE company_id = ?
          ORDER BY name ASC, id ASC`,
         [auth.companyId]
       );
 
-      const taxRates = (rows as Array<{ id: number; company_id: number; code: string; name: string; rate_percent: number | string; is_inclusive: number; is_active: number; created_at: string; updated_at: string }>).map(
+      const taxRates = (rows as Array<{ id: number; company_id: number; code: string; name: string; rate_percent: number | string; account_id: number | null; is_inclusive: number; is_active: number; created_at: string; updated_at: string }>).map(
         (row) => ({
           id: Number(row.id),
           company_id: Number(row.company_id),
           code: String(row.code),
           name: String(row.name),
           rate_percent: Number(row.rate_percent),
+          account_id: row.account_id ? Number(row.account_id) : null,
           is_inclusive: row.is_inclusive === 1,
           is_active: row.is_active === 1,
           created_at: new Date(row.created_at).toISOString(),
@@ -61,6 +62,17 @@ export const POST = withAuth(
       const payload = await request.json();
       const input = TaxRateCreateRequestSchema.parse(payload);
 
+      if (input.account_id !== null && input.account_id !== undefined) {
+        const pool = getDbPool();
+        const [accountRows] = await pool.execute<RowDataPacket[]>(
+          `SELECT id FROM accounts WHERE company_id = ? AND id = ? LIMIT 1`,
+          [auth.companyId, input.account_id]
+        );
+        if (accountRows.length === 0) {
+          return errorResponse("INVALID_ACCOUNT", "Account not found for this company", 400);
+        }
+      }
+
       const pool = getDbPool();
       const [result] = await pool.execute<ResultSetHeader>(
         `INSERT INTO tax_rates (
@@ -68,16 +80,18 @@ export const POST = withAuth(
            code,
            name,
            rate_percent,
+           account_id,
            is_inclusive,
            is_active,
            created_by_user_id,
            updated_by_user_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           auth.companyId,
           input.code,
           input.name,
           input.rate_percent,
+          input.account_id ?? null,
           input.is_inclusive ? 1 : 0,
           input.is_active === false ? 0 : 1,
           auth.userId,
@@ -100,6 +114,7 @@ export const POST = withAuth(
           code: input.code,
           name: input.name,
           rate_percent: input.rate_percent,
+          account_id: input.account_id,
           is_inclusive: input.is_inclusive,
           is_active: input.is_active !== false
         }

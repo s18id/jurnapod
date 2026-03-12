@@ -8,8 +8,11 @@ import { userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 
-const mappingKeys = ["SALES_REVENUE", "SALES_TAX", "AR", "INVOICE_PAYMENT_BANK"] as const;
+const mappingKeys = ["SALES_REVENUE", "AR", "INVOICE_PAYMENT_BANK"] as const;
+const companyOnlyMappingKeys = ["PAYMENT_VARIANCE_GAIN", "PAYMENT_VARIANCE_LOSS"] as const;
+const allMappingKeys = [...mappingKeys, ...companyOnlyMappingKeys] as const;
 const mappingKeySchema = z.enum(mappingKeys);
+const companyOnlyMappingKeySchema = z.enum(companyOnlyMappingKeys);
 const scopeSchema = z.enum(["company", "outlet"]);
 
 const querySchema = z
@@ -26,7 +29,7 @@ const companyBodySchema = z.object({
   scope: z.literal("company"),
   mappings: z.array(
     z.object({
-      mapping_key: mappingKeySchema,
+      mapping_key: z.union([mappingKeySchema, companyOnlyMappingKeySchema]),
       account_id: z.number().int().positive()
     })
   )
@@ -188,7 +191,7 @@ export const PUT = withAuth(
       const pool = getDbPool();
 
       if (parsed.scope === "company") {
-        const requiredKeys: readonly ("AR" | "SALES_REVENUE" | "SALES_TAX")[] = ["AR", "SALES_REVENUE", "SALES_TAX"];
+        const requiredKeys: readonly ("AR" | "SALES_REVENUE")[] = ["AR", "SALES_REVENUE"];
         const providedKeys = new Set(parsed.mappings.map((m) => m.mapping_key));
         const missingKeys = requiredKeys.filter((key) => !providedKeys.has(key));
         

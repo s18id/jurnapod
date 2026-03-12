@@ -8,6 +8,7 @@ import {
   loadEnvIfPresent,
   readEnv
 } from "../../tests/integration/integration-harness.mjs";
+import { closeDbPool } from "./db";
 import { createPayment, DatabaseConflictError, PaymentAllocationError } from "./sales";
 import type { RowDataPacket } from "mysql2";
 import { randomUUID } from "node:crypto";
@@ -274,6 +275,7 @@ test(
       }
 
       await pool.end();
+      await closeDbPool();
     }
   }
 );
@@ -424,6 +426,7 @@ test(
       }
 
       await pool.end();
+      await closeDbPool();
     }
   }
 );

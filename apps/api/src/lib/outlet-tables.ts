@@ -6,6 +6,8 @@ import type { PoolConnection } from "mysql2/promise";
 import { AuditService } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
 
+const MYSQL_DUPLICATE_ERROR_CODE = 1062;
+
 export class OutletTableNotFoundError extends Error {}
 export class OutletTableCodeExistsError extends Error {}
 export class OutletTableBulkConflictError extends Error {
@@ -170,7 +172,7 @@ export async function createOutletTable(params: {
   name: string;
   zone?: string | null;
   capacity?: number | null;
-  status?: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
+  status?: "AVAILABLE" | "UNAVAILABLE";
   actor: OutletTableActor;
 }): Promise<OutletTableFullResponse> {
   const pool = getDbPool();
@@ -251,7 +253,7 @@ export async function createOutletTablesBulk(params: {
   count: number;
   zone?: string | null;
   capacity?: number | null;
-  status?: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
+  status?: "AVAILABLE" | "UNAVAILABLE";
   actor: OutletTableActor;
 }): Promise<OutletTableFullResponse[]> {
   const pool = getDbPool();
@@ -316,31 +318,42 @@ export async function createOutletTablesBulk(params: {
 
     const insertedIds: number[] = [];
     for (const item of generated) {
-      const [insertResult] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          params.company_id,
-          params.outlet_id,
-          item.code,
-          item.name,
-          params.zone ?? null,
-          params.capacity ?? null,
-          params.status ?? "AVAILABLE"
-        ]
-      );
+      try {
+        const [insertResult] = await connection.execute<ResultSetHeader>(
+          `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            params.company_id,
+            params.outlet_id,
+            item.code,
+            item.name,
+            params.zone ?? null,
+            params.capacity ?? null,
+            params.status ?? "AVAILABLE"
+          ]
+        );
 
-      const tableId = Number(insertResult.insertId);
-      insertedIds.push(tableId);
+        const tableId = Number(insertResult.insertId);
+        insertedIds.push(tableId);
 
-      const auditContext = buildAuditContext(params.company_id, params.actor);
-      await auditService.logCreate(auditContext, "outlet_table", tableId, {
-        code: item.code,
-        name: item.name,
-        zone: params.zone ?? null,
-        capacity: params.capacity ?? null,
-        status: params.status ?? "AVAILABLE"
-      });
+        const auditContext = buildAuditContext(params.company_id, params.actor);
+        await auditService.logCreate(auditContext, "outlet_table", tableId, {
+          code: item.code,
+          name: item.name,
+          zone: params.zone ?? null,
+          capacity: params.capacity ?? null,
+          status: params.status ?? "AVAILABLE"
+        });
+      } catch (insertError: any) {
+        const errno = insertError?.errno;
+        if (errno === MYSQL_DUPLICATE_ERROR_CODE) {
+          throw new OutletTableBulkConflictError(
+            `Table code already exists for this outlet: ${item.code}`,
+            [item.code]
+          );
+        }
+        throw insertError;
+      }
     }
 
     const idPlaceholders = insertedIds.map(() => "?").join(", ");
@@ -373,7 +386,7 @@ export async function updateOutletTable(params: {
   name?: string;
   zone?: string | null;
   capacity?: number | null;
-  status?: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
+  status?: "AVAILABLE" | "UNAVAILABLE";
   actor: OutletTableActor;
 }): Promise<OutletTableFullResponse> {
   const pool = getDbPool();
@@ -531,6 +544,19 @@ export async function deleteOutletTable(params: {
     }
 
     // Check if table is in use (has reservations or active orders)
+    const [openOrders] = await connection.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) as count FROM pos_order_snapshots
+       WHERE company_id = ? AND outlet_id = ? AND table_id = ?
+       AND order_state = 'OPEN' AND service_type = 'DINE_IN'`,
+      [params.companyId, params.outletId, params.tableId]
+    );
+
+    if (openOrders[0].count > 0) {
+      throw new Error(
+        `Cannot delete table: ${openOrders[0].count} active dine-in orders are linked to this table`
+      );
+    }
+
     const [reservations] = await connection.execute<RowDataPacket[]>(
       `SELECT COUNT(*) as count FROM reservations 
        WHERE company_id = ? AND outlet_id = ? AND table_id = ? 

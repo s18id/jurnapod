@@ -24,6 +24,8 @@ import { useAccounts } from "../hooks/use-accounts";
 import {
   useOutletAccountMappings,
   type OutletAccountMappingKey,
+  type CompanyOnlyMappingKey,
+  type AnyMappingKey,
   type OutletAccountMapping,
   type EffectiveOutletAccountMapping
 } from "../hooks/use-outlet-account-mappings";
@@ -46,29 +48,53 @@ const mappingGroups: Array<{
   title: string;
   description: string;
   keys: Array<{ key: OutletAccountMappingKey; label: string }>;
+  companyOnly?: boolean;
 }> = [
   {
     title: "Sales Defaults",
     description: "Used for sales invoice posting.",
     keys: [
       { key: "AR", label: "Accounts Receivable" },
-      { key: "SALES_REVENUE", label: "Sales Revenue" },
-      { key: "SALES_TAX", label: "Sales Tax" }
+      { key: "SALES_REVENUE", label: "Sales Revenue" }
+    ]
+  },
+  {
+    title: "Company Defaults / Other Income-Expense",
+    description: "Used for payment variance (forex delta) posting. Configure under company scope only.",
+    keys: [],
+    companyOnly: true
+  }
+];
+
+const companyOnlyMappingGroups: Array<{
+  title: string;
+  description: string;
+  keys: Array<{ key: CompanyOnlyMappingKey; label: string }>;
+}> = [
+  {
+    title: "Payment Variance (Forex Delta)",
+    description: "Accounts for differences between invoice amount and actual payment from foreign clients.",
+    keys: [
+      { key: "PAYMENT_VARIANCE_GAIN", label: "Payment Variance Gain" },
+      { key: "PAYMENT_VARIANCE_LOSS", label: "Payment Variance Loss" }
     ]
   }
 ];
 
 const allMappingKeys = mappingGroups.flatMap((group) => group.keys.map((entry) => entry.key));
+const persistedMappingKeys: AnyMappingKey[] = Array.from(
+  new Set<AnyMappingKey>([...allMappingKeys, "INVOICE_PAYMENT_BANK", "PAYMENT_VARIANCE_GAIN", "PAYMENT_VARIANCE_LOSS"])
+);
 
-const requiredSalesMappingKeys: OutletAccountMappingKey[] = ["AR", "SALES_REVENUE", "SALES_TAX"];
+const requiredSalesMappingKeys: OutletAccountMappingKey[] = ["AR", "SALES_REVENUE"];
 
-function buildDefaultMappings(): Record<OutletAccountMappingKey, number | ""> {
-  return allMappingKeys.reduce(
+function buildDefaultMappings(): Record<AnyMappingKey, number | ""> {
+  return persistedMappingKeys.reduce(
     (acc, key) => {
       acc[key] = "";
       return acc;
     },
-    {} as Record<OutletAccountMappingKey, number | "">
+    {} as Record<AnyMappingKey, number | "">
   );
 }
 
@@ -76,14 +102,14 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
   const isOnline = useOnlineStatus();
   const [scope, setScope] = useState<MappingScope>("outlet");
   const [outletId, setOutletId] = useState<number>(user.outlets[0]?.id ?? 0);
-  const [formState, setFormState] = useState<Record<OutletAccountMappingKey, number | "">>(
-    buildDefaultMappings()
+  const [formState, setFormState] = useState<Record<AnyMappingKey, number | "">>(
+    buildDefaultMappings() as Record<AnyMappingKey, number | "">
   );
-  const [sourceState, setSourceState] = useState<Record<OutletAccountMappingKey, "outlet" | "company" | null>>(
-    {} as Record<OutletAccountMappingKey, "outlet" | "company" | null>
+  const [sourceState, setSourceState] = useState<Record<AnyMappingKey, "outlet" | "company" | null>>(
+    {} as Record<AnyMappingKey, "outlet" | "company" | null>
   );
-  const [companyDefaultsAvailable, setCompanyDefaultsAvailable] = useState<Record<OutletAccountMappingKey, boolean>>(
-    {} as Record<OutletAccountMappingKey, boolean>
+  const [companyDefaultsAvailable, setCompanyDefaultsAvailable] = useState<Record<AnyMappingKey, boolean>>(
+    {} as Record<AnyMappingKey, boolean>
   );
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [paymentSubmitError, setPaymentSubmitError] = useState<string | null>(null);
@@ -147,8 +173,8 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
       }
     });
     setFormState(nextState);
-    setSourceState(nextSource as Record<OutletAccountMappingKey, "outlet" | "company" | null>);
-    setCompanyDefaultsAvailable(nextCompanyDefaults as Record<OutletAccountMappingKey, boolean>);
+    setSourceState(nextSource as Record<AnyMappingKey, "outlet" | "company" | null>);
+    setCompanyDefaultsAvailable(nextCompanyDefaults as Record<AnyMappingKey, boolean>);
   }, [mappings]);
 
   useEffect(() => {
@@ -263,7 +289,7 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
       setOutletId(outletId);
     }
     setFormState(buildDefaultMappings());
-    setSourceState({} as Record<OutletAccountMappingKey, "outlet" | "company" | null>);
+    setSourceState({} as Record<AnyMappingKey, "outlet" | "company" | null>);
     setPaymentFormState({});
     setPaymentLabelState({});
     setPaymentSourceState({});
@@ -317,7 +343,7 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
 
     setSaving(true);
     try {
-      const payload = allMappingKeys.map((key) => ({
+      const payload = persistedMappingKeys.map((key) => ({
         mapping_key: key,
         account_id: formState[key]
       }));
@@ -401,7 +427,7 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
     setPaymentSubmitError(null);
   }
 
-  function renderMappingRow(entry: { key: OutletAccountMappingKey; label: string }) {
+  function renderMappingRow(entry: { key: AnyMappingKey; label: string }) {
     const source = sourceState[entry.key];
     
     return (
@@ -514,6 +540,30 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
                         {scope === "outlet" 
                           ? "Override company defaults for this outlet. Leave blank to inherit company settings."
                           : group.description}
+                      </Text>
+                    </div>
+                    <Table>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>Mapping</Table.Th>
+                          <Table.Th>Account</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {group.keys.map((entry) => renderMappingRow(entry))}
+                      </Table.Tbody>
+                    </Table>
+                  </Stack>
+                </Card>
+              ))}
+
+              {scope === "company" && companyOnlyMappingGroups.map((group) => (
+                <Card key={group.title} withBorder>
+                  <Stack gap="sm">
+                    <div>
+                      <Title order={3}>{group.title}</Title>
+                      <Text c="dimmed" size="sm">
+                        {group.description}
                       </Text>
                     </div>
                     <Table>

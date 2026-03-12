@@ -175,6 +175,77 @@ async function setTableStatus(
   );
 }
 
+async function hasOpenDineInOrderOnTable(
+  connection: PoolConnection,
+  companyId: number,
+  outletId: number,
+  tableId: number
+): Promise<boolean> {
+  const [rows] = await connection.execute<Array<RowDataPacket & { count_open: number }>>(
+    `SELECT COUNT(*) AS count_open
+     FROM pos_order_snapshots
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND table_id = ?
+       AND order_state = 'OPEN'
+       AND service_type = 'DINE_IN'`,
+    [companyId, outletId, tableId]
+  );
+
+  return Number(rows[0]?.count_open ?? 0) > 0;
+}
+
+async function recomputeTableStatus(
+  connection: PoolConnection,
+  companyId: number,
+  outletId: number,
+  tableId: number
+): Promise<void> {
+  const table = await readTableForUpdate(connection, companyId, outletId, tableId);
+  if (table.status === "UNAVAILABLE") {
+    return;
+  }
+
+  const hasOpenDineIn = await hasOpenDineInOrderOnTable(connection, companyId, outletId, tableId);
+  if (hasOpenDineIn) {
+    await setTableStatus(connection, companyId, outletId, tableId, "OCCUPIED");
+    return;
+  }
+
+  const [rows] = await connection.execute<
+    Array<
+      RowDataPacket & {
+        count_seated: number;
+        count_pre_seated: number;
+      }
+    >
+  >(
+    `SELECT
+       SUM(CASE WHEN status = 'SEATED' THEN 1 ELSE 0 END) AS count_seated,
+       SUM(CASE WHEN status IN ('BOOKED', 'CONFIRMED', 'ARRIVED') THEN 1 ELSE 0 END) AS count_pre_seated
+     FROM reservations
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND table_id = ?`,
+    [companyId, outletId, tableId]
+  );
+
+  const seatedCount = Number(rows[0]?.count_seated ?? 0);
+  const preSeatedCount = Number(rows[0]?.count_pre_seated ?? 0);
+
+  if (seatedCount > 0) {
+    await setTableStatus(connection, companyId, outletId, tableId, "OCCUPIED");
+    return;
+  }
+
+  if (preSeatedCount > 0) {
+    await setTableStatus(connection, companyId, outletId, tableId, "RESERVED");
+    return;
+  }
+
+  await setTableStatus(connection, companyId, outletId, tableId, "AVAILABLE");
+}
+
 async function hasActiveReservationOnTable(
   connection: PoolConnection,
   companyId: number,
@@ -357,20 +428,6 @@ export async function updateReservation(
       if (table.status === "OCCUPIED" || table.status === "UNAVAILABLE" || tableAlreadyReserved) {
         throw new ReservationValidationError("Selected table is not assignable");
       }
-      await setTableStatus(connection, companyId, current.outlet_id, nextTableId, "RESERVED");
-    }
-
-    if (current.table_id && current.table_id !== nextTableId) {
-      await setTableStatus(connection, companyId, current.outlet_id, current.table_id, "AVAILABLE");
-    }
-
-    if (nextTableId) {
-      if (nextStatus === "SEATED") {
-        await setTableStatus(connection, companyId, current.outlet_id, nextTableId, "OCCUPIED");
-      }
-      if (nextStatus === "COMPLETED" || nextStatus === "CANCELLED" || nextStatus === "NO_SHOW") {
-        await setTableStatus(connection, companyId, current.outlet_id, nextTableId, "AVAILABLE");
-      }
     }
 
     await connection.execute(
@@ -404,8 +461,20 @@ export async function updateReservation(
         nextStatus,
         companyId,
         reservationId
-      ]
+       ]
     );
+
+    const impactedTableIds = new Set<number>();
+    if (current.table_id != null) {
+      impactedTableIds.add(current.table_id);
+    }
+    if (nextTableId != null) {
+      impactedTableIds.add(nextTableId);
+    }
+
+    for (const tableId of impactedTableIds) {
+      await recomputeTableStatus(connection, companyId, current.outlet_id, tableId);
+    }
 
     const updated = await readReservationForUpdate(connection, companyId, reservationId);
     await connection.commit();

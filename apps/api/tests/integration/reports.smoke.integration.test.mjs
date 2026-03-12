@@ -195,10 +195,10 @@ test(
         trialBalanceBody.data.rows.some((row) => Number(row.account_id) === accountId),
         true
       );
-      assert.equal(
-        Number(trialBalanceBody.data.totals.total_debit) >= Number(trialBalanceBody.data.totals.total_credit),
-        true
-      );
+      const fixtureRow = trialBalanceBody.data.rows.find((row) => Number(row.account_id) === accountId);
+      assert.equal(Boolean(fixtureRow), true);
+      assert.equal(Number(fixtureRow.total_debit), 100);
+      assert.equal(Number(fixtureRow.total_credit), 100);
     } finally {
       if (journalBatchId > 0) {
         await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [journalBatchId]);

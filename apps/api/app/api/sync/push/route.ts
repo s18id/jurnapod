@@ -36,6 +36,9 @@ const RETRYABLE_DB_DEADLOCK_MESSAGE = "RETRYABLE_DB_DEADLOCK";
 const TEST_FAIL_AFTER_HEADER_INSERT_HEADER = "x-jp-sync-push-fail-after-header";
 const TEST_FORCE_DB_ERRNO_HEADER = "x-jp-sync-push-force-db-errno";
 const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
+const SYNC_PUSH_CONCURRENCY_ENV = "JP_SYNC_PUSH_CONCURRENCY";
+const DEFAULT_SYNC_PUSH_CONCURRENCY = 3;
+const MAX_SYNC_PUSH_CONCURRENCY = 5;
 const PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT = 2;
 
 type MysqlError = {
@@ -46,6 +49,24 @@ type MysqlError = {
 };
 
 type SyncPushResultCode = "OK" | "DUPLICATE" | "ERROR";
+
+type SyncPushTaxContext = {
+  defaultTaxRates: TaxRateRecord[];
+  taxRateById: Map<number, TaxRateRecord>;
+};
+
+type ProcessTransactionParams = {
+  dbPool: ReturnType<typeof getDbPool>;
+  tx: SyncPushTransactionPayload;
+  txIndex: number;
+  inputOutletId: number;
+  authCompanyId: number;
+  authUserId: number;
+  correlationId: string;
+  injectFailureAfterHeaderInsert: boolean;
+  forcedRetryableErrno: number | null;
+  taxContext: SyncPushTaxContext;
+};
 
 type AcceptedSyncPushContext = {
   correlationId: string;
@@ -430,19 +451,441 @@ function readForcedRetryableErrno(request: Request): number | null {
   return parsed;
 }
 
-async function rollbackQuietly(dbConnection: PoolConnection): Promise<void> {
+function readSyncPushConcurrency(): number {
+  const raw = process.env[SYNC_PUSH_CONCURRENCY_ENV];
+  if (!raw || raw.trim().length === 0) {
+    return DEFAULT_SYNC_PUSH_CONCURRENCY;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return DEFAULT_SYNC_PUSH_CONCURRENCY;
+  }
+
+  return Math.min(MAX_SYNC_PUSH_CONCURRENCY, Math.max(1, parsed));
+}
+
+type IndexedTransaction = {
+  tx: SyncPushTransactionPayload;
+  txIndex: number;
+};
+
+function buildTransactionBatches(
+  transactions: SyncPushTransactionPayload[],
+  maxConcurrency: number
+): IndexedTransaction[][] {
+  const batches: IndexedTransaction[][] = [];
+  let current: IndexedTransaction[] = [];
+  let seenClientTxIds = new Set<string>();
+
+  for (const [txIndex, tx] of transactions.entries()) {
+    const isChunkFull = current.length >= maxConcurrency;
+    const hasDuplicateInChunk = seenClientTxIds.has(tx.client_tx_id);
+
+    if ((isChunkFull || hasDuplicateInChunk) && current.length > 0) {
+      batches.push(current);
+      current = [];
+      seenClientTxIds = new Set<string>();
+    }
+
+    current.push({ tx, txIndex });
+    seenClientTxIds.add(tx.client_tx_id);
+  }
+
+  if (current.length > 0) {
+    batches.push(current);
+  }
+
+  return batches;
+}
+
+async function processSyncPushTransaction(params: ProcessTransactionParams): Promise<SyncPushResultItem> {
+  const { dbPool, tx, txIndex, inputOutletId, authCompanyId, authUserId, correlationId, injectFailureAfterHeaderInsert, forcedRetryableErrno, taxContext } = params;
+  const { defaultTaxRates, taxRateById } = taxContext;
+
+  const orderDbConnection = await dbPool.getConnection();
+  const attempt = txIndex + 1;
+  const startedAtMs = Date.now();
+
+  const logTransactionResult = (result: SyncPushResultCode) => {
+    logSyncPushTransactionResult({
+      correlationId,
+      clientTxId: tx.client_tx_id,
+      attempt,
+      latencyMs: Math.max(0, Date.now() - startedAtMs),
+      result
+    });
+  };
+
   try {
-    await dbConnection.rollback();
+    if (tx.company_id !== authCompanyId) {
+      const result = toErrorResult(tx.client_tx_id, "company_id mismatch");
+      logTransactionResult("ERROR");
+      return result;
+    }
+
+    if (tx.outlet_id !== inputOutletId) {
+      const result = toErrorResult(tx.client_tx_id, "outlet_id mismatch");
+      logTransactionResult("ERROR");
+      return result;
+    }
+
+    if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && !tx.table_id) {
+      const result = toErrorResult(tx.client_tx_id, "DINE_IN requires table_id");
+      logTransactionResult("ERROR");
+      return result;
+    }
+
+    const trxAtCanonical = toMysqlDateTime(tx.trx_at);
+    const openedAtCanonical = tx.opened_at ? toMysqlDateTime(tx.opened_at) : trxAtCanonical;
+    const closedAtCanonical = tx.closed_at ? toMysqlDateTime(tx.closed_at) : trxAtCanonical;
+    const payloadSha256 = computePayloadSha256(canonicalizeTransactionForHash(tx));
+    const payloadSha256Legacy = computePayloadSha256(canonicalizeTransactionForLegacyHash(tx));
+    let acceptedContextForFailureAudit: AcceptedSyncPushContext | null = null;
+
+    try {
+      await orderDbConnection.beginTransaction();
+
+      if (forcedRetryableErrno !== null) {
+        throw {
+          errno: forcedRetryableErrno
+        } satisfies MysqlError;
+      }
+
+      const [insertResult] = await orderDbConnection.execute<ResultSetHeader>(
+        `INSERT INTO pos_transactions (
+           company_id,
+           outlet_id,
+           cashier_user_id,
+           client_tx_id,
+           status,
+           service_type,
+           table_id,
+           reservation_id,
+           guest_count,
+           order_status,
+           opened_at,
+           closed_at,
+           notes,
+           trx_at,
+           payload_sha256,
+           payload_hash_version
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          tx.company_id,
+          tx.outlet_id,
+          tx.cashier_user_id,
+          tx.client_tx_id,
+          tx.status,
+          tx.service_type ?? "TAKEAWAY",
+          tx.table_id ?? null,
+          tx.reservation_id ?? null,
+          tx.guest_count ?? null,
+          tx.order_status ?? "COMPLETED",
+          openedAtCanonical,
+          closedAtCanonical,
+          tx.notes ?? null,
+          trxAtCanonical,
+          payloadSha256,
+          PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT
+        ]
+      );
+
+      const posTransactionId = Number(insertResult.insertId);
+
+      if (injectFailureAfterHeaderInsert) {
+        throw new Error("SYNC_PUSH_TEST_FAIL_AFTER_HEADER_INSERT");
+      }
+
+      if (tx.items.length > 0) {
+        const itemPlaceholders = tx.items.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+        const itemValues = (tx.items as SyncPushTransactionPayload["items"]).flatMap((item, index) => [
+          posTransactionId,
+          tx.company_id,
+          tx.outlet_id,
+          index + 1,
+          item.item_id,
+          item.qty,
+          item.price_snapshot,
+          item.name_snapshot
+        ]);
+
+        await orderDbConnection.execute(
+          `INSERT INTO pos_transaction_items (
+             pos_transaction_id,
+             company_id,
+             outlet_id,
+             line_no,
+             item_id,
+             qty,
+             price_snapshot,
+             name_snapshot
+           ) VALUES ${itemPlaceholders}`,
+          itemValues
+        );
+      }
+
+      if (tx.payments.length > 0) {
+        const paymentPlaceholders = tx.payments.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
+        const paymentValues = (tx.payments as SyncPushTransactionPayload["payments"]).flatMap((payment, index) => [
+          posTransactionId,
+          tx.company_id,
+          tx.outlet_id,
+          index + 1,
+          payment.method,
+          payment.amount
+        ]);
+
+        await orderDbConnection.execute(
+          `INSERT INTO pos_transaction_payments (
+             pos_transaction_id,
+             company_id,
+             outlet_id,
+             payment_no,
+             method,
+             amount
+           ) VALUES ${paymentPlaceholders}`,
+          paymentValues
+        );
+      }
+
+      const grossSales = sumGrossSales(tx.items);
+      const taxLines = buildTaxLinesForTransaction({
+        taxes: tx.taxes,
+        grossSales,
+        defaultTaxRates,
+        taxRateById
+      });
+
+      if (taxLines.length > 0) {
+        const taxPlaceholders = taxLines.map(() => "(?, ?, ?, ?, ?)").join(", ");
+        const taxValues = taxLines.flatMap((tax) => [
+          posTransactionId,
+          tx.company_id,
+          tx.outlet_id,
+          tax.tax_rate_id,
+          tax.amount
+        ]);
+
+        await orderDbConnection.execute(
+          `INSERT INTO pos_transaction_taxes (
+             pos_transaction_id,
+             company_id,
+             outlet_id,
+             tax_rate_id,
+             amount
+           ) VALUES ${taxPlaceholders}`,
+          taxValues
+        );
+      }
+
+      if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && tx.table_id) {
+        await orderDbConnection.execute(
+          `UPDATE outlet_tables
+           SET status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
+           WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+          [tx.company_id, tx.outlet_id, tx.table_id]
+        );
+      }
+
+      if (tx.reservation_id) {
+        await orderDbConnection.execute(
+          `UPDATE reservations
+           SET linked_order_id = ?,
+               status = CASE
+                 WHEN status IN ('CANCELLED', 'NO_SHOW', 'COMPLETED') THEN status
+                 ELSE 'COMPLETED'
+               END,
+               seated_at = COALESCE(seated_at, CURRENT_TIMESTAMP),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+          [tx.client_tx_id, tx.company_id, tx.outlet_id, tx.reservation_id]
+        );
+      }
+
+      const acceptedContext: AcceptedSyncPushContext = {
+        correlationId,
+        companyId: tx.company_id,
+        outletId: tx.outlet_id,
+        userId: authUserId,
+        clientTxId: tx.client_tx_id,
+        status: tx.status,
+        trxAt: tx.trx_at,
+        posTransactionId
+      };
+      acceptedContextForFailureAudit = acceptedContext;
+
+      let postingResult: SyncPushPostingHookResult;
+
+      try {
+        postingResult = await runSyncPushPostingHook(orderDbConnection, acceptedContext);
+      } catch (postingHookError) {
+        if (
+          postingHookError instanceof SyncPushPostingHookError
+          && postingHookError.mode === "shadow"
+        ) {
+          await recordSyncPushPostingHookFailure(orderDbConnection, acceptedContext, postingHookError);
+          postingResult = {
+            mode: postingHookError.mode,
+            journalBatchId: null,
+            balanceOk: false,
+            reason: postingHookError.message
+          };
+        } else {
+          throw postingHookError;
+        }
+      }
+
+      await runAcceptedSyncPushHook(orderDbConnection, acceptedContext, postingResult);
+
+      await orderDbConnection.commit();
+
+      logTransactionResult("OK");
+      return {
+        client_tx_id: tx.client_tx_id,
+        result: "OK"
+      };
+    } catch (error) {
+      if (isClientTxIdDuplicateError(error)) {
+        await rollbackQuietly(orderDbConnection);
+
+        const existingRecord = await readExistingIdempotencyRecordByClientTxId(orderDbConnection, tx.client_tx_id);
+        if (!existingRecord) {
+          const result = toErrorResult(tx.client_tx_id, RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE);
+          logTransactionResult("ERROR");
+          return result;
+        }
+
+        const existingHashVersion = existingRecord.payloadHashVersion ?? 1;
+        const normalizedExistingHash = existingRecord.payloadSha256?.trim() ?? "";
+        if (normalizedExistingHash.length === 0) {
+          const legacyReplayMatch = await doesLegacyPayloadReplayMatch(orderDbConnection, existingRecord.posTransactionId, tx);
+          if (!legacyReplayMatch) {
+            const result = toErrorResult(tx.client_tx_id, IDEMPOTENCY_CONFLICT_MESSAGE);
+            logTransactionResult("ERROR");
+            return result;
+          }
+
+          await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
+            authUserId,
+            correlationId,
+            companyId: tx.company_id,
+            outletId: tx.outlet_id,
+            clientTxId: tx.client_tx_id,
+            posTransactionId: existingRecord.posTransactionId
+          });
+          logTransactionResult("DUPLICATE");
+          return {
+            client_tx_id: tx.client_tx_id,
+            result: "DUPLICATE"
+          };
+        }
+
+        if (normalizedExistingHash === payloadSha256) {
+          await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
+            authUserId,
+            correlationId,
+            companyId: tx.company_id,
+            outletId: tx.outlet_id,
+            clientTxId: tx.client_tx_id,
+            posTransactionId: existingRecord.posTransactionId
+          });
+          logTransactionResult("DUPLICATE");
+          return {
+            client_tx_id: tx.client_tx_id,
+            result: "DUPLICATE"
+          };
+        }
+
+        if (existingHashVersion <= 1 && normalizedExistingHash === payloadSha256Legacy) {
+          await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
+            authUserId,
+            correlationId,
+            companyId: tx.company_id,
+            outletId: tx.outlet_id,
+            clientTxId: tx.client_tx_id,
+            posTransactionId: existingRecord.posTransactionId
+          });
+          logTransactionResult("DUPLICATE");
+          return {
+            client_tx_id: tx.client_tx_id,
+            result: "DUPLICATE"
+          };
+        }
+
+        if (existingHashVersion <= 1) {
+          const legacyReplayMatch = await doesLegacyV1HashMismatchReplayMatch(
+            orderDbConnection,
+            existingRecord.posTransactionId,
+            normalizedExistingHash,
+            tx
+          );
+          if (legacyReplayMatch) {
+            await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
+              authUserId,
+              correlationId,
+              companyId: tx.company_id,
+              outletId: tx.outlet_id,
+              clientTxId: tx.client_tx_id,
+              posTransactionId: existingRecord.posTransactionId
+            });
+            logTransactionResult("DUPLICATE");
+            return {
+              client_tx_id: tx.client_tx_id,
+              result: "DUPLICATE"
+            };
+          }
+        }
+
+        const result = toErrorResult(tx.client_tx_id, IDEMPOTENCY_CONFLICT_MESSAGE);
+        logTransactionResult("ERROR");
+        return result;
+      }
+
+      if (isRetryableMysqlError(error)) {
+        await rollbackQuietly(orderDbConnection);
+        const result = toErrorResult(tx.client_tx_id, toRetryableDbErrorMessage(error));
+        logTransactionResult("ERROR");
+        return result;
+      }
+
+      await rollbackQuietly(orderDbConnection);
+
+      if (
+        acceptedContextForFailureAudit
+        && error instanceof SyncPushPostingHookError
+        && error.mode !== "shadow"
+      ) {
+        await recordSyncPushPostingHookFailure(dbPool, acceptedContextForFailureAudit, error);
+      }
+
+      console.error("POST /sync/push transaction insert failed", {
+        correlation_id: correlationId,
+        client_tx_id: tx.client_tx_id,
+        error
+      });
+      const result = toErrorResult(tx.client_tx_id, "insert failed");
+      logTransactionResult("ERROR");
+      return result;
+    }
+  } finally {
+    orderDbConnection.release();
+  }
+}
+
+async function rollbackQuietly(orderDbConnection: PoolConnection): Promise<void> {
+  try {
+    await orderDbConnection.rollback();
   } catch {
     // Ignore rollback errors to preserve root cause handling.
   }
 }
 
 async function readExistingIdempotencyRecordByClientTxId(
-  dbConnection: PoolConnection,
+  orderDbConnection: PoolConnection,
   clientTxId: string
 ): Promise<ExistingIdempotencyRecord | null> {
-  const [rows] = await dbConnection.execute(
+  const [rows] = await orderDbConnection.execute(
     `SELECT id, payload_sha256, payload_hash_version
      FROM pos_transactions
      WHERE client_tx_id = ?
@@ -463,10 +906,10 @@ async function readExistingIdempotencyRecordByClientTxId(
 }
 
 async function readLegacyComparablePayloadByPosTransactionId(
-  dbConnection: PoolConnection,
+  orderDbConnection: PoolConnection,
   posTransactionId: number
 ): Promise<LegacyComparablePayload | null> {
-  const [headerRows] = await dbConnection.execute(
+  const [headerRows] = await orderDbConnection.execute(
     `SELECT client_tx_id, company_id, outlet_id, status, DATE_FORMAT(trx_at, '%Y-%m-%d %H:%i:%s') AS trx_at
      FROM pos_transactions
      WHERE id = ?
@@ -494,7 +937,7 @@ async function readLegacyComparablePayloadByPosTransactionId(
     return null;
   }
 
-  const [itemRows] = await dbConnection.execute(
+  const [itemRows] = await orderDbConnection.execute(
     `SELECT item_id, qty, price_snapshot, name_snapshot
      FROM pos_transaction_items
      WHERE pos_transaction_id = ?
@@ -502,7 +945,7 @@ async function readLegacyComparablePayloadByPosTransactionId(
     [posTransactionId]
   );
 
-  const [paymentRows] = await dbConnection.execute(
+  const [paymentRows] = await orderDbConnection.execute(
     `SELECT method, amount
      FROM pos_transaction_payments
      WHERE pos_transaction_id = ?
@@ -530,11 +973,11 @@ async function readLegacyComparablePayloadByPosTransactionId(
 }
 
 async function doesLegacyPayloadReplayMatch(
-  dbConnection: PoolConnection,
+  orderDbConnection: PoolConnection,
   posTransactionId: number,
   incomingTx: SyncPushTransactionPayload
 ): Promise<boolean> {
-  const existingPayload = await readLegacyComparablePayloadByPosTransactionId(dbConnection, posTransactionId);
+  const existingPayload = await readLegacyComparablePayloadByPosTransactionId(orderDbConnection, posTransactionId);
   if (!existingPayload) {
     return false;
   }
@@ -561,7 +1004,7 @@ async function doesLegacyPayloadReplayMatch(
 }
 
 async function doesLegacyV1HashMismatchReplayMatch(
-  dbConnection: PoolConnection,
+  orderDbConnection: PoolConnection,
   posTransactionId: number,
   existingHash: string,
   incomingTx: SyncPushTransactionPayload
@@ -570,7 +1013,7 @@ async function doesLegacyV1HashMismatchReplayMatch(
     return false;
   }
 
-  return doesLegacyPayloadReplayMatch(dbConnection, posTransactionId, incomingTx);
+  return doesLegacyPayloadReplayMatch(orderDbConnection, posTransactionId, incomingTx);
 }
 
 function logSyncPushTransactionResult(params: {
@@ -843,7 +1286,6 @@ export const POST = withAuth(
       const payload = await request.json();
       const input = syncPushRequestSchemaWithOffset.parse(payload);
       const dbPool = getDbPool();
-      const dbConnection = await dbPool.getConnection();
       const results: SyncPushResultItem[] = [];
       const orderUpdateResults: Array<{
         update_id: string;
@@ -855,382 +1297,66 @@ export const POST = withAuth(
         result: "OK" | "DUPLICATE" | "ERROR";
         message?: string;
       }> = [];
+
+      const taxDbConnection = await dbPool.getConnection();
       try {
         const [companyTaxRates, defaultTaxRates] = await Promise.all([
-          listCompanyTaxRates(dbConnection, auth.companyId),
-          listCompanyDefaultTaxRates(dbConnection, auth.companyId)
+          listCompanyTaxRates(taxDbConnection, auth.companyId),
+          listCompanyDefaultTaxRates(taxDbConnection, auth.companyId)
         ]);
         const activeTaxRates = companyTaxRates.filter((rate) => rate.is_active);
         const taxRateById = new Map(activeTaxRates.map((rate) => [rate.id, rate]));
 
-        for (const [txIndex, tx] of input.transactions.entries()) {
-          const attempt = txIndex + 1;
-          const startedAtMs = Date.now();
-          const logTransactionResult = (result: SyncPushResultCode) => {
-            logSyncPushTransactionResult({
-              correlationId,
-              clientTxId: tx.client_tx_id,
-              attempt,
-              latencyMs: Math.max(0, Date.now() - startedAtMs),
-              result
-            });
-          };
+        const taxContext: SyncPushTaxContext = {
+          defaultTaxRates,
+          taxRateById
+        };
 
-          if (tx.company_id !== auth.companyId) {
-            results.push(toErrorResult(tx.client_tx_id, "company_id mismatch"));
-            logTransactionResult("ERROR");
-            continue;
-          }
+        const maxConcurrency = readSyncPushConcurrency();
+        const batches = buildTransactionBatches(input.transactions as SyncPushTransactionPayload[], maxConcurrency);
 
-          if (tx.outlet_id !== input.outlet_id) {
-            results.push(toErrorResult(tx.client_tx_id, "outlet_id mismatch"));
-            logTransactionResult("ERROR");
-            continue;
-          }
+        const resultsByIndex: Map<number, SyncPushResultItem> = new Map();
 
-          if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && !tx.table_id) {
-            results.push(toErrorResult(tx.client_tx_id, "DINE_IN requires table_id"));
-            logTransactionResult("ERROR");
-            continue;
-          }
+        for (const batch of batches) {
+          const batchResults = await Promise.all(
+            batch.map((indexedTx) =>
+              processSyncPushTransaction({
+                dbPool,
+                tx: indexedTx.tx,
+                txIndex: indexedTx.txIndex,
+                inputOutletId: input.outlet_id,
+                authCompanyId: auth.companyId,
+                authUserId: auth.userId,
+                correlationId,
+                injectFailureAfterHeaderInsert,
+                forcedRetryableErrno,
+                taxContext
+              })
+            )
+          );
 
-          const trxAtCanonical = toMysqlDateTime(tx.trx_at);
-          const openedAtCanonical = tx.opened_at ? toMysqlDateTime(tx.opened_at) : trxAtCanonical;
-          const closedAtCanonical = tx.closed_at ? toMysqlDateTime(tx.closed_at) : trxAtCanonical;
-          const payloadSha256 = computePayloadSha256(canonicalizeTransactionForHash(tx));
-          const payloadSha256Legacy = computePayloadSha256(canonicalizeTransactionForLegacyHash(tx));
-          let acceptedContextForFailureAudit: AcceptedSyncPushContext | null = null;
-
-          try {
-            await dbConnection.beginTransaction();
-
-            if (forcedRetryableErrno !== null) {
-              throw {
-                errno: forcedRetryableErrno
-              } satisfies MysqlError;
+          for (const result of batchResults) {
+            const originalIndex = batch.find((idxTx) => idxTx.tx.client_tx_id === result.client_tx_id)?.txIndex;
+            if (originalIndex !== undefined) {
+              resultsByIndex.set(originalIndex, result);
             }
-
-            const [insertResult] = await dbConnection.execute<ResultSetHeader>(
-              `INSERT INTO pos_transactions (
-                 company_id,
-                 outlet_id,
-                 cashier_user_id,
-                 client_tx_id,
-                 status,
-                 service_type,
-                 table_id,
-                 reservation_id,
-                 guest_count,
-                 order_status,
-                 opened_at,
-                 closed_at,
-                 notes,
-                 trx_at,
-                 payload_sha256,
-                  payload_hash_version
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                tx.company_id,
-                tx.outlet_id,
-                tx.cashier_user_id,
-                tx.client_tx_id,
-                tx.status,
-                tx.service_type ?? "TAKEAWAY",
-                tx.table_id ?? null,
-                tx.reservation_id ?? null,
-                tx.guest_count ?? null,
-                tx.order_status ?? "COMPLETED",
-                openedAtCanonical,
-                closedAtCanonical,
-                tx.notes ?? null,
-                trxAtCanonical,
-                payloadSha256,
-                PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT
-              ]
-            );
-
-            const posTransactionId = Number(insertResult.insertId);
-
-            if (injectFailureAfterHeaderInsert) {
-              throw new Error("SYNC_PUSH_TEST_FAIL_AFTER_HEADER_INSERT");
-            }
-
-            if (tx.items.length > 0) {
-              const itemPlaceholders = tx.items.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-              const itemValues = (tx.items as SyncPushTransactionPayload["items"]).flatMap((item, index) => [
-                posTransactionId,
-                tx.company_id,
-                tx.outlet_id,
-                index + 1,
-                item.item_id,
-                item.qty,
-                item.price_snapshot,
-                item.name_snapshot
-              ]);
-
-              await dbConnection.execute(
-                `INSERT INTO pos_transaction_items (
-                   pos_transaction_id,
-                   company_id,
-                   outlet_id,
-                   line_no,
-                   item_id,
-                   qty,
-                   price_snapshot,
-                   name_snapshot
-                 ) VALUES ${itemPlaceholders}`,
-                itemValues
-              );
-            }
-
-            if (tx.payments.length > 0) {
-              const paymentPlaceholders = tx.payments.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
-              const paymentValues = (tx.payments as SyncPushTransactionPayload["payments"]).flatMap((payment, index) => [
-                posTransactionId,
-                tx.company_id,
-                tx.outlet_id,
-                index + 1,
-                payment.method,
-                payment.amount
-              ]);
-
-              await dbConnection.execute(
-                `INSERT INTO pos_transaction_payments (
-                   pos_transaction_id,
-                   company_id,
-                   outlet_id,
-                   payment_no,
-                   method,
-                   amount
-                 ) VALUES ${paymentPlaceholders}`,
-                paymentValues
-              );
-            }
-
-            const grossSales = sumGrossSales(tx.items);
-            const taxLines = buildTaxLinesForTransaction({
-              taxes: tx.taxes,
-              grossSales,
-              defaultTaxRates,
-              taxRateById
-            });
-
-            if (taxLines.length > 0) {
-              const taxPlaceholders = taxLines.map(() => "(?, ?, ?, ?, ?)").join(", ");
-              const taxValues = taxLines.flatMap((tax) => [
-                posTransactionId,
-                tx.company_id,
-                tx.outlet_id,
-                tax.tax_rate_id,
-                tax.amount
-              ]);
-
-              await dbConnection.execute(
-                `INSERT INTO pos_transaction_taxes (
-                   pos_transaction_id,
-                   company_id,
-                   outlet_id,
-                   tax_rate_id,
-                   amount
-                 ) VALUES ${taxPlaceholders}`,
-                taxValues
-              );
-            }
-
-            if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && tx.table_id) {
-              await dbConnection.execute(
-                `UPDATE outlet_tables
-                 SET status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
-                 WHERE company_id = ? AND outlet_id = ? AND id = ?`,
-                [tx.company_id, tx.outlet_id, tx.table_id]
-              );
-            }
-
-            if (tx.reservation_id) {
-              await dbConnection.execute(
-                `UPDATE reservations
-                 SET linked_order_id = ?,
-                     status = CASE
-                       WHEN status IN ('CANCELLED', 'NO_SHOW', 'COMPLETED') THEN status
-                       ELSE 'COMPLETED'
-                     END,
-                     seated_at = COALESCE(seated_at, CURRENT_TIMESTAMP),
-                     updated_at = CURRENT_TIMESTAMP
-                 WHERE company_id = ? AND outlet_id = ? AND id = ?`,
-                [tx.client_tx_id, tx.company_id, tx.outlet_id, tx.reservation_id]
-              );
-            }
-
-            const acceptedContext: AcceptedSyncPushContext = {
-              correlationId,
-              companyId: tx.company_id,
-              outletId: tx.outlet_id,
-              userId: auth.userId,
-              clientTxId: tx.client_tx_id,
-              status: tx.status,
-              trxAt: tx.trx_at,
-              posTransactionId
-            };
-            acceptedContextForFailureAudit = acceptedContext;
-
-            let postingResult: SyncPushPostingHookResult;
-
-            try {
-              postingResult = await runSyncPushPostingHook(dbConnection, acceptedContext);
-            } catch (postingHookError) {
-              if (
-                postingHookError instanceof SyncPushPostingHookError
-                && postingHookError.mode === "shadow"
-              ) {
-                await recordSyncPushPostingHookFailure(dbConnection, acceptedContext, postingHookError);
-                postingResult = {
-                  mode: postingHookError.mode,
-                  journalBatchId: null,
-                  balanceOk: false,
-                  reason: postingHookError.message
-                };
-              } else {
-                throw postingHookError;
-              }
-            }
-
-            await runAcceptedSyncPushHook(dbConnection, acceptedContext, postingResult);
-
-            await dbConnection.commit();
-
-            results.push({
-              client_tx_id: tx.client_tx_id,
-              result: "OK"
-            });
-            logTransactionResult("OK");
-          } catch (error) {
-            if (isClientTxIdDuplicateError(error)) {
-              await rollbackQuietly(dbConnection);
-
-              const existingRecord = await readExistingIdempotencyRecordByClientTxId(dbConnection, tx.client_tx_id);
-              if (!existingRecord) {
-                results.push(toErrorResult(tx.client_tx_id, RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE));
-                logTransactionResult("ERROR");
-                continue;
-              }
-
-              const existingHashVersion = existingRecord.payloadHashVersion ?? 1;
-              const normalizedExistingHash = existingRecord.payloadSha256?.trim() ?? "";
-              if (normalizedExistingHash.length === 0) {
-                const legacyReplayMatch = await doesLegacyPayloadReplayMatch(dbConnection, existingRecord.posTransactionId, tx);
-                if (!legacyReplayMatch) {
-                  results.push(toErrorResult(tx.client_tx_id, IDEMPOTENCY_CONFLICT_MESSAGE));
-                  logTransactionResult("ERROR");
-                  continue;
-                }
-
-                await recordSyncPushDuplicateReplayAudit(dbConnection, {
-                  authUserId: auth.userId,
-                  correlationId,
-                  companyId: tx.company_id,
-                  outletId: tx.outlet_id,
-                  clientTxId: tx.client_tx_id,
-                  posTransactionId: existingRecord.posTransactionId
-                });
-                results.push({
-                  client_tx_id: tx.client_tx_id,
-                  result: "DUPLICATE"
-                });
-                logTransactionResult("DUPLICATE");
-                continue;
-              }
-
-              if (normalizedExistingHash === payloadSha256) {
-                await recordSyncPushDuplicateReplayAudit(dbConnection, {
-                  authUserId: auth.userId,
-                  correlationId,
-                  companyId: tx.company_id,
-                  outletId: tx.outlet_id,
-                  clientTxId: tx.client_tx_id,
-                  posTransactionId: existingRecord.posTransactionId
-                });
-                results.push({
-                  client_tx_id: tx.client_tx_id,
-                  result: "DUPLICATE"
-                });
-                logTransactionResult("DUPLICATE");
-                continue;
-              }
-
-              if (existingHashVersion <= 1 && normalizedExistingHash === payloadSha256Legacy) {
-                await recordSyncPushDuplicateReplayAudit(dbConnection, {
-                  authUserId: auth.userId,
-                  correlationId,
-                  companyId: tx.company_id,
-                  outletId: tx.outlet_id,
-                  clientTxId: tx.client_tx_id,
-                  posTransactionId: existingRecord.posTransactionId
-                });
-                results.push({
-                  client_tx_id: tx.client_tx_id,
-                  result: "DUPLICATE"
-                });
-                logTransactionResult("DUPLICATE");
-                continue;
-              }
-
-              if (existingHashVersion <= 1) {
-                const legacyReplayMatch = await doesLegacyV1HashMismatchReplayMatch(
-                  dbConnection,
-                  existingRecord.posTransactionId,
-                  normalizedExistingHash,
-                  tx
-                );
-                if (legacyReplayMatch) {
-                  await recordSyncPushDuplicateReplayAudit(dbConnection, {
-                    authUserId: auth.userId,
-                    correlationId,
-                    companyId: tx.company_id,
-                    outletId: tx.outlet_id,
-                    clientTxId: tx.client_tx_id,
-                    posTransactionId: existingRecord.posTransactionId
-                  });
-                  results.push({
-                    client_tx_id: tx.client_tx_id,
-                    result: "DUPLICATE"
-                  });
-                  logTransactionResult("DUPLICATE");
-                  continue;
-                }
-              }
-
-              results.push(toErrorResult(tx.client_tx_id, IDEMPOTENCY_CONFLICT_MESSAGE));
-              logTransactionResult("ERROR");
-              continue;
-            }
-
-            if (isRetryableMysqlError(error)) {
-              await rollbackQuietly(dbConnection);
-              results.push(toErrorResult(tx.client_tx_id, toRetryableDbErrorMessage(error)));
-              logTransactionResult("ERROR");
-              continue;
-            }
-
-            await rollbackQuietly(dbConnection);
-
-            if (
-              acceptedContextForFailureAudit
-              && error instanceof SyncPushPostingHookError
-              && error.mode !== "shadow"
-            ) {
-              await recordSyncPushPostingHookFailure(dbPool, acceptedContextForFailureAudit, error);
-            }
-
-            console.error("POST /sync/push transaction insert failed", {
-              correlation_id: correlationId,
-              client_tx_id: tx.client_tx_id,
-              error
-            });
-            results.push(toErrorResult(tx.client_tx_id, "insert failed"));
-            logTransactionResult("ERROR");
           }
         }
 
+        for (let i = 0; i < input.transactions.length; i++) {
+          const result = resultsByIndex.get(i);
+          if (result) {
+            results.push(result);
+          } else {
+            results.push(toErrorResult(input.transactions[i].client_tx_id, "processing failed"));
+          }
+        }
+      } finally {
+        taxDbConnection.release();
+      }
+
+      const orderDbConnection = await dbPool.getConnection();
+      try {
         for (const update of input.order_updates ?? []) {
           if (update.company_id !== auth.companyId) {
             orderUpdateResults.push({
@@ -1290,12 +1416,12 @@ export const POST = withAuth(
           }
 
           try {
-            await dbConnection.beginTransaction();
+            await orderDbConnection.beginTransaction();
 
             let previousTableId: number | null = null;
             let previousServiceType: "TAKEAWAY" | "DINE_IN" | null = null;
 
-            const [previousRows] = await dbConnection.execute<RowDataPacket[]>(
+            const [previousRows] = await orderDbConnection.execute<RowDataPacket[]>(
               `SELECT table_id, service_type
                FROM pos_order_snapshots
                WHERE order_id = ? AND company_id = ? AND outlet_id = ?
@@ -1314,7 +1440,7 @@ export const POST = withAuth(
               previousServiceType = previousSnapshot.service_type;
             }
 
-            await dbConnection.execute(
+            await orderDbConnection.execute(
               `INSERT INTO pos_order_snapshots (
                  order_id,
                  company_id,
@@ -1385,7 +1511,7 @@ export const POST = withAuth(
               && currentTableId !== null;
 
             const releaseTable = async (tableId: number) => {
-              const [tableRows] = await dbConnection.execute<RowDataPacket[]>(
+              const [tableRows] = await orderDbConnection.execute<RowDataPacket[]>(
                 `SELECT status FROM outlet_tables
                  WHERE company_id = ? AND outlet_id = ? AND id = ?
                  LIMIT 1`,
@@ -1396,7 +1522,7 @@ export const POST = withAuth(
                 return;
               }
 
-              const [reservationRows] = await dbConnection.execute<RowDataPacket[]>(
+              const [reservationRows] = await orderDbConnection.execute<RowDataPacket[]>(
                 `SELECT id FROM reservations
                  WHERE company_id = ? AND outlet_id = ? AND table_id = ?
                    AND status IN ('BOOKED', 'CONFIRMED', 'ARRIVED')
@@ -1404,7 +1530,7 @@ export const POST = withAuth(
                 [snapshot.company_id, snapshot.outlet_id, tableId]
               );
               const nextStatus = reservationRows.length > 0 ? "RESERVED" : "AVAILABLE";
-              await dbConnection.execute(
+              await orderDbConnection.execute(
                 `UPDATE outlet_tables
                  SET status = ?, updated_at = CURRENT_TIMESTAMP
                  WHERE company_id = ? AND outlet_id = ? AND id = ?`,
@@ -1413,7 +1539,7 @@ export const POST = withAuth(
             };
 
             const occupyTable = async (tableId: number) => {
-              await dbConnection.execute(
+              await orderDbConnection.execute(
                 `UPDATE outlet_tables
                  SET status = 'OCCUPIED', updated_at = CURRENT_TIMESTAMP
                  WHERE company_id = ? AND outlet_id = ? AND id = ?`,
@@ -1429,7 +1555,7 @@ export const POST = withAuth(
               await occupyTable(currentTableId);
             }
 
-            await dbConnection.execute(
+            await orderDbConnection.execute(
               `DELETE FROM pos_order_snapshot_lines
                WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
               [snapshot.order_id, snapshot.company_id, snapshot.outlet_id]
@@ -1450,7 +1576,7 @@ export const POST = withAuth(
                 line.discount_amount,
                 toMysqlDateTime(line.updated_at)
               ]);
-              await dbConnection.execute(
+              await orderDbConnection.execute(
                 `INSERT INTO pos_order_snapshot_lines (
                    order_id,
                    company_id,
@@ -1468,7 +1594,7 @@ export const POST = withAuth(
               );
             }
 
-            await dbConnection.execute(
+            await orderDbConnection.execute(
               `INSERT INTO pos_order_updates (
                  update_id,
                  order_id,
@@ -1498,7 +1624,7 @@ export const POST = withAuth(
             );
 
             if (cancellation) {
-              await dbConnection.execute(
+              await orderDbConnection.execute(
                 `INSERT INTO pos_item_cancellations (
                    cancellation_id,
                    update_id,
@@ -1526,7 +1652,7 @@ export const POST = withAuth(
               );
             }
 
-            await dbConnection.commit();
+            await orderDbConnection.commit();
             orderUpdateResults.push({
               update_id: update.update_id,
               result: "OK"
@@ -1538,7 +1664,7 @@ export const POST = withAuth(
               });
             }
           } catch (error) {
-            await rollbackQuietly(dbConnection);
+            await rollbackQuietly(orderDbConnection);
             if (isMysqlError(error) && error.errno === MYSQL_DUPLICATE_ERROR_CODE) {
               orderUpdateResults.push({
                 update_id: update.update_id,
@@ -1567,7 +1693,7 @@ export const POST = withAuth(
           }
         }
       } finally {
-        dbConnection.release();
+        orderDbConnection.release();
       }
 
       const response = SyncPushPayloadSchema.parse({

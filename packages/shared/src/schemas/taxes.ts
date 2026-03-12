@@ -12,6 +12,7 @@ export const TaxRateSchema = z.object({
   code: z.string().trim().min(1).max(64),
   name: z.string().trim().min(1).max(191),
   rate_percent: RatePercentSchema,
+  account_id: NumericIdSchema.nullable(),
   is_inclusive: z.boolean(),
   is_active: z.boolean(),
   created_at: z.string().datetime(),
@@ -22,6 +23,7 @@ export const TaxRateCreateRequestSchema = z.object({
   code: z.string().trim().min(1).max(64),
   name: z.string().trim().min(1).max(191),
   rate_percent: RatePercentSchema,
+  account_id: NumericIdSchema.nullable().optional(),
   is_inclusive: z.boolean().default(false),
   is_active: z.boolean().optional()
 });
@@ -31,6 +33,7 @@ export const TaxRateUpdateRequestSchema = z
     code: z.string().trim().min(1).max(64).optional(),
     name: z.string().trim().min(1).max(191).optional(),
     rate_percent: RatePercentSchema.optional(),
+    account_id: NumericIdSchema.nullable().optional(),
     is_inclusive: z.boolean().optional(),
     is_active: z.boolean().optional()
   })

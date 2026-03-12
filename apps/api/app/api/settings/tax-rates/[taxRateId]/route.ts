@@ -15,14 +15,14 @@ const idSchema = z.coerce.number().int().positive();
 async function findTaxRate(companyId: number, taxRateId: number) {
   const pool = getDbPool();
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, company_id, code, name, rate_percent, is_inclusive, is_active
+    `SELECT id, company_id, code, name, rate_percent, account_id, is_inclusive, is_active
      FROM tax_rates
      WHERE id = ? AND company_id = ?
      LIMIT 1`,
     [taxRateId, companyId]
   );
 
-  return (rows as Array<{ id: number; company_id: number; code: string; name: string; rate_percent: number | string; is_inclusive: number; is_active: number }>)[0] ?? null;
+  return (rows as Array<{ id: number; company_id: number; code: string; name: string; rate_percent: number | string; account_id: number | null; is_inclusive: number; is_active: number }>)[0] ?? null;
 }
 
 export const PUT = withAuth(
@@ -33,32 +33,65 @@ export const PUT = withAuth(
       const payload = await request.json();
       const input = TaxRateUpdateRequestSchema.parse(payload);
 
+      if (input.account_id !== undefined && input.account_id !== null) {
+        const pool = getDbPool();
+        const [accountRows] = await pool.execute<RowDataPacket[]>(
+          `SELECT id FROM accounts WHERE company_id = ? AND id = ? LIMIT 1`,
+          [auth.companyId, input.account_id]
+        );
+        if (accountRows.length === 0) {
+          return errorResponse("INVALID_ACCOUNT", "Account not found for this company", 400);
+        }
+      }
+
       const current = await findTaxRate(auth.companyId, taxRateId);
       if (!current) {
         return errorResponse("NOT_FOUND", "Tax rate not found", 404);
       }
 
       const pool = getDbPool();
+      
+      const fields: string[] = [];
+      const values: (string | number | null)[] = [];
+      
+      if (input.code !== undefined) {
+        fields.push("code = ?");
+        values.push(input.code);
+      }
+      if (input.name !== undefined) {
+        fields.push("name = ?");
+        values.push(input.name);
+      }
+      if (input.rate_percent !== undefined) {
+        fields.push("rate_percent = ?");
+        values.push(input.rate_percent);
+      }
+      if (input.account_id !== undefined) {
+        fields.push("account_id = ?");
+        values.push(input.account_id);
+      }
+      if (input.is_inclusive !== undefined) {
+        fields.push("is_inclusive = ?");
+        values.push(input.is_inclusive ? 1 : 0);
+      }
+      if (input.is_active !== undefined) {
+        fields.push("is_active = ?");
+        values.push(input.is_active ? 1 : 0);
+      }
+      
+      if (fields.length === 0) {
+        return successResponse(null);
+      }
+      
+      fields.push("updated_by_user_id = ?");
+      values.push(auth.userId);
+      fields.push("updated_at = CURRENT_TIMESTAMP");
+      
+      values.push(taxRateId, auth.companyId);
+
       const [result] = await pool.execute<ResultSetHeader>(
-        `UPDATE tax_rates
-         SET code = COALESCE(?, code),
-             name = COALESCE(?, name),
-             rate_percent = COALESCE(?, rate_percent),
-             is_inclusive = COALESCE(?, is_inclusive),
-             is_active = COALESCE(?, is_active),
-             updated_by_user_id = ?,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND company_id = ?`,
-        [
-          input.code ?? null,
-          input.name ?? null,
-          input.rate_percent ?? null,
-          input.is_inclusive === undefined ? null : input.is_inclusive ? 1 : 0,
-          input.is_active === undefined ? null : input.is_active ? 1 : 0,
-          auth.userId,
-          taxRateId,
-          auth.companyId
-        ]
+        `UPDATE tax_rates SET ${fields.join(", ")} WHERE id = ? AND company_id = ?`,
+        values
       );
 
       if (result.affectedRows === 0) {
@@ -79,6 +112,7 @@ export const PUT = withAuth(
           code: current.code,
           name: current.name,
           rate_percent: Number(current.rate_percent),
+          account_id: current.account_id ? Number(current.account_id) : null,
           is_inclusive: current.is_inclusive === 1,
           is_active: current.is_active === 1
         },
@@ -86,6 +120,7 @@ export const PUT = withAuth(
           code: input.code ?? current.code,
           name: input.name ?? current.name,
           rate_percent: input.rate_percent ?? Number(current.rate_percent),
+          account_id: input.account_id !== undefined ? input.account_id : (current.account_id ? Number(current.account_id) : null),
           is_inclusive: input.is_inclusive ?? (current.is_inclusive === 1),
           is_active: input.is_active ?? (current.is_active === 1)
         }

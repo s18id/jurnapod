@@ -43,6 +43,7 @@ export interface WebBootstrapConfig {
   onPushError?: (error: Error) => void;
   onPushStatusChange?: (inFlight: boolean) => void;
   onPullStatusChange?: (inFlight: boolean) => void;
+  pushSendConcurrency?: number;
 }
 
 export function createWebBootstrapContext(config: WebBootstrapConfig): WebBootstrapContext {
@@ -63,7 +64,8 @@ export function createWebBootstrapContext(config: WebBootstrapConfig): WebBootst
     accessToken: config.accessToken,
     onPushError: config.onPushError,
     onPushStatusChange: config.onPushStatusChange,
-    onPullStatusChange: config.onPullStatusChange
+    onPullStatusChange: config.onPullStatusChange,
+    pushSendConcurrency: config.pushSendConcurrency
   };
 
   const orchestrator = new SyncOrchestrator(

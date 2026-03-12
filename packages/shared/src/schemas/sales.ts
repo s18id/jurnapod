@@ -180,11 +180,15 @@ export const SalesPaymentCreateRequestSchema = z.object({
   client_ref: z.string().uuid().optional(),
   payment_no: z.string().trim().min(1).max(64).optional(),
   payment_at: z.string().datetime(),
-  account_id: NumericIdSchema.optional(), // optional when splits provided
-  method: SalesPaymentMethodSchema.optional(), // deprecated, kept for backward compat
+  account_id: NumericIdSchema.optional(),
+  method: SalesPaymentMethodSchema.optional(),
   amount: MoneyInputPositiveSchema.refine(
     (val) => !hasMoreThanTwoDecimals(val),
     { message: "Amount must have at most 2 decimal places" }
+  ),
+  actual_amount_idr: MoneyInputPositiveSchema.optional().refine(
+    (val) => val === undefined || !hasMoreThanTwoDecimals(val),
+    { message: "Actual amount must have at most 2 decimal places" }
   ),
   splits: z.array(SalesPaymentSplitInputSchema).min(1).max(10).optional()
 }).refine((data) => {
@@ -222,6 +226,15 @@ export const SalesPaymentCreateRequestSchema = z.object({
 }, {
   message: "Duplicate account_ids not allowed in splits",
   path: ["splits"]
+}).refine((data) => {
+  // When splits are provided, actual_amount_idr must equal amount (same minor units)
+  if (data.splits && data.splits.length > 0 && data.actual_amount_idr !== undefined) {
+    return toMinorUnits(data.actual_amount_idr) === toMinorUnits(data.amount);
+  }
+  return true;
+}, {
+  message: "When splits are provided, actual_amount_idr must equal amount",
+  path: ["actual_amount_idr"]
 });
 
 export const SalesPaymentUpdateRequestSchema = z
@@ -231,12 +244,16 @@ export const SalesPaymentUpdateRequestSchema = z
     payment_no: z.string().trim().min(1).max(64).optional(),
     payment_at: z.string().datetime().optional(),
     account_id: NumericIdSchema.optional(),
-    method: SalesPaymentMethodSchema.optional(), // deprecated
+    method: SalesPaymentMethodSchema.optional(),
     amount: MoneyInputPositiveSchema.optional().refine(
       (val) => val === undefined || !hasMoreThanTwoDecimals(val),
       { message: "Amount must have at most 2 decimal places" }
     ),
-    splits: z.array(SalesPaymentSplitInputSchema).min(1).max(10).optional() // Phase 8
+    actual_amount_idr: MoneyInputPositiveSchema.optional().refine(
+      (val) => val === undefined || !hasMoreThanTwoDecimals(val),
+      { message: "Actual amount must have at most 2 decimal places" }
+    ),
+    splits: z.array(SalesPaymentSplitInputSchema).min(1).max(10).optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided"
@@ -263,6 +280,19 @@ export const SalesPaymentUpdateRequestSchema = z
   }, {
     message: "Duplicate account_ids not allowed in splits",
     path: ["splits"]
+  })
+  .refine((data) => {
+    // When splits are provided, actual_amount_idr must equal split total (same minor units)
+    if (data.splits && data.splits.length > 0 && data.actual_amount_idr !== undefined) {
+      const expectedMinor = data.amount !== undefined
+        ? toMinorUnits(data.amount)
+        : data.splits.reduce((sum, split) => sum + toMinorUnits(split.amount), 0);
+      return toMinorUnits(data.actual_amount_idr) === expectedMinor;
+    }
+    return true;
+  }, {
+    message: "When splits are provided, actual_amount_idr must equal amount",
+    path: ["actual_amount_idr"]
   });
 
 // Phase 8: Payment split response schema
@@ -286,11 +316,19 @@ export const SalesPaymentSchema = z.object({
   client_ref: z.string().uuid().nullable().optional(),
   payment_at: z.string().datetime(),
   account_id: NumericIdSchema,
-  account_name: z.string().optional(), // joined from accounts table
-  method: SalesPaymentMethodSchema.optional(), // deprecated
+  account_name: z.string().optional(),
+  method: SalesPaymentMethodSchema.optional(),
   status: DocumentStatusSchema,
   amount: MoneySchema.positive(),
-  splits: z.array(SalesPaymentSplitSchema).optional(), // Phase 8: split allocations
+  actual_amount_idr: MoneySchema.nonnegative().nullable().optional(),
+  invoice_amount_idr: MoneySchema.nonnegative().nullable().optional(),
+  payment_amount_idr: MoneySchema.nonnegative().nullable().optional(),
+  payment_delta_idr: MoneySchema.optional(),
+  shortfall_settled_as_loss: z.boolean().optional(),
+  shortfall_reason: z.string().max(500).nullable().optional(),
+  shortfall_settled_by_user_id: NumericIdSchema.nullable().optional(),
+  shortfall_settled_at: z.string().datetime().nullable().optional(),
+  splits: z.array(SalesPaymentSplitSchema).optional(),
   created_by_user_id: NumericIdSchema.nullable().optional(),
   updated_by_user_id: NumericIdSchema.nullable().optional(),
   created_at: z.string().datetime(),
@@ -305,6 +343,21 @@ export const SalesPaymentListQuerySchema = PaginationQuerySchema.extend({
   date_from: DateOnlySchema.optional(),
   date_to: DateOnlySchema.optional()
 });
+
+export const SalesPaymentPostRequestSchema = z.object({
+  settle_shortfall_as_loss: z.boolean().optional(),
+  shortfall_reason: z.string().trim().min(1).max(500).optional()
+}).refine((data) => {
+  if (data.settle_shortfall_as_loss === true) {
+    return typeof data.shortfall_reason === "string" && data.shortfall_reason.trim().length > 0;
+  }
+  return true;
+}, {
+  message: "shortfall_reason is required when settle_shortfall_as_loss is true",
+  path: ["shortfall_reason"]
+});
+
+export type SalesPaymentPostRequest = z.infer<typeof SalesPaymentPostRequestSchema>;
 
 export const SalesOrderStatusSchema = z.enum([
   "DRAFT",

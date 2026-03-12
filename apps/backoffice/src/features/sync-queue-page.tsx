@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Stack, Table, Button, Group, Text, Badge, Alert } from "@mantine/core";
 import { PageCard } from "../components/PageCard";
 import { OutboxService } from "../lib/outbox-service";
+import { canShowSyncQueueActions } from "../lib/outbox-guards";
 import type { SessionUser } from "../lib/session";
 import type { OutboxItem } from "../lib/offline-db";
 import { ConflictDialog } from "../components/conflict-dialog";
@@ -37,10 +38,14 @@ export function SyncQueuePage({ user }: SyncQueuePageProps) {
   }, [user.id]);
 
   async function handleDelete(id: string) {
-    if (!window.confirm("Discard this queued transaction?")) {
+    if (!window.confirm("This will permanently discard the transaction. It will never be synced and cannot be recovered. Continue?")) {
       return;
     }
-    await OutboxService.deleteItem(id, user.id);
+    const deleted = await OutboxService.deleteFailedItem(id, user.id);
+    if (!deleted) {
+      window.alert("Cannot delete: item is not in failed state or does not belong to you.");
+      return;
+    }
     await loadQueue();
   }
 
@@ -88,14 +93,16 @@ export function SyncQueuePage({ user }: SyncQueuePageProps) {
                   <Table.Td>{item.error ?? "-"}</Table.Td>
                   <Table.Td>
                     <Group gap="xs" justify="center">
-                      {item.status === "failed" ? (
-                        <Button size="xs" variant="light" onClick={() => setConflictItem(item)}>
-                          Review
-                        </Button>
+                      {canShowSyncQueueActions(item.status) ? (
+                        <>
+                          <Button size="xs" variant="light" onClick={() => setConflictItem(item)}>
+                            Review
+                          </Button>
+                          <Button size="xs" color="red" onClick={() => handleDelete(item.id)}>
+                            Delete
+                          </Button>
+                        </>
                       ) : null}
-                      <Button size="xs" color="red" onClick={() => handleDelete(item.id)}>
-                        Delete
-                      </Button>
                     </Group>
                   </Table.Td>
                 </Table.Tr>
@@ -110,16 +117,19 @@ export function SyncQueuePage({ user }: SyncQueuePageProps) {
           onClose={() => setConflictItem(null)}
           onResolve={async (action) => {
             if (action === "discard") {
-                await OutboxService.deleteItem(conflictItem.id, user.id);
+              const deleted = await OutboxService.deleteFailedItem(conflictItem.id, user.id);
+              if (!deleted) {
+                window.alert("Cannot discard: item is not in failed state.");
               }
-              if (action === "keep") {
-                await OutboxService.updateStatus(
-                  conflictItem.id,
-                  user.id,
-                  "failed",
-                  conflictItem.error
-                );
-              }
+            }
+            if (action === "keep") {
+              await OutboxService.updateStatus(
+                conflictItem.id,
+                user.id,
+                "failed",
+                conflictItem.error
+              );
+            }
             if (action === "edit") {
               if (conflictItem.type === "journal") {
                 window.location.hash = "#/transactions";

@@ -2372,6 +2372,7 @@ async function readSyncConfig(companyId: number): Promise<SyncPullResponse["data
       code: rate.code,
       name: rate.name,
       rate_percent: rate.rate_percent,
+      account_id: rate.account_id,
       is_inclusive: rate.is_inclusive,
       is_active: rate.is_active
     })),

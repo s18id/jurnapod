@@ -12,6 +12,8 @@ import {
 import type { OutboxJobRow } from "@jurnapod/offline-db/dexie";
 
 const DEFAULT_BATCH_SIZE = 10;
+const DEFAULT_SEND_CONCURRENCY = 3;
+const MAX_SEND_CONCURRENCY = 5;
 const RETRY_BACKOFF_BASE_MS = 5_000;
 const RETRY_BACKOFF_MAX_MS = 60_000;
 const NON_RETRYABLE_BACKOFF_MS = 300_000;
@@ -29,6 +31,7 @@ export interface DrainOutboxJobsInput {
   owner_id?: string;
   lease_ms?: number;
   drain_reason?: string;
+  send_concurrency?: number;
 }
 
 export interface OutboxSendInput {
@@ -108,6 +111,14 @@ function resolveBatchSize(batchSize: number | undefined): number {
   }
 
   return Math.floor(batchSize);
+}
+
+function resolveSendConcurrency(concurrency: number | undefined): number {
+  if (!Number.isFinite(concurrency) || concurrency === undefined || concurrency <= 0) {
+    return DEFAULT_SEND_CONCURRENCY;
+  }
+
+  return Math.min(Math.floor(concurrency), MAX_SEND_CONCURRENCY);
 }
 
 function normalizeRandomValue(randomValue: number): number {
@@ -243,6 +254,7 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
   const random = input.random ?? Math.random;
   const sender = input.sender ?? defaultOutboxJobSender;
   const batchSize = resolveBatchSize(input.batch_size);
+  const sendConcurrency = resolveSendConcurrency(input.send_concurrency);
   const ownerId = input.owner_id ?? DEFAULT_OWNER_ID;
   const drainReason = resolveDrainReason(input.drain_reason);
   const leaseMs =
@@ -260,40 +272,82 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
     stale_count: 0
   };
 
-  for (const job of jobs) {
-    const clientTxId = readClientTxIdFromOutboxPayload(job);
-    const attempt = await reserveOutboxAttempt(
+  const orderUpdateJobs = jobs.filter((j) => j.job_type === "SYNC_POS_ORDER_UPDATE");
+  const txJobs = jobs.filter((j) => j.job_type !== "SYNC_POS_ORDER_UPDATE");
+
+  const params: ProcessJobParams = { sender, ownerId, leaseMs, drainReason, now, random, db };
+
+  for (const job of orderUpdateJobs) {
+    const r = await processJob(job, params);
+    if (r.sent) result.sent_count++;
+    if (r.failed) result.failed_count++;
+    if (r.stale) result.stale_count++;
+  }
+
+  if (txJobs.length > 0) {
+    const chunks: OutboxJobRow[][] = [];
+    for (let i = 0; i < txJobs.length; i += sendConcurrency) {
+      chunks.push(txJobs.slice(i, i + sendConcurrency));
+    }
+    for (const chunk of chunks) {
+      const chunkResults = await Promise.all(chunk.map((job) => processJob(job, params)));
+      for (const r of chunkResults) {
+        if (r.sent) result.sent_count++;
+        if (r.failed) result.failed_count++;
+        if (r.stale) result.stale_count++;
+      }
+    }
+  }
+
+  result.skipped_count = Math.max(0, result.selected_count - result.sent_count - result.failed_count - result.stale_count);
+  return result;
+}
+
+interface ProcessJobParams {
+  sender: OutboxJobSender;
+  ownerId: string;
+  leaseMs: number;
+  drainReason: string;
+  now: () => number;
+  random: () => number;
+  db: PosOfflineDb;
+}
+
+interface JobResult {
+  sent: boolean;
+  failed: boolean;
+  stale: boolean;
+}
+
+async function processJob(job: OutboxJobRow, p: ProcessJobParams): Promise<JobResult> {
+  const { sender, ownerId, leaseMs, drainReason, now, random, db } = p;
+  const result: JobResult = { sent: false, failed: false, stale: false };
+
+  const clientTxId = readClientTxIdFromOutboxPayload(job);
+  const attempt = await reserveOutboxAttempt({ job_id: job.job_id, owner_id: ownerId, lease_ms: leaseMs, now }, db);
+
+  if (!attempt.claimed || !attempt.lease_token) {
+    result.stale = true;
+    return result;
+  }
+
+  const leaseToken = attempt.lease_token;
+  const sendStartedAtMs = now();
+  const heartbeatIntervalMs = Math.max(1_000, Math.floor(leaseMs / 3));
+  let consecutiveRenewalFailures = 0;
+  const heartbeatId = globalThis.setInterval(() => {
+    renewOutboxAttemptLease(
       {
         job_id: job.job_id,
+        attempt_token: attempt.attempt,
+        lease_token: leaseToken,
         owner_id: ownerId,
         lease_ms: leaseMs,
         now
       },
       db
-    );
-
-    if (!attempt.claimed || !attempt.lease_token) {
-      result.stale_count += 1;
-      continue;
-    }
-
-    const leaseToken = attempt.lease_token;
-    const sendStartedAtMs = now();
-
-    const heartbeatIntervalMs = Math.max(1_000, Math.floor(leaseMs / 3));
-    let consecutiveRenewalFailures = 0;
-    const heartbeatId = globalThis.setInterval(() => {
-      renewOutboxAttemptLease(
-        {
-          job_id: job.job_id,
-          attempt_token: attempt.attempt,
-          lease_token: leaseToken,
-          owner_id: ownerId,
-          lease_ms: leaseMs,
-          now
-        },
-        db
-      ).catch((error) => {
+    )
+      .catch((error) => {
         consecutiveRenewalFailures++;
         console.error("[outbox-drainer] Lease renewal failed", {
           job_id: job.job_id,
@@ -301,10 +355,7 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
           consecutive_failures: consecutiveRenewalFailures,
           error
         });
-        
-        // If renewal fails repeatedly, the lease may have expired.
-        // Log a warning but allow the send to continue - the final
-        // status update will fail with stale token if lease actually expired.
+
         if (consecutiveRenewalFailures >= 3) {
           console.warn("[outbox-drainer] Multiple consecutive lease renewal failures", {
             job_id: job.job_id,
@@ -312,145 +363,70 @@ export async function drainOutboxJobs(input: DrainOutboxJobsInput = {}, db: PosO
             consecutive_failures: consecutiveRenewalFailures
           });
         }
-      }).then(() => {
-        // Reset failure counter on successful renewal
+      })
+      .then(() => {
         consecutiveRenewalFailures = 0;
       });
-    }, heartbeatIntervalMs);
+  }, heartbeatIntervalMs);
 
-    try {
-      const sendResult = await sender({
-        job,
-        attempt_token: attempt.attempt,
-        db
-      });
+  try {
+    const sendResult = await sender({ job, attempt_token: attempt.attempt, db });
+    if (sendResult.result !== "OK" && sendResult.result !== "DUPLICATE") throw new Error(`Unsupported: ${sendResult.result}`);
+    const updateResult = await updateOutboxJobStatus({ job_id: job.job_id, attempt_token: attempt.attempt, lease_token: leaseToken, status: "SENT" }, db);
 
-      if (sendResult.result !== "OK" && sendResult.result !== "DUPLICATE") {
-        throw new Error(`Unsupported sender result: ${String(sendResult.result)}`);
-      }
-
-      const updateResult = await updateOutboxJobStatus(
-        {
-          job_id: job.job_id,
-          attempt_token: attempt.attempt,
-          lease_token: leaseToken,
-          status: "SENT"
-        },
-        db
-      );
-
-        if (updateResult.applied) {
-          if (job.job_type === "SYNC_POS_ORDER_UPDATE") {
-            const updateId = readOrderUpdateIdFromOutboxPayload(job);
-            if (updateId) {
-            const orderUpdateRow = await db.active_order_updates.where("update_id").equals(updateId).first();
-            if (orderUpdateRow) {
-              await db.active_order_updates.update(orderUpdateRow.pk, {
-                sync_status: "SENT",
-                sync_error: null
-                });
-              }
-            }
-
-            const cancellationId = readItemCancellationIdFromOutboxPayload(job);
-            if (cancellationId) {
-              const cancellationRow = await db.item_cancellations.where("cancellation_id").equals(cancellationId).first();
-              if (cancellationRow) {
-                await db.item_cancellations.update(cancellationRow.pk, {
-                  sync_status: "SENT",
-                  sync_error: null
-                });
-              }
-            }
+    if (updateResult.applied) {
+      if (job.job_type === "SYNC_POS_ORDER_UPDATE") {
+        const updateId = readOrderUpdateIdFromOutboxPayload(job);
+        if (updateId) {
+          const orderUpdateRow = await db.active_order_updates.where("update_id").equals(updateId).first();
+          if (orderUpdateRow) {
+            await db.active_order_updates.update(orderUpdateRow.pk, { sync_status: "SENT", sync_error: null });
           }
-        result.sent_count += 1;
-        logOutboxDrainAttempt({
-          correlationId: sendResult.correlation_id ?? null,
-          clientTxId,
-          attempt: attempt.attempt,
-          leaseToken,
-          drainReason,
-          latencyMs: Math.max(0, now() - sendStartedAtMs),
-          result: "SENT"
-        });
-      } else {
-        result.stale_count += 1;
-        logOutboxDrainAttempt({
-          correlationId: sendResult.correlation_id ?? null,
-          clientTxId,
-          attempt: attempt.attempt,
-          leaseToken,
-          drainReason,
-          latencyMs: Math.max(0, now() - sendStartedAtMs),
-          result: "STALE"
-        });
-      }
-    } catch (error) {
-      const classified = classifyOutboxSenderError(error);
-      const nextAttemptAt = new Date(now() + computeFailureBackoffMs(attempt.attempt, classified.category, random)).toISOString();
-      const updateResult = await updateOutboxJobStatus(
-        {
-          job_id: job.job_id,
-          attempt_token: attempt.attempt,
-          lease_token: leaseToken,
-          status: "FAILED",
-          next_attempt_at: nextAttemptAt,
-          last_error: stringifySendError(classified)
-        },
-        db
-      );
-
-        if (updateResult.applied) {
-          if (job.job_type === "SYNC_POS_ORDER_UPDATE") {
-            const updateId = readOrderUpdateIdFromOutboxPayload(job);
-            if (updateId) {
-            const orderUpdateRow = await db.active_order_updates.where("update_id").equals(updateId).first();
-            if (orderUpdateRow) {
-              await db.active_order_updates.update(orderUpdateRow.pk, {
-                sync_status: "FAILED",
-                sync_error: stringifySendError(classified)
-                });
-              }
-            }
-
-            const cancellationId = readItemCancellationIdFromOutboxPayload(job);
-            if (cancellationId) {
-              const cancellationRow = await db.item_cancellations.where("cancellation_id").equals(cancellationId).first();
-              if (cancellationRow) {
-                await db.item_cancellations.update(cancellationRow.pk, {
-                  sync_status: "FAILED",
-                  sync_error: stringifySendError(classified)
-                });
-              }
-            }
+        }
+        const cancellationId = readItemCancellationIdFromOutboxPayload(job);
+        if (cancellationId) {
+          const cancellationRow = await db.item_cancellations.where("cancellation_id").equals(cancellationId).first();
+          if (cancellationRow) {
+            await db.item_cancellations.update(cancellationRow.pk, { sync_status: "SENT", sync_error: null });
           }
-        result.failed_count += 1;
-        logOutboxDrainAttempt({
-          correlationId: null,
-          clientTxId,
-          attempt: attempt.attempt,
-          leaseToken,
-          drainReason,
-          latencyMs: Math.max(0, now() - sendStartedAtMs),
-          result: "FAILED"
-        });
-      } else {
-        result.stale_count += 1;
-        logOutboxDrainAttempt({
-          correlationId: null,
-          clientTxId,
-          attempt: attempt.attempt,
-          leaseToken,
-          drainReason,
-          latencyMs: Math.max(0, now() - sendStartedAtMs),
-          result: "STALE"
-        });
+        }
       }
-    } finally {
-      globalThis.clearInterval(heartbeatId);
+      result.sent = true;
+      logOutboxDrainAttempt({ correlationId: sendResult.correlation_id ?? null, clientTxId, attempt: attempt.attempt, leaseToken, drainReason, latencyMs: Math.max(0, now() - sendStartedAtMs), result: "SENT" });
+    } else {
+      result.stale = true;
+      logOutboxDrainAttempt({ correlationId: sendResult.correlation_id ?? null, clientTxId, attempt: attempt.attempt, leaseToken, drainReason, latencyMs: Math.max(0, now() - sendStartedAtMs), result: "STALE" });
     }
-  }
+  } catch (error) {
+    const classified = classifyOutboxSenderError(error);
+    const nextAttemptAt = new Date(now() + computeFailureBackoffMs(attempt.attempt, classified.category, random)).toISOString();
+    const updateResult = await updateOutboxJobStatus({ job_id: job.job_id, attempt_token: attempt.attempt, lease_token: leaseToken, status: "FAILED", next_attempt_at: nextAttemptAt, last_error: stringifySendError(classified) }, db);
 
-  result.skipped_count = Math.max(0, result.selected_count - result.sent_count - result.failed_count - result.stale_count);
+    if (updateResult.applied) {
+      if (job.job_type === "SYNC_POS_ORDER_UPDATE") {
+        const updateId = readOrderUpdateIdFromOutboxPayload(job);
+        if (updateId) {
+          const orderUpdateRow = await db.active_order_updates.where("update_id").equals(updateId).first();
+          if (orderUpdateRow) {
+            await db.active_order_updates.update(orderUpdateRow.pk, { sync_status: "FAILED", sync_error: stringifySendError(classified) });
+          }
+        }
+        const cancellationId = readItemCancellationIdFromOutboxPayload(job);
+        if (cancellationId) {
+          const cancellationRow = await db.item_cancellations.where("cancellation_id").equals(cancellationId).first();
+          if (cancellationRow) {
+            await db.item_cancellations.update(cancellationRow.pk, { sync_status: "FAILED", sync_error: stringifySendError(classified) });
+          }
+        }
+      }
+      result.failed = true;
+      logOutboxDrainAttempt({ correlationId: null, clientTxId, attempt: attempt.attempt, leaseToken, drainReason, latencyMs: Math.max(0, now() - sendStartedAtMs), result: "FAILED" });
+    } else {
+      result.stale = true;
+      logOutboxDrainAttempt({ correlationId: null, clientTxId, attempt: attempt.attempt, leaseToken, drainReason, latencyMs: Math.max(0, now() - sendStartedAtMs), result: "STALE" });
+    }
+  } finally {
+    globalThis.clearInterval(heartbeatId);
+  }
   return result;
 }

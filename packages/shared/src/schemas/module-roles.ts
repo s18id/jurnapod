@@ -11,6 +11,7 @@ export const ModuleSchema = z.enum([
   "roles",
   "accounts",
   "journals",
+  "cash_bank",
   "sales",
   "inventory",
   "purchasing",
