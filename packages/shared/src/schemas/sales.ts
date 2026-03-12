@@ -321,6 +321,10 @@ export const SalesPaymentSchema = z.object({
   invoice_amount_idr: MoneySchema.nonnegative().nullable().optional(),
   payment_amount_idr: MoneySchema.nonnegative().nullable().optional(),
   payment_delta_idr: MoneySchema.optional(),
+  shortfall_settled_as_loss: z.boolean().optional(),
+  shortfall_reason: z.string().max(500).nullable().optional(),
+  shortfall_settled_by_user_id: NumericIdSchema.nullable().optional(),
+  shortfall_settled_at: z.string().datetime().nullable().optional(),
   splits: z.array(SalesPaymentSplitSchema).optional(),
   created_by_user_id: NumericIdSchema.nullable().optional(),
   updated_by_user_id: NumericIdSchema.nullable().optional(),
@@ -336,6 +340,21 @@ export const SalesPaymentListQuerySchema = PaginationQuerySchema.extend({
   date_from: DateOnlySchema.optional(),
   date_to: DateOnlySchema.optional()
 });
+
+export const SalesPaymentPostRequestSchema = z.object({
+  settle_shortfall_as_loss: z.boolean().optional(),
+  shortfall_reason: z.string().trim().min(1).max(500).optional()
+}).refine((data) => {
+  if (data.settle_shortfall_as_loss === true) {
+    return typeof data.shortfall_reason === "string" && data.shortfall_reason.trim().length > 0;
+  }
+  return true;
+}, {
+  message: "shortfall_reason is required when settle_shortfall_as_loss is true",
+  path: ["shortfall_reason"]
+});
+
+export type SalesPaymentPostRequest = z.infer<typeof SalesPaymentPostRequestSchema>;
 
 export const SalesOrderStatusSchema = z.enum([
   "DRAFT",

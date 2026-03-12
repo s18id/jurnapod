@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { NumericIdSchema } from "@jurnapod/shared";
+import { NumericIdSchema, SalesPaymentPostRequestSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { FiscalYearNotOpenError } from "../../../../../../src/lib/fiscal-years";
@@ -21,15 +21,26 @@ function parsePaymentId(request: Request): number {
   return NumericIdSchema.parse(paymentIdRaw);
 }
 
+async function parsePostRequestBody(request: Request): Promise<{ settle_shortfall_as_loss?: boolean; shortfall_reason?: string }> {
+  const text = await request.text();
+  if (!text || text.trim().length === 0) {
+    return {};
+  }
+  const parsed = JSON.parse(text);
+  return SalesPaymentPostRequestSchema.parse(parsed);
+}
+
 export const POST = withAuth(
   async (request, auth) => {
     try {
       const paymentId = parsePaymentId(request);
+      const postOptions = await parsePostRequestBody(request);
       
       const payment = await postPayment(
         auth.companyId,
         paymentId,
-        { userId: auth.userId }
+        { userId: auth.userId },
+        postOptions
       );
 
       if (!payment) {
@@ -38,7 +49,7 @@ export const POST = withAuth(
 
       return successResponse(payment);
     } catch (error) {
-      if (error instanceof ZodError) {
+      if (error instanceof ZodError || (error instanceof SyntaxError && error.message.includes("JSON"))) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 

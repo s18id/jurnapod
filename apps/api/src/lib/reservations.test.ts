@@ -6,7 +6,7 @@ import { test } from "node:test";
 import type { ResultSetHeader } from "mysql2";
 import type { RowDataPacket } from "mysql2";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { getDbPool } from "./db";
+import { closeDbPool, getDbPool } from "./db";
 import {
   ReservationValidationError,
   createReservation,
@@ -236,7 +236,7 @@ test(
         );
       }
 
-      await pool.end();
+      await closeDbPool();
     }
   }
 );

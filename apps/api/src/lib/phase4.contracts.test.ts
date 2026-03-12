@@ -13,7 +13,8 @@ import {
   CashBankTransactionCreateRequestSchema,
   SalesPaymentSchema,
   SalesPaymentCreateRequestSchema,
-  SalesPaymentUpdateRequestSchema
+  SalesPaymentUpdateRequestSchema,
+  SalesPaymentPostRequestSchema
 } from "@jurnapod/shared";
 
 describe("Phase 4 contracts: TaxRateSchema", () => {
@@ -410,5 +411,53 @@ describe("Phase 4 contracts: SalesPaymentUpdateRequestSchema", () => {
         ]
       });
     });
+  });
+});
+
+describe("Phase 4 contracts: SalesPaymentPostRequestSchema", () => {
+  test("accepts empty payload", () => {
+    const parsed = SalesPaymentPostRequestSchema.parse({});
+    assert.equal(parsed.settle_shortfall_as_loss, undefined);
+    assert.equal(parsed.shortfall_reason, undefined);
+  });
+
+  test("accepts settle_shortfall_as_loss: true with valid reason", () => {
+    const parsed = SalesPaymentPostRequestSchema.parse({
+      settle_shortfall_as_loss: true,
+      shortfall_reason: "Customer dispute write-off"
+    });
+    assert.equal(parsed.settle_shortfall_as_loss, true);
+    assert.equal(parsed.shortfall_reason, "Customer dispute write-off");
+  });
+
+  test("rejects settle_shortfall_as_loss: true without reason", () => {
+    assert.throws(() => {
+      SalesPaymentPostRequestSchema.parse({
+        settle_shortfall_as_loss: true
+      });
+    });
+  });
+
+  test("rejects settle_shortfall_as_loss: true with whitespace reason", () => {
+    assert.throws(() => {
+      SalesPaymentPostRequestSchema.parse({
+        settle_shortfall_as_loss: true,
+        shortfall_reason: "   "
+      });
+    });
+  });
+
+  test("accepts settle_shortfall_as_loss: false with or without reason", () => {
+    const parsed1 = SalesPaymentPostRequestSchema.parse({
+      settle_shortfall_as_loss: false
+    });
+    assert.equal(parsed1.settle_shortfall_as_loss, false);
+
+    const parsed2 = SalesPaymentPostRequestSchema.parse({
+      settle_shortfall_as_loss: false,
+      shortfall_reason: "Optional reason"
+    });
+    assert.equal(parsed2.settle_shortfall_as_loss, false);
+    assert.equal(parsed2.shortfall_reason, "Optional reason");
   });
 });

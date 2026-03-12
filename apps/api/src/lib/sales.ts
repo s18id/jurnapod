@@ -186,6 +186,10 @@ type SalesPaymentRow = RowDataPacket & {
   invoice_amount_idr?: string | number | null;
   payment_amount_idr?: string | number | null;
   payment_delta_idr?: string | number;
+  shortfall_settled_as_loss?: number;
+  shortfall_reason?: string | null;
+  shortfall_settled_by_user_id?: number | null;
+  shortfall_settled_at?: Date | string | null;
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
   created_at: Date;
@@ -220,6 +224,10 @@ export type SalesPayment = {
   invoice_amount_idr?: number | null;
   payment_amount_idr?: number | null;
   payment_delta_idr?: number;
+  shortfall_settled_as_loss?: boolean;
+  shortfall_reason?: string | null;
+  shortfall_settled_by_user_id?: number | null;
+  shortfall_settled_at?: string | null;
   splits?: SalesPaymentSplit[];
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
@@ -1277,6 +1285,10 @@ function normalizePayment(row: SalesPaymentRow): SalesPayment {
     payment_delta_idr: row.payment_delta_idr !== undefined 
       ? normalizeMoney(Number(row.payment_delta_idr)) 
       : undefined,
+    shortfall_settled_as_loss: row.shortfall_settled_as_loss === 1 ? true : row.shortfall_settled_as_loss === 0 ? false : undefined,
+    shortfall_reason: row.shortfall_reason ?? null,
+    shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : null,
+    shortfall_settled_at: row.shortfall_settled_at ? new Date(row.shortfall_settled_at).toISOString() : null,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
     created_at: new Date(row.created_at).toISOString(),
@@ -1437,6 +1449,7 @@ async function findPaymentByIdWithExecutor(
     `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
             sp.account_id, a.name as account_name, sp.method, sp.status,
             sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
+            sp.shortfall_settled_as_loss, sp.shortfall_reason, sp.shortfall_settled_by_user_id, sp.shortfall_settled_at,
             sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
      FROM sales_payments sp
      LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
@@ -1537,6 +1550,7 @@ export async function listPayments(companyId: number, filters: PaymentListFilter
     `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
             sp.account_id, a.name as account_name, sp.method, sp.status,
             sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
+            sp.shortfall_settled_as_loss, sp.shortfall_reason, sp.shortfall_settled_by_user_id, sp.shortfall_settled_at,
             sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
      FROM sales_payments sp
      LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
@@ -2031,7 +2045,11 @@ export async function updatePayment(
 export async function postPayment(
   companyId: number,
   paymentId: number,
-  actor?: MutationActor
+  actor?: MutationActor,
+  options?: {
+    settle_shortfall_as_loss?: boolean;
+    shortfall_reason?: string;
+  }
 ): Promise<SalesPayment | null> {
   return withTransaction(async (connection) => {
     const payment = await findPaymentByIdWithExecutor(connection, companyId, paymentId, {
@@ -2073,25 +2091,55 @@ export async function postPayment(
       throw new PaymentAllocationError("Invoice is fully paid");
     }
 
-    // Phase 2 (ADR-0008): Variance is computed against outstanding AR, not full invoice.
-    // This ensures correct behavior for multi-payment sequences.
-    // - Exact settlement: delta = 0
-    // - Overpayment: delta > 0 (posts to variance gain)
-    // - Underpayment (partial): delta = 0 (AR remains open, no loss posted)
     const paymentAmount = payment.payment_amount_idr ?? payment.amount;
-    const invoiceAmountApplied = Math.min(paymentAmount, outstanding);
-    const delta = normalizeMoney(paymentAmount - invoiceAmountApplied);
+    const isUnderpayment = paymentAmount < outstanding;
+    
+    if (options?.settle_shortfall_as_loss && !isUnderpayment) {
+      throw new PaymentAllocationError("Cannot settle shortfall as loss for exact or overpayment");
+    }
+
+    if (options?.settle_shortfall_as_loss && isUnderpayment && !options.shortfall_reason?.trim()) {
+      throw new PaymentAllocationError("shortfall_reason is required when settle_shortfall_as_loss is true");
+    }
+
+    let invoiceAmountApplied: number;
+    let delta: number;
+
+    if (isUnderpayment && options?.settle_shortfall_as_loss) {
+      invoiceAmountApplied = outstanding;
+      delta = normalizeMoney(paymentAmount - outstanding);
+    } else {
+      invoiceAmountApplied = Math.min(paymentAmount, outstanding);
+      delta = normalizeMoney(paymentAmount - invoiceAmountApplied);
+    }
+
+    const userId = actor?.userId ?? null;
+    const shortfallSettledAt = options?.settle_shortfall_as_loss ? new Date() : null;
 
     await connection.execute<ResultSetHeader>(
       `UPDATE sales_payments
        SET status = 'POSTED',
            invoice_amount_idr = ?,
            payment_delta_idr = ?,
+           shortfall_settled_as_loss = ?,
+           shortfall_reason = ?,
+           shortfall_settled_by_user_id = ?,
+           shortfall_settled_at = ?,
            updated_by_user_id = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE company_id = ?
          AND id = ?`,
-      [invoiceAmountApplied, delta, actor?.userId ?? null, companyId, paymentId]
+      [
+        invoiceAmountApplied,
+        delta,
+        options?.settle_shortfall_as_loss ? 1 : 0,
+        options?.shortfall_reason ?? null,
+        options?.settle_shortfall_as_loss ? userId : null,
+        shortfallSettledAt,
+        userId,
+        companyId,
+        paymentId
+      ]
     );
 
     const newPaidTotal = normalizeMoney(Math.min(invoice.grand_total, invoice.paid_total + invoiceAmountApplied));
@@ -2110,7 +2158,7 @@ export async function postPayment(
            updated_at = CURRENT_TIMESTAMP
        WHERE company_id = ?
          AND id = ?`,
-      [newPaidTotal, newPaymentStatus, actor?.userId ?? null, companyId, invoice.id]
+      [newPaidTotal, newPaymentStatus, userId, companyId, invoice.id]
     );
 
     const postedPayment = await findPaymentByIdWithExecutor(connection, companyId, paymentId);

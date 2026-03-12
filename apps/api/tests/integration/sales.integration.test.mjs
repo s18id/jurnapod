@@ -377,6 +377,37 @@ async function ensureOutletAccountMappings(db, companyId, outletId) {
   };
 }
 
+async function ensureCompanyVarianceLossMapping(db, companyId) {
+  const [rows] = await db.execute(
+    `SELECT account_id
+     FROM company_account_mappings
+     WHERE company_id = ?
+       AND mapping_key = 'PAYMENT_VARIANCE_LOSS'
+     LIMIT 1`,
+    [companyId]
+  );
+
+  if (rows.length > 0 && Number(rows[0].account_id) > 0) {
+    return { createdMapping: false, createdAccount: false, accountId: Number(rows[0].account_id) };
+  }
+
+  const accountCode = buildTestAccountCode("PAYMENT_VARIANCE_LOSS");
+  const [accountInsert] = await db.execute(
+    `INSERT INTO accounts (company_id, code, name, is_payable)
+     VALUES (?, ?, ?, 0)`,
+    [companyId, accountCode, "Integration Test PAYMENT_VARIANCE_LOSS"]
+  );
+  const accountId = Number(accountInsert.insertId);
+
+  await db.execute(
+    `INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
+     VALUES (?, 'PAYMENT_VARIANCE_LOSS', ?)`,
+    [companyId, accountId]
+  );
+
+  return { createdMapping: true, createdAccount: true, accountId };
+}
+
 async function setupTestData(db) {
   const companyId = 1;
   const outletId = 1;
@@ -1214,6 +1245,219 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         headers: authHeaders
       });
       assert.strictEqual(getPaymentRes.body.data.status, "DRAFT");
+    });
+
+    await t.test("Partial payment without flag stays PARTIAL", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-${randomUUID().slice(0, 8)}`;
+      const paymentNo = `TEST-PAY-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+      testPaymentNos.push(paymentNo);
+
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      const paymentRes = await apiRequest(baseUrl, "/api/sales/payments", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          payment_no: paymentNo,
+          payment_at: openFiscalDateTime,
+          account_id: mappingFixture.accountIdsByKey.CASH,
+          method: "CASH",
+          amount: 800
+        })
+      });
+
+      const paymentId = paymentRes.body.data.id;
+
+      const postRes = await apiRequest(baseUrl, `/api/sales/payments/${paymentId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      assert.strictEqual(postRes.status, 200);
+      assert.strictEqual(postRes.body.data.status, "POSTED");
+      assert.strictEqual(postRes.body.data.payment_delta_idr, 0);
+
+      const getInvoiceRes = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}`, {
+        headers: authHeaders
+      });
+      assert.strictEqual(getInvoiceRes.body.data.paid_total, 800);
+      assert.strictEqual(getInvoiceRes.body.data.payment_status, "PARTIAL");
+    });
+
+    await t.test("Payment post rejects malformed JSON body with 400", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-${randomUUID().slice(0, 8)}`;
+      const paymentNo = `TEST-PAY-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+      testPaymentNos.push(paymentNo);
+
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      const paymentRes = await apiRequest(baseUrl, "/api/sales/payments", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          payment_no: paymentNo,
+          payment_at: openFiscalDateTime,
+          account_id: mappingFixture.accountIdsByKey.CASH,
+          method: "CASH",
+          amount: 800
+        })
+      });
+
+      const paymentId = paymentRes.body.data.id;
+
+      const res = await apiRequest(baseUrl, `/api/sales/payments/${paymentId}/post`, {
+        method: "POST",
+        headers: authHeaders,
+        body: "{bad-json"
+      });
+
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.success, false);
+      assert.strictEqual(res.body.error.code, "INVALID_REQUEST");
+    });
+
+    await t.test("Manual shortfall settlement closes invoice with loss", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-${randomUUID().slice(0, 8)}`;
+      const paymentNo = `TEST-PAY-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+      testPaymentNos.push(paymentNo);
+
+      const varianceFixture = await ensureCompanyVarianceLossMapping(db, companyId);
+
+      try {
+        const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            outlet_id: outletId,
+            invoice_no: invoiceNo,
+            invoice_date: "2024-01-15",
+            tax_amount: 0,
+            lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+          })
+        });
+
+        const invoiceId = invoiceRes.body.data.id;
+
+        await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+          method: "POST",
+          headers: authHeaders
+        });
+
+        const paymentRes = await apiRequest(baseUrl, "/api/sales/payments", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            outlet_id: outletId,
+            invoice_id: invoiceId,
+            payment_no: paymentNo,
+            payment_at: openFiscalDateTime,
+            account_id: mappingFixture.accountIdsByKey.CASH,
+            method: "CASH",
+            amount: 800
+          })
+        });
+
+        const paymentId = paymentRes.body.data.id;
+
+        const postRes = await apiRequest(baseUrl, `/api/sales/payments/${paymentId}/post`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            settle_shortfall_as_loss: true,
+            shortfall_reason: "Customer dispute write-off"
+          })
+        });
+
+        assert.strictEqual(postRes.status, 200);
+        assert.strictEqual(postRes.body.data.status, "POSTED");
+        assert.strictEqual(postRes.body.data.shortfall_settled_as_loss, true);
+        assert.strictEqual(postRes.body.data.shortfall_reason, "Customer dispute write-off");
+        assert.ok(postRes.body.data.shortfall_settled_at !== null);
+
+        const getInvoiceRes = await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}`, {
+          headers: authHeaders
+        });
+        assert.strictEqual(getInvoiceRes.body.data.paid_total, 1000);
+        assert.strictEqual(getInvoiceRes.body.data.payment_status, "PAID");
+
+        const [batches] = await db.execute(
+          `SELECT id FROM journal_batches 
+           WHERE company_id = ? AND doc_type = ? AND doc_id = ?`,
+          [companyId, SALES_PAYMENT_IN_DOC_TYPE, paymentId]
+        );
+        assert.strictEqual(batches.length, 1);
+
+        const [lines] = await db.execute(
+          `SELECT debit, credit, account_id FROM journal_lines WHERE journal_batch_id = ?`,
+          [batches[0].id]
+        );
+
+        const totalDebit = lines.reduce((sum, line) => sum + Number(line.debit), 0);
+        const totalCredit = lines.reduce((sum, line) => sum + Number(line.credit), 0);
+        assert.strictEqual(totalDebit, totalCredit);
+      } finally {
+        if (varianceFixture?.createdMapping) {
+          await db.execute(
+            `DELETE FROM company_account_mappings
+             WHERE company_id = ?
+               AND mapping_key = 'PAYMENT_VARIANCE_LOSS'
+               AND account_id = ?`,
+            [companyId, varianceFixture.accountId]
+          );
+        }
+
+        if (varianceFixture?.createdAccount) {
+          await db.execute(
+            `DELETE FROM journal_lines WHERE account_id = ? AND company_id = ?`,
+            [varianceFixture.accountId, companyId]
+          );
+          await db.execute(
+            `DELETE FROM accounts WHERE company_id = ? AND id = ?`,
+            [companyId, varianceFixture.accountId]
+          );
+        }
+      }
     });
 
     await t.test("Duplicate post calls for payments are idempotent", { timeout: 30000 }, async () => {

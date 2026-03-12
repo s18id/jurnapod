@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { getDbPool } from "./db";
+import { getDbPool, closeDbPool } from "./db";
 import { createOutletTablesBulk, deleteOutletTable, OutletTableBulkConflictError } from "./outlet-tables";
 import { OutletTableBulkCreateRequestSchema } from "@jurnapod/shared";
 
@@ -268,3 +268,7 @@ test(
     }
   }
 );
+
+test.after(async () => {
+  await closeDbPool();
+});
