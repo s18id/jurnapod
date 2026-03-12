@@ -119,6 +119,14 @@ test(
         [companyBOwnerUserId, ownerRoleId]
       );
 
+      // ACL guard for tax-rates requires settings module permission in addition to role.
+      await db.execute(
+        `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+         VALUES (?, ?, 'settings', 15)
+         ON DUPLICATE KEY UPDATE permission_mask = 15`,
+        [companyBId, ownerRoleId]
+      );
+
       // Add outlet access
       await db.execute(
         `INSERT INTO user_outlets (user_id, outlet_id) VALUES (?, ?)`,
