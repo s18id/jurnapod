@@ -304,6 +304,7 @@ export const SyncPullConfigSchema = z.object({
         code: z.string().trim().min(1),
         name: z.string().trim().min(1),
         rate_percent: z.number().finite().min(0).max(100),
+        account_id: NumericIdSchema.nullable(),
         is_inclusive: z.boolean(),
         is_active: z.boolean()
       })
