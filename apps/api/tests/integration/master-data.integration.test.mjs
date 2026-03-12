@@ -1348,6 +1348,7 @@ test(
       );
       assert.equal(deactivateOverrideResponse.status, 200);
 
+      // Inactive outlet override hides item from active sync payload (no fallback to company default).
       const syncPullAfterDeactivateResponse = await fetch(
         `${baseUrl}/api/sync/pull?outlet_id=${outlet1Id}&since_version=0`,
         {
@@ -1359,12 +1360,10 @@ test(
       assert.equal(syncPullAfterDeactivateResponse.status, 200);
       const syncPullAfterDeactivateBody = await syncPullAfterDeactivateResponse.json();
       assert.equal(syncPullAfterDeactivateBody.success, true);
-      const overrideFallbackPrice = syncPullAfterDeactivateBody.data.prices.find(
+      const hiddenOverridePrice = syncPullAfterDeactivateBody.data.prices.find(
         (p) => Number(p.item_id) === overrideItemId
       );
-      assert.equal(Boolean(overrideFallbackPrice), true);
-      assert.equal(Number(overrideFallbackPrice.price), 60000);
-      assert.equal(Number(overrideFallbackPrice.outlet_id), outlet1Id);
+      assert.equal(Boolean(hiddenOverridePrice), false);
 
       // Test duplicate company default prevention
       const createDuplicateDefaultResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {

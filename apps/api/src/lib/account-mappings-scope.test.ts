@@ -34,10 +34,10 @@ describe("Query scope validation", () => {
 });
 
 describe("Company completeness validation", () => {
-  const requiredKeys = ["AR", "SALES_REVENUE", "SALES_TAX"] as const;
+  const requiredKeys = ["AR", "SALES_REVENUE"] as const;
   
   test("complete payload passes", () => {
-    const providedKeys = new Set(["AR", "SALES_REVENUE", "SALES_TAX"]);
+    const providedKeys = new Set(["AR", "SALES_REVENUE"]);
     const missingKeys = requiredKeys.filter((key) => !providedKeys.has(key));
     
     assert.equal(missingKeys.length, 0, "Should have no missing keys");
@@ -47,9 +47,8 @@ describe("Company completeness validation", () => {
     const providedKeys = new Set(["AR"]);
     const missingKeys = requiredKeys.filter((key) => !providedKeys.has(key));
     
-    assert.equal(missingKeys.length, 2, "Should have 2 missing keys");
+    assert.equal(missingKeys.length, 1, "Should have 1 missing key");
     assert.ok(missingKeys.includes("SALES_REVENUE"), "SALES_REVENUE should be missing");
-    assert.ok(missingKeys.includes("SALES_TAX"), "SALES_TAX should be missing");
   });
 });
 
@@ -57,8 +56,7 @@ describe("Outlet blank clears override logic", () => {
   test("filters numeric entries for upsert", () => {
     const mappings = [
       { mapping_key: "AR", account_id: "" as const },
-      { mapping_key: "SALES_REVENUE", account_id: 5 },
-      { mapping_key: "SALES_TAX", account_id: "" as const }
+      { mapping_key: "SALES_REVENUE", account_id: 5 }
     ];
     
     const toUpsert = mappings.filter(
@@ -72,17 +70,15 @@ describe("Outlet blank clears override logic", () => {
   test("identifies blank entries for deletion", () => {
     const mappings = [
       { mapping_key: "AR", account_id: "" as const },
-      { mapping_key: "SALES_REVENUE", account_id: 5 },
-      { mapping_key: "SALES_TAX", account_id: "" as const }
+      { mapping_key: "SALES_REVENUE", account_id: 5 }
     ];
     
     const toDelete = mappings
       .filter((m) => m.account_id === "")
       .map((m) => m.mapping_key);
     
-    assert.equal(toDelete.length, 2, "Should have 2 delete entries");
+    assert.equal(toDelete.length, 1, "Should have 1 delete entry");
     assert.ok(toDelete.includes("AR"), "AR should be deleted");
-    assert.ok(toDelete.includes("SALES_TAX"), "SALES_TAX should be deleted");
   });
 });
 

@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict";
 import { describe, mock, test } from "node:test";
+import type { FieldPacket, RowDataPacket } from "mysql2";
 import {
   __salesPostingTestables,
   OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE
@@ -15,9 +16,9 @@ const { readOutletAccountMappingByKey, readOutletPaymentMethodMappings } = __sal
 
 type QueryExecutor = Parameters<typeof readOutletAccountMappingByKey>[0];
 
-function makeExecutor(impl: (sql: string) => unknown[]) {
-  const execute = mock.fn(async (sql: string) => impl(sql));
-  return { execute } as QueryExecutor;
+function makeExecutor(impl: (sql: string) => [unknown[], unknown[]]) {
+  const execute = mock.fn(async (sql: string) => impl(sql) as [RowDataPacket[], FieldPacket[]]);
+  return { execute } as unknown as QueryExecutor;
 }
 
 describe("readOutletAccountMappingByKey fallback precedence", () => {
@@ -26,15 +27,13 @@ describe("readOutletAccountMappingByKey fallback precedence", () => {
       if (sql.includes("outlet_account_mappings")) {
         return [[
           { mapping_key: "AR", account_id: 100 },
-          { mapping_key: "SALES_REVENUE", account_id: 101 },
-          { mapping_key: "SALES_TAX", account_id: 102 }
+          { mapping_key: "SALES_REVENUE", account_id: 101 }
         ], []];
       }
       if (sql.includes("company_account_mappings")) {
         return [[
           { mapping_key: "AR", account_id: 200 },
-          { mapping_key: "SALES_REVENUE", account_id: 201 },
-          { mapping_key: "SALES_TAX", account_id: 202 }
+          { mapping_key: "SALES_REVENUE", account_id: 201 }
         ], []];
       }
       return [[], []];
@@ -43,7 +42,6 @@ describe("readOutletAccountMappingByKey fallback precedence", () => {
     const result = await readOutletAccountMappingByKey(db, 1, 1);
     assert.equal(result.AR, 100);
     assert.equal(result.SALES_REVENUE, 101);
-    assert.equal(result.SALES_TAX, 102);
   });
 
   test("company fallback used when outlet missing", async () => {
@@ -52,8 +50,7 @@ describe("readOutletAccountMappingByKey fallback precedence", () => {
       if (sql.includes("company_account_mappings")) {
         return [[
           { mapping_key: "AR", account_id: 200 },
-          { mapping_key: "SALES_REVENUE", account_id: 201 },
-          { mapping_key: "SALES_TAX", account_id: 202 }
+          { mapping_key: "SALES_REVENUE", account_id: 201 }
         ], []];
       }
       return [[], []];
@@ -62,7 +59,6 @@ describe("readOutletAccountMappingByKey fallback precedence", () => {
     const result = await readOutletAccountMappingByKey(db, 1, 1);
     assert.equal(result.AR, 200);
     assert.equal(result.SALES_REVENUE, 201);
-    assert.equal(result.SALES_TAX, 202);
   });
 
   test("throws when missing in both scopes", async () => {
@@ -83,7 +79,7 @@ describe("readOutletAccountMappingByKey fallback precedence", () => {
       }
       if (sql.includes("company_account_mappings")) {
         return [[
-          { mapping_key: "SALES_TAX", account_id: 202 }
+          { mapping_key: "AR", account_id: 200 }
         ], []];
       }
       return [[], []];
@@ -92,7 +88,6 @@ describe("readOutletAccountMappingByKey fallback precedence", () => {
     const result = await readOutletAccountMappingByKey(db, 1, 1);
     assert.equal(result.AR, 100);
     assert.equal(result.SALES_REVENUE, 101);
-    assert.equal(result.SALES_TAX, 202);
   });
 
   test("ignores invalid rows but falls back to company", async () => {
@@ -106,8 +101,7 @@ describe("readOutletAccountMappingByKey fallback precedence", () => {
       }
       if (sql.includes("company_account_mappings")) {
         return [[
-          { mapping_key: "AR", account_id: 200 },
-          { mapping_key: "SALES_TAX", account_id: 202 }
+          { mapping_key: "AR", account_id: 200 }
         ], []];
       }
       return [[], []];
@@ -116,7 +110,6 @@ describe("readOutletAccountMappingByKey fallback precedence", () => {
     const result = await readOutletAccountMappingByKey(db, 1, 1);
     assert.equal(result.AR, 200);
     assert.equal(result.SALES_REVENUE, 101);
-    assert.equal(result.SALES_TAX, 202);
   });
 });
 

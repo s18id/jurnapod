@@ -54,6 +54,7 @@ test(
     const createdInvoiceIds = [];
     let createdOutletId = 0;
     let companyId = 0;
+    const createdMappingAccountIds = [];
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -106,6 +107,41 @@ test(
            AND outlet_id = ?`,
         [outletId, companyId, sourceOutletId]
       );
+
+      const requiredMappingKeys = ["AR", "SALES_REVENUE"];
+      const [existingMappingRows] = await db.execute(
+        `SELECT mapping_key, account_id
+         FROM outlet_account_mappings
+         WHERE company_id = ?
+           AND outlet_id = ?
+           AND mapping_key IN ('AR', 'SALES_REVENUE')`,
+        [companyId, outletId]
+      );
+
+      const existingKeys = new Set(existingMappingRows.map((r) => String(r.mapping_key)));
+      const createdMappingAccountIds = [];
+      const mappingRunId = randomUUID().slice(0, 8);
+
+      for (const mappingKey of requiredMappingKeys) {
+        if (existingKeys.has(mappingKey)) {
+          continue;
+        }
+
+        const accountCode = `IT${mappingKey.replaceAll("_", "")}${Date.now().toString(36).toUpperCase()}`.slice(0, 32);
+        const [accountInsert] = await db.execute(
+          `INSERT INTO accounts (company_id, code, name, is_active)
+           VALUES (?, ?, ?, 1)`,
+          [companyId, accountCode, `IT ${mappingKey} ${mappingRunId}`]
+        );
+        const accountId = Number(accountInsert.insertId);
+        createdMappingAccountIds.push(accountId);
+
+        await db.execute(
+          `INSERT INTO outlet_account_mappings (company_id, outlet_id, mapping_key, account_id)
+           VALUES (?, ?, ?, ?)`,
+          [companyId, outletId, mappingKey, accountId]
+        );
+      }
 
       const [fiscalRows] = await db.execute(
         `SELECT DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
@@ -387,6 +423,16 @@ test(
                AND outlet_id = ?`,
             [companyId, createdOutletId]
           );
+
+          if (createdMappingAccountIds.length > 0) {
+            const accountPlaceholders = createdMappingAccountIds.map(() => "?").join(", ");
+            await db.execute(
+              `DELETE FROM accounts
+               WHERE company_id = ?
+                 AND id IN (${accountPlaceholders})`,
+              [companyId, ...createdMappingAccountIds]
+            );
+          }
         }
 
         await db.execute("DELETE FROM outlets WHERE id = ?", [createdOutletId]);
