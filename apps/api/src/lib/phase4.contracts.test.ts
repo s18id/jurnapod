@@ -412,6 +412,24 @@ describe("Phase 4 contracts: SalesPaymentUpdateRequestSchema", () => {
       });
     });
   });
+
+  test("when splits provided without amount, actual_amount_idr must equal split total", () => {
+    assert.throws(() => {
+      SalesPaymentUpdateRequestSchema.parse({
+        actual_amount_idr: 1100,
+        splits: [{ account_id: 200, amount: 1000 }]
+      });
+    });
+  });
+
+  test("when splits provided without amount and totals match, accepts update", () => {
+    const parsed = SalesPaymentUpdateRequestSchema.parse({
+      actual_amount_idr: 1000,
+      splits: [{ account_id: 200, amount: 1000 }]
+    });
+    assert.equal(parsed.actual_amount_idr, 1000);
+    assert.equal(parsed.splits?.length, 1);
+  });
 });
 
 describe("Phase 4 contracts: SalesPaymentPostRequestSchema", () => {

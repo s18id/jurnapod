@@ -282,9 +282,12 @@ export const SalesPaymentUpdateRequestSchema = z
     path: ["splits"]
   })
   .refine((data) => {
-    // When splits are provided, actual_amount_idr must equal amount (same minor units)
-    if (data.splits && data.splits.length > 0 && data.actual_amount_idr !== undefined && data.amount !== undefined) {
-      return toMinorUnits(data.actual_amount_idr) === toMinorUnits(data.amount);
+    // When splits are provided, actual_amount_idr must equal split total (same minor units)
+    if (data.splits && data.splits.length > 0 && data.actual_amount_idr !== undefined) {
+      const expectedMinor = data.amount !== undefined
+        ? toMinorUnits(data.amount)
+        : data.splits.reduce((sum, split) => sum + toMinorUnits(split.amount), 0);
+      return toMinorUnits(data.actual_amount_idr) === expectedMinor;
     }
     return true;
   }, {

@@ -1304,6 +1304,117 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       assert.strictEqual(getInvoiceRes.body.data.payment_status, "PARTIAL");
     });
 
+    await t.test("PATCH split payment with actual_amount_idr mismatch rejects with 400", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-${randomUUID().slice(0, 8)}`;
+      const paymentNo = `TEST-PAY-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+      testPaymentNos.push(paymentNo);
+
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      const paymentRes = await apiRequest(baseUrl, "/api/sales/payments", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          payment_no: paymentNo,
+          payment_at: openFiscalDateTime,
+          account_id: mappingFixture.accountIdsByKey.CASH,
+          method: "CASH",
+          amount: 1000
+        })
+      });
+
+      const paymentId = paymentRes.body.data.id;
+
+      const updateRes = await apiRequest(baseUrl, `/api/sales/payments/${paymentId}`, {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          splits: [{ account_id: mappingFixture.accountIdsByKey.CASH, amount: 1000 }],
+          actual_amount_idr: 1100
+        })
+      });
+
+      assert.strictEqual(updateRes.status, 400);
+      assert.strictEqual(updateRes.body.success, false);
+    });
+
+    await t.test("PATCH split payment with actual_amount_idr matching split total persists consistent payment amount", { timeout: 30000 }, async () => {
+      const invoiceNo = `TEST-INV-${randomUUID().slice(0, 8)}`;
+      const paymentNo = `TEST-PAY-${randomUUID().slice(0, 8)}`;
+      testInvoiceNos.push(invoiceNo);
+      testPaymentNos.push(paymentNo);
+
+      const invoiceRes = await apiRequest(baseUrl, "/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_no: invoiceNo,
+          invoice_date: "2024-01-15",
+          tax_amount: 0,
+          lines: [{ description: "Service", qty: 1, unit_price: 1000 }]
+        })
+      });
+
+      const invoiceId = invoiceRes.body.data.id;
+
+      await apiRequest(baseUrl, `/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: authHeaders
+      });
+
+      const paymentRes = await apiRequest(baseUrl, "/api/sales/payments", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_id: invoiceId,
+          payment_no: paymentNo,
+          payment_at: openFiscalDateTime,
+          account_id: mappingFixture.accountIdsByKey.CASH,
+          method: "CASH",
+          amount: 1000
+        })
+      });
+
+      const paymentId = paymentRes.body.data.id;
+
+      const updateRes = await apiRequest(baseUrl, `/api/sales/payments/${paymentId}`, {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          splits: [{ account_id: mappingFixture.accountIdsByKey.CASH, amount: 1000 }],
+          actual_amount_idr: 1000
+        })
+      });
+
+      assert.strictEqual(updateRes.status, 200);
+      assert.strictEqual(updateRes.body.data.splits?.length, 1);
+
+      assert.strictEqual(updateRes.body.data.payment_amount_idr, 1000);
+      assert.strictEqual(updateRes.body.data.amount, 1000);
+    });
+
     await t.test("Payment post rejects malformed JSON body with 400", { timeout: 30000 }, async () => {
       const invoiceNo = `TEST-INV-${randomUUID().slice(0, 8)}`;
       const paymentNo = `TEST-PAY-${randomUUID().slice(0, 8)}`;

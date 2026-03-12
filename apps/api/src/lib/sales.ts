@@ -1930,12 +1930,17 @@ export async function updatePayment(
         throw new PaymentAllocationError("Header account_id must equal splits[0].account_id");
       }
 
-      // Scope 1: Guard - when splits provided, actual_amount_idr must equal amount (same minor units)
-      if (typeof input.actual_amount_idr === "number" && typeof input.amount === "number") {
-        if (Math.round(input.actual_amount_idr * 100) !== Math.round(input.amount * 100)) {
+      // Scope 1: Guard - when splits provided, actual_amount_idr must equal split total (same minor units)
+      if (typeof input.actual_amount_idr === "number") {
+        const actualMinor = Math.round(input.actual_amount_idr * 100);
+        const effectiveAmountMinor = Math.round(nextAmount * 100);
+        if (actualMinor !== effectiveAmountMinor) {
           throw new PaymentAllocationError("When splits are provided, actual_amount_idr must equal amount");
         }
       }
+
+      // Ensure payment_amount_idr matches split total to prevent posting imbalance
+      nextPaymentAmountIdr = nextAmount;
     } else {
       // Patch 1: Validate precision for non-split payment updates
       if (typeof input.amount === "number" && hasMoreThanTwoDecimals(input.amount)) {
