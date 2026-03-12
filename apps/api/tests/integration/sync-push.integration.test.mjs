@@ -29,6 +29,7 @@ const RETRYABLE_DB_DEADLOCK_MESSAGE = "RETRYABLE_DB_DEADLOCK";
 const TEST_FORCE_DB_ERRNO_HEADER = "x-jp-sync-push-force-db-errno";
 const TEST_FAIL_AFTER_HEADER_INSERT_HEADER = "x-jp-sync-push-fail-after-header";
 const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
+const SYNC_PUSH_CONCURRENCY_ENV = "JP_SYNC_PUSH_CONCURRENCY";
 const SYNC_PUSH_POSTING_MODE_ENV = "SYNC_PUSH_POSTING_MODE";
 const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
 const POS_SALE_DOC_TYPE = "POS_SALE";
@@ -182,7 +183,10 @@ async function getFreePort() {
 
 function startApiServer(port, options = {}) {
   const enableSyncPushTestHooks = options.enableSyncPushTestHooks === true;
-  const envOverrides = options.envOverrides ?? {};
+  const envOverrides = {
+    ...(options.envOverrides ?? {}),
+    [SYNC_PUSH_CONCURRENCY_ENV]: options.envOverrides?.[SYNC_PUSH_CONCURRENCY_ENV] ?? "3"
+  };
   const childEnv = {
     ...process.env,
     NODE_ENV: "test",
