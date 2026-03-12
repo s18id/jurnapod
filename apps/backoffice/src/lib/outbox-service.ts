@@ -81,6 +81,18 @@ export class OutboxService {
     ]);
   }
 
+  static async deleteFailedItem(id: string, userId: number): Promise<boolean> {
+    const item = await db.outbox.get(id);
+    if (!item || item.userId !== userId || item.status !== "failed") {
+      return false;
+    }
+    await Promise.all([
+      db.outbox.delete(id),
+      db.alertReadState.delete([userId, id] as [number, string])
+    ]);
+    return true;
+  }
+
   static async updateStatus(
     id: string,
     userId: number,

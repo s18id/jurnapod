@@ -11,6 +11,7 @@ export type TaxRateRecord = {
   code: string;
   name: string;
   rate_percent: number;
+  account_id: number | null;
   is_inclusive: boolean;
   is_active: boolean;
 };
@@ -37,6 +38,7 @@ type TaxRateRow = RowDataPacket & {
   code: string;
   name: string;
   rate_percent: number | string;
+  account_id: number | null;
   is_inclusive: number;
   is_active: number;
 };
@@ -46,7 +48,7 @@ export async function listCompanyTaxRates(
   companyId: number
 ): Promise<TaxRateRecord[]> {
   const [rows] = await executor.execute<TaxRateRow[]>(
-    `SELECT id, company_id, code, name, rate_percent, is_inclusive, is_active
+    `SELECT id, company_id, code, name, rate_percent, account_id, is_inclusive, is_active
      FROM tax_rates
      WHERE company_id = ?
      ORDER BY name ASC, id ASC`,
@@ -59,6 +61,7 @@ export async function listCompanyTaxRates(
     code: String(row.code),
     name: String(row.name),
     rate_percent: normalizeRate(row.rate_percent),
+    account_id: row.account_id ? Number(row.account_id) : null,
     is_inclusive: row.is_inclusive === 1,
     is_active: row.is_active === 1
   }));
@@ -84,13 +87,16 @@ export async function listCompanyDefaultTaxRates(
   companyId: number
 ): Promise<TaxRateRecord[]> {
   const [rows] = await executor.execute<TaxRateRow[]>(
-    `SELECT tr.id, tr.company_id, tr.code, tr.name, tr.rate_percent, tr.is_inclusive, tr.is_active
+    `SELECT tr.id, tr.company_id, tr.code, tr.name, tr.rate_percent, tr.account_id, tr.is_inclusive, tr.is_active
      FROM company_tax_defaults ctd
-     INNER JOIN tax_rates tr ON tr.id = ctd.tax_rate_id
+     INNER JOIN tax_rates tr
+       ON tr.id = ctd.tax_rate_id
+       AND tr.company_id = ctd.company_id
      WHERE ctd.company_id = ?
+       AND tr.company_id = ?
        AND tr.is_active = 1
      ORDER BY tr.name ASC, tr.id ASC`,
-    [companyId]
+    [companyId, companyId]
   );
 
   return rows.map((row) => ({
@@ -99,6 +105,7 @@ export async function listCompanyDefaultTaxRates(
     code: String(row.code),
     name: String(row.name),
     rate_percent: normalizeRate(row.rate_percent),
+    account_id: row.account_id ? Number(row.account_id) : null,
     is_inclusive: row.is_inclusive === 1,
     is_active: row.is_active === 1
   }));
