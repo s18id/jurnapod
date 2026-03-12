@@ -27,20 +27,6 @@ export const POST = withAuth(
         return errorResponse("OUTLET_MISMATCH", "Outlet ID mismatch", 400);
       }
 
-      const generatedCodes = Array.from({ length: input.count }, (_, index) => {
-        const seq = input.start_seq + index;
-        return input.code_template.replaceAll("{seq}", String(seq)).trim().toUpperCase();
-      });
-      const uniqueCodeCount = new Set(generatedCodes).size;
-      if (uniqueCodeCount !== generatedCodes.length) {
-        const duplicateCodes = [...new Set(generatedCodes.filter((code, index) => generatedCodes.indexOf(code) !== index))].sort();
-        return errorResponse(
-          "DUPLICATE_TABLE",
-          `Generated duplicate table codes in request: ${duplicateCodes.join(", ")}`,
-          409
-        );
-      }
-
       const access = await checkUserAccess({
         userId: auth.userId,
         companyId: auth.companyId,
