@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:unit": "node --test --test-concurrency=1 --import tsx src/**/*.test.ts",
     "test:unit:auth": "node --test --test-concurrency=1 --import tsx src/lib/auth.test.ts",
+    "test:unit:supplies": "node --test --test-concurrency=1 --import tsx src/lib/master-data.supplies.test.ts",
     "test:integration": "node --test --test-concurrency=1 ",
     "test:integration:all": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "test:integration:fast": "JP_TEST_BASE_URL=http://127.0.0.1:3001 node --test --test-concurrency=8 tests/integration/*.test.mjs",
