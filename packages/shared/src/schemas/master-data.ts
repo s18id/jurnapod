@@ -118,6 +118,23 @@ export const ItemGroupUpdateRequestSchema = z
     message: "At least one field must be provided"
   });
 
+const optionalShortTextSchemaWithMax64 = z.string().trim().max(64);
+const requiredCodeSchema = z.string().trim().min(1).max(64);
+
+export const ItemGroupBulkCreateRowSchema = z.object({
+  code: requiredCodeSchema,
+  name: z.string().trim().min(1).max(191),
+  parent_code: optionalShortTextSchemaWithMax64.nullable().optional(),
+  is_active: z.boolean().optional()
+});
+
+export const ItemGroupBulkCreateRequestSchema = z.object({
+  rows: z.array(ItemGroupBulkCreateRowSchema).min(1).max(500)
+});
+
+export type ItemGroupBulkCreateRow = z.infer<typeof ItemGroupBulkCreateRowSchema>;
+export type ItemGroupBulkCreateRequest = z.infer<typeof ItemGroupBulkCreateRequestSchema>;
+
 export const SupplyCreateRequestSchema = z.object({
   sku: optionalSkuSchema,
   name: z.string().trim().min(1).max(191),

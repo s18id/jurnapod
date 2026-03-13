@@ -3,6 +3,20 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
+const HTTP_LOG_ENABLED = process.env.JP_HTTP_LOG === "1";
+const HTTP_LOG_HEALTH = process.env.JP_HTTP_LOG_HEALTH === "1";
+
+function shouldLog(path: string): boolean {
+  if (!HTTP_LOG_ENABLED) return false;
+  if (!HTTP_LOG_HEALTH && path === "/api/health") return false;
+  return true;
+}
+
+function logRequest(method: string, path: string, status: number, durationMs: number, origin: string | null) {
+  const originStr = origin || "-";
+  console.log(`[api-hit] ${method} ${path} ${status} in ${durationMs}ms origin=${originStr}`);
+}
+
 /**
  * Get allowed CORS origins based on environment
  * Development: localhost origins for Vite dev servers
@@ -42,16 +56,20 @@ function getAllowedOrigins(): string[] {
  * Middleware to add CORS headers
  * Development: Allows requests from Vite dev servers
  * Production: Uses CORS_ALLOWED_ORIGINS environment variable
+ * 
+ * Optional HTTP logging: set JP_HTTP_LOG=1 to enable, JP_HTTP_LOG_HEALTH=1 to include health checks
  */
 export function middleware(request: NextRequest) {
-  // Get the origin from the request
+  const startTime = Date.now();
+  const path = request.nextUrl.pathname;
+  const method = request.method;
   const origin = request.headers.get("origin");
-  
+
   // Get allowed origins for current environment
   const allowedOrigins = getAllowedOrigins();
 
   // Handle preflight OPTIONS request
-  if (request.method === "OPTIONS") {
+  if (method === "OPTIONS") {
     const response = new NextResponse(null, { status: 204 });
     
     if (origin && allowedOrigins.includes(origin)) {
@@ -75,6 +93,12 @@ export function middleware(request: NextRequest) {
     response.headers.set("Access-Control-Allow-Credentials", "true");
     response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
     response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  }
+
+  // Log HTTP request if enabled
+  if (shouldLog(path)) {
+    const durationMs = Date.now() - startTime;
+    logRequest(method, path, response.status, durationMs, origin);
   }
 
   return response;

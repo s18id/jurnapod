@@ -40,6 +40,29 @@ LEFT JOIN (
 GROUP BY pt.company_id, pt.outlet_id, DATE(pt.trx_at), pt.status`;
 
 const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
+const HTTP_LOG_ENV = "JP_HTTP_LOG";
+const INTEGRATION_VERBOSE_ENV = "JP_INTEGRATION_VERBOSE";
+const DEFAULT_API_PORT = 3001;
+
+async function isPortListening(port) {
+  return new Promise((resolve) => {
+    const net = require("net");
+    const socket = new net.Socket();
+    socket.setTimeout(1000);
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on("error", () => {
+      resolve(false);
+    });
+    socket.connect(port, "127.0.0.1");
+  });
+}
 
 export function loadEnvIfPresent() {
   const loadEnvFile = process.loadEnvFile;
@@ -115,10 +138,13 @@ export function startApiServer(port, options = {}) {
   const enableSyncPushTestHooks = options.enableSyncPushTestHooks === true;
   const envOverrides = options.envOverrides ?? {};
   const envWithoutKeys = options.envWithoutKeys ?? [];
+  const verbose = options.verbose ?? process.env[INTEGRATION_VERBOSE_ENV] === "1";
+
   const childEnv = {
     ...process.env,
     NODE_ENV: "test",
     [SYNC_PUSH_TEST_HOOKS_ENV]: enableSyncPushTestHooks ? "1" : "0",
+    [HTTP_LOG_ENV]: verbose ? "1" : process.env[HTTP_LOG_ENV],
     ...envOverrides
   };
 
@@ -126,26 +152,31 @@ export function startApiServer(port, options = {}) {
     delete childEnv[key];
   }
 
+  // In verbose mode, stream output directly to parent process
+  const stdioMode = verbose ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "pipe"];
+
   const serverLogs = [];
   const childProcess = spawn(process.execPath, [nextCliPath, "dev", "-p", String(port)], {
     cwd: apiRoot,
     env: childEnv,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: stdioMode
   });
 
-  childProcess.stdout.on("data", (chunk) => {
-    serverLogs.push(chunk.toString());
-    if (serverLogs.length > 200) {
-      serverLogs.shift();
-    }
-  });
+  if (!verbose) {
+    childProcess.stdout.on("data", (chunk) => {
+      serverLogs.push(chunk.toString());
+      if (serverLogs.length > 200) {
+        serverLogs.shift();
+      }
+    });
 
-  childProcess.stderr.on("data", (chunk) => {
-    serverLogs.push(chunk.toString());
-    if (serverLogs.length > 200) {
-      serverLogs.shift();
-    }
-  });
+    childProcess.stderr.on("data", (chunk) => {
+      serverLogs.push(chunk.toString());
+      if (serverLogs.length > 200) {
+        serverLogs.shift();
+      }
+    });
+  }
 
   return {
     childProcess,
@@ -243,6 +274,7 @@ export function createIntegrationTestContext(options = {}) {
   const serverOptions = options.serverOptions ?? {};
   const hasServerOptions = Object.keys(serverOptions).length > 0;
   const useDb = options.useDb !== false;
+  const forceLocal = options.forceLocalServer === true;
 
   let db = options.dbPool ?? null;
   let manageDb = useDb && !options.dbPool;
@@ -255,11 +287,29 @@ export function createIntegrationTestContext(options = {}) {
       loadEnvIfPresent();
 
       const externalBaseUrl = process.env.JP_TEST_BASE_URL;
-      const allowExternal = Boolean(externalBaseUrl) && !hasServerOptions && options.forceLocalServer !== true;
+      const allowExternal = Boolean(externalBaseUrl) && !hasServerOptions && !forceLocal;
+
+      // Auto-detect if API is already running on default port
+      const autoDetectRunning = !forceLocal && !hasServerOptions && !externalBaseUrl;
+      let useExistingServer = false;
+
+      if (autoDetectRunning) {
+        const running = await isPortListening(DEFAULT_API_PORT);
+        if (running) {
+          console.log(`[integration] Using existing dev server at http://127.0.0.1:${DEFAULT_API_PORT}`);
+          baseUrl = `http://127.0.0.1:${DEFAULT_API_PORT}`;
+          useExistingServer = true;
+          isExternal = true;
+        }
+      }
 
       if (useDb && !db) {
         db = createDbPool(options.dbPoolOptions ?? {});
         manageDb = true;
+      }
+
+      if (useExistingServer) {
+        return;
       }
 
       if (allowExternal) {
