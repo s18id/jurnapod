@@ -31,11 +31,12 @@ import {
   IconUpload,
   IconPlus,
   IconTrash,
-  IconSearch,
-  IconArrowRight
+  IconSearch
 } from "@tabler/icons-react";
 import type { SessionUser } from "../lib/session";
 import { apiRequest, ApiError } from "../lib/api-client";
+import { ImportStepBadges } from "../components/import-step-badges";
+import { readImportFile } from "../lib/import/delimited";
 import { useOnlineStatus } from "../lib/connection";
 import { OfflinePage } from "../components/offline-page";
 import {
@@ -225,11 +226,9 @@ export function SuppliesPage(props: SuppliesPageProps) {
   }
 
   function handleFileSelect(file: File | null) {
-    if (file) {
-      file.text().then((text) => {
-        setImportText(text);
-      });
-    }
+    readImportFile(file).then((text) => {
+      if (text) setImportText(text);
+    });
   }
 
   function processImportText() {
@@ -493,15 +492,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
           size="lg"
         >
           <Stack>
-            <Group gap="xs">
-              <Badge color={importStep === "source" ? "blue" : "green"}>1. Source</Badge>
-              <IconArrowRight size={14} />
-              <Badge color={importStep === "preview" ? "blue" : importStep === "apply" ? "green" : "gray"}>
-                2. Preview
-              </Badge>
-              <IconArrowRight size={14} />
-              <Badge color={importStep === "apply" ? "blue" : "gray"}>3. Apply</Badge>
-            </Group>
+            <ImportStepBadges step={importStep} />
 
             <Divider />
 

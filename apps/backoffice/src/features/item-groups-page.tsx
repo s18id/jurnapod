@@ -27,7 +27,9 @@ import { useDisclosure } from "@mantine/hooks";
 import { IconUpload, IconPlus, IconDownload } from "@tabler/icons-react";
 import { apiRequest, ApiError } from "../lib/api-client";
 import { CacheService, buildCacheKey } from "../lib/cache-service";
+import { readImportFile } from "../lib/import/delimited";
 import { useOnlineStatus } from "../lib/connection";
+import { ImportStepBadges } from "../components/import-step-badges";
 import { StaleDataWarning } from "../components/stale-data-warning";
 import { OfflinePage } from "../components/offline-page";
 import type { SessionUser } from "../lib/session";
@@ -340,11 +342,9 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
   }
 
   function handleFileSelect(file: File | null) {
-    if (file) {
-      file.text().then((text) => {
-        setImportText(text);
-      });
-    }
+    readImportFile(file).then((text) => {
+      if (text) setImportText(text);
+    });
   }
 
   function processImportText() {
@@ -815,11 +815,7 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
           centered
         >
           <Stack>
-            <Group gap="sm">
-              <Badge color={importStep === "source" ? "blue" : "green"}>1. Source</Badge>
-              <Badge color={importStep === "preview" ? "blue" : importStep === "apply" ? "green" : "gray"}>2. Preview</Badge>
-              <Badge color={importStep === "apply" ? "blue" : "gray"}>3. Apply</Badge>
-            </Group>
+            <ImportStepBadges step={importStep} />
 
             {importStep === "source" && (
               <Stack>
