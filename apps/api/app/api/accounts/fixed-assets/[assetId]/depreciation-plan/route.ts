@@ -8,6 +8,7 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
+import { checkUserAccess } from "../../../../../../src/lib/auth";
 import { errorResponse, successResponse } from "../../../../../../src/lib/response";
 import {
   createDepreciationPlan,
@@ -18,6 +19,7 @@ import {
   getDepreciationPlanForFixedAsset,
   updateDepreciationPlan
 } from "../../../../../../src/lib/depreciation";
+import { findFixedAssetById } from "../../../../../../src/lib/master-data";
 
 function parseAssetId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -29,6 +31,23 @@ export const GET = withAuth(
   async (request, auth) => {
     try {
       const assetId = parseAssetId(request);
+      const asset = await findFixedAssetById(auth.companyId, assetId);
+
+      if (!asset) {
+        return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
+      }
+
+      if (asset.outlet_id != null) {
+        const access = await checkUserAccess({
+          userId: auth.userId,
+          companyId: auth.companyId,
+          outletId: asset.outlet_id
+        });
+        if (!access || (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin)) {
+          return errorResponse("NOT_FOUND", "Depreciation plan not found", 404);
+        }
+      }
+
       const plan = await getDepreciationPlanForFixedAsset(auth.companyId, assetId);
 
       return successResponse(plan);

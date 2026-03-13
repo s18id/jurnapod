@@ -191,6 +191,25 @@ async function ensureUserHasOutletAccess(
   }
 }
 
+async function ensureCompanyAccountExists(
+  executor: QueryExecutor,
+  companyId: number,
+  accountId: number
+): Promise<void> {
+  const [rows] = await executor.execute<RowDataPacket[]>(
+    `SELECT id
+     FROM accounts
+     WHERE id = ?
+       AND company_id = ?
+     LIMIT 1`,
+    [accountId, companyId]
+  );
+
+  if (rows.length === 0) {
+    throw new DatabaseReferenceError("Account not found for company");
+  }
+}
+
 async function findFixedAssetWithExecutor(
   executor: QueryExecutor,
   companyId: number,
@@ -405,6 +424,9 @@ export async function createDepreciationPlan(
       throw new DatabaseReferenceError("FixedAsset not found");
     }
 
+    await ensureCompanyAccountExists(connection, companyId, input.expense_account_id);
+    await ensureCompanyAccountExists(connection, companyId, input.accum_depr_account_id);
+
     const outletId =
       typeof input.outlet_id === "number"
         ? input.outlet_id
@@ -548,11 +570,13 @@ export async function updateDepreciationPlan(
     }
 
     if (typeof input.expense_account_id === "number") {
+      await ensureCompanyAccountExists(connection, companyId, input.expense_account_id);
       fields.push("expense_account_id = ?");
       values.push(input.expense_account_id);
     }
 
     if (typeof input.accum_depr_account_id === "number") {
+      await ensureCompanyAccountExists(connection, companyId, input.accum_depr_account_id);
       fields.push("accum_depr_account_id = ?");
       values.push(input.accum_depr_account_id);
     }
