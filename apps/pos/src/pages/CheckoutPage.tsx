@@ -25,7 +25,8 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
     hasProductCache,
     cartLines,
     cartTotals,
-    setPaidAmount,
+    payments,
+    setPayments,
     resetCartStatePreserveOrderStatus,
     activeOrderContext,
     setOrderStatus,
@@ -73,7 +74,32 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
     [context.runtime]
   );
 
-  const { paymentMethod, setPaymentMethod, paymentMethodAllowed, canCompleteSale, completeInFlight, lastCompleteMessage, runCompleteSale } = useCheckout({
+  useEffect(() => {
+    if (checkoutConfig.payment_methods.length === 0) {
+      return;
+    }
+
+    if (payments.length === 0) {
+      return;
+    }
+
+    const nextPayments = payments.map((payment) => {
+      if (checkoutRuntime.isPaymentMethodAllowed(payment.method, checkoutConfig.payment_methods)) {
+        return payment;
+      }
+      return {
+        ...payment,
+        method: checkoutRuntime.resolvePaymentMethod(payment.method, checkoutConfig.payment_methods)
+      };
+    });
+
+    const hasChanged = nextPayments.some((p, i) => p.method !== payments[i]?.method);
+    if (hasChanged) {
+      setPayments(nextPayments);
+    }
+  }, [checkoutConfig.payment_methods, checkoutRuntime, payments, setPayments]);
+
+  const { canCompleteSale, completeInFlight, lastCompleteMessage, runCompleteSale } = useCheckout({
     scope,
     activeOrderContext,
     requestPush: context.orchestrator.requestPush.bind(context.orchestrator),
@@ -84,7 +110,8 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
   const offlineCacheMissing = syncBadgeState === "Offline" && !hasProductCache;
   const dineInTableMissing = activeOrderContext.service_type === "DINE_IN" && !activeOrderContext.table_id;
   const orderNotFinalized = !activeOrderContext.kitchen_sent;
-  const canComplete = !configLoading && !offlineCacheMissing && !dineInTableMissing && !orderNotFinalized && canCompleteSale(cartLines, cartTotals);
+  const allPaymentMethodsAllowed = payments.length === 0 || payments.every((p) => checkoutRuntime.isPaymentMethodAllowed(p.method, checkoutConfig.payment_methods));
+  const canComplete = !configLoading && !offlineCacheMissing && !dineInTableMissing && !orderNotFinalized && canCompleteSale(cartLines, cartTotals) && allPaymentMethodsAllowed;
 
   return (
     <main
@@ -205,16 +232,31 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
           </p>
         ) : null}
 
+        {!allPaymentMethodsAllowed && payments.length > 0 ? (
+          <p
+            role="alert"
+            style={{
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 10,
+              background: "#fef2f2",
+              border: "1px solid #fecaca",
+              color: "#991b1b",
+              fontWeight: 600
+            }}
+          >
+            One or more selected payment methods are not allowed for this outlet. They will be corrected automatically.
+          </p>
+        ) : null}
+
         <CheckoutForm
-          paymentMethod={paymentMethod}
           paymentMethods={checkoutConfig.payment_methods}
           taxConfig={checkoutConfig.tax}
           totals={cartTotals}
-          paymentMethodAllowed={paymentMethodAllowed}
           canComplete={canComplete}
           completeInFlight={completeInFlight}
-          onPaymentMethodChange={setPaymentMethod}
-          onPaidAmountChange={(amount) => setPaidAmount(normalizeMoney(amount))}
+          payments={payments}
+          onPaymentsChange={setPayments}
           onComplete={() => {
               const clearOrderContext = async () => {
                 const sessionResult = await context.runtime.completeOrderSession(scope, {
@@ -247,8 +289,8 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
                 resetCartStatePreserveOrderStatus();
               };
 
-            void runCompleteSale(cartLines, cartTotals, {
-              setPaidAmount,
+            void runCompleteSale(cartLines, cartTotals, payments, {
+              setPayments,
               onAfterSaleCommit: clearOrderContext
             });
           }}

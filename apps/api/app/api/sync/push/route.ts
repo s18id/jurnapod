@@ -33,6 +33,7 @@ const SYNC_PUSH_POSTING_HOOK_FAIL_AUDIT_ACTION = "SYNC_PUSH_POSTING_HOOK_FAIL";
 const IDEMPOTENCY_CONFLICT_MESSAGE = "IDEMPOTENCY_CONFLICT";
 const RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE = "RETRYABLE_DB_LOCK_TIMEOUT";
 const RETRYABLE_DB_DEADLOCK_MESSAGE = "RETRYABLE_DB_DEADLOCK";
+const CASHIER_USER_ID_MISMATCH_MESSAGE = "cashier_user_id mismatch";
 const TEST_FAIL_AFTER_HEADER_INSERT_HEADER = "x-jp-sync-push-fail-after-header";
 const TEST_FORCE_DB_ERRNO_HEADER = "x-jp-sync-push-force-db-errno";
 const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
@@ -49,6 +50,10 @@ type MysqlError = {
 };
 
 type SyncPushResultCode = "OK" | "DUPLICATE" | "ERROR";
+
+type IdempotencyReplayOutcome =
+  | { client_tx_id: string; result: "DUPLICATE" }
+  | { client_tx_id: string; result: "ERROR"; message: string };
 
 type SyncPushTaxContext = {
   defaultTaxRates: TaxRateRecord[];
@@ -470,6 +475,107 @@ type IndexedTransaction = {
   txIndex: number;
 };
 
+async function isCashierInCompany(
+  dbExecutor: QueryExecutor,
+  companyId: number,
+  cashierUserId: number
+): Promise<boolean> {
+  const [rows] = await dbExecutor.execute(
+    `SELECT 1
+     FROM users u
+     WHERE u.id = ?
+       AND u.company_id = ?
+     LIMIT 1`,
+    [cashierUserId, companyId]
+  );
+
+  return (rows as Array<unknown>).length > 0;
+}
+
+async function resolveIdempotencyReplayOutcome(
+  orderDbConnection: PoolConnection,
+  existingRecord: ExistingIdempotencyRecord,
+  tx: SyncPushTransactionPayload,
+  payloadSha256: string,
+  payloadSha256Legacy: string,
+  authUserId: number,
+  correlationId: string
+): Promise<IdempotencyReplayOutcome> {
+  const existingHashVersion = existingRecord.payloadHashVersion ?? 1;
+  const normalizedExistingHash = existingRecord.payloadSha256?.trim() ?? "";
+
+  if (normalizedExistingHash.length === 0) {
+    const legacyReplayMatch = await doesLegacyPayloadReplayMatch(orderDbConnection, existingRecord.posTransactionId, tx);
+    if (!legacyReplayMatch) {
+      return {
+        client_tx_id: tx.client_tx_id,
+        result: "ERROR",
+        message: IDEMPOTENCY_CONFLICT_MESSAGE
+      };
+    }
+
+    await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
+      authUserId,
+      correlationId,
+      companyId: tx.company_id,
+      outletId: tx.outlet_id,
+      clientTxId: tx.client_tx_id,
+      posTransactionId: existingRecord.posTransactionId
+    });
+    return { client_tx_id: tx.client_tx_id, result: "DUPLICATE" };
+  }
+
+  if (normalizedExistingHash === payloadSha256) {
+    await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
+      authUserId,
+      correlationId,
+      companyId: tx.company_id,
+      outletId: tx.outlet_id,
+      clientTxId: tx.client_tx_id,
+      posTransactionId: existingRecord.posTransactionId
+    });
+    return { client_tx_id: tx.client_tx_id, result: "DUPLICATE" };
+  }
+
+  if (existingHashVersion <= 1 && normalizedExistingHash === payloadSha256Legacy) {
+    await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
+      authUserId,
+      correlationId,
+      companyId: tx.company_id,
+      outletId: tx.outlet_id,
+      clientTxId: tx.client_tx_id,
+      posTransactionId: existingRecord.posTransactionId
+    });
+    return { client_tx_id: tx.client_tx_id, result: "DUPLICATE" };
+  }
+
+  if (existingHashVersion <= 1) {
+    const legacyReplayMatch = await doesLegacyV1HashMismatchReplayMatch(
+      orderDbConnection,
+      existingRecord.posTransactionId,
+      normalizedExistingHash,
+      tx
+    );
+    if (legacyReplayMatch) {
+      await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
+        authUserId,
+        correlationId,
+        companyId: tx.company_id,
+        outletId: tx.outlet_id,
+        clientTxId: tx.client_tx_id,
+        posTransactionId: existingRecord.posTransactionId
+      });
+      return { client_tx_id: tx.client_tx_id, result: "DUPLICATE" };
+    }
+  }
+
+  return {
+    client_tx_id: tx.client_tx_id,
+    result: "ERROR",
+    message: IDEMPOTENCY_CONFLICT_MESSAGE
+  };
+}
+
 function buildTransactionBatches(
   transactions: SyncPushTransactionPayload[],
   maxConcurrency: number
@@ -542,6 +648,32 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
     const payloadSha256 = computePayloadSha256(canonicalizeTransactionForHash(tx));
     const payloadSha256Legacy = computePayloadSha256(canonicalizeTransactionForLegacyHash(tx));
     let acceptedContextForFailureAudit: AcceptedSyncPushContext | null = null;
+
+    const existingRecord = await readExistingIdempotencyRecordByClientTxId(orderDbConnection, tx.company_id, tx.client_tx_id);
+    if (existingRecord) {
+      const outcome = await resolveIdempotencyReplayOutcome(
+        orderDbConnection,
+        existingRecord,
+        tx,
+        payloadSha256,
+        payloadSha256Legacy,
+        authUserId,
+        correlationId
+      );
+      if (outcome.result === "DUPLICATE") {
+        logTransactionResult("DUPLICATE");
+      } else {
+        logTransactionResult("ERROR");
+      }
+      return outcome;
+    }
+
+    const cashierInCompany = await isCashierInCompany(orderDbConnection, tx.company_id, tx.cashier_user_id);
+    if (!cashierInCompany) {
+      const result = toErrorResult(tx.client_tx_id, CASHIER_USER_ID_MISMATCH_MESSAGE);
+      logTransactionResult("ERROR");
+      return result;
+    }
 
     try {
       await orderDbConnection.beginTransaction();
@@ -749,97 +881,28 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       if (isClientTxIdDuplicateError(error)) {
         await rollbackQuietly(orderDbConnection);
 
-        const existingRecord = await readExistingIdempotencyRecordByClientTxId(orderDbConnection, tx.client_tx_id);
+        const existingRecord = await readExistingIdempotencyRecordByClientTxId(orderDbConnection, tx.company_id, tx.client_tx_id);
         if (!existingRecord) {
           const result = toErrorResult(tx.client_tx_id, RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE);
           logTransactionResult("ERROR");
           return result;
         }
 
-        const existingHashVersion = existingRecord.payloadHashVersion ?? 1;
-        const normalizedExistingHash = existingRecord.payloadSha256?.trim() ?? "";
-        if (normalizedExistingHash.length === 0) {
-          const legacyReplayMatch = await doesLegacyPayloadReplayMatch(orderDbConnection, existingRecord.posTransactionId, tx);
-          if (!legacyReplayMatch) {
-            const result = toErrorResult(tx.client_tx_id, IDEMPOTENCY_CONFLICT_MESSAGE);
-            logTransactionResult("ERROR");
-            return result;
-          }
-
-          await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
-            authUserId,
-            correlationId,
-            companyId: tx.company_id,
-            outletId: tx.outlet_id,
-            clientTxId: tx.client_tx_id,
-            posTransactionId: existingRecord.posTransactionId
-          });
+        const outcome = await resolveIdempotencyReplayOutcome(
+          orderDbConnection,
+          existingRecord,
+          tx,
+          payloadSha256,
+          payloadSha256Legacy,
+          authUserId,
+          correlationId
+        );
+        if (outcome.result === "DUPLICATE") {
           logTransactionResult("DUPLICATE");
-          return {
-            client_tx_id: tx.client_tx_id,
-            result: "DUPLICATE"
-          };
+        } else {
+          logTransactionResult("ERROR");
         }
-
-        if (normalizedExistingHash === payloadSha256) {
-          await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
-            authUserId,
-            correlationId,
-            companyId: tx.company_id,
-            outletId: tx.outlet_id,
-            clientTxId: tx.client_tx_id,
-            posTransactionId: existingRecord.posTransactionId
-          });
-          logTransactionResult("DUPLICATE");
-          return {
-            client_tx_id: tx.client_tx_id,
-            result: "DUPLICATE"
-          };
-        }
-
-        if (existingHashVersion <= 1 && normalizedExistingHash === payloadSha256Legacy) {
-          await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
-            authUserId,
-            correlationId,
-            companyId: tx.company_id,
-            outletId: tx.outlet_id,
-            clientTxId: tx.client_tx_id,
-            posTransactionId: existingRecord.posTransactionId
-          });
-          logTransactionResult("DUPLICATE");
-          return {
-            client_tx_id: tx.client_tx_id,
-            result: "DUPLICATE"
-          };
-        }
-
-        if (existingHashVersion <= 1) {
-          const legacyReplayMatch = await doesLegacyV1HashMismatchReplayMatch(
-            orderDbConnection,
-            existingRecord.posTransactionId,
-            normalizedExistingHash,
-            tx
-          );
-          if (legacyReplayMatch) {
-            await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
-              authUserId,
-              correlationId,
-              companyId: tx.company_id,
-              outletId: tx.outlet_id,
-              clientTxId: tx.client_tx_id,
-              posTransactionId: existingRecord.posTransactionId
-            });
-            logTransactionResult("DUPLICATE");
-            return {
-              client_tx_id: tx.client_tx_id,
-              result: "DUPLICATE"
-            };
-          }
-        }
-
-        const result = toErrorResult(tx.client_tx_id, IDEMPOTENCY_CONFLICT_MESSAGE);
-        logTransactionResult("ERROR");
-        return result;
+        return outcome;
       }
 
       if (isRetryableMysqlError(error)) {
@@ -847,6 +910,16 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
         const result = toErrorResult(tx.client_tx_id, toRetryableDbErrorMessage(error));
         logTransactionResult("ERROR");
         return result;
+      }
+
+      if (isMysqlError(error) && error.errno === 1452) {
+        const sqlMessage = error.sqlMessage ?? "";
+        if (sqlMessage.includes("fk_pos_transactions_cashier_user") || sqlMessage.includes("cashier_user_id")) {
+          await rollbackQuietly(orderDbConnection);
+          const result = toErrorResult(tx.client_tx_id, CASHIER_USER_ID_MISMATCH_MESSAGE);
+          logTransactionResult("ERROR");
+          return result;
+        }
       }
 
       await rollbackQuietly(orderDbConnection);
@@ -883,14 +956,15 @@ async function rollbackQuietly(orderDbConnection: PoolConnection): Promise<void>
 
 async function readExistingIdempotencyRecordByClientTxId(
   orderDbConnection: PoolConnection,
+  companyId: number,
   clientTxId: string
 ): Promise<ExistingIdempotencyRecord | null> {
   const [rows] = await orderDbConnection.execute(
     `SELECT id, payload_sha256, payload_hash_version
      FROM pos_transactions
-     WHERE client_tx_id = ?
+     WHERE company_id = ? AND client_tx_id = ?
      LIMIT 1`,
-    [clientTxId]
+    [companyId, clientTxId]
   );
 
   const row = (rows as Array<{ id?: number; payload_sha256?: string | null; payload_hash_version?: number | null }>)[0];
@@ -1075,17 +1149,21 @@ async function runAcceptedSyncPushHook(
 
 async function readAcceptedPostingAuditMetadata(
   dbExecutor: QueryExecutor,
+  companyId: number,
+  outletId: number,
   clientTxId: string
 ): Promise<PostingAuditMetadata> {
   const [rows] = await dbExecutor.execute(
     `SELECT payload_json
      FROM audit_logs
-     WHERE action = ?
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND action = ?
        AND result = 'SUCCESS'
        AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
      ORDER BY id DESC
      LIMIT 1`,
-    [SYNC_PUSH_ACCEPTED_AUDIT_ACTION, clientTxId]
+    [companyId, outletId, SYNC_PUSH_ACCEPTED_AUDIT_ACTION, clientTxId]
   );
 
   const row = (rows as Array<{ payload_json?: string | null }>)[0];
@@ -1156,7 +1234,7 @@ async function recordSyncPushDuplicateReplayAudit(
     posTransactionId: number;
   }
 ): Promise<void> {
-  const metadata = await readAcceptedPostingAuditMetadata(dbExecutor, params.clientTxId);
+  const metadata = await readAcceptedPostingAuditMetadata(dbExecutor, params.companyId, params.outletId, params.clientTxId);
   const fallbackJournalBatchId = await readJournalBatchIdByPosTransactionId(dbExecutor, params.posTransactionId);
   const journalBatchId = metadata.journalBatchId ?? fallbackJournalBatchId;
 

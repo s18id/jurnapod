@@ -47,7 +47,7 @@ export function AppLayout({ children, cartItemCount, context }: AppLayoutProps):
     syncBadgeState,
     pendingOutboxCount,
     clearCart,
-    setPaidAmount,
+    setPayments,
     activeOrderContext,
     outletReservations,
     activeReservationId,
@@ -290,7 +290,7 @@ export function AppLayout({ children, cartItemCount, context }: AppLayoutProps):
                     outlet_id: nextOutletId
                   });
                   clearCart();
-                  setPaidAmount(0);
+                  setPayments([]);
                   setOutletTables([]);
                   setOutletReservations([]);
                   setActiveReservationId(null);

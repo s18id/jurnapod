@@ -29,8 +29,8 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     cartLines,
     cartTotals,
     upsertCartLine,
-    paidAmount,
-    setPaidAmount,
+    payments,
+    setPayments,
     activeOrderContext,
     setServiceType,
     setOrderReservationId,
@@ -150,8 +150,9 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
 
     setDineInGuardMessage(null);
     upsertCartLine(product, { qty: (cart[product.item_id]?.qty ?? 0) + 1 });
-    if (paidAmount <= 0) {
-      setPaidAmount(product.price_snapshot);
+    if (payments.length === 0 || payments[0].amount === 0) {
+      const fallbackMethod = payments[0]?.method ?? "";
+      setPayments([{ method: fallbackMethod, amount: product.price_snapshot }]);
     }
   };
 

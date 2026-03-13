@@ -3,7 +3,7 @@
 
 import React, { useCallback, useMemo } from "react";
 import type { RuntimeProductCatalogItem } from "../../services/runtime-service.js";
-import { normalizeMoney, computeCartTotals, type CartTotals } from "../../shared/utils/money.js";
+import { normalizeMoney, computeCartTotals, type CartTotals, type PaymentEntry } from "../../shared/utils/money.js";
 
 export type OrderServiceType = "TAKEAWAY" | "DINE_IN";
 
@@ -36,7 +36,7 @@ function cartToList(cart: CartState): CartLineState[] {
 
 export interface UseCartOptions {
   initialCart?: CartState;
-  paidAmount?: number;
+  payments?: PaymentEntry[];
   activeOrderContext?: ActiveOrderContextState;
 }
 
@@ -46,8 +46,8 @@ export interface UseCartReturn {
   cartTotals: CartTotals;
   upsertCartLine: (product: RuntimeProductCatalogItem, patch: Partial<Pick<CartLineState, "qty" | "discount_amount">>) => void;
   clearCart: () => void;
-  setPaidAmount: (amount: number) => void;
-  paidAmount: number;
+  setPayments: (payments: PaymentEntry[]) => void;
+  payments: PaymentEntry[];
   activeOrderContext: ActiveOrderContextState;
   setServiceType: (serviceType: OrderServiceType) => void;
   setActiveTableId: (tableId: number | null) => void;
@@ -58,7 +58,7 @@ export interface UseCartReturn {
   setOrderFinalized: (isFinalized: boolean) => void;
   hydrateOrder: (input: {
     cart: CartState;
-    paidAmount: number;
+    payments: PaymentEntry[];
     activeOrderContext: ActiveOrderContextState;
   }) => void;
 }
@@ -83,11 +83,11 @@ function createDefaultActiveOrderContext(): ActiveOrderContextState {
 
 export function useCart({
   initialCart = {},
-  paidAmount: initialPaidAmount = 0,
+  payments: initialPayments = [],
   activeOrderContext: initialOrderContext = createDefaultActiveOrderContext()
 }: UseCartOptions = {}): UseCartReturn {
   const [cart, setCart] = React.useState<CartState>(initialCart);
-  const [paidAmount, setPaidAmount] = React.useState<number>(initialPaidAmount);
+  const [payments, setPayments] = React.useState<PaymentEntry[]>(initialPayments);
   const [activeOrderContext, setActiveOrderContext] = React.useState<ActiveOrderContextState>(initialOrderContext);
 
   const upsertCartLine = useCallback(
@@ -132,7 +132,7 @@ export function useCart({
 
   const clearCart = useCallback(() => {
     setCart({});
-    setPaidAmount(0);
+    setPayments([]);
     setActiveOrderContext(createDefaultActiveOrderContext());
   }, []);
 
@@ -210,16 +210,16 @@ export function useCart({
 
   const hydrateOrder = useCallback((input: {
     cart: CartState;
-    paidAmount: number;
+    payments: PaymentEntry[];
     activeOrderContext: ActiveOrderContextState;
   }) => {
     setCart(input.cart);
-    setPaidAmount(input.paidAmount);
+    setPayments(input.payments);
     setActiveOrderContext(input.activeOrderContext);
   }, []);
 
   const cartLines = useMemo(() => cartToList(cart), [cart]);
-  const cartTotals = useMemo(() => computeCartTotals(cartLines, paidAmount), [cartLines, paidAmount]);
+  const cartTotals = useMemo(() => computeCartTotals(cartLines, payments), [cartLines, payments]);
 
   return {
     cart,
@@ -227,8 +227,8 @@ export function useCart({
     cartTotals,
     upsertCartLine,
     clearCart,
-    setPaidAmount,
-    paidAmount,
+    setPayments,
+    payments,
     activeOrderContext,
     setServiceType,
     setActiveTableId,
