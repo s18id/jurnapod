@@ -22,7 +22,54 @@ CREATE TABLE IF NOT EXISTS fixed_asset_categories (
   CONSTRAINT fk_fixed_asset_categories_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB;
 
-ALTER TABLE fixed_assets
-  ADD COLUMN category_id BIGINT UNSIGNED DEFAULT NULL AFTER outlet_id,
-  ADD KEY idx_fixed_assets_company_category (company_id, category_id),
-  ADD CONSTRAINT fk_fixed_assets_category FOREIGN KEY (category_id) REFERENCES fixed_asset_categories(id) ON DELETE SET NULL;
+SET @category_column_exists := (
+  SELECT COUNT(*) > 0
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'fixed_assets'
+    AND COLUMN_NAME = 'category_id'
+);
+
+SET @category_key_exists := (
+  SELECT COUNT(*) > 0
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'fixed_assets'
+    AND INDEX_NAME = 'idx_fixed_assets_company_category'
+);
+
+SET @category_fk_exists := (
+  SELECT COUNT(*) > 0
+  FROM information_schema.TABLE_CONSTRAINTS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'fixed_assets'
+    AND CONSTRAINT_NAME = 'fk_fixed_assets_category'
+    AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+);
+
+SET @add_column_sql := IF(
+  @category_column_exists = 0,
+  'ALTER TABLE fixed_assets ADD COLUMN category_id BIGINT UNSIGNED DEFAULT NULL AFTER outlet_id',
+  'SELECT ''Column already exists'''
+);
+PREPARE add_column_stmt FROM @add_column_sql;
+EXECUTE add_column_stmt;
+DEALLOCATE PREPARE add_column_stmt;
+
+SET @add_key_sql := IF(
+  @category_key_exists = 0,
+  'ALTER TABLE fixed_assets ADD KEY idx_fixed_assets_company_category (company_id, category_id)',
+  'SELECT ''Key already exists'''
+);
+PREPARE add_key_stmt FROM @add_key_sql;
+EXECUTE add_key_stmt;
+DEALLOCATE PREPARE add_key_stmt;
+
+SET @add_fk_sql := IF(
+  @category_fk_exists = 0,
+  'ALTER TABLE fixed_assets ADD CONSTRAINT fk_fixed_assets_category FOREIGN KEY (category_id) REFERENCES fixed_asset_categories(id) ON DELETE SET NULL',
+  'SELECT ''Foreign key already exists'''
+);
+PREPARE add_fk_stmt FROM @add_fk_sql;
+EXECUTE add_fk_stmt;
+DEALLOCATE PREPARE add_fk_stmt;

@@ -7,6 +7,7 @@ import {
 } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
+import { checkUserAccess, listUserOutletIds } from "../../../../src/lib/auth";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createFixedAsset,
@@ -47,6 +48,28 @@ export const GET = withAuth(
 
       const outletId = outletIdRaw == null ? undefined : NumericIdSchema.parse(outletIdRaw);
       const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
+
+      if (outletId != null) {
+        const access = await checkUserAccess({
+          userId: auth.userId,
+          companyId: auth.companyId,
+          outletId
+        });
+        if (!access || (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin)) {
+          return errorResponse("FORBIDDEN", "Outlet access denied", 403);
+        }
+      } else {
+        const access = await checkUserAccess({
+          userId: auth.userId,
+          companyId: auth.companyId
+        });
+        if (!access || (!access.hasGlobalRole && !access.isSuperAdmin)) {
+          const allowedOutletIds = await listUserOutletIds(auth.userId, auth.companyId);
+          const assets = await listFixedAssets(auth.companyId, { isActive, allowedOutletIds });
+          return successResponse(assets);
+        }
+      }
+
       const assets = await listFixedAssets(auth.companyId, { outletId, isActive });
 
       return successResponse(assets);

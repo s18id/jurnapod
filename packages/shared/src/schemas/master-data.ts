@@ -149,13 +149,13 @@ export const FixedAssetCreateRequestSchema = z.object({
 
 export const FixedAssetUpdateRequestSchema = z
   .object({
-    asset_tag: optionalShortTextSchema(64),
+    asset_tag: optionalShortTextSchema(64).optional(),
     name: z.string().trim().min(1).max(191).optional(),
-    serial_number: optionalShortTextSchema(128),
-    outlet_id: NumericIdSchema.optional(),
-    category_id: NumericIdSchema.optional(),
-    purchase_date: z.string().trim().min(1).optional(),
-    purchase_cost: z.coerce.number().finite().nonnegative().optional(),
+    serial_number: optionalShortTextSchema(128).optional(),
+    outlet_id: NumericIdSchema.nullable().optional(),
+    category_id: NumericIdSchema.nullable().optional(),
+    purchase_date: z.string().trim().min(1).nullable().optional(),
+    purchase_cost: z.coerce.number().finite().nonnegative().nullable().optional(),
     is_active: z.boolean().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {

@@ -1803,7 +1803,7 @@ export async function deleteFixedAssetCategory(
 
 export async function listFixedAssets(
   companyId: number,
-  filters?: { outletId?: number; isActive?: boolean }
+  filters?: { outletId?: number; isActive?: boolean; allowedOutletIds?: number[] }
 ) {
   const pool = getDbPool();
   const values: Array<number> = [companyId];
@@ -1814,6 +1814,16 @@ export async function listFixedAssets(
   if (typeof filters?.outletId === "number") {
     sql += " AND outlet_id = ?";
     values.push(filters.outletId);
+  }
+
+  if (filters?.allowedOutletIds !== undefined) {
+    if (filters.allowedOutletIds.length > 0) {
+      const placeholders = filters.allowedOutletIds.map(() => "?").join(", ");
+      sql += ` AND (outlet_id IS NULL OR outlet_id IN (${placeholders}))`;
+      values.push(...filters.allowedOutletIds);
+    } else {
+      sql += " AND outlet_id IS NULL";
+    }
   }
 
   if (typeof filters?.isActive === "boolean") {

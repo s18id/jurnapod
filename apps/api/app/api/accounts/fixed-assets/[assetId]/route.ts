@@ -4,6 +4,7 @@
 import { FixedAssetUpdateRequestSchema, NumericIdSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
+import { checkUserAccess } from "../../../../../src/lib/auth";
 import { errorResponse, successResponse } from "../../../../../src/lib/response";
 import {
   DatabaseConflictError,
@@ -29,6 +30,17 @@ export const GET = withAuth(
         return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
       }
 
+      if (asset.outlet_id != null) {
+        const access = await checkUserAccess({
+          userId: auth.userId,
+          companyId: auth.companyId,
+          outletId: asset.outlet_id
+        });
+        if (!access || (!access.hasOutletAccess && !access.hasGlobalRole && !access.isSuperAdmin)) {
+          return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
+        }
+      }
+
       return successResponse(asset);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -49,16 +61,18 @@ export const PATCH = withAuth(
       const payload = await request.json();
       const input = FixedAssetUpdateRequestSchema.parse(payload);
 
-      const asset = await updateFixedAsset(auth.companyId, assetId, {
-        outlet_id: input.outlet_id ?? null,
-        category_id: input.category_id ?? null,
-        asset_tag: input.asset_tag,
-        name: input.name,
-        serial_number: input.serial_number,
-        purchase_date: input.purchase_date ?? null,
-        purchase_cost: input.purchase_cost ?? null,
-        is_active: input.is_active
-      }, {
+      const updateInput: Parameters<typeof updateFixedAsset>[2] = {};
+
+      if (Object.hasOwn(input, "outlet_id")) updateInput.outlet_id = input.outlet_id ?? null;
+      if (Object.hasOwn(input, "category_id")) updateInput.category_id = input.category_id ?? null;
+      if (Object.hasOwn(input, "asset_tag")) updateInput.asset_tag = input.asset_tag ?? null;
+      if (Object.hasOwn(input, "name")) updateInput.name = input.name;
+      if (Object.hasOwn(input, "serial_number")) updateInput.serial_number = input.serial_number ?? null;
+      if (Object.hasOwn(input, "purchase_date")) updateInput.purchase_date = input.purchase_date ?? null;
+      if (Object.hasOwn(input, "purchase_cost")) updateInput.purchase_cost = input.purchase_cost ?? null;
+      if (Object.hasOwn(input, "is_active")) updateInput.is_active = input.is_active;
+
+      const asset = await updateFixedAsset(auth.companyId, assetId, updateInput, {
         userId: auth.userId
       });
 
