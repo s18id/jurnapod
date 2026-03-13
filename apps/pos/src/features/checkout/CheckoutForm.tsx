@@ -11,31 +11,25 @@ import type { CartTotals, PaymentEntry } from "../../shared/utils/money.js";
 import { normalizeMoney } from "../../shared/utils/money.js";
 
 export interface CheckoutFormProps {
-  paymentMethod: string;
   paymentMethods: string[];
   taxConfig: {
     rate: number;
     inclusive: boolean;
   };
   totals: CartTotals;
-  paymentMethodAllowed: boolean;
   canComplete: boolean;
   completeInFlight: boolean;
-  onPaymentMethodChange: (method: string) => void;
   payments: PaymentEntry[];
   onPaymentsChange: (payments: PaymentEntry[]) => void;
   onComplete: () => void;
 }
 
 export function CheckoutForm({
-  paymentMethod,
   paymentMethods,
   taxConfig,
   totals,
-  paymentMethodAllowed,
   canComplete,
   completeInFlight,
-  onPaymentMethodChange,
   payments,
   onPaymentsChange,
   onComplete
@@ -134,6 +128,9 @@ export function CheckoutForm({
       <QuickAmountButtons 
         total={remainingAmount > 0 ? remainingAmount : totals.grand_total} 
         onSelectAmount={(amount) => {
+          if (payments.length === 0) {
+            return;
+          }
           if (remainingAmount > 0 && amount >= remainingAmount) {
             handlePayRemaining();
           } else {
@@ -149,12 +146,6 @@ export function CheckoutForm({
           Overpayment: Rp {normalizeMoney(-remainingAmount).toLocaleString("id-ID")}
         </IonText>
       )}
-
-      {!paymentMethodAllowed ? (
-        <IonText color="danger" style={{ marginTop: 8, display: "block", fontSize: 12 }}>
-          Selected payment method is not allowed for this outlet. It will be corrected on next refresh.
-        </IonText>
-      ) : null}
 
       <IonButton
         id="checkout-complete-sale"

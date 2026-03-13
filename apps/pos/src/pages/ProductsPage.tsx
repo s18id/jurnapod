@@ -151,7 +151,8 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     setDineInGuardMessage(null);
     upsertCartLine(product, { qty: (cart[product.item_id]?.qty ?? 0) + 1 });
     if (payments.length === 0 || payments[0].amount === 0) {
-      setPayments([{ method: "CASH", amount: product.price_snapshot }]);
+      const fallbackMethod = payments[0]?.method ?? "";
+      setPayments([{ method: fallbackMethod, amount: product.price_snapshot }]);
     }
   };
 

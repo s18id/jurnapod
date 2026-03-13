@@ -22,10 +22,7 @@ export interface UseCheckoutOptions {
 }
 
 export interface UseCheckoutReturn {
-  paymentMethod: string;
-  setPaymentMethod: (method: string) => void;
   paymentMethods: string[];
-  paymentMethodAllowed: boolean;
   canAttemptSaleCompletion: (cartLines: CartLine[], cartTotals: CartTotals) => boolean;
   canCompleteSale: (cartLines: CartLine[], cartTotals: CartTotals) => boolean;
   completeInFlight: boolean;
@@ -35,7 +32,6 @@ export interface UseCheckoutReturn {
     cartTotals: CartTotals,
     payments: PaymentEntry[],
     options?: {
-      setPaymentMethod?: (method: string) => void;
       onAfterSaleCommit?: () => Promise<void> | void;
       setPayments?: (payments: PaymentEntry[]) => void;
       setCurrentFlowId?: (id: string) => void;
@@ -58,7 +54,6 @@ export function useCheckout({
   requestPush,
   initialPaymentMethods = ["CASH"]
 }: UseCheckoutOptions): UseCheckoutReturn {
-  const [paymentMethod, setPaymentMethod] = useState<string>(initialPaymentMethods[0]);
   const [paymentMethods, setPaymentMethods] = useState<string[]>(initialPaymentMethods);
   const [completeInFlight, setCompleteInFlight] = useState<boolean>(false);
   const [lastCompleteMessage, setLastCompleteMessage] = useState<string | null>(null);
@@ -83,28 +78,18 @@ export function useCheckout({
     );
   }, [normalizedInitialMethods]);
 
-  React.useEffect(() => {
-    if (
-      paymentMethods.length > 0 &&
-      !runtime.isPaymentMethodAllowed(paymentMethod, paymentMethods)
-    ) {
-      const nextMethod = runtime.resolvePaymentMethod(paymentMethod, paymentMethods);
-      setPaymentMethod(nextMethod);
-    }
-  }, [paymentMethods, paymentMethod, runtime]);
-
-  const paymentMethodAllowed = runtime.isPaymentMethodAllowed(paymentMethod, paymentMethods);
-
   const lockSaleCompletion = useCallback((flowId: string): boolean => {
-    if (inFlightFlowIdsRef.current.has(flowId)) {
+    if (inFlightFlowIdsRef.current.size > 0) {
       return false;
     }
     inFlightFlowIdsRef.current.add(flowId);
+    setCompleteInFlight(true);
     return true;
   }, []);
 
   const unlockSaleCompletion = useCallback((flowId: string): void => {
     inFlightFlowIdsRef.current.delete(flowId);
+    setCompleteInFlight(inFlightFlowIdsRef.current.size > 0);
   }, []);
 
   const canAttemptSaleCompletion = useCallback(
@@ -118,11 +103,10 @@ export function useCheckout({
     (cartLines: CartLine[], cartTotals: CartTotals): boolean => {
       return (
         canAttemptSaleCompletion(cartLines, cartTotals) &&
-        paymentMethodAllowed &&
         paymentMethods.length > 0
       );
     },
-    [canAttemptSaleCompletion, paymentMethodAllowed, paymentMethods.length]
+    [canAttemptSaleCompletion, paymentMethods.length]
   );
 
   const runCompleteSale = useCallback(
@@ -131,7 +115,6 @@ export function useCheckout({
       cartTotals: CartTotals,
       payments: PaymentEntry[],
       options?: {
-        setPaymentMethod?: (method: string) => void;
         onAfterSaleCommit?: () => Promise<void> | void;
         setPayments?: (payments: PaymentEntry[]) => void;
         setCurrentFlowId?: (id: string) => void;
@@ -142,11 +125,29 @@ export function useCheckout({
         return;
       }
 
-      if (!runtime.isPaymentMethodAllowed(paymentMethod, paymentMethods)) {
-        const nextPaymentMethod = runtime.resolvePaymentMethod(paymentMethod, paymentMethods);
-        options?.setPaymentMethod?.(nextPaymentMethod);
+      if (payments.length === 0) {
+        setLastCompleteMessage("Add at least one payment method before completing sale.");
+        return;
+      }
+
+      const hasDisallowedPaymentMethod = payments.some(
+        (payment) => !runtime.isPaymentMethodAllowed(payment.method, paymentMethods)
+      );
+
+      if (hasDisallowedPaymentMethod) {
+        const correctedPayments = payments.map((payment) => {
+          if (runtime.isPaymentMethodAllowed(payment.method, paymentMethods)) {
+            return payment;
+          }
+          return {
+            ...payment,
+            method: runtime.resolvePaymentMethod(payment.method, paymentMethods)
+          };
+        });
+
+        options?.setPayments?.(correctedPayments);
         setLastCompleteMessage(
-          `Payment method ${paymentMethod} is no longer allowed for this outlet. Switched to ${nextPaymentMethod}.`
+          "One or more payment methods are no longer allowed for this outlet. Review updated methods, then complete sale again."
         );
         return;
       }
@@ -219,7 +220,6 @@ export function useCheckout({
     },
     [
       activeOrderContext,
-      paymentMethod,
       paymentMethods,
       requestPush,
       scope,
@@ -230,10 +230,7 @@ export function useCheckout({
   );
 
   return {
-    paymentMethod,
-    setPaymentMethod,
     paymentMethods,
-    paymentMethodAllowed,
     canAttemptSaleCompletion,
     canCompleteSale,
     completeInFlight,
