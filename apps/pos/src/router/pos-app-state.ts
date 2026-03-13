@@ -16,7 +16,7 @@ import type {
   OrderLifecycleStatus,
   OrderServiceType
 } from "../features/cart/useCart.js";
-import type { CartTotals } from "../shared/utils/money.js";
+import type { CartTotals, PaymentEntry } from "../shared/utils/money.js";
 
 export interface PosAppStateValue {
   scope: RuntimeOutletScope;
@@ -41,8 +41,8 @@ export interface PosAppStateValue {
   cart: CartState;
   cartLines: CartLineState[];
   cartTotals: CartTotals;
-  paidAmount: number;
-  setPaidAmount: (amount: number) => void;
+  payments: PaymentEntry[];
+  setPayments: (payments: PaymentEntry[]) => void;
   upsertCartLine: (product: RuntimeProductCatalogItem, patch: Partial<Pick<CartLineState, "qty" | "discount_amount">>) => void;
   clearCart: () => void;
   resetCartStatePreserveOrderStatus: () => void;

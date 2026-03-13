@@ -214,7 +214,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
 
     return (
       cartState.cartLines.length > 0
-      || cartState.paidAmount > 0
+      || cartState.payments.length > 0
       || hasDineInAnchor
       || !!cartState.activeOrderContext.table_id
       || !!cartState.activeOrderContext.reservation_id
@@ -222,7 +222,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       || cartState.activeOrderContext.kitchen_sent  // Renamed from is_finalized
       || cartState.activeOrderContext.notes !== null
     );
-  }, [cartState.activeOrderContext, cartState.cartLines.length, cartState.paidAmount]);
+  }, [cartState.activeOrderContext, cartState.cartLines.length, cartState.payments]);
 
   const hydrateFromSnapshot = useCallback((input: {
     order_id: string;
@@ -252,7 +252,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     hydrateInProgressRef.current = true;
     cartState.hydrateOrder({
       cart: toCartState(input.lines, input.order.is_finalized),  // DB field
-      paidAmount: input.paid_amount,
+      payments: input.paid_amount > 0 ? [{ method: "CASH", amount: input.paid_amount }] : [],
       activeOrderContext: toOrderContext(input.order)  // Maps is_finalized → kitchen_sent inside
     });
     setCurrentActiveOrderId(input.order_id);
@@ -290,7 +290,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       guest_count: cartState.activeOrderContext.guest_count,
       kitchen_sent: cartState.activeOrderContext.kitchen_sent,  // Renamed from is_finalized
       order_status: cartState.activeOrderContext.order_status,
-      paid_amount: cartState.paidAmount,
+      paid_amount: cartState.payments.reduce((sum, p) => sum + p.amount, 0),
       opened_at: cartState.activeOrderContext.opened_at,
       closed_at: cartState.activeOrderContext.closed_at,
       notes: cartState.activeOrderContext.notes,
@@ -314,7 +314,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     activeOrderHydrated,
     cartState.activeOrderContext,
     cartState.cartLines,
-    cartState.paidAmount,
+    cartState.payments,
     context.runtime,
     currentActiveOrderId,
     hasMeaningfulOrderState,
@@ -511,7 +511,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     activeOrderHydrated,
     cartState.activeOrderContext,
     cartState.cartLines,
-    cartState.paidAmount,
+    cartState.payments,
     persistCurrentOrderSnapshot
   ]);
 
@@ -643,7 +643,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       // Update cart with filtered items
       cartState.hydrateOrder({
         cart: nextCart,
-        paidAmount: cartState.paidAmount,
+        payments: cartState.payments,
         activeOrderContext: cartState.activeOrderContext
       });
     }
@@ -793,8 +793,8 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       cart: cartState.cart,
       cartLines: cartState.cartLines,
       cartTotals: cartState.cartTotals,
-      paidAmount: cartState.paidAmount,
-      setPaidAmount: cartState.setPaidAmount,
+      payments: cartState.payments,
+      setPayments: cartState.setPayments,
       upsertCartLine: cartState.upsertCartLine,
       clearCart,
       resetCartStatePreserveOrderStatus,

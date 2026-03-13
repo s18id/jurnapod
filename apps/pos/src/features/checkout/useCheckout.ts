@@ -6,7 +6,7 @@ import { CASHIER_USER_ID } from "../../shared/utils/constants.js";
 import { createSaleDraft, completeSale } from "../../offline/sales.js";
 import type { RuntimeOutletScope } from "../../services/runtime-service.js";
 import type { ActiveOrderContextState } from "../cart/useCart.js";
-import type { CartTotals, CartLine } from "../../shared/utils/money.js";
+import type { CartTotals, CartLine, PaymentEntry } from "../../shared/utils/money.js";
 
 type SyncPushReason = "MANUAL_PUSH" | "AUTO_REFRESH" | "NETWORK_ONLINE" | "BACKGROUND_SYNC";
 
@@ -33,14 +33,15 @@ export interface UseCheckoutReturn {
   runCompleteSale: (
     cartLines: CartLine[],
     cartTotals: CartTotals,
-      options?: {
+    payments: PaymentEntry[],
+    options?: {
       setPaymentMethod?: (method: string) => void;
       onAfterSaleCommit?: () => Promise<void> | void;
-      setPaidAmount?: (amount: number) => void;
-        setCurrentFlowId?: (id: string) => void;
-        onAfterComplete?: () => Promise<void> | void;
-      }
-    ) => Promise<void>;
+      setPayments?: (payments: PaymentEntry[]) => void;
+      setCurrentFlowId?: (id: string) => void;
+      onAfterComplete?: () => Promise<void> | void;
+    }
+  ) => Promise<void>;
 }
 
 function areStringArraysEqual(a: readonly string[], b: readonly string[]): boolean {
@@ -89,49 +90,50 @@ export function useCheckout({
     ) {
       const nextMethod = runtime.resolvePaymentMethod(paymentMethod, paymentMethods);
       setPaymentMethod(nextMethod);
-      setLastCompleteMessage(
-        `Payment method ${paymentMethod} is no longer allowed for this outlet. Switched to ${nextMethod}.`
-      );
     }
-  }, [
-    paymentMethod,
-    paymentMethods,
-    runtime.isPaymentMethodAllowed,
-    runtime.resolvePaymentMethod
-  ]);
+  }, [paymentMethods, paymentMethod, runtime]);
+
+  const paymentMethodAllowed = runtime.isPaymentMethodAllowed(paymentMethod, paymentMethods);
 
   const lockSaleCompletion = useCallback((flowId: string): boolean => {
     if (inFlightFlowIdsRef.current.has(flowId)) {
       return false;
     }
     inFlightFlowIdsRef.current.add(flowId);
-    setCompleteInFlight(true);
     return true;
   }, []);
 
   const unlockSaleCompletion = useCallback((flowId: string): void => {
     inFlightFlowIdsRef.current.delete(flowId);
-    setCompleteInFlight(inFlightFlowIdsRef.current.size > 0);
   }, []);
 
-  const paymentMethodAllowed = runtime.isPaymentMethodAllowed(paymentMethod, paymentMethods);
+  const canAttemptSaleCompletion = useCallback(
+    (cartLines: CartLine[], cartTotals: CartTotals): boolean => {
+      return cartLines.length > 0 && cartTotals.paid_total >= cartTotals.grand_total;
+    },
+    []
+  );
 
-  const canAttemptSaleCompletion = useCallback((cartLines: CartLine[], cartTotals: CartTotals): boolean => {
-    return cartLines.length > 0 && cartTotals.paid_total >= cartTotals.grand_total;
-  }, []);
-
-  const canCompleteSale = useCallback((cartLines: CartLine[], cartTotals: CartTotals): boolean => {
-    return canAttemptSaleCompletion(cartLines, cartTotals) && paymentMethodAllowed;
-  }, [canAttemptSaleCompletion, paymentMethodAllowed]);
+  const canCompleteSale = useCallback(
+    (cartLines: CartLine[], cartTotals: CartTotals): boolean => {
+      return (
+        canAttemptSaleCompletion(cartLines, cartTotals) &&
+        paymentMethodAllowed &&
+        paymentMethods.length > 0
+      );
+    },
+    [canAttemptSaleCompletion, paymentMethodAllowed, paymentMethods.length]
+  );
 
   const runCompleteSale = useCallback(
     async (
       cartLines: CartLine[],
       cartTotals: CartTotals,
+      payments: PaymentEntry[],
       options?: {
         setPaymentMethod?: (method: string) => void;
         onAfterSaleCommit?: () => Promise<void> | void;
-        setPaidAmount?: (amount: number) => void;
+        setPayments?: (payments: PaymentEntry[]) => void;
         setCurrentFlowId?: (id: string) => void;
         onAfterComplete?: () => Promise<void> | void;
       }
@@ -157,7 +159,6 @@ export function useCheckout({
       setLastCompleteMessage(null);
       let saleResult: { client_tx_id: string } | null = null;
 
-      // Phase A: Authoritative sale write (must succeed or fail atomically)
       try {
         const draft = await createSaleDraft({
           company_id: scope.company_id,
@@ -179,12 +180,7 @@ export function useCheckout({
             qty: line.qty,
             discount_amount: line.discount_amount
           })),
-          payments: [
-            {
-              method: paymentMethod,
-              amount: cartTotals.paid_total
-            }
-          ],
+          payments: payments,
           totals: cartTotals,
           service_type: activeOrderContext.service_type,
           table_id: activeOrderContext.table_id,
@@ -207,11 +203,10 @@ export function useCheckout({
         return;
       }
 
-      // Phase B: UI/session cleanup (non-authoritative, must not mask success)
       try {
         await options?.onAfterComplete?.();
         await options?.onAfterSaleCommit?.();
-        options?.setPaidAmount?.(0);
+        options?.setPayments?.([]);
         options?.setCurrentFlowId?.(crypto.randomUUID());
       } catch (cleanupError) {
         const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : "Unknown error";

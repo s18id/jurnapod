@@ -25,7 +25,8 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
     hasProductCache,
     cartLines,
     cartTotals,
-    setPaidAmount,
+    payments,
+    setPayments,
     resetCartStatePreserveOrderStatus,
     activeOrderContext,
     setOrderStatus,
@@ -214,7 +215,8 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
           canComplete={canComplete}
           completeInFlight={completeInFlight}
           onPaymentMethodChange={setPaymentMethod}
-          onPaidAmountChange={(amount) => setPaidAmount(normalizeMoney(amount))}
+          payments={payments}
+          onPaymentsChange={setPayments}
           onComplete={() => {
               const clearOrderContext = async () => {
                 const sessionResult = await context.runtime.completeOrderSession(scope, {
@@ -247,8 +249,8 @@ export function CheckoutPage({ context }: CheckoutPageProps): JSX.Element {
                 resetCartStatePreserveOrderStatus();
               };
 
-            void runCompleteSale(cartLines, cartTotals, {
-              setPaidAmount,
+            void runCompleteSale(cartLines, cartTotals, payments, {
+              setPayments,
               onAfterSaleCommit: clearOrderContext
             });
           }}

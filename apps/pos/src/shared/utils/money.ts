@@ -24,6 +24,11 @@ export interface CartLine {
   discount_amount: number;
 }
 
+export interface PaymentEntry {
+  method: string;
+  amount: number;
+}
+
 export interface CartTotals {
   subtotal: number;
   discount_total: number;
@@ -35,7 +40,7 @@ export interface CartTotals {
 
 export function computeCartTotals(
   lines: CartLine[],
-  paidAmount: number
+  payments: PaymentEntry[]
 ): CartTotals {
   const subtotal = normalizeMoney(
     lines.reduce((sum, line) => sum + line.qty * line.product.price_snapshot, 0)
@@ -44,7 +49,9 @@ export function computeCartTotals(
     lines.reduce((sum, line) => sum + line.discount_amount, 0)
   );
   const grandTotal = normalizeMoney(subtotal - discountTotal);
-  const paidTotal = normalizeMoney(paidAmount);
+  const paidTotal = normalizeMoney(
+    payments.reduce((sum, p) => sum + p.amount, 0)
+  );
   const changeTotal = normalizeMoney(paidTotal - grandTotal);
 
   return {
