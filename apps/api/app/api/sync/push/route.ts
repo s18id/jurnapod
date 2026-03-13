@@ -475,22 +475,18 @@ type IndexedTransaction = {
   txIndex: number;
 };
 
-async function isCashierValidForOutlet(
+async function isCashierInCompany(
   dbExecutor: QueryExecutor,
   companyId: number,
-  outletId: number,
   cashierUserId: number
 ): Promise<boolean> {
   const [rows] = await dbExecutor.execute(
     `SELECT 1
      FROM users u
-     INNER JOIN user_outlets uo ON uo.user_id = u.id
      WHERE u.id = ?
        AND u.company_id = ?
-       AND uo.outlet_id = ?
-       AND u.is_active = 1
      LIMIT 1`,
-    [cashierUserId, companyId, outletId]
+    [cashierUserId, companyId]
   );
 
   return (rows as Array<unknown>).length > 0;
@@ -672,6 +668,13 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       return outcome;
     }
 
+    const cashierInCompany = await isCashierInCompany(orderDbConnection, tx.company_id, tx.cashier_user_id);
+    if (!cashierInCompany) {
+      const result = toErrorResult(tx.client_tx_id, CASHIER_USER_ID_MISMATCH_MESSAGE);
+      logTransactionResult("ERROR");
+      return result;
+    }
+
     try {
       await orderDbConnection.beginTransaction();
 
@@ -721,11 +724,6 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       );
 
       const posTransactionId = Number(insertResult.insertId);
-
-      const cashierValid = await isCashierValidForOutlet(orderDbConnection, tx.company_id, tx.outlet_id, tx.cashier_user_id);
-      if (!cashierValid) {
-        throw new Error("CASHIER_USER_ID_MISMATCH");
-      }
 
       if (injectFailureAfterHeaderInsert) {
         throw new Error("SYNC_PUSH_TEST_FAIL_AFTER_HEADER_INSERT");
@@ -910,13 +908,6 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       if (isRetryableMysqlError(error)) {
         await rollbackQuietly(orderDbConnection);
         const result = toErrorResult(tx.client_tx_id, toRetryableDbErrorMessage(error));
-        logTransactionResult("ERROR");
-        return result;
-      }
-
-      if (error instanceof Error && error.message === "CASHIER_USER_ID_MISMATCH") {
-        await rollbackQuietly(orderDbConnection);
-        const result = toErrorResult(tx.client_tx_id, CASHIER_USER_ID_MISMATCH_MESSAGE);
         logTransactionResult("ERROR");
         return result;
       }

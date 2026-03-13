@@ -2485,6 +2485,52 @@ localServerTest(
             result: "DUPLICATE"
           }
         ]);
+      }
+      finally {
+        await db.execute("UPDATE users SET is_active = 1 WHERE id = ?", [ownerUserId]);
+      }
+
+      const inactiveCashierFirstWriteTxId = randomUUID();
+      await db.execute("UPDATE users SET is_active = 0 WHERE id = ?", [ownerUserId]);
+
+      try {
+        const inactiveFirstWriteResponse = await fetch(`${baseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            outlet_id: outletId,
+            transactions: [
+              buildSyncTransaction({
+                clientTxId: inactiveCashierFirstWriteTxId,
+                companyId,
+                outletId,
+                cashierUserId: ownerUserId,
+                trxAt
+              })
+            ]
+          })
+        });
+        assert.equal(inactiveFirstWriteResponse.status, 200);
+        const inactiveFirstWriteBody = await parseJsonResponse(inactiveFirstWriteResponse);
+        assert.equal(inactiveFirstWriteBody.success, true);
+        assert.deepEqual(inactiveFirstWriteBody.results, [
+          {
+            client_tx_id: inactiveCashierFirstWriteTxId,
+            result: "OK"
+          }
+        ]);
+        createdClientTxIds.push(inactiveCashierFirstWriteTxId);
+
+        const [inactiveFirstWriteCountRows] = await db.execute(
+          `SELECT COUNT(*) AS total
+           FROM pos_transactions
+           WHERE company_id = ? AND client_tx_id = ?`,
+          [companyId, inactiveCashierFirstWriteTxId]
+        );
+        assert.equal(Number(inactiveFirstWriteCountRows[0].total), 1);
       } finally {
         await db.execute("UPDATE users SET is_active = 1 WHERE id = ?", [ownerUserId]);
       }
