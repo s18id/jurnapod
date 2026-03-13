@@ -487,31 +487,6 @@ async function getItemGroupParentId(
   return parentId == null ? null : Number(parentId);
 }
 
-async function rebuildItemGroupClosure(executor: QueryExecutor, companyId: number): Promise<void> {
-  await executor.execute<ResultSetHeader>(
-    `DELETE FROM item_group_closure
-     WHERE company_id = ?`,
-    [companyId]
-  );
-
-  await executor.execute<ResultSetHeader>(
-    `WITH RECURSIVE closure AS (
-       SELECT id AS ancestor_id, id AS descendant_id, 0 AS depth, company_id
-       FROM item_groups
-       WHERE company_id = ?
-       UNION ALL
-       SELECT ig.parent_id AS ancestor_id, c.descendant_id, c.depth + 1, c.company_id
-       FROM closure c
-       INNER JOIN item_groups ig ON ig.id = c.ancestor_id AND ig.company_id = c.company_id
-       WHERE ig.parent_id IS NOT NULL
-     )
-     INSERT INTO item_group_closure (company_id, ancestor_id, descendant_id, depth)
-     SELECT company_id, ancestor_id, descendant_id, depth
-     FROM closure`,
-    [companyId]
-  );
-}
-
 async function isItemGroupDescendant(
   executor: QueryExecutor,
   companyId: number,
@@ -861,8 +836,6 @@ export async function createItemGroup(
         throw new Error("Created item group not found");
       }
 
-      await rebuildItemGroupClosure(connection, companyId);
-
       await recordMasterDataAuditLog(connection, {
         companyId,
         outletId: null,
@@ -882,6 +855,195 @@ export async function createItemGroup(
 
       throw error;
     }
+  });
+}
+
+export class ItemGroupBulkConflictError extends Error {
+  constructor(
+    message: string,
+    public readonly code: "DUPLICATE_CODE" | "CODE_EXISTS" | "PARENT_CODE_NOT_FOUND" | "CYCLE_DETECTED"
+  ) {
+    super(message);
+  }
+}
+
+type ItemGroupBulkRow = {
+  code: string | null;
+  name: string;
+  parent_code: string | null;
+  is_active: boolean;
+};
+
+export async function createItemGroupsBulk(
+  companyId: number,
+  rows: ItemGroupBulkRow[],
+  actor?: MutationAuditActor
+): Promise<{ created_count: number; groups: Awaited<ReturnType<typeof findItemGroupById>>[] }> {
+  return withTransaction(async (connection) => {
+    const normalizedRows = rows.map((r) => ({
+      code: r.code?.trim() ?? null,
+      name: r.name.trim(),
+      parent_code: r.parent_code?.trim() ?? null,
+      is_active: r.is_active ?? true
+    }));
+
+    const codeSet = new Set<string>();
+    for (const row of normalizedRows) {
+      if (row.code) {
+        const lowerCode = row.code.toLowerCase();
+        if (codeSet.has(lowerCode)) {
+          throw new ItemGroupBulkConflictError(
+            `Duplicate code in file: ${row.code}`,
+            "DUPLICATE_CODE"
+          );
+        }
+        codeSet.add(lowerCode);
+      }
+    }
+
+    const codeToIdMap = new Map<string, number>();
+    if (codeSet.size > 0) {
+      const codes = Array.from(codeSet);
+      const placeholders = codes.map(() => "?").join(",");
+      const [existing] = await connection.execute<RowDataPacket[]>(
+        `SELECT id, code FROM item_groups WHERE company_id = ? AND LOWER(code) IN (${placeholders})`,
+        [companyId, ...codes]
+      );
+      for (const row of existing as Array<{ id: number; code: string }>) {
+        codeToIdMap.set(row.code.toLowerCase(), row.id);
+      }
+      if (codeToIdMap.size > 0) {
+        const existingCodes = Array.from(codeToIdMap.keys()).join(", ");
+        throw new ItemGroupBulkConflictError(
+          `Code(s) already exist: ${existingCodes}`,
+          "CODE_EXISTS"
+        );
+      }
+    }
+
+    const codeToRowMap = new Map<string, number>();
+    normalizedRows.forEach((row, idx) => {
+      if (row.code) {
+        codeToRowMap.set(row.code.toLowerCase(), idx);
+      }
+    });
+
+    const parentIdMap = new Map<number, number | null>();
+    for (let i = 0; i < normalizedRows.length; i++) {
+      const row = normalizedRows[i];
+      if (row.parent_code) {
+        const parentLower = row.parent_code.toLowerCase();
+        const parentId = codeToIdMap.get(parentLower);
+        if (parentId !== undefined) {
+          parentIdMap.set(i, parentId);
+        } else {
+          const parentIdx = codeToRowMap.get(parentLower);
+          if (parentIdx !== undefined) {
+            parentIdMap.set(i, -1 - parentIdx);
+          } else {
+            throw new ItemGroupBulkConflictError(
+              `Parent code not found: ${row.parent_code}`,
+              "PARENT_CODE_NOT_FOUND"
+            );
+          }
+        }
+      } else {
+        parentIdMap.set(i, null);
+      }
+    }
+
+    const inDegree = new Map<number, number>();
+    for (let i = 0; i < normalizedRows.length; i++) {
+      inDegree.set(i, 0);
+    }
+    for (let i = 0; i < normalizedRows.length; i++) {
+      const parentId = parentIdMap.get(i);
+      if (parentId !== undefined && parentId !== null && parentId < 0) {
+        const parentIdx = -1 - parentId;
+        inDegree.set(i, (inDegree.get(i) ?? 0) + 1);
+      }
+    }
+
+    const stack: number[] = [];
+    for (const [idx, degree] of inDegree) {
+      if (degree === 0) {
+        stack.push(idx);
+      }
+    }
+
+    const topoOrder: number[] = [];
+    while (stack.length > 0) {
+      const idx = stack.pop()!;
+      topoOrder.push(idx);
+
+      for (let j = 0; j < normalizedRows.length; j++) {
+        const childParentId = parentIdMap.get(j);
+        if (childParentId !== undefined && childParentId !== null && childParentId < 0) {
+          const parentIdx = -1 - childParentId;
+          if (parentIdx === idx) {
+            const newDegree = (inDegree.get(j) ?? 1) - 1;
+            inDegree.set(j, newDegree);
+            if (newDegree === 0) {
+              stack.push(j);
+            }
+          }
+        }
+      }
+    }
+
+    if (topoOrder.length !== normalizedRows.length) {
+      throw new ItemGroupBulkConflictError("Cycle detected in parent relationships", "CYCLE_DETECTED");
+    }
+
+    const createdGroups: Awaited<ReturnType<typeof findItemGroupById>>[] = [];
+
+    for (const idx of topoOrder) {
+      const row = normalizedRows[idx];
+
+      let parentId: number | null = null;
+      if (row.parent_code) {
+        const resolvedParentId = codeToIdMap.get(row.parent_code.toLowerCase());
+        if (resolvedParentId === undefined) {
+          throw new ItemGroupBulkConflictError(
+            `Parent code not found: ${row.parent_code}`,
+            "PARENT_CODE_NOT_FOUND"
+          );
+        }
+        parentId = resolvedParentId;
+      }
+
+      const [result] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO item_groups (company_id, parent_id, code, name, is_active)
+         VALUES (?, ?, ?, ?, ?)`,
+        [companyId, parentId, row.code, row.name, row.is_active ? 1 : 0]
+      );
+
+      const newId = Number(result.insertId);
+
+      if (row.code) {
+        codeToIdMap.set(row.code.toLowerCase(), newId);
+      }
+
+      const itemGroup = await findItemGroupByIdWithExecutor(connection, companyId, newId);
+      if (!itemGroup) {
+        throw new Error("Created item group not found");
+      }
+
+      await recordMasterDataAuditLog(connection, {
+        companyId,
+        outletId: null,
+        actor,
+        action: masterDataAuditActions.itemGroupCreate,
+        payload: {
+          item_group_id: itemGroup.id,
+          after: itemGroup
+        }
+      });
+
+      createdGroups.push(itemGroup);
+    }
+
+    return { created_count: createdGroups.length, groups: createdGroups };
   });
 }
 
@@ -906,7 +1068,6 @@ export async function updateItemGroup(
 
     const fields: string[] = [];
     const values: Array<string | number | null> = [];
-    let parentChanged = false;
 
     if (Object.hasOwn(input, "code")) {
       fields.push("code = ?");
@@ -926,7 +1087,6 @@ export async function updateItemGroup(
     if (Object.hasOwn(input, "parent_id")) {
       const nextParentId = input.parent_id ?? null;
       if (nextParentId !== before.parent_id) {
-        parentChanged = true;
         if (nextParentId == null) {
           fields.push("parent_id = ?");
           values.push(null);
@@ -970,10 +1130,6 @@ export async function updateItemGroup(
       const itemGroup = await findItemGroupByIdWithExecutor(connection, companyId, groupId);
       if (!itemGroup) {
         return null;
-      }
-
-      if (parentChanged) {
-        await rebuildItemGroupClosure(connection, companyId);
       }
 
       await recordMasterDataAuditLog(connection, {
