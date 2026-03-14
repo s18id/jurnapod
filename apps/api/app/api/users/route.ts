@@ -57,16 +57,27 @@ export const GET = withAuth(
     try {
       const url = new URL(request.url);
       const companyIdRaw = url.searchParams.get("company_id");
+      let targetCompanyId = auth.companyId;
+
       if (companyIdRaw != null) {
-        const companyId = NumericIdSchema.parse(companyIdRaw);
-        if (companyId !== auth.companyId) {
-          return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+        const requestedCompanyId = NumericIdSchema.parse(companyIdRaw);
+        if (requestedCompanyId !== auth.companyId) {
+          const access = await checkUserAccess({
+            userId: auth.userId,
+            companyId: auth.companyId,
+            allowedRoles: ["SUPER_ADMIN"]
+          });
+          const isSuperAdmin = access?.isSuperAdmin ?? false;
+          if (!isSuperAdmin) {
+            return errorResponse("FORBIDDEN", "Cannot list users for another company", 403);
+          }
+          targetCompanyId = requestedCompanyId;
         }
       }
 
       const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
       const search = url.searchParams.get("search")?.trim() || undefined;
-      const users = await listUsers(auth.companyId, { isActive, search });
+      const users = await listUsers(targetCompanyId, { isActive, search });
 
       return successResponse(users);
     } catch (error) {

@@ -697,8 +697,27 @@ export async function setUserRoles(params: {
       throw new RoleLevelViolationError("Insufficient role level to assign this role");
     }
 
+    // Validate role scope: global roles cannot be outlet-scoped and vice versa
+    const isOutletAssignment = typeof params.outletId === "number";
+    if (roleCodes.length > 0) {
+      const globalRoles = roleCodes.filter((code) => roleMap.get(code)?.is_global === 1);
+      const nonGlobalRoles = roleCodes.filter((code) => roleMap.get(code)?.is_global !== 1);
+
+      if (isOutletAssignment && globalRoles.length > 0) {
+        throw new RoleScopeViolationError("Global roles cannot be assigned per outlet");
+      }
+
+      if (!isOutletAssignment && nonGlobalRoles.length > 0) {
+        throw new RoleScopeViolationError("Outlet-scoped roles require outlet assignments");
+      }
+
+      if (!isOutletAssignment && globalRoles.length > 1) {
+        throw new RoleScopeViolationError("A user can only have one global role");
+      }
+    }
+
     // Handle outlet role assignment
-    if (typeof params.outletId === "number") {
+    if (isOutletAssignment) {
       const outletId = NumericIdSchema.parse(params.outletId);
       await ensureOutletIdsExist(connection, params.companyId, [outletId]);
 
@@ -743,22 +762,28 @@ export async function setUserRoles(params: {
         { outlet_id: outletId, role_codes: roleCodes }
       );
     } else {
-      // Handle global role - update users.global_role_id directly
+      // Handle global role - update user_role_assignments (outlet_id = NULL)
       const beforeRoles =
         (await hydrateUserGlobalRoles(connection, [params.userId])).get(params.userId) ?? [];
 
+      // Delete existing global role assignments
+      await connection.execute<ResultSetHeader>(
+        `DELETE FROM user_role_assignments WHERE user_id = ? AND outlet_id IS NULL`,
+        [params.userId]
+      );
+
+      // Insert new global role assignment(s)
       if (roleCodes.length > 0) {
-        const roleId = roleMap.get(roleCodes[0])?.id;
-        if (roleId) {
-          await connection.execute<ResultSetHeader>(
-            `UPDATE users SET global_role_id = ? WHERE id = ?`,
-            [roleId, params.userId]
-          );
-        }
-      } else {
-        await connection.execute<ResultSetHeader>(
-          `UPDATE users SET global_role_id = NULL WHERE id = ?`,
-          [params.userId]
+        const roleValues = roleCodes.map((code) => [
+          params.userId,
+          roleMap.get(code)?.id ?? 0,
+          null
+        ]);
+        await connection.query(
+          `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES ${roleValues
+            .map(() => "(?, ?, ?)")
+            .join(", ")}`,
+          roleValues.flat()
         );
       }
 
