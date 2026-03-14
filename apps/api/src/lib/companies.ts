@@ -310,6 +310,14 @@ export type CompanyResponse = {
   id: number;
   code: string;
   name: string;
+  legal_name: string | null;
+  tax_id: string | null;
+  email: string | null;
+  phone: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  postal_code: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -325,6 +333,14 @@ type CompanyRow = RowDataPacket & {
   id: number;
   code: string;
   name: string;
+  legal_name: string | null;
+  tax_id: string | null;
+  email: string | null;
+  phone: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  postal_code: string | null;
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -381,6 +397,14 @@ function normalizeCompanyRow(row: CompanyRow): CompanyResponse {
     id: Number(row.id),
     code: row.code,
     name: row.name,
+    legal_name: row.legal_name,
+    tax_id: row.tax_id,
+    email: row.email,
+    phone: row.phone,
+    address_line1: row.address_line1,
+    address_line2: row.address_line2,
+    city: row.city,
+    postal_code: row.postal_code,
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
     deleted_at: row.deleted_at ? row.deleted_at.toISOString() : null
@@ -673,7 +697,7 @@ export async function listCompanies(params: {
   }
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const [rows] = await pool.execute<CompanyRow[]>(
-    `SELECT id, code, name, created_at, updated_at, deleted_at
+    `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
      FROM companies
      ${whereClause}
      ORDER BY name ASC`,
@@ -693,7 +717,7 @@ export async function getCompany(
   const pool = getDbPool();
   const includeDeleted = options?.includeDeleted ?? false;
   const [rows] = await pool.execute<CompanyRow[]>(
-    `SELECT id, code, name, created_at, updated_at, deleted_at
+    `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
      FROM companies
      WHERE id = ?
      ${includeDeleted ? "" : "AND deleted_at IS NULL"}`,
@@ -713,6 +737,14 @@ export async function getCompany(
 export async function createCompany(params: {
   code: string;
   name: string;
+  legal_name?: string | null;
+  tax_id?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
   actor: CompanyActor;
 }): Promise<CompanyResponse> {
   const pool = getDbPool();
@@ -732,10 +764,22 @@ export async function createCompany(params: {
       throw new CompanyCodeExistsError(`Company with code ${params.code} already exists`);
     }
 
-    // Insert company
+    // Insert company with profile fields
     const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO companies (code, name) VALUES (?, ?)`,
-      [params.code, params.name]
+      `INSERT INTO companies (code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        params.code,
+        params.name,
+        params.legal_name ?? null,
+        params.tax_id ?? null,
+        params.email ?? null,
+        params.phone ?? null,
+        params.address_line1 ?? null,
+        params.address_line2 ?? null,
+        params.city ?? null,
+        params.postal_code ?? null
+      ]
     );
 
     const companyId = Number(result.insertId);
@@ -747,7 +791,7 @@ export async function createCompany(params: {
     const auditContext = buildAuditContext(companyId, params.actor);
 
     const [rows] = await connection.execute<CompanyRow[]>(
-      `SELECT id, code, name, created_at, updated_at, deleted_at
+      `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
        FROM companies
        WHERE id = ?`,
       [companyId]
@@ -779,7 +823,15 @@ export async function createCompany(params: {
  */
 export async function updateCompany(params: {
   companyId: number;
-  name?: string;
+  name?: string | null;
+  legal_name?: string | null;
+  tax_id?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
   actor: CompanyActor;
 }): Promise<CompanyResponse> {
   const pool = getDbPool();
@@ -793,13 +845,53 @@ export async function updateCompany(params: {
       includeDeleted: true
     });
 
-    // Update if name provided
-    if (params.name && params.name !== currentCompany.name) {
+    const updates: string[] = [];
+    const values: (string | number | null)[] = [];
+
+    if (params.name !== undefined && params.name !== currentCompany.name) {
+      updates.push("name = ?");
+      values.push(params.name);
+    }
+    if (params.legal_name !== undefined && params.legal_name !== currentCompany.legal_name) {
+      updates.push("legal_name = ?");
+      values.push(params.legal_name);
+    }
+    if (params.tax_id !== undefined && params.tax_id !== currentCompany.tax_id) {
+      updates.push("tax_id = ?");
+      values.push(params.tax_id);
+    }
+    if (params.email !== undefined && params.email !== currentCompany.email) {
+      updates.push("email = ?");
+      values.push(params.email);
+    }
+    if (params.phone !== undefined && params.phone !== currentCompany.phone) {
+      updates.push("phone = ?");
+      values.push(params.phone);
+    }
+    if (params.address_line1 !== undefined && params.address_line1 !== currentCompany.address_line1) {
+      updates.push("address_line1 = ?");
+      values.push(params.address_line1);
+    }
+    if (params.address_line2 !== undefined && params.address_line2 !== currentCompany.address_line2) {
+      updates.push("address_line2 = ?");
+      values.push(params.address_line2);
+    }
+    if (params.city !== undefined && params.city !== currentCompany.city) {
+      updates.push("city = ?");
+      values.push(params.city);
+    }
+    if (params.postal_code !== undefined && params.postal_code !== currentCompany.postal_code) {
+      updates.push("postal_code = ?");
+      values.push(params.postal_code);
+    }
+
+    if (updates.length > 0) {
+      updates.push("updated_at = CURRENT_TIMESTAMP");
+      values.push(params.companyId);
+
       await connection.execute(
-        `UPDATE companies
-         SET name = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [params.name, params.companyId]
+        `UPDATE companies SET ${updates.join(", ")} WHERE id = ?`,
+        values
       );
 
       const auditContext = buildAuditContext(params.companyId, params.actor);
@@ -807,21 +899,44 @@ export async function updateCompany(params: {
         auditContext,
         "company",
         params.companyId,
-        { name: currentCompany.name },
-        { name: params.name }
+        {
+          name: currentCompany.name,
+          legal_name: currentCompany.legal_name,
+          tax_id: currentCompany.tax_id,
+          email: currentCompany.email,
+          phone: currentCompany.phone,
+          address_line1: currentCompany.address_line1,
+          address_line2: currentCompany.address_line2,
+          city: currentCompany.city,
+          postal_code: currentCompany.postal_code
+        },
+        {
+          name: params.name ?? currentCompany.name,
+          legal_name: params.legal_name ?? currentCompany.legal_name,
+          tax_id: params.tax_id ?? currentCompany.tax_id,
+          email: params.email ?? currentCompany.email,
+          phone: params.phone ?? currentCompany.phone,
+          address_line1: params.address_line1 ?? currentCompany.address_line1,
+          address_line2: params.address_line2 ?? currentCompany.address_line2,
+          city: params.city ?? currentCompany.city,
+          postal_code: params.postal_code ?? currentCompany.postal_code
+        }
       );
     }
 
     await connection.commit();
 
-    return {
-      id: Number(currentCompany.id),
-      code: currentCompany.code,
-      name: params.name ?? currentCompany.name,
-      created_at: currentCompany.created_at.toISOString(),
-      updated_at: new Date().toISOString(),
-      deleted_at: currentCompany.deleted_at ? currentCompany.deleted_at.toISOString() : null
-    };
+    const [rows] = await connection.execute<CompanyRow[]>(
+      `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+       FROM companies WHERE id = ?`,
+      [params.companyId]
+    );
+
+    if (rows.length === 0) {
+      throw new CompanyNotFoundError(`Company with id ${params.companyId} not found`);
+    }
+
+    return normalizeCompanyRow(rows[0]);
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -876,14 +991,13 @@ export async function deactivateCompany(params: {
 
     await connection.commit();
 
-    return {
-      id: Number(company.id),
-      code: company.code,
-      name: company.name,
-      created_at: company.created_at.toISOString(),
-      updated_at: new Date().toISOString(),
-      deleted_at: new Date().toISOString()
-    };
+    const [rows] = await connection.execute<CompanyRow[]>(
+      `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+       FROM companies WHERE id = ?`,
+      [params.companyId]
+    );
+
+    return normalizeCompanyRow(rows[0]);
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -926,14 +1040,13 @@ export async function reactivateCompany(params: {
 
     await connection.commit();
 
-    return {
-      id: Number(company.id),
-      code: company.code,
-      name: company.name,
-      created_at: company.created_at.toISOString(),
-      updated_at: new Date().toISOString(),
-      deleted_at: null
-    };
+    const [rows] = await connection.execute<CompanyRow[]>(
+      `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+       FROM companies WHERE id = ?`,
+      [params.companyId]
+    );
+
+    return normalizeCompanyRow(rows[0]);
   } catch (error) {
     await connection.rollback();
     throw error;
