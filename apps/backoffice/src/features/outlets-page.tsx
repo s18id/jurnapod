@@ -3,17 +3,39 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  ActionIcon,
   Alert,
+  Badge,
   Button,
+  Divider,
+  Drawer,
+  FileInput,
   Group,
   Modal,
+  SegmentedControl,
   Select,
   Stack,
   Switch,
+  Table,
   Text,
   TextInput,
-  Title
+  Textarea,
+  Title,
+  Tooltip
 } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
+import { IconDownload, IconEye, IconPlus, IconTrash, IconUpload } from "@tabler/icons-react";
+import { readImportFile } from "../lib/import/delimited";
+import { ImportStepBadges } from "../components/import-step-badges";
+import {
+  buildImportPlan,
+  computeImportSummary,
+  downloadOutletsCsv,
+  normalizeImportRow,
+  parseDelimited,
+  type ImportPlanRow,
+  type ImportSummary
+} from "./outlets-import-export-utils";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
 import {
@@ -36,7 +58,7 @@ type OutletsPageProps = {
   accessToken: string;
 };
 
-type DialogMode = "create" | "edit" | null;
+type DialogMode = "create" | "view" | "edit" | null;
 
 type OutletFormData = {
   company_id: number;
@@ -85,6 +107,10 @@ export function OutletsPage(props: OutletsPageProps) {
 
   const [selectedCompanyId, setSelectedCompanyId] = useState<number>(user.company_id);
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
+  const [cityFilter, setCityFilter] = useState<string | null>(null);
+
+  const isMobile = useMediaQuery("(max-width: 48em)");
 
   const outletsQuery = useOutletsFull(
     canManageCompanies ? selectedCompanyId : user.company_id,
@@ -98,10 +124,24 @@ export function OutletsPage(props: OutletsPageProps) {
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof OutletFormData, string>>>({});
 
   const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [confirmState, setConfirmState] = useState<OutletFullResponse | null>(null);
+
+  const [importOpened, setImportOpened] = useState(false);
+  const [importStep, setImportStep] = useState<"source" | "preview" | "apply">("source");
+  const [importText, setImportText] = useState("");
+  const [importPlan, setImportPlan] = useState<ImportPlanRow[]>([]);
+  const [importSummary, setImportSummary] = useState<ImportSummary>({ create: 0, error: 0, total: 0 });
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importResults, setImportResults] = useState({ success: 0, failed: 0 });
+  const [hasAppliedImport, setHasAppliedImport] = useState(false);
+  const [importApplyResults, setImportApplyResults] = useState<
+    Array<{ rowIndex: number; code: string | null; name: string; status: "SUCCESS" | "FAILED"; error?: string }>
+  >([]);
 
   const outlets = outletsQuery.data || [];
   const companies = companiesQuery.data || [];
@@ -115,6 +155,61 @@ export function OutletsPage(props: OutletsPageProps) {
     }
   }, [canManageCompanies, companies, selectedCompanyId]);
 
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+
+  const originalFormData = useMemo(() => {
+    if (dialogMode === "edit" && editingOutlet) {
+      return {
+        company_id: editingOutlet.company_id,
+        code: editingOutlet.code,
+        name: editingOutlet.name,
+        city: editingOutlet.city ?? "",
+        address_line1: editingOutlet.address_line1 ?? "",
+        address_line2: editingOutlet.address_line2 ?? "",
+        postal_code: editingOutlet.postal_code ?? "",
+        phone: editingOutlet.phone ?? "",
+        email: editingOutlet.email ?? "",
+        timezone: editingOutlet.timezone ?? "",
+        is_active: editingOutlet.is_active
+      };
+    }
+    if (dialogMode === "create") {
+      return {
+        company_id: canManageCompanies ? selectedCompanyId : user.company_id,
+        code: "",
+        name: "",
+        city: "",
+        address_line1: "",
+        address_line2: "",
+        postal_code: "",
+        phone: "",
+        email: "",
+        timezone: "",
+        is_active: true
+      };
+    }
+    return emptyForm;
+  }, [dialogMode, editingOutlet, canManageCompanies, selectedCompanyId, user.company_id]);
+
+  const isEditableDialog = dialogMode === "create" || dialogMode === "edit";
+  const hasUnsavedChanges = isEditableDialog && JSON.stringify(formData) !== JSON.stringify(originalFormData);
+
+  useEffect(() => {
+    if (hasUnsavedChanges) {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        e.preventDefault();
+        e.returnValue = "";
+      };
+      window.addEventListener("beforeunload", handleBeforeUnload);
+      return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    }
+  }, [hasUnsavedChanges]);
+
   const companyOptions = useMemo(
     () =>
       companies.map((company) => ({
@@ -123,6 +218,16 @@ export function OutletsPage(props: OutletsPageProps) {
       })),
     [companies]
   );
+
+  const cityOptions = useMemo(() => {
+    const cities = new Set<string>();
+    outlets.forEach((outlet) => {
+      if (outlet.city) {
+        cities.add(outlet.city);
+      }
+    });
+    return Array.from(cities).sort();
+  }, [outlets]);
 
   const companyLookup = useMemo(() => {
     const map = new Map<number, string>();
@@ -157,6 +262,13 @@ export function OutletsPage(props: OutletsPageProps) {
     setSuccessMessage(null);
   };
 
+  const openDetailDrawer = (outlet: OutletFullResponse) => {
+    setEditingOutlet(outlet);
+    setDialogMode("view");
+    setError(null);
+    setSuccessMessage(null);
+  };
+
   const openEditDialog = (outlet: OutletFullResponse) => {
     setFormData({
       company_id: outlet.company_id,
@@ -183,6 +295,14 @@ export function OutletsPage(props: OutletsPageProps) {
     setEditingOutlet(null);
     setFormData(emptyForm);
     setFormErrors({});
+  };
+
+  const handleCloseDialog = () => {
+    if (isEditableDialog && hasUnsavedChanges && !submitting) {
+      const confirmed = window.confirm("You have unsaved changes. Are you sure you want to close?");
+      if (!confirmed) return;
+    }
+    closeDialog();
   };
 
   const validateForm = (): boolean => {
@@ -212,6 +332,34 @@ export function OutletsPage(props: OutletsPageProps) {
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
+
+  const validateField = (field: keyof OutletFormData) => {
+    let error: string | undefined;
+    if (field === "company_id" && dialogMode === "create" && !formData.company_id) {
+      error = "Company is required";
+    }
+    if (field === "code" && dialogMode === "create" && !formData.code.trim()) {
+      error = "Branch code is required";
+    }
+    if (field === "name" && !formData.name.trim()) {
+      error = "Branch name is required";
+    }
+    if (field === "email" && formData.email.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(formData.email.trim())) {
+        error = "Invalid email format";
+      }
+    }
+    setFormErrors((prev) => ({ ...prev, [field]: error }));
+  };
+
+  const isFormSubmittable = useMemo(() => {
+    if (!formData.name.trim()) return false;
+    if (dialogMode === "create") {
+      if (!formData.company_id || !formData.code.trim()) return false;
+    }
+    return true;
+  }, [formData, dialogMode]);
 
   const handleSubmit = async () => {
     if (!validateForm()) return;
@@ -278,7 +426,6 @@ export function OutletsPage(props: OutletsPageProps) {
         if (!hasChanges) {
           setSuccessMessage("No changes to save");
           closeDialog();
-          setSubmitting(false);
           return;
         }
 
@@ -301,16 +448,24 @@ export function OutletsPage(props: OutletsPageProps) {
   const filteredOutlets = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
     return outlets.filter((outlet) => {
-      if (!normalizedSearch) {
-        return true;
+      if (statusFilter === "ACTIVE" && !outlet.is_active) return false;
+      if (statusFilter === "INACTIVE" && outlet.is_active) return false;
+      if (cityFilter && outlet.city !== cityFilter) return false;
+      if (normalizedSearch) {
+        return (
+          outlet.code.toLowerCase().includes(normalizedSearch) ||
+          outlet.name.toLowerCase().includes(normalizedSearch) ||
+          (outlet.city?.toLowerCase().includes(normalizedSearch) ?? false)
+        );
       }
-      return (
-        outlet.code.toLowerCase().includes(normalizedSearch) ||
-        outlet.name.toLowerCase().includes(normalizedSearch) ||
-        (outlet.city?.toLowerCase().includes(normalizedSearch) ?? false)
-      );
+      return true;
     });
-  }, [outlets, searchTerm]);
+  }, [outlets, searchTerm, statusFilter, cityFilter]);
+
+  const totalCount = outlets.length;
+  const activeCount = outlets.filter((o) => o.is_active).length;
+  const inactiveCount = outlets.filter((o) => !o.is_active).length;
+  const filteredCount = filteredOutlets.length;
 
   const columns = useMemo<ColumnDef<OutletFullResponse>[]>(() => {
     const baseColumns: ColumnDef<OutletFullResponse>[] = [
@@ -331,53 +486,72 @@ export function OutletsPage(props: OutletsPageProps) {
       },
       {
         id: "is_active",
-        header: "Active",
+        header: "Status",
         cell: (info) => (
-          <Text c={info.row.original.is_active ? "green" : "red"}>
-            {info.row.original.is_active ? "Yes" : "No"}
-          </Text>
+          <Badge color={info.row.original.is_active ? "green" : "gray"} variant="light">
+            {info.row.original.is_active ? "Active" : "Inactive"}
+          </Badge>
         )
+      },
+      {
+        id: "contact",
+        header: "Contact",
+        cell: (info) => {
+          const phone = info.row.original.phone;
+          const email = info.row.original.email;
+          return (
+            <Text size="sm" c="dimmed">
+              {phone ?? "—"} / {email ?? "—"}
+            </Text>
+          );
+        }
+      },
+      {
+        id: "timezone",
+        header: "Timezone",
+        cell: (info) => <Text size="xs" c="dimmed">{info.row.original.timezone ?? "—"}</Text>
       }
     ];
-
-    if (canManageCompanies) {
-      baseColumns.push({
-        id: "company",
-        header: "Company",
-        cell: (info) => <Text>{getCompanyLabel(info.row.original.company_id)}</Text>
-      });
-    }
 
     baseColumns.push({
       id: "actions",
       header: "Actions",
       cell: (info) => (
         <Group gap="xs" justify="flex-end" wrap="wrap">
-          <Button size="xs" variant="light" onClick={() => openEditDialog(info.row.original)}>
-            Edit
-          </Button>
-          <Button
-            size="xs"
-            color="red"
-            variant="light"
-            onClick={() => setConfirmState(info.row.original)}
-          >
-            Delete
-          </Button>
+          <Tooltip label="View details">
+            <ActionIcon
+              variant="light"
+              onClick={() => openDetailDrawer(info.row.original)}
+              disabled={submitting || deleting}
+            >
+              <IconEye size={16} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Delete branch">
+            <ActionIcon
+              variant="light"
+              color="red"
+              onClick={() => setConfirmState(info.row.original)}
+              disabled={submitting || deleting}
+            >
+              <IconTrash size={16} />
+            </ActionIcon>
+          </Tooltip>
         </Group>
       )
     });
 
     return baseColumns;
-  }, [canManageCompanies, getCompanyLabel]);
+  }, [canManageCompanies, getCompanyLabel, submitting, deleting]);
 
   async function handleConfirmDelete() {
-    if (!confirmState) {
+    if (!confirmState || deleting) {
       return;
     }
 
     setError(null);
     setSuccessMessage(null);
+    setDeleting(true);
 
     try {
       await deleteOutlet(confirmState.id, accessToken);
@@ -391,7 +565,105 @@ export function OutletsPage(props: OutletsPageProps) {
       }
     } finally {
       setConfirmState(null);
+      setDeleting(false);
     }
+  }
+
+  function handleImportFileSelect(file: File | null) {
+    readImportFile(file).then((text) => {
+      if (text) setImportText(text);
+    });
+  }
+
+  function processImportText() {
+    const parsed = parseDelimited(importText.trim());
+    if (parsed.length < 2) {
+      setError("Import file must have a header row and at least one data row");
+      return;
+    }
+
+    const header = parsed[0];
+    const body = parsed.slice(1).filter((row) => row.some((cell) => cell.trim() !== ""));
+
+    const rows = body.map((cells) => normalizeImportRow(cells, header));
+    setHasAppliedImport(false);
+    setImportApplyResults([]);
+
+    const plan = buildImportPlan(rows, outlets);
+    setImportPlan(plan);
+
+    const summary = computeImportSummary(plan);
+    setImportSummary(summary);
+
+    setImportStep("preview");
+    setError(null);
+  }
+
+  async function runImport() {
+    if (importing || hasAppliedImport) {
+      return;
+    }
+
+    const actionable = importPlan.filter((p) => p.action === "CREATE");
+    setImporting(true);
+    setImportStep("apply");
+    setImportProgress(0);
+    let success = 0;
+    let failed = 0;
+    const results: Array<{ rowIndex: number; code: string | null; name: string; status: "SUCCESS" | "FAILED"; error?: string }> = [];
+
+    const currentCompanyId = canManageCompanies ? selectedCompanyId : user.company_id;
+
+    for (let i = 0; i < actionable.length; i++) {
+      const row = actionable[i];
+      setImportProgress(((i + 1) / actionable.length) * 100);
+
+      const createData: OutletCreateInput = {
+        company_id: currentCompanyId,
+        code: row.original.code!.toUpperCase(),
+        name: row.original.name.trim()
+      };
+
+      if (row.original.city) createData.city = row.original.city.trim();
+      if (row.original.address_line1) createData.address_line1 = row.original.address_line1.trim();
+      if (row.original.address_line2) createData.address_line2 = row.original.address_line2.trim();
+      if (row.original.postal_code) createData.postal_code = row.original.postal_code.trim();
+      if (row.original.phone) createData.phone = row.original.phone.trim();
+      if (row.original.email) createData.email = row.original.email.trim();
+      if (row.original.timezone) createData.timezone = row.original.timezone.trim();
+
+      try {
+        await createOutlet(createData, accessToken);
+        success++;
+        results.push({ rowIndex: row.rowIndex, code: row.original.code, name: row.original.name, status: "SUCCESS" });
+      } catch (err) {
+        failed++;
+        const errorMessage = err instanceof Error ? err.message : "Unknown error";
+        results.push({ rowIndex: row.rowIndex, code: row.original.code, name: row.original.name, status: "FAILED", error: errorMessage });
+      }
+    }
+
+    setImporting(false);
+    setImportResults({ success, failed });
+    setImportApplyResults(results);
+    setHasAppliedImport(true);
+    await outletsQuery.refetch();
+  }
+
+  function resetImportState() {
+    setImporting(false);
+    setImportStep("source");
+    setImportText("");
+    setImportPlan([]);
+    setImportSummary({ create: 0, error: 0, total: 0 });
+    setImportProgress(0);
+    setImportResults({ success: 0, failed: 0 });
+    setImportApplyResults([]);
+    setHasAppliedImport(false);
+  }
+
+  function handleExport() {
+    downloadOutletsCsv(filteredOutlets, canManageCompanies ? selectedCompanyId : undefined);
   }
 
   return (
@@ -401,12 +673,29 @@ export function OutletsPage(props: OutletsPageProps) {
           title="Branch Management"
           description="Manage branches (outlets) for your company. Each branch is a physical location with its own POS, inventory, and journal."
           actions={
-            <Button
-              onClick={openCreateDialog}
-              disabled={canManageCompanies && companies.length === 0}
-            >
-              Create Branch
-            </Button>
+            <Group gap="sm">
+              <Button
+                variant="light"
+                leftSection={<IconDownload size={16} />}
+                onClick={handleExport}
+                disabled={filteredOutlets.length === 0}
+              >
+                Export CSV
+              </Button>
+              <Button
+                variant="light"
+                leftSection={<IconUpload size={16} />}
+                onClick={() => setImportOpened(true)}
+              >
+                Import
+              </Button>
+              <Button
+                onClick={openCreateDialog}
+                disabled={canManageCompanies && companies.length === 0}
+              >
+                Create Branch
+              </Button>
+            </Group>
           }
         >
           <Stack gap="sm">
@@ -437,6 +726,27 @@ export function OutletsPage(props: OutletsPageProps) {
                 onChange={(event) => setSearchTerm(event.currentTarget.value)}
                 style={{ minWidth: 220 }}
               />
+
+              <SegmentedControl
+                data={[
+                  { value: "ALL", label: "All" },
+                  { value: "ACTIVE", label: "Active" },
+                  { value: "INACTIVE", label: "Inactive" }
+                ]}
+                value={statusFilter}
+                onChange={(v) => setStatusFilter(v as "ALL" | "ACTIVE" | "INACTIVE")}
+              />
+
+              <Select
+                label="City"
+                placeholder="All cities"
+                data={cityOptions}
+                value={cityFilter}
+                onChange={setCityFilter}
+                clearable
+                searchable
+                style={{ minWidth: 160 }}
+              />
             </FilterBar>
 
             {canManageCompanies && companiesQuery.loading ? (
@@ -460,85 +770,146 @@ export function OutletsPage(props: OutletsPageProps) {
               </Alert>
             ) : null}
             {error ? (
-              <Alert color="red" title="Action failed">
+              <Alert color="red" withCloseButton onClose={() => setError(null)}>
                 {error}
               </Alert>
             ) : null}
             {successMessage ? (
-              <Alert color="green" title="Success">
+              <Alert color="green" withCloseButton onClose={() => setSuccessMessage(null)}>
                 {successMessage}
               </Alert>
             ) : null}
           </Stack>
         </PageCard>
 
-        <PageCard title={`Outlets (Branches) (${filteredOutlets.length})`}>
-          <DataTable
-            columns={columns}
-            data={filteredOutlets}
-            emptyState={
-              searchTerm.trim().length > 0
-                ? "No branches match your search."
-                : "No branches found for this company."
-            }
-          />
+        <PageCard>
+          {totalCount > 0 && (
+            <Group gap="xs" mb="sm">
+              <Badge size="lg" variant="light">Total: {totalCount}</Badge>
+              <Badge size="lg" color="green" variant="light">Active: {activeCount}</Badge>
+              <Badge size="lg" color="gray" variant="light">Inactive: {inactiveCount}</Badge>
+              {filteredCount !== totalCount && (
+                <Badge size="lg" color="blue" variant="light">Filtered: {filteredCount}</Badge>
+              )}
+            </Group>
+          )}
+          {totalCount === 0 && !outletsQuery.loading && (
+            <Stack align="center" gap="xs" py="xl">
+              <Text size="lg" fw={500}>No branches yet</Text>
+              <Text size="sm" c="dimmed" ta="center">
+                Create your first branch to start processing transactions.
+              </Text>
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={openCreateDialog}
+                mt="sm"
+              >
+                Create Branch
+              </Button>
+            </Stack>
+          )}
+          {totalCount > 0 && (
+            <DataTable
+              columns={columns}
+              data={filteredOutlets}
+              emptyState={
+                searchTerm.trim().length > 0 || statusFilter !== "ALL" || cityFilter
+                  ? "No branches match your filters."
+                  : "No branches match your search."
+              }
+            />
+          )}
         </PageCard>
       </Stack>
 
-      <Modal
+      <Drawer
         opened={dialogMode !== null}
-        onClose={closeDialog}
+        onClose={handleCloseDialog}
+        position="right"
+        size={isMobile ? "100%" : "lg"}
+        withCloseButton
+        closeOnClickOutside={!submitting}
+        closeOnEscape={!submitting}
         title={
           <Title order={4}>
-            {dialogMode === "create" ? "Create New Branch" : "Edit Branch"}
+            {dialogMode === "create" ? "Create New Branch" : dialogMode === "view" ? "Branch Details" : "Edit Branch"}
           </Title>
         }
-        centered
-        size="lg"
       >
-        <Stack gap="md">
-          {dialogMode === "create" && canManageCompanies ? (
-            <Select
-              label="Company"
-              data={companyOptions}
-              value={String(formData.company_id || "")}
-              onChange={(value) =>
-                setFormData({
-                  ...formData,
-                  company_id: Number(value)
-                })
-              }
-              placeholder="Select company"
-              disabled={companies.length === 0}
-              error={formErrors.company_id}
-              withAsterisk
-            />
-          ) : (
-            <TextInput
-              label="Company"
-              value={
-                editingOutlet
-                  ? getCompanyLabel(editingOutlet.company_id)
-                  : getCompanyLabel(formData.company_id || user.company_id)
-              }
-              disabled
-              description="Company cannot be changed"
-            />
-          )}
+        {dialogMode === "view" && editingOutlet ? (
+          <Stack gap="md">
+            <Divider label="Branch Identity" my="sm" />
+            
+            <TextInput label="Branch Code" value={editingOutlet.code} disabled />
+            <TextInput label="Branch Name" value={editingOutlet.name} disabled />
+            
+            <Badge color={editingOutlet.is_active ? "green" : "gray"} variant="light" size="lg">
+              {editingOutlet.is_active ? "Active" : "Inactive"}
+            </Badge>
 
-          {dialogMode === "create" ? (
-            <TextInput
-              label="Branch Code"
-              placeholder="e.g., JKT-MAIN, SBY-01"
-              value={formData.code}
-              onChange={(event) => setFormData({ ...formData, code: event.currentTarget.value.toUpperCase() })}
-              maxLength={32}
-              error={formErrors.code}
-              description="Code must be unique within the company. Format: CITY-SITE"
-              withAsterisk
-            />
-          ) : (
-            <TextInput
+            <Divider label="Contact & Address" my="sm" />
+
+            <TextInput label="City" value={editingOutlet.city ?? "—"} disabled />
+            <TextInput label="Phone" value={editingOutlet.phone ?? "—"} disabled />
+            <TextInput label="Email" value={editingOutlet.email ?? "—"} disabled />
+            <TextInput label="Address Line 1" value={editingOutlet.address_line1 ?? "—"} disabled />
+            <TextInput label="Address Line 2" value={editingOutlet.address_line2 ?? "—"} disabled />
+            <TextInput label="Postal Code" value={editingOutlet.postal_code ?? "—"} disabled />
+            <TextInput label="Timezone" value={editingOutlet.timezone ?? "—"} disabled />
+
+            <Group justify="flex-end" mt="md">
+              <Button onClick={() => openEditDialog(editingOutlet)}>
+                Edit Branch
+              </Button>
+            </Group>
+          </Stack>
+        ) : (
+          <Stack gap="md">
+            {dialogMode === "create" && canManageCompanies ? (
+              <Select
+                label="Company"
+                data={companyOptions}
+                value={String(formData.company_id || "")}
+                onChange={(value) =>
+                  setFormData({
+                    ...formData,
+                    company_id: Number(value)
+                  })
+                }
+                placeholder="Select company"
+                disabled={companies.length === 0}
+                error={formErrors.company_id}
+                withAsterisk
+              />
+            ) : (
+              <TextInput
+                label="Company"
+                value={
+                  editingOutlet
+                    ? getCompanyLabel(editingOutlet.company_id)
+                    : getCompanyLabel(formData.company_id || user.company_id)
+                }
+                disabled
+                description="Company cannot be changed"
+              />
+            )}
+
+            <Divider label="Branch Identity" my="sm" />
+
+            {dialogMode === "create" ? (
+              <TextInput
+                label="Branch Code"
+                placeholder="e.g., JKT-MAIN, SBY-01"
+                value={formData.code}
+                onChange={(event) => setFormData({ ...formData, code: event.currentTarget.value.toUpperCase() })}
+                onBlur={() => validateField("code")}
+                maxLength={32}
+                error={formErrors.code}
+                description="Code must be unique within the company. Format: CITY-SITE"
+                withAsterisk
+              />
+            ) : (
+              <TextInput
               label="Branch Code"
               value={editingOutlet?.code ?? ""}
               disabled
@@ -551,18 +922,40 @@ export function OutletsPage(props: OutletsPageProps) {
             placeholder="e.g., Jakarta Main Office"
             value={formData.name}
             onChange={(event) => setFormData({ ...formData, name: event.currentTarget.value })}
+            onBlur={() => validateField("name")}
             maxLength={191}
             error={formErrors.name}
             withAsterisk
           />
 
-          <TextInput
-            label="City"
-            placeholder="e.g., Jakarta, Surabaya"
-            value={formData.city}
-            onChange={(event) => setFormData({ ...formData, city: event.currentTarget.value })}
-            maxLength={96}
-          />
+          {dialogMode === "edit" && (
+            <Switch
+              label="Active"
+              description="Inactive branches cannot process transactions"
+              checked={formData.is_active}
+              onChange={(event) => setFormData({ ...formData, is_active: event.currentTarget.checked })}
+            />
+          )}
+
+          <Divider label="Contact & Address" my="sm" />
+
+          <Group grow>
+            <TextInput
+              label="City"
+              placeholder="e.g., Jakarta, Surabaya"
+              value={formData.city}
+              onChange={(event) => setFormData({ ...formData, city: event.currentTarget.value })}
+              maxLength={96}
+            />
+
+            <TextInput
+              label="Phone"
+              placeholder="e.g., +62 21 1234 5678"
+              value={formData.phone}
+              onChange={(event) => setFormData({ ...formData, phone: event.currentTarget.value })}
+              maxLength={32}
+            />
+          </Group>
 
           <TextInput
             label="Address Line 1"
@@ -589,25 +982,6 @@ export function OutletsPage(props: OutletsPageProps) {
               maxLength={20}
             />
 
-            <TextInput
-              label="Phone"
-              placeholder="e.g., +62 21 1234 5678"
-              value={formData.phone}
-              onChange={(event) => setFormData({ ...formData, phone: event.currentTarget.value })}
-              maxLength={32}
-            />
-          </Group>
-
-          <Group grow>
-            <TextInput
-              label="Email"
-              placeholder="branch@company.com"
-              value={formData.email}
-              onChange={(event) => setFormData({ ...formData, email: event.currentTarget.value })}
-              maxLength={191}
-              error={formErrors.email}
-            />
-
             <Select
               label="Timezone"
               placeholder="Select timezone"
@@ -619,14 +993,15 @@ export function OutletsPage(props: OutletsPageProps) {
             />
           </Group>
 
-          {dialogMode === "edit" && (
-            <Switch
-              label="Active"
-              description="Inactive branches cannot process transactions"
-              checked={formData.is_active}
-              onChange={(event) => setFormData({ ...formData, is_active: event.currentTarget.checked })}
-            />
-          )}
+          <TextInput
+            label="Email"
+            placeholder="branch@company.com"
+            value={formData.email}
+            onChange={(event) => setFormData({ ...formData, email: event.currentTarget.value })}
+            onBlur={() => validateField("email")}
+            maxLength={191}
+            error={formErrors.email}
+          />
 
           {error ? (
             <Alert color="red" title="Unable to save">
@@ -635,15 +1010,16 @@ export function OutletsPage(props: OutletsPageProps) {
           ) : null}
 
           <Group justify="flex-end">
-            <Button variant="default" onClick={closeDialog} disabled={submitting}>
+            <Button variant="default" onClick={handleCloseDialog} disabled={submitting}>
               Cancel
             </Button>
-            <Button onClick={handleSubmit} loading={submitting}>
+            <Button onClick={handleSubmit} loading={submitting} disabled={!isFormSubmittable}>
               Save
             </Button>
           </Group>
-        </Stack>
-      </Modal>
+          </Stack>
+        )}
+      </Drawer>
 
       <Modal
         opened={confirmState !== null}
@@ -656,13 +1032,182 @@ export function OutletsPage(props: OutletsPageProps) {
             Delete branch "{confirmState?.name}"? This cannot be undone.
           </Text>
           <Group justify="flex-end">
-            <Button variant="default" onClick={() => setConfirmState(null)}>
+            <Button variant="default" onClick={() => setConfirmState(null)} disabled={deleting}>
               Cancel
             </Button>
-            <Button color="red" onClick={handleConfirmDelete}>
+            <Button color="red" onClick={handleConfirmDelete} loading={deleting} disabled={deleting}>
               Delete
             </Button>
           </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={importOpened}
+        onClose={() => {
+          if (importing) return;
+          setImportOpened(false);
+          resetImportState();
+        }}
+        title="Import Branches"
+        size="lg"
+        closeOnClickOutside={!importing}
+        closeOnEscape={!importing}
+        withCloseButton={!importing}
+      >
+        <Stack>
+          <ImportStepBadges step={importStep} />
+
+          <Divider />
+
+          {importStep === "source" && (
+            <Stack>
+              <Textarea
+                label="Paste data"
+                placeholder="code,name,city,phone,email&#10;JKT-MAIN,Jakarta Main,Jakarta,+62 21 1234 5678,jkt@company.com&#10;SBY-01,Surabaya Branch,Surabaya,+62 31 5678 1234,sby@company.com"
+                minRows={5}
+                value={importText}
+                onChange={(e) => setImportText(e.currentTarget.value)}
+              />
+              <FileInput
+                label="Or upload file"
+                placeholder="Choose CSV or TXT file"
+                accept=".csv,.txt"
+                onChange={handleImportFileSelect}
+              />
+              <Text size="xs" c="dimmed">
+                Template: code,name,city,address_line1,address_line2,postal_code,phone,email,timezone
+              </Text>
+              <Button onClick={processImportText} disabled={!importText.trim()}>
+                Continue to preview
+              </Button>
+            </Stack>
+          )}
+
+          {importStep === "preview" && (
+            <Stack>
+              <Group justify="space-between">
+                <Text fw={500}>Import plan</Text>
+                <Group gap="xs">
+                  <Badge color="green">Create: {importSummary.create}</Badge>
+                  <Badge color="red">Error: {importSummary.error}</Badge>
+                </Group>
+              </Group>
+
+              <Table striped>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>#</Table.Th>
+                    <Table.Th>Code</Table.Th>
+                    <Table.Th>Name</Table.Th>
+                    <Table.Th>City</Table.Th>
+                    <Table.Th>Status</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {importPlan.slice(0, 20).map((row) => (
+                    <Table.Tr key={row.rowIndex}>
+                      <Table.Td>{row.rowIndex + 1}</Table.Td>
+                      <Table.Td>{row.original.code ?? "—"}</Table.Td>
+                      <Table.Td>{row.original.name ?? "—"}</Table.Td>
+                      <Table.Td>{row.original.city ?? "—"}</Table.Td>
+                      <Table.Td>
+                        {row.action === "ERROR" ? (
+                          <Badge color="red" size="sm">{row.error}</Badge>
+                        ) : (
+                          <Badge color="green" size="sm">Will create</Badge>
+                        )}
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+
+              {importPlan.length > 20 && (
+                <Text size="sm" c="dimmed">Showing first 20 of {importPlan.length} rows</Text>
+              )}
+
+              <Group justify="space-between">
+                <Button variant="default" onClick={() => setImportStep("source")}>
+                  Back
+                </Button>
+                <Button
+                  onClick={runImport}
+                  loading={importing}
+                  disabled={importing || importSummary.create === 0 || hasAppliedImport}
+                >
+                  {importing ? "Applying..." : hasAppliedImport ? "Import already applied" : `Start import (${importSummary.create})`}
+                </Button>
+              </Group>
+            </Stack>
+          )}
+
+          {importStep === "apply" && (
+            <Stack>
+              {importing && (
+                <>
+                  <Text size="sm" c="dimmed">
+                    Importing... {Math.round(importProgress)}%
+                  </Text>
+                  <Text size="xs" c="dimmed" fs="italic">
+                    Import in progress. Please wait until completion before closing.
+                  </Text>
+                </>
+              )}
+
+              {!importing && (
+                <>
+                  <Alert color="green" title="Import complete">
+                    Successfully created: {importResults.success} | Failed: {importResults.failed}
+                  </Alert>
+
+                  {importApplyResults.length > 0 && (
+                    <Stack gap="xs">
+                      <Text fw={500}>Results</Text>
+                      <Table striped>
+                        <Table.Thead>
+                          <Table.Tr>
+                            <Table.Th>#</Table.Th>
+                            <Table.Th>Code</Table.Th>
+                            <Table.Th>Name</Table.Th>
+                            <Table.Th>Result</Table.Th>
+                            <Table.Th>Message</Table.Th>
+                          </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>
+                          {importApplyResults.slice(0, 50).map((row) => (
+                            <Table.Tr key={row.rowIndex}>
+                              <Table.Td>{row.rowIndex + 1}</Table.Td>
+                              <Table.Td>{row.code ?? "—"}</Table.Td>
+                              <Table.Td>{row.name ?? "—"}</Table.Td>
+                              <Table.Td>
+                                <Badge color={row.status === "SUCCESS" ? "green" : "red"} size="sm">
+                                  {row.status}
+                                </Badge>
+                              </Table.Td>
+                              <Table.Td>{row.error ?? "—"}</Table.Td>
+                            </Table.Tr>
+                          ))}
+                        </Table.Tbody>
+                      </Table>
+                      {importApplyResults.length > 50 && (
+                        <Text size="sm" c="dimmed">Showing first 50 of {importApplyResults.length} rows</Text>
+                      )}
+                    </Stack>
+                  )}
+
+                  <Button
+                    onClick={() => {
+                      setImportOpened(false);
+                      resetImportState();
+                    }}
+                  >
+                    Done
+                  </Button>
+                </>
+              )}
+            </Stack>
+          )}
         </Stack>
       </Modal>
     </>
