@@ -13,13 +13,15 @@ type FixedAsset = {
   purchase_cost: number | null;
 };
 
-type Category = {
+type FixedAssetCategory = {
   id: number;
   code: string;
   name: string;
   useful_life_months: number;
   residual_value_pct: number;
   expense_account_id: number | null;
+  accum_depr_account_id: number | null;
+  is_active: boolean;
 };
 
 type Account = {
@@ -32,11 +34,12 @@ type AcquisitionModalProps = {
   opened: boolean;
   onClose: () => void;
   asset: FixedAsset | undefined;
+  category: FixedAssetCategory | undefined;
   accounts: Account[];
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
 };
 
-export function AcquisitionModal({ opened, onClose, asset, accounts, onSubmit }: AcquisitionModalProps) {
+export function AcquisitionModal({ opened, onClose, asset, category, accounts, onSubmit }: AcquisitionModalProps) {
   const [form, setForm] = useState({
     event_date: "",
     cost: 0,
@@ -52,19 +55,24 @@ export function AcquisitionModal({ opened, onClose, asset, accounts, onSubmit }:
 
   useEffect(() => {
     if (opened) {
+      const cost = asset?.purchase_cost ?? 0;
+      const usefulLife = category?.useful_life_months ?? 60;
+      const residualPct = category?.residual_value_pct ?? 0;
+      const salvage = Math.round(cost * residualPct) / 100;
+      
       setForm({
         event_date: asset?.purchase_date?.slice(0, 10) ?? "",
-        cost: asset?.purchase_cost ?? 0,
-        useful_life_months: 60,
-        salvage_value: 0,
+        cost: cost,
+        useful_life_months: usefulLife,
+        salvage_value: salvage,
         asset_account_id: "",
         offset_account_id: "",
-        expense_account_id: "",
+        expense_account_id: category?.expense_account_id ? String(category.expense_account_id) : "",
         notes: ""
       });
       setFormError(null);
     }
-  }, [opened, asset]);
+  }, [opened, asset, category]);
 
   async function handleSubmit() {
     if (!form.asset_account_id || !form.offset_account_id) {

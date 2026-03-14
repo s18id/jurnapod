@@ -451,32 +451,43 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
 
       {selectedAssetId && (
         <>
-          <AcquisitionModal
-            opened={acquisitionModalOpen}
-            onClose={() => setAcquisitionModalOpen(false)}
-            asset={assets.find(a => a.id === selectedAssetId)}
-            accounts={accounts}
-            onSubmit={handleAcquisitionSubmit}
-          />
-          <TransferModal
-            opened={transferModalOpen}
-            onClose={() => setTransferModalOpen(false)}
-            asset={assets.find(a => a.id === selectedAssetId)}
-            outlets={outletOptions}
-            onSubmit={handleTransferSubmit}
-          />
-          <ImpairmentModal
-            opened={impairmentModalOpen}
-            onClose={() => setImpairmentModalOpen(false)}
-            accounts={accounts}
-            onSubmit={handleImpairmentSubmit}
-          />
-          <DisposalModal
-            opened={disposalModalOpen}
-            onClose={() => setDisposalModalOpen(false)}
-            accounts={accounts}
-            onSubmit={handleDisposalSubmit}
-          />
+          {(() => {
+            const selectedAsset = assets.find(a => a.id === selectedAssetId) ?? null;
+            const selectedCategory = selectedAsset?.category_id != null
+              ? categories.find(c => c.id === selectedAsset.category_id) ?? null
+              : null;
+            return (
+              <>
+                <AcquisitionModal
+                  opened={acquisitionModalOpen}
+                  onClose={() => setAcquisitionModalOpen(false)}
+                  asset={selectedAsset ?? undefined}
+                  category={selectedCategory ?? undefined}
+                  accounts={accounts}
+                  onSubmit={handleAcquisitionSubmit}
+                />
+                <TransferModal
+                  opened={transferModalOpen}
+                  onClose={() => setTransferModalOpen(false)}
+                  asset={selectedAsset ?? undefined}
+                  outlets={outletOptions}
+                  onSubmit={handleTransferSubmit}
+                />
+                <ImpairmentModal
+                  opened={impairmentModalOpen}
+                  onClose={() => setImpairmentModalOpen(false)}
+                  accounts={accounts}
+                  onSubmit={handleImpairmentSubmit}
+                />
+                <DisposalModal
+                  opened={disposalModalOpen}
+                  onClose={() => setDisposalModalOpen(false)}
+                  accounts={accounts}
+                  onSubmit={handleDisposalSubmit}
+                />
+              </>
+            );
+          })()}
         </>
       )}
     </Stack>
