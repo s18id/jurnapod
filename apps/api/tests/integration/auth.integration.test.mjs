@@ -180,6 +180,7 @@ test(
     let childProcess;
     let viewerUserId = 0;
     let deniedOutletId = 0;
+    let viewerRoleId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -287,14 +288,15 @@ test(
       }));
 
       const [viewerRoleResult] = await db.execute(
-        `INSERT INTO roles (code, name)
-         VALUES ('VIEWER', 'Viewer')
+        `INSERT INTO roles (code, name, company_id, is_global, role_level)
+         VALUES (?, 'Viewer', ?, 0, 0)
          ON DUPLICATE KEY UPDATE
            name = VALUES(name),
            id = LAST_INSERT_ID(id),
-           updated_at = CURRENT_TIMESTAMP`
+           updated_at = CURRENT_TIMESTAMP`,
+        [`VIEWER_TEST_${runId}`, companyId]
       );
-      const viewerRoleId = Number(viewerRoleResult.insertId);
+      viewerRoleId = Number(viewerRoleResult.insertId);
 
       const viewerPasswordHash = await bcrypt.hash(viewerPassword, 12);
       const [viewerUserResult] = await db.execute(
@@ -489,6 +491,10 @@ test(
       if (viewerUserId > 0) {
         await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [viewerUserId]);
         await db.execute("DELETE FROM users WHERE id = ?", [viewerUserId]);
+      }
+
+      if (viewerRoleId > 0) {
+        await db.execute("DELETE FROM roles WHERE id = ?", [viewerRoleId]);
       }
 
       if (deniedOutletId > 0) {

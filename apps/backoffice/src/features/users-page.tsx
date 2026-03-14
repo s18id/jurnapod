@@ -297,17 +297,29 @@ export function UsersPage(props: UsersPageProps) {
     search: searchQuery || undefined
   });
 
-  const rolesQuery = useRoles(accessToken);
+  const rolesQuery = useRoles(accessToken, activeCompanyId);
   const companiesQuery = useCompanies(accessToken, { enabled: isSuperAdmin });
   const outletCompanyId =
     isSuperAdmin && dialogMode === "create"
       ? (formData.company_id ?? activeCompanyId)
       : activeCompanyId;
   const outletsQuery = useOutlets(outletCompanyId, accessToken);
-  const availableRoles = useMemo(
-    () => (rolesQuery.data || []).filter((role) => role.code !== "SUPER_ADMIN"),
-    [rolesQuery.data]
-  );
+
+  const availableRoles = useMemo(() => {
+    const roles = rolesQuery.data || [];
+    const dedupedByCode = new Map<string, (typeof roles)[0]>();
+    for (const role of roles) {
+      if (role.code === "SUPER_ADMIN") continue;
+      const existing = dedupedByCode.get(role.code);
+      if (!existing) {
+        dedupedByCode.set(role.code, role);
+      } else if (role.company_id !== null && role.company_id === activeCompanyId) {
+        dedupedByCode.set(role.code, role);
+      }
+    }
+    return Array.from(dedupedByCode.values());
+  }, [rolesQuery.data, activeCompanyId]);
+
   const globalRoleOptions = useMemo(
     () => availableRoles.filter((role) => role.is_global),
     [availableRoles]
@@ -318,10 +330,10 @@ export function UsersPage(props: UsersPageProps) {
   );
 
   const actorMaxRoleLevel = useMemo(() => {
-    const roleLevels = new Map((rolesQuery.data || []).map((role) => [role.code, role.role_level]));
+    const roleLevels = new Map(availableRoles.map((role) => [role.code, role.role_level]));
     const levels = user.roles.map((code) => roleLevels.get(code) ?? 0);
     return Math.max(0, ...levels);
-  }, [rolesQuery.data, user.roles]);
+  }, [availableRoles, user.roles]);
 
   const companyOptions = useMemo(
     () =>
