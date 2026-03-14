@@ -22,7 +22,7 @@ export const OutletFullResponseSchema = z.object({
 });
 
 export const OutletCreateRequestSchema = z.object({
-  company_id: NumericIdSchema,
+  company_id: NumericIdSchema.optional(),
   code: z.string().trim().min(1).max(32),
   name: z.string().trim().min(1).max(191),
   city: z.string().trim().max(96).optional(),
@@ -30,7 +30,7 @@ export const OutletCreateRequestSchema = z.object({
   address_line2: z.string().trim().max(191).optional(),
   postal_code: z.string().trim().max(20).optional(),
   phone: z.string().trim().max(32).optional(),
-  email: z.string().trim().email().max(191).optional(),
+  email: z.string().trim().email().max(191).optional().nullable(),
   timezone: z.string().trim().max(64).optional()
 });
 

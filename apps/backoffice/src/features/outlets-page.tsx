@@ -274,6 +274,14 @@ export function OutletsPage(props: OutletsPageProps) {
           updateData.is_active = formData.is_active;
         }
 
+        const hasChanges = Object.keys(updateData).length > 0;
+        if (!hasChanges) {
+          setSuccessMessage("No changes to save");
+          closeDialog();
+          setSubmitting(false);
+          return;
+        }
+
         await updateOutlet(editingOutlet.id, updateData, accessToken);
         setSuccessMessage("Branch updated successfully");
         await outletsQuery.refetch();

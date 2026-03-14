@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { NumericIdSchema } from "@jurnapod/shared";
+import { NumericIdSchema, OutletUpdateRequestSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { checkUserAccess } from "../../../../src/lib/auth";
@@ -35,64 +35,6 @@ async function resolveCompanyId(request: Request, auth: { userId: number; compan
   }
 
   return companyId;
-}
-
-function parseStringOptional(value: unknown, maxLength: number): string | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === null) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
-  if (trimmed.length > maxLength) {
-    return undefined;
-  }
-  return trimmed;
-}
-
-function parseEmailOptional(value: unknown): string | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === null) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
-  // Basic email validation
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-    return undefined;
-  }
-  if (trimmed.length > 191) {
-    return undefined;
-  }
-  return trimmed;
-}
-
-function parseBooleanOptional(value: unknown): boolean | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value === "string") {
-    if (value.toLowerCase() === "true") return true;
-    if (value.toLowerCase() === "false") return false;
-  }
-  return undefined;
 }
 
 export const GET = withAuth(
@@ -131,7 +73,15 @@ export const PATCH = withAuth(
       const outletId = parseOutletId(request);
       const companyId = await resolveCompanyId(request, _auth);
       const body = await request.json();
-      const { name, city, address_line1, address_line2, postal_code, phone, email, timezone, is_active } = body;
+      
+      const parsed = OutletUpdateRequestSchema.parse(body);
+      
+      const updatableFields = ['name', 'city', 'address_line1', 'address_line2', 'postal_code', 'phone', 'email', 'timezone', 'is_active'];
+      const hasChanges = updatableFields.some(field => parsed[field as keyof typeof parsed] !== undefined);
+      
+      if (!hasChanges) {
+        return errorResponse("VALIDATION_ERROR", "At least one field must be provided", 400);
+      }
 
       const updateData: Parameters<typeof updateOutlet>[0] = {
         companyId,
@@ -139,47 +89,19 @@ export const PATCH = withAuth(
         actor: {
           userId: _auth.userId,
           ipAddress: readClientIp(request)
-        }
+        },
+        ...parsed
       };
-
-      // Only include name if provided and non-empty
-      if (name !== undefined) {
-        if (!name || typeof name !== "string" || name.trim().length === 0) {
-          return errorResponse("VALIDATION_ERROR", "Branch name is required", 400);
-        }
-        updateData.name = name.trim();
-      }
-
-      // Profile fields - allow null to clear
-      const parsedCity = parseStringOptional(city, 96);
-      if (parsedCity !== undefined) updateData.city = parsedCity;
-
-      const parsedAddress1 = parseStringOptional(address_line1, 191);
-      if (parsedAddress1 !== undefined) updateData.address_line1 = parsedAddress1;
-
-      const parsedAddress2 = parseStringOptional(address_line2, 191);
-      if (parsedAddress2 !== undefined) updateData.address_line2 = parsedAddress2;
-
-      const parsedPostalCode = parseStringOptional(postal_code, 20);
-      if (parsedPostalCode !== undefined) updateData.postal_code = parsedPostalCode;
-
-      const parsedPhone = parseStringOptional(phone, 32);
-      if (parsedPhone !== undefined) updateData.phone = parsedPhone;
-
-      const parsedEmail = parseEmailOptional(email);
-      if (parsedEmail !== undefined) updateData.email = parsedEmail;
-
-      const parsedTimezone = parseStringOptional(timezone, 64);
-      if (parsedTimezone !== undefined) updateData.timezone = parsedTimezone;
-
-      const parsedIsActive = parseBooleanOptional(is_active);
-      if (parsedIsActive !== undefined) updateData.is_active = parsedIsActive;
 
       const outlet = await updateOutlet(updateData);
 
       return successResponse(outlet);
     } catch (error) {
       if (error instanceof ZodError) {
+        const issues = error.issues.map(i => `${i.path.join('.') || 'request'}: ${i.message}`).join('; ');
+        return errorResponse("VALIDATION_ERROR", `Invalid request: ${issues}`, 400);
+      }
+      if (error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       if (error instanceof Error && error.message === "COMPANY_MISMATCH") {

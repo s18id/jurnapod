@@ -409,6 +409,117 @@ test(
         )
       );
 
+      // ========================================
+      // Test: Outlet profile fields CRUD
+      // ========================================
+      const profileOutletCode = `PROF${runId}`.slice(0, 32).toUpperCase();
+      const createProfileRes = await fetch(`${baseUrl}/api/outlets`, {
+        method: "POST",
+        headers: ownerHeader,
+        body: JSON.stringify({
+          code: profileOutletCode,
+          name: `Profile Test Outlet ${runId}`,
+          city: "Jakarta",
+          address_line1: "Jl. Sudirman No. 1",
+          address_line2: "Floor 10",
+          postal_code: "10220",
+          phone: "+62 21 1234 5678",
+          email: "jakarta@test.com",
+          timezone: "Asia/Jakarta"
+        })
+      });
+
+      assert.equal(createProfileRes.status, 201);
+      const profileOutlet = await createProfileRes.json();
+      assert.equal(profileOutlet.success, true);
+      assert.equal(profileOutlet.data.city, "Jakarta");
+      assert.equal(profileOutlet.data.address_line1, "Jl. Sudirman No. 1");
+      assert.equal(profileOutlet.data.address_line2, "Floor 10");
+      assert.equal(profileOutlet.data.postal_code, "10220");
+      assert.equal(profileOutlet.data.phone, "+62 21 1234 5678");
+      assert.equal(profileOutlet.data.email, "jakarta@test.com");
+      assert.equal(profileOutlet.data.timezone, "Asia/Jakarta");
+      assert.equal(profileOutlet.data.is_active, true);
+
+      const profileOutletId = profileOutlet.data.id;
+
+      // ========================================
+      // Test: PATCH profile fields including clear-to-null
+      // ========================================
+      const patchProfileRes = await fetch(`${baseUrl}/api/outlets/${profileOutletId}`, {
+        method: "PATCH",
+        headers: ownerHeader,
+        body: JSON.stringify({
+          city: "Surabaya",
+          email: null,
+          is_active: false
+        })
+      });
+
+      assert.equal(patchProfileRes.status, 200);
+      const patchedOutlet = await patchProfileRes.json();
+      assert.equal(patchedOutlet.data.city, "Surabaya");
+      assert.equal(patchedOutlet.data.email, null);
+      assert.equal(patchedOutlet.data.is_active, false);
+      assert.equal(patchedOutlet.data.address_line1, "Jl. Sudirman No. 1");
+
+      // ========================================
+      // Test: Invalid email returns 400
+      // ========================================
+      const invalidEmailRes = await fetch(`${baseUrl}/api/outlets`, {
+        method: "POST",
+        headers: ownerHeader,
+        body: JSON.stringify({
+          code: `INV${runId}`.slice(0, 32).toUpperCase(),
+          name: `Invalid Email Outlet ${runId}`,
+          email: "not-an-email"
+        })
+      });
+
+      assert.equal(invalidEmailRes.status, 400);
+      const invalidEmailBody = await invalidEmailRes.json();
+      assert.equal(invalidEmailBody.success, false);
+      assert.ok(invalidEmailBody.error?.message);
+      assert.ok(invalidEmailBody.error.message.includes("email"));
+
+      // ========================================
+      // Test: PATCH with invalid email returns 400
+      // ========================================
+      const patchInvalidEmailRes = await fetch(`${baseUrl}/api/outlets/${profileOutletId}`, {
+        method: "PATCH",
+        headers: ownerHeader,
+        body: JSON.stringify({
+          email: "also-invalid"
+        })
+      });
+
+      assert.equal(patchInvalidEmailRes.status, 400);
+      const patchInvalidEmailBody = await patchInvalidEmailRes.json();
+      assert.equal(patchInvalidEmailBody.success, false);
+      assert.ok(patchInvalidEmailBody.error?.message);
+      assert.ok(patchInvalidEmailBody.error.message.includes("email"));
+
+      // ========================================
+      // Test: Empty PATCH returns 400
+      // ========================================
+      const emptyPatchRes = await fetch(`${baseUrl}/api/outlets/${profileOutletId}`, {
+        method: "PATCH",
+        headers: ownerHeader,
+        body: JSON.stringify({})
+      });
+
+      assert.equal(emptyPatchRes.status, 400);
+      const emptyPatchBody = await emptyPatchRes.json();
+      assert.equal(emptyPatchBody.success, false);
+      assert.ok(emptyPatchBody.error?.message);
+      assert.ok(emptyPatchBody.error.message.includes("At least one field"));
+
+      // Cleanup profile outlet
+      await fetch(`${baseUrl}/api/outlets/${profileOutletId}`, {
+        method: "DELETE",
+        headers: ownerHeader
+      });
+
       const roleCode = `ROLE${runId}`.slice(0, 32).toUpperCase();
       const roleName = `Role ${runId}`;
       const roleNameUpdated = `Role Updated ${runId}`;
