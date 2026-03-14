@@ -750,13 +750,23 @@ export async function recordTransfer(
     const idempotencyKey = input.idempotency_key ?? generateIdempotencyKey();
     const existingEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
     if (existingEvent) {
+      if (Number(existingEvent.asset_id) !== assetId) {
+        throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+      }
+      if (existingEvent.event_type !== FA_TRANSFER) {
+        throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+      }
       const eventData = typeof existingEvent.event_data === "string" 
         ? JSON.parse(existingEvent.event_data) 
         : existingEvent.event_data;
+      const toOutletId = (eventData as Record<string, unknown>).to_outlet_id;
+      if (typeof toOutletId !== "number") {
+        throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+      }
       return {
         event_id: existingEvent.id,
         journal_batch_id: existingEvent.journal_batch_id,
-        to_outlet_id: (eventData as Record<string, unknown>).to_outlet_id as number,
+        to_outlet_id: toOutletId,
         duplicate: true
       };
     }
@@ -795,13 +805,23 @@ export async function recordTransfer(
     if (eventIdResult.isDuplicate) {
       const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
       if (dupEvent) {
+        if (Number(dupEvent.asset_id) !== assetId) {
+          throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+        }
+        if (dupEvent.event_type !== FA_TRANSFER) {
+          throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+        }
         const eventData = typeof dupEvent.event_data === "string" 
           ? JSON.parse(dupEvent.event_data) 
           : dupEvent.event_data;
+        const toOutletId = (eventData as Record<string, unknown>).to_outlet_id;
+        if (typeof toOutletId !== "number") {
+          throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+        }
         return {
           event_id: eventIdResult.eventId,
           journal_batch_id: dupEvent.journal_batch_id,
-          to_outlet_id: (eventData as Record<string, unknown>).to_outlet_id as number,
+          to_outlet_id: toOutletId,
           duplicate: true
         };
       }
