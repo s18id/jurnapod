@@ -57,3 +57,5 @@ Important:
   - imports
   - migrations
   - financial reports
+- For API integration tests, expect API-driven setup/mutations; DB only for cleanup/read-only verification.
+- Flag new code paths that filter `audit_logs` by `result` instead of `success`.

@@ -1159,7 +1159,7 @@ async function readAcceptedPostingAuditMetadata(
      WHERE company_id = ?
        AND outlet_id = ?
        AND action = ?
-       AND result = 'SUCCESS'
+       AND success = 1
        AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
      ORDER BY id DESC
      LIMIT 1`,

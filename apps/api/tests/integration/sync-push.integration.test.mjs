@@ -314,7 +314,7 @@ async function countAcceptedSyncPushEvents(db, clientTxId) {
     `SELECT COUNT(*) AS total
      FROM audit_logs
      WHERE action = ?
-       AND result = 'SUCCESS'
+       AND success = 1
        AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
     [SYNC_PUSH_ACCEPTED_AUDIT_ACTION, clientTxId]
   );
@@ -327,7 +327,7 @@ async function countDuplicateSyncPushEvents(db, clientTxId) {
     `SELECT COUNT(*) AS total
      FROM audit_logs
      WHERE action = ?
-       AND result = 'SUCCESS'
+       AND success = 1
        AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
     [SYNC_PUSH_DUPLICATE_AUDIT_ACTION, clientTxId]
   );
@@ -340,7 +340,7 @@ async function readAcceptedSyncPushAuditPayload(db, clientTxId) {
     `SELECT payload_json
      FROM audit_logs
      WHERE action = ?
-       AND result = 'SUCCESS'
+       AND success = 1
        AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
      ORDER BY id DESC
      LIMIT 1`,
@@ -380,7 +380,7 @@ async function readDuplicateSyncPushAuditPayload(db, clientTxId) {
     `SELECT payload_json
      FROM audit_logs
      WHERE action = ?
-       AND result = 'SUCCESS'
+       AND success = 1
        AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
      ORDER BY id DESC
      LIMIT 1`,
