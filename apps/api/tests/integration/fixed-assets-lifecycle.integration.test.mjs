@@ -172,6 +172,8 @@ test(
     let createdCashAccountId = 0;
     let createdAssetAccountId = 0;
     let createdOutletId = 0;
+    let createdLossAccountId = 0;
+    let createdDisposalExpenseAccountId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -239,6 +241,18 @@ test(
         [companyId, `CASH-${runId}`, `Cash Account ${runId}`]
       );
       createdCashAccountId = Number(cashAccountResult.insertId);
+
+      const [lossAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `FA-LOSS-${runId}`, `FA Loss ${runId}`]
+      );
+      createdLossAccountId = Number(lossAccountResult.insertId);
+
+      const [disposalExpenseAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `FA-DISP-EXP-${runId}`, `FA Disposal Exp ${runId}`]
+      );
+      createdDisposalExpenseAccountId = Number(disposalExpenseAccountResult.insertId);
 
       const [outletResult] = await db.execute(
         `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
@@ -402,7 +416,7 @@ test(
       assert.equal(ledgerAfterImpairmentBody.data.events[1].event_type, "TRANSFER");
       assert.equal(ledgerAfterImpairmentBody.data.events[2].event_type, "IMPAIRMENT");
 
-      // DISPOSAL (SALE)
+      // DISPOSAL (SALE) - with loss and disposal cost
       const disposalResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId}/disposal`, {
         method: "POST",
         headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
@@ -414,6 +428,9 @@ test(
           cash_account_id: createdCashAccountId,
           asset_account_id: createdAssetAccountId,
           accum_depr_account_id: createdExpenseAccountId,
+          accum_impairment_account_id: createdExpenseAccountId,
+          loss_account_id: createdLossAccountId,
+          disposal_expense_account_id: createdDisposalExpenseAccountId,
           notes: "Test sale"
         })
       });
@@ -422,7 +439,7 @@ test(
       assert.equal(disposalBody.success, true);
       assert.equal(disposalBody.data.book.carrying_amount, 0, "Carrying amount should be zero after disposal");
       assert.equal(disposalBody.data.disposal.cost_removed, 10000000);
-      assert.equal(disposalBody.data.disposal.gain_loss, -1600000, "Gain/loss = proceeds - carryingAmount - disposalCost = 6000000 - 7500000 - 100000 = -1600000");
+      assert.equal(disposalBody.data.disposal.gain_loss, -2000000, "Gain/loss = proceeds - nbv (cost - accum_depr - accum_impair) = 6000000 - 8000000 = -2000000 (loss)");
       assert.equal(typeof disposalBody.data.duplicate === "boolean", true, "Disposal response should have duplicate field");
 
       // Verify asset is marked as disposed
@@ -440,7 +457,8 @@ test(
           impairment_date: eventDate,
           impairment_amount: 100000,
           reason: "Test",
-          expense_account_id: createdExpenseAccountId
+          expense_account_id: createdExpenseAccountId,
+          accum_impairment_account_id: createdExpenseAccountId
         })
       });
       assert.equal(actionOnDisposedResponse.status, 409, "Action on disposed asset should fail");
@@ -472,6 +490,12 @@ test(
       }
       if (createdCashAccountId > 0) {
         await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
+      }
+      if (createdLossAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdLossAccountId]);
+      }
+      if (createdDisposalExpenseAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdDisposalExpenseAccountId]);
       }
       if (createdOutletId > 0) {
         await db.execute("DELETE FROM outlets WHERE id = ?", [createdOutletId]);
@@ -953,6 +977,8 @@ test(
     let createdAssetAccountId = 0;
     let createdCashAccountId = 0;
     let createdDisposalEventId = 0;
+    let createdLossAccountId = 0;
+    let createdDisposalExpenseAccountId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -1021,6 +1047,20 @@ test(
       );
       createdCashAccountId = Number(cashAccountResult.insertId);
 
+      const [lossAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name)
+         VALUES (?, ?, ?)`,
+        [companyId, `FA-LOSS-${runId}`, `FA Loss ${runId}`]
+      );
+      createdLossAccountId = Number(lossAccountResult.insertId);
+
+      const [disposalExpenseAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name)
+         VALUES (?, ?, ?)`,
+        [companyId, `FA-DISP-EXP-${runId}`, `FA Disposal Exp ${runId}`]
+      );
+      createdDisposalExpenseAccountId = Number(disposalExpenseAccountResult.insertId);
+
       const [assetResult] = await db.execute(
         `INSERT INTO fixed_assets (company_id, outlet_id, category_id, name, purchase_cost, is_active)
          VALUES (?, ?, ?, ?, 10000000, 1)`,
@@ -1068,7 +1108,9 @@ test(
           disposal_cost: 0,
           cash_account_id: createdCashAccountId,
           asset_account_id: createdAssetAccountId,
-          accum_depr_account_id: createdExpenseAccountId
+          accum_depr_account_id: createdExpenseAccountId,
+          accum_impairment_account_id: createdExpenseAccountId,
+          loss_account_id: createdLossAccountId
         })
       });
       assert.equal(disposalResponse.status, 201);
@@ -1112,7 +1154,19 @@ test(
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM asset_depreciation_plans WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId]);
+        // Delete events first (releases FK references to journal_batches)
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
+        // Then delete VOID journal entries (by event_id, not asset_id)
+        if (createdDisposalEventId > 0) {
+          await db.execute(
+            "DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?)",
+            [createdDisposalEventId]
+          );
+          await db.execute(
+            "DELETE FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?",
+            [createdDisposalEventId]
+          );
+        }
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
         await db.execute(
           `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'IMPAIRMENT', 'DISPOSAL', 'VOID'))`,
@@ -1135,6 +1189,12 @@ test(
       }
       if (createdCashAccountId > 0) {
         await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
+      }
+      if (createdLossAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdLossAccountId]);
+      }
+      if (createdDisposalExpenseAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdDisposalExpenseAccountId]);
       }
     }
   }
@@ -1255,7 +1315,7 @@ test(
         headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
         body: JSON.stringify({ void_reason: "Void legacy FA_ACQUISITION" })
       });
-      assert.equal(voidResponse.status, 201, "Void legacy FA_ACQUISITION should succeed");
+      assert.equal(voidResponse.status, 201, "Void legacy ACQUISITION should succeed");
       const voidBody = await voidResponse.json();
       assert.equal(voidBody.success, true);
       assert.equal(voidBody.data.original_event_id, createdEventId);
@@ -1275,7 +1335,19 @@ test(
 
     } finally {
       if (createdAssetId > 0) {
+        // Delete events first (releases FK references to journal_batches)
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
+        // Then delete VOID journal entries (by event_id)
+        if (createdEventId > 0) {
+          await db.execute(
+            "DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?)",
+            [createdEventId]
+          );
+          await db.execute(
+            "DELETE FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?",
+            [createdEventId]
+          );
+        }
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [journalBatchId]);
         await db.execute("DELETE FROM journal_batches WHERE id = ?", [journalBatchId]);
@@ -1609,6 +1681,437 @@ test(
       }
       if (createdCashAccountId > 0) {
         await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
+      }
+    }
+  }
+);
+
+test(
+  "fixed asset lifecycle: duplicate disposal returns canonical gain_loss and journal_batch_id",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let createdAssetId = 0;
+    let createdCategoryId = 0;
+    let createdAssetAccountId = 0;
+    let createdCashAccountId = 0;
+    let createdExpenseAccountId = 0;
+    let createdLossAccountId = 0;
+    let createdDisposalExpenseAccountId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const idempotentKey = `disp-dup-${runId}`;
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error("owner fixture not found");
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+      const baseUrl = testContext.baseUrl;
+
+      const eventDate = await getOpenFiscalYearDate(db, companyId);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const { access_token: accessToken } = (await loginResponse.json()).data;
+
+      const [categoryResult] = await db.execute(
+        `INSERT INTO fixed_asset_categories (company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, is_active)
+         VALUES (?, ?, ?, 'STRAIGHT_LINE', 60, 5, 1)`,
+        [companyId, `CAT-${runId}`, `Dup Disp ${runId}`]
+      );
+      createdCategoryId = Number(categoryResult.insertId);
+
+      const [assetAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `FA-${runId}`, `Fixed Asset ${runId}`]
+      );
+      createdAssetAccountId = Number(assetAccountResult.insertId);
+
+      const [cashAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `CASH-${runId}`, `Cash ${runId}`]
+      );
+      createdCashAccountId = Number(cashAccountResult.insertId);
+
+      const [expenseAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `EXP-${runId}`, `Expense ${runId}`]
+      );
+      createdExpenseAccountId = Number(expenseAccountResult.insertId);
+
+      const [lossAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `LOSS-${runId}`, `Loss ${runId}`]
+      );
+      createdLossAccountId = Number(lossAccountResult.insertId);
+
+      const [disposalExpenseAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `DISP-EXP-${runId}`, `Disposal Expense ${runId}`]
+      );
+      createdDisposalExpenseAccountId = Number(disposalExpenseAccountResult.insertId);
+
+      const [assetResult] = await db.execute(
+        `INSERT INTO fixed_assets (company_id, outlet_id, category_id, name, purchase_cost, is_active)
+         VALUES (?, ?, ?, ?, 10000000, 1)`,
+        [companyId, outletId, createdCategoryId, `Dup Disp Asset ${runId}`]
+      );
+      createdAssetId = Number(assetResult.insertId);
+
+      const acqResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId}/acquisition`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          event_date: eventDate,
+          cost: 10000000,
+          useful_life_months: 60,
+          salvage_value: 0,
+          asset_account_id: createdAssetAccountId,
+          offset_account_id: createdCashAccountId
+        })
+      });
+      assert.equal(acqResponse.status, 201);
+
+      const firstDispResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId}/disposal`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          disposal_date: eventDate,
+          disposal_type: "SALE",
+          proceeds: 6000000,
+          disposal_cost: 100000,
+          cash_account_id: createdCashAccountId,
+          asset_account_id: createdAssetAccountId,
+          accum_depr_account_id: createdExpenseAccountId,
+          accum_impairment_account_id: createdExpenseAccountId,
+          loss_account_id: createdLossAccountId,
+          disposal_expense_account_id: createdDisposalExpenseAccountId,
+          idempotency_key: idempotentKey,
+          notes: "First disposal attempt"
+        })
+      });
+      assert.equal(firstDispResponse.status, 201);
+      const firstDispBody = await firstDispResponse.json();
+      const originalEventId = firstDispBody.data.event_id;
+      const originalBatchId = firstDispBody.data.journal_batch_id;
+      const originalGainLoss = firstDispBody.data.disposal.gain_loss;
+      assert.ok(originalBatchId > 0, "Original should have valid journal batch id");
+
+      const dupDispResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId}/disposal`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          disposal_date: eventDate,
+          disposal_type: "SALE",
+          proceeds: 9999999,
+          disposal_cost: 999999,
+          cash_account_id: createdCashAccountId,
+          asset_account_id: createdAssetAccountId,
+          accum_depr_account_id: createdExpenseAccountId,
+          accum_impairment_account_id: createdExpenseAccountId,
+          loss_account_id: createdLossAccountId,
+          disposal_expense_account_id: createdDisposalExpenseAccountId,
+          idempotency_key: idempotentKey,
+          notes: "Altered payload - should be ignored"
+        })
+      });
+      assert.equal(dupDispResponse.status, 201);
+      const dupDispBody = await dupDispResponse.json();
+      assert.equal(dupDispBody.data.duplicate, true, "Should be marked duplicate");
+      assert.equal(dupDispBody.data.event_id, originalEventId, "Event id should match original");
+      assert.equal(dupDispBody.data.journal_batch_id, originalBatchId, "Journal batch id should be canonical");
+      assert.ok(dupDispBody.data.journal_batch_id > 0, "Duplicate should return original batch id, not zero");
+      assert.equal(dupDispBody.data.disposal.gain_loss, originalGainLoss, "Gain/loss should be canonical from first request");
+
+      const [idempotencyRows] = await db.execute(
+        `SELECT COUNT(*) AS cnt FROM fixed_asset_events
+         WHERE company_id = ? AND asset_id = ? AND idempotency_key = ?`,
+        [companyId, createdAssetId, idempotentKey]
+      );
+      assert.equal(Number(idempotencyRows[0].cnt), 1, "Exactly one event for idempotency key");
+
+    } finally {
+      if (createdAssetId > 0) {
+        await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId]);
+        await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
+        await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
+        await db.execute(
+          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL'))`,
+          [createdAssetId]
+        );
+        await db.execute(
+          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL')`,
+          [createdAssetId]
+        );
+        await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
+      }
+      if (createdCategoryId > 0) {
+        await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
+      }
+      if (createdAssetAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
+      }
+      if (createdCashAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
+      }
+      if (createdExpenseAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdExpenseAccountId]);
+      }
+      if (createdLossAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdLossAccountId]);
+      }
+      if (createdDisposalExpenseAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdDisposalExpenseAccountId]);
+      }
+    }
+  }
+);
+
+test(
+  "fixed asset lifecycle: cross-asset disposal idempotency returns conflict",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let createdAssetId1 = 0;
+    let createdAssetId2 = 0;
+    let createdCategoryId = 0;
+    let createdAssetAccountId = 0;
+    let createdCashAccountId = 0;
+    let createdExpenseAccountId = 0;
+    let createdLossAccountId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const sharedIdempotencyKey = `cross-asset-${runId}`;
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error("owner fixture not found");
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+      const baseUrl = testContext.baseUrl;
+
+      const eventDate = await getOpenFiscalYearDate(db, companyId);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const { access_token: accessToken } = (await loginResponse.json()).data;
+
+      const [categoryResult] = await db.execute(
+        `INSERT INTO fixed_asset_categories (company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, is_active)
+         VALUES (?, ?, ?, 'STRAIGHT_LINE', 60, 5, 1)`,
+        [companyId, `CAT-${runId}`, `Cross Asset ${runId}`]
+      );
+      createdCategoryId = Number(categoryResult.insertId);
+
+      const [assetAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `FA-${runId}`, `Fixed Asset ${runId}`]
+      );
+      createdAssetAccountId = Number(assetAccountResult.insertId);
+
+      const [cashAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `CASH-${runId}`, `Cash ${runId}`]
+      );
+      createdCashAccountId = Number(cashAccountResult.insertId);
+
+      const [expenseAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `EXP-${runId}`, `Expense ${runId}`]
+      );
+      createdExpenseAccountId = Number(expenseAccountResult.insertId);
+
+      const [lossAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `LOSS-${runId}`, `Loss ${runId}`]
+      );
+      createdLossAccountId = Number(lossAccountResult.insertId);
+
+      const [assetResult1] = await db.execute(
+        `INSERT INTO fixed_assets (company_id, outlet_id, category_id, name, purchase_cost, is_active)
+         VALUES (?, ?, ?, ?, 10000000, 1)`,
+        [companyId, outletId, createdCategoryId, `Asset1 ${runId}`]
+      );
+      createdAssetId1 = Number(assetResult1.insertId);
+
+      const [assetResult2] = await db.execute(
+        `INSERT INTO fixed_assets (company_id, outlet_id, category_id, name, purchase_cost, is_active)
+         VALUES (?, ?, ?, ?, 10000000, 1)`,
+        [companyId, outletId, createdCategoryId, `Asset2 ${runId}`]
+      );
+      createdAssetId2 = Number(assetResult2.insertId);
+
+      const acqResponse1 = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId1}/acquisition`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          event_date: eventDate,
+          cost: 10000000,
+          useful_life_months: 60,
+          salvage_value: 0,
+          asset_account_id: createdAssetAccountId,
+          offset_account_id: createdCashAccountId
+        })
+      });
+      assert.equal(acqResponse1.status, 201);
+
+      const acqResponse2 = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId2}/acquisition`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          event_date: eventDate,
+          cost: 10000000,
+          useful_life_months: 60,
+          salvage_value: 0,
+          asset_account_id: createdAssetAccountId,
+          offset_account_id: createdCashAccountId
+        })
+      });
+      assert.equal(acqResponse2.status, 201);
+
+      const firstDispResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId1}/disposal`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          disposal_date: eventDate,
+          disposal_type: "SALE",
+          proceeds: 6000000,
+          disposal_cost: 0,
+          cash_account_id: createdCashAccountId,
+          asset_account_id: createdAssetAccountId,
+          accum_depr_account_id: createdExpenseAccountId,
+          loss_account_id: createdLossAccountId,
+          idempotency_key: sharedIdempotencyKey,
+          notes: "First asset disposal"
+        })
+      });
+      assert.equal(firstDispResponse.status, 201);
+
+      const crossAssetDispResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId2}/disposal`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          disposal_date: eventDate,
+          disposal_type: "SALE",
+          proceeds: 8000000,
+          disposal_cost: 0,
+          cash_account_id: createdCashAccountId,
+          asset_account_id: createdAssetAccountId,
+          accum_depr_account_id: createdExpenseAccountId,
+          loss_account_id: createdLossAccountId,
+          idempotency_key: sharedIdempotencyKey,
+          notes: "Different asset - should fail"
+        })
+      });
+      assert.equal(crossAssetDispResponse.status, 409, "Cross-asset idempotency should return conflict error");
+      const crossBody = await crossAssetDispResponse.json();
+      assert.equal(crossBody.error?.code, "CONFLICT", "Error code should be CONFLICT");
+      assert.equal(crossBody.error?.message, "Duplicate event", "Error message should be Duplicate event");
+      assert.equal(crossBody.data, undefined, "No data should be exposed in conflict response");
+      assert.equal(crossBody.data?.event_id, undefined, "event_id must not be leaked");
+      assert.equal(crossBody.data?.journal_batch_id, undefined, "journal_batch_id must not be leaked");
+      assert.equal(crossBody.data?.disposal, undefined, "disposal must not be leaked");
+
+    } finally {
+      if (createdAssetId1 > 0) {
+        await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId1]);
+        await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId1]);
+        await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId1]);
+        await db.execute(
+          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL'))`,
+          [createdAssetId1]
+        );
+        await db.execute(
+          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL')`,
+          [createdAssetId1]
+        );
+        await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId1]);
+      }
+      if (createdAssetId2 > 0) {
+        await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId2]);
+        await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId2]);
+        await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId2]);
+        await db.execute(
+          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL'))`,
+          [createdAssetId2]
+        );
+        await db.execute(
+          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL')`,
+          [createdAssetId2]
+        );
+        await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId2]);
+      }
+      if (createdCategoryId > 0) {
+        await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
+      }
+      if (createdAssetAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
+      }
+      if (createdCashAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
+      }
+      if (createdExpenseAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdExpenseAccountId]);
+      }
+      if (createdLossAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdLossAccountId]);
       }
     }
   }

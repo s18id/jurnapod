@@ -329,6 +329,29 @@ async function markAssetDisposed(
   );
 }
 
+interface DisposalSnapshot {
+  proceeds: number;
+  cost_removed: number;
+  gain_loss: number;
+}
+
+async function findDisposalSnapshotByEventId(
+  executor: QueryExecutor,
+  companyId: number,
+  eventId: number
+): Promise<DisposalSnapshot | null> {
+  const [rows] = await executor.execute<RowDataPacket[]>(
+    `SELECT proceeds, cost_removed, gain_loss FROM fixed_asset_disposals WHERE company_id = ? AND event_id = ?`,
+    [companyId, eventId]
+  );
+  if (rows.length === 0) return null;
+  return {
+    proceeds: Number(rows[0].proceeds),
+    cost_removed: Number(rows[0].cost_removed),
+    gain_loss: Number(rows[0].gain_loss)
+  };
+}
+
 function ensureDateWithinOpenFiscalYear(
   executor: QueryExecutor,
   companyId: number,
@@ -1014,24 +1037,33 @@ export async function recordDisposal(
     if (!asset) {
       throw new FixedAssetNotFoundError();
     }
-    if (asset.disposed_at) {
-      throw new FixedAssetDisposedError();
-    }
 
     await ensureUserCanAccessAssetOutlet(connection, actor.userId, companyId, assetId);
-
-    const book = await findAssetBookWithExecutor(connection, assetId);
-    if (!book) {
-      throw new FixedAssetLifecycleError("Asset has no book value - must acquire first", "INVALID_STATE");
-    }
 
     const idempotencyKey = input.idempotency_key ?? generateIdempotencyKey();
     const existingEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
     if (existingEvent) {
+      if (Number(existingEvent.asset_id) !== assetId) {
+        throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+      }
+      const book = await findAssetBookWithExecutor(connection, assetId);
+      const snapshot = await findDisposalSnapshotByEventId(connection, companyId, existingEvent.id);
+      if (snapshot) {
+        return {
+          event_id: existingEvent.id,
+          journal_batch_id: existingEvent.journal_batch_id ?? 0,
+          disposal: {
+            proceeds: snapshot.proceeds,
+            cost_removed: snapshot.cost_removed,
+            gain_loss: snapshot.gain_loss
+          },
+          book: { carrying_amount: book ? Number(book.carrying_amount) : 0 },
+          duplicate: true
+        };
+      }
       const eventData = typeof existingEvent.event_data === "string"
         ? JSON.parse(existingEvent.event_data)
         : existingEvent.event_data;
-      const book = await findAssetBookWithExecutor(connection, assetId);
       return {
         event_id: existingEvent.id,
         journal_batch_id: existingEvent.journal_batch_id ?? 0,
@@ -1043,6 +1075,15 @@ export async function recordDisposal(
         book: { carrying_amount: book ? Number(book.carrying_amount) : 0 },
         duplicate: true
       };
+    }
+
+    if (asset.disposed_at) {
+      throw new FixedAssetDisposedError();
+    }
+
+    const book = await findAssetBookWithExecutor(connection, assetId);
+    if (!book) {
+      throw new FixedAssetLifecycleError("Asset has no book value - must acquire first", "INVALID_STATE");
     }
 
     await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, input.disposal_date);
@@ -1067,13 +1108,15 @@ export async function recordDisposal(
     const costBasis = Number(book.cost_basis);
     const accumDepreciation = Number(book.accum_depreciation);
     const accumImpairment = Number(book.accum_impairment);
-    const carryingAmount = Number(book.carrying_amount);
+
+    // NBV from components (GL-derived)
+    const nbv = costBasis - accumDepreciation - accumImpairment;
 
     let gainLoss: number;
     if (input.disposal_type === "SALE") {
-      gainLoss = normalizeMoney(proceeds - carryingAmount - disposalCost);
+      gainLoss = normalizeMoney(proceeds - nbv);
     } else {
-      gainLoss = normalizeMoney(-(carryingAmount + disposalCost));
+      gainLoss = normalizeMoney(-nbv);
     }
 
     if (accumImpairment > 0 && !input.accum_impairment_account_id) {
@@ -1123,10 +1166,27 @@ export async function recordDisposal(
     if (eventIdResult.isDuplicate) {
       const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
       if (dupEvent) {
+        if (Number(dupEvent.asset_id) !== assetId) {
+          throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+        }
+        const book = await findAssetBookWithExecutor(connection, assetId);
+        const snapshot = await findDisposalSnapshotByEventId(connection, companyId, dupEvent.id);
+        if (snapshot) {
+          return {
+            event_id: dupEvent.id,
+            journal_batch_id: dupEvent.journal_batch_id ?? 0,
+            disposal: {
+              proceeds: snapshot.proceeds,
+              cost_removed: snapshot.cost_removed,
+              gain_loss: snapshot.gain_loss
+            },
+            book: { carrying_amount: book ? Number(book.carrying_amount) : 0 },
+            duplicate: true
+          };
+        }
         const eventData = typeof dupEvent.event_data === "string" 
           ? JSON.parse(dupEvent.event_data) 
           : dupEvent.event_data;
-        const book = await findAssetBookWithExecutor(connection, assetId);
         return {
           event_id: dupEvent.id,
           journal_batch_id: dupEvent.journal_batch_id ?? 0,
@@ -1143,7 +1203,7 @@ export async function recordDisposal(
     }
 
     // Post journal after event reservation
-    const journalBatchId = await postDisposalToJournal(
+    const journalResult = await postDisposalToJournal(
       connection,
       companyId,
       assetId,
@@ -1155,7 +1215,6 @@ export async function recordDisposal(
       costBasis,
       accumDepreciation,
       accumImpairment,
-      gainLoss,
       input.cash_account_id,
       input.asset_account_id,
       input.accum_depr_account_id,
@@ -1165,13 +1224,21 @@ export async function recordDisposal(
       input.disposal_expense_account_id
     );
 
-    await attachJournalBatchToEvent(connection, eventIdResult.eventId, journalBatchId);
+    await attachJournalBatchToEvent(connection, eventIdResult.eventId, journalResult.journalBatchId);
+
+    // Use the actual posted gain/loss from the journal
+    const postedGainLoss = journalResult.gainLoss;
 
     await connection.execute<ResultSetHeader>(
       `INSERT INTO fixed_asset_disposals (
         company_id, event_id, asset_id, proceeds, cost_removed, depr_removed, impairment_removed, disposal_cost, gain_loss, disposal_type, notes
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [companyId, eventIdResult.eventId, assetId, proceeds, costBasis, accumDepreciation, accumImpairment, disposalCost, gainLoss, input.disposal_type, input.notes ?? null]
+      [companyId, eventIdResult.eventId, assetId, proceeds, costBasis, accumDepreciation, accumImpairment, disposalCost, postedGainLoss, input.disposal_type, input.notes ?? null]
+    );
+
+    await connection.execute<ResultSetHeader>(
+      `UPDATE fixed_asset_events SET event_data = JSON_SET(event_data, '$.gain_loss', ?) WHERE id = ?`,
+      [postedGainLoss, eventIdResult.eventId]
     );
 
     await updateAssetBook(
@@ -1190,11 +1257,11 @@ export async function recordDisposal(
 
     return {
       event_id: eventIdResult.eventId,
-      journal_batch_id: journalBatchId,
+      journal_batch_id: journalResult.journalBatchId,
       disposal: {
         proceeds,
         cost_removed: costBasis,
-        gain_loss: gainLoss
+        gain_loss: postedGainLoss
       },
       book: { carrying_amount: 0 },
       duplicate: false
@@ -1214,7 +1281,6 @@ async function postDisposalToJournal(
   costBasis: number,
   accumDepreciation: number,
   accumImpairment: number,
-  gainLoss: number,
   cashAccountId: number,
   assetAccountId: number,
   accumDeprAccountId: number,
@@ -1222,7 +1288,7 @@ async function postDisposalToJournal(
   gainAccountId: number | undefined,
   lossAccountId: number | undefined,
   disposalExpenseAccountId: number | undefined
-): Promise<number> {
+): Promise<{ journalBatchId: number; gainLoss: number }> {
   await ensureDateWithinOpenFiscalYearWithExecutor(executor, companyId, eventDate);
 
   const [batchResult] = await executor.execute<ResultSetHeader>(
@@ -1233,6 +1299,7 @@ async function postDisposalToJournal(
 
   const lines: Array<[number, number, number | null, number, string, number, number, string]> = [];
 
+  // Build base disposal lines
   if (disposalType === "SALE" && proceeds > 0) {
     lines.push([journalBatchId, companyId, outletId, cashAccountId, eventDate, proceeds, 0, "Disposal Proceeds"]);
   }
@@ -1249,18 +1316,45 @@ async function postDisposalToJournal(
     lines.push([journalBatchId, companyId, outletId, assetAccountId, eventDate, 0, costBasis, "Fixed Asset Cost Removed"]);
   }
 
-  if (gainLoss !== 0) {
-    if (gainLoss > 0 && gainAccountId) {
-      lines.push([journalBatchId, companyId, outletId, gainAccountId, eventDate, 0, gainLoss, "Gain on Disposal"]);
-    } else if (gainLoss < 0 && lossAccountId) {
-      lines.push([journalBatchId, companyId, outletId, lossAccountId, eventDate, Math.abs(gainLoss), 0, "Loss on Disposal"]);
+  // Disposal cost is a separate expense + cash outflow
+  if (disposalCost > 0 && disposalExpenseAccountId) {
+    lines.push([journalBatchId, companyId, outletId, disposalExpenseAccountId, eventDate, disposalCost, 0, "Disposal Costs"]);
+    lines.push([journalBatchId, companyId, outletId, cashAccountId, eventDate, 0, disposalCost, "Disposal Costs Payment"]);
+  }
+
+  // Calculate gain/loss from delta after base lines
+  let totalDebit = 0;
+  let totalCredit = 0;
+  for (const line of lines) {
+    totalDebit += line[5];
+    totalCredit += line[6];
+  }
+  
+  // Compute actual gain/loss from the delta
+  const delta = totalDebit - totalCredit;
+  let actualGainLoss = 0;
+  
+  if (delta !== 0) {
+    if (delta > 0) {
+      // Debit > Credit (debit-heavy) = gain to balance the journal (add credit)
+      actualGainLoss = delta;
+      if (gainAccountId) {
+        lines.push([journalBatchId, companyId, outletId, gainAccountId, eventDate, 0, actualGainLoss, "Gain on Disposal"]);
+      } else {
+        throw new FixedAssetLifecycleError("Gain account required when disposal results in gain", "INVALID_REFERENCE");
+      }
+    } else {
+      // Credit > Debit (credit-heavy) = loss to balance the journal (add debit)
+      actualGainLoss = delta; // Already negative
+      if (lossAccountId) {
+        lines.push([journalBatchId, companyId, outletId, lossAccountId, eventDate, Math.abs(actualGainLoss), 0, "Loss on Disposal"]);
+      } else {
+        throw new FixedAssetLifecycleError("Loss account required when disposal results in loss", "INVALID_REFERENCE");
+      }
     }
   }
 
-  if (disposalCost > 0 && disposalExpenseAccountId) {
-    lines.push([journalBatchId, companyId, outletId, disposalExpenseAccountId, eventDate, disposalCost, 0, "Disposal Costs"]);
-  }
-
+  // Final balance check
   if (lines.length > 0) {
     const journalLines = lines.map(l => ({ debit: l[5], credit: l[6] }));
     assertJournalBalanced(journalLines);
@@ -1270,7 +1364,7 @@ async function postDisposalToJournal(
     await executor.execute(`INSERT INTO journal_lines (journal_batch_id, company_id, outlet_id, account_id, line_date, debit, credit, description) VALUES ${placeholders}`, values);
   }
 
-  return journalBatchId;
+  return { journalBatchId, gainLoss: actualGainLoss };
 }
 
 export interface VoidEventInput {
