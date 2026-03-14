@@ -479,6 +479,7 @@ async function recomputeAssetBookFromEvents(
   );
 
   let costBasis = 0;
+  let acquisitionSalvage = 0;
   let accumDepr = 0;
   let accumImpairment = 0;
   let disposedAt: Date | null = null;
@@ -489,6 +490,7 @@ async function recomputeAssetBookFromEvents(
     
     if (isAcquisitionType(eventType)) {
       costBasis = Number((data as Record<string, unknown>).cost ?? 0);
+      acquisitionSalvage = normalizeMoney(Number((data as Record<string, unknown>).salvage_value ?? 0));
       accumDepr = 0;
       accumImpairment = 0;
       disposedAt = null;
@@ -511,7 +513,7 @@ async function recomputeAssetBookFromEvents(
     };
   }
 
-  const carryingAmount = normalizeMoney(Math.max(0, costBasis - accumDepr - accumImpairment));
+  const carryingAmount = normalizeMoney(Math.max(0, costBasis - acquisitionSalvage - accumDepr - accumImpairment));
   return {
     cost_basis: normalizeMoney(costBasis),
     accum_depreciation: normalizeMoney(accumDepr),
