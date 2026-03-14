@@ -259,7 +259,7 @@ test(
       assert.equal(createBody.data.city, "Jakarta");
       assert.equal(createBody.data.postal_code, "10220");
 
-      const [getResponse] = await fetch(`${baseUrl}/api/companies/${companyId}`, {
+      const getResponse = await fetch(`${baseUrl}/api/companies/${companyId}`, {
         method: "GET",
         headers: authHeader
       });
@@ -269,7 +269,7 @@ test(
       assert.equal(getBody.data.tax_id, "01.234.567.8-901.000");
       assert.equal(getBody.data.email, "contact@" + companyCode.toLowerCase() + ".com");
 
-      const [patchResponse] = await fetch(`${baseUrl}/api/companies/${companyId}`, {
+      const patchResponse = await fetch(`${baseUrl}/api/companies/${companyId}`, {
         method: "PATCH",
         headers: authHeader,
         body: JSON.stringify({

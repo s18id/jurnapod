@@ -663,7 +663,7 @@ async function ensureCompanyExists(
 ): Promise<CompanyRow> {
   const includeDeleted = options?.includeDeleted ?? false;
   const [rows] = await connection.execute<CompanyRow[]>(
-    `SELECT id, code, name, created_at, updated_at, deleted_at
+    `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
      FROM companies
      WHERE id = ?
      ${includeDeleted ? "" : "AND deleted_at IS NULL"}`,
