@@ -253,6 +253,47 @@ async function userHasSuperAdminRole(
   return rows.length > 0;
 }
 
+async function userHasRoleCode(
+  connection: PoolConnection | ReturnType<typeof getDbPool>,
+  companyId: number,
+  userId: number,
+  roleCode: string
+): Promise<boolean> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT 1
+     FROM user_role_assignments ura
+     INNER JOIN roles r ON r.id = ura.role_id
+     INNER JOIN users u ON u.id = ura.user_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND r.code = ?
+       AND ura.outlet_id IS NULL
+     LIMIT 1`,
+    [userId, companyId, roleCode]
+  );
+
+  return rows.length > 0;
+}
+
+async function ensureSuperAdminTargetManagedBySelf(
+  connection: PoolConnection | ReturnType<typeof getDbPool>,
+  companyId: number,
+  actorUserId: number,
+  targetUserId: number
+): Promise<void> {
+  const targetIsSuperAdmin = await userHasSuperAdminRole(connection, companyId, targetUserId);
+  if (!targetIsSuperAdmin) {
+    return;
+  }
+
+  const actorIsSelf = actorUserId === targetUserId;
+  const actorIsSuperAdmin = await userHasRoleCode(connection, companyId, actorUserId, "SUPER_ADMIN");
+
+  if (!actorIsSelf || !actorIsSuperAdmin) {
+    throw new SuperAdminProtectionError("Only SUPER_ADMIN user can manage their own account");
+  }
+}
+
 async function ensureOutletIdsExist(
   connection: PoolConnection | ReturnType<typeof getDbPool>,
   companyId: number,
@@ -606,8 +647,17 @@ export async function updateUserEmail(params: {
 
   try {
     await connection.beginTransaction();
-    const email = normalizeEmail(params.email);
+    await ensureUserExists(connection, params.companyId, params.userId);
+
+    await ensureSuperAdminTargetManagedBySelf(
+      connection,
+      params.companyId,
+      params.actor.userId,
+      params.userId
+    );
+
     const user = await ensureUserExists(connection, params.companyId, params.userId);
+    const email = normalizeEmail(params.email);
 
     if (user.email !== email) {
       const [existingRows] = await connection.execute<RowDataPacket[]>(
@@ -664,17 +714,12 @@ export async function setUserRoles(params: {
     await connection.beginTransaction();
     await ensureUserExists(connection, params.companyId, params.userId);
 
-    // Prevent modifying roles for SUPER_ADMIN users
-    const isSuperAdmin = await userHasSuperAdminRole(
+    await ensureSuperAdminTargetManagedBySelf(
       connection,
       params.companyId,
+      params.actor.userId,
       params.userId
     );
-    if (isSuperAdmin) {
-      throw new SuperAdminProtectionError(
-        "Cannot modify roles for SUPER_ADMIN user"
-      );
-    }
 
     const roleCodes = params.roleCodes.map((role) => RoleSchema.parse(role));
     
@@ -826,6 +871,14 @@ export async function setUserOutlets(params: {
   try {
     await connection.beginTransaction();
     await ensureUserExists(connection, params.companyId, params.userId);
+
+    await ensureSuperAdminTargetManagedBySelf(
+      connection,
+      params.companyId,
+      params.actor.userId,
+      params.userId
+    );
+
     const [beforeRows] = await connection.execute<RowDataPacket[]>(
       `SELECT DISTINCT outlet_id
        FROM user_role_assignments
@@ -892,6 +945,14 @@ export async function setUserPassword(params: {
 
   try {
     await connection.beginTransaction();
+
+    await ensureSuperAdminTargetManagedBySelf(
+      connection,
+      params.companyId,
+      params.actor.userId,
+      params.userId
+    );
+
     const policy = passwordHashPolicyFromEnv();
     const passwordHash = await hashPassword(params.password, policy);
     const [result] = await connection.execute<ResultSetHeader>(
@@ -932,7 +993,7 @@ export async function setUserActiveState(params: {
   try {
     await connection.beginTransaction();
 
-    // Prevent deactivating SUPER_ADMIN users
+    // Prevent deactivating SUPER_ADMIN users (including self, for safety)
     if (!params.isActive) {
       const isSuperAdmin = await userHasSuperAdminRole(
         connection,
@@ -944,6 +1005,16 @@ export async function setUserActiveState(params: {
           "Cannot deactivate SUPER_ADMIN user"
         );
       }
+    }
+
+    // For reactivate, ensure only self SUPER_ADMIN can reactivate SUPER_ADMIN
+    if (params.isActive) {
+      await ensureSuperAdminTargetManagedBySelf(
+        connection,
+        params.companyId,
+        params.actor.userId,
+        params.userId
+      );
     }
 
     const [result] = await connection.execute<ResultSetHeader>(

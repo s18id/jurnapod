@@ -8,6 +8,7 @@ import { readClientIp } from "../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   findUserById,
+  SuperAdminProtectionError,
   updateUserEmail,
   UserEmailExistsError,
   UserNotFoundError
@@ -81,6 +82,10 @@ export const PATCH = withAuth(
 
       if (error instanceof UserEmailExistsError) {
         return errorResponse("DUPLICATE_EMAIL", "Email already exists", 409);
+      }
+
+      if (error instanceof SuperAdminProtectionError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
       }
 
       console.error("PATCH /api/users/:userId failed", error);
