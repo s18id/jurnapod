@@ -9,6 +9,44 @@ import { readClientIp } from "../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../src/lib/response";
 import { listOutletsByCompany, createOutlet, OutletCodeExistsError } from "../../../src/lib/outlets";
 
+function parseStringOptional(value: unknown, maxLength: number): string | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (trimmed.length > maxLength) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function parseEmailOptional(value: unknown): string | null | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  // Basic email validation
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    return undefined;
+  }
+  if (trimmed.length > 191) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 export const GET = withAuth(
   async (request, auth) => {
     try {
@@ -52,7 +90,7 @@ export const POST = withAuth(
   async (request, auth) => {
     try {
       const body = await request.json();
-      const { company_id, code, name } = body;
+      const { company_id, code, name, city, address_line1, address_line2, postal_code, phone, email, timezone } = body;
 
       // Use provided company_id or default to auth.companyId
       const targetCompanyId = company_id != null ? NumericIdSchema.parse(company_id) : auth.companyId;
@@ -70,17 +108,24 @@ export const POST = withAuth(
       }
 
       if (!code || typeof code !== "string" || code.trim().length === 0) {
-        return errorResponse("VALIDATION_ERROR", "Outlet code is required", 400);
+        return errorResponse("VALIDATION_ERROR", "Branch code is required", 400);
       }
 
       if (!name || typeof name !== "string" || name.trim().length === 0) {
-        return errorResponse("VALIDATION_ERROR", "Outlet name is required", 400);
+        return errorResponse("VALIDATION_ERROR", "Branch name is required", 400);
       }
 
       const outlet = await createOutlet({
         company_id: targetCompanyId,
         code: code.trim().toUpperCase(),
         name: name.trim(),
+        city: parseStringOptional(city, 96),
+        address_line1: parseStringOptional(address_line1, 191),
+        address_line2: parseStringOptional(address_line2, 191),
+        postal_code: parseStringOptional(postal_code, 20),
+        phone: parseStringOptional(phone, 32),
+        email: parseEmailOptional(email),
+        timezone: parseStringOptional(timezone, 64),
         actor: {
           userId: auth.userId,
           ipAddress: readClientIp(request)

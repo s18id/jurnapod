@@ -9,6 +9,7 @@ import {
   Modal,
   Select,
   Stack,
+  Switch,
   Text,
   TextInput,
   Title
@@ -19,7 +20,9 @@ import {
   useOutletsFull,
   createOutlet,
   updateOutlet,
-  deleteOutlet
+  deleteOutlet,
+  type OutletCreateInput,
+  type OutletUpdateInput
 } from "../hooks/use-outlets";
 import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
@@ -39,13 +42,40 @@ type OutletFormData = {
   company_id: number;
   code: string;
   name: string;
+  city: string;
+  address_line1: string;
+  address_line2: string;
+  postal_code: string;
+  phone: string;
+  email: string;
+  timezone: string;
+  is_active: boolean;
 };
 
 const emptyForm: OutletFormData = {
   company_id: 0,
   code: "",
-  name: ""
+  name: "",
+  city: "",
+  address_line1: "",
+  address_line2: "",
+  postal_code: "",
+  phone: "",
+  email: "",
+  timezone: "",
+  is_active: true
 };
+
+const TIMEZONE_OPTIONS = [
+  { value: "Asia/Jakarta", label: "Asia/Jakarta (WIB)" },
+  { value: "Asia/Makassar", label: "Asia/Makassar (WITA)" },
+  { value: "Asia/Jayapura", label: "Asia/Jayapura (WIT)" },
+  { value: "Asia/Shanghai", label: "Asia/Shanghai (CST)" },
+  { value: "Asia/Singapore", label: "Asia/Singapore (SGT)" },
+  { value: "Asia/Bangkok", label: "Asia/Bangkok (ICT)" },
+  { value: "Asia/Kuala_Lumpur", label: "Asia/Kuala Lumpur (MYT)" },
+  { value: "UTC", label: "UTC" }
+];
 
 export function OutletsPage(props: OutletsPageProps) {
   const { user, accessToken } = props;
@@ -110,7 +140,15 @@ export function OutletsPage(props: OutletsPageProps) {
     setFormData({
       company_id: canManageCompanies ? selectedCompanyId : user.company_id,
       code: "",
-      name: ""
+      name: "",
+      city: "",
+      address_line1: "",
+      address_line2: "",
+      postal_code: "",
+      phone: "",
+      email: "",
+      timezone: "",
+      is_active: true
     });
     setFormErrors({});
     setEditingOutlet(null);
@@ -123,7 +161,15 @@ export function OutletsPage(props: OutletsPageProps) {
     setFormData({
       company_id: outlet.company_id,
       code: outlet.code,
-      name: outlet.name
+      name: outlet.name,
+      city: outlet.city ?? "",
+      address_line1: outlet.address_line1 ?? "",
+      address_line2: outlet.address_line2 ?? "",
+      postal_code: outlet.postal_code ?? "",
+      phone: outlet.phone ?? "",
+      email: outlet.email ?? "",
+      timezone: outlet.timezone ?? "",
+      is_active: outlet.is_active
     });
     setFormErrors({});
     setEditingOutlet(outlet);
@@ -147,12 +193,20 @@ export function OutletsPage(props: OutletsPageProps) {
         errors.company_id = "Company is required";
       }
       if (!formData.code.trim()) {
-        errors.code = "Outlet code is required";
+        errors.code = "Branch code is required";
       }
     }
 
     if (!formData.name.trim()) {
-      errors.name = "Outlet name is required";
+      errors.name = "Branch name is required";
+    }
+
+    // Validate email if provided
+    if (formData.email.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(formData.email.trim())) {
+        errors.email = "Invalid email format";
+      }
     }
 
     setFormErrors(errors);
@@ -168,26 +222,60 @@ export function OutletsPage(props: OutletsPageProps) {
 
     try {
       if (dialogMode === "create") {
-        await createOutlet(
-          {
-            company_id: formData.company_id,
-            code: formData.code.trim(),
-            name: formData.name.trim()
-          },
-          accessToken
-        );
-        setSuccessMessage("Outlet created successfully");
+        const createData: OutletCreateInput = {
+          company_id: formData.company_id,
+          code: formData.code.trim().toUpperCase(),
+          name: formData.name.trim()
+        };
+
+        // Add optional fields if provided
+        if (formData.city.trim()) createData.city = formData.city.trim();
+        if (formData.address_line1.trim()) createData.address_line1 = formData.address_line1.trim();
+        if (formData.address_line2.trim()) createData.address_line2 = formData.address_line2.trim();
+        if (formData.postal_code.trim()) createData.postal_code = formData.postal_code.trim();
+        if (formData.phone.trim()) createData.phone = formData.phone.trim();
+        if (formData.email.trim()) createData.email = formData.email.trim();
+        if (formData.timezone) createData.timezone = formData.timezone;
+
+        await createOutlet(createData, accessToken);
+        setSuccessMessage("Branch created successfully");
         await outletsQuery.refetch();
         closeDialog();
       } else if (dialogMode === "edit" && editingOutlet) {
-        await updateOutlet(
-          editingOutlet.id,
-          {
-            name: formData.name.trim()
-          },
-          accessToken
-        );
-        setSuccessMessage("Outlet updated successfully");
+        const updateData: OutletUpdateInput = {};
+
+        if (formData.name.trim() !== editingOutlet.name) {
+          updateData.name = formData.name.trim();
+        }
+
+        // Profile fields - use null to clear
+        if (formData.city.trim() !== (editingOutlet.city ?? "")) {
+          updateData.city = formData.city.trim() || null;
+        }
+        if (formData.address_line1.trim() !== (editingOutlet.address_line1 ?? "")) {
+          updateData.address_line1 = formData.address_line1.trim() || null;
+        }
+        if (formData.address_line2.trim() !== (editingOutlet.address_line2 ?? "")) {
+          updateData.address_line2 = formData.address_line2.trim() || null;
+        }
+        if (formData.postal_code.trim() !== (editingOutlet.postal_code ?? "")) {
+          updateData.postal_code = formData.postal_code.trim() || null;
+        }
+        if (formData.phone.trim() !== (editingOutlet.phone ?? "")) {
+          updateData.phone = formData.phone.trim() || null;
+        }
+        if (formData.email.trim() !== (editingOutlet.email ?? "")) {
+          updateData.email = formData.email.trim() || null;
+        }
+        if (formData.timezone !== (editingOutlet.timezone ?? "")) {
+          updateData.timezone = formData.timezone || null;
+        }
+        if (formData.is_active !== editingOutlet.is_active) {
+          updateData.is_active = formData.is_active;
+        }
+
+        await updateOutlet(editingOutlet.id, updateData, accessToken);
+        setSuccessMessage("Branch updated successfully");
         await outletsQuery.refetch();
         closeDialog();
       }
@@ -210,7 +298,8 @@ export function OutletsPage(props: OutletsPageProps) {
       }
       return (
         outlet.code.toLowerCase().includes(normalizedSearch) ||
-        outlet.name.toLowerCase().includes(normalizedSearch)
+        outlet.name.toLowerCase().includes(normalizedSearch) ||
+        (outlet.city?.toLowerCase().includes(normalizedSearch) ?? false)
       );
     });
   }, [outlets, searchTerm]);
@@ -226,6 +315,20 @@ export function OutletsPage(props: OutletsPageProps) {
         id: "name",
         header: "Name",
         cell: (info) => <Text>{info.row.original.name}</Text>
+      },
+      {
+        id: "city",
+        header: "City",
+        cell: (info) => <Text c="dimmed">{info.row.original.city ?? "—"}</Text>
+      },
+      {
+        id: "is_active",
+        header: "Active",
+        cell: (info) => (
+          <Text c={info.row.original.is_active ? "green" : "red"}>
+            {info.row.original.is_active ? "Yes" : "No"}
+          </Text>
+        )
       }
     ];
 
@@ -258,7 +361,7 @@ export function OutletsPage(props: OutletsPageProps) {
     });
 
     return baseColumns;
-  }, [canManageCompanies, getCompanyLabel, openEditDialog]);
+  }, [canManageCompanies, getCompanyLabel]);
 
   async function handleConfirmDelete() {
     if (!confirmState) {
@@ -270,13 +373,13 @@ export function OutletsPage(props: OutletsPageProps) {
 
     try {
       await deleteOutlet(confirmState.id, accessToken);
-      setSuccessMessage(`Outlet "${confirmState.name}" deleted successfully`);
+      setSuccessMessage(`Branch "${confirmState.name}" deleted successfully`);
       await outletsQuery.refetch();
     } catch (deleteError) {
       if (deleteError instanceof ApiError) {
         setError(deleteError.message);
       } else {
-        setError("Failed to delete outlet");
+        setError("Failed to delete branch");
       }
     } finally {
       setConfirmState(null);
@@ -287,14 +390,14 @@ export function OutletsPage(props: OutletsPageProps) {
     <>
       <Stack gap="md">
         <PageCard
-          title="Outlet Management"
-          description="Manage outlets for your company. Outlets represent physical locations or branches."
+          title="Branch Management"
+          description="Manage branches (outlets) for your company. Each branch is a physical location with its own POS, inventory, and journal."
           actions={
             <Button
               onClick={openCreateDialog}
               disabled={canManageCompanies && companies.length === 0}
             >
-              Create Outlet
+              Create Branch
             </Button>
           }
         >
@@ -321,7 +424,7 @@ export function OutletsPage(props: OutletsPageProps) {
 
               <TextInput
                 label="Search"
-                placeholder="Search by code or name"
+                placeholder="Search by code, name, or city"
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.currentTarget.value)}
                 style={{ minWidth: 220 }}
@@ -361,14 +464,14 @@ export function OutletsPage(props: OutletsPageProps) {
           </Stack>
         </PageCard>
 
-        <PageCard title={`Outlets (${filteredOutlets.length})`}>
+        <PageCard title={`Outlets (Branches) (${filteredOutlets.length})`}>
           <DataTable
             columns={columns}
             data={filteredOutlets}
             emptyState={
               searchTerm.trim().length > 0
-                ? "No outlets match your search."
-                : "No outlets found for this company."
+                ? "No branches match your search."
+                : "No branches found for this company."
             }
           />
         </PageCard>
@@ -379,10 +482,11 @@ export function OutletsPage(props: OutletsPageProps) {
         onClose={closeDialog}
         title={
           <Title order={4}>
-            {dialogMode === "create" ? "Create New Outlet" : "Edit Outlet"}
+            {dialogMode === "create" ? "Create New Branch" : "Edit Branch"}
           </Title>
         }
         centered
+        size="lg"
       >
         <Stack gap="md">
           {dialogMode === "create" && canManageCompanies ? (
@@ -416,18 +520,18 @@ export function OutletsPage(props: OutletsPageProps) {
 
           {dialogMode === "create" ? (
             <TextInput
-              label="Outlet Code"
-              placeholder="e.g., MAIN, BRANCH1"
+              label="Branch Code"
+              placeholder="e.g., JKT-MAIN, SBY-01"
               value={formData.code}
-              onChange={(event) => setFormData({ ...formData, code: event.currentTarget.value })}
+              onChange={(event) => setFormData({ ...formData, code: event.currentTarget.value.toUpperCase() })}
               maxLength={32}
               error={formErrors.code}
-              description="Code must be unique within the company"
+              description="Code must be unique within the company. Format: CITY-SITE"
               withAsterisk
             />
           ) : (
             <TextInput
-              label="Outlet Code"
+              label="Branch Code"
               value={editingOutlet?.code ?? ""}
               disabled
               description="Code cannot be changed"
@@ -435,14 +539,86 @@ export function OutletsPage(props: OutletsPageProps) {
           )}
 
           <TextInput
-            label="Outlet Name"
-            placeholder="e.g., Main Branch"
+            label="Branch Name"
+            placeholder="e.g., Jakarta Main Office"
             value={formData.name}
             onChange={(event) => setFormData({ ...formData, name: event.currentTarget.value })}
             maxLength={191}
             error={formErrors.name}
             withAsterisk
           />
+
+          <TextInput
+            label="City"
+            placeholder="e.g., Jakarta, Surabaya"
+            value={formData.city}
+            onChange={(event) => setFormData({ ...formData, city: event.currentTarget.value })}
+            maxLength={96}
+          />
+
+          <TextInput
+            label="Address Line 1"
+            placeholder="Street address"
+            value={formData.address_line1}
+            onChange={(event) => setFormData({ ...formData, address_line1: event.currentTarget.value })}
+            maxLength={191}
+          />
+
+          <TextInput
+            label="Address Line 2"
+            placeholder="Additional address info"
+            value={formData.address_line2}
+            onChange={(event) => setFormData({ ...formData, address_line2: event.currentTarget.value })}
+            maxLength={191}
+          />
+
+          <Group grow>
+            <TextInput
+              label="Postal Code"
+              placeholder="e.g., 10110"
+              value={formData.postal_code}
+              onChange={(event) => setFormData({ ...formData, postal_code: event.currentTarget.value })}
+              maxLength={20}
+            />
+
+            <TextInput
+              label="Phone"
+              placeholder="e.g., +62 21 1234 5678"
+              value={formData.phone}
+              onChange={(event) => setFormData({ ...formData, phone: event.currentTarget.value })}
+              maxLength={32}
+            />
+          </Group>
+
+          <Group grow>
+            <TextInput
+              label="Email"
+              placeholder="branch@company.com"
+              value={formData.email}
+              onChange={(event) => setFormData({ ...formData, email: event.currentTarget.value })}
+              maxLength={191}
+              error={formErrors.email}
+            />
+
+            <Select
+              label="Timezone"
+              placeholder="Select timezone"
+              data={TIMEZONE_OPTIONS}
+              value={formData.timezone || null}
+              onChange={(value) => setFormData({ ...formData, timezone: value ?? "" })}
+              clearable
+              searchable
+            />
+          </Group>
+
+          {dialogMode === "edit" && (
+            <Switch
+              label="Active"
+              description="Inactive branches cannot process transactions"
+              checked={formData.is_active}
+              onChange={(event) => setFormData({ ...formData, is_active: event.currentTarget.checked })}
+            />
+          )}
 
           {error ? (
             <Alert color="red" title="Unable to save">
@@ -464,12 +640,12 @@ export function OutletsPage(props: OutletsPageProps) {
       <Modal
         opened={confirmState !== null}
         onClose={() => setConfirmState(null)}
-        title={<Title order={4}>Delete Outlet</Title>}
+        title={<Title order={4}>Delete Branch</Title>}
         centered
       >
         <Stack gap="md">
           <Text size="sm">
-            Delete outlet "{confirmState?.name}"? This cannot be undone.
+            Delete branch "{confirmState?.name}"? This cannot be undone.
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setConfirmState(null)}>
