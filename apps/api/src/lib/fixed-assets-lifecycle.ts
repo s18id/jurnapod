@@ -6,12 +6,17 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "./db";
 import { postDepreciationRunToJournal } from "./depreciation-posting";
 
-const FA_ACQUISITION = "FA_ACQUISITION";
-const FA_DEPRECIATION = "FA_DEPRECIATION";
-const FA_TRANSFER = "FA_TRANSFER";
-const FA_IMPAIRMENT = "FA_IMPAIRMENT";
-const FA_DISPOSAL = "FA_DISPOSAL";
-const FA_VOID = "FA_VOID";
+const FA_ACQUISITION = "ACQUISITION";
+const FA_DEPRECIATION = "DEPRECIATION";
+const FA_TRANSFER = "TRANSFER";
+const FA_IMPAIRMENT = "IMPAIRMENT";
+const FA_DISPOSAL = "DISPOSAL";
+const FA_VOID = "VOID";
+
+function isAcquisitionType(t: string): boolean { return t === "ACQUISITION" || t === "FA_ACQUISITION"; }
+function isDepreciationType(t: string): boolean { return t === "DEPRECIATION" || t === "FA_DEPRECIATION"; }
+function isImpairmentType(t: string): boolean { return t === "IMPAIRMENT" || t === "FA_IMPAIRMENT"; }
+function isDisposalType(t: string): boolean { return t === "DISPOSAL" || t === "FA_DISPOSAL"; }
 
 type FixedAssetRow = RowDataPacket & {
   id: number;
@@ -346,13 +351,162 @@ async function ensureDateWithinOpenFiscalYearWithExecutor(
   }
 }
 
+function assertJournalBalanced(lines: Array<{ debit: number; credit: number }>): void {
+  const totalDebit = lines.reduce((sum, l) => sum + l.debit, 0);
+  const totalCredit = lines.reduce((sum, l) => sum + l.credit, 0);
+  if (Math.abs(totalDebit - totalCredit) > 0.001) {
+    throw new FixedAssetLifecycleError(
+      `Journal not balanced: debit=${totalDebit}, credit=${totalCredit}`,
+      "JOURNAL_UNBALANCED"
+    );
+  }
+}
+
+async function ensureUserCanAccessAssetOutlet(
+  executor: QueryExecutor,
+  userId: number,
+  companyId: number,
+  assetId: number
+): Promise<void> {
+  const asset = await findFixedAssetWithExecutor(executor, companyId, assetId);
+  if (!asset) {
+    throw new FixedAssetNotFoundError();
+  }
+
+  if (asset.outlet_id) {
+    try {
+      await ensureUserHasOutletAccess(executor, userId, companyId, asset.outlet_id);
+    } catch (error) {
+      const err = error as { code?: string };
+      if (err.code === "FORBIDDEN") throw new FixedAssetNotFoundError();
+      throw error;
+    }
+  }
+}
+
+async function insertEventWithIdempotency(
+  executor: QueryExecutor,
+  companyId: number,
+  assetId: number,
+  eventType: string,
+  eventDate: string,
+  outletId: number | null,
+  journalBatchId: number | null,
+  status: string,
+  idempotencyKey: string,
+  eventData: Record<string, unknown>,
+  createdBy: number
+): Promise<{ eventId: number; isDuplicate: boolean }> {
+  try {
+    const eventId = await insertEvent(
+      executor,
+      companyId,
+      assetId,
+      eventType,
+      eventDate,
+      outletId,
+      journalBatchId,
+      status,
+      idempotencyKey,
+      eventData,
+      createdBy
+    );
+    return { eventId, isDuplicate: false };
+  } catch (error) {
+    if (isMysqlError(error) && error.errno === 1062) {
+      const existing = await findExistingEventByIdempotencyKey(executor, companyId, idempotencyKey);
+      if (existing) {
+        return { eventId: existing.id, isDuplicate: true };
+      }
+    }
+    throw error;
+  }
+}
+
+async function attachJournalBatchToEvent(
+  executor: QueryExecutor,
+  eventId: number,
+  journalBatchId: number | null
+): Promise<void> {
+  if (journalBatchId) {
+    await executor.execute<ResultSetHeader>(
+      `UPDATE fixed_asset_events SET journal_batch_id = ? WHERE id = ?`,
+      [journalBatchId, eventId]
+    );
+  }
+}
+
+async function recomputeAssetBookFromEvents(
+  executor: QueryExecutor,
+  companyId: number,
+  assetId: number
+): Promise<{
+  cost_basis: number;
+  accum_depreciation: number;
+  accum_impairment: number;
+  carrying_amount: number;
+  disposed_at: Date | null;
+}> {
+  const [events] = await executor.execute<FixedAssetEventRow[]>(
+    `SELECT id, company_id, asset_id, event_type, event_date, outlet_id, journal_batch_id, status, idempotency_key, event_data, created_at, created_by, voided_by, voided_at
+     FROM fixed_asset_events
+     WHERE company_id = ? AND asset_id = ? AND status = 'POSTED'
+     ORDER BY event_date ASC, id ASC`,
+    [companyId, assetId]
+  );
+
+  let costBasis = 0;
+  let accumDepr = 0;
+  let accumImpairment = 0;
+  let disposedAt: Date | null = null;
+
+  for (const event of events) {
+    const data = typeof event.event_data === "string" ? JSON.parse(event.event_data) : event.event_data;
+    const eventType = event.event_type;
+    
+    if (isAcquisitionType(eventType)) {
+      costBasis = Number((data as Record<string, unknown>).cost ?? 0);
+      accumDepr = 0;
+      accumImpairment = 0;
+      disposedAt = null;
+    } else if (isDepreciationType(eventType)) {
+      accumDepr = normalizeMoney(accumDepr + Number((data as Record<string, unknown>).amount ?? 0));
+    } else if (isImpairmentType(eventType)) {
+      accumImpairment = normalizeMoney(accumImpairment + Number((data as Record<string, unknown>).impairment_amount ?? 0));
+    } else if (isDisposalType(eventType)) {
+      disposedAt = event.event_date ? new Date(event.event_date) : null;
+    }
+  }
+
+  if (disposedAt) {
+    return {
+      cost_basis: 0,
+      accum_depreciation: 0,
+      accum_impairment: 0,
+      carrying_amount: 0,
+      disposed_at: disposedAt
+    };
+  }
+
+  const carryingAmount = normalizeMoney(Math.max(0, costBasis - accumDepr - accumImpairment));
+  return {
+    cost_basis: normalizeMoney(costBasis),
+    accum_depreciation: normalizeMoney(accumDepr),
+    accum_impairment: normalizeMoney(accumImpairment),
+    carrying_amount: carryingAmount,
+    disposed_at: null
+  };
+}
+
 export interface AcquisitionInput {
   outlet_id?: number;
   event_date: string;
   cost: number;
   useful_life_months: number;
   salvage_value?: number;
-  expense_account_id: number;
+  asset_account_id: number;
+  offset_account_id: number;
+  expense_account_id?: number;
   accum_depr_account_id?: number;
   notes?: string;
   idempotency_key?: string;
@@ -383,6 +537,8 @@ export async function recordAcquisition(
       throw new FixedAssetDisposedError();
     }
 
+    await ensureUserCanAccessAssetOutlet(connection, actor.userId, companyId, assetId);
+
     const idempotencyKey = input.idempotency_key ?? generateIdempotencyKey();
     const existingEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
     if (existingEvent) {
@@ -399,17 +555,64 @@ export async function recordAcquisition(
     }
 
     await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, input.event_date);
-    await ensureCompanyAccountExists(connection, companyId, input.expense_account_id);
+    await ensureCompanyAccountExists(connection, companyId, input.asset_account_id);
+    await ensureCompanyAccountExists(connection, companyId, input.offset_account_id);
 
     let outletId = input.outlet_id ?? asset.outlet_id ?? null;
     if (typeof outletId === "number") {
       await ensureCompanyOutletExists(connection, companyId, outletId);
-      await ensureUserHasOutletAccess(connection, actor.userId, companyId, outletId);
+      try {
+        await ensureUserHasOutletAccess(connection, actor.userId, companyId, outletId);
+      } catch (error) {
+        const err = error as { code?: string };
+        if (err.code === "FORBIDDEN") throw new FixedAssetNotFoundError();
+        throw error;
+      }
     }
 
     const salvageValue = input.salvage_value ?? 0;
     const carryingAmount = normalizeMoney(input.cost - salvageValue);
 
+    // Reserve event first for idempotency
+    const eventIdResult = await insertEventWithIdempotency(
+      connection,
+      companyId,
+      assetId,
+      FA_ACQUISITION,
+      input.event_date,
+      outletId,
+      null,
+      "POSTED",
+      idempotencyKey,
+      {
+        cost: input.cost,
+        useful_life_months: input.useful_life_months,
+        salvage_value: salvageValue,
+        asset_account_id: input.asset_account_id,
+        offset_account_id: input.offset_account_id,
+        notes: input.notes
+      },
+      actor.userId
+    );
+
+    if (eventIdResult.isDuplicate) {
+      const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+      if (dupEvent) {
+        const book = await findAssetBookWithExecutor(connection, assetId);
+        return {
+          event_id: dupEvent.id,
+          journal_batch_id: dupEvent.journal_batch_id ?? 0,
+          book: {
+            cost_basis: book ? Number(book.cost_basis) : 0,
+            carrying_amount: book ? Number(book.carrying_amount) : 0
+          },
+          duplicate: true
+        };
+      }
+      throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+    }
+
+    // Post journal after event reservation
     const journalBatchId = await postAcquisitionToJournal(
       connection,
       companyId,
@@ -417,28 +620,11 @@ export async function recordAcquisition(
       outletId,
       input.event_date,
       input.cost,
-      input.expense_account_id
+      input.asset_account_id,
+      input.offset_account_id
     );
 
-    const eventId = await insertEvent(
-      connection,
-      companyId,
-      assetId,
-      FA_ACQUISITION,
-      input.event_date,
-      outletId,
-      journalBatchId,
-      "POSTED",
-      idempotencyKey,
-      {
-        cost: input.cost,
-        useful_life_months: input.useful_life_months,
-        salvage_value: salvageValue,
-        expense_account_id: input.expense_account_id,
-        notes: input.notes
-      },
-      actor.userId
-    );
+    await attachJournalBatchToEvent(connection, eventIdResult.eventId, journalBatchId);
 
     await updateAssetBook(
       connection,
@@ -449,11 +635,11 @@ export async function recordAcquisition(
       0,
       carryingAmount,
       input.event_date,
-      eventId
+      eventIdResult.eventId
     );
 
     return {
-      event_id: eventId,
+      event_id: eventIdResult.eventId,
       journal_batch_id: journalBatchId,
       book: {
         cost_basis: input.cost,
@@ -471,7 +657,8 @@ async function postAcquisitionToJournal(
   outletId: number | null,
   eventDate: string,
   cost: number,
-  expenseAccountId: number
+  assetAccountId: number,
+  offsetAccountId: number
 ): Promise<number> {
   await ensureDateWithinOpenFiscalYearWithExecutor(executor, companyId, eventDate);
 
@@ -481,14 +668,16 @@ async function postAcquisitionToJournal(
   );
   const journalBatchId = Number(batchResult.insertId);
 
-  const debitAccountId = expenseAccountId;
-  const creditAccountId = expenseAccountId;
+  assertJournalBalanced([
+    { debit: cost, credit: 0 },
+    { debit: 0, credit: cost }
+  ]);
 
   await executor.execute(
     `INSERT INTO journal_lines (journal_batch_id, company_id, outlet_id, account_id, line_date, debit, credit, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      journalBatchId, companyId, outletId, debitAccountId, eventDate, cost, 0, `Fixed Asset Acquisition - Cost`,
-      journalBatchId, companyId, outletId, creditAccountId, eventDate, 0, cost, `Fixed Asset Acquisition - Offset`
+      journalBatchId, companyId, outletId, assetAccountId, eventDate, cost, 0, `Fixed Asset Acquisition - Cost`,
+      journalBatchId, companyId, outletId, offsetAccountId, eventDate, 0, cost, `Fixed Asset Acquisition - Offset`
     ]
   );
 
@@ -524,6 +713,17 @@ export async function recordTransfer(
       throw new FixedAssetDisposedError();
     }
 
+    const fromOutletId = asset.outlet_id;
+    if (fromOutletId) {
+      try {
+        await ensureUserHasOutletAccess(connection, actor.userId, companyId, fromOutletId);
+      } catch (error) {
+        const err = error as { code?: string };
+        if (err.code === "FORBIDDEN") throw new FixedAssetNotFoundError();
+        throw error;
+      }
+    }
+
     const idempotencyKey = input.idempotency_key ?? generateIdempotencyKey();
     const existingEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
     if (existingEvent) {
@@ -540,12 +740,18 @@ export async function recordTransfer(
 
     await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, input.transfer_date);
     await ensureCompanyOutletExists(connection, companyId, input.to_outlet_id);
-    await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.to_outlet_id);
+    try {
+      await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.to_outlet_id);
+    } catch (error) {
+      const err = error as { code?: string };
+      if (err.code === "FORBIDDEN") throw new FixedAssetNotFoundError();
+      throw error;
+    }
 
-    const fromOutletId = asset.outlet_id;
     const toOutletId = input.to_outlet_id;
 
-    const eventId = await insertEvent(
+    // Reserve event first for idempotency
+    const eventIdResult = await insertEventWithIdempotency(
       connection,
       companyId,
       assetId,
@@ -563,13 +769,30 @@ export async function recordTransfer(
       actor.userId
     );
 
+    if (eventIdResult.isDuplicate) {
+      const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+      if (dupEvent) {
+        const eventData = typeof dupEvent.event_data === "string" 
+          ? JSON.parse(dupEvent.event_data) 
+          : dupEvent.event_data;
+        return {
+          event_id: eventIdResult.eventId,
+          journal_batch_id: dupEvent.journal_batch_id,
+          to_outlet_id: (eventData as Record<string, unknown>).to_outlet_id as number,
+          duplicate: true
+        };
+      }
+      throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+    }
+
+    // Update asset outlet after successful event reservation
     await connection.execute<ResultSetHeader>(
       `UPDATE fixed_assets SET outlet_id = ? WHERE id = ?`,
       [toOutletId, assetId]
     );
 
     return {
-      event_id: eventId,
+      event_id: eventIdResult.eventId,
       journal_batch_id: null,
       to_outlet_id: toOutletId,
       duplicate: false
@@ -582,6 +805,7 @@ export interface ImpairmentInput {
   impairment_amount: number;
   reason: string;
   expense_account_id: number;
+  accum_impairment_account_id: number;
   idempotency_key?: string;
 }
 
@@ -610,6 +834,8 @@ export async function recordImpairment(
       throw new FixedAssetDisposedError();
     }
 
+    await ensureUserCanAccessAssetOutlet(connection, actor.userId, companyId, assetId);
+
     const book = await findAssetBookWithExecutor(connection, assetId);
     if (!book) {
       throw new FixedAssetLifecycleError("Asset has no book value - must acquire first", "INVALID_STATE");
@@ -631,12 +857,51 @@ export async function recordImpairment(
 
     await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, input.impairment_date);
     await ensureCompanyAccountExists(connection, companyId, input.expense_account_id);
+    await ensureCompanyAccountExists(connection, companyId, input.accum_impairment_account_id);
 
     const currentCarryingAmount = Number(book.carrying_amount);
     const newImpairment = Math.min(input.impairment_amount, currentCarryingAmount);
     const newCarryingAmount = normalizeMoney(currentCarryingAmount - newImpairment);
     const newAccumImpairment = Number(book.accum_impairment) + newImpairment;
 
+    // Reserve event first for idempotency
+    const eventIdResult = await insertEventWithIdempotency(
+      connection,
+      companyId,
+      assetId,
+      FA_IMPAIRMENT,
+      input.impairment_date,
+      asset.outlet_id,
+      null,
+      "POSTED",
+      idempotencyKey,
+      {
+        impairment_amount: newImpairment,
+        reason: input.reason,
+        expense_account_id: input.expense_account_id,
+        accum_impairment_account_id: input.accum_impairment_account_id
+      },
+      actor.userId
+    );
+
+    if (eventIdResult.isDuplicate) {
+      const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+      if (dupEvent) {
+        const book = await findAssetBookWithExecutor(connection, assetId);
+        return {
+          event_id: dupEvent.id,
+          journal_batch_id: dupEvent.journal_batch_id ?? 0,
+          book: {
+            carrying_amount: book ? Number(book.carrying_amount) : 0,
+            accum_impairment: book ? Number(book.accum_impairment) : 0
+          },
+          duplicate: true
+        };
+      }
+      throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+    }
+
+    // Post journal after event reservation
     const journalBatchId = await postImpairmentToJournal(
       connection,
       companyId,
@@ -644,26 +909,11 @@ export async function recordImpairment(
       asset.outlet_id,
       input.impairment_date,
       newImpairment,
-      input.expense_account_id
+      input.expense_account_id,
+      input.accum_impairment_account_id
     );
 
-    const eventId = await insertEvent(
-      connection,
-      companyId,
-      assetId,
-      FA_IMPAIRMENT,
-      input.impairment_date,
-      asset.outlet_id,
-      journalBatchId,
-      "POSTED",
-      idempotencyKey,
-      {
-        impairment_amount: newImpairment,
-        reason: input.reason,
-        expense_account_id: input.expense_account_id
-      },
-      actor.userId
-    );
+    await attachJournalBatchToEvent(connection, eventIdResult.eventId, journalBatchId);
 
     await updateAssetBook(
       connection,
@@ -674,11 +924,11 @@ export async function recordImpairment(
       newAccumImpairment,
       newCarryingAmount,
       input.impairment_date,
-      eventId
+      eventIdResult.eventId
     );
 
     return {
-      event_id: eventId,
+      event_id: eventIdResult.eventId,
       journal_batch_id: journalBatchId,
       book: {
         carrying_amount: newCarryingAmount,
@@ -696,7 +946,8 @@ async function postImpairmentToJournal(
   outletId: number | null,
   eventDate: string,
   impairmentAmount: number,
-  expenseAccountId: number
+  expenseAccountId: number,
+  accumImpairmentAccountId: number
 ): Promise<number> {
   await ensureDateWithinOpenFiscalYearWithExecutor(executor, companyId, eventDate);
 
@@ -706,11 +957,16 @@ async function postImpairmentToJournal(
   );
   const journalBatchId = Number(batchResult.insertId);
 
+  assertJournalBalanced([
+    { debit: impairmentAmount, credit: 0 },
+    { debit: 0, credit: impairmentAmount }
+  ]);
+
   await executor.execute(
     `INSERT INTO journal_lines (journal_batch_id, company_id, outlet_id, account_id, line_date, debit, credit, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      journalBatchId, companyId, outletId, expenseAccountId, eventDate, impairmentAmount, 0, `Fixed Asset Impairment`,
-      journalBatchId, companyId, outletId, expenseAccountId, eventDate, 0, impairmentAmount, `Fixed Asset Impairment - Accum`
+      journalBatchId, companyId, outletId, expenseAccountId, eventDate, impairmentAmount, 0, `Fixed Asset Impairment - Expense`,
+      journalBatchId, companyId, outletId, accumImpairmentAccountId, eventDate, 0, impairmentAmount, `Fixed Asset Impairment - Accum`
     ]
   );
 
@@ -723,6 +979,12 @@ export interface DisposalInput {
   proceeds?: number;
   disposal_cost?: number;
   cash_account_id: number;
+  asset_account_id: number;
+  accum_depr_account_id: number;
+  accum_impairment_account_id?: number;
+  gain_account_id?: number;
+  loss_account_id?: number;
+  disposal_expense_account_id?: number;
   notes?: string;
   idempotency_key?: string;
 }
@@ -756,6 +1018,8 @@ export async function recordDisposal(
       throw new FixedAssetDisposedError();
     }
 
+    await ensureUserCanAccessAssetOutlet(connection, actor.userId, companyId, assetId);
+
     const book = await findAssetBookWithExecutor(connection, assetId);
     if (!book) {
       throw new FixedAssetLifecycleError("Asset has no book value - must acquire first", "INVALID_STATE");
@@ -767,6 +1031,7 @@ export async function recordDisposal(
       const eventData = typeof existingEvent.event_data === "string"
         ? JSON.parse(existingEvent.event_data)
         : existingEvent.event_data;
+      const book = await findAssetBookWithExecutor(connection, assetId);
       return {
         event_id: existingEvent.id,
         journal_batch_id: existingEvent.journal_batch_id ?? 0,
@@ -775,13 +1040,27 @@ export async function recordDisposal(
           cost_removed: (eventData as Record<string, unknown>).cost_removed as number ?? 0,
           gain_loss: (eventData as Record<string, unknown>).gain_loss as number ?? 0
         },
-        book: { carrying_amount: 0 },
+        book: { carrying_amount: book ? Number(book.carrying_amount) : 0 },
         duplicate: true
       };
     }
 
     await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, input.disposal_date);
     await ensureCompanyAccountExists(connection, companyId, input.cash_account_id);
+    await ensureCompanyAccountExists(connection, companyId, input.asset_account_id);
+    await ensureCompanyAccountExists(connection, companyId, input.accum_depr_account_id);
+    if (input.accum_impairment_account_id) {
+      await ensureCompanyAccountExists(connection, companyId, input.accum_impairment_account_id);
+    }
+    if (input.gain_account_id) {
+      await ensureCompanyAccountExists(connection, companyId, input.gain_account_id);
+    }
+    if (input.loss_account_id) {
+      await ensureCompanyAccountExists(connection, companyId, input.loss_account_id);
+    }
+    if (input.disposal_expense_account_id) {
+      await ensureCompanyAccountExists(connection, companyId, input.disposal_expense_account_id);
+    }
 
     const proceeds = input.proceeds ?? 0;
     const disposalCost = input.disposal_cost ?? 0;
@@ -792,11 +1071,78 @@ export async function recordDisposal(
 
     let gainLoss: number;
     if (input.disposal_type === "SALE") {
-      gainLoss = normalizeMoney(proceeds + disposalCost - carryingAmount);
+      gainLoss = normalizeMoney(proceeds - carryingAmount - disposalCost);
     } else {
-      gainLoss = normalizeMoney(-carryingAmount - disposalCost);
+      gainLoss = normalizeMoney(-(carryingAmount + disposalCost));
     }
 
+    if (accumImpairment > 0 && !input.accum_impairment_account_id) {
+      throw new FixedAssetLifecycleError("Accumulated impairment account required when asset has impairment", "INVALID_REFERENCE");
+    }
+    if (gainLoss > 0 && !input.gain_account_id) {
+      throw new FixedAssetLifecycleError("Gain account required when disposal results in gain", "INVALID_REFERENCE");
+    }
+    if (gainLoss < 0 && !input.loss_account_id) {
+      throw new FixedAssetLifecycleError("Loss account required when disposal results in loss", "INVALID_REFERENCE");
+    }
+    if (disposalCost > 0 && !input.disposal_expense_account_id) {
+      throw new FixedAssetLifecycleError("Disposal expense account required when there are disposal costs", "INVALID_REFERENCE");
+    }
+
+    // Reserve event first for idempotency
+    const eventIdResult = await insertEventWithIdempotency(
+      connection,
+      companyId,
+      assetId,
+      FA_DISPOSAL,
+      input.disposal_date,
+      asset.outlet_id,
+      null,
+      "POSTED",
+      idempotencyKey,
+      {
+        disposal_type: input.disposal_type,
+        proceeds,
+        disposal_cost: disposalCost,
+        cost_removed: costBasis,
+        depr_removed: accumDepreciation,
+        impairment_removed: accumImpairment,
+        gain_loss: gainLoss,
+        cash_account_id: input.cash_account_id,
+        asset_account_id: input.asset_account_id,
+        accum_depr_account_id: input.accum_depr_account_id,
+        accum_impairment_account_id: input.accum_impairment_account_id,
+        gain_account_id: input.gain_account_id,
+        loss_account_id: input.loss_account_id,
+        disposal_expense_account_id: input.disposal_expense_account_id,
+        notes: input.notes
+      },
+      actor.userId
+    );
+
+    if (eventIdResult.isDuplicate) {
+      const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+      if (dupEvent) {
+        const eventData = typeof dupEvent.event_data === "string" 
+          ? JSON.parse(dupEvent.event_data) 
+          : dupEvent.event_data;
+        const book = await findAssetBookWithExecutor(connection, assetId);
+        return {
+          event_id: dupEvent.id,
+          journal_batch_id: dupEvent.journal_batch_id ?? 0,
+          disposal: {
+            proceeds: (eventData as Record<string, unknown>).proceeds as number ?? 0,
+            cost_removed: (eventData as Record<string, unknown>).cost_removed as number ?? 0,
+            gain_loss: (eventData as Record<string, unknown>).gain_loss as number ?? 0
+          },
+          book: { carrying_amount: book ? Number(book.carrying_amount) : 0 },
+          duplicate: true
+        };
+      }
+      throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+    }
+
+    // Post journal after event reservation
     const journalBatchId = await postDisposalToJournal(
       connection,
       companyId,
@@ -810,38 +1156,22 @@ export async function recordDisposal(
       accumDepreciation,
       accumImpairment,
       gainLoss,
-      input.cash_account_id
+      input.cash_account_id,
+      input.asset_account_id,
+      input.accum_depr_account_id,
+      input.accum_impairment_account_id,
+      input.gain_account_id,
+      input.loss_account_id,
+      input.disposal_expense_account_id
     );
 
-    const eventId = await insertEvent(
-      connection,
-      companyId,
-      assetId,
-      FA_DISPOSAL,
-      input.disposal_date,
-      asset.outlet_id,
-      journalBatchId,
-      "POSTED",
-      idempotencyKey,
-      {
-        disposal_type: input.disposal_type,
-        proceeds,
-        disposal_cost: disposalCost,
-        cost_removed: costBasis,
-        depr_removed: accumDepreciation,
-        impairment_removed: accumImpairment,
-        gain_loss: gainLoss,
-        cash_account_id: input.cash_account_id,
-        notes: input.notes
-      },
-      actor.userId
-    );
+    await attachJournalBatchToEvent(connection, eventIdResult.eventId, journalBatchId);
 
     await connection.execute<ResultSetHeader>(
       `INSERT INTO fixed_asset_disposals (
         company_id, event_id, asset_id, proceeds, cost_removed, depr_removed, impairment_removed, disposal_cost, gain_loss, disposal_type, notes
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [companyId, eventId, assetId, proceeds, costBasis, accumDepreciation, accumImpairment, disposalCost, gainLoss, input.disposal_type, input.notes ?? null]
+      [companyId, eventIdResult.eventId, assetId, proceeds, costBasis, accumDepreciation, accumImpairment, disposalCost, gainLoss, input.disposal_type, input.notes ?? null]
     );
 
     await updateAssetBook(
@@ -853,13 +1183,13 @@ export async function recordDisposal(
       0,
       0,
       input.disposal_date,
-      eventId
+      eventIdResult.eventId
     );
 
     await markAssetDisposed(connection, assetId, new Date(input.disposal_date));
 
     return {
-      event_id: eventId,
+      event_id: eventIdResult.eventId,
       journal_batch_id: journalBatchId,
       disposal: {
         proceeds,
@@ -885,7 +1215,13 @@ async function postDisposalToJournal(
   accumDepreciation: number,
   accumImpairment: number,
   gainLoss: number,
-  cashAccountId: number
+  cashAccountId: number,
+  assetAccountId: number,
+  accumDeprAccountId: number,
+  accumImpairmentAccountId: number | undefined,
+  gainAccountId: number | undefined,
+  lossAccountId: number | undefined,
+  disposalExpenseAccountId: number | undefined
 ): Promise<number> {
   await ensureDateWithinOpenFiscalYearWithExecutor(executor, companyId, eventDate);
 
@@ -902,30 +1238,33 @@ async function postDisposalToJournal(
   }
 
   if (accumDepreciation > 0) {
-    lines.push([journalBatchId, companyId, outletId, cashAccountId, eventDate, accumDepreciation, 0, "Accumulated Depreciation Removed"]);
+    lines.push([journalBatchId, companyId, outletId, accumDeprAccountId, eventDate, accumDepreciation, 0, "Accumulated Depreciation Removed"]);
   }
 
-  if (accumImpairment > 0) {
-    lines.push([journalBatchId, companyId, outletId, cashAccountId, eventDate, accumImpairment, 0, "Accumulated Impairment Removed"]);
+  if (accumImpairment > 0 && accumImpairmentAccountId) {
+    lines.push([journalBatchId, companyId, outletId, accumImpairmentAccountId, eventDate, accumImpairment, 0, "Accumulated Impairment Removed"]);
   }
 
   if (costBasis > 0) {
-    lines.push([journalBatchId, companyId, outletId, cashAccountId, eventDate, 0, costBasis, "Fixed Asset Cost Removed"]);
+    lines.push([journalBatchId, companyId, outletId, assetAccountId, eventDate, 0, costBasis, "Fixed Asset Cost Removed"]);
   }
 
   if (gainLoss !== 0) {
-    if (gainLoss > 0) {
-      lines.push([journalBatchId, companyId, outletId, cashAccountId, eventDate, 0, gainLoss, "Gain on Disposal"]);
-    } else {
-      lines.push([journalBatchId, companyId, outletId, cashAccountId, eventDate, Math.abs(gainLoss), 0, "Loss on Disposal"]);
+    if (gainLoss > 0 && gainAccountId) {
+      lines.push([journalBatchId, companyId, outletId, gainAccountId, eventDate, 0, gainLoss, "Gain on Disposal"]);
+    } else if (gainLoss < 0 && lossAccountId) {
+      lines.push([journalBatchId, companyId, outletId, lossAccountId, eventDate, Math.abs(gainLoss), 0, "Loss on Disposal"]);
     }
   }
 
-  if (disposalCost > 0) {
-    lines.push([journalBatchId, companyId, outletId, cashAccountId, eventDate, disposalCost, 0, "Disposal Costs"]);
+  if (disposalCost > 0 && disposalExpenseAccountId) {
+    lines.push([journalBatchId, companyId, outletId, disposalExpenseAccountId, eventDate, disposalCost, 0, "Disposal Costs"]);
   }
 
   if (lines.length > 0) {
+    const journalLines = lines.map(l => ({ debit: l[5], credit: l[6] }));
+    assertJournalBalanced(journalLines);
+
     const placeholders = lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
     const values = lines.flat();
     await executor.execute(`INSERT INTO journal_lines (journal_batch_id, company_id, outlet_id, account_id, line_date, debit, credit, description) VALUES ${placeholders}`, values);
@@ -946,7 +1285,9 @@ export interface VoidResult {
   duplicate: boolean;
 }
 
-const VOIDABLE_EVENTS = [FA_ACQUISITION, FA_DISPOSAL];
+function isVoidableEventType(eventType: string): boolean {
+  return isAcquisitionType(eventType) || isDisposalType(eventType);
+}
 
 export async function voidEvent(
   companyId: number,
@@ -962,8 +1303,19 @@ export async function voidEvent(
     if (event.status === "VOIDED") {
       throw new FixedAssetEventVoidedError();
     }
-    if (!VOIDABLE_EVENTS.includes(event.event_type)) {
+    if (!isVoidableEventType(event.event_type)) {
       throw new FixedAssetEventNotVoidableError();
+    }
+
+    // Check outlet access for the event
+    if (event.outlet_id) {
+      try {
+        await ensureUserHasOutletAccess(connection, actor.userId, companyId, event.outlet_id);
+      } catch (error) {
+        const err = error as { code?: string };
+        if (err.code === "FORBIDDEN") throw new FixedAssetEventNotFoundError();
+        throw error;
+      }
     }
 
     const idempotencyKey = input.idempotency_key ?? `void-${generateIdempotencyKey()}`;
@@ -979,20 +1331,15 @@ export async function voidEvent(
 
     await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, formatDateOnly(new Date()));
 
-    let journalBatchId: number | null = null;
-
-    if (event.journal_batch_id) {
-      journalBatchId = await postVoidToJournal(connection, companyId, eventId, event.asset_id, event.outlet_id, formatDateOnly(new Date()));
-    }
-
-    const voidEventId = await insertEvent(
+    // Reserve void event first for idempotency
+    const voidEventResult = await insertEventWithIdempotency(
       connection,
       companyId,
       event.asset_id,
       FA_VOID,
       formatDateOnly(new Date()),
       event.outlet_id,
-      journalBatchId,
+      null,
       "POSTED",
       idempotencyKey,
       {
@@ -1002,38 +1349,55 @@ export async function voidEvent(
       actor.userId
     );
 
+    if (voidEventResult.isDuplicate) {
+      const dupVoidEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+      if (dupVoidEvent) {
+        return {
+          void_event_id: dupVoidEvent.id,
+          original_event_id: eventId,
+          journal_batch_id: dupVoidEvent.journal_batch_id,
+          duplicate: true
+        };
+      }
+      throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+    }
+
+    // Post reversal journal if original had journal batch
+    let journalBatchId: number | null = null;
+    if (event.journal_batch_id) {
+      journalBatchId = await postVoidToJournal(connection, companyId, eventId, event.asset_id, event.outlet_id, formatDateOnly(new Date()));
+    }
+
+    await attachJournalBatchToEvent(connection, voidEventResult.eventId, journalBatchId);
+
+    // Mark original event as voided
     await connection.execute<ResultSetHeader>(
       `UPDATE fixed_asset_events SET status = 'VOIDED', voided_by = ?, voided_at = NOW() WHERE id = ?`,
       [actor.userId, eventId]
     );
 
-    if (event.event_type === FA_DISPOSAL) {
-      await connection.execute<ResultSetHeader>(
-        `UPDATE fixed_assets SET disposed_at = NULL WHERE id = ?`,
-        [event.asset_id]
-      );
+    // Recompute book from remaining posted events
+    const recomputed = await recomputeAssetBookFromEvents(connection, companyId, event.asset_id);
 
-      const originalData = typeof event.event_data === "string"
-        ? JSON.parse(event.event_data)
-        : event.event_data;
-      const book = await findAssetBookWithExecutor(connection, event.asset_id);
-      if (book) {
-        await updateAssetBook(
-          connection,
-          companyId,
-          event.asset_id,
-          Number(originalData.cost_removed) || 0,
-          Number(originalData.depr_removed) || 0,
-          Number(originalData.impairment_removed) || 0,
-          Number(originalData.cost_removed) || 0,
-          formatDateOnly(new Date()),
-          voidEventId
-        );
-      }
-    }
+    await updateAssetBook(
+      connection,
+      companyId,
+      event.asset_id,
+      recomputed.cost_basis,
+      recomputed.accum_depreciation,
+      recomputed.accum_impairment,
+      recomputed.carrying_amount,
+      formatDateOnly(new Date()),
+      voidEventResult.eventId
+    );
+
+    await connection.execute<ResultSetHeader>(
+      `UPDATE fixed_assets SET disposed_at = ? WHERE id = ?`,
+      [recomputed.disposed_at ? formatDateOnly(recomputed.disposed_at) : null, event.asset_id]
+    );
 
     return {
-      void_event_id: voidEventId,
+      void_event_id: voidEventResult.eventId,
       original_event_id: eventId,
       journal_batch_id: journalBatchId,
       duplicate: false
@@ -1090,12 +1454,29 @@ export interface LedgerResult {
   events: LedgerEntry[];
 }
 
-export async function getAssetLedger(companyId: number, assetId: number): Promise<LedgerResult> {
+export async function getAssetLedger(companyId: number, assetId: number, actor: MutationActor): Promise<LedgerResult> {
   const pool = getDbPool();
 
   const asset = await findFixedAssetWithExecutor(pool, companyId, assetId);
   if (!asset) {
     throw new FixedAssetNotFoundError();
+  }
+
+  const rawOutletId = asset.outlet_id ?? null;
+  const outletId = rawOutletId == null ? null : Number(rawOutletId);
+  if (outletId !== null) {
+    if (!Number.isInteger(outletId) || outletId <= 0) {
+      throw new FixedAssetNotFoundError();
+    }
+    try {
+      await ensureUserHasOutletAccess(pool, actor.userId, companyId, outletId);
+    } catch (error) {
+      const err = error as { code?: string };
+      if (err.code === "FORBIDDEN") {
+        throw new FixedAssetNotFoundError();
+      }
+      throw error;
+    }
   }
 
   const [rows] = await pool.execute<FixedAssetEventRow[]>(
@@ -1126,12 +1507,29 @@ export interface BookResult {
   last_event_id: number;
 }
 
-export async function getAssetBook(companyId: number, assetId: number): Promise<BookResult> {
+export async function getAssetBook(companyId: number, assetId: number, actor: MutationActor): Promise<BookResult> {
   const pool = getDbPool();
 
   const asset = await findFixedAssetWithExecutor(pool, companyId, assetId);
   if (!asset) {
     throw new FixedAssetNotFoundError();
+  }
+
+  const rawOutletId = asset.outlet_id ?? null;
+  const outletId = rawOutletId == null ? null : Number(rawOutletId);
+  if (outletId !== null) {
+    if (!Number.isInteger(outletId) || outletId <= 0) {
+      throw new FixedAssetNotFoundError();
+    }
+    try {
+      await ensureUserHasOutletAccess(pool, actor.userId, companyId, outletId);
+    } catch (error) {
+      const err = error as { code?: string };
+      if (err.code === "FORBIDDEN") {
+        throw new FixedAssetNotFoundError();
+      }
+      throw error;
+    }
   }
 
   const book = await findAssetBookWithExecutor(pool, assetId);

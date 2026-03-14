@@ -26,7 +26,9 @@ export const AcquisitionRequestSchema = z.object({
   cost: MoneySchema.positive(),
   useful_life_months: z.coerce.number().int().positive(),
   salvage_value: MoneySchema.nonnegative().default(0),
-  expense_account_id: NumericIdSchema,
+  asset_account_id: NumericIdSchema,
+  offset_account_id: NumericIdSchema,
+  expense_account_id: NumericIdSchema.optional(),
   accum_depr_account_id: NumericIdSchema.optional(),
   notes: z.string().max(500).optional(),
   idempotency_key: IdempotencyKeySchema.optional()
@@ -44,6 +46,7 @@ export const ImpairmentRequestSchema = z.object({
   impairment_amount: MoneySchema.positive(),
   reason: z.string().min(1).max(500),
   expense_account_id: NumericIdSchema,
+  accum_impairment_account_id: NumericIdSchema,
   idempotency_key: IdempotencyKeySchema.optional()
 });
 
@@ -53,6 +56,12 @@ export const DisposalRequestSchema = z.object({
   proceeds: MoneySchema.nonnegative().optional(),
   disposal_cost: MoneySchema.nonnegative().default(0),
   cash_account_id: NumericIdSchema,
+  asset_account_id: NumericIdSchema,
+  accum_depr_account_id: NumericIdSchema,
+  accum_impairment_account_id: NumericIdSchema.optional(),
+  gain_account_id: NumericIdSchema.optional(),
+  loss_account_id: NumericIdSchema.optional(),
+  disposal_expense_account_id: NumericIdSchema.optional(),
   notes: z.string().max(500).optional(),
   idempotency_key: IdempotencyKeySchema.optional()
 }).refine(
@@ -115,7 +124,8 @@ export const AcquisitionResponseSchema = z.object({
   book: z.object({
     cost_basis: MoneySchema.nonnegative(),
     carrying_amount: MoneySchema.nonnegative()
-  })
+  }),
+  duplicate: z.boolean()
 });
 
 export const DepreciationRunResponseSchema = z.object({
@@ -129,7 +139,8 @@ export const TransferResponseSchema = z.object({
   event_id: NumericIdSchema,
   journal_batch_id: NumericIdSchema.nullable(),
   to_outlet_id: NumericIdSchema,
-  to_outlet_name: z.string().optional()
+  to_outlet_name: z.string().optional(),
+  duplicate: z.boolean()
 });
 
 export const ImpairmentResponseSchema = z.object({
@@ -138,7 +149,8 @@ export const ImpairmentResponseSchema = z.object({
   book: z.object({
     carrying_amount: MoneySchema.nonnegative(),
     accum_impairment: MoneySchema.nonnegative()
-  })
+  }),
+  duplicate: z.boolean()
 });
 
 export const DisposalResponseSchema = z.object({
@@ -151,13 +163,15 @@ export const DisposalResponseSchema = z.object({
   }),
   book: z.object({
     carrying_amount: MoneySchema.nonnegative()
-  })
+  }),
+  duplicate: z.boolean()
 });
 
 export const VoidResponseSchema = z.object({
   void_event_id: NumericIdSchema,
   original_event_id: NumericIdSchema,
-  journal_batch_id: NumericIdSchema.nullable()
+  journal_batch_id: NumericIdSchema.nullable(),
+  duplicate: z.boolean()
 });
 
 export const LedgerResponseSchema = z.object({

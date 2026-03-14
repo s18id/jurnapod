@@ -115,6 +115,8 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     cost: 0,
     useful_life_months: 60,
     salvage_value: 0,
+    asset_account_id: "",
+    offset_account_id: "",
     expense_account_id: "",
     notes: ""
   });
@@ -131,7 +133,8 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     impairment_date: "",
     impairment_amount: 0,
     reason: "",
-    expense_account_id: ""
+    expense_account_id: "",
+    accum_impairment_account_id: ""
   });
 
   const [disposalModalOpen, setDisposalModalOpen] = useState(false);
@@ -141,6 +144,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     proceeds: 0,
     disposal_cost: 0,
     cash_account_id: "",
+    asset_account_id: "",
+    accum_depr_account_id: "",
+    accum_impairment_account_id: "",
+    gain_account_id: "",
+    loss_account_id: "",
+    disposal_expense_account_id: "",
     notes: ""
   });
 
@@ -397,6 +406,8 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
       cost: purchaseCost,
       useful_life_months: selectedCategory?.useful_life_months ?? 60,
       salvage_value: purchaseCost * (residualPct / 100),
+      asset_account_id: "",
+      offset_account_id: "",
       expense_account_id: String(selectedCategory?.expense_account_id ?? ""),
       notes: ""
     });
@@ -405,6 +416,11 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
 
   async function handleAcquisition() {
     if (!selectedAsset) return;
+
+    if (!acquisitionForm.asset_account_id || !acquisitionForm.offset_account_id) {
+      setError("Please select both asset account and offset account");
+      return;
+    }
 
     try {
       setError(null);
@@ -417,7 +433,9 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             cost: acquisitionForm.cost,
             useful_life_months: acquisitionForm.useful_life_months,
             salvage_value: acquisitionForm.salvage_value,
-            expense_account_id: Number(acquisitionForm.expense_account_id),
+            asset_account_id: Number(acquisitionForm.asset_account_id),
+            offset_account_id: Number(acquisitionForm.offset_account_id),
+            expense_account_id: acquisitionForm.expense_account_id ? Number(acquisitionForm.expense_account_id) : undefined,
             notes: acquisitionForm.notes
           })
         },
@@ -479,13 +497,19 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
       impairment_date: new Date().toISOString().slice(0, 10),
       impairment_amount: 0,
       reason: "",
-      expense_account_id: ""
+      expense_account_id: "",
+      accum_impairment_account_id: ""
     });
     setImpairmentModalOpen(true);
   }
 
   async function handleImpairment() {
     if (!selectedAsset) return;
+
+    if (!impairmentForm.expense_account_id || !impairmentForm.accum_impairment_account_id) {
+      setError("Please select both expense and accumulated impairment accounts");
+      return;
+    }
 
     try {
       setError(null);
@@ -497,7 +521,8 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             impairment_date: impairmentForm.impairment_date,
             impairment_amount: impairmentForm.impairment_amount,
             reason: impairmentForm.reason,
-            expense_account_id: Number(impairmentForm.expense_account_id)
+            expense_account_id: Number(impairmentForm.expense_account_id),
+            accum_impairment_account_id: Number(impairmentForm.accum_impairment_account_id)
           })
         },
         props.accessToken
@@ -521,6 +546,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
       proceeds: 0,
       disposal_cost: 0,
       cash_account_id: "",
+      asset_account_id: "",
+      accum_depr_account_id: "",
+      accum_impairment_account_id: "",
+      gain_account_id: "",
+      loss_account_id: "",
+      disposal_expense_account_id: "",
       notes: ""
     });
     setDisposalModalOpen(true);
@@ -528,6 +559,11 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
 
   async function handleDisposal() {
     if (!selectedAsset) return;
+
+    if (!disposalForm.cash_account_id || !disposalForm.asset_account_id || !disposalForm.accum_depr_account_id) {
+      setError("Please select cash, asset, and accumulated depreciation accounts");
+      return;
+    }
 
     try {
       setError(null);
@@ -541,6 +577,12 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             proceeds: disposalForm.disposal_type === "SALE" ? disposalForm.proceeds : undefined,
             disposal_cost: disposalForm.disposal_cost,
             cash_account_id: Number(disposalForm.cash_account_id),
+            asset_account_id: Number(disposalForm.asset_account_id),
+            accum_depr_account_id: Number(disposalForm.accum_depr_account_id),
+            accum_impairment_account_id: disposalForm.accum_impairment_account_id ? Number(disposalForm.accum_impairment_account_id) : undefined,
+            gain_account_id: disposalForm.gain_account_id ? Number(disposalForm.gain_account_id) : undefined,
+            loss_account_id: disposalForm.loss_account_id ? Number(disposalForm.loss_account_id) : undefined,
+            disposal_expense_account_id: disposalForm.disposal_expense_account_id ? Number(disposalForm.disposal_expense_account_id) : undefined,
             notes: disposalForm.notes
           })
         },
@@ -1048,9 +1090,18 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             onChange={(v: string | number | undefined) => setAcquisitionForm((p) => ({ ...p, salvage_value: Number(v) ?? 0 }))}
           />
           <Select
-            label="Expense Account"
-            value={acquisitionForm.expense_account_id}
-            onChange={(v) => setAcquisitionForm((p) => ({ ...p, expense_account_id: v ?? "" }))}
+            label="Asset Account (Debit)"
+            placeholder="Select fixed asset account"
+            value={acquisitionForm.asset_account_id}
+            onChange={(v) => setAcquisitionForm((p) => ({ ...p, asset_account_id: v ?? "" }))}
+            data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
+            required
+          />
+          <Select
+            label="Offset Account (Credit)"
+            placeholder="Select offset account (AP/Cash)"
+            value={acquisitionForm.offset_account_id}
+            onChange={(v) => setAcquisitionForm((p) => ({ ...p, offset_account_id: v ?? "" }))}
             data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
             required
           />
@@ -1119,6 +1170,13 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
             required
           />
+          <Select
+            label="Accumulated Impairment Account"
+            value={impairmentForm.accum_impairment_account_id}
+            onChange={(v) => setImpairmentForm((p) => ({ ...p, accum_impairment_account_id: v ?? "" }))}
+            data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
+            required
+          />
           <Button color="orange" onClick={handleImpairment}>
             Record Impairment
           </Button>
@@ -1163,6 +1221,44 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             onChange={(v) => setDisposalForm((p) => ({ ...p, cash_account_id: v ?? "" }))}
             data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
             required
+          />
+          <Select
+            label="Asset Account"
+            value={disposalForm.asset_account_id}
+            onChange={(v) => setDisposalForm((p) => ({ ...p, asset_account_id: v ?? "" }))}
+            data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
+            required
+          />
+          <Select
+            label="Accumulated Depreciation Account"
+            value={disposalForm.accum_depr_account_id}
+            onChange={(v) => setDisposalForm((p) => ({ ...p, accum_depr_account_id: v ?? "" }))}
+            data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
+            required
+          />
+          <Select
+            label="Accumulated Impairment Account"
+            value={disposalForm.accum_impairment_account_id}
+            onChange={(v) => setDisposalForm((p) => ({ ...p, accum_impairment_account_id: v ?? "" }))}
+            data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
+          />
+          <Select
+            label="Gain Account"
+            value={disposalForm.gain_account_id}
+            onChange={(v) => setDisposalForm((p) => ({ ...p, gain_account_id: v ?? "" }))}
+            data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
+          />
+          <Select
+            label="Loss Account"
+            value={disposalForm.loss_account_id}
+            onChange={(v) => setDisposalForm((p) => ({ ...p, loss_account_id: v ?? "" }))}
+            data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
+          />
+          <Select
+            label="Disposal Expense Account"
+            value={disposalForm.disposal_expense_account_id}
+            onChange={(v) => setDisposalForm((p) => ({ ...p, disposal_expense_account_id: v ?? "" }))}
+            data={accounts.map((a) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))}
           />
           <TextInput
             label="Notes"

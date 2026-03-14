@@ -24,7 +24,7 @@ export const GET = withAuth(
         return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
       }
 
-      const ledger = await getAssetLedger(auth.companyId, assetId);
+      const ledger = await getAssetLedger(auth.companyId, assetId, { userId: auth.userId });
 
       return successResponse(ledger);
     } catch (error) {

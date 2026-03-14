@@ -33,8 +33,9 @@ export const POST = withAuth(
       return successResponse({
         event_id: result.event_id,
         journal_batch_id: result.journal_batch_id,
-        to_outlet_id: result.to_outlet_id
-      });
+        to_outlet_id: result.to_outlet_id,
+        duplicate: result.duplicate
+      }, 201);
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);

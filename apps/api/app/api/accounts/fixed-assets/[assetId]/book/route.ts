@@ -24,7 +24,7 @@ export const GET = withAuth(
         return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
       }
 
-      const book = await getAssetBook(auth.companyId, assetId);
+      const book = await getAssetBook(auth.companyId, assetId, { userId: auth.userId });
 
       return successResponse(book);
     } catch (error) {
