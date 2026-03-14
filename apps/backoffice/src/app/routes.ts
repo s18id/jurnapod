@@ -183,7 +183,7 @@ export const APP_ROUTES: readonly AppRoute[] = [
   },
   {
     path: "/outlets",
-    label: "Outlets",
+    label: "Outlets (Branches)",
     allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN"]
   },
   {

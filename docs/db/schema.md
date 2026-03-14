@@ -108,3 +108,31 @@ Checks:
 Smoke failure messages include explicit prerequisite hints (for example, run migration first, grant write permission, or restore transactional table engine).
 
 On failure, script exits non-zero.
+
+## Appendix: Table Reference
+
+### outlets
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | BIGINT UNSIGNED | NO | AUTO_INCREMENT | Primary key |
+| company_id | BIGINT UNSIGNED | NO | — | FK to companies |
+| code | VARCHAR(32) | NO | — | Unique per company (e.g., JKT-MAIN) |
+| name | VARCHAR(191) | NO | — | Display name |
+| city | VARCHAR(96) | YES | NULL | City name |
+| address_line1 | VARCHAR(191) | YES | NULL | Street address |
+| address_line2 | VARCHAR(191) | YES | NULL | Additional address |
+| postal_code | VARCHAR(20) | YES | NULL | Postal/zip code |
+| phone | VARCHAR(32) | YES | NULL | Contact phone |
+| email | VARCHAR(191) | YES | NULL | Contact email |
+| timezone | VARCHAR(64) | YES | NULL | IANA timezone (e.g., Asia/Jakarta) |
+| is_active | TINYINT(1) | NO | 1 | Active status (0=inactive, 1=active) |
+| created_at | DATETIME | NO | CURRENT_TIMESTAMP | Creation timestamp |
+| updated_at | DATETIME | NO | CURRENT_TIMESTAMP ON UPDATE | Last update timestamp |
+
+**Indexes:**
+- `PRIMARY KEY (id)`
+- `UNIQUE KEY uq_outlets_company_code (company_id, code)`
+- `KEY idx_outlets_company_id_id (company_id, id)`
+- `KEY idx_outlets_company_is_active (company_id, is_active)`
+- `KEY idx_outlets_company_city (company_id, city)`

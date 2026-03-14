@@ -9,11 +9,30 @@ import { getDbPool } from "./db";
 export class OutletNotFoundError extends Error {}
 export class OutletCodeExistsError extends Error {}
 
+export type OutletProfile = {
+  city: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  postal_code: string | null;
+  phone: string | null;
+  email: string | null;
+  timezone: string | null;
+  is_active: boolean;
+};
+
 export type OutletFullResponse = {
   id: number;
   company_id: number;
   code: string;
   name: string;
+  city: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  postal_code: string | null;
+  phone: string | null;
+  email: string | null;
+  timezone: string | null;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -23,6 +42,14 @@ type OutletRow = RowDataPacket & {
   company_id: number;
   code: string;
   name: string;
+  city: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  postal_code: string | null;
+  phone: string | null;
+  email: string | null;
+  timezone: string | null;
+  is_active: number;
   created_at: Date;
   updated_at: Date;
 };
@@ -79,27 +106,42 @@ function buildAuditContext(companyId: number, actor: OutletActor) {
   };
 }
 
+function mapRowToOutlet(row: OutletRow): OutletFullResponse {
+  return {
+    id: Number(row.id),
+    company_id: Number(row.company_id),
+    code: row.code,
+    name: row.name,
+    city: row.city,
+    address_line1: row.address_line1,
+    address_line2: row.address_line2,
+    postal_code: row.postal_code,
+    phone: row.phone,
+    email: row.email,
+    timezone: row.timezone,
+    is_active: Boolean(row.is_active),
+    created_at: row.created_at.toISOString(),
+    updated_at: row.updated_at.toISOString()
+  };
+}
+
+const BASE_SELECT = `SELECT id, company_id, code, name, city, address_line1, address_line2, 
+  postal_code, phone, email, timezone, is_active, created_at, updated_at`;
+
 /**
  * List all outlets for a company
  */
 export async function listOutletsByCompany(companyId: number): Promise<OutletFullResponse[]> {
   const pool = getDbPool();
   const [rows] = await pool.execute<OutletRow[]>(
-    `SELECT id, company_id, code, name, created_at, updated_at
+    `${BASE_SELECT}
      FROM outlets
      WHERE company_id = ?
      ORDER BY name ASC`,
     [companyId]
   );
 
-  return rows.map((row) => ({
-    id: Number(row.id),
-    company_id: Number(row.company_id),
-    code: row.code,
-    name: row.name,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
-  }));
+  return rows.map(mapRowToOutlet);
 }
 
 /**
@@ -108,19 +150,12 @@ export async function listOutletsByCompany(companyId: number): Promise<OutletFul
 export async function listAllOutlets(): Promise<OutletFullResponse[]> {
   const pool = getDbPool();
   const [rows] = await pool.execute<OutletRow[]>(
-    `SELECT id, company_id, code, name, created_at, updated_at
+    `${BASE_SELECT}
      FROM outlets
      ORDER BY company_id ASC, name ASC`
   );
 
-  return rows.map((row) => ({
-    id: Number(row.id),
-    company_id: Number(row.company_id),
-    code: row.code,
-    name: row.name,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
-  }));
+  return rows.map(mapRowToOutlet);
 }
 
 /**
@@ -129,7 +164,7 @@ export async function listAllOutlets(): Promise<OutletFullResponse[]> {
 export async function getOutlet(companyId: number, outletId: number): Promise<OutletFullResponse> {
   const pool = getDbPool();
   const [rows] = await pool.execute<OutletRow[]>(
-    `SELECT id, company_id, code, name, created_at, updated_at
+    `${BASE_SELECT}
      FROM outlets
      WHERE id = ? AND company_id = ?`,
     [outletId, companyId]
@@ -139,26 +174,27 @@ export async function getOutlet(companyId: number, outletId: number): Promise<Ou
     throw new OutletNotFoundError(`Outlet with id ${outletId} not found`);
   }
 
-  const row = rows[0];
-  return {
-    id: Number(row.id),
-    company_id: Number(row.company_id),
-    code: row.code,
-    name: row.name,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
-  };
+  return mapRowToOutlet(rows[0]);
 }
+
+export type CreateOutletParams = {
+  company_id: number;
+  code: string;
+  name: string;
+  city?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  postal_code?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  timezone?: string | null;
+  actor: OutletActor;
+};
 
 /**
  * Create a new outlet
  */
-export async function createOutlet(params: {
-  company_id: number;
-  code: string;
-  name: string;
-  actor: OutletActor;
-}): Promise<OutletFullResponse> {
+export async function createOutlet(params: CreateOutletParams): Promise<OutletFullResponse> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
   const auditService = createAuditServiceForConnection(connection);
@@ -176,10 +212,23 @@ export async function createOutlet(params: {
       throw new OutletCodeExistsError(`Outlet with code ${params.code} already exists for this company`);
     }
 
-    // Insert outlet
+    // Insert outlet with profile fields
     const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
-      [params.company_id, params.code, params.name]
+      `INSERT INTO outlets (company_id, code, name, city, address_line1, address_line2, 
+        postal_code, phone, email, timezone, is_active) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      [
+        params.company_id,
+        params.code,
+        params.name,
+        params.city ?? null,
+        params.address_line1 ?? null,
+        params.address_line2 ?? null,
+        params.postal_code ?? null,
+        params.phone ?? null,
+        params.email ?? null,
+        params.timezone ?? null
+      ]
     );
 
     const outletId = Number(result.insertId);
@@ -187,13 +236,19 @@ export async function createOutlet(params: {
 
     await auditService.logCreate(auditContext, "outlet", outletId, {
       code: params.code,
-      name: params.name
+      name: params.name,
+      city: params.city,
+      address_line1: params.address_line1,
+      address_line2: params.address_line2,
+      postal_code: params.postal_code,
+      phone: params.phone,
+      email: params.email,
+      timezone: params.timezone,
+      is_active: true
     });
 
     const [rows] = await connection.execute<OutletRow[]>(
-      `SELECT id, company_id, code, name, created_at, updated_at
-       FROM outlets
-       WHERE id = ? AND company_id = ?`,
+      `${BASE_SELECT} FROM outlets WHERE id = ? AND company_id = ?`,
       [outletId, params.company_id]
     );
 
@@ -201,18 +256,9 @@ export async function createOutlet(params: {
       throw new OutletNotFoundError(`Outlet with id ${outletId} not found`);
     }
 
-    const outlet = rows[0];
-
     await connection.commit();
 
-    return {
-      id: Number(outlet.id),
-      company_id: Number(outlet.company_id),
-      code: outlet.code,
-      name: outlet.name,
-      created_at: outlet.created_at.toISOString(),
-      updated_at: outlet.updated_at.toISOString()
-    };
+    return mapRowToOutlet(rows[0]);
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -221,15 +267,25 @@ export async function createOutlet(params: {
   }
 }
 
-/**
- * Update an outlet
- */
-export async function updateOutlet(params: {
+export type UpdateOutletParams = {
   companyId: number;
   outletId: number;
   name?: string;
+  city?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  postal_code?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  timezone?: string | null;
+  is_active?: boolean;
   actor: OutletActor;
-}): Promise<OutletFullResponse> {
+};
+
+/**
+ * Update an outlet
+ */
+export async function updateOutlet(params: UpdateOutletParams): Promise<OutletFullResponse> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
   const auditService = createAuditServiceForConnection(connection);
@@ -239,9 +295,7 @@ export async function updateOutlet(params: {
 
     // Get current outlet
     const [rows] = await connection.execute<OutletRow[]>(
-      `SELECT id, company_id, code, name, created_at, updated_at
-       FROM outlets
-       WHERE id = ? AND company_id = ?`,
+      `${BASE_SELECT} FROM outlets WHERE id = ? AND company_id = ?`,
       [params.outletId, params.companyId]
     );
 
@@ -250,31 +304,91 @@ export async function updateOutlet(params: {
     }
 
     const currentOutlet = rows[0];
+    const updates: string[] = [];
+    const values: any[] = [];
+    const oldData: Record<string, any> = {};
+    const newData: Record<string, any> = {};
+
+    // Track and apply updates
+    if (params.name !== undefined && params.name !== currentOutlet.name) {
+      updates.push("name = ?");
+      values.push(params.name);
+      oldData.name = currentOutlet.name;
+      newData.name = params.name;
+    }
+
+    if (params.city !== undefined && params.city !== currentOutlet.city) {
+      updates.push("city = ?");
+      values.push(params.city);
+      oldData.city = currentOutlet.city;
+      newData.city = params.city;
+    }
+
+    if (params.address_line1 !== undefined && params.address_line1 !== currentOutlet.address_line1) {
+      updates.push("address_line1 = ?");
+      values.push(params.address_line1);
+      oldData.address_line1 = currentOutlet.address_line1;
+      newData.address_line1 = params.address_line1;
+    }
+
+    if (params.address_line2 !== undefined && params.address_line2 !== currentOutlet.address_line2) {
+      updates.push("address_line2 = ?");
+      values.push(params.address_line2);
+      oldData.address_line2 = currentOutlet.address_line2;
+      newData.address_line2 = params.address_line2;
+    }
+
+    if (params.postal_code !== undefined && params.postal_code !== currentOutlet.postal_code) {
+      updates.push("postal_code = ?");
+      values.push(params.postal_code);
+      oldData.postal_code = currentOutlet.postal_code;
+      newData.postal_code = params.postal_code;
+    }
+
+    if (params.phone !== undefined && params.phone !== currentOutlet.phone) {
+      updates.push("phone = ?");
+      values.push(params.phone);
+      oldData.phone = currentOutlet.phone;
+      newData.phone = params.phone;
+    }
+
+    if (params.email !== undefined && params.email !== currentOutlet.email) {
+      updates.push("email = ?");
+      values.push(params.email);
+      oldData.email = currentOutlet.email;
+      newData.email = params.email;
+    }
+
+    if (params.timezone !== undefined && params.timezone !== currentOutlet.timezone) {
+      updates.push("timezone = ?");
+      values.push(params.timezone);
+      oldData.timezone = currentOutlet.timezone;
+      newData.timezone = params.timezone;
+    }
+
+    if (params.is_active !== undefined && params.is_active !== Boolean(currentOutlet.is_active)) {
+      updates.push("is_active = ?");
+      values.push(params.is_active ? 1 : 0);
+      oldData.is_active = Boolean(currentOutlet.is_active);
+      newData.is_active = params.is_active;
+    }
 
     let outletForResponse = currentOutlet;
 
-    // Update if name provided
-    if (params.name && params.name !== currentOutlet.name) {
+    if (updates.length > 0) {
+      updates.push("updated_at = CURRENT_TIMESTAMP");
+      values.push(params.outletId, params.companyId);
+
       await connection.execute(
-        `UPDATE outlets
-         SET name = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND company_id = ?`,
-        [params.name, params.outletId, params.companyId]
+        `UPDATE outlets SET ${updates.join(", ")} WHERE id = ? AND company_id = ?`,
+        values
       );
 
       const auditContext = buildAuditContext(params.companyId, params.actor);
-      await auditService.logUpdate(
-        auditContext,
-        "outlet",
-        params.outletId,
-        { name: currentOutlet.name },
-        { name: params.name }
-      );
+      await auditService.logUpdate(auditContext, "outlet", params.outletId, oldData, newData);
 
       const [updatedRows] = await connection.execute<OutletRow[]>(
-        `SELECT id, company_id, code, name, created_at, updated_at
-         FROM outlets
-         WHERE id = ? AND company_id = ?`,
+        `${BASE_SELECT} FROM outlets WHERE id = ? AND company_id = ?`,
         [params.outletId, params.companyId]
       );
 
@@ -287,14 +401,7 @@ export async function updateOutlet(params: {
 
     await connection.commit();
 
-    return {
-      id: Number(outletForResponse.id),
-      company_id: Number(outletForResponse.company_id),
-      code: outletForResponse.code,
-      name: outletForResponse.name,
-      created_at: outletForResponse.created_at.toISOString(),
-      updated_at: outletForResponse.updated_at.toISOString()
-    };
+    return mapRowToOutlet(outletForResponse);
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -320,9 +427,7 @@ export async function deleteOutlet(params: {
 
     // Get current outlet
     const [rows] = await connection.execute<OutletRow[]>(
-      `SELECT id, code, name
-       FROM outlets
-       WHERE id = ? AND company_id = ?`,
+      `SELECT id, code, name FROM outlets WHERE id = ? AND company_id = ?`,
       [params.outletId, params.companyId]
     );
 

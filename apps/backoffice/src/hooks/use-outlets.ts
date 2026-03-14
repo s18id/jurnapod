@@ -112,12 +112,37 @@ export function useOutletFull(
   return { data, loading, error, refetch };
 }
 
+export type OutletCreateInput = {
+  company_id: number;
+  code: string;
+  name: string;
+  city?: string;
+  address_line1?: string;
+  address_line2?: string;
+  postal_code?: string;
+  phone?: string;
+  email?: string;
+  timezone?: string;
+};
+
+export type OutletUpdateInput = {
+  name?: string;
+  city?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  postal_code?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  timezone?: string | null;
+  is_active?: boolean;
+};
+
 /**
  * Mutation: createOutlet
  * Creates a new outlet
  */
 export async function createOutlet(
-  data: { company_id: number; code: string; name: string },
+  data: OutletCreateInput,
   accessToken: string
 ): Promise<OutletFullResponse> {
   const response = await apiRequest<OutletSingleResponse>(
@@ -137,7 +162,7 @@ export async function createOutlet(
  */
 export async function updateOutlet(
   outletId: number,
-  data: { name: string },
+  data: OutletUpdateInput,
   accessToken: string
 ): Promise<OutletFullResponse> {
   const response = await apiRequest<OutletSingleResponse>(

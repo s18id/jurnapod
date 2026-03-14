@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { NumericIdSchema } from "@jurnapod/shared";
+import { NumericIdSchema, OutletUpdateRequestSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { checkUserAccess } from "../../../../src/lib/auth";
@@ -73,25 +73,35 @@ export const PATCH = withAuth(
       const outletId = parseOutletId(request);
       const companyId = await resolveCompanyId(request, _auth);
       const body = await request.json();
-      const { name } = body;
-
-      if (!name || typeof name !== "string" || name.trim().length === 0) {
-        return errorResponse("VALIDATION_ERROR", "Outlet name is required", 400);
+      
+      const parsed = OutletUpdateRequestSchema.parse(body);
+      
+      const updatableFields = ['name', 'city', 'address_line1', 'address_line2', 'postal_code', 'phone', 'email', 'timezone', 'is_active'];
+      const hasChanges = updatableFields.some(field => parsed[field as keyof typeof parsed] !== undefined);
+      
+      if (!hasChanges) {
+        return errorResponse("VALIDATION_ERROR", "At least one field must be provided", 400);
       }
 
-      const outlet = await updateOutlet({
+      const updateData: Parameters<typeof updateOutlet>[0] = {
         companyId,
         outletId,
-        name: name.trim(),
         actor: {
           userId: _auth.userId,
           ipAddress: readClientIp(request)
-        }
-      });
+        },
+        ...parsed
+      };
+
+      const outlet = await updateOutlet(updateData);
 
       return successResponse(outlet);
     } catch (error) {
       if (error instanceof ZodError) {
+        const issues = error.issues.map(i => `${i.path.join('.') || 'request'}: ${i.message}`).join('; ');
+        return errorResponse("VALIDATION_ERROR", `Invalid request: ${issues}`, 400);
+      }
+      if (error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       if (error instanceof Error && error.message === "COMPANY_MISMATCH") {

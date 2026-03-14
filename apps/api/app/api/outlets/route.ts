@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { NumericIdSchema } from "@jurnapod/shared";
+import { NumericIdSchema, OutletCreateRequestSchema } from "@jurnapod/shared";
 import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
 import { checkUserAccess } from "../../../src/lib/auth";
@@ -52,11 +52,10 @@ export const POST = withAuth(
   async (request, auth) => {
     try {
       const body = await request.json();
-      const { company_id, code, name } = body;
-
-      // Use provided company_id or default to auth.companyId
-      const targetCompanyId = company_id != null ? NumericIdSchema.parse(company_id) : auth.companyId;
-
+      
+      const parsed = OutletCreateRequestSchema.parse(body);
+      
+      let targetCompanyId = parsed.company_id ?? auth.companyId;
       if (targetCompanyId !== auth.companyId) {
         const access = await checkUserAccess({
           userId: auth.userId,
@@ -69,18 +68,17 @@ export const POST = withAuth(
         }
       }
 
-      if (!code || typeof code !== "string" || code.trim().length === 0) {
-        return errorResponse("VALIDATION_ERROR", "Outlet code is required", 400);
-      }
-
-      if (!name || typeof name !== "string" || name.trim().length === 0) {
-        return errorResponse("VALIDATION_ERROR", "Outlet name is required", 400);
-      }
-
       const outlet = await createOutlet({
         company_id: targetCompanyId,
-        code: code.trim().toUpperCase(),
-        name: name.trim(),
+        code: parsed.code.trim().toUpperCase(),
+        name: parsed.name.trim(),
+        city: parsed.city?.trim() || undefined,
+        address_line1: parsed.address_line1?.trim() || undefined,
+        address_line2: parsed.address_line2?.trim() || undefined,
+        postal_code: parsed.postal_code?.trim() || undefined,
+        phone: parsed.phone?.trim() || undefined,
+        email: parsed.email?.trim() || undefined,
+        timezone: parsed.timezone?.trim() || undefined,
         actor: {
           userId: auth.userId,
           ipAddress: readClientIp(request)
@@ -89,7 +87,11 @@ export const POST = withAuth(
 
       return successResponse(outlet, 201);
     } catch (error) {
-      if (error instanceof ZodError || error instanceof SyntaxError) {
+      if (error instanceof ZodError) {
+        const issues = error.issues.map(i => `${i.path.join('.') || 'request'}: ${i.message}`).join('; ');
+        return errorResponse("VALIDATION_ERROR", `Invalid request: ${issues}`, 400);
+      }
+      if (error instanceof SyntaxError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
       console.error("POST /api/outlets failed", error);
