@@ -20,7 +20,7 @@ import {
 import { SalesInvoicesPage as SalesInvoicesManagementPage } from "./sales-invoices-page";
 import { SalesPaymentsPage as SalesPaymentsManagementPage } from "./sales-payments-page";
 import { SuppliesPage as SuppliesManagementPage } from "./supplies-page";
-import { FixedAssetPage as FixedAssetsManagementPage } from "./fixed-assets-page";
+import { FixedAssetsPage as FixedAssetsManagementPage } from "./fixed-assets/FixedAssetsPage";
 import { AccountMappingsPage as AccountMappingsSettingsPage } from "./account-mappings-page";
 import { FeatureSettingsPage as FeatureSettingsFeaturePage } from "./feature-settings-page";
 import { ModulesPage as ModulesFeaturePage } from "./modules-page";

@@ -32,7 +32,10 @@ export const AcquisitionRequestSchema = z.object({
   accum_depr_account_id: NumericIdSchema.optional(),
   notes: z.string().max(500).optional(),
   idempotency_key: IdempotencyKeySchema.optional()
-});
+}).refine(
+  (data) => data.salvage_value <= data.cost,
+  { message: "salvage_value cannot exceed cost", path: ["salvage_value"] }
+);
 
 export const TransferRequestSchema = z.object({
   to_outlet_id: NumericIdSchema,
