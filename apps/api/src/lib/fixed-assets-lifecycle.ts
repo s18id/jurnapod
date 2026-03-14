@@ -565,6 +565,12 @@ export async function recordAcquisition(
     const idempotencyKey = input.idempotency_key ?? generateIdempotencyKey();
     const existingEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
     if (existingEvent) {
+      if (Number(existingEvent.asset_id) !== assetId) {
+        throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+      }
+      if (!isAcquisitionType(existingEvent.event_type)) {
+        throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+      }
       const book = await findAssetBookWithExecutor(connection, assetId);
       return {
         event_id: existingEvent.id,
@@ -594,6 +600,9 @@ export async function recordAcquisition(
     }
 
     const salvageValue = input.salvage_value ?? 0;
+    if (salvageValue > input.cost) {
+      throw new FixedAssetLifecycleError("Salvage value cannot exceed cost", "INVALID_REFERENCE");
+    }
     const carryingAmount = normalizeMoney(input.cost - salvageValue);
 
     // Reserve event first for idempotency
@@ -621,6 +630,12 @@ export async function recordAcquisition(
     if (eventIdResult.isDuplicate) {
       const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
       if (dupEvent) {
+        if (Number(dupEvent.asset_id) !== assetId) {
+          throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+        }
+        if (!isAcquisitionType(dupEvent.event_type)) {
+          throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
+        }
         const book = await findAssetBookWithExecutor(connection, assetId);
         return {
           event_id: dupEvent.id,

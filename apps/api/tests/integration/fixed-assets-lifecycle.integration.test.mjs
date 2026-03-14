@@ -505,6 +505,606 @@ test(
 );
 
 test(
+  "fixed asset lifecycle: acquisition rejects salvage value above cost",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let createdAssetId = 0;
+    let createdCategoryId = 0;
+    let createdAssetAccountId = 0;
+    let createdCashAccountId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error("owner fixture not found");
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+      const baseUrl = testContext.baseUrl;
+
+      const eventDate = await getOpenFiscalYearDate(db, companyId);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const { access_token: accessToken } = (await loginResponse.json()).data;
+
+      const [categoryResult] = await db.execute(
+        `INSERT INTO fixed_asset_categories (company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, is_active)
+         VALUES (?, ?, ?, 'STRAIGHT_LINE', 60, 5, 1)`,
+        [companyId, `CAT-${runId}`, `Invalid Salvage ${runId}`]
+      );
+      createdCategoryId = Number(categoryResult.insertId);
+
+      const [assetAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `FA-${runId}`, `Fixed Asset ${runId}`]
+      );
+      createdAssetAccountId = Number(assetAccountResult.insertId);
+
+      const [cashAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `CASH-${runId}`, `Cash ${runId}`]
+      );
+      createdCashAccountId = Number(cashAccountResult.insertId);
+
+      const [assetResult] = await db.execute(
+        `INSERT INTO fixed_assets (company_id, outlet_id, category_id, name, purchase_cost, is_active)
+         VALUES (?, ?, ?, ?, 10000000, 1)`,
+        [companyId, outletId, createdCategoryId, `Asset ${runId}`]
+      );
+      createdAssetId = Number(assetResult.insertId);
+
+      const invalidAcqResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId}/acquisition`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          event_date: eventDate,
+          cost: 10000000,
+          useful_life_months: 60,
+          salvage_value: 10000001,
+          asset_account_id: createdAssetAccountId,
+          offset_account_id: createdCashAccountId,
+          notes: "Invalid - salvage exceeds cost"
+        })
+      });
+      assert.equal(invalidAcqResponse.status, 400, "Acquisition with salvage > cost should return 400");
+      const errorBody = await invalidAcqResponse.json();
+      assert.equal(errorBody.error?.code, "INVALID_REQUEST", "Error code should be INVALID_REQUEST");
+
+      const [eventCount] = await db.execute(
+        `SELECT COUNT(*) as cnt FROM fixed_asset_events WHERE asset_id = ? AND event_type = 'ACQUISITION'`,
+        [createdAssetId]
+      );
+      assert.equal(Number(eventCount[0].cnt), 0, "No acquisition event should be created");
+
+      const [bookCount] = await db.execute(
+        `SELECT COUNT(*) as cnt FROM fixed_asset_books WHERE asset_id = ?`,
+        [createdAssetId]
+      );
+      assert.equal(Number(bookCount[0].cnt), 0, "No book row should be created");
+
+    } finally {
+      if (createdAssetId > 0) {
+        await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
+        await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
+        await db.execute(
+          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION')`,
+          [createdAssetId]
+        );
+        await db.execute(
+          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION'`,
+          [createdAssetId]
+        );
+        await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
+      }
+      if (createdCategoryId > 0) {
+        await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
+      }
+      if (createdAssetAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
+      }
+      if (createdCashAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
+      }
+    }
+  }
+);
+
+test(
+  "fixed asset lifecycle: cross-asset acquisition idempotency returns conflict",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let createdAssetId1 = 0;
+    let createdAssetId2 = 0;
+    let createdCategoryId = 0;
+    let createdAssetAccountId = 0;
+    let createdCashAccountId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const sharedIdempotencyKey = `cross-asset-acq-${runId}`;
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error("owner fixture not found");
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+      const baseUrl = testContext.baseUrl;
+
+      const eventDate = await getOpenFiscalYearDate(db, companyId);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const { access_token: accessToken } = (await loginResponse.json()).data;
+
+      const [categoryResult] = await db.execute(
+        `INSERT INTO fixed_asset_categories (company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, is_active)
+         VALUES (?, ?, ?, 'STRAIGHT_LINE', 60, 5, 1)`,
+        [companyId, `CAT-${runId}`, `Cross Asset Acq ${runId}`]
+      );
+      createdCategoryId = Number(categoryResult.insertId);
+
+      const [assetAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `FA-${runId}`, `Fixed Asset ${runId}`]
+      );
+      createdAssetAccountId = Number(assetAccountResult.insertId);
+
+      const [cashAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `CASH-${runId}`, `Cash ${runId}`]
+      );
+      createdCashAccountId = Number(cashAccountResult.insertId);
+
+      const [assetResult1] = await db.execute(
+        `INSERT INTO fixed_assets (company_id, outlet_id, category_id, name, purchase_cost, is_active)
+         VALUES (?, ?, ?, ?, 10000000, 1)`,
+        [companyId, outletId, createdCategoryId, `Asset1 ${runId}`]
+      );
+      createdAssetId1 = Number(assetResult1.insertId);
+
+      const [assetResult2] = await db.execute(
+        `INSERT INTO fixed_assets (company_id, outlet_id, category_id, name, purchase_cost, is_active)
+         VALUES (?, ?, ?, ?, 10000000, 1)`,
+        [companyId, outletId, createdCategoryId, `Asset2 ${runId}`]
+      );
+      createdAssetId2 = Number(assetResult2.insertId);
+
+      const firstAcqResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId1}/acquisition`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          event_date: eventDate,
+          cost: 10000000,
+          useful_life_months: 60,
+          salvage_value: 0,
+          asset_account_id: createdAssetAccountId,
+          offset_account_id: createdCashAccountId,
+          idempotency_key: sharedIdempotencyKey,
+          notes: "First asset acquisition"
+        })
+      });
+      assert.equal(firstAcqResponse.status, 201);
+
+      const crossAssetAcqResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId2}/acquisition`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          event_date: eventDate,
+          cost: 8000000,
+          useful_life_months: 60,
+          salvage_value: 0,
+          asset_account_id: createdAssetAccountId,
+          offset_account_id: createdCashAccountId,
+          idempotency_key: sharedIdempotencyKey,
+          notes: "Different asset - should fail"
+        })
+      });
+      assert.equal(crossAssetAcqResponse.status, 409, "Cross-asset idempotency should return conflict");
+      const conflictBody = await crossAssetAcqResponse.json();
+      assert.equal(conflictBody.error?.code, "CONFLICT", "Error code should be CONFLICT");
+      assert.equal(conflictBody.data, undefined, "No data should be exposed in conflict response");
+
+    } finally {
+      if (createdAssetId1 > 0) {
+        await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId1]);
+        await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId1]);
+        await db.execute(
+          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION')`,
+          [createdAssetId1]
+        );
+        await db.execute(
+          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION'`,
+          [createdAssetId1]
+        );
+        await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId1]);
+      }
+      if (createdAssetId2 > 0) {
+        await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId2]);
+        await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId2]);
+        await db.execute(
+          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION')`,
+          [createdAssetId2]
+        );
+        await db.execute(
+          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION'`,
+          [createdAssetId2]
+        );
+        await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId2]);
+      }
+      if (createdCategoryId > 0) {
+        await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
+      }
+      if (createdAssetAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
+      }
+      if (createdCashAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
+      }
+    }
+  }
+);
+
+test(
+  "fixed asset lifecycle: same-asset acquisition with transfer idempotency key returns conflict",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let createdAssetId = 0;
+    let createdCategoryId = 0;
+    let createdAssetAccountId = 0;
+    let createdCashAccountId = 0;
+    let targetOutletId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const sharedIdempotencyKey = `acq-transfer-type-${runId}`;
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.company_id, u.id as user_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error("owner fixture not found");
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+      const userId = Number(owner.user_id);
+      const baseUrl = testContext.baseUrl;
+
+      const eventDate = await getOpenFiscalYearDate(db, companyId);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const { access_token: accessToken } = (await loginResponse.json()).data;
+
+      const [targetOutletResult] = await db.execute(
+        `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `TARGET-${runId}`, `Target ${runId}`]
+      );
+      targetOutletId = Number(targetOutletResult.insertId);
+      await db.execute(
+        `INSERT INTO user_outlets (user_id, outlet_id) VALUES (?, ?)`,
+        [userId, targetOutletId]
+      );
+
+      const [categoryResult] = await db.execute(
+        `INSERT INTO fixed_asset_categories (company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, is_active)
+         VALUES (?, ?, ?, 'STRAIGHT_LINE', 60, 5, 1)`,
+        [companyId, `CAT-${runId}`, `Type Collision ${runId}`]
+      );
+      createdCategoryId = Number(categoryResult.insertId);
+
+      const [assetAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `FA-${runId}`, `Fixed Asset ${runId}`]
+      );
+      createdAssetAccountId = Number(assetAccountResult.insertId);
+
+      const [cashAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `CASH-${runId}`, `Cash ${runId}`]
+      );
+      createdCashAccountId = Number(cashAccountResult.insertId);
+
+      const [assetResult] = await db.execute(
+        `INSERT INTO fixed_assets (company_id, outlet_id, category_id, name, purchase_cost, is_active)
+         VALUES (?, ?, ?, ?, 10000000, 1)`,
+        [companyId, outletId, createdCategoryId, `Asset ${runId}`]
+      );
+      createdAssetId = Number(assetResult.insertId);
+
+      const acqResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId}/acquisition`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          event_date: eventDate,
+          cost: 10000000,
+          useful_life_months: 60,
+          salvage_value: 0,
+          asset_account_id: createdAssetAccountId,
+          offset_account_id: createdCashAccountId,
+          idempotency_key: sharedIdempotencyKey,
+          notes: "Acquisition with shared key"
+        })
+      });
+      assert.equal(acqResponse.status, 201);
+
+      const transferWithAcqKeyResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId}/transfer`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          to_outlet_id: targetOutletId,
+          transfer_date: eventDate,
+          idempotency_key: sharedIdempotencyKey,
+          notes: "Transfer using acquisition key - should fail"
+        })
+      });
+      assert.equal(transferWithAcqKeyResponse.status, 409, "Same-asset non-acquisition key reuse should return conflict");
+      const conflictBody = await transferWithAcqKeyResponse.json();
+      assert.equal(conflictBody.error?.code, "CONFLICT", "Error code should be CONFLICT");
+      assert.equal(conflictBody.data, undefined, "No data should be exposed in conflict response");
+
+    } finally {
+      if (createdAssetId > 0) {
+        await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
+        await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
+        await db.execute(
+          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER'))`,
+          [createdAssetId]
+        );
+        await db.execute(
+          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER')`,
+          [createdAssetId]
+        );
+        await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
+      }
+      if (targetOutletId > 0) {
+        await db.execute("DELETE FROM user_outlets WHERE outlet_id = ?", [targetOutletId]);
+        await db.execute("DELETE FROM outlets WHERE id = ?", [targetOutletId]);
+      }
+      if (createdCategoryId > 0) {
+        await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
+      }
+      if (createdAssetAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
+      }
+      if (createdCashAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
+      }
+    }
+  }
+);
+
+test(
+  "fixed asset lifecycle: same-asset acquisition idempotent retry returns duplicate success",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let createdAssetId = 0;
+    let createdCategoryId = 0;
+    let createdAssetAccountId = 0;
+    let createdCashAccountId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const idempotencyKey = `acq-retry-${runId}`;
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error("owner fixture not found");
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+      const baseUrl = testContext.baseUrl;
+
+      const eventDate = await getOpenFiscalYearDate(db, companyId);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const { access_token: accessToken } = (await loginResponse.json()).data;
+
+      const [categoryResult] = await db.execute(
+        `INSERT INTO fixed_asset_categories (company_id, code, name, depreciation_method, useful_life_months, residual_value_pct, is_active)
+         VALUES (?, ?, ?, 'STRAIGHT_LINE', 60, 5, 1)`,
+        [companyId, `CAT-${runId}`, `Retry ${runId}`]
+      );
+      createdCategoryId = Number(categoryResult.insertId);
+
+      const [assetAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `FA-${runId}`, `Fixed Asset ${runId}`]
+      );
+      createdAssetAccountId = Number(assetAccountResult.insertId);
+
+      const [cashAccountResult] = await db.execute(
+        `INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)`,
+        [companyId, `CASH-${runId}`, `Cash ${runId}`]
+      );
+      createdCashAccountId = Number(cashAccountResult.insertId);
+
+      const [assetResult] = await db.execute(
+        `INSERT INTO fixed_assets (company_id, outlet_id, category_id, name, purchase_cost, is_active)
+         VALUES (?, ?, ?, ?, 10000000, 1)`,
+        [companyId, outletId, createdCategoryId, `Asset ${runId}`]
+      );
+      createdAssetId = Number(assetResult.insertId);
+
+      const firstAcqResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId}/acquisition`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          event_date: eventDate,
+          cost: 10000000,
+          useful_life_months: 60,
+          salvage_value: 0,
+          asset_account_id: createdAssetAccountId,
+          offset_account_id: createdCashAccountId,
+          idempotency_key: idempotencyKey,
+          notes: "First acquisition"
+        })
+      });
+      assert.equal(firstAcqResponse.status, 201, "First acquisition should succeed");
+      const firstBody = await firstAcqResponse.json();
+      assert.equal(firstBody.success, true);
+      const firstEventId = firstBody.data.event_id;
+
+      const retryAcqResponse = await fetch(`${baseUrl}/api/accounts/fixed-assets/${createdAssetId}/acquisition`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          event_date: eventDate,
+          cost: 10000000,
+          useful_life_months: 60,
+          salvage_value: 0,
+          asset_account_id: createdAssetAccountId,
+          offset_account_id: createdCashAccountId,
+          idempotency_key: idempotencyKey,
+          notes: "Retry acquisition"
+        })
+      });
+      assert.equal(retryAcqResponse.status, 201, "Retry acquisition should return duplicate success");
+      const retryBody = await retryAcqResponse.json();
+      assert.equal(retryBody.success, true);
+      assert.equal(retryBody.data.duplicate, true, "duplicate flag should be true");
+      assert.equal(retryBody.data.event_id, firstEventId, "Should return canonical event_id");
+      assert.equal(retryBody.data.book.cost_basis, 10000000, "Should return correct cost_basis");
+      assert.equal(retryBody.data.book.carrying_amount, 10000000, "Should return correct carrying_amount");
+
+    } finally {
+      if (createdAssetId > 0) {
+        await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
+        await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
+        await db.execute(
+          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION')`,
+          [createdAssetId]
+        );
+        await db.execute(
+          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION'`,
+          [createdAssetId]
+        );
+        await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
+      }
+      if (createdCategoryId > 0) {
+        await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
+      }
+      if (createdAssetAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
+      }
+      if (createdCashAccountId > 0) {
+        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
+      }
+    }
+  }
+);
+
+test(
   "fixed asset lifecycle: void acquisition reverses journal",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async () => {
@@ -2175,7 +2775,7 @@ test(
       const { access_token: accessToken } = (await loginResponse.json()).data;
 
       const [targetOutletResult] = await db.execute(
-        `INSERT INTO outlets (company_id, code, name, is_active) VALUES (?, ?, ?, 1)`,
+        `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
         [companyId, `TARGET-${runId}`, `Target ${runId}`]
       );
       targetOutletId = Number(targetOutletResult.insertId);
@@ -2519,7 +3119,7 @@ test(
       const { access_token: accessToken } = (await loginResponse.json()).data;
 
       const [targetOutletResult] = await db.execute(
-        `INSERT INTO outlets (company_id, code, name, is_active) VALUES (?, ?, ?, 1)`,
+        `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
         [companyId, `TARGET-${runId}`, `Target ${runId}`]
       );
       targetOutletId = Number(targetOutletResult.insertId);
