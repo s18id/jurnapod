@@ -11,14 +11,16 @@
     "packages/modules/*"
   ],
   "scripts": {
-    "clean": "npx rimraf dist \"apps/*/dist\" \"packages/*/dist\" \"packages/modules/*/dist\" \"packages/**/src/**/*.js\" \"packages/**/src/**/*.d.ts\" \"packages/**/src/**/*.map\" \"**/*.tsbuildinfo\"",
-    "build": "npm run clean && npm run build -w @jurnapod/offline-db && npm run build -ws --if-present",
+    "clean": "npx rimraf dist \"apps/*/dist\" \"packages/*/dist\" \"packages/modules/*/dist\" \"**/*.tsbuildinfo\"",
+    "prebuild": "npm run build -w @jurnapod/offline-db",
+    "build": "npm run build -ws --if-present",
+    "build:clean": "npm run clean && npm run build",
     "dev": "npm run dev:check && concurrently -n api,backoffice,pos -c blue,green,magenta --restart-tries 3 --restart-after 5000 \"npm:dev:api\" \"npm run dev:backoffice:wait\" \"npm run dev:pos:wait\"",
     "dev:all": "npm run dev",
     "dev:api+backoffice": "npm run dev:check && concurrently -n api,backoffice -c blue,green --restart-tries 3 --restart-after 5000 \"npm:dev:api\" \"npm run dev:backoffice:wait\"",
     "dev:api+pos": "npm run dev:check && concurrently -n api,pos -c blue,magenta --restart-tries 3 --restart-after 5000 \"npm:dev:api\" \"npm run dev:pos:wait\"",
-    "dev:backoffice:wait": "wait-on http://127.0.0.1:3001/api/health && npm run dev:backoffice",
-    "dev:pos:wait": "wait-on http://127.0.0.1:3001/api/health && npm run dev:pos",
+    "dev:backoffice:wait": "node scripts/wait-for-api.mjs && npm run dev:backoffice",
+    "dev:pos:wait": "node scripts/wait-for-api.mjs && npm run dev:pos",
     "dev:check": "node scripts/check-env.mjs",
     "dev:kill": "node scripts/kill-ports.mjs",
     "dev:stop": "npm run dev:kill",
@@ -45,7 +47,7 @@
     "db:reconcile:pos-journals": "npm run db:reconcile:pos-journals -w @jurnapod/db --",
     "db:audit:system-roles": "npm run db:audit:system-roles -w @jurnapod/db",
     "db:consolidate:system-roles": "npm run db:consolidate:system-roles -w @jurnapod/db",
-    "test:scripts": "node --test \"scripts/tests/**/*.test.mjs\"",
+    "test:scripts": "node --test scripts/tests/*.test.mjs",
     "auth:secret:generate": "node ./scripts/auth-secret-generate.mjs",
     "auth:secret:regenerate": "node ./scripts/auth-secret-regenerate.mjs",
     "auth:refresh-secret:generate": "node ./scripts/auth-refresh-secret-generate.mjs",
@@ -54,15 +56,18 @@
     "platform:encryption-key:regenerate": "node ./scripts/platform-encryption-key-regenerate.mjs",
     "cron:email-secret:generate": "node ./scripts/cron-email-secret-generate.mjs",
     "cron:email-secret:regenerate": "node ./scripts/cron-email-secret-regenerate.mjs",
-    "deploy:pos": "/bin/cp -R apps/pos/dist/* public_html/pos/",
-    "deploy:backoffice": "/bin/cp -R apps/backoffice/dist/* public_html/backoffice/"
+    "deploy:pos": "node scripts/deploy.mjs --app=pos",
+    "deploy:backoffice": "node scripts/deploy.mjs --app=backoffice"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
+    "nodemon": "^3.1.14",
     "rimraf": "^5.0.10",
     "wait-on": "^8.0.1"
   },
   "dependencies": {
-    "@tabler/icons-react": "^3.40.0"
+    "@hono/node-server": "^1.19.11",
+    "@tabler/icons-react": "^3.40.0",
+    "hono": "^4.12.8"
   }
 }

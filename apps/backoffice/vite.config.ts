@@ -8,6 +8,7 @@ import { VitePWA } from "vite-plugin-pwa";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiProxyTarget = env.VITE_API_PROXY_TARGET?.trim() || "http://localhost:3001";
+  const backofficePort = parseInt(env.BACKOFFICE_PORT || "3002", 10);
 
   return {
     plugins: [
@@ -89,7 +90,7 @@ export default defineConfig(({ mode }) => {
       })
     ],
     server: {
-      port: 3002,
+      port: backofficePort,
       proxy: {
         "/api": {
           target: apiProxyTarget,

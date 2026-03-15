@@ -56,6 +56,18 @@ Important:
 - For API integration tests, expect API-driven setup/mutations; DB only for cleanup/read-only verification.
 - Flag new code paths that filter `audit_logs` by `result` instead of `success`.
 
+### Test cleanup (CRITICAL)
+- **All unit tests using `getDbPool()` must close the pool after completion.**
+- Without cleanup, tests hang indefinitely.
+- Required pattern:
+  ```typescript
+  // Close database pool after all tests
+  test.after(async () => {
+    await closeDbPool();
+  });
+  ```
+- Flag any test file that uses database connections but lacks this cleanup hook.
+
 ## AI Model Configuration
 
 BMAD uses the following model strategy:

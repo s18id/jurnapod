@@ -280,3 +280,8 @@ test(
     }
   }
 );
+
+// Close database pool after all tests
+test.after(async () => {
+  await closeDbPool();
+});

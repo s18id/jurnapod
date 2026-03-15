@@ -4,6 +4,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
@@ -12,7 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const apiRoot = path.resolve(__dirname, "../..");
 const repoRoot = path.resolve(apiRoot, "../..");
-const nextCliPath = path.resolve(repoRoot, "node_modules/next/dist/bin/next");
+const serverScriptPath = path.resolve(apiRoot, "src/server.ts");
 const ENV_PATH = path.resolve(repoRoot, ".env");
 
 export const TEST_TIMEOUT_MS = 180000;
@@ -46,7 +47,6 @@ const DEFAULT_API_PORT = 3001;
 
 async function isPortListening(port) {
   return new Promise((resolve) => {
-    const net = require("net");
     const socket = new net.Socket();
     socket.setTimeout(1000);
     socket.on("connect", () => {
@@ -156,9 +156,9 @@ export function startApiServer(port, options = {}) {
   const stdioMode = verbose ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "pipe"];
 
   const serverLogs = [];
-  const childProcess = spawn(process.execPath, [nextCliPath, "dev", "-p", String(port)], {
+  const childProcess = spawn(process.execPath, ["--import", "tsx", serverScriptPath], {
     cwd: apiRoot,
-    env: childEnv,
+    env: { ...childEnv, PORT: String(port) },
     stdio: stdioMode
   });
 

@@ -15,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const apiRoot = path.resolve(__dirname, "../..");
 const repoRoot = path.resolve(apiRoot, "../..");
-const nextCliPath = path.resolve(repoRoot, "node_modules/next/dist/bin/next");
+const serverScriptPath = path.resolve(apiRoot, "src/server.ts");
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -40,10 +40,10 @@ async function testServerStartup() {
   
   const childProcess = spawn(
     process.execPath,
-    [nextCliPath, "dev", "-p", String(port)],
+    ["--import", "tsx", serverScriptPath],
     {
       cwd: apiRoot,
-      env: { ...process.env, NODE_ENV: "test" },
+      env: { ...process.env, NODE_ENV: "test", PORT: String(port) },
       stdio: ["ignore", "pipe", "pipe"]
     }
   );

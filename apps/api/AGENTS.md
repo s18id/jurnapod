@@ -46,6 +46,18 @@ API server rules for auth, validation, posting triggers, persistence safety, and
   - settings/config endpoints
   - report query logic
 
+### Unit test database cleanup
+- **CRITICAL**: All unit tests that use `getDbPool()` **must** close the pool after tests complete.
+- Add cleanup hook at the end of test files:
+  ```typescript
+  // Close database pool after all tests
+  test.after(async () => {
+    await closeDbPool();
+  });
+  ```
+- Without this cleanup, tests will hang indefinitely after completion.
+- Flag any new or modified test file that uses database connections but lacks cleanup.
+
 ### Integration test fixture policy
 - HTTP integration tests must create/mutate fixtures through API endpoints.
 - Direct DB writes are **not allowed** for setup/mutations of business entities (`users`, `roles`, `outlets`, assignments, etc.).

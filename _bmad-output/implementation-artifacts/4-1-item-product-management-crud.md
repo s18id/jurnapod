@@ -37,10 +37,10 @@ So that **products are available for sale at POS**.
 - [x] Task 2: Verify POS can access items (AC: #1, #2)
   - [x] Subtask 2.1: Confirm sync includes item data
   - [x] Subtask 2.2: Test POS can display items in cart
-- [ ] Task 3: Add executable integration tests for deactivation/RBAC/tenant isolation (AC: #1, #2, #4)
-  - [ ] Add test for PATCH `is_active=false` and assert hidden from synced POS catalog while historical sales remain intact
-  - [ ] Add test proving CASHIER cannot create/update/delete inventory items
-  - [ ] Add test proving company A cannot read/update/delete company B items
+- [x] Task 3: Add executable integration tests for deactivation/RBAC/tenant isolation (AC: #1, #2, #4)
+  - [x] Add test for PATCH `is_active=false` and assert hidden from synced POS catalog while historical sales remain intact
+  - [x] Add test proving CASHIER cannot create/update/delete inventory items
+  - [x] Add test proving company A cannot read/update/delete company B items
 - [ ] Task 4: Resolve AC/contract alignment for create + pricing (AC: #1)
   - [ ] Keep current two-step design (`/inventory/items` + `/inventory/item-prices`) and ensure flow always creates an active price
   - [ ] If product requirements demand single-step creation with base price, update shared contracts and API/UI consistently
@@ -154,3 +154,15 @@ So that **products are available for sale at POS**.
   - Cart can add items from product cache
 
 ### File List
+
+- `apps/api/tests/integration/master-data.integration.test.mjs` - Added 3 integration tests:
+  - Test: item deactivation hides from POS sync but preserves data
+  - Test: RBAC - CASHIER cannot create/update/delete inventory items
+  - Test: tenant isolation - company A cannot access company B items
+
+### Change Log
+
+- 2026-03-15: Added 3 integration tests for Task 3:
+  - Test: item deactivation hides from POS sync but preserves data
+  - Test: RBAC - CASHIER cannot create/update/delete inventory items
+  - Test: tenant isolation - company A cannot access company B items

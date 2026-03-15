@@ -10,20 +10,13 @@
     "noEmit": true,
     "incremental": true,
     "isolatedModules": true,
-    "jsx": "preserve",
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ]
+    "jsx": "preserve"
   },
   "include": [
-    "next-env.d.ts",
     "instrumentation.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
-    "src",
-    ".next/types/**/*.ts"
+    "src"
   ],
   "exclude": [
     "node_modules"

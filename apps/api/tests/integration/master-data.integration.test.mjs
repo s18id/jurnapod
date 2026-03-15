@@ -15,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const apiRoot = path.resolve(__dirname, "../..");
 const repoRoot = path.resolve(apiRoot, "../..");
-const nextCliPath = path.resolve(repoRoot, "node_modules/next/dist/bin/next");
+const serverScriptPath = path.resolve(apiRoot, "src/server.ts");
 const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
@@ -85,9 +85,9 @@ function startApiServer(port) {
   };
 
   const serverLogs = [];
-  const childProcess = spawn(process.execPath, [nextCliPath, "dev", "-p", String(port)], {
+  const childProcess = spawn(process.execPath, ["--import", "tsx", serverScriptPath], {
     cwd: apiRoot,
-    env: childEnv,
+    env: { ...childEnv, PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"]
   });
 
@@ -2356,7 +2356,7 @@ test(
                JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.supply_id')) = ?
                OR JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.before.id')) = ?
                OR JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.after.id')) = ?
-             )`,
+              )`,
           [
             companyId,
             ownerUserId,
@@ -2365,6 +2365,677 @@ test(
             String(createdSupplyId)
           ]
         );
+      }
+    }
+  }
+);
+
+test(
+  "master data integration: item deactivation hides from POS sync but preserves data",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let createdItemId = 0;
+    let createdPriceId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const baseUrl = testContext.baseUrl;
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await loginResponse.json();
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const baselinePullResponse = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${outletId}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(baselinePullResponse.status, 200);
+      const baselinePullBody = await baselinePullResponse.json();
+      assert.equal(baselinePullBody.success, true);
+      const baselineVersion = Number(baselinePullBody.data.data_version);
+
+      const createItemResponse = await fetch(`${baseUrl}/api/inventory/items`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          sku: `DEACT-${runId}`,
+          name: `Deactivation Test Item ${runId}`,
+          type: "PRODUCT",
+          is_active: true
+        })
+      });
+      assert.equal(createItemResponse.status, 201);
+      const createItemBody = await createItemResponse.json();
+      assert.equal(createItemBody.success, true);
+      createdItemId = Number(createItemBody.data.id);
+
+      const createPriceResponse = await fetch(`${baseUrl}/api/inventory/item-prices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          item_id: createdItemId,
+          outlet_id: outletId,
+          price: 15000,
+          is_active: true
+        })
+      });
+      assert.equal(createPriceResponse.status, 201);
+      const createPriceBody = await createPriceResponse.json();
+      assert.equal(createPriceBody.success, true);
+      createdPriceId = Number(createPriceBody.data.id);
+
+      const activePullResponse = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${outletId}&since_version=${baselineVersion}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(activePullResponse.status, 200);
+      const activePullBody = await activePullResponse.json();
+      assert.equal(activePullBody.success, true);
+
+      const activeItem = activePullBody.data.items.find((i) => Number(i.id) === createdItemId);
+      assert.equal(Boolean(activeItem), true, "active item should appear in sync");
+
+      const activePrice = activePullBody.data.prices.find((p) => Number(p.id) === createdPriceId);
+      assert.equal(Boolean(activePrice), true, "active price should appear in sync");
+
+      const deactivateResponse = await fetch(`${baseUrl}/api/inventory/items/${createdItemId}`, {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          is_active: false
+        })
+      });
+      assert.equal(deactivateResponse.status, 200);
+      const deactivateBody = await deactivateResponse.json();
+      assert.equal(deactivateBody.success, true);
+      assert.equal(deactivateBody.data.is_active, false);
+
+      const deactivatedPullResponse = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${outletId}&since_version=${baselineVersion}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+      assert.equal(deactivatedPullResponse.status, 200);
+      const deactivatedPullBody = await deactivatedPullResponse.json();
+      assert.equal(deactivatedPullBody.success, true);
+
+      const deactivatedItem = deactivatedPullBody.data.items.find((i) => Number(i.id) === createdItemId);
+      assert.equal(Boolean(deactivatedItem), false, "deactivated item should NOT appear in sync");
+
+      const deactivatedPrice = deactivatedPullBody.data.prices.find((p) => Number(p.id) === createdPriceId);
+      assert.equal(Boolean(deactivatedPrice), false, "deactivated price should NOT appear in sync");
+
+      const [dbItemRows] = await db.execute(
+        `SELECT id, sku, name, is_active FROM items WHERE id = ?`,
+        [createdItemId]
+      );
+      assert.equal(dbItemRows.length, 1, "deactivated item should still exist in DB");
+      assert.equal(Number(dbItemRows[0].is_active), 0, "item should be marked inactive in DB");
+
+      const [dbPriceRows] = await db.execute(
+        `SELECT id, item_id, is_active FROM item_prices WHERE id = ?`,
+        [createdPriceId]
+      );
+      assert.equal(dbPriceRows.length, 1, "deactivated price should still exist in DB");
+      assert.equal(Number(dbPriceRows[0].is_active), 0, "price should be marked inactive in DB");
+    } finally {
+      if (createdPriceId > 0) {
+        await db.execute("DELETE FROM item_prices WHERE id = ?", [createdPriceId]);
+      }
+      if (createdItemId > 0) {
+        await db.execute("DELETE FROM items WHERE id = ?", [createdItemId]);
+      }
+    }
+  }
+);
+
+test(
+  "master data integration: RBAC - CASHIER cannot create/update/delete inventory items",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let cashierUserId = 0;
+    let itemId = 0;
+    let supplyId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const cashierEmail = `cashier-rbac-${runId}@example.com`;
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const [ownerPasswordRows] = await db.execute(
+        `SELECT password_hash
+         FROM users
+         WHERE id = ?
+         LIMIT 1`,
+        [Number(owner.id)]
+      );
+      const ownerPasswordHash = ownerPasswordRows[0]?.password_hash;
+      if (!ownerPasswordHash) {
+        throw new Error("owner password hash not found; run `npm run db:migrate && npm run db:seed`");
+      }
+
+      const [cashierRoleRows] = await db.execute(
+        `SELECT id FROM roles WHERE code = 'CASHIER' LIMIT 1`
+      );
+      const cashierRoleId = cashierRoleRows[0]?.id;
+      if (!cashierRoleId) {
+        throw new Error("CASHIER role not found; run `npm run db:migrate && npm run db:seed`");
+      }
+
+      const [cashierInsert] = await db.execute(
+        `INSERT INTO users (company_id, email, password_hash, is_active)
+         VALUES (?, ?, ?, 1)`,
+        [companyId, cashierEmail, ownerPasswordHash]
+      );
+      cashierUserId = Number(cashierInsert.insertId);
+
+      await db.execute(
+        `INSERT INTO user_role_assignments (user_id, role_id)
+         VALUES (?, ?)`,
+        [cashierUserId, Number(cashierRoleId)]
+      );
+
+      await db.execute(
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
+         VALUES (?, ?, ?)`,
+        [cashierUserId, outletId, Number(cashierRoleId)]
+      );
+
+      await db.execute(
+        `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+         VALUES (?, ?, 'inventory', 0)
+         ON DUPLICATE KEY UPDATE permission_mask = 0`,
+        [companyId, Number(cashierRoleId)]
+      );
+
+      const baseUrl = testContext.baseUrl;
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: cashierEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await loginResponse.json();
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const createItemResponse = await fetch(`${baseUrl}/api/inventory/items`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          sku: `CASHIER-${runId}`,
+          name: `Cashier Item ${runId}`,
+          type: "PRODUCT",
+          is_active: true
+        })
+      });
+      assert.equal(createItemResponse.status, 403);
+      const createItemBody = await createItemResponse.json();
+      assert.equal(createItemBody.success, false);
+      assert.equal(createItemBody.error.code, "FORBIDDEN");
+
+      const [itemInsert] = await db.execute(
+        `INSERT INTO items (company_id, sku, name, item_type, is_active)
+         VALUES (?, ?, ?, 'PRODUCT', 1)`,
+        [companyId, `OWNER-${runId}`, `Owner Item ${runId}`]
+      );
+      itemId = Number(itemInsert.insertId);
+
+      const patchItemResponse = await fetch(`${baseUrl}/api/inventory/items/${itemId}`, {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          name: "Hacked Name"
+        })
+      });
+      assert.equal(patchItemResponse.status, 403);
+      const patchItemBody = await patchItemResponse.json();
+      assert.equal(patchItemBody.success, false);
+      assert.equal(patchItemBody.error.code, "FORBIDDEN");
+
+      const deleteItemResponse = await fetch(`${baseUrl}/api/inventory/items/${itemId}`, {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        }
+      });
+      assert.equal(deleteItemResponse.status, 403);
+      const deleteItemBody = await deleteItemResponse.json();
+      assert.equal(deleteItemBody.success, false);
+      assert.equal(deleteItemBody.error.code, "FORBIDDEN");
+
+      const createSupplyResponse = await fetch(`${baseUrl}/api/inventory/supplies`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          sku: `CASHSUP-${runId}`,
+          name: `Cashier Supply ${runId}`,
+          unit: "box"
+        })
+      });
+      assert.equal(createSupplyResponse.status, 403);
+      const createSupplyBody = await createSupplyResponse.json();
+      assert.equal(createSupplyBody.success, false);
+      assert.equal(createSupplyBody.error.code, "FORBIDDEN");
+
+      const [supplyInsert] = await db.execute(
+        `INSERT INTO supplies (company_id, sku, name, unit, is_active)
+         VALUES (?, ?, ?, 'unit', 1)`,
+        [companyId, `OWNERSUP-${runId}`, `Owner Supply ${runId}`]
+      );
+      supplyId = Number(supplyInsert.insertId);
+
+      const patchSupplyResponse = await fetch(`${baseUrl}/api/inventory/supplies/${supplyId}`, {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          name: "Hacked Supply"
+        })
+      });
+      assert.equal(patchSupplyResponse.status, 403);
+      const patchSupplyBody = await patchSupplyResponse.json();
+      assert.equal(patchSupplyBody.success, false);
+      assert.equal(patchSupplyBody.error.code, "FORBIDDEN");
+
+      const deleteSupplyResponse = await fetch(`${baseUrl}/api/inventory/supplies/${supplyId}`, {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        }
+      });
+      assert.equal(deleteSupplyResponse.status, 403);
+      const deleteSupplyBody = await deleteSupplyResponse.json();
+      assert.equal(deleteSupplyBody.success, false);
+      assert.equal(deleteSupplyBody.error.code, "FORBIDDEN");
+
+      const listItemsResponse = await fetch(`${baseUrl}/api/inventory/items`, {
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        }
+      });
+      assert.equal(listItemsResponse.status, 200);
+      const listItemsBody = await listItemsResponse.json();
+      assert.equal(listItemsBody.success, true);
+
+      const listSuppliesResponse = await fetch(`${baseUrl}/api/inventory/supplies`, {
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        }
+      });
+      assert.equal(listSuppliesResponse.status, 200);
+      const listSuppliesBody = await listSuppliesResponse.json();
+      assert.equal(listSuppliesBody.success, true);
+    } finally {
+      if (supplyId > 0) {
+        await db.execute("DELETE FROM supplies WHERE id = ?", [supplyId]);
+      }
+      if (itemId > 0) {
+        await db.execute("DELETE FROM items WHERE id = ?", [itemId]);
+      }
+      if (cashierUserId > 0) {
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [cashierUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [cashierUserId]);
+        await db.execute("DELETE FROM users WHERE id = ?", [cashierUserId]);
+      }
+    }
+  }
+);
+
+test(
+  "master data integration: tenant isolation - company A cannot access company B items",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let otherCompanyId = 0;
+    let otherUserId = 0;
+    let otherOutletId = 0;
+    let otherItemId = 0;
+    let otherSupplyId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const otherCompanyCode = `ISOT${runId}`.slice(0, 16).toUpperCase();
+    const otherCompanyName = `Isolation Test Co ${runId}`;
+    const otherUserEmail = `owner-iso-${runId}@example.com`;
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const primaryCompanyId = Number(owner.company_id);
+      const primaryOutletId = Number(owner.outlet_id);
+
+      const [ownerPasswordRows] = await db.execute(
+        `SELECT password_hash
+         FROM users
+         WHERE id = ?
+         LIMIT 1`,
+        [Number(owner.id)]
+      );
+      const ownerPasswordHash = ownerPasswordRows[0]?.password_hash;
+      if (!ownerPasswordHash) {
+        throw new Error("owner password hash not found; run `npm run db:migrate && npm run db:seed`");
+      }
+
+      const [companyInsert] = await db.execute(
+        `INSERT INTO companies (code, name, is_active)
+         VALUES (?, ?, 1)`,
+        [otherCompanyCode, otherCompanyName]
+      );
+      otherCompanyId = Number(companyInsert.insertId);
+
+      const [outletInsert] = await db.execute(
+        `INSERT INTO outlets (company_id, code, name)
+         VALUES (?, ?, ?)`,
+        [otherCompanyId, `ISOOUT-${runId}`.slice(0, 32).toUpperCase(), `Isolation Outlet ${runId}`]
+      );
+      otherOutletId = Number(outletInsert.insertId);
+
+      const [otherUserInsert] = await db.execute(
+        `INSERT INTO users (company_id, email, password_hash, is_active)
+         VALUES (?, ?, ?, 1)`,
+        [otherCompanyId, otherUserEmail, ownerPasswordHash]
+      );
+      otherUserId = Number(otherUserInsert.insertId);
+
+      const [ownerRoleRows] = await db.execute(
+        `SELECT id FROM roles WHERE code = 'OWNER' LIMIT 1`
+      );
+      const ownerRoleId = ownerRoleRows[0]?.id;
+      if (!ownerRoleId) {
+        throw new Error("OWNER role not found; run `npm run db:migrate && npm run db:seed`");
+      }
+
+      await db.execute(
+        `INSERT INTO user_role_assignments (user_id, role_id)
+         VALUES (?, ?)`,
+        [otherUserId, Number(ownerRoleId)]
+      );
+
+      await db.execute(
+        `INSERT INTO user_outlets (user_id, outlet_id)
+         VALUES (?, ?)`,
+        [otherUserId, otherOutletId]
+      );
+
+      await db.execute(
+        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
+         VALUES (?, ?, ?)`,
+        [otherUserId, otherOutletId, Number(ownerRoleId)]
+      );
+
+      await db.execute(
+        `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+         VALUES (?, ?, 'inventory', 15)
+         ON DUPLICATE KEY UPDATE permission_mask = 15`,
+        [otherCompanyId, Number(ownerRoleId)]
+      );
+
+      const [otherItemInsert] = await db.execute(
+        `INSERT INTO items (company_id, sku, name, item_type, is_active)
+         VALUES (?, ?, ?, 'PRODUCT', 1)`,
+        [otherCompanyId, `ISOITEM-${runId}`, `Isolation Item ${runId}`]
+      );
+      otherItemId = Number(otherItemInsert.insertId);
+
+      const [otherSupplyInsert] = await db.execute(
+        `INSERT INTO supplies (company_id, sku, name, unit, is_active)
+         VALUES (?, ?, ?, 'unit', 1)`,
+        [otherCompanyCode, `ISOSUP-${runId}`, `Isolation Supply ${runId}`]
+      );
+      otherSupplyId = Number(otherSupplyInsert.insertId);
+
+      const baseUrl = testContext.baseUrl;
+
+      const primaryLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(primaryLoginResponse.status, 200);
+      const primaryLoginBody = await primaryLoginResponse.json();
+      assert.equal(primaryLoginBody.success, true);
+      const primaryToken = primaryLoginBody.data.access_token;
+
+      const listAllItemsResponse = await fetch(`${baseUrl}/api/inventory/items`, {
+        headers: {
+          authorization: `Bearer ${primaryToken}`
+        }
+      });
+      assert.equal(listAllItemsResponse.status, 200);
+      const listAllItemsBody = await listAllItemsResponse.json();
+      assert.equal(listAllItemsBody.success, true);
+      const otherItemVisible = listAllItemsBody.data.some((i) => Number(i.id) === otherItemId);
+      assert.equal(otherItemVisible, false, "other company's item should not be visible");
+
+      const getOtherItemResponse = await fetch(`${baseUrl}/api/inventory/items/${otherItemId}`, {
+        headers: {
+          authorization: `Bearer ${primaryToken}`
+        }
+      });
+      assert.equal(getOtherItemResponse.status, 404);
+      const getOtherItemBody = await getOtherItemResponse.json();
+      assert.equal(getOtherItemBody.success, false);
+
+      const listAllSuppliesResponse = await fetch(`${baseUrl}/api/inventory/supplies`, {
+        headers: {
+          authorization: `Bearer ${primaryToken}`
+        }
+      });
+      assert.equal(listAllSuppliesResponse.status, 200);
+      const listAllSuppliesBody = await listAllSuppliesResponse.json();
+      assert.equal(listAllSuppliesBody.success, true);
+      const otherSupplyVisible = listAllSuppliesBody.data.some((s) => Number(s.id) === otherSupplyId);
+      assert.equal(otherSupplyVisible, false, "other company's supply should not be visible");
+
+      const getOtherSupplyResponse = await fetch(`${baseUrl}/api/inventory/supplies/${otherSupplyId}`, {
+        headers: {
+          authorization: `Bearer ${primaryToken}`
+        }
+      });
+      assert.equal(getOtherSupplyResponse.status, 404);
+      const getOtherSupplyBody = await getOtherSupplyResponse.json();
+      assert.equal(getOtherSupplyBody.success, false);
+
+      const otherLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode: otherCompanyCode,
+          email: otherUserEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(otherLoginResponse.status, 200);
+      const otherLoginBody = await otherLoginResponse.json();
+      assert.equal(otherLoginBody.success, true);
+      const otherToken = otherLoginBody.data.access_token;
+
+      const otherSyncPullResponse = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${otherOutletId}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${otherToken}`
+          }
+        }
+      );
+      assert.equal(otherSyncPullResponse.status, 200);
+      const otherSyncPullBody = await otherSyncPullResponse.json();
+      assert.equal(otherSyncPullBody.success, true);
+
+      const syncItem = otherSyncPullBody.data.items.find((i) => Number(i.id) === otherItemId);
+      assert.equal(Boolean(syncItem), true, "other company's item should be in their sync");
+
+      const syncSupply = otherSyncPullBody.data.supplies?.find((s) => Number(s.id) === otherSupplyId);
+      assert.equal(Boolean(syncSupply), true, "other company's supply should be in their sync");
+    } finally {
+      if (otherSupplyId > 0) {
+        await db.execute("DELETE FROM supplies WHERE id = ?", [otherSupplyId]);
+      }
+      if (otherItemId > 0) {
+        await db.execute("DELETE FROM items WHERE id = ?", [otherItemId]);
+      }
+      if (otherUserId > 0) {
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [otherUserId]);
+        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [otherUserId]);
+        await db.execute("DELETE FROM user_outlets WHERE user_id = ?", [otherUserId]);
+        await db.execute("DELETE FROM users WHERE id = ?", [otherUserId]);
+      }
+      if (otherOutletId > 0) {
+        await db.execute("DELETE FROM outlets WHERE id = ?", [otherOutletId]);
+      }
+      if (otherCompanyId > 0) {
+        await db.execute("DELETE FROM companies WHERE id = ?", [otherCompanyId]);
       }
     }
   }

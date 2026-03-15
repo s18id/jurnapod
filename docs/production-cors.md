@@ -8,7 +8,7 @@ This document explains how to configure CORS (Cross-Origin Resource Sharing) for
 ## Overview
 
 Jurnapod consists of three services:
-- **API** (Next.js) - Backend server
+- **API** (Hono) - Backend server
 - **Backoffice** (Vite React) - Admin interface
 - **POS** (Vite React PWA) - Point of sale interface
 
@@ -401,9 +401,8 @@ npm run dev:restart  # or systemctl restart jurnapod-api
 2. Missing required headers
 
 **Solution:**
-- Middleware automatically handles OPTIONS
-- Ensure middleware is loaded (check `apps/api/middleware.ts` exists)
-- Check Next.js logs for errors
+- CORS middleware automatically handles OPTIONS
+- Check API server logs for errors
 
 ### Problem: Credentials not being sent
 
@@ -558,7 +557,7 @@ if (!allowedOrigins.includes(origin)) {
 ## References
 
 - [MDN: CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS)
-- [Next.js Middleware](https://nextjs.org/docs/app/building-your-application/routing/middleware)
+- [Hono Documentation](https://hono.dev/)
 - [OWASP: CORS Security](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Origin_Resource_Sharing_Cheat_Sheet.html)
 
 ---

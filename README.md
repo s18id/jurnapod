@@ -66,6 +66,22 @@ npm run dev:check    # Validate environment variables only
 - **Backoffice**: http://localhost:3002
 - **POS**: http://localhost:5173
 
+### Port Configuration
+
+All dev server ports are configurable via environment variables in `.env`:
+
+```bash
+# API Server
+PORT=3001           # or API_PORT
+HOST=0.0.0.0        # Bind address (0.0.0.0 = all interfaces, 127.0.0.1 = localhost only)
+
+# Frontend Dev Servers
+BACKOFFICE_PORT=3002
+POS_PORT=5173
+```
+
+**Note:** `HOST=0.0.0.0` allows access from other devices on your network (useful for mobile testing). The dev startup script automatically translates `0.0.0.0` to `127.0.0.1` for health checks.
+
 ### Frontend Base URLs
 Backoffice and POS resolve their API/domain targets from runtime globals (injected on `globalThis`) or env config before falling back to the current origin.
 
@@ -421,7 +437,7 @@ npm run build
 
 This will:
 1. Build shared packages (`@jurnapod/shared`, `@jurnapod/core`, `@jurnapod/modules/*`)
-2. Build API server (Next.js production build)
+2. Typecheck API server
 3. Build POS PWA (Vite production build with service worker)
 4. Build Backoffice (Vite production build)
 
@@ -429,7 +445,6 @@ This will:
 
 ```bash
 # Check build artifacts
-ls -la apps/api/.next/
 ls -la apps/pos/dist/
 ls -la apps/backoffice/dist/
 ```
@@ -537,7 +552,57 @@ sudo systemctl start jurnapod-api
 sudo systemctl status jurnapod-api
 ```
 
-### 6. Reverse Proxy Setup
+### 6. Frontend Deployment
+
+The build process creates optimized production builds in:
+- `apps/pos/dist/` - POS PWA static files
+- `apps/backoffice/dist/` - Backoffice static files
+
+#### Automated Deployment Script
+
+Use the built-in deployment script for safe, atomic deployment with automatic backup and rollback:
+
+```bash
+# Deploy POS
+npm run deploy:pos
+
+# Deploy Backoffice
+npm run deploy:backoffice
+
+# Dry-run mode (test without making changes)
+node scripts/deploy.mjs --app=pos --dry-run
+
+# Skip backup (faster, but no rollback on failure)
+node scripts/deploy.mjs --app=backoffice --skip-backup
+```
+
+**Features:**
+- ✅ Validates build before deploying (checks for `index.html`, non-empty directory)
+- ✅ Atomic deployment (users never see partial state)
+- ✅ Automatic backup before deployment
+- ✅ Automatic rollback on failure
+- ✅ 60-second timeout with clear error messages
+- ✅ No shell dependencies (pure Node.js)
+
+**Deployment target:** `public_html/<app>/`
+
+For detailed deployment documentation, see [`scripts/DEPLOY.md`](scripts/DEPLOY.md)
+
+#### Manual Deployment (Alternative)
+
+If you prefer manual deployment or need to deploy to a different location:
+
+```bash
+# Copy POS build to web root
+cp -R apps/pos/dist/* /var/www/html/pos/
+
+# Copy Backoffice build to web root
+cp -R apps/backoffice/dist/* /var/www/html/backoffice/
+```
+
+**Note:** Manual deployment doesn't include validation, backup, or rollback. Use the automated script for production.
+
+### 7. Reverse Proxy Setup
 
 #### Nginx Configuration
 
@@ -617,7 +682,7 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    root /opt/jurnapod/apps/pos/dist;
+    root /opt/jurnapod/public_html/pos;
     index index.html;
 
     # Security headers
@@ -669,7 +734,7 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    root /opt/jurnapod/apps/backoffice/dist;
+    root /opt/jurnapod/public_html/backoffice;
     index index.html;
 
     # Security headers
@@ -721,7 +786,7 @@ Verify auto-renewal:
 sudo certbot renew --dry-run
 ```
 
-### 7. POS PWA Deployment
+### 8. POS PWA Deployment
 
 The POS application is built as a Progressive Web App (PWA) with offline-first capabilities.
 
@@ -777,7 +842,7 @@ The POS uses IndexedDB (via Dexie) for offline storage:
 
 No additional configuration needed - handled by application code.
 
-### 8. Post-Deployment
+### 9. Post-Deployment
 
 #### Health Checks
 
@@ -914,7 +979,7 @@ Create `/etc/logrotate.d/jurnapod`:
 - Use log aggregation tools (Loki, ELK, Graylog)
 - Set up alerts for error patterns
 
-### 9. Security Considerations
+### 10. Security Considerations
 
 #### Secrets Management
 

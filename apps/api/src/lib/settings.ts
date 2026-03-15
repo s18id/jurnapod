@@ -82,64 +82,61 @@ function validateValueType(valueType: SettingValueType): void {
 }
 
 function serializeValue(value: unknown, valueType: SettingValueType): string {
-  if (valueType === "json") {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      throw new SettingValidationError("JSON value type requires a non-array object");
-    }
-    const jsonStr = JSON.stringify(value);
-    if (jsonStr.length > MAX_VALUE_LENGTH) {
-      throw new SettingValidationError(`JSON value exceeds maximum length of ${MAX_VALUE_LENGTH} characters`);
-    }
-    return jsonStr;
-  }
-
-  let serialized: string;
+  // Validate the value matches its declared type
   switch (valueType) {
+    case "json":
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new SettingValidationError("JSON value type requires a non-array object");
+      }
+      break;
     case "string":
       if (typeof value !== "string") {
         throw new SettingValidationError("String value type requires a string");
       }
-      serialized = value;
       break;
     case "number":
       if (typeof value !== "number" || !Number.isFinite(value)) {
         throw new SettingValidationError("Number value type requires a finite number");
       }
-      serialized = String(value);
       break;
     case "boolean":
       if (typeof value !== "boolean") {
         throw new SettingValidationError("Boolean value type requires a boolean");
       }
-      serialized = value ? "1" : "0";
       break;
     default:
       throw new SettingValidationError(`Unknown value type: ${valueType}`);
   }
 
-  if (serialized.length > MAX_VALUE_LENGTH) {
+  // All values must be stored as valid JSON (database constraint)
+  const jsonStr = JSON.stringify(value);
+  
+  if (jsonStr.length > MAX_VALUE_LENGTH) {
     throw new SettingValidationError(`Value exceeds maximum length of ${MAX_VALUE_LENGTH} characters`);
   }
 
-  return serialized;
+  return jsonStr;
 }
 
 function deserializeValue(valueJson: string, valueType: SettingValueType): string | number | boolean | Record<string, unknown> | null {
-  switch (valueType) {
-    case "string":
-      return valueJson;
-    case "number":
-      return Number(valueJson);
-    case "boolean":
-      return valueJson === "1";
-    case "json":
-      try {
-        return JSON.parse(valueJson);
-      } catch {
+  try {
+    const parsed = JSON.parse(valueJson);
+    
+    // Validate the parsed value matches the expected type
+    switch (valueType) {
+      case "string":
+        return typeof parsed === "string" ? parsed : null;
+      case "number":
+        return typeof parsed === "number" ? parsed : null;
+      case "boolean":
+        return typeof parsed === "boolean" ? parsed : null;
+      case "json":
+        return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : null;
+      default:
         return null;
-      }
-    default:
-      return null;
+    }
+  } catch {
+    return null;
   }
 }
 
