@@ -32,6 +32,11 @@ Database schema, migrations, indexes, constraints, and persistence-safety rules.
 - Flag irreversible or destructive migrations unless they are clearly intentional and operationally planned.
 - Watch for backfill logic that can create inconsistent historical state.
 
+### Canonical vs compatibility columns
+- When both canonical and compatibility columns exist, constraints/indexes should enforce canonical fields.
+- Avoid making compatibility columns the only constrained source of truth.
+- For `audit_logs`, treat `success` as canonical; `result` remains backward-compatible projection.
+
 ### Testing expectations
 - Expect migration or smoke coverage when changing:
   - financial tables

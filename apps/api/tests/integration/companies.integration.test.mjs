@@ -233,7 +233,15 @@ test(
         headers: authHeader,
         body: JSON.stringify({
           code: companyCode,
-          name: companyName
+          name: companyName,
+          legal_name: "PT " + companyName,
+          tax_id: "01.234.567.8-901.000",
+          email: "contact@" + companyCode.toLowerCase() + ".com",
+          phone: "+62 21 1234 5678",
+          address_line1: "Jl. Sudirman No. 123",
+          address_line2: "Tower A, Lt. 10",
+          city: "Jakarta",
+          postal_code: "10220"
         })
       });
 
@@ -242,6 +250,39 @@ test(
       assert.equal(createBody.success, true);
       const companyId = Number(createBody.data.id);
       assert.ok(companyId > 0);
+      assert.equal(createBody.data.legal_name, "PT " + companyName);
+      assert.equal(createBody.data.tax_id, "01.234.567.8-901.000");
+      assert.equal(createBody.data.email, "contact@" + companyCode.toLowerCase() + ".com");
+      assert.equal(createBody.data.phone, "+62 21 1234 5678");
+      assert.equal(createBody.data.address_line1, "Jl. Sudirman No. 123");
+      assert.equal(createBody.data.address_line2, "Tower A, Lt. 10");
+      assert.equal(createBody.data.city, "Jakarta");
+      assert.equal(createBody.data.postal_code, "10220");
+
+      const getResponse = await fetch(`${baseUrl}/api/companies/${companyId}`, {
+        method: "GET",
+        headers: authHeader
+      });
+      assert.equal(getResponse.status, 200);
+      const getBody = await getResponse.json();
+      assert.equal(getBody.data.legal_name, "PT " + companyName);
+      assert.equal(getBody.data.tax_id, "01.234.567.8-901.000");
+      assert.equal(getBody.data.email, "contact@" + companyCode.toLowerCase() + ".com");
+
+      const patchResponse = await fetch(`${baseUrl}/api/companies/${companyId}`, {
+        method: "PATCH",
+        headers: authHeader,
+        body: JSON.stringify({
+          legal_name: null,
+          tax_id: null,
+          city: "Surabaya"
+        })
+      });
+      assert.equal(patchResponse.status, 200);
+      const patchBody = await patchResponse.json();
+      assert.equal(patchBody.data.legal_name, null);
+      assert.equal(patchBody.data.tax_id, null);
+      assert.equal(patchBody.data.city, "Surabaya");
 
       const [roleRowsAfter] = await db.execute(`SELECT code FROM roles ORDER BY code ASC`);
       const roleCountAfter = roleRowsAfter.length;

@@ -6,7 +6,7 @@ import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../../src/lib/response";
-import { setUserPassword, UserNotFoundError } from "../../../../../src/lib/users";
+import { setUserPassword, SuperAdminProtectionError, UserNotFoundError } from "../../../../../src/lib/users";
 
 const updatePasswordSchema = z
   .object({
@@ -44,6 +44,10 @@ export const POST = withAuth(
 
       if (error instanceof UserNotFoundError) {
         return errorResponse("NOT_FOUND", "User not found", 404);
+      }
+
+      if (error instanceof SuperAdminProtectionError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
       }
 
       console.error("POST /api/users/:userId/password failed", error);

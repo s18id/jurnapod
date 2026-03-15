@@ -42,12 +42,28 @@ export const POST = withAuth(
       const body = await request.json();
       const input = CompanyCreateRequestSchema.parse({
         code: typeof body.code === "string" ? body.code.trim().toUpperCase() : "",
-        name: typeof body.name === "string" ? body.name.trim() : ""
+        name: typeof body.name === "string" ? body.name.trim() : "",
+        legal_name: typeof body.legal_name === "string" ? body.legal_name.trim() : undefined,
+        tax_id: typeof body.tax_id === "string" ? body.tax_id.trim() : undefined,
+        email: typeof body.email === "string" ? body.email.trim() : undefined,
+        phone: typeof body.phone === "string" ? body.phone.trim() : undefined,
+        address_line1: typeof body.address_line1 === "string" ? body.address_line1.trim() : undefined,
+        address_line2: typeof body.address_line2 === "string" ? body.address_line2.trim() : undefined,
+        city: typeof body.city === "string" ? body.city.trim() : undefined,
+        postal_code: typeof body.postal_code === "string" ? body.postal_code.trim() : undefined
       });
 
       const company = await createCompany({
         code: input.code,
         name: input.name,
+        legal_name: input.legal_name,
+        tax_id: input.tax_id,
+        email: input.email,
+        phone: input.phone,
+        address_line1: input.address_line1,
+        address_line2: input.address_line2,
+        city: input.city,
+        postal_code: input.postal_code,
         actor: {
           userId: auth.userId,
           ipAddress: readClientIp(request)

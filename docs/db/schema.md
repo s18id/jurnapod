@@ -136,3 +136,28 @@ On failure, script exits non-zero.
 - `KEY idx_outlets_company_id_id (company_id, id)`
 - `KEY idx_outlets_company_is_active (company_id, is_active)`
 - `KEY idx_outlets_company_city (company_id, city)`
+
+### companies
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | BIGINT UNSIGNED | NO | AUTO_INCREMENT | Primary key |
+| code | VARCHAR(32) | NO | — | Unique company code (e.g., ACME, COMPANY1) |
+| name | VARCHAR(191) | NO | — | Display name |
+| legal_name | VARCHAR(191) | YES | NULL | Legal business name |
+| tax_id | VARCHAR(64) | YES | NULL | Tax identification number (NPWP in Indonesia) |
+| email | VARCHAR(191) | YES | NULL | Contact email |
+| phone | VARCHAR(32) | YES | NULL | Contact phone |
+| address_line1 | VARCHAR(191) | YES | NULL | Street address |
+| address_line2 | VARCHAR(191) | YES | NULL | Additional address |
+| city | VARCHAR(96) | YES | NULL | City |
+| postal_code | VARCHAR(20) | YES | NULL | Postal/zip code |
+| created_at | DATETIME | NO | CURRENT_TIMESTAMP | Creation timestamp |
+| updated_at | DATETIME | NO | CURRENT_TIMESTAMP ON UPDATE | Last update timestamp |
+| deleted_at | DATETIME | YES | NULL | Soft delete timestamp |
+
+**Indexes:**
+- `PRIMARY KEY (id)`
+- `UNIQUE KEY uq_companies_code (code)`
+- `KEY idx_companies_deleted_at (deleted_at)`
+- `KEY idx_companies_city (city)`

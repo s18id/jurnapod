@@ -3,17 +3,23 @@
 
 import { useMemo, useState } from "react";
 import {
+  ActionIcon,
   Alert,
   Badge,
   Button,
+  Divider,
+  Drawer,
   Group,
   Modal,
   Select,
   Stack,
   Text,
   TextInput,
-  Title
+  Title,
+  Tooltip
 } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
+import { IconEye } from "@tabler/icons-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
 import {
@@ -34,17 +40,33 @@ type CompaniesPageProps = {
   accessToken: string;
 };
 
-type DialogMode = "create" | "edit" | null;
+type DialogMode = "create" | "edit" | "view" | null;
 type CompanyStatusFilter = "active" | "archived" | "all";
 
 type CompanyFormData = {
   code: string;
   name: string;
+  legal_name: string;
+  tax_id: string;
+  email: string;
+  phone: string;
+  address_line1: string;
+  address_line2: string;
+  city: string;
+  postal_code: string;
 };
 
 const emptyForm: CompanyFormData = {
   code: "",
-  name: ""
+  name: "",
+  legal_name: "",
+  tax_id: "",
+  email: "",
+  phone: "",
+  address_line1: "",
+  address_line2: "",
+  city: "",
+  postal_code: ""
 };
 
 const statusOptions: Array<{ value: CompanyStatusFilter; label: string }> = [
@@ -74,6 +96,8 @@ export function CompaniesPage(props: CompaniesPageProps) {
   const [confirmState, setConfirmState] = useState<
     { action: "deactivate" | "reactivate"; company: CompanyResponse } | null
   >(null);
+
+  const isMobile = useMediaQuery("(max-width: 48em)");
 
   // API hooks
   const companiesQuery = useCompanies(accessToken, {
@@ -113,10 +137,37 @@ export function CompaniesPage(props: CompaniesPageProps) {
     setSuccessMessage(null);
   };
   
+  const openDetailDrawer = (company: CompanyResponse) => {
+    setFormData({
+      code: company.code,
+      name: company.name,
+      legal_name: company.legal_name ?? "",
+      tax_id: company.tax_id ?? "",
+      email: company.email ?? "",
+      phone: company.phone ?? "",
+      address_line1: company.address_line1 ?? "",
+      address_line2: company.address_line2 ?? "",
+      city: company.city ?? "",
+      postal_code: company.postal_code ?? ""
+    });
+    setEditingCompany(company);
+    setDialogMode("view");
+    setError(null);
+    setSuccessMessage(null);
+  };
+
   const openEditDialog = (company: CompanyResponse) => {
     setFormData({
       code: company.code,
-      name: company.name
+      name: company.name,
+      legal_name: company.legal_name ?? "",
+      tax_id: company.tax_id ?? "",
+      email: company.email ?? "",
+      phone: company.phone ?? "",
+      address_line1: company.address_line1 ?? "",
+      address_line2: company.address_line2 ?? "",
+      city: company.city ?? "",
+      postal_code: company.postal_code ?? ""
     });
     setFormErrors({});
     setEditingCompany(company);
@@ -130,6 +181,14 @@ export function CompaniesPage(props: CompaniesPageProps) {
     setEditingCompany(null);
     setFormData(emptyForm);
     setFormErrors({});
+  };
+
+  const closeDrawer = () => {
+    setDialogMode(null);
+    setEditingCompany(null);
+    setFormData(emptyForm);
+    setError(null);
+    setSuccessMessage(null);
   };
   
   const validateForm = (): boolean => {
@@ -163,7 +222,15 @@ export function CompaniesPage(props: CompaniesPageProps) {
         await createCompany(
           {
             code: formData.code.trim().toUpperCase(),
-            name: formData.name.trim()
+            name: formData.name.trim(),
+            legal_name: formData.legal_name.trim() || undefined,
+            tax_id: formData.tax_id.trim() || undefined,
+            email: formData.email.trim() || undefined,
+            phone: formData.phone.trim() || undefined,
+            address_line1: formData.address_line1.trim() || undefined,
+            address_line2: formData.address_line2.trim() || undefined,
+            city: formData.city.trim() || undefined,
+            postal_code: formData.postal_code.trim() || undefined
           },
           accessToken
         );
@@ -171,15 +238,41 @@ export function CompaniesPage(props: CompaniesPageProps) {
         await companiesQuery.refetch();
         closeDialog();
       } else if (dialogMode === "edit" && editingCompany) {
-        await updateCompany(
-          editingCompany.id,
-          {
-            name: formData.name.trim()
-          },
-          accessToken
-        );
-        setSuccessMessage("Company updated successfully");
-        await companiesQuery.refetch();
+        const updates: Parameters<typeof updateCompany>[1] = {};
+        
+        if (formData.name.trim() !== editingCompany.name) {
+          updates.name = formData.name.trim();
+        }
+        if (formData.legal_name.trim() !== (editingCompany.legal_name ?? "")) {
+          updates.legal_name = formData.legal_name.trim() || null;
+        }
+        if (formData.tax_id.trim() !== (editingCompany.tax_id ?? "")) {
+          updates.tax_id = formData.tax_id.trim() || null;
+        }
+        if (formData.email.trim() !== (editingCompany.email ?? "")) {
+          updates.email = formData.email.trim() || null;
+        }
+        if (formData.phone.trim() !== (editingCompany.phone ?? "")) {
+          updates.phone = formData.phone.trim() || null;
+        }
+        if (formData.address_line1.trim() !== (editingCompany.address_line1 ?? "")) {
+          updates.address_line1 = formData.address_line1.trim() || null;
+        }
+        if (formData.address_line2.trim() !== (editingCompany.address_line2 ?? "")) {
+          updates.address_line2 = formData.address_line2.trim() || null;
+        }
+        if (formData.city.trim() !== (editingCompany.city ?? "")) {
+          updates.city = formData.city.trim() || null;
+        }
+        if (formData.postal_code.trim() !== (editingCompany.postal_code ?? "")) {
+          updates.postal_code = formData.postal_code.trim() || null;
+        }
+
+        if (Object.keys(updates).length > 0) {
+          await updateCompany(editingCompany.id, updates, accessToken);
+          setSuccessMessage("Company updated successfully");
+          await companiesQuery.refetch();
+        }
         closeDialog();
       }
     } catch (submitError) {
@@ -224,6 +317,11 @@ export function CompaniesPage(props: CompaniesPageProps) {
           const company = info.row.original;
           return (
             <Group gap="xs" justify="flex-end" wrap="wrap">
+              <Tooltip label="View details">
+                <ActionIcon variant="light" onClick={() => openDetailDrawer(company)}>
+                  <IconEye size={16} />
+                </ActionIcon>
+              </Tooltip>
               {!company.deleted_at ? (
                 <Button
                   size="xs"
@@ -257,7 +355,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
         }
       }
     ],
-    [isSuperAdmin, openEditDialog]
+    [isSuperAdmin, openDetailDrawer, openEditDialog]
   );
 
   async function handleConfirmAction() {
@@ -364,7 +462,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
       </Stack>
 
       <Modal
-        opened={dialogMode !== null}
+        opened={dialogMode === "create" || dialogMode === "edit"}
         onClose={closeDialog}
         title={
           <Title order={4}>
@@ -374,6 +472,8 @@ export function CompaniesPage(props: CompaniesPageProps) {
         centered
       >
         <Stack gap="md">
+          <Divider label="Company Identity" my="sm" />
+
           {dialogMode === "create" ? (
             <TextInput
               label="Company Code"
@@ -405,6 +505,78 @@ export function CompaniesPage(props: CompaniesPageProps) {
             error={formErrors.name}
             withAsterisk
           />
+
+          <Divider label="Legal & Tax Information" my="sm" />
+
+          <TextInput
+            label="Legal Name"
+            placeholder="e.g., PT ACME Indonesia"
+            value={formData.legal_name}
+            onChange={(event) => setFormData({ ...formData, legal_name: event.currentTarget.value })}
+            maxLength={191}
+          />
+
+          <TextInput
+            label="Tax ID / NPWP"
+            placeholder="e.g., 01.234.567.8-901.000"
+            value={formData.tax_id}
+            onChange={(event) => setFormData({ ...formData, tax_id: event.currentTarget.value })}
+            maxLength={64}
+          />
+
+          <Divider label="Contact Information" my="sm" />
+
+          <TextInput
+            label="Email"
+            placeholder="e.g., contact@acme.com"
+            value={formData.email}
+            onChange={(event) => setFormData({ ...formData, email: event.currentTarget.value })}
+            maxLength={191}
+          />
+
+          <TextInput
+            label="Phone"
+            placeholder="e.g., +62 21 1234 5678"
+            value={formData.phone}
+            onChange={(event) => setFormData({ ...formData, phone: event.currentTarget.value })}
+            maxLength={32}
+          />
+
+          <Divider label="Address" my="sm" />
+
+          <TextInput
+            label="Address Line 1"
+            placeholder="Street address"
+            value={formData.address_line1}
+            onChange={(event) => setFormData({ ...formData, address_line1: event.currentTarget.value })}
+            maxLength={191}
+          />
+
+          <TextInput
+            label="Address Line 2"
+            placeholder="Additional address info"
+            value={formData.address_line2}
+            onChange={(event) => setFormData({ ...formData, address_line2: event.currentTarget.value })}
+            maxLength={191}
+          />
+
+          <Group grow>
+            <TextInput
+              label="City"
+              placeholder="e.g., Jakarta"
+              value={formData.city}
+              onChange={(event) => setFormData({ ...formData, city: event.currentTarget.value })}
+              maxLength={96}
+            />
+
+            <TextInput
+              label="Postal Code"
+              placeholder="e.g., 12345"
+              value={formData.postal_code}
+              onChange={(event) => setFormData({ ...formData, postal_code: event.currentTarget.value })}
+              maxLength={20}
+            />
+          </Group>
 
           {error ? (
             <Alert color="red" title="Unable to save">
@@ -448,6 +620,59 @@ export function CompaniesPage(props: CompaniesPageProps) {
           </Group>
         </Stack>
       </Modal>
+
+      <Drawer
+        opened={dialogMode === "view"}
+        onClose={closeDrawer}
+        position="right"
+        size={isMobile ? "100%" : "lg"}
+        withCloseButton
+        title={<Title order={4}>Company Details</Title>}
+      >
+        {editingCompany ? (
+          <Stack gap="md">
+            <Divider label="Company Identity" my="sm" />
+
+            <TextInput label="Company Code" value={editingCompany.code} disabled />
+            <TextInput label="Company Name" value={editingCompany.name} disabled />
+            <TextInput label="Legal Name" value={editingCompany.legal_name ?? "—"} disabled />
+            <TextInput label="Tax ID / NPWP" value={editingCompany.tax_id ?? "—"} disabled />
+
+            <Divider label="Status" my="sm" />
+
+            <Badge
+              color={editingCompany.deleted_at ? "red" : "green"}
+              variant="light"
+              size="lg"
+            >
+              {editingCompany.deleted_at ? "Archived" : "Active"}
+            </Badge>
+
+            <Text size="xs" c="dimmed">
+              Created: {new Date(editingCompany.created_at).toLocaleString("id-ID")}
+            </Text>
+            <Text size="xs" c="dimmed">
+              Updated: {new Date(editingCompany.updated_at).toLocaleString("id-ID")}
+            </Text>
+
+            <Divider label="Contact Information" my="sm" />
+
+            <TextInput label="Email" value={editingCompany.email ?? "—"} disabled />
+            <TextInput label="Phone" value={editingCompany.phone ?? "—"} disabled />
+
+            <Divider label="Address" my="sm" />
+
+            <TextInput label="Address Line 1" value={editingCompany.address_line1 ?? "—"} disabled />
+            <TextInput label="Address Line 2" value={editingCompany.address_line2 ?? "—"} disabled />
+            <TextInput label="City" value={editingCompany.city ?? "—"} disabled />
+            <TextInput label="Postal Code" value={editingCompany.postal_code ?? "—"} disabled />
+
+            <Group justify="flex-end" mt="md">
+              <Button onClick={() => openEditDialog(editingCompany)}>Edit Company</Button>
+            </Group>
+          </Stack>
+        ) : null}
+      </Drawer>
     </>
   );
 }
