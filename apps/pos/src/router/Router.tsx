@@ -192,6 +192,9 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     opened_at: string;
     closed_at: string | null;
     notes: string | null;
+    discount_percent?: number;
+    discount_fixed?: number;
+    discount_code?: string | null;
   }): ActiveOrderContextState => ({
     service_type: order.service_type,
     table_id: order.table_id,
@@ -201,7 +204,10 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     order_status: order.order_status,
     opened_at: order.opened_at,
     closed_at: order.closed_at,
-    notes: order.notes
+    notes: order.notes,
+    discount_percent: order.discount_percent ?? 0,
+    discount_fixed: order.discount_fixed ?? 0,
+    discount_code: order.discount_code ?? null
   }), []);
 
   const hasMeaningfulOrderState = useMemo(() => {

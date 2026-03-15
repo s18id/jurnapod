@@ -15,6 +15,14 @@ export const CompanyResponseSchema = z.object({
   id: NumericIdSchema,
   code: CompanyCodeSchema,
   name: z.string().trim().min(1).max(191),
+  legal_name: z.string().trim().max(191).nullable(),
+  tax_id: z.string().trim().max(64).nullable(),
+  email: z.string().trim().email().max(191).nullable(),
+  phone: z.string().trim().max(32).nullable(),
+  address_line1: z.string().trim().max(191).nullable(),
+  address_line2: z.string().trim().max(191).nullable(),
+  city: z.string().trim().max(96).nullable(),
+  postal_code: z.string().trim().max(20).nullable(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
   deleted_at: z.string().datetime().nullable()
@@ -22,12 +30,28 @@ export const CompanyResponseSchema = z.object({
 
 export const CompanyCreateRequestSchema = z.object({
   code: CompanyCodeSchema,
-  name: z.string().trim().min(1).max(191)
+  name: z.string().trim().min(1).max(191),
+  legal_name: z.string().trim().max(191).optional(),
+  tax_id: z.string().trim().max(64).optional(),
+  email: z.string().trim().email().max(191).optional().nullable(),
+  phone: z.string().trim().max(32).optional(),
+  address_line1: z.string().trim().max(191).optional(),
+  address_line2: z.string().trim().max(191).optional(),
+  city: z.string().trim().max(96).optional(),
+  postal_code: z.string().trim().max(20).optional()
 });
 
 export const CompanyUpdateRequestSchema = z
   .object({
-    name: z.string().trim().min(1).max(191).optional()
+    name: z.string().trim().min(1).max(191).optional(),
+    legal_name: z.string().trim().max(191).nullable().optional(),
+    tax_id: z.string().trim().max(64).nullable().optional(),
+    email: z.string().trim().email().max(191).nullable().optional(),
+    phone: z.string().trim().max(32).nullable().optional(),
+    address_line1: z.string().trim().max(191).nullable().optional(),
+    address_line2: z.string().trim().max(191).nullable().optional(),
+    city: z.string().trim().max(96).nullable().optional(),
+    postal_code: z.string().trim().max(20).nullable().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided"

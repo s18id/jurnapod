@@ -6,7 +6,12 @@ import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../../src/lib/response";
-import { OutletNotFoundError, setUserOutlets, UserNotFoundError } from "../../../../../src/lib/users";
+import {
+  OutletNotFoundError,
+  setUserOutlets,
+  SuperAdminProtectionError,
+  UserNotFoundError
+} from "../../../../../src/lib/users";
 
 const updateOutletsSchema = z
   .object({
@@ -48,6 +53,10 @@ export const POST = withAuth(
 
       if (error instanceof OutletNotFoundError) {
         return errorResponse("OUTLET_NOT_FOUND", "Outlet not found", 400);
+      }
+
+      if (error instanceof SuperAdminProtectionError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
       }
 
       console.error("POST /api/users/:userId/outlets failed", error);

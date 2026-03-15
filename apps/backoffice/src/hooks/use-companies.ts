@@ -122,7 +122,18 @@ export function useCompany(
  * Creates a new company
  */
 export async function createCompany(
-  data: { code: string; name: string },
+  data: {
+    code: string;
+    name: string;
+    legal_name?: string;
+    tax_id?: string;
+    email?: string;
+    phone?: string;
+    address_line1?: string;
+    address_line2?: string;
+    city?: string;
+    postal_code?: string;
+  },
   accessToken: string
 ): Promise<CompanyResponse> {
   const response = await apiRequest<SuccessResponse<CompanyResponse>>(
@@ -142,7 +153,17 @@ export async function createCompany(
  */
 export async function updateCompany(
   companyId: number,
-  data: { name: string },
+  data: {
+    name?: string;
+    legal_name?: string | null;
+    tax_id?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    postal_code?: string | null;
+  },
   accessToken: string
 ): Promise<CompanyResponse> {
   const response = await apiRequest<SuccessResponse<CompanyResponse>>(

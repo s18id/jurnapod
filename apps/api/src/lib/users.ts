@@ -20,6 +20,7 @@ export class SuperAdminProtectionError extends Error {}
 export type UserProfile = {
   id: number;
   company_id: number;
+  name: string | null;
   email: string;
   is_active: boolean;
   global_roles: string[];
@@ -42,6 +43,7 @@ type UserActor = {
 type UserRow = RowDataPacket & {
   id: number;
   company_id: number;
+  name: string | null;
   email: string;
   is_active: number;
   created_at: Date;
@@ -150,13 +152,26 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+function generateTempPassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  let password = "";
+  for (let i = 0; i < 12; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
+
+async function sendRoleChangeNotification(companyId: number, userId: number, newRoles: string[]): Promise<void> {
+  console.log(`[NOTIFICATION] User ${userId} roles changed to: ${newRoles.join(", ")} (company ${companyId})`);
+}
+
 async function findUserRowById(
   connection: PoolConnection | ReturnType<typeof getDbPool>,
   companyId: number,
   userId: number
 ): Promise<UserRow | null> {
   const [rows] = await connection.execute<UserRow[]>(
-    `SELECT id, company_id, email, is_active, created_at, updated_at
+    `SELECT id, company_id, name, email, is_active, created_at, updated_at
      FROM users
      WHERE id = ? AND company_id = ?
      LIMIT 1`,
@@ -251,6 +266,47 @@ async function userHasSuperAdminRole(
   );
 
   return rows.length > 0;
+}
+
+async function userHasRoleCode(
+  connection: PoolConnection | ReturnType<typeof getDbPool>,
+  companyId: number,
+  userId: number,
+  roleCode: string
+): Promise<boolean> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT 1
+     FROM user_role_assignments ura
+     INNER JOIN roles r ON r.id = ura.role_id
+     INNER JOIN users u ON u.id = ura.user_id
+     WHERE u.id = ?
+       AND u.company_id = ?
+       AND r.code = ?
+       AND ura.outlet_id IS NULL
+     LIMIT 1`,
+    [userId, companyId, roleCode]
+  );
+
+  return rows.length > 0;
+}
+
+async function ensureSuperAdminTargetManagedBySelf(
+  connection: PoolConnection | ReturnType<typeof getDbPool>,
+  companyId: number,
+  actorUserId: number,
+  targetUserId: number
+): Promise<void> {
+  const targetIsSuperAdmin = await userHasSuperAdminRole(connection, companyId, targetUserId);
+  if (!targetIsSuperAdmin) {
+    return;
+  }
+
+  const actorIsSelf = actorUserId === targetUserId;
+  const actorIsSuperAdmin = await userHasRoleCode(connection, companyId, actorUserId, "SUPER_ADMIN");
+
+  if (!actorIsSelf || !actorIsSuperAdmin) {
+    throw new SuperAdminProtectionError("Only SUPER_ADMIN user can manage their own account");
+  }
 }
 
 async function ensureOutletIdsExist(
@@ -387,6 +443,7 @@ function normalizeUserRow(row: UserRow): Omit<UserProfile, "global_roles" | "out
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
+    name: row.name,
     email: row.email,
     is_active: row.is_active === 1,
     created_at: row.created_at.toISOString(),
@@ -398,7 +455,7 @@ export async function listUsers(companyId: number, filters?: { isActive?: boolea
   const pool = getDbPool();
   const values: Array<string | number> = [companyId];
   let sql =
-    "SELECT id, company_id, email, is_active, created_at, updated_at FROM users WHERE company_id = ?";
+    "SELECT id, company_id, name, email, is_active, created_at, updated_at FROM users WHERE company_id = ?";
 
   if (typeof filters?.isActive === "boolean") {
     sql += " AND is_active = ?";
@@ -449,8 +506,9 @@ export async function findUserById(companyId: number, userId: number): Promise<U
 
 export async function createUser(params: {
   companyId: number;
+  name?: string;
   email: string;
-  password: string;
+  password?: string;
   roleCodes?: string[];
   outletIds?: number[];
   outletRoleAssignments?: Array<{ outletId: number; roleCodes: string[] }>;
@@ -465,7 +523,8 @@ export async function createUser(params: {
   try {
     await connection.beginTransaction();
     const email = normalizeEmail(params.email);
-    const isActive = params.isActive ?? true;
+    const name = params.name?.trim() ?? null;
+    const isActive = params.isActive ?? false;
 
     const [existingRows] = await connection.execute<RowDataPacket[]>(
       `SELECT id FROM users WHERE company_id = ? AND email = ? LIMIT 1`,
@@ -477,11 +536,12 @@ export async function createUser(params: {
     }
 
     const policy = passwordHashPolicyFromEnv();
-    const passwordHash = await hashPassword(params.password, policy);
+    const passwordToHash = params.password ?? generateTempPassword();
+    const passwordHash = await hashPassword(passwordToHash, policy);
     const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO users (company_id, email, password_hash, is_active)
-       VALUES (?, ?, ?, ?)`,
-      [params.companyId, email, passwordHash, isActive ? 1 : 0]
+      `INSERT INTO users (company_id, name, email, password_hash, is_active)
+       VALUES (?, ?, ?, ?, ?)`,
+      [params.companyId, name, email, passwordHash, isActive ? 1 : 0]
     );
 
     const userId = Number(result.insertId);
@@ -606,8 +666,17 @@ export async function updateUserEmail(params: {
 
   try {
     await connection.beginTransaction();
-    const email = normalizeEmail(params.email);
+    await ensureUserExists(connection, params.companyId, params.userId);
+
+    await ensureSuperAdminTargetManagedBySelf(
+      connection,
+      params.companyId,
+      params.actor.userId,
+      params.userId
+    );
+
     const user = await ensureUserExists(connection, params.companyId, params.userId);
+    const email = normalizeEmail(params.email);
 
     if (user.email !== email) {
       const [existingRows] = await connection.execute<RowDataPacket[]>(
@@ -664,17 +733,12 @@ export async function setUserRoles(params: {
     await connection.beginTransaction();
     await ensureUserExists(connection, params.companyId, params.userId);
 
-    // Prevent modifying roles for SUPER_ADMIN users
-    const isSuperAdmin = await userHasSuperAdminRole(
+    await ensureSuperAdminTargetManagedBySelf(
       connection,
       params.companyId,
+      params.actor.userId,
       params.userId
     );
-    if (isSuperAdmin) {
-      throw new SuperAdminProtectionError(
-        "Cannot modify roles for SUPER_ADMIN user"
-      );
-    }
 
     const roleCodes = params.roleCodes.map((role) => RoleSchema.parse(role));
     
@@ -697,8 +761,27 @@ export async function setUserRoles(params: {
       throw new RoleLevelViolationError("Insufficient role level to assign this role");
     }
 
+    // Validate role scope: global roles cannot be outlet-scoped and vice versa
+    const isOutletAssignment = typeof params.outletId === "number";
+    if (roleCodes.length > 0) {
+      const globalRoles = roleCodes.filter((code) => roleMap.get(code)?.is_global === 1);
+      const nonGlobalRoles = roleCodes.filter((code) => roleMap.get(code)?.is_global !== 1);
+
+      if (isOutletAssignment && globalRoles.length > 0) {
+        throw new RoleScopeViolationError("Global roles cannot be assigned per outlet");
+      }
+
+      if (!isOutletAssignment && nonGlobalRoles.length > 0) {
+        throw new RoleScopeViolationError("Outlet-scoped roles require outlet assignments");
+      }
+
+      if (!isOutletAssignment && globalRoles.length > 1) {
+        throw new RoleScopeViolationError("A user can only have one global role");
+      }
+    }
+
     // Handle outlet role assignment
-    if (typeof params.outletId === "number") {
+    if (isOutletAssignment) {
       const outletId = NumericIdSchema.parse(params.outletId);
       await ensureOutletIdsExist(connection, params.companyId, [outletId]);
 
@@ -743,22 +826,28 @@ export async function setUserRoles(params: {
         { outlet_id: outletId, role_codes: roleCodes }
       );
     } else {
-      // Handle global role - update users.global_role_id directly
+      // Handle global role - update user_role_assignments (outlet_id = NULL)
       const beforeRoles =
         (await hydrateUserGlobalRoles(connection, [params.userId])).get(params.userId) ?? [];
 
+      // Delete existing global role assignments
+      await connection.execute<ResultSetHeader>(
+        `DELETE FROM user_role_assignments WHERE user_id = ? AND outlet_id IS NULL`,
+        [params.userId]
+      );
+
+      // Insert new global role assignment(s)
       if (roleCodes.length > 0) {
-        const roleId = roleMap.get(roleCodes[0])?.id;
-        if (roleId) {
-          await connection.execute<ResultSetHeader>(
-            `UPDATE users SET global_role_id = ? WHERE id = ?`,
-            [roleId, params.userId]
-          );
-        }
-      } else {
-        await connection.execute<ResultSetHeader>(
-          `UPDATE users SET global_role_id = NULL WHERE id = ?`,
-          [params.userId]
+        const roleValues = roleCodes.map((code) => [
+          params.userId,
+          roleMap.get(code)?.id ?? 0,
+          null
+        ]);
+        await connection.query(
+          `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES ${roleValues
+            .map(() => "(?, ?, ?)")
+            .join(", ")}`,
+          roleValues.flat()
         );
       }
 
@@ -770,6 +859,8 @@ export async function setUserRoles(params: {
         { global_roles: roleCodes }
       );
     }
+
+    await sendRoleChangeNotification(params.companyId, params.userId, roleCodes);
 
     await connection.commit();
 
@@ -801,6 +892,14 @@ export async function setUserOutlets(params: {
   try {
     await connection.beginTransaction();
     await ensureUserExists(connection, params.companyId, params.userId);
+
+    await ensureSuperAdminTargetManagedBySelf(
+      connection,
+      params.companyId,
+      params.actor.userId,
+      params.userId
+    );
+
     const [beforeRows] = await connection.execute<RowDataPacket[]>(
       `SELECT DISTINCT outlet_id
        FROM user_role_assignments
@@ -867,6 +966,14 @@ export async function setUserPassword(params: {
 
   try {
     await connection.beginTransaction();
+
+    await ensureSuperAdminTargetManagedBySelf(
+      connection,
+      params.companyId,
+      params.actor.userId,
+      params.userId
+    );
+
     const policy = passwordHashPolicyFromEnv();
     const passwordHash = await hashPassword(params.password, policy);
     const [result] = await connection.execute<ResultSetHeader>(
@@ -907,7 +1014,7 @@ export async function setUserActiveState(params: {
   try {
     await connection.beginTransaction();
 
-    // Prevent deactivating SUPER_ADMIN users
+    // Prevent deactivating SUPER_ADMIN users (including self, for safety)
     if (!params.isActive) {
       const isSuperAdmin = await userHasSuperAdminRole(
         connection,
@@ -919,6 +1026,16 @@ export async function setUserActiveState(params: {
           "Cannot deactivate SUPER_ADMIN user"
         );
       }
+    }
+
+    // For reactivate, ensure only self SUPER_ADMIN can reactivate SUPER_ADMIN
+    if (params.isActive) {
+      await ensureSuperAdminTargetManagedBySelf(
+        connection,
+        params.companyId,
+        params.actor.userId,
+        params.userId
+      );
     }
 
     const [result] = await connection.execute<ResultSetHeader>(
@@ -1033,6 +1150,29 @@ export async function getRole(roleId: number): Promise<{
     name: rows[0].name,
     is_global: Boolean(rows[0].is_global),
     role_level: Number(rows[0].role_level ?? 0)
+  };
+}
+
+export async function getRoleWithPermissions(params: {
+  roleId: number;
+  companyId: number;
+}): Promise<{
+  id: number;
+  code: string;
+  name: string;
+  is_global: boolean;
+  role_level: number;
+  permissions: ModuleRoleResponse[];
+}> {
+  const role = await getRole(params.roleId);
+  const permissions = await listModuleRoles({
+    companyId: params.companyId,
+    roleId: params.roleId
+  });
+
+  return {
+    ...role,
+    permissions
   };
 }
 

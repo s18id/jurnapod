@@ -157,3 +157,26 @@ export const SettingsConfigResponseSchema = z.object({
 export type SettingsConfigQuery = z.infer<typeof SettingsConfigQuerySchema>;
 export type SettingsConfigUpdate = z.infer<typeof SettingsConfigUpdateSchema>;
 export type SettingsConfigResponse = z.infer<typeof SettingsConfigResponseSchema>;
+
+export const FlexibleSettingValueTypeSchema = z.enum(["string", "number", "boolean", "json"]);
+
+export type FlexibleSettingValueType = z.infer<typeof FlexibleSettingValueTypeSchema>;
+
+export const FlexibleSettingKeySchema = z.string().min(1).max(64).regex(/^[a-z][a-z0-9_]{0,62}[a-z0-9]$/);
+
+export type FlexibleSettingKey = z.infer<typeof FlexibleSettingKeySchema>;
+
+export const OutletSettingCreateSchema = z.object({
+  key: FlexibleSettingKeySchema,
+  value: z.unknown(),
+  value_type: FlexibleSettingValueTypeSchema
+});
+
+export const OutletSettingUpdateSchema = z.object({
+  key: FlexibleSettingKeySchema,
+  value: z.unknown(),
+  value_type: FlexibleSettingValueTypeSchema
+});
+
+export type OutletSettingCreate = z.infer<typeof OutletSettingCreateSchema>;
+export type OutletSettingUpdate = z.infer<typeof OutletSettingUpdateSchema>;

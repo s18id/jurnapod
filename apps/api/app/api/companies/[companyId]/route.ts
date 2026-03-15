@@ -66,12 +66,28 @@ export const PATCH = withAuth(
       }
       const body = await request.json();
       const input = CompanyUpdateRequestSchema.parse({
-        name: typeof body.name === "string" ? body.name.trim() : undefined
+        name: typeof body.name === "string" ? body.name.trim() : undefined,
+        legal_name: typeof body.legal_name === "string" ? body.legal_name.trim() : (body.legal_name === null ? null : undefined),
+        tax_id: typeof body.tax_id === "string" ? body.tax_id.trim() : (body.tax_id === null ? null : undefined),
+        email: typeof body.email === "string" ? body.email.trim() : (body.email === null ? null : undefined),
+        phone: typeof body.phone === "string" ? body.phone.trim() : (body.phone === null ? null : undefined),
+        address_line1: typeof body.address_line1 === "string" ? body.address_line1.trim() : (body.address_line1 === null ? null : undefined),
+        address_line2: typeof body.address_line2 === "string" ? body.address_line2.trim() : (body.address_line2 === null ? null : undefined),
+        city: typeof body.city === "string" ? body.city.trim() : (body.city === null ? null : undefined),
+        postal_code: typeof body.postal_code === "string" ? body.postal_code.trim() : (body.postal_code === null ? null : undefined)
       });
 
       const company = await updateCompany({
         companyId,
         name: input.name,
+        legal_name: input.legal_name,
+        tax_id: input.tax_id,
+        email: input.email,
+        phone: input.phone,
+        address_line1: input.address_line1,
+        address_line2: input.address_line2,
+        city: input.city,
+        postal_code: input.postal_code,
         actor: {
           userId: auth.userId,
           ipAddress: readClientIp(request)

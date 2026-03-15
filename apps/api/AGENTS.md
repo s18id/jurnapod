@@ -45,3 +45,17 @@ API server rules for auth, validation, posting triggers, persistence safety, and
   - posting endpoints
   - settings/config endpoints
   - report query logic
+
+### Integration test fixture policy
+- HTTP integration tests must create/mutate fixtures through API endpoints.
+- Direct DB writes are **not allowed** for setup/mutations of business entities (`users`, `roles`, `outlets`, assignments, etc.).
+- Direct DB access is allowed only for:
+  1. teardown/cleanup in `finally`,
+  2. read-only verification when no API endpoint exists (e.g. audit persistence checks).
+- All test fixtures should use unique per-run identifiers and deterministic cleanup.
+
+### Audit log status semantics
+- `audit_logs.success` is canonical for logic/filtering.
+- `audit_logs.result` is compatibility/display only.
+- New queries must filter by `success` (`1` / `0`) instead of string `result`.
+- Migrations and tests must preserve this invariant.

@@ -53,3 +53,37 @@ Important:
   - imports
   - migrations
   - financial reports
+- For API integration tests, expect API-driven setup/mutations; DB only for cleanup/read-only verification.
+- Flag new code paths that filter `audit_logs` by `result` instead of `success`.
+
+## AI Model Configuration
+
+BMAD uses the following model strategy:
+- **Primary**: `opencode-go/minimax-m2.5` (your OpenCode Go subscription)
+- **Code tasks**: `openai/gpt-5.1-codex-mini` (best for code generation)
+- **Complex reasoning**: `anthropic/claude-3-5-sonnet-20241022` (when needed)
+
+Model mappings are configured in `_bmad/_config/agent-models.yaml`.
+Default model is set in `_bmad/_config/ides/opencode.yaml`.
+
+## Agent delegation
+
+Delegate to specialized agents when tasks match their expertise:
+
+| Task | Agent |
+|------|-------|
+| Code review | `bmad-code-review` |
+| Write tests / test strategy | `bmad-testarch-*` |
+| Create PRD | `bmad-create-prd` |
+| Create architecture | `bmad-create-architecture` |
+| Create UX design | `bmad-create-ux-design` |
+| Break down requirements | `bmad-create-epics-and-stories` |
+| Implement story | `bmad-dev-story` |
+| Product management | `bmad-pm` |
+| Market/domain research | `bmad-market-research` / `bmad-domain-research` |
+| Retrospective | `bmad-retrospective` |
+| Technical research | `bmad-technical-research` |
+| Sprint status | `bmad-sprint-status` |
+| Project documentation | `bmad-document-project` |
+
+Use the `skill` tool to load the appropriate agent. If unsure what to do, use `bmad-help`.

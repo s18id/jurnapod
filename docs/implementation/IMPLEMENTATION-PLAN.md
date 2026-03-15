@@ -174,7 +174,10 @@ Cr Payment Variance Gain (payment_delta_idr) // only when delta > 0
 
 ### 3.1 Database Migration
 
+> **Note**: This is for reference. See current schema at `docs/db/schema.md`.
+
 ```sql
+-- See docs/db/schema.md for current schema
 CREATE TABLE cash_bank_transactions (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   company_id BIGINT UNSIGNED NOT NULL,

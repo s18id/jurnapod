@@ -322,6 +322,9 @@ export class SyncOrchestrator {
             opened_at: order.opened_at,
             closed_at: order.closed_at,
             notes: order.notes,
+            discount_percent: 0,
+            discount_fixed: 0,
+            discount_code: null,
             updated_at: order.updated_at
           }))
         );

@@ -8,7 +8,9 @@
     "baseUrl": ".",
     "paths": {
       "@jurnapod/shared": ["packages/shared/src/index.ts"],
-      "@jurnapod/core": ["packages/core/src/index.ts"]
+      "@jurnapod/core": ["packages/core/src/index.ts"],
+      "@/lib/*": ["apps/api/src/lib/*"],
+      "@/lib": ["apps/api/src/lib"]
     },
     "resolveJsonModule": true,
     "esModuleInterop": true,

@@ -20,8 +20,9 @@ import {
 const createUserSchema = z
   .object({
     company_id: NumericIdSchema.optional(),
+    name: z.string().trim().min(1).max(191).optional(),
     email: z.string().trim().email().max(191),
-    password: z.string().min(8).max(255),
+    password: z.string().min(8).max(255).optional(),
     role_codes: z.array(RoleSchema).optional(),
     outlet_ids: z.array(NumericIdSchema).optional(),
     outlet_role_assignments: z
@@ -57,16 +58,27 @@ export const GET = withAuth(
     try {
       const url = new URL(request.url);
       const companyIdRaw = url.searchParams.get("company_id");
+      let targetCompanyId = auth.companyId;
+
       if (companyIdRaw != null) {
-        const companyId = NumericIdSchema.parse(companyIdRaw);
-        if (companyId !== auth.companyId) {
-          return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+        const requestedCompanyId = NumericIdSchema.parse(companyIdRaw);
+        if (requestedCompanyId !== auth.companyId) {
+          const access = await checkUserAccess({
+            userId: auth.userId,
+            companyId: auth.companyId,
+            allowedRoles: ["SUPER_ADMIN"]
+          });
+          const isSuperAdmin = access?.isSuperAdmin ?? false;
+          if (!isSuperAdmin) {
+            return errorResponse("FORBIDDEN", "Cannot list users for another company", 403);
+          }
+          targetCompanyId = requestedCompanyId;
         }
       }
 
       const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
       const search = url.searchParams.get("search")?.trim() || undefined;
-      const users = await listUsers(auth.companyId, { isActive, search });
+      const users = await listUsers(targetCompanyId, { isActive, search });
 
       return successResponse(users);
     } catch (error) {
@@ -112,6 +124,7 @@ export const POST = withAuth(
 
       const user = await createUser({
         companyId,
+        name: input.name,
         email: input.email,
         password: input.password,
         roleCodes: input.role_codes,
@@ -120,7 +133,7 @@ export const POST = withAuth(
           outletId: assignment.outlet_id,
           roleCodes: assignment.role_codes
         })),
-        isActive: input.is_active,
+        isActive: input.is_active ?? false,
         actor: {
           userId: auth.userId,
           ipAddress: readClientIp(request)

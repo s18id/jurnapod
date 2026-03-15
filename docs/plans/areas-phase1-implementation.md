@@ -1,5 +1,10 @@
 # Phase 1: Areas Module Implementation Plan
 
+> **Status**: Not yet implemented (future enhancement)
+> 
+> The `areas` table and related schema changes have NOT been created yet.
+> See current schema at `docs/db/schema.md`.
+
 ## Overview
 
 This document specifies Phase 1 implementation for the Areas module. Areas provide an organizational grouping layer above outlets, enabling:

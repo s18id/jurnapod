@@ -1,0 +1,94 @@
+# generated: 2026-03-15T09:32:00.000Z
+# last_updated: 2026-03-15T09:40:00.000Z
+# project: jurnapod
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-03-15T09:32:00.000Z
+last_updated: 2026-03-15T11:15:00.000Z
+project: jurnapod
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  # Epic 1: Foundation - Auth, Company & Outlet Management
+  epic-1: done
+  1-1-user-login-email-password-google-sso: done
+  1-2-jwt-token-management-refresh: done
+  1-3-rbac-role-definitions-permissions: done
+  1-4-admin-user-management-crud: done
+  1-5-company-settings-management-enhanced: done
+  1-6-outlet-management-crud: done
+  1-7-outlet-specific-settings-enhanced: done
+  epic-1-retrospective: optional
+
+  # Epic 2: POS - Offline-first Point of Sale
+  epic-2: done
+  2-1-pos-cart-add-items-quantities: done
+  2-2-pos-cart-apply-discounts: done
+  2-3-pos-process-multiple-payment-methods: done
+  2-4-pos-offline-mode-local-storage: done
+  2-5-pos-sync-transactions-when-online: done
+  2-6-pos-duplicate-prevention-during-sync: done
+  epic-2-retrospective: optional
+
+  # Epic 3: Accounting - GL Posting & Reports
+  epic-3: done
+  3-1-automatic-journal-entry-pos: done
+  3-2-manual-journal-entry-creation: done
+  3-3-journal-batch-history: done
+  3-4-trial-balance-report: done
+  3-5-general-ledger-report: done
+  epic-3-retrospective: optional
+
+  # Epic 4: Items & Catalog - Product Management
+  epic-4: backlog
+  4-1-item-product-management-crud: backlog
+  4-2-outlet-specific-pricing: backlog
+  4-3-multiple-item-types: backlog
+  epic-4-retrospective: optional
+
+  # Epic 5: Settings - Tax, Payment, Module Configuration
+  epic-5: backlog
+  5-1-tax-rate-configuration: backlog
+  5-2-payment-method-configuration: backlog
+  5-3-module-enable-disable-per-company: backlog
+  epic-5-retrospective: optional
+
+  # Epic 6: Reporting - Sales Reports & Exports
+  epic-6: backlog
+  6-1-sales-reports-date-range: backlog
+  6-2-export-reports-accountants: backlog
+  6-3-pos-transaction-history: backlog
+  epic-6-retrospective: optional

@@ -6,7 +6,7 @@ import { ZodError } from "zod";
 import { requireAccess, withAuth } from "../../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../../src/lib/response";
-import { setUserActiveState, UserNotFoundError } from "../../../../../src/lib/users";
+import { setUserActiveState, SuperAdminProtectionError, UserNotFoundError } from "../../../../../src/lib/users";
 
 function parseUserId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -36,6 +36,10 @@ export const POST = withAuth(
 
       if (error instanceof UserNotFoundError) {
         return errorResponse("NOT_FOUND", "User not found", 404);
+      }
+
+      if (error instanceof SuperAdminProtectionError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
       }
 
       console.error("POST /api/users/:userId/reactivate failed", error);

@@ -129,6 +129,9 @@ export interface RuntimeActiveOrder {
   opened_at: string;
   closed_at: string | null;
   notes: string | null;
+  discount_percent: number;
+  discount_fixed: number;
+  discount_code: string | null;
   updated_at: string;
 }
 
@@ -175,6 +178,9 @@ export interface UpsertRuntimeActiveOrderInput {
   opened_at?: string;
   closed_at?: string | null;
   notes?: string | null;
+  discount_percent?: number;
+  discount_fixed?: number;
+  discount_code?: string | null;
   lines?: RuntimeActiveOrderLineInput[];
 }
 
@@ -303,6 +309,9 @@ function mapActiveOrderRow(row: ActiveOrderRow): RuntimeActiveOrder {
     opened_at: row.opened_at,
     closed_at: row.closed_at,
     notes: row.notes,
+    discount_percent: row.discount_percent ?? 0,
+    discount_fixed: row.discount_fixed ?? 0,
+    discount_code: row.discount_code ?? null,
     updated_at: row.updated_at
   };
 }
@@ -912,6 +921,9 @@ export class RuntimeService {
       opened_at: timestamp,
       closed_at: null,
       notes: input.notes ?? null,
+      discount_percent: 0,
+      discount_fixed: 0,
+      discount_code: null,
       updated_at: timestamp
     };
 
@@ -983,6 +995,9 @@ export class RuntimeService {
       opened_at: baseOpenedAt,
       closed_at: closedAt,
       notes: input.notes ?? null,
+      discount_percent: input.discount_percent ?? 0,
+      discount_fixed: input.discount_fixed ?? 0,
+      discount_code: input.discount_code ?? null,
       updated_at: timestamp
     };
 
