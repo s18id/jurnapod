@@ -131,11 +131,23 @@ function normalizeLines(lines: JournalLine[]) {
 export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
   const companyId = user.company_id;
   const accountsFilter = useMemo(() => ({ is_active: true }), []);
-  const journalFilter = useMemo(() => ({ limit: 10 }), []);
   const isOnline = useOnlineStatus();
   
   const { data: accounts } = useAccounts(companyId, accessToken, accountsFilter);
-  const { data: recentEntries, refetch: refetchEntries } = useJournalBatches(companyId, accessToken, journalFilter);
+
+  // Filter state
+  const [filters, setFilters] = useState({
+    start_date: "",
+    end_date: "",
+    doc_type: "",
+    account_id: undefined as number | undefined,
+    limit: 50,
+    offset: 0
+  });
+  const { data: journalBatches, loading: loadingBatches, refetch: refetchBatches } = useJournalBatches(companyId, accessToken, filters);
+
+  // Detail modal state
+  const [selectedBatch, setSelectedBatch] = useState<JournalBatchResponse | null>(null);
 
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split("T")[0]);
   const [description, setDescription] = useState("");
@@ -406,7 +418,7 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
         setSubmitStatus("success");
         setTimeout(() => {
           clearForm();
-          refetchEntries();
+          refetchBatches();
         }, 1500);
       } else {
         await OutboxService.queueTransaction("journal", payload, user.id);
@@ -689,34 +701,211 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
         </div>
       </form>
 
-      {/* Recent Entries */}
+      {/* Journal Batch History with Filters */}
       <div style={boxStyle}>
-        <h3 style={{ marginTop: 0, marginBottom: "12px" }}>Recent Entries (Last 10)</h3>
-        {recentEntries.length === 0 ? (
-          <p style={{ margin: 0, color: "#666", textAlign: "center" }}>No entries yet</p>
+        <h3 style={{ marginTop: 0, marginBottom: "12px" }}>Journal Batch History</h3>
+        
+        {/* Filters */}
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "16px" }}>
+          <input
+            type="date"
+            value={filters.start_date}
+            onChange={(e) => setFilters({ ...filters, start_date: e.target.value })}
+            style={{ ...inputStyle, width: "140px" }}
+            placeholder="Start date"
+          />
+          <input
+            type="date"
+            value={filters.end_date}
+            onChange={(e) => setFilters({ ...filters, end_date: e.target.value })}
+            style={{ ...inputStyle, width: "140px" }}
+            placeholder="End date"
+          />
+          <select
+            value={filters.doc_type}
+            onChange={(e) => setFilters({ ...filters, doc_type: e.target.value })}
+            style={{ ...selectStyle, width: "140px" }}
+          >
+            <option value="">All Types</option>
+            <option value="POS_SALE">POS Sale</option>
+            <option value="MANUAL">Manual</option>
+            <option value="SALES_INVOICE">Sales Invoice</option>
+            <option value="SALES_PAYMENT">Payment</option>
+          </select>
+          <button
+            onClick={() => setFilters({ start_date: "", end_date: "", doc_type: "", account_id: undefined, limit: 50, offset: 0 })}
+            style={buttonStyle}
+          >
+            Clear Filters
+          </button>
+          <button
+            onClick={() => refetchBatches()}
+            style={buttonStyle}
+          >
+            Refresh
+          </button>
+        </div>
+
+        {loadingBatches ? (
+          <p style={{ margin: 0, color: "#666", textAlign: "center" }}>Loading...</p>
+        ) : journalBatches.length === 0 ? (
+          <p style={{ margin: 0, color: "#666", textAlign: "center" }}>No entries found</p>
         ) : (
           <table style={tableStyle}>
             <thead>
               <tr style={{ backgroundColor: "#f5f1ea" }}>
                 <th style={{ ...cellStyle, textAlign: "left" }}>Date</th>
                 <th style={{ ...cellStyle, textAlign: "left" }}>Type</th>
-                <th style={{ ...cellStyle, textAlign: "left" }}>ID</th>
+                <th style={{ ...cellStyle, textAlign: "left" }}>Ref</th>
+                <th style={{ ...cellStyle, textAlign: "right" }}>Debit</th>
+                <th style={{ ...cellStyle, textAlign: "right" }}>Credit</th>
                 <th style={{ ...cellStyle, textAlign: "right" }}>Lines</th>
               </tr>
             </thead>
             <tbody>
-              {recentEntries.map((entry: JournalBatchResponse) => (
-                <tr key={entry.id}>
-                  <td style={cellStyle}>{new Date(entry.posted_at).toLocaleDateString()}</td>
-                  <td style={cellStyle}>{entry.doc_type}</td>
-                  <td style={cellStyle}>#{entry.id}</td>
-                  <td style={{ ...cellStyle, textAlign: "right" }}>{entry.lines?.length || 0}</td>
-                </tr>
-              ))}
+              {journalBatches.map((entry: JournalBatchResponse) => {
+                const totalDebit = entry.lines?.reduce((sum, l) => sum + (l.debit || 0), 0) || 0;
+                const totalCredit = entry.lines?.reduce((sum, l) => sum + (l.credit || 0), 0) || 0;
+                return (
+                  <tr 
+                    key={entry.id} 
+                    onClick={() => setSelectedBatch(entry)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <td style={cellStyle}>{new Date(entry.posted_at).toLocaleDateString()}</td>
+                    <td style={cellStyle}>{entry.doc_type}</td>
+                    <td style={cellStyle}>
+                      #{entry.id}
+                      {entry.doc_type === "POS_SALE" && entry.doc_id && (
+                        <span style={{ color: "#666", fontSize: "11px", marginLeft: "4px" }}>
+                          (POS #{entry.doc_id})
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ ...cellStyle, textAlign: "right" }}>{totalDebit.toFixed(2)}</td>
+                    <td style={{ ...cellStyle, textAlign: "right" }}>{totalCredit.toFixed(2)}</td>
+                    <td style={{ ...cellStyle, textAlign: "right" }}>{entry.lines?.length || 0}</td>
+                  </tr>
+                );
+              })}
             </tbody>
+            <tfoot>
+              <tr style={{ backgroundColor: "#f5f1ea", fontWeight: "bold" }}>
+                <td style={cellStyle}>Total</td>
+                <td style={cellStyle}></td>
+                <td style={cellStyle}></td>
+                <td style={{ ...cellStyle, textAlign: "right" }}>
+                  {journalBatches.reduce((sum, e) => sum + (e.lines?.reduce((s, l) => s + (l.debit || 0), 0) || 0), 0).toFixed(2)}
+                </td>
+                <td style={{ ...cellStyle, textAlign: "right" }}>
+                  {journalBatches.reduce((sum, e) => sum + (e.lines?.reduce((s, l) => s + (l.credit || 0), 0) || 0), 0).toFixed(2)}
+                </td>
+                <td style={cellStyle}></td>
+              </tr>
+            </tfoot>
           </table>
         )}
       </div>
+
+      {/* Batch Detail Modal */}
+      {selectedBatch && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000
+          }}
+          onClick={() => setSelectedBatch(null)}
+        >
+          <div
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: "8px",
+              padding: "24px",
+              maxWidth: "800px",
+              width: "90%",
+              maxHeight: "80vh",
+              overflow: "auto"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <h2 style={{ margin: 0 }}>
+                Batch #{selectedBatch.id}
+              </h2>
+              <button
+                onClick={() => setSelectedBatch(null)}
+                style={{ ...buttonStyle, fontSize: "18px", padding: "4px 12px" }}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div style={{ marginBottom: "16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <div><strong>Date:</strong> {new Date(selectedBatch.posted_at).toLocaleString()}</div>
+              <div><strong>Type:</strong> {selectedBatch.doc_type}</div>
+              {selectedBatch.doc_type === "POS_SALE" && (
+                <div><strong>POS Ref:</strong> #{selectedBatch.doc_id}</div>
+              )}
+              {selectedBatch.client_ref && (
+                <div><strong>Client Ref:</strong> {selectedBatch.client_ref}</div>
+              )}
+            </div>
+
+            <table style={tableStyle}>
+              <thead>
+                <tr style={{ backgroundColor: "#f5f1ea" }}>
+                  <th style={{ ...cellStyle, textAlign: "left" }}>Account</th>
+                  <th style={{ ...cellStyle, textAlign: "left" }}>Description</th>
+                  <th style={{ ...cellStyle, textAlign: "right" }}>Debit</th>
+                  <th style={{ ...cellStyle, textAlign: "right" }}>Credit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedBatch.lines?.map((line) => {
+                  const account = accounts?.find(a => a.id === line.account_id);
+                  return (
+                    <tr key={line.id}>
+                      <td style={cellStyle}>
+                        {account?.name || `Account #${line.account_id}`}
+                        <div style={{ fontSize: "11px", color: "#666" }}>
+                          {account?.code || ""}
+                        </div>
+                      </td>
+                      <td style={cellStyle}>{line.description || "-"}</td>
+                      <td style={{ ...cellStyle, textAlign: "right" }}>
+                        {line.debit > 0 ? line.debit.toFixed(2) : ""}
+                      </td>
+                      <td style={{ ...cellStyle, textAlign: "right" }}>
+                        {line.credit > 0 ? line.credit.toFixed(2) : ""}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{ backgroundColor: "#f5f1ea", fontWeight: "bold" }}>
+                  <td style={cellStyle}>Total</td>
+                  <td style={cellStyle}></td>
+                  <td style={{ ...cellStyle, textAlign: "right" }}>
+                    {selectedBatch.lines?.reduce((sum, l) => sum + (l.debit || 0), 0).toFixed(2)}
+                  </td>
+                  <td style={{ ...cellStyle, textAlign: "right" }}>
+                    {selectedBatch.lines?.reduce((sum, l) => sum + (l.credit || 0), 0).toFixed(2)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
