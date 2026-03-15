@@ -19,6 +19,9 @@ export interface ActiveOrderContextState {
   opened_at: string;
   closed_at: string | null;
   notes: string | null;
+  discount_percent: number;
+  discount_fixed: number;
+  discount_code: string | null;
 }
 
 export interface CartLineState {
@@ -56,6 +59,10 @@ export interface UseCartReturn {
   setOrderStatus: (status: OrderLifecycleStatus) => void;
   setOrderNotes: (notes: string | null) => void;
   setOrderFinalized: (isFinalized: boolean) => void;
+  applyPercentDiscount: (percent: number) => void;
+  applyFixedDiscount: (amount: number) => void;
+  applyDiscountCode: (code: string) => void;
+  clearTransactionDiscounts: () => void;
   hydrateOrder: (input: {
     cart: CartState;
     payments: PaymentEntry[];
@@ -77,7 +84,10 @@ function createDefaultActiveOrderContext(): ActiveOrderContextState {
     order_status: "OPEN",
     opened_at: nowIso(),
     closed_at: null,
-    notes: null
+    notes: null,
+    discount_percent: 0,
+    discount_fixed: 0,
+    discount_code: null
   };
 }
 
@@ -218,8 +228,54 @@ export function useCart({
     setActiveOrderContext(input.activeOrderContext);
   }, []);
 
+  const applyPercentDiscount = useCallback((percent: number) => {
+    const validPercent = Math.max(0, Math.min(100, percent));
+    setActiveOrderContext((previous) => ({
+      ...previous,
+      discount_percent: validPercent,
+      discount_code: null,
+      kitchen_sent: false
+    }));
+  }, []);
+
+  const applyFixedDiscount = useCallback((amount: number) => {
+    const validAmount = Math.max(0, amount);
+    setActiveOrderContext((previous) => ({
+      ...previous,
+      discount_fixed: validAmount,
+      discount_code: null,
+      kitchen_sent: false
+    }));
+  }, []);
+
+  const applyDiscountCode = useCallback((code: string) => {
+    const trimmedCode = code.trim().toUpperCase();
+    if (!trimmedCode) return;
+    setActiveOrderContext((previous) => ({
+      ...previous,
+      discount_code: trimmedCode,
+      kitchen_sent: false
+    }));
+  }, []);
+
+  const clearTransactionDiscounts = useCallback(() => {
+    setActiveOrderContext((previous) => ({
+      ...previous,
+      discount_percent: 0,
+      discount_fixed: 0,
+      discount_code: null,
+      kitchen_sent: false
+    }));
+  }, []);
+
+  const transactionDiscounts = useMemo(() => ({
+    discount_percent: activeOrderContext.discount_percent,
+    discount_fixed: activeOrderContext.discount_fixed,
+    discount_code: activeOrderContext.discount_code
+  }), [activeOrderContext.discount_percent, activeOrderContext.discount_fixed, activeOrderContext.discount_code]);
+
   const cartLines = useMemo(() => cartToList(cart), [cart]);
-  const cartTotals = useMemo(() => computeCartTotals(cartLines, payments), [cartLines, payments]);
+  const cartTotals = useMemo(() => computeCartTotals(cartLines, payments, transactionDiscounts), [cartLines, payments, transactionDiscounts]);
 
   return {
     cart,
@@ -237,6 +293,10 @@ export function useCart({
     setOrderStatus,
     setOrderNotes,
     setOrderFinalized,
+    applyPercentDiscount,
+    applyFixedDiscount,
+    applyDiscountCode,
+    clearTransactionDiscounts,
     hydrateOrder
   };
 }

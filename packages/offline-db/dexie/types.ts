@@ -114,6 +114,9 @@ export interface ActiveOrderRow {
   opened_at: string;
   closed_at: string | null;
   notes: string | null;
+  discount_percent: number;
+  discount_fixed: number;
+  discount_code: string | null;
   updated_at: string;
 }
 
@@ -206,6 +209,9 @@ export interface SaleRow {
   trx_at: string;
   subtotal: number;
   discount_total: number;
+  discount_percent: number;
+  discount_fixed: number;
+  discount_code: string | null;
   tax_total: number;
   grand_total: number;
   paid_total: number;
@@ -293,6 +299,9 @@ export interface CompleteSalePaymentInput {
 export interface CompleteSaleTotalsInput {
   subtotal: number;
   discount_total: number;
+  discount_percent: number;
+  discount_fixed: number;
+  discount_code: string | null;
   tax_total: number;
   grand_total: number;
   paid_total: number;

@@ -52,17 +52,32 @@ function sumMoney(values: readonly number[]): number {
   return normalizeMoney(total);
 }
 
-function reconcileSaleTotals(itemRows: readonly SaleItemRow[], paymentRows: readonly PaymentRow[]): CompleteSaleTotalsInput {
+function reconcileSaleTotals(
+  itemRows: readonly SaleItemRow[],
+  paymentRows: readonly PaymentRow[],
+  transactionDiscounts: { discount_percent: number; discount_fixed: number; discount_code: string | null } = { discount_percent: 0, discount_fixed: 0, discount_code: null }
+): CompleteSaleTotalsInput {
   const subtotal = sumMoney(itemRows.map((line) => normalizeMoney(line.qty * line.unit_price_snapshot)));
-  const discountTotal = sumMoney(itemRows.map((line) => line.discount_amount));
-  const grandTotal = sumMoney(itemRows.map((line) => line.line_total));
-  const taxTotal = normalizeMoney(grandTotal - normalizeMoney(subtotal - discountTotal));
+  const lineDiscountTotal = sumMoney(itemRows.map((line) => line.discount_amount));
+  const afterLineDiscounts = normalizeMoney(subtotal - lineDiscountTotal);
+  
+  const percentDiscount = normalizeMoney(afterLineDiscounts * (transactionDiscounts.discount_percent / 100));
+  const afterPercent = normalizeMoney(afterLineDiscounts - percentDiscount);
+  const fixedDiscount = normalizeMoney(Math.min(transactionDiscounts.discount_fixed, afterPercent));
+  
+  const totalDiscount = normalizeMoney(lineDiscountTotal + percentDiscount + fixedDiscount);
+  const grandTotal = normalizeMoney(Math.max(0, subtotal - totalDiscount));
+  
+  const taxTotal = normalizeMoney(grandTotal - normalizeMoney(subtotal - lineDiscountTotal));
   const paidTotal = sumMoney(paymentRows.map((payment) => payment.amount));
   const changeTotal = normalizeMoney(paidTotal - grandTotal);
 
   return {
     subtotal,
-    discount_total: discountTotal,
+    discount_total: totalDiscount,
+    discount_percent: transactionDiscounts.discount_percent,
+    discount_fixed: transactionDiscounts.discount_fixed,
+    discount_code: transactionDiscounts.discount_code,
     tax_total: taxTotal,
     grand_total: grandTotal,
     paid_total: paidTotal,
@@ -194,6 +209,9 @@ export async function createSaleDraft(
     trx_at: openedAt,
     subtotal: 0,
     discount_total: 0,
+    discount_percent: 0,
+    discount_fixed: 0,
+    discount_code: null,
     tax_total: 0,
     grand_total: 0,
     paid_total: 0,
@@ -266,7 +284,11 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
           paid_at: trxAt
         }));
 
-      const reconciledTotals = reconcileSaleTotals(itemRows, paymentRows);
+      const reconciledTotals = reconcileSaleTotals(itemRows, paymentRows, {
+        discount_percent: input.totals.discount_percent,
+        discount_fixed: input.totals.discount_fixed,
+        discount_code: input.totals.discount_code
+      });
       if (reconciledTotals.paid_total < reconciledTotals.grand_total) {
         throw new ScopeValidationError("paid_total must be >= grand_total");
       }
@@ -288,6 +310,9 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
         trx_at: trxAt,
         subtotal: reconciledTotals.subtotal,
         discount_total: reconciledTotals.discount_total,
+        discount_percent: reconciledTotals.discount_percent,
+        discount_fixed: reconciledTotals.discount_fixed,
+        discount_code: reconciledTotals.discount_code,
         tax_total: reconciledTotals.tax_total,
         grand_total: reconciledTotals.grand_total,
         paid_total: reconciledTotals.paid_total,

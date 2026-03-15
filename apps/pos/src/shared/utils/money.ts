@@ -32,23 +32,46 @@ export interface PaymentEntry {
 export interface CartTotals {
   subtotal: number;
   discount_total: number;
+  discount_percent: number;
+  discount_fixed: number;
+  discount_code: string | null;
   tax_total: number;
   grand_total: number;
   paid_total: number;
   change_total: number;
 }
 
+export interface TransactionDiscounts {
+  discount_percent: number;
+  discount_fixed: number;
+  discount_code: string | null;
+}
+
 export function computeCartTotals(
   lines: CartLine[],
-  payments: PaymentEntry[]
+  payments: PaymentEntry[],
+  transactionDiscounts: TransactionDiscounts = { discount_percent: 0, discount_fixed: 0, discount_code: null }
 ): CartTotals {
   const subtotal = normalizeMoney(
     lines.reduce((sum, line) => sum + line.qty * line.product.price_snapshot, 0)
   );
-  const discountTotal = normalizeMoney(
+  const lineDiscountTotal = normalizeMoney(
     lines.reduce((sum, line) => sum + line.discount_amount, 0)
   );
-  const grandTotal = normalizeMoney(subtotal - discountTotal);
+  const afterLineDiscounts = normalizeMoney(subtotal - lineDiscountTotal);
+
+  const percentDiscount = normalizeMoney(
+    afterLineDiscounts * (transactionDiscounts.discount_percent / 100)
+  );
+  const afterPercent = normalizeMoney(afterLineDiscounts - percentDiscount);
+
+  const fixedDiscount = normalizeMoney(
+    Math.min(transactionDiscounts.discount_fixed, afterPercent)
+  );
+
+  const totalDiscount = normalizeMoney(lineDiscountTotal + percentDiscount + fixedDiscount);
+  const grandTotal = normalizeMoney(Math.max(0, subtotal - totalDiscount));
+  
   const paidTotal = normalizeMoney(
     payments.reduce((sum, p) => sum + p.amount, 0)
   );
@@ -56,7 +79,10 @@ export function computeCartTotals(
 
   return {
     subtotal,
-    discount_total: discountTotal,
+    discount_total: totalDiscount,
+    discount_percent: transactionDiscounts.discount_percent,
+    discount_fixed: transactionDiscounts.discount_fixed,
+    discount_code: transactionDiscounts.discount_code,
     tax_total: 0,
     grand_total: grandTotal,
     paid_total: paidTotal,

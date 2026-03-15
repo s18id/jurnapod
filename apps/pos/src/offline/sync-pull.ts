@@ -351,7 +351,7 @@ function mapSyncPullToConfigRow(
 }
 
 function mapSyncPullToOpenOrderRows(payload: SyncPullResponse): ActiveOrderRow[] {
-  return payload.open_orders.map((order) => ({
+  return payload.open_orders?.map((order) => ({
     pk: order.order_id,
     order_id: order.order_id,
     company_id: order.company_id,
@@ -369,8 +369,11 @@ function mapSyncPullToOpenOrderRows(payload: SyncPullResponse): ActiveOrderRow[]
     opened_at: order.opened_at,
     closed_at: order.closed_at,
     notes: order.notes,
+    discount_percent: 0,
+    discount_fixed: 0,
+    discount_code: null,
     updated_at: order.updated_at
-  }));
+  })) ?? [];
 }
 
 function mapSyncPullToOpenOrderLineRows(payload: SyncPullResponse): ActiveOrderLineRow[] {
