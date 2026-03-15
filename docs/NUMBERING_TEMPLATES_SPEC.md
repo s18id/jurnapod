@@ -290,47 +290,16 @@ CREATE INDEX idx_numbering_templates_company_active
   ON numbering_templates(company_id, is_active);
 
 -- -----------------------------------------------------------------------------
--- Table: numbering_sequences
--- Purpose: Store current counter values per scope (atomic increment)
+-- Table Relationships
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS numbering_sequences (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  company_id BIGINT UNSIGNED NOT NULL,
-  doc_type VARCHAR(32) NOT NULL COMMENT 'SALES_INVOICE, SALES_PAYMENT',
-  scope_key VARCHAR(128) NOT NULL COMMENT 'E.g., 2026, 2026-03, HQ-2026',
-  current_value BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  last_generated_at DATETIME DEFAULT NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  
-  -- Constraints
-  CONSTRAINT uq_numbering_sequences_scope 
-    UNIQUE KEY (company_id, doc_type, scope_key),
-  CONSTRAINT fk_numbering_sequences_company 
-    FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Document numbering sequence counters';
-
-CREATE INDEX idx_numbering_sequences_company_doctype 
-  ON numbering_sequences(company_id, doc_type);
-
+-- NOTE: `numbering_sequences` table is NOT implemented.
+-- Current implementation uses `current_value` column in `numbering_templates` table.
 -- -----------------------------------------------------------------------------
--- Notes:
--- 1. No automatic template creation - admins must configure manually
--- 2. No renumbering of existing documents - backward compatible
--- 3. Sequences use row-level locking (FOR UPDATE) for concurrency safety
--- 4. Scope keys are calculated dynamically based on pattern + reset rule
--- -----------------------------------------------------------------------------
-```
-
-### Table Relationships
 
 ```
 companies (1) ──┬──< (N) numbering_templates
-                └──< (N) numbering_sequences
 
 numbering_templates.doc_type ──→ ENUM('SALES_INVOICE', 'SALES_PAYMENT')
-numbering_sequences.doc_type ──→ ENUM('SALES_INVOICE', 'SALES_PAYMENT')
 
 sales_invoices.invoice_no ──→ Generated using numbering_templates
 sales_payments.payment_no ──→ Generated using numbering_templates

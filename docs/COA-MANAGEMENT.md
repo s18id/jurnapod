@@ -21,31 +21,37 @@ The COA management system provides a complete CRUD interface for managing the co
 
 **Table:** `accounts`
 
+> Note: This CREATE TABLE is for reference only. See actual schema at `docs/db/schema.md`.
+
 ```sql
 CREATE TABLE accounts (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   company_id BIGINT UNSIGNED NOT NULL,
   code VARCHAR(32) NOT NULL,
   name VARCHAR(191) NOT NULL,
+  account_type_id BIGINT UNSIGNED NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_payable TINYINT(1) NOT NULL DEFAULT 0,
   type_name VARCHAR(191) NULL,
   normal_balance CHAR(1) NULL COMMENT 'D=Debit, K=Kredit',
   report_group VARCHAR(8) NULL COMMENT 'NRC=Neraca, PL=Laba Rugi',
   parent_account_id BIGINT UNSIGNED NULL,
   is_group TINYINT(1) NOT NULL DEFAULT 0,
-  is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   
   UNIQUE KEY (company_id, code),
   KEY (parent_account_id),
   KEY (company_id, is_active),
+  KEY idx_accounts_is_payable (company_id, is_payable),
   
   FOREIGN KEY (company_id) REFERENCES companies(id),
+  FOREIGN KEY (account_type_id) REFERENCES account_types(id),
   FOREIGN KEY (parent_account_id) REFERENCES accounts(id)
 ) ENGINE=InnoDB;
 ```
 
-**Migration:** `packages/db/migrations/0016_add_accounts_is_active.sql`
+**Migration:** See `docs/db/schema.md` for current schema
 
 ### Business Logic Layer
 

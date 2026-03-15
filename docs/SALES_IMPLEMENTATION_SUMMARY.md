@@ -146,51 +146,70 @@ POST /api/sales/invoices/1/void
 
 ## Database Schema Additions
 
+> **Note**: These CREATE TABLE statements are for historical reference.
+> See the current schema at `docs/db/schema.md`.
+
 ### Numbering Templates
 ```sql
+-- See current schema in docs/db/schema.md
 CREATE TABLE numbering_templates (
   id BIGINT UNSIGNED AUTO_INCREMENT,
   company_id BIGINT UNSIGNED NOT NULL,
   outlet_id BIGINT UNSIGNED DEFAULT NULL,
-  doc_type VARCHAR(32) NOT NULL, -- SALES_INVOICE, SALES_PAYMENT, SALES_ORDER
-  pattern VARCHAR(128) NOT NULL,  -- INV/{{yy}}{{mm}}/{{seq4}}
-  reset_period VARCHAR(16) DEFAULT 'NEVER', -- NEVER|YEARLY|MONTHLY
+  scope_key BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  doc_type VARCHAR(32) NOT NULL,
+  pattern VARCHAR(128) NOT NULL,
+  reset_period VARCHAR(16) DEFAULT 'NEVER',
   current_value INT UNSIGNED DEFAULT 0,
   last_reset DATE DEFAULT NULL,
   is_active TINYINT(1) DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY (company_id, outlet_id, doc_type)
 );
 ```
 
 ### Sales Orders
 ```sql
+-- See current schema in docs/db/schema.md
 CREATE TABLE sales_orders (
   id BIGINT UNSIGNED AUTO_INCREMENT,
   company_id BIGINT UNSIGNED NOT NULL,
   outlet_id BIGINT UNSIGNED NOT NULL,
   order_no VARCHAR(64) NOT NULL,
+  client_ref CHAR(36) NULL,
   order_date DATE NOT NULL,
   expected_date DATE DEFAULT NULL,
-  status VARCHAR(16) DEFAULT 'DRAFT', -- DRAFT|CONFIRMED|COMPLETED|VOID
+  status VARCHAR(16) DEFAULT 'DRAFT',
   notes TEXT,
   subtotal DECIMAL(18,2) DEFAULT 0,
   tax_amount DECIMAL(18,2) DEFAULT 0,
   grand_total DECIMAL(18,2) DEFAULT 0,
+  created_by_user_id BIGINT UNSIGNED,
+  updated_by_user_id BIGINT UNSIGNED,
   confirmed_by_user_id BIGINT UNSIGNED,
   confirmed_at DATETIME,
   completed_by_user_id BIGINT UNSIGNED,
   completed_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY (company_id, order_no)
 );
 
 CREATE TABLE sales_order_lines (
   id BIGINT UNSIGNED AUTO_INCREMENT,
   order_id BIGINT UNSIGNED NOT NULL,
+  company_id BIGINT UNSIGNED NOT NULL,
+  outlet_id BIGINT UNSIGNED NOT NULL,
   line_no INT UNSIGNED NOT NULL,
+  line_type VARCHAR(16) DEFAULT 'SERVICE',
+  item_id BIGINT UNSIGNED,
   description VARCHAR(255) NOT NULL,
   qty DECIMAL(18,4) NOT NULL,
   unit_price DECIMAL(18,2) NOT NULL,
   line_total DECIMAL(18,2) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY (order_id, line_no)
 );
 ```

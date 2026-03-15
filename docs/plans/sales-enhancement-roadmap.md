@@ -99,19 +99,25 @@ DRAFT → APPROVED → POSTED → PAID
 - `apps/api/src/lib/sales-posting.ts` - Journal entry posting and void reversal
 
 **Database:**
+> **Note**: This is for reference. See current schema at `docs/db/schema.md`.
+
 ```sql
 CREATE TABLE sales_credit_notes (
   id BIGINT UNSIGNED AUTO_INCREMENT,
   company_id BIGINT UNSIGNED NOT NULL,
   outlet_id BIGINT UNSIGNED NOT NULL,
-  invoice_id BIGINT UNSIGNED NOT NULL, -- source invoice
+  invoice_id BIGINT UNSIGNED NOT NULL,
   credit_note_no VARCHAR(64) NOT NULL,
   credit_note_date DATE NOT NULL,
-  client_ref CHAR(36) DEFAULT NULL, -- for idempotency
-  status VARCHAR(16) DEFAULT 'DRAFT', -- DRAFT|POSTED|VOID
+  status VARCHAR(16) DEFAULT 'DRAFT',
   reason TEXT,
   notes TEXT,
   amount DECIMAL(18,2) NOT NULL,
+  client_ref CHAR(36) DEFAULT NULL,
+  created_by_user_id BIGINT UNSIGNED,
+  updated_by_user_id BIGINT UNSIGNED,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   ...
 );
 ```
@@ -208,10 +214,13 @@ Cr: Sales Returns (contra revenue)  amount
 ### Phase 6: Enhanced Audit Trail
 **Priority:** Low  
 **Effort:** Low  
-**Status:** Planned
+**Status:** Not yet implemented
+
+> **Note**: This table has NOT been created yet.
 
 **Database:**
 ```sql
+-- NOT YET IMPLEMENTED
 CREATE TABLE sales_invoice_history (
   id BIGINT UNSIGNED AUTO_INCREMENT,
   invoice_id BIGINT UNSIGNED NOT NULL,
@@ -373,15 +382,20 @@ WHERE i.status = 'POSTED'
 - List API returns splits consistently with detail API
 
 **Database:**
+> **Note**: This is for reference. See current schema at `docs/db/schema.md`.
+
 ```sql
+-- See docs/db/schema.md for current schema
 CREATE TABLE sales_payment_splits (
   id BIGINT UNSIGNED AUTO_INCREMENT,
   payment_id BIGINT UNSIGNED NOT NULL,
   company_id BIGINT UNSIGNED NOT NULL,
   outlet_id BIGINT UNSIGNED NOT NULL,
-  split_index INT UNSIGNED NOT NULL,
+  split_index INT UNSIGNED NOT NULL DEFAULT 0,
   account_id BIGINT UNSIGNED NOT NULL,
   amount DECIMAL(18,2) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_sales_payment_splits_payment_index (payment_id, split_index)
 );
