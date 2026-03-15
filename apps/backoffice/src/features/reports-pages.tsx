@@ -3,6 +3,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Badge,
   Box,
   Button,
@@ -1096,6 +1097,7 @@ export function JournalsPage(props: ReportsProps) {
     total_credit: 0,
     balance: 0
   });
+  const isTrialBalanced = useMemo(() => trialTotals.total_debit === trialTotals.total_credit, [trialTotals]);
   const [error, setError] = useState<string | null>(null);
   const {
     data: fiscalYears,
@@ -1314,6 +1316,11 @@ export function JournalsPage(props: ReportsProps) {
               { label: "Balance", value: formatMoneyDisplay(trialTotals.balance) }
             ]}
           />
+          {!isTrialBalanced && (
+            <Alert color="red" title="Out of Balance">
+              Trial balance is out of balance. Total Debits ({formatMoneyDisplay(trialTotals.total_debit)}) do not equal Total Credits ({formatMoneyDisplay(trialTotals.total_credit)}). This indicates a posting error.
+            </Alert>
+          )}
           <DataTable columns={trialColumns} data={trialRows} minWidth={640} stickyHeader />
         </Stack>
       </PageCard>

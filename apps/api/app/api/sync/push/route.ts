@@ -120,6 +120,9 @@ type SyncPushTransactionPayload = {
     tax_rate_id: number;
     amount: number;
   }>;
+  discount_percent?: number;
+  discount_fixed?: number;
+  discount_code?: string | null;
 };
 
 type ExistingIdempotencyRecord = {
@@ -700,9 +703,12 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
            closed_at,
            notes,
            trx_at,
+           discount_percent,
+           discount_fixed,
+           discount_code,
            payload_sha256,
            payload_hash_version
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           tx.company_id,
           tx.outlet_id,
@@ -718,6 +724,9 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
           closedAtCanonical,
           tx.notes ?? null,
           trxAtCanonical,
+          tx.discount_percent ?? 0,
+          tx.discount_fixed ?? 0,
+          tx.discount_code ?? null,
           payloadSha256,
           PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT
         ]

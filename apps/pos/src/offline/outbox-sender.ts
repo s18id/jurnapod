@@ -67,6 +67,9 @@ export interface SyncPushTransaction {
   closed_at?: string | null;
   notes?: string | null;
   trx_at: string;
+  discount_percent?: number;
+  discount_fixed?: number;
+  discount_code?: string | null;
   items: SyncPushTransactionItem[];
   payments: SyncPushTransactionPayment[];
 }
@@ -361,6 +364,9 @@ function buildSyncRequest(payload: ParsedOutboxPayload, snapshot: HydratedSaleSn
     closed_at: sale.closed_at ?? sale.completed_at,
     notes: sale.notes ?? null,
     trx_at: sale.trx_at,
+    discount_percent: sale.discount_percent,
+    discount_fixed: sale.discount_fixed,
+    discount_code: sale.discount_code ?? null,
     items: snapshot.items.map((item) => ({
       item_id: item.item_id,
       qty: item.qty,

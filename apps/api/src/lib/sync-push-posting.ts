@@ -13,7 +13,7 @@ const SYNC_PUSH_POSTING_MODE_ENV_KEY = "SYNC_PUSH_POSTING_MODE";
 const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV_KEY = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
 const POS_SALE_DOC_TYPE = "POS_SALE";
 const MONEY_SCALE = 100;
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "AR", "SALES_RETURNS"] as const;
+const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "AR", "SALES_RETURNS", "SALES_DISCOUNTS"] as const;
 type OutletAccountMappingKey = (typeof OUTLET_ACCOUNT_MAPPING_KEYS)[number];
 
 export const OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE = "OUTLET_ACCOUNT_MAPPING_MISSING";
@@ -254,11 +254,13 @@ async function readOutletAccountMappingByKey(
   }
 
   const salesReturnsAccountId = accountByKey.get("SALES_RETURNS") ?? accountByKey.get("SALES_REVENUE");
+  const salesDiscountsAccountId = accountByKey.get("SALES_DISCOUNTS") ?? accountByKey.get("SALES_REVENUE");
 
   return {
     SALES_REVENUE: accountByKey.get("SALES_REVENUE") as number,
     AR: accountByKey.get("AR") as number,
-    SALES_RETURNS: salesReturnsAccountId as number
+    SALES_RETURNS: salesReturnsAccountId as number,
+    SALES_DISCOUNTS: salesDiscountsAccountId as number
   };
 }
 
@@ -373,6 +375,35 @@ async function readPosGrossSalesAmount(dbExecutor: QueryExecutor, context: SyncP
   return grossSales;
 }
 
+type PosDiscountData = {
+  percent: number;
+  fixed: number;
+  code: string | null;
+};
+
+async function readPosDiscount(
+  dbExecutor: QueryExecutor,
+  context: SyncPushPostingContext
+): Promise<PosDiscountData> {
+  const [rows] = await dbExecutor.execute(
+    `SELECT discount_percent, discount_fixed, discount_code
+     FROM pos_transactions
+     WHERE id = ?`,
+    [context.posTransactionId]
+  );
+
+  const row = (rows as Array<{ discount_percent?: number | string; discount_fixed?: number | string; discount_code?: string | null }>)[0];
+  if (!row) {
+    return { percent: 0, fixed: 0, code: null };
+  }
+
+  return {
+    percent: normalizeMoney(Number(row.discount_percent ?? 0)),
+    fixed: normalizeMoney(Number(row.discount_fixed ?? 0)),
+    code: row.discount_code ?? null
+  };
+}
+
 async function readPosTaxSummary(
   dbExecutor: QueryExecutor,
   context: SyncPushPostingContext
@@ -418,8 +449,16 @@ async function buildPosSaleJournalLines(
   const paymentMethodMappings = await readOutletPaymentMethodMappings(dbExecutor, context);
   const payments = await readPosPaymentsByMethod(dbExecutor, context);
   const grossSales = await readPosGrossSalesAmount(dbExecutor, context);
+  const discountData = await readPosDiscount(dbExecutor, context);
   const taxSummary = await readPosTaxSummary(dbExecutor, context);
   const taxConfig = taxSummary ? null : await readCompanyPosTaxConfig(dbExecutor, context);
+
+  let discountAmount = 0;
+  if (discountData.percent > 0) {
+    discountAmount = normalizeMoney(grossSales * (discountData.percent / 100));
+  }
+  discountAmount = normalizeMoney(discountAmount + discountData.fixed);
+  discountAmount = normalizeMoney(Math.min(discountAmount, grossSales));
 
   let salesTaxAmount = 0;
   let salesRevenueAmount = grossSales;
@@ -439,7 +478,7 @@ async function buildPosSaleJournalLines(
   }
 
   const isInclusive = taxSummary ? taxSummary.inclusive : taxConfig?.inclusive ?? false;
-  const totalDue = normalizeMoney(grossSales + (isInclusive ? 0 : salesTaxAmount));
+  const totalDue = normalizeMoney(grossSales + (isInclusive ? 0 : salesTaxAmount) - discountAmount);
 
   const lines: JournalLine[] = [];
   let paymentTotal = 0;
@@ -480,6 +519,18 @@ async function buildPosSaleJournalLines(
     credit: salesRevenueAmount,
     description: "POS sales revenue"
   });
+
+  if (discountAmount > 0) {
+    const discountDescription = discountData.code
+      ? `POS sales discount (${discountData.code})`
+      : "POS sales discount";
+    lines.push({
+      account_id: mapping.SALES_DISCOUNTS,
+      debit: 0,
+      credit: discountAmount,
+      description: discountDescription
+    });
+  }
 
   if (salesTaxAmount > 0) {
     if (taxSummary && taxSummary.lines.length > 0) {
