@@ -20,8 +20,9 @@ import {
 const createUserSchema = z
   .object({
     company_id: NumericIdSchema.optional(),
+    name: z.string().trim().min(1).max(191).optional(),
     email: z.string().trim().email().max(191),
-    password: z.string().min(8).max(255),
+    password: z.string().min(8).max(255).optional(),
     role_codes: z.array(RoleSchema).optional(),
     outlet_ids: z.array(NumericIdSchema).optional(),
     outlet_role_assignments: z
@@ -123,6 +124,7 @@ export const POST = withAuth(
 
       const user = await createUser({
         companyId,
+        name: input.name,
         email: input.email,
         password: input.password,
         roleCodes: input.role_codes,
@@ -131,7 +133,7 @@ export const POST = withAuth(
           outletId: assignment.outlet_id,
           roleCodes: assignment.role_codes
         })),
-        isActive: input.is_active,
+        isActive: input.is_active ?? false,
         actor: {
           userId: auth.userId,
           ipAddress: readClientIp(request)

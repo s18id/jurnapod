@@ -7,7 +7,7 @@ import { requireAccess, withAuth } from "../../../../src/lib/auth-guard";
 import { readClientIp } from "../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
-  getRole,
+  getRoleWithPermissions,
   updateRole,
   deleteRole,
   RoleNotFoundError,
@@ -21,10 +21,10 @@ function parseRoleId(request: Request): number {
 }
 
 export const GET = withAuth(
-  async (request, _auth) => {
+  async (request, auth) => {
     try {
       const roleId = parseRoleId(request);
-      const role = await getRole(roleId);
+      const role = await getRoleWithPermissions({ roleId, companyId: auth.companyId });
       return successResponse(role);
     } catch (error) {
       if (error instanceof ZodError) {

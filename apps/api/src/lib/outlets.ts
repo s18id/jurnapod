@@ -465,3 +465,19 @@ export async function deleteOutlet(params: {
     connection.release();
   }
 }
+
+/**
+ * Deactivate an outlet (soft delete - preserves historical data)
+ */
+export async function deactivateOutlet(params: {
+  companyId: number;
+  outletId: number;
+  actor: OutletActor;
+}): Promise<OutletFullResponse> {
+  return updateOutlet({
+    companyId: params.companyId,
+    outletId: params.outletId,
+    is_active: false,
+    actor: params.actor
+  });
+}

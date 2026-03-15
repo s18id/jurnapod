@@ -20,6 +20,7 @@ export class SuperAdminProtectionError extends Error {}
 export type UserProfile = {
   id: number;
   company_id: number;
+  name: string | null;
   email: string;
   is_active: boolean;
   global_roles: string[];
@@ -42,6 +43,7 @@ type UserActor = {
 type UserRow = RowDataPacket & {
   id: number;
   company_id: number;
+  name: string | null;
   email: string;
   is_active: number;
   created_at: Date;
@@ -150,13 +152,26 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+function generateTempPassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  let password = "";
+  for (let i = 0; i < 12; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
+
+async function sendRoleChangeNotification(companyId: number, userId: number, newRoles: string[]): Promise<void> {
+  console.log(`[NOTIFICATION] User ${userId} roles changed to: ${newRoles.join(", ")} (company ${companyId})`);
+}
+
 async function findUserRowById(
   connection: PoolConnection | ReturnType<typeof getDbPool>,
   companyId: number,
   userId: number
 ): Promise<UserRow | null> {
   const [rows] = await connection.execute<UserRow[]>(
-    `SELECT id, company_id, email, is_active, created_at, updated_at
+    `SELECT id, company_id, name, email, is_active, created_at, updated_at
      FROM users
      WHERE id = ? AND company_id = ?
      LIMIT 1`,
@@ -428,6 +443,7 @@ function normalizeUserRow(row: UserRow): Omit<UserProfile, "global_roles" | "out
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
+    name: row.name,
     email: row.email,
     is_active: row.is_active === 1,
     created_at: row.created_at.toISOString(),
@@ -439,7 +455,7 @@ export async function listUsers(companyId: number, filters?: { isActive?: boolea
   const pool = getDbPool();
   const values: Array<string | number> = [companyId];
   let sql =
-    "SELECT id, company_id, email, is_active, created_at, updated_at FROM users WHERE company_id = ?";
+    "SELECT id, company_id, name, email, is_active, created_at, updated_at FROM users WHERE company_id = ?";
 
   if (typeof filters?.isActive === "boolean") {
     sql += " AND is_active = ?";
@@ -490,8 +506,9 @@ export async function findUserById(companyId: number, userId: number): Promise<U
 
 export async function createUser(params: {
   companyId: number;
+  name?: string;
   email: string;
-  password: string;
+  password?: string;
   roleCodes?: string[];
   outletIds?: number[];
   outletRoleAssignments?: Array<{ outletId: number; roleCodes: string[] }>;
@@ -506,7 +523,8 @@ export async function createUser(params: {
   try {
     await connection.beginTransaction();
     const email = normalizeEmail(params.email);
-    const isActive = params.isActive ?? true;
+    const name = params.name?.trim() ?? null;
+    const isActive = params.isActive ?? false;
 
     const [existingRows] = await connection.execute<RowDataPacket[]>(
       `SELECT id FROM users WHERE company_id = ? AND email = ? LIMIT 1`,
@@ -518,11 +536,12 @@ export async function createUser(params: {
     }
 
     const policy = passwordHashPolicyFromEnv();
-    const passwordHash = await hashPassword(params.password, policy);
+    const passwordToHash = params.password ?? generateTempPassword();
+    const passwordHash = await hashPassword(passwordToHash, policy);
     const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO users (company_id, email, password_hash, is_active)
-       VALUES (?, ?, ?, ?)`,
-      [params.companyId, email, passwordHash, isActive ? 1 : 0]
+      `INSERT INTO users (company_id, name, email, password_hash, is_active)
+       VALUES (?, ?, ?, ?, ?)`,
+      [params.companyId, name, email, passwordHash, isActive ? 1 : 0]
     );
 
     const userId = Number(result.insertId);
@@ -841,6 +860,8 @@ export async function setUserRoles(params: {
       );
     }
 
+    await sendRoleChangeNotification(params.companyId, params.userId, roleCodes);
+
     await connection.commit();
 
     const updated = await findUserById(params.companyId, params.userId);
@@ -1129,6 +1150,29 @@ export async function getRole(roleId: number): Promise<{
     name: rows[0].name,
     is_global: Boolean(rows[0].is_global),
     role_level: Number(rows[0].role_level ?? 0)
+  };
+}
+
+export async function getRoleWithPermissions(params: {
+  roleId: number;
+  companyId: number;
+}): Promise<{
+  id: number;
+  code: string;
+  name: string;
+  is_global: boolean;
+  role_level: number;
+  permissions: ModuleRoleResponse[];
+}> {
+  const role = await getRole(params.roleId);
+  const permissions = await listModuleRoles({
+    companyId: params.companyId,
+    roleId: params.roleId
+  });
+
+  return {
+    ...role,
+    permissions
   };
 }
 

@@ -80,7 +80,11 @@ export async function POST(request: Request) {
 
     const user = await findGoogleLoginUser(input.companyCode, profile.email);
     if (!user) {
-      return errorResponse("INVALID_CREDENTIALS", "Invalid credentials", 401);
+      return errorResponse(
+        "GOOGLE_USER_NOT_FOUND",
+        "No account found for this Google email. Please contact your administrator to create an account or register first.",
+        404
+      );
     }
 
     const linkResult = await linkGoogleAccount({
