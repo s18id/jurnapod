@@ -68,22 +68,85 @@ Default model is set in `_bmad/_config/ides/opencode.yaml`.
 
 ## Agent delegation
 
-Delegate to specialized agents when tasks match their expertise:
+Use the `skill` tool to load the appropriate agent. If unsure what to do, use `bmad-help`.
 
-| Task | Agent |
-|------|-------|
+### Development & Implementation
+
+| When you need... | Use this agent |
+|------------------|----------------|
+| Implement a story (from spec) | `bmad-dev-story` |
+| Quick code change / bug fix | `bmad-quick-dev` or `bmad-quick-dev-new-preview` |
+| Solo dev on a task | `bmad-quick-flow-solo-dev` |
 | Code review | `bmad-code-review` |
-| Write tests / test strategy | `bmad-testarch-*` |
-| Create PRD | `bmad-create-prd` |
-| Create architecture | `bmad-create-architecture` |
-| Create UX design | `bmad-create-ux-design` |
-| Break down requirements | `bmad-create-epics-and-stories` |
-| Implement story | `bmad-dev-story` |
-| Product management | `bmad-pm` |
-| Market/domain research | `bmad-market-research` / `bmad-domain-research` |
-| Retrospective | `bmad-retrospective` |
+| Edge case review | `bmad-review-edge-case-hunter` |
+
+### Requirements & Design
+
+| When you need... | Use this agent |
+|------------------|----------------|
+| New feature requirements (PRD) | `bmad-create-prd` |
+| Edit existing PRD | `bmad-edit-prd` |
+| Validate PRD | `bmad-validate-prd` |
+| Create architecture / tech design | `bmad-create-architecture` |
+| Create UX design specs | `bmad-create-ux-design` |
+| Break down requirements into stories | `bmad-create-epics-and-stories` |
+| Quick tech spec | `bmad-quick-spec` |
+| Product brief | `bmad-create-product-brief` |
+
+### Testing & Quality
+
+| When you need... | Use this agent |
+|------------------|----------------|
+| Test strategy / plan | `bmad-testarch-test-design` |
+| Setup test framework | `bmad-testarch-framework` |
+| Expand test coverage | `bmad-testarch-automate` |
+| Acceptance tests (TDD) | `bmad-testarch-atdd` |
+| Traceability matrix | `bmad-testarch-trace` |
+| Review test quality | `bmad-testarch-test-review` |
+| NFR assessment | `bmad-testarch-nfr` |
+| Setup CI pipeline | `bmad-testarch-ci` |
+| Generate e2e tests | `bmad-qa-generate-e2e-tests` |
+| QA assistance | `bmad-qa` |
+
+### Research & Analysis
+
+| When you need... | Use this agent |
+|------------------|----------------|
+| Market research | `bmad-market-research` |
+| Domain/industry research | `bmad-domain-research` |
 | Technical research | `bmad-technical-research` |
 | Sprint status | `bmad-sprint-status` |
-| Project documentation | `bmad-document-project` |
+| Sprint planning | `bmad-sprint-planning` |
 
-Use the `skill` tool to load the appropriate agent. If unsure what to do, use `bmad-help`.
+### Product & Process
+
+| When you need... | Use this agent |
+|------------------|----------------|
+| Product management | `bmad-pm` |
+| Run retrospective | `bmad-retrospective` |
+| Brainstorming / ideation | `bmad-brainstorming` |
+| Correct course (sprint change) | `bmad-correct-course` |
+| Check implementation readiness | `bmad-check-implementation-readiness` |
+
+### Documentation
+
+| When you need... | Use this agent |
+|------------------|----------------|
+| Document existing project | `bmad-document-project` |
+| Generate project context | `bmad-generate-project-context` |
+| Shard large document | `bmad-shard-doc` |
+| Index docs folder | `bmad-index-docs` |
+| Tech writing | `bmad-tech-writer` |
+| Editorial review (prose) | `bmad-editorial-review-prose` |
+| Editorial review (structure) | `bmad-editorial-review-structure` |
+
+### Specialized
+
+| When you need... | Use this agent |
+|------------------|----------------|
+| Master orchestrator | `bmad-master` |
+| Analyst | `bmad-analyst` |
+| Adversarial review | `bmad-review-adversarial-general` |
+| Party mode (group discussion) | `bmad-party-mode` |
+| Advanced elicitation | `bmad-advanced-elicitation` |
+| Learn testing | `bmad-teach-me-testing` |
