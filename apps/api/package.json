@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev -H ${HOST:-0.0.0.0} -p ${PORT:-3001}",
-    "build": "next build",
-    "start": "next start",
+    "dev": "nodemon --watch src --ext ts --exec 'node --import tsx src/server.ts'",
+    "build": "tsc --noEmit",
+    "start": "NODE_ENV=production node --import tsx src/server.ts",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run test:unit",
@@ -23,14 +23,12 @@
     "@jurnapod/shared": "0.1.0",
     "@node-rs/argon2": "^2.0.2",
     "bcryptjs": "^3.0.2",
+    "hono": "^4.0.0",
     "jose": "^6.1.2",
     "marked": "^12.0.2",
     "mysql2": "^3.15.3",
-    "next": "^15.5.12",
     "nodemailer": "^6.9.15",
     "puppeteer-core": "^22.15.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "sanitize-html": "^2.14.0",
     "zod": "^3.24.1"
   },
@@ -40,7 +38,6 @@
     "@types/nodemailer": "^6.4.16",
     "@types/sanitize-html": "^2.13.0",
     "eslint": "^9.39.3",
-    "eslint-config-next": "^15.5.12",
     "tsx": "^4.20.3",
     "typescript": "^5.7.3"
   }

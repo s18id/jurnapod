@@ -2,11 +2,15 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 
-export default defineConfig({
-  plugins: [react()],
-  build: {
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const posPort = parseInt(env.POS_PORT || "5173", 10);
+
+  return {
+    plugins: [react()],
+    build: {
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -59,12 +63,14 @@ export default defineConfig({
       }
     }
   },
-  server: {
-    proxy: {
-      "/api": {
-        target: process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:3001",
-        changeOrigin: true
+    server: {
+      port: posPort,
+      proxy: {
+        "/api": {
+          target: process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:3001",
+          changeOrigin: true
+        }
       }
     }
-  }
+  };
 });

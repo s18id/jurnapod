@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-15T11:15:00.000Z
+last_updated: 2026-03-15T14:44:17+07:00
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -73,8 +73,8 @@ development_status:
   epic-3-retrospective: optional
 
   # Epic 4: Items & Catalog - Product Management
-  epic-4: backlog
-  4-1-item-product-management-crud: backlog
+  epic-4: in-progress
+  4-1-item-product-management-crud: in-progress
   4-2-outlet-specific-pricing: backlog
   4-3-multiple-item-types: backlog
   epic-4-retrospective: optional

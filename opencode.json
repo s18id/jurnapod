@@ -4,7 +4,8 @@
     "opencode-go": {
       "options": {
         "timeout": 600000,
-        "chunkTimeout": 120000
+        "chunkTimeout": 120000,
+        "textVerbosity": "low"
       }
     }
   }

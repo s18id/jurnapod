@@ -13,9 +13,8 @@ const compat = new FlatCompat({
 });
 
 const config = [
-  ...compat.extends("next/core-web-vitals"),
   {
-    ignores: [".next/**", "dist/**", "next-env.d.ts"],
+    ignores: ["dist/**"],
   },
 ];
 
