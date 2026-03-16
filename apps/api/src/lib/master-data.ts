@@ -1335,6 +1335,16 @@ export async function updateItem(
         values
       );
 
+      // If deactivating the item, also deactivate its prices
+      if (typeof input.is_active === "boolean" && input.is_active === false) {
+        await connection.execute<ResultSetHeader>(
+          `UPDATE item_prices 
+           SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+           WHERE company_id = ? AND item_id = ?`,
+          [companyId, itemId]
+        );
+      }
+
       const item = await findItemByIdWithExecutor(connection, companyId, itemId);
       if (!item) {
         return null;
@@ -1491,6 +1501,9 @@ export async function listEffectiveItemPricesForOutlet(
 
   if (typeof filters?.isActive === "boolean") {
     sql += " AND COALESCE(override.is_active, def.is_active) = ?";
+    values.push(filters.isActive ? 1 : 0);
+    // Also filter by item active status when filtering for active prices
+    sql += " AND i.is_active = ?";
     values.push(filters.isActive ? 1 : 0);
   }
 
