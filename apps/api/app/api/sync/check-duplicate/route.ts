@@ -23,7 +23,7 @@ type CheckDuplicateResponse = z.infer<typeof CheckDuplicateResponseSchema>;
 
 type PosTransactionRow = {
   id: number;
-  created_at: Date;
+  created_at: string;
 };
 
 async function checkDuplicateTransaction(
@@ -49,7 +49,7 @@ async function checkDuplicateTransaction(
     
     return {
       id: row.id,
-      created_at: row.created_at.toISOString()
+      created_at: row.created_at
     };
   } finally {
     connection.release();
