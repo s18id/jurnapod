@@ -38,6 +38,8 @@ import {
   ForbiddenPage,
   ItemGroupsPage,
   ItemsPricesPage,
+  ItemsPage,
+  PricesPage,
   JournalsPage,
   GeneralLedgerPage,
   ProfitLossPage,
@@ -151,8 +153,17 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   if (props.path === "/outlets") {
     return <OutletsPage user={props.user} accessToken={props.accessToken} />;
   }
+  // Handle legacy route redirect
   if (props.path === "/items-prices") {
-    return <ItemsPricesPage user={props.user} accessToken={props.accessToken} />;
+    // Redirect to new /items page
+    window.location.hash = "#/items";
+    return <ItemsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/items") {
+    return <ItemsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/prices") {
+    return <PricesPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/item-groups") {
     return <ItemGroupsPage user={props.user} accessToken={props.accessToken} />;

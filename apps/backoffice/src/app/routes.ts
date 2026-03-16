@@ -145,9 +145,23 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "inventory"
   },
+  // NEW: Separate Items and Prices pages (replaces items-prices)
+  {
+    path: "/items",
+    label: "Items",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "inventory"
+  },
+  {
+    path: "/prices",
+    label: "Prices",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "inventory"
+  },
+  // LEGACY: Hidden from menu, redirects to /items
   {
     path: "/items-prices",
-    label: "Items & Prices",
+    label: "Items & Prices (Legacy)",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "inventory"
   },

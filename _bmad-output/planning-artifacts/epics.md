@@ -1010,3 +1010,22 @@ So that **the system performs well at scale and data doesn't grow unbounded**.
 **Given** backoffice_sync_queue records completed more than 7 days ago  
 **When** the retention job runs  
 **Then** those records are automatically purged
+
+---
+
+## Related Epic Documents
+
+### Backoffice UX Refactoring
+**File:** `epics-backoffice-ux.md`  
+**Status:** Ready for Implementation  
+**Epics:** 8, 9, 10, 11 (Epic 11 Deferred)  
+**Scope:** UX improvements for existing backoffice application
+
+**Included Epics:**
+- **Epic 8:** Backoffice-Items-Split (P0) - Split 2,195-line Items & Prices page
+- **Epic 9:** Backoffice-Users-Simplify (P1) - Redesign complex role management
+- **Epic 10:** Backoffice-Consistency-Standards (P2) - Standardize 6-8 problem pages
+- **Epic 11:** Backoffice-Performance (P3) - Deferred
+
+**Total Stories:** 19 active stories  
+**Total Effort:** ~26-33 hours

@@ -1,0 +1,771 @@
+// Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
+// Ownership: Ahmad Faruk (Signal18 ID)
+
+import { useState, useMemo, useCallback } from "react";
+import {
+  Stack,
+  Card,
+  Title,
+  Text,
+  Group,
+  Button,
+  Select,
+  TextInput,
+  Table,
+  ScrollArea,
+  Badge,
+  Alert,
+  Loader,
+  Modal,
+  ActionIcon,
+  Checkbox,
+  Menu,
+} from "@mantine/core";
+import { useDisclosure, useMediaQuery } from "@mantine/hooks";
+import {
+  IconAlertCircle,
+  IconTrash,
+  IconSearch,
+  IconEdit,
+  IconPlus,
+  IconDownload,
+  IconTag,
+  IconDots,
+} from "@tabler/icons-react";
+import { apiRequest } from "../lib/api-client";
+import { useItems, type Item, type ItemType } from "../hooks/use-items";
+import { useItemGroups } from "../hooks/use-item-groups";
+import type { SessionUser } from "../lib/session";
+
+interface ItemsPageProps {
+  user: SessionUser;
+  accessToken: string;
+}
+
+type ItemFormData = {
+  sku: string | null;
+  name: string;
+  type: ItemType;
+  item_group_id: number | null;
+  is_active: boolean;
+};
+
+const itemTypeOptions = [
+  { value: "SERVICE", label: "Service" },
+  { value: "PRODUCT", label: "Product" },
+  { value: "INGREDIENT", label: "Ingredient" },
+  { value: "RECIPE", label: "Recipe" },
+];
+
+export function ItemsPage({ user, accessToken }: ItemsPageProps) {
+  const isMobile = useMediaQuery("(max-width: 48em)");
+
+  // Data hooks
+  const {
+    items,
+    loading: itemsLoading,
+    error: itemsError,
+    refresh: refreshItems,
+    itemMap,
+  } = useItems({ user, accessToken });
+
+  const {
+    itemGroups,
+    loading: groupsLoading,
+    error: groupsError,
+    groupMap,
+  } = useItemGroups({ user, accessToken });
+
+  // Filter states
+  const [searchTerm, setSearchTerm] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [groupFilter, setGroupFilter] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<boolean | null>(true); // Default to Active
+
+  // Modal states
+  const [createModalOpen, { open: openCreateModal, close: closeCreateModal }] =
+    useDisclosure(false);
+  const [editModalOpen, { open: openEditModal, close: closeEditModal }] =
+    useDisclosure(false);
+  const [deleteModalOpen, { open: openDeleteModal, close: closeDeleteModal }] =
+    useDisclosure(false);
+
+  // Form states
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
+  const [formData, setFormData] = useState<ItemFormData>({
+    sku: null,
+    name: "",
+    type: "PRODUCT",
+    item_group_id: null,
+    is_active: true,
+  });
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Derived data
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      // Search filter
+      if (searchTerm) {
+        const search = searchTerm.toLowerCase();
+        const nameMatch = item.name.toLowerCase().includes(search);
+        const skuMatch = item.sku?.toLowerCase().includes(search) ?? false;
+        if (!nameMatch && !skuMatch) return false;
+      }
+
+      // Type filter
+      if (typeFilter && item.type !== typeFilter) return false;
+
+      // Group filter
+      if (groupFilter && String(item.item_group_id) !== groupFilter) return false;
+
+      // Status filter
+      if (statusFilter !== null && item.is_active !== statusFilter) return false;
+
+      return true;
+    });
+  }, [items, searchTerm, typeFilter, groupFilter, statusFilter]);
+
+  const hasActiveFilters =
+    searchTerm || typeFilter || groupFilter || statusFilter !== null;
+
+  const groupSelectOptions = useMemo(() => {
+    return itemGroups.map((group) => ({
+      value: String(group.id),
+      label: group.name,
+    }));
+  }, [itemGroups]);
+
+  // Helper functions
+  const getGroupName = useCallback(
+    (groupId: number | null) => {
+      if (!groupId) return "-";
+      const group = groupMap.get(groupId);
+      return group?.name ?? "-";
+    },
+    [groupMap]
+  );
+
+  const resetFilters = () => {
+    setSearchTerm("");
+    setTypeFilter(null);
+    setGroupFilter(null);
+    setStatusFilter(true);
+  };
+
+  // Form handlers
+  const resetForm = () => {
+    setFormData({
+      sku: null,
+      name: "",
+      type: "PRODUCT",
+      item_group_id: null,
+      is_active: true,
+    });
+    setFormErrors({});
+    setActionError(null);
+  };
+
+  const openCreate = () => {
+    resetForm();
+    openCreateModal();
+  };
+
+  const openEdit = (item: Item) => {
+    setEditingItem(item);
+    setFormData({
+      sku: item.sku,
+      name: item.name,
+      type: item.type,
+      item_group_id: item.item_group_id,
+      is_active: item.is_active,
+    });
+    setFormErrors({});
+    setActionError(null);
+    openEditModal();
+  };
+
+  const openDelete = (itemId: number) => {
+    setDeletingItemId(itemId);
+    setActionError(null);
+    openDeleteModal();
+  };
+
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (!formData.name.trim()) {
+      errors.name = "Name is required";
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleCreate = async () => {
+    if (!validateForm()) return;
+
+    setSubmitting(true);
+    setActionError(null);
+
+    try {
+      await apiRequest(
+        "/inventory/items",
+        {
+          method: "POST",
+          body: JSON.stringify(formData),
+        },
+        accessToken
+      );
+
+      closeCreateModal();
+      resetForm();
+      await refreshItems();
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Failed to create item"
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!editingItem || !validateForm()) return;
+
+    setSubmitting(true);
+    setActionError(null);
+
+    try {
+      await apiRequest(
+        `/inventory/items/${editingItem.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(formData),
+        },
+        accessToken
+      );
+
+      closeEditModal();
+      setEditingItem(null);
+      resetForm();
+      await refreshItems();
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Failed to update item"
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingItemId) return;
+
+    setSubmitting(true);
+    setActionError(null);
+
+    try {
+      await apiRequest(
+        `/inventory/items/${deletingItemId}`,
+        {
+          method: "DELETE",
+        },
+        accessToken
+      );
+
+      closeDeleteModal();
+      setDeletingItemId(null);
+      await refreshItems();
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Failed to delete item"
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleExport = () => {
+    // TODO: Implement export functionality
+    // This will be handled in a separate story
+    console.log("Export items - not yet implemented");
+  };
+
+  // Loading state
+  if (itemsLoading || groupsLoading) {
+    return (
+      <Stack gap="md" p="md">
+        <Title order={2}>Items</Title>
+        <Group justify="center" py="xl">
+          <Loader />
+          <Text>Loading items...</Text>
+        </Group>
+      </Stack>
+    );
+  }
+
+  // Error state
+  if (itemsError || groupsError) {
+    return (
+      <Stack gap="md" p="md">
+        <Title order={2}>Items</Title>
+        <Alert color="red" title="Error loading data">
+          {itemsError || groupsError}
+        </Alert>
+        <Button onClick={refreshItems}>Retry</Button>
+      </Stack>
+    );
+  }
+
+  return (
+    <Stack gap="md" p="md">
+      {/* Header */}
+      <Group justify="space-between" align="center">
+        <div>
+          <Title order={2}>Items</Title>
+          <Text size="sm" c="dimmed">
+            Manage your product catalog
+          </Text>
+        </div>
+        <Group>
+          <Button
+            variant="light"
+            leftSection={<IconTag size={16} />}
+            component="a"
+            href="#/prices"
+          >
+            Manage Prices
+          </Button>
+          <Button
+            leftSection={<IconPlus size={16} />}
+            onClick={openCreate}
+          >
+            Create Item
+          </Button>
+          <Button
+            variant="default"
+            leftSection={<IconDownload size={16} />}
+            onClick={handleExport}
+          >
+            Export
+          </Button>
+        </Group>
+      </Group>
+
+      {/* Filters */}
+      <Card>
+        <Stack gap="xs">
+          <Group gap="sm" wrap="wrap">
+            <TextInput
+              placeholder="Search name or SKU..."
+              leftSection={<IconSearch size={16} />}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{ minWidth: 200 }}
+            />
+            <Select
+              placeholder="Type"
+              value={typeFilter}
+              onChange={setTypeFilter}
+              data={itemTypeOptions}
+              clearable
+              style={{ minWidth: 140 }}
+            />
+            <Select
+              placeholder="Group"
+              value={groupFilter}
+              onChange={setGroupFilter}
+              data={groupSelectOptions}
+              clearable
+              style={{ minWidth: 160 }}
+            />
+            <Select
+              placeholder="Status"
+              value={statusFilter === null ? null : String(statusFilter)}
+              onChange={(v) =>
+                setStatusFilter(v === null ? null : v === "true")
+              }
+              data={[
+                { value: "true", label: "Active" },
+                { value: "false", label: "Inactive" },
+              ]}
+              clearable
+              style={{ minWidth: 120 }}
+            />
+            {hasActiveFilters && (
+              <Button variant="subtle" size="sm" onClick={resetFilters}>
+                Clear All
+              </Button>
+            )}
+          </Group>
+          {hasActiveFilters && (
+            <Group gap="xs">
+              <Text size="xs" c="dimmed">
+                Active filters:
+              </Text>
+              {searchTerm && (
+                <Badge variant="light">Search: {searchTerm}</Badge>
+              )}
+              {typeFilter && <Badge variant="light">Type: {typeFilter}</Badge>}
+              {groupFilter && (
+                <Badge variant="light">
+                  Group: {getGroupName(Number(groupFilter))}
+                </Badge>
+              )}
+              {statusFilter !== null && (
+                <Badge variant="light">
+                  Status: {statusFilter ? "Active" : "Inactive"}
+                </Badge>
+              )}
+            </Group>
+          )}
+        </Stack>
+      </Card>
+
+      {/* Items Table */}
+      <Card>
+        {filteredItems.length === 0 ? (
+          <Text c="dimmed" ta="center" py="xl">
+            {hasActiveFilters
+              ? "No items match your filters."
+              : "No items found."}
+          </Text>
+        ) : isMobile ? (
+          // Mobile card view
+          <Stack gap="xs">
+            {filteredItems.map((item) => (
+              <Card key={item.id} withBorder>
+                <Stack gap="xs">
+                  <Group justify="space-between" align="flex-start">
+                    <div>
+                      <Text size="sm" fw={600}>
+                        {item.name}
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        #{item.id} · {item.sku ?? "No SKU"}
+                      </Text>
+                    </div>
+                    <Badge
+                      color={item.is_active ? "green" : "red"}
+                      variant="light"
+                    >
+                      {item.is_active ? "Active" : "Inactive"}
+                    </Badge>
+                  </Group>
+                  <Group justify="space-between" align="center">
+                    <Group gap="xs">
+                      <Badge variant="light">{item.type}</Badge>
+                      <Text size="xs" c="dimmed">
+                        {getGroupName(item.item_group_id)}
+                      </Text>
+                    </Group>
+                    <Menu>
+                      <Menu.Target>
+                        <ActionIcon variant="subtle">
+                          <IconDots size={16} />
+                        </ActionIcon>
+                      </Menu.Target>
+                      <Menu.Dropdown>
+                        <Menu.Item
+                          leftSection={<IconEdit size={14} />}
+                          onClick={() => openEdit(item)}
+                        >
+                          Edit
+                        </Menu.Item>
+                        <Menu.Item
+                          leftSection={<IconTrash size={14} />}
+                          color="red"
+                          onClick={() => openDelete(item.id)}
+                        >
+                          Delete
+                        </Menu.Item>
+                      </Menu.Dropdown>
+                    </Menu>
+                  </Group>
+                </Stack>
+              </Card>
+            ))}
+          </Stack>
+        ) : (
+          // Desktop table view
+          <ScrollArea>
+            <Table highlightOnHover striped stickyHeader>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>ID</Table.Th>
+                  <Table.Th>SKU</Table.Th>
+                  <Table.Th>Name</Table.Th>
+                  <Table.Th>Group</Table.Th>
+                  <Table.Th>Type</Table.Th>
+                  <Table.Th>Status</Table.Th>
+                  <Table.Th>Actions</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {filteredItems.map((item) => (
+                  <Table.Tr key={item.id}>
+                    <Table.Td>{item.id}</Table.Td>
+                    <Table.Td>
+                      <Text size="sm">{item.sku ?? "-"}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" fw={500}>
+                        {item.name}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm">
+                        {getGroupName(item.item_group_id)}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge variant="light">{item.type}</Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge
+                        color={item.is_active ? "green" : "red"}
+                        variant="light"
+                      >
+                        {item.is_active ? "Active" : "Inactive"}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Menu>
+                        <Menu.Target>
+                          <Button variant="light" size="xs">
+                            Actions
+                          </Button>
+                        </Menu.Target>
+                        <Menu.Dropdown>
+                          <Menu.Item
+                            leftSection={<IconEdit size={14} />}
+                            onClick={() => openEdit(item)}
+                          >
+                            Edit
+                          </Menu.Item>
+                          <Menu.Item
+                            leftSection={<IconTrash size={14} />}
+                            color="red"
+                            onClick={() => openDelete(item.id)}
+                          >
+                            Delete
+                          </Menu.Item>
+                        </Menu.Dropdown>
+                      </Menu>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        )}
+      </Card>
+
+      {/* Create Item Modal */}
+      <Modal
+        opened={createModalOpen}
+        onClose={closeCreateModal}
+        title="Create New Item"
+        size="md"
+      >
+        <Stack gap="md">
+          {actionError && (
+            <Alert color="red" icon={<IconAlertCircle size={16} />}>
+              {actionError}
+            </Alert>
+          )}
+
+          <TextInput
+            label="SKU"
+            placeholder="Optional SKU code"
+            value={formData.sku ?? ""}
+            onChange={(e) =>
+              setFormData((prev) => ({
+                ...prev,
+                sku: e.target.value || null,
+              }))
+            }
+          />
+
+          <TextInput
+            label="Name"
+            placeholder="Item name"
+            value={formData.name}
+            onChange={(e) =>
+              setFormData((prev) => ({ ...prev, name: e.target.value }))
+            }
+            error={formErrors.name}
+            required
+          />
+
+          <Select
+            label="Type"
+            value={formData.type}
+            onChange={(value) =>
+              setFormData((prev) => ({
+                ...prev,
+                type: (value as ItemType) || "PRODUCT",
+              }))
+            }
+            data={itemTypeOptions}
+            required
+          />
+
+          <Select
+            label="Group"
+            placeholder="Optional group"
+            value={formData.item_group_id ? String(formData.item_group_id) : ""}
+            onChange={(value) =>
+              setFormData((prev) => ({
+                ...prev,
+                item_group_id: value ? Number(value) : null,
+              }))
+            }
+            data={groupSelectOptions}
+            clearable
+          />
+
+          <Checkbox
+            label="Active"
+            checked={formData.is_active}
+            onChange={(e) =>
+              setFormData((prev) => ({
+                ...prev,
+                is_active: e.currentTarget.checked,
+              }))
+            }
+          />
+
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={closeCreateModal}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreate} loading={submitting}>
+              Create Item
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Edit Item Modal */}
+      <Modal
+        opened={editModalOpen}
+        onClose={closeEditModal}
+        title="Edit Item"
+        size="md"
+      >
+        <Stack gap="md">
+          {actionError && (
+            <Alert color="red" icon={<IconAlertCircle size={16} />}>
+              {actionError}
+            </Alert>
+          )}
+
+          <TextInput
+            label="SKU"
+            placeholder="Optional SKU code"
+            value={formData.sku ?? ""}
+            onChange={(e) =>
+              setFormData((prev) => ({
+                ...prev,
+                sku: e.target.value || null,
+              }))
+            }
+          />
+
+          <TextInput
+            label="Name"
+            placeholder="Item name"
+            value={formData.name}
+            onChange={(e) =>
+              setFormData((prev) => ({ ...prev, name: e.target.value }))
+            }
+            error={formErrors.name}
+            required
+          />
+
+          <Select
+            label="Type"
+            value={formData.type}
+            onChange={(value) =>
+              setFormData((prev) => ({
+                ...prev,
+                type: (value as ItemType) || "PRODUCT",
+              }))
+            }
+            data={itemTypeOptions}
+            required
+          />
+
+          <Select
+            label="Group"
+            placeholder="Optional group"
+            value={formData.item_group_id ? String(formData.item_group_id) : ""}
+            onChange={(value) =>
+              setFormData((prev) => ({
+                ...prev,
+                item_group_id: value ? Number(value) : null,
+              }))
+            }
+            data={groupSelectOptions}
+            clearable
+          />
+
+          <Checkbox
+            label="Active"
+            checked={formData.is_active}
+            onChange={(e) =>
+              setFormData((prev) => ({
+                ...prev,
+                is_active: e.currentTarget.checked,
+              }))
+            }
+          />
+
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={closeEditModal}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdate} loading={submitting}>
+              Save Changes
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        opened={deleteModalOpen}
+        onClose={closeDeleteModal}
+        title="Confirm Delete"
+        size="sm"
+      >
+        <Stack gap="md">
+          {actionError && (
+            <Alert color="red" icon={<IconAlertCircle size={16} />}>
+              {actionError}
+            </Alert>
+          )}
+
+          <Text>Are you sure you want to delete this item?</Text>
+          <Text size="sm" c="dimmed">
+            This action cannot be undone. The item will be removed from the
+            catalog.
+          </Text>
+
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={closeDeleteModal}>
+              Cancel
+            </Button>
+            <Button color="red" onClick={handleDelete} loading={submitting}>
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </Stack>
+  );
+}

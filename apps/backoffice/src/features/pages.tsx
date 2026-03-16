@@ -6,6 +6,8 @@ import { AccountsPage as ChartOfAccountsPage } from "./accounts-page";
 import { AccountTypesPage as AccountTypesManagementPage } from "./account-types-page";
 import { TransactionsPage as TransactionInputPage } from "./transactions-page";
 import { ItemsPricesPage as ItemsPricesManagementPage } from "./items-prices-page";
+import { ItemsPage as ItemsManagementPage } from "./items-page";
+import { PricesPage as PricesManagementPage } from "./prices-page";
 import { ItemGroupsPage as ItemGroupsManagementPage } from "./item-groups-page";
 import { TransactionTemplatesPage as TransactionTemplatesManagementPage } from "./transaction-templates-page";
 import {
@@ -69,6 +71,10 @@ export const TransactionsPage = TransactionInputPage;
 export const TransactionTemplatesPage = TransactionTemplatesManagementPage;
 
 export const ItemsPricesPage = ItemsPricesManagementPage;
+
+export const ItemsPage = ItemsManagementPage;
+
+export const PricesPage = PricesManagementPage;
 
 export const ItemGroupsPage = ItemGroupsManagementPage;
 
