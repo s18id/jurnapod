@@ -5,6 +5,7 @@ import { z } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { getReceivablesAgeingReport } from "../../../../src/lib/reports";
+import { getCompany } from "../../../../src/lib/companies";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
@@ -66,6 +67,10 @@ export const GET = withAuth(
       });
 
       const asOfDate = parsed.as_of_date ?? new Date().toISOString().slice(0, 10);
+
+      // Get company timezone for date boundary conversion
+      const company = await getCompany(auth.companyId);
+      const timezone = company.timezone ?? 'UTC';
 
       let outletIds: number[];
       if (typeof parsed.outlet_id === "number") {

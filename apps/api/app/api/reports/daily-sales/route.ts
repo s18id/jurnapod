@@ -6,6 +6,7 @@ import { checkUserAccess, listUserOutletIds, userHasOutletAccess } from "../../.
 import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { listDailySalesSummary } from "../../../../src/lib/reports";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
+import { getCompany } from "../../../../src/lib/companies";
 
 const elevatedRoles = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"] as const;
 
@@ -71,13 +72,18 @@ export const GET = withAuth(
 
       const cashierOnly = await isCashierOnly(auth);
 
+      // Get company timezone for date boundary conversion
+      const company = await getCompany(auth.companyId);
+      const timezone = company.timezone ?? 'UTC';
+
       const rows = await listDailySalesSummary({
         companyId: auth.companyId,
         outletIds,
         dateFrom,
         dateTo,
         status: parsed.status,
-        userId: cashierOnly ? auth.userId : undefined
+        userId: cashierOnly ? auth.userId : undefined,
+        timezone
       });
 
        return successResponse({
