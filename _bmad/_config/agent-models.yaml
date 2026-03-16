@@ -1,0 +1,235 @@
+# BMAD Agent Model Configuration
+# Maps BMAD agents to optimal AI models based on capability and cost
+# Generated: 2026-03-15
+
+# Strategy: OpenCode Go Primary (your subscription)
+# - Use opencode-go/minimax-m2.5 as primary for most tasks
+# - Use openai/gpt-5.1-codex-mini for code-specific tasks
+# - Use anthropic/claude-3-5-sonnet for complex reasoning only
+
+# Agent to Model Mappings
+agent_models:
+  # Core/Master agents - use minimax for orchestration
+  bmad-master:
+    model: "opencode-go/minimax-m2.5"
+    description: "Orchestration and complex decision making"
+    
+  # Development agents - use Codex for code tasks (best for coding)
+  bmad-dev:
+    model: "openai/gpt-5.1-codex-mini"
+    description: "Code implementation and debugging"
+    
+  bmad-quick-flow-solo-dev:
+    model: "openai/gpt-5.1-codex-mini"
+    description: "Rapid implementation"
+    
+  bmad-quick-dev:
+    model: "openai/gpt-5.1-codex-mini"
+    description: "Quick spec implementation"
+    
+  bmad-dev-story:
+    model: "openai/gpt-5.1-codex-mini"
+    description: "Story-based implementation"
+    
+  # QA/Testing agents - use minimax
+  bmad-qa:
+    model: "opencode-go/minimax-m2.5"
+    description: "Test generation"
+    
+  bmad-qa-generate-e2e-tests:
+    model: "opencode-go/minimax-m2.5"
+    description: "E2E test creation"
+    
+  bmad-testarch-test-design:
+    model: "opencode-go/minimax-m2.5"
+    description: "Test strategy design"
+    
+  bmad-testarch-framework:
+    model: "opencode-go/minimax-m2.5"
+    description: "Test framework setup"
+    
+  bmad-testarch-atdd:
+    model: "opencode-go/minimax-m2.5"
+    description: "Acceptance test generation"
+    
+  bmad-testarch-trace:
+    model: "opencode-go/minimax-m2.5"
+    description: "Traceability matrix"
+    
+  bmad-testarch-nfr:
+    model: "opencode-go/minimax-m2.5"
+    description: "Non-functional requirements testing"
+    
+  bmad-testarch-ci:
+    model: "opencode-go/minimax-m2.5"
+    description: "CI pipeline setup"
+    
+  bmad-testarch-automate:
+    model: "opencode-go/minimax-m2.5"
+    description: "Test automation expansion"
+    
+  bmad-testarch-test-review:
+    model: "opencode-go/minimax-m2.5"
+    description: "Test quality review"
+    
+  # Planning/Analysis agents
+  bmad-analyst:
+    model: "opencode-go/minimax-m2.5"
+    description: "Market research and analysis"
+    
+  bmad-architect:
+    model: "opencode-go/minimax-m2.5"
+    description: "Architecture design"
+    
+  bmad-pm:
+    model: "opencode-go/minimax-m2.5"
+    description: "Product management"
+    
+  bmad-sm:
+    model: "opencode-go/minimax-m2.5"
+    description: "Scrum master tasks"
+    
+  # UX/Design agents
+  bmad-ux-designer:
+    model: "opencode-go/minimax-m2.5"
+    description: "User experience design"
+    
+  bmad-create-ux-design:
+    model: "opencode-go/minimax-m2.5"
+    description: "UX specification creation"
+    
+  # Documentation agents
+  bmad-tech-writer:
+    model: "opencode-go/minimax-m2.5"
+    description: "Technical documentation"
+    
+  bmad-shard-doc:
+    model: "opencode-go/minimax-m2.5"
+    description: "Document organization"
+    
+  # Review agents - use kimi-k2.5 for consistency with implementation context
+  # and deep codebase understanding from ongoing work
+  bmad-code-review:
+    model: "opencode-go/kimi-k2.5"
+    description: "Adversarial code review"
+    
+  bmad-review-adversarial-general:
+    model: "opencode-go/kimi-k2.5"
+    description: "Critical review"
+    
+  bmad-review-edge-case-hunter:
+    model: "opencode-go/kimi-k2.5"
+    description: "Edge case analysis"
+    
+  bmad-editorial-review-prose:
+    model: "opencode-go/kimi-k2.5"
+    description: "Prose review"
+    
+  bmad-editorial-review-structure:
+    model: "opencode-go/kimi-k2.5"
+    description: "Structure review"
+    
+  # Research agents
+  bmad-market-research:
+    model: "opencode-go/minimax-m2.5"
+    description: "Market analysis"
+    
+  bmad-domain-research:
+    model: "opencode-go/minimax-m2.5"
+    description: "Domain research"
+    
+  bmad-technical-research:
+    model: "opencode-go/minimax-m2.5"
+    description: "Technical research"
+    
+  # PRD/Requirements
+  bmad-create-prd:
+    model: "opencode-go/minimax-m2.5"
+    description: "PRD creation"
+    
+  bmad-edit-prd:
+    model: "opencode-go/minimax-m2.5"
+    description: "PRD editing"
+    
+  bmad-validate-prd:
+    model: "opencode-go/minimax-m2.5"
+    description: "PRD validation"
+    
+  # Product/Design agents
+  bmad-create-product-brief:
+    model: "opencode-go/minimax-m2.5"
+    description: "Product brief creation"
+    
+  bmad-brainstorming:
+    model: "opencode-go/minimax-m2.5"
+    description: "Ideation sessions"
+    
+  bmad-create-epics-and-stories:
+    model: "opencode-go/minimax-m2.5"
+    description: "Epic/story breakdown"
+    
+  bmad-create-story:
+    model: "opencode-go/minimax-m2.5"
+    description: "Story creation"
+    
+  # Architecture/Planning
+  bmad-create-architecture:
+    model: "opencode-go/minimax-m2.5"
+    description: "Architecture design"
+    
+  bmad-quick-spec:
+    model: "opencode-go/minimax-m2.5"
+    description: "Quick tech spec"
+    
+  bmad-check-implementation-readiness:
+    model: "opencode-go/minimax-m2.5"
+    description: "Implementation readiness check"
+    
+  # Sprint/Project Management
+  bmad-sprint-planning:
+    model: "opencode-go/minimax-m2.5"
+    description: "Sprint planning"
+    
+  bmad-sprint-status:
+    model: "opencode-go/minimax-m2.5"
+    description: "Sprint status"
+    
+  bmad-retrospective:
+    model: "opencode-go/minimax-m2.5"
+    description: "Retrospectives"
+    
+  bmad-correct-course:
+    model: "opencode-go/minimax-m2.5"
+    description: "Course correction"
+    
+  # Utility agents
+  bmad-help:
+    model: "opencode-go/minimax-m2.5"
+    description: "Help and guidance"
+    
+  bmad-party-mode:
+    model: "opencode-go/minimax-m2.5"
+    description: "Multi-agent orchestration"
+    
+  bmad-document-project:
+    model: "opencode-go/minimax-m2.5"
+    description: "Project documentation"
+    
+  bmad-generate-project-context:
+    model: "opencode-go/minimax-m2.5"
+    description: "Context generation"
+    
+  bmad-index-docs:
+    model: "opencode-go/minimax-m2.5"
+    description: "Documentation indexing"
+    
+  bmad-teach-me-testing:
+    model: "opencode-go/minimax-m2.5"
+    description: "Testing education"
+    
+  bmad-advanced-elicitation:
+    model: "opencode-go/minimax-m2.5"
+    description: "Requirements elicitation"
+
+# Default fallback model
+default_model: "opencode-go/minimax-m2.5"
