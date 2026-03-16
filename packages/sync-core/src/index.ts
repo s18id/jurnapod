@@ -19,3 +19,8 @@ export type {
   TransportRequest, 
   TransportResponse 
 } from "./transport/retry-transport.js";
+
+// Export WebSocket types and utilities
+export type * from "./websocket/types.js";
+export { createEventPayload, isWebSocketEventType } from "./websocket/publisher.js";
+export type { EventPublisher, EventSubscriber } from "./websocket/publisher.js";
