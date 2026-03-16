@@ -15,6 +15,7 @@ import { formatMoney } from "../shared/utils/money.js";
 import { usePosAppState } from "../router/pos-app-state.js";
 import { ServiceSwitchModal } from "../features/navigation/ServiceSwitchModal.js";
 import type { OrderServiceType } from "../features/cart/useCart.js";
+import { useStockValidation } from "../features/stock/useStockValidation.js";
 
 interface ProductsPageProps {
   context: WebBootstrapContext;
@@ -43,7 +44,12 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     hasUnsentDineInItems
   } = usePosAppState();
   const { visibleProducts, searchTerm, setSearchTerm } = useProducts({ catalog });
+  const { checkStock, validationErrors, clearErrors } = useStockValidation({
+    companyId: scope.company_id,
+    outletId: scope.outlet_id
+  });
   const [dineInGuardMessage, setDineInGuardMessage] = useState<string | null>(null);
+  const [stockError, setStockError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [serviceSwitchModal, setServiceSwitchModal] = useState<{
     isOpen: boolean;
@@ -142,14 +148,28 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     setServiceSwitchModal((prev) => ({ ...prev, isOpen: false }));
   };
 
-  const handleAddProduct = (product: RuntimeProductCatalogItem) => {
+  const handleAddProduct = async (product: RuntimeProductCatalogItem) => {
     if (activeOrderContext.service_type === "DINE_IN" && !activeOrderContext.table_id) {
       setDineInGuardMessage("Select a table from the Tables page before adding items for dine-in.");
       return;
     }
 
+    // Check stock availability before adding
+    clearErrors();
+    const currentQty = cart[product.item_id]?.qty ?? 0;
+    const requestedQty = currentQty + 1;
+    const stockResult = await checkStock(product.item_id, requestedQty);
+    
+    if (stockResult && stockResult.track_stock && !stockResult.available) {
+      setStockError(
+        `Insufficient stock for ${product.name}. Available: ${stockResult.quantity_available}, Requested: ${requestedQty}`
+      );
+      return;
+    }
+
     setDineInGuardMessage(null);
-    upsertCartLine(product, { qty: (cart[product.item_id]?.qty ?? 0) + 1 });
+    setStockError(null);
+    upsertCartLine(product, { qty: requestedQty });
     if (payments.length === 0 || payments[0].amount === 0) {
       const fallbackMethod = payments[0]?.method ?? "";
       setPayments([{ method: fallbackMethod, amount: product.price_snapshot }]);
@@ -272,6 +292,24 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
           }}
         >
           {dineInGuardMessage}
+        </p>
+      ) : null}
+
+      {stockError ? (
+        <p
+          role="alert"
+          style={{
+            marginTop: 10,
+            padding: 10,
+            borderRadius: 8,
+            border: "1px solid #f87171",
+            background: "#fef2f2",
+            color: "#991b1b",
+            fontSize: 13,
+            fontWeight: 600
+          }}
+        >
+          {stockError}
         </p>
       ) : null}
 

@@ -36,3 +36,22 @@ export type {
 
 export { PrintService } from "./print-service.js";
 export type { PrintSaleReceiptInput } from "./print-service.js";
+
+export {
+  checkStockAvailability,
+  validateStockForItems,
+  reserveStock,
+  releaseStock,
+  releaseExpiredReservations,
+  updateStockFromSync,
+  batchUpdateStockFromSync,
+  getStockStatus
+} from "./stock.js";
+export type {
+  CheckStockAvailabilityInput,
+  CheckStockAvailabilityResult,
+  ValidateStockForItemsInput,
+  ReserveStockInput,
+  ReleaseStockInput,
+  UpdateStockFromSyncInput
+} from "./stock.js";

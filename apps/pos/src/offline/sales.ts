@@ -20,6 +20,7 @@ import {
   SaleTotalsMismatchError,
   ScopeValidationError
 } from "@jurnapod/offline-db/dexie";
+import { validateStockForItems, reserveStock, releaseStock } from "../services/stock.js";
 
 const saleCompletionLocks = new Set<string>();
 const MONEY_SCALE = 100;
@@ -218,7 +219,8 @@ export async function createSaleDraft(
     change_total: 0,
     data_version: null,
     created_at: openedAt,
-    completed_at: null
+    completed_at: null,
+    stock_checked: false
   };
 
   await db.sales.add(sale);
@@ -233,16 +235,27 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
   assertSaleCompletionInput(input);
 
   return withSaleCompletionLock(db, input.sale_id, async () => {
-    return db.transaction("rw", [db.sales, db.products_cache, db.sale_items, db.payments, db.outbox_jobs], async () => {
-      const currentSale = await db.sales.get(input.sale_id);
-      if (!currentSale) {
-        throw new RecordNotFoundError("sale", input.sale_id);
-      }
+    // Validate stock availability before transaction
+    const currentSale = await db.sales.get(input.sale_id);
+    if (!currentSale) {
+      throw new RecordNotFoundError("sale", input.sale_id);
+    }
 
-      if (currentSale.status !== "DRAFT") {
-        throw new InvalidSaleTransitionError(currentSale.sale_id, currentSale.status, "COMPLETED");
-      }
+    if (currentSale.status !== "DRAFT") {
+      throw new InvalidSaleTransitionError(currentSale.sale_id, currentSale.status, "COMPLETED");
+    }
 
+    // Check stock availability before proceeding
+    await validateStockForItems(
+      {
+        items: input.items.map((item) => ({ itemId: item.item_id, quantity: item.qty })),
+        companyId: currentSale.company_id,
+        outletId: currentSale.outlet_id
+      },
+      db
+    );
+
+    return db.transaction("rw", [db.sales, db.products_cache, db.sale_items, db.payments, db.outbox_jobs, db.inventory_stock, db.stock_reservations], async () => {
       const completedAt = nowIso();
       const clientTxId = crypto.randomUUID();
       const trxAt = input.trx_at ?? completedAt;
@@ -281,8 +294,8 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
         method: payment.method,
         amount: payment.amount,
         reference_no: payment.reference_no ?? null,
-          paid_at: trxAt
-        }));
+        paid_at: trxAt
+      }));
 
       const reconciledTotals = reconcileSaleTotals(itemRows, paymentRows, {
         discount_percent: input.totals.discount_percent,
@@ -294,6 +307,17 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
       }
 
       assertCallerTotalsMatch(input.totals, reconciledTotals);
+
+      // Reserve stock for the completed sale
+      await reserveStock(
+        {
+          saleId: currentSale.sale_id,
+          items: input.items.map((item) => ({ itemId: item.item_id, quantity: item.qty })),
+          companyId: currentSale.company_id,
+          outletId: currentSale.outlet_id
+        },
+        db
+      );
 
       const updatedCount = await db.sales.update(currentSale.sale_id, {
         client_tx_id: clientTxId,
@@ -317,7 +341,8 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
         grand_total: reconciledTotals.grand_total,
         paid_total: reconciledTotals.paid_total,
         change_total: reconciledTotals.change_total,
-        completed_at: completedAt
+        completed_at: completedAt,
+        stock_checked: true
       });
 
       if (updatedCount !== 1) {
@@ -334,6 +359,60 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
         client_tx_id: clientTxId,
         status: "COMPLETED",
         outbox_job_id: outboxJob.job_id
+      };
+    });
+  });
+}
+
+export interface VoidSaleInput {
+  sale_id: string;
+  reason?: string;
+}
+
+export interface VoidSaleResult {
+  sale_id: string;
+  status: "VOID";
+}
+
+export async function voidSale(input: VoidSaleInput, db: PosOfflineDb = posDb): Promise<VoidSaleResult> {
+  if (!input.sale_id) {
+    throw new ScopeValidationError("sale_id is required");
+  }
+
+  return withSaleCompletionLock(db, input.sale_id, async () => {
+    return db.transaction("rw", [db.sales, db.inventory_stock, db.stock_reservations], async () => {
+      const currentSale = await db.sales.get(input.sale_id);
+      if (!currentSale) {
+        throw new RecordNotFoundError("sale", input.sale_id);
+      }
+
+      // Only DRAFT or COMPLETED sales can be voided
+      if (currentSale.status !== "DRAFT" && currentSale.status !== "COMPLETED") {
+        throw new InvalidSaleTransitionError(currentSale.sale_id, currentSale.status, "VOID");
+      }
+
+      // Release any stock reservations
+      await releaseStock({ saleId: currentSale.sale_id }, db);
+
+      const voidedAt = nowIso();
+      const notes = input.reason
+        ? `${currentSale.notes ?? ""} [VOIDED: ${input.reason}]`.trim()
+        : currentSale.notes;
+
+      const updatedCount = await db.sales.update(currentSale.sale_id, {
+        status: "VOID",
+        sync_status: currentSale.sync_status === "SENT" ? "PENDING" : currentSale.sync_status,
+        closed_at: voidedAt,
+        notes: notes ?? null
+      });
+
+      if (updatedCount !== 1) {
+        throw new ScopeValidationError(`Failed to void sale ${currentSale.sale_id}`);
+      }
+
+      return {
+        sale_id: currentSale.sale_id,
+        status: "VOID"
       };
     });
   });

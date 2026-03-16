@@ -67,7 +67,7 @@ export function createPosSyncEndpoints(
         tier: "REALTIME",
         auth_required: true,
         rate_limit: {
-          requests: 60,  // 60 requests per minute for realtime
+          requests: 120,  // 120 requests per minute for realtime
           window_ms: 60_000
         }
       },
@@ -102,7 +102,7 @@ export function createPosSyncEndpoints(
         tier: "OPERATIONAL",
         auth_required: true,
         rate_limit: {
-          requests: 120, // 120 requests per minute for operational
+          requests: 60, // 60 requests per minute for operational
           window_ms: 60_000
         }
       },
@@ -141,7 +141,7 @@ export function createPosSyncEndpoints(
         tier: "MASTER", 
         auth_required: true,
         rate_limit: {
-          requests: 60, // 60 requests per minute for master data
+          requests: 30, // 30 requests per minute for master data
           window_ms: 60_000
         }
       },
@@ -179,7 +179,7 @@ export function createPosSyncEndpoints(
         tier: "ADMIN",
         auth_required: true,
         rate_limit: {
-          requests: 30, // 30 requests per minute for admin data
+          requests: 10, // 10 requests per minute for admin data
           window_ms: 60_000
         }
       },

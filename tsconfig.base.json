@@ -12,6 +12,8 @@
       "@jurnapod/sync-core": ["packages/sync-core/src/index.ts"],
       "@jurnapod/pos-sync": ["packages/pos-sync/src/index.ts"],
       "@jurnapod/backoffice-sync": ["packages/backoffice-sync/src/index.ts"],
+      "@jurnapod/modules-platform": ["packages/modules/platform/src/index.ts"],
+      "@jurnapod/modules-platform/sync": ["packages/modules/platform/src/sync/index.ts"],
       "@/lib/*": ["apps/api/src/lib/*"],
       "@/lib": ["apps/api/src/lib"]
     },
