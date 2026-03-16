@@ -9,6 +9,11 @@ import type { Context } from "hono";
 import { compress } from "hono/compress";
 import { logger as honoLogger } from "hono/logger";
 import { serve } from "@hono/node-server";
+import { assertAppEnvReady } from "./lib/env.js";
+import { initializeSyncModules, cleanupSyncModules } from "./lib/sync-modules.js";
+
+// Validate environment configuration before starting server
+assertAppEnvReady();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,16 +77,29 @@ function toApiRoutePath(routesRoot: string, routeFilePath: string): string {
 async function listRouteFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true });
   const files: string[] = [];
+  const dynamics: string[] = [];
 
   for (const entry of entries) {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
-      files.push(...(await listRouteFiles(fullPath)));
+      if (entry.name.startsWith("[")) {
+        dynamics.push(...(await listRouteFiles(fullPath)))
+      } else {
+        files.push(...(await listRouteFiles(fullPath)));
+      }
       continue;
     }
 
     if (entry.isFile() && entry.name === "route.ts") {
       files.push(fullPath);
+    }
+  }
+
+  if (dynamics.length > 0) {
+    for (const dynamic of dynamics) {
+      if (dynamic.length > 0){
+          files.push(dynamic)
+      }
     }
   }
 
@@ -206,6 +224,13 @@ app.use("/api/*", async (c: any, next: () => Promise<void>) => {
 
 await registerRoutes(app);
 
+// Initialize sync modules after routes are registered
+try {
+  await initializeSyncModules();
+} catch (error) {
+  console.error("Failed to initialize sync modules. Server will continue without modular sync.", error);
+}
+
 app.notFound(() => {
   return Response.json(
     {
@@ -245,8 +270,12 @@ const server = serve(
 );
 
 // Handle graceful shutdown
-const shutdown = () => {
+const shutdown = async () => {
   console.log("\nShutting down API server...");
+  
+  // Cleanup sync modules first
+  await cleanupSyncModules();
+  
   server.close(() => {
     console.log("API server stopped");
     process.exit(0);
