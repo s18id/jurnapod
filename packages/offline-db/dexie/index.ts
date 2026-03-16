@@ -50,7 +50,11 @@ export type {
   UpdateOutboxStatusInput,
   ReserveOutboxAttemptInput,
   OutboxStatusUpdateReason,
-  OutboxStatusUpdateResult
+  OutboxStatusUpdateResult,
+  InventoryStockRow,
+  StockReservationRow,
+  CheckStockInput,
+  CheckStockResult
 } from "./types.js";
 
 export {
@@ -60,5 +64,7 @@ export {
   InvalidSaleTransitionError,
   SaleCompletionInProgressError,
   ProductSnapshotNotFoundError,
-  SaleTotalsMismatchError
+  SaleTotalsMismatchError,
+  InsufficientStockError,
+  StockValidationError
 } from "./types.js";
