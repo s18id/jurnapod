@@ -143,15 +143,24 @@ export const SupplyCreateRequestSchema = z.object({
 });
 
 export const SupplyUpdateRequestSchema = z
-  .object({
-    sku: optionalSkuSchema,
-    name: z.string().trim().min(1).max(191).optional(),
-    unit: z.string().trim().min(1).max(32).optional(),
-    is_active: z.boolean().optional()
-  })
-  .refine((value) => Object.keys(value).length > 0, {
+  .unknown()
+  .refine((input) => {
+    if (typeof input !== 'object' || input === null) {
+      return false;
+    }
+    // Check if the input has at least one property before any transformations
+    return Object.keys(input).length > 0;
+  }, {
     message: "At least one field must be provided"
-  });
+  })
+  .pipe(
+    z.object({
+      sku: optionalSkuSchema,
+      name: z.string().trim().min(1).max(191).optional(),
+      unit: z.string().trim().min(1).max(32).optional(),
+      is_active: z.boolean().optional()
+    })
+  );
 
 export const FixedAssetCreateRequestSchema = z.object({
   asset_tag: optionalShortTextSchema(64),
