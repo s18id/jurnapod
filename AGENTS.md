@@ -119,16 +119,94 @@ Story completion notes MUST include:
 ## AI Model Configuration
 
 BMAD uses the following model strategy:
-- **Primary**: `opencode-go/minimax-m2.5` (your OpenCode Go subscription)
-- **Code tasks**: `openai/gpt-5.1-codex-mini` (best for code generation)
-- **Complex reasoning**: `anthropic/claude-3-5-sonnet-20241022` (when needed)
+- **Primary**: `opencode-go/minimax-m2.5` (your OpenCode Go subscription) - 75% of agents
+- **Context-critical**: `opencode-go/kimi-k2.5` (integration, orchestration, review) - 25% of agents  
+- **Complex reasoning**: `anthropic/claude-3-5-sonnet-20241022` (architecture decisions) - 5% of agents
+- **Code tasks**: `openai/gpt-5.1-codex-mini` (when available - currently exhausted)
+
+**Current Week Status**: Codex tokens exhausted. All code tasks using kimi-k2.5 with decomposition pattern.
 
 Model mappings are configured in `_bmad/_config/agent-models.yaml`.
 Default model is set in `_bmad/_config/ides/opencode.yaml`.
 
+## Agent Model Allocation Strategy
+
+BMAD agents are distributed across three AI models for optimal cost-effectiveness:
+
+### Model Tiers
+
+| Model | Agents | Use Case | Cost |
+|-------|--------|----------|------|
+| **minimax-m2.5** | 30 (75%) | Narrow scope, standardized workflows, external data | Low |
+| **kimi-k2.5** | 10 (25%) | Context-critical, integration, orchestration | Medium |
+| **claude-3.5-sonnet** | 2 (5%) | Complex architectural decisions | High |
+
+### Agent Assignments by Model
+
+**minimax-m2.5** (Narrow Scope - 30 agents):
+- Quick dev: `bmad-quick-dev`, `bmad-quick-flow-solo-dev`
+- Testing: All `bmad-testarch-*`, `bmad-qa`, `bmad-qa-generate-e2e-tests`
+- Research: `bmad-market-research`, `bmad-domain-research`, `bmad-technical-research`
+- Utility: `bmad-shard-doc`, `bmad-index-docs`, `bmad-tech-writer`
+- Analysis: `bmad-analyst`, `bmad-create-product-brief`, `bmad-brainstorming`
+- UX: `bmad-ux-designer`, `bmad-create-ux-design`
+
+**kimi-k2.5** (Context-Critical - 10 agents):
+- Core: `bmad-master`, `bmad-party-mode`, `bmad-help`
+- Dev: `bmad-dev`, `bmad-dev-story`
+- Management: `bmad-pm`, `bmad-sm`, `bmad-retrospective`, `bmad-sprint-planning`, `bmad-sprint-status`, `bmad-correct-course`
+- Documentation: `bmad-document-project`, `bmad-generate-project-context`
+- Review: All `bmad-code-review`, `bmad-review-*`, `bmad-editorial-review-*`
+
+**claude-3.5-sonnet** (Complex Reasoning - 2 agents):
+- Architecture: `bmad-architect`, `bmad-create-architecture`
+
+### Delegation Pattern for Development Work
+
+**DO NOT** implement directly. Decompose and delegate:
+
+1. **Break into narrow chunks** (2-4 hours each)
+2. **Delegate to minimax agents** for implementation
+3. **Review with kimi-k2.5** for integration and quality
+4. **Iterate** on issues found
+
+**Example - "Build notification service" (8h):**
+- Delegate to `bmad-quick-dev`: "Create package structure" (30min)
+- Delegate to `bmad-quick-flow-solo-dev`: "Implement SendGrid provider" (1.5h)
+- Delegate to `bmad-quick-dev`: "Create template system" (1.5h)
+- Delegate to `bmad-quick-flow-solo-dev`: "Add retry logic" (1h)
+- Delegate to `bmad-dev`: "Create email templates" (1h)
+- Delegate to `bmad-qa`: "Write tests" (1h)
+- **Review with** `bmad-code-review`: Integration check (30min)
+
+**Maximizes throughput**: 75% of work on cheapest model, quality assured by review.
+
+### When to Use Each Tier
+
+**Use minimax when:**
+- Task is narrow and focused (< 4 hours)
+- Clear acceptance criteria exist
+- Standard patterns/templates apply
+- External data sources involved
+- Testing or documentation tasks
+
+**Use kimi-k2.5 when:**
+- Project context and history matter
+- Integration between components
+- Orchestrating multiple agents
+- Story/epic creation and planning
+- Code review (catches minimax issues)
+- Critical business logic
+
+**Use claude when:**
+- Complex architectural trade-offs
+- High-stakes design decisions
+- Novel problem spaces
+- Justifies token cost for quality
+
 ## Agent delegation
 
-Use the `skill` tool to load the appropriate agent. If unsure what to do, use `bmad-help`.
+Use the `skill` tool to load the appropriate agent based on the model allocation above. If unsure what to do, use `bmad-help`.
 
 ### Development & Implementation
 
