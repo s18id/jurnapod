@@ -240,10 +240,10 @@ export const SyncPullOpenOrderSchema = z.object({
   order_status: z.enum(["OPEN", "READY_TO_PAY", "COMPLETED", "CANCELLED"]),
   order_state: z.enum(["OPEN", "CLOSED"]),
   paid_amount: z.number().finite().min(0),
-  opened_at: z.string().datetime(),
-  closed_at: z.string().datetime().nullable(),
+  opened_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)),
+  closed_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)).nullable(),
   notes: z.string().nullable(),
-  updated_at: z.string().datetime()
+  updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 });
 
 export const SyncPullOpenOrderLineSchema = z.object({
@@ -257,7 +257,7 @@ export const SyncPullOpenOrderLineSchema = z.object({
   unit_price_snapshot: z.number().finite().nonnegative(),
   qty: z.number().positive(),
   discount_amount: z.number().finite().min(0),
-  updated_at: z.string().datetime()
+  updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 });
 
 export const SyncPullOrderUpdateSchema = z.object({
@@ -265,7 +265,7 @@ export const SyncPullOrderUpdateSchema = z.object({
   order_id: z.string().uuid(),
   company_id: NumericIdSchema,
   outlet_id: NumericIdSchema,
-  base_order_updated_at: z.string().datetime().nullable(),
+  base_order_updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)).nullable(),
   event_type: z.enum([
     "SNAPSHOT_FINALIZED",
     "ITEM_ADDED",
@@ -279,8 +279,8 @@ export const SyncPullOrderUpdateSchema = z.object({
   delta_json: z.string(),
   actor_user_id: NumericIdSchema.nullable(),
   device_id: z.string().min(1),
-  event_at: z.string().datetime(),
-  created_at: z.string().datetime(),
+  event_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)),
+  created_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)),
   sequence_no: z.number().int().positive()
 });
 
@@ -291,7 +291,7 @@ export const SyncPullItemSchema = z.object({
   type: ItemTypeSchema,
   item_group_id: NumericIdSchema.nullable(),
   is_active: z.boolean(),
-  updated_at: z.string().datetime()
+  updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 });
 
 export const SyncPullItemGroupSchema = z.object({
@@ -300,7 +300,7 @@ export const SyncPullItemGroupSchema = z.object({
   code: z.string().nullable(),
   name: z.string(),
   is_active: z.boolean(),
-  updated_at: z.string().datetime()
+  updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 });
 
 export const SyncPullPriceSchema = z.object({
@@ -309,7 +309,7 @@ export const SyncPullPriceSchema = z.object({
   outlet_id: NumericIdSchema,
   price: z.number().finite().nonnegative(),
   is_active: z.boolean(),
-  updated_at: z.string().datetime()
+  updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 });
 
 export const PaymentMethodConfigSchema = z.object({
@@ -350,7 +350,7 @@ export const SyncPullTableSchema = z.object({
   zone: z.string().max(64).nullable(),
   capacity: z.number().int().positive().nullable(),
   status: OutletTableStatusSchema,
-  updated_at: z.string().datetime()
+  updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 });
 
 export const SyncPullReservationSchema = z.object({
@@ -359,15 +359,15 @@ export const SyncPullReservationSchema = z.object({
   customer_name: z.string().min(1).max(191),
   customer_phone: z.string().max(64).nullable(),
   guest_count: z.number().int().positive(),
-  reservation_at: z.string().datetime(),
+  reservation_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)),
   duration_minutes: z.number().int().positive().nullable(),
   status: ReservationStatusSchema,
   notes: z.string().max(500).nullable(),
   linked_order_id: z.string().uuid().nullable(),
-  arrived_at: z.string().datetime().nullable(),
-  seated_at: z.string().datetime().nullable(),
-  cancelled_at: z.string().datetime().nullable(),
-  updated_at: z.string().datetime()
+  arrived_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)).nullable(),
+  seated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)).nullable(),
+  cancelled_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)).nullable(),
+  updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 });
 
 export const SyncPullPayloadSchema = z.object({
