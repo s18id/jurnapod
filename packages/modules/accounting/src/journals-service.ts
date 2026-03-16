@@ -266,21 +266,21 @@ export class JournalsService {
       doc_type: batch.doc_type,
       doc_id: batch.doc_id,
       client_ref: batch.client_ref ?? null,
-      posted_at: batch.posted_at.toISOString(),
-      created_at: batch.created_at.toISOString(),
-      updated_at: batch.updated_at.toISOString(),
+      posted_at: batch.posted_at,
+      created_at: batch.created_at,
+      updated_at: batch.updated_at,
       lines: lines.map(line => ({
         id: line.id,
         journal_batch_id: line.journal_batch_id,
         company_id: line.company_id,
         outlet_id: line.outlet_id,
         account_id: line.account_id,
-        line_date: line.line_date.toISOString().split('T')[0],
+        line_date: typeof line.line_date === 'string' ? line.line_date.split('T')[0] : line.line_date.toISOString().split('T')[0],
         debit: parseFloat(line.debit),
         credit: parseFloat(line.credit),
         description: line.description,
-        created_at: line.created_at.toISOString(),
-        updated_at: line.updated_at.toISOString()
+        created_at: line.created_at,
+        updated_at: line.updated_at
       }))
     };
   }

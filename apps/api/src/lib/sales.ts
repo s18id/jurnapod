@@ -3883,7 +3883,7 @@ export async function postCreditNote(
       credit_note_no: creditNote.credit_note_no,
       credit_note_date: formatDateOnly(creditNote.credit_note_date),
       amount: Number(creditNote.amount),
-      updated_at: creditNote.updated_at.toISOString()
+      updated_at: creditNote.updated_at
     });
 
     await connection.execute<ResultSetHeader>(
@@ -3967,7 +3967,7 @@ export async function voidCreditNote(
         credit_note_no: creditNote.credit_note_no,
         credit_note_date: formatDateOnly(creditNote.credit_note_date),
         amount: Number(creditNote.amount),
-        updated_at: creditNote.updated_at.toISOString()
+      updated_at: creditNote.updated_at
       });
 
       const [invoiceResult] = await connection.execute<RowDataPacket[]>(
