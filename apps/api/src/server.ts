@@ -110,11 +110,16 @@ async function listRouteFiles(dir: string): Promise<string[]> {
 
 function cloneRequestForHandler(request: Request): Request {
   const isBodylessMethod = request.method === "GET" || request.method === "HEAD";
-  return new Request(request.url, {
+  const init: RequestInit = {
     method: request.method,
     headers: request.headers,
     body: isBodylessMethod ? undefined : request.body
-  });
+  };
+  // Required for streaming bodies in Node.js fetch
+  if (!isBodylessMethod && request.body) {
+    (init as any).duplex = 'half';
+  }
+  return new Request(request.url, init);
 }
 
 function registerRoute(app: Hono, routePath: string, method: HttpMethod, handler: (request: Request) => Promise<Response> | Response): void {
@@ -260,10 +265,85 @@ app.onError((error: unknown) => {
   );
 });
 
+// Helper to read request body from Node.js stream
+function readRequestBody(req: any): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+// Create Node.js server with Hono adapter
 const server = createServer(async (req, res) => {
-  // Let Hono handle the request
+  // Convert Node.js req to Web Standard Request
   try {
-    await app.fetch(req as any, res as any);
+    // Build the full URL
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers.host || `${HOST}:${PORT}`;
+    const url = `${protocol}://${host}${req.url}`;
+    
+    // Convert Node.js headers to Web Standard Headers
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value !== undefined) {
+        if (Array.isArray(value)) {
+          value.forEach(v => headers.append(key, v));
+        } else {
+          headers.set(key, value);
+        }
+      }
+    }
+    
+    // Read request body for non-GET/HEAD methods
+    let body: Buffer | undefined;
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      body = await readRequestBody(req);
+    }
+    
+    // Create Web Standard Request from Node.js req
+    const requestInit: RequestInit = {
+      method: req.method,
+      headers: headers,
+    };
+    
+    if (body && body.length > 0) {
+      requestInit.body = body as any;
+      // Required for streaming bodies in Node.js fetch
+      (requestInit as any).duplex = 'half';
+    }
+    
+    const request = new Request(url, requestInit);
+    
+    // Call Hono's fetch with the proper Request object
+    const response = await app.fetch(request);
+    
+    // Write response back to Node.js res
+    res.statusCode = response.status;
+    response.headers.forEach((value, key) => {
+      res.setHeader(key, value);
+    });
+    
+    // Stream response body to Node.js res
+    if (response.body) {
+      const reader = response.body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(Buffer.from(value));
+        }
+        res.end();
+      } catch (error) {
+        console.error("Error streaming response:", error);
+        if (!res.writableEnded) {
+          res.end();
+        }
+      }
+    } else {
+      res.end();
+    }
   } catch (error) {
     console.error("Request handling error:", error);
     if (!res.writableEnded) {
