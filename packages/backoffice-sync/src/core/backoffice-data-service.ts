@@ -405,7 +405,7 @@ export class BackofficeDataService {
         1 AS multi_outlet_enabled, -- TODO: Make configurable
         c.created_at
       FROM companies c
-      LEFT JOIN fiscal_years fy ON fy.company_id = c.id AND fy.is_active = 1
+      LEFT JOIN fiscal_years fy ON fy.company_id = c.id AND fy.status = 'OPEN'
       WHERE c.id = ?
     `, [company_id]);
 
