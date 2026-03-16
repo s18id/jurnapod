@@ -106,6 +106,12 @@ function buildAuditContext(companyId: number, actor: OutletActor) {
   };
 }
 
+function normalizeDateTime(dateTime: string | Date | null): string | null {
+  if (!dateTime) return null;
+  const date = typeof dateTime === 'string' ? new Date(dateTime) : dateTime;
+  return date.toISOString();
+}
+
 function mapRowToOutlet(row: OutletRow): OutletFullResponse {
   return {
     id: Number(row.id),
@@ -120,8 +126,8 @@ function mapRowToOutlet(row: OutletRow): OutletFullResponse {
     email: row.email,
     timezone: row.timezone,
     is_active: Boolean(row.is_active),
-    created_at: row.created_at,
-    updated_at: row.updated_at
+    created_at: normalizeDateTime(row.created_at),
+    updated_at: normalizeDateTime(row.updated_at)
   };
 }
 
