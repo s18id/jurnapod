@@ -823,19 +823,19 @@ export async function getLowStockAlerts(
   try {
     const [rows] = await conn.execute<ProductRow[]>(
       `SELECT
-        p.id as product_id,
-        p.sku,
-        p.name,
+        i.id as product_id,
+        i.sku,
+        i.name,
         s.quantity,
         s.available_quantity,
-        p.low_stock_threshold
-      FROM products p
-      JOIN inventory_stock s ON s.product_id = p.id
-      WHERE p.company_id = ?
-        AND p.track_stock = 1
-        AND p.low_stock_threshold IS NOT NULL
+        i.low_stock_threshold
+      FROM items i
+      JOIN inventory_stock s ON s.product_id = i.id
+      WHERE i.company_id = ?
+        AND i.track_stock = 1
+        AND i.low_stock_threshold IS NOT NULL
         AND (s.outlet_id = ? OR s.outlet_id IS NULL)
-        AND s.available_quantity <= p.low_stock_threshold`,
+        AND s.available_quantity <= i.low_stock_threshold`,
       [company_id, outlet_id]
     );
 

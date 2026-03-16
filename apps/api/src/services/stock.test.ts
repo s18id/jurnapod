@@ -52,15 +52,15 @@ async function setupTestData(connection: PoolConnection): Promise<void> {
 
   // Create test products with stock tracking
   await connection.execute(
-    `INSERT INTO products (id, company_id, sku, name, status, track_stock, low_stock_threshold, created_at, updated_at)
-     VALUES (?, ?, 'TEST-SKU-001', 'Test Product 1', 1, 1, 10.0000, NOW(), NOW())
+    `INSERT INTO items (id, company_id, sku, name, item_type, is_active, track_stock, low_stock_threshold, created_at, updated_at)
+     VALUES (?, ?, 'TEST-SKU-001', 'Test Product 1', 'PRODUCT', 1, 1, 10.0000, NOW(), NOW())
      ON DUPLICATE KEY UPDATE name = 'Test Product 1', track_stock = 1, low_stock_threshold = 10.0000`,
     [TEST_PRODUCT_ID, TEST_COMPANY_ID]
   );
 
   await connection.execute(
-    `INSERT INTO products (id, company_id, sku, name, status, track_stock, low_stock_threshold, created_at, updated_at)
-     VALUES (?, ?, 'TEST-SKU-002', 'Test Product 2', 1, 1, 5.0000, NOW(), NOW())
+    `INSERT INTO items (id, company_id, sku, name, item_type, is_active, track_stock, low_stock_threshold, created_at, updated_at)
+     VALUES (?, ?, 'TEST-SKU-002', 'Test Product 2', 'PRODUCT', 1, 1, 5.0000, NOW(), NOW())
      ON DUPLICATE KEY UPDATE name = 'Test Product 2', track_stock = 1, low_stock_threshold = 5.0000`,
     [TEST_PRODUCT_ID_2, TEST_COMPANY_ID]
   );
@@ -92,7 +92,7 @@ async function cleanupTestData(connection: PoolConnection): Promise<void> {
     [TEST_COMPANY_ID]
   );
   await connection.execute(
-    `DELETE FROM products WHERE company_id = ? AND id IN (?, ?)`,
+    `DELETE FROM items WHERE company_id = ? AND id IN (?, ?)`,
     [TEST_COMPANY_ID, TEST_PRODUCT_ID, TEST_PRODUCT_ID_2]
   );
   await connection.execute(

@@ -105,10 +105,10 @@ export const GET = withAuth(
           s.available_quantity,
           s.updated_at
         FROM inventory_stock s
-        JOIN products p ON p.id = s.product_id
+        JOIN items i ON i.id = s.product_id
         WHERE ${whereClause}
-          AND p.track_stock = 1
-          AND p.is_active = 1
+          AND i.track_stock = 1
+          AND i.is_active = 1
         ORDER BY s.updated_at ASC, s.product_id ASC
         LIMIT ?`,
         [...params, limit + 1] // Fetch one extra to determine has_more

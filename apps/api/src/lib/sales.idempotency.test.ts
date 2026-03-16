@@ -4,11 +4,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  createDbPool,
   loadEnvIfPresent,
   readEnv
 } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool } from "./db";
+import { getDbPool, closeDbPool } from "./db";
 import { createPayment, DatabaseConflictError, PaymentAllocationError } from "./sales";
 import type { RowDataPacket } from "mysql2";
 import { randomUUID } from "node:crypto";
@@ -19,7 +18,7 @@ test(
   "Payment idempotency behavior tests",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = createDbPool();
+    const pool = getDbPool();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -281,7 +280,7 @@ test(
   "Service precision validation - non-split payments",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = createDbPool();
+    const pool = getDbPool();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";

@@ -36,8 +36,8 @@ async function setupTestData(connection: PoolConnection): Promise<void> {
 
   // Create test product with stock tracking
   await connection.execute(
-    `INSERT INTO products (id, company_id, sku, name, status, track_stock, low_stock_threshold, created_at, updated_at)
-     VALUES (?, ?, 'ROUTE-SKU-001', 'Route Test Product', 1, 1, 10.0000, NOW(), NOW())
+    `INSERT INTO items (id, company_id, sku, name, item_type, is_active, track_stock, low_stock_threshold, created_at, updated_at)
+     VALUES (?, ?, 'ROUTE-SKU-001', 'Route Test Product', 'PRODUCT', 1, 1, 10.0000, NOW(), NOW())
      ON DUPLICATE KEY UPDATE name = 'Route Test Product', track_stock = 1, low_stock_threshold = 10.0000`,
     [TEST_PRODUCT_ID, TEST_COMPANY_ID]
   );
@@ -61,7 +61,7 @@ async function cleanupTestData(connection: PoolConnection): Promise<void> {
     [TEST_COMPANY_ID]
   );
   await connection.execute(
-    `DELETE FROM products WHERE company_id = ? AND id = ?`,
+    `DELETE FROM items WHERE company_id = ? AND id = ?`,
     [TEST_COMPANY_ID, TEST_PRODUCT_ID]
   );
   await connection.execute(
@@ -123,14 +123,14 @@ describe("Stock Routes", { concurrency: false }, () => {
       );
 
       const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT p.id, p.sku, p.name, s.quantity, s.available_quantity, p.low_stock_threshold
-         FROM products p
-         JOIN inventory_stock s ON s.product_id = p.id
-         WHERE p.company_id = ?
-           AND p.track_stock = 1
-           AND p.low_stock_threshold IS NOT NULL
+        `SELECT i.id, i.sku, i.name, s.quantity, s.available_quantity, i.low_stock_threshold
+         FROM items i
+         JOIN inventory_stock s ON s.product_id = i.id
+         WHERE i.company_id = ?
+           AND i.track_stock = 1
+           AND i.low_stock_threshold IS NOT NULL
            AND (s.outlet_id = ? OR s.outlet_id IS NULL)
-           AND s.available_quantity <= p.low_stock_threshold`,
+           AND s.available_quantity <= i.low_stock_threshold`,
         [TEST_COMPANY_ID, TEST_OUTLET_ID]
       );
 

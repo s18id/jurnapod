@@ -35,8 +35,8 @@ async function setupTestData(connection: PoolConnection): Promise<void> {
 
   // Create test product
   await connection.execute(
-    `INSERT INTO products (id, company_id, sku, name, status, track_stock, created_at, updated_at)
-     VALUES (?, ?, 'TEST-SKU-001', 'Test Product', 1, 1, NOW(), NOW())
+    `INSERT INTO items (id, company_id, sku, name, item_type, is_active, track_stock, created_at, updated_at)
+     VALUES (?, ?, 'TEST-SKU-001', 'Test Product', 'PRODUCT', 1, 1, NOW(), NOW())
      ON DUPLICATE KEY UPDATE name = 'Test Product'`,
     [TEST_PRODUCT_ID, TEST_COMPANY_ID]
   );
@@ -61,7 +61,7 @@ async function cleanupTestData(connection: PoolConnection): Promise<void> {
     [TEST_COMPANY_ID]
   );
   await connection.execute(
-    `DELETE FROM products WHERE id = ? AND company_id = ?`,
+    `DELETE FROM items WHERE id = ? AND company_id = ?`,
     [TEST_PRODUCT_ID, TEST_COMPANY_ID]
   );
   await connection.execute(

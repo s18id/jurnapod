@@ -79,11 +79,11 @@ export async function createTestFixture(
     [userId, outletId]
   );
   
-  // Assign OWNER role
+  // Assign OWNER role (global role, so outlet_id is NULL)
   await dbPool.execute(
-    `INSERT INTO user_role_assignments (user_id, role_id, company_id, created_at)
-     SELECT ?, id, ?, NOW() FROM roles WHERE name = 'OWNER'`,
-    [userId, companyId]
+    `INSERT INTO user_role_assignments (user_id, role_id, outlet_id, created_at)
+     SELECT ?, id, NULL, NOW() FROM roles WHERE name = 'OWNER'`,
+    [userId]
   );
   
   return {
