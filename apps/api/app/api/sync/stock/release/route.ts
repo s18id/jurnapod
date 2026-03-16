@@ -115,11 +115,12 @@ export const POST = withAuth(
             company_id,
             outlet_id,
             transaction_type,
+            reference_type,
             reference_id,
             product_id,
-            quantity,
+            quantity_delta,
             created_at
-          ) VALUES (?, ?, 'RELEASE', ?, ?, ?, CURRENT_TIMESTAMP)`,
+          ) VALUES (?, ?, 4, 'RELEASE', ?, ?, ?, CURRENT_TIMESTAMP)`,
           [company_id, outlet_id, client_tx_id, items[0].item_id, items[0].quantity]
         );
 

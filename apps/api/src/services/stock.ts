@@ -11,6 +11,22 @@
 import { getDbPool } from "@/lib/db";
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
 
+/**
+ * Transaction Type Constants
+ * Using TINYINT values for compact storage and fast indexing
+ */
+export const TransactionType = {
+  SALE: 1,        // Stock reduction from completed sale
+  REFUND: 2,      // Stock increase from void/refund
+  RESERVATION: 3, // Temporary stock hold during checkout
+  RELEASE: 4,     // Cancel reservation
+  ADJUSTMENT: 5,  // Manual inventory adjustment
+  RECEIPT: 6,     // Stock received from supplier
+  TRANSFER: 7     // Inter-outlet stock transfer
+} as const;
+
+export type TransactionTypeValue = typeof TransactionType[keyof typeof TransactionType];
+
 export interface StockItem {
   product_id: number;
   quantity: number;
@@ -47,10 +63,11 @@ export interface StockTransaction {
   transaction_id: number;
   company_id: number;
   outlet_id: number | null;
-  transaction_type: string;
+  transaction_type: number;
+  reference_type: string | null;
   reference_id: string | null;
   product_id: number;
-  quantity: number;
+  quantity_delta: number;
   created_at: string;
 }
 
@@ -248,12 +265,13 @@ export async function deductStock(
             company_id,
             outlet_id,
             transaction_type,
+            reference_type,
             reference_id,
             product_id,
-            quantity,
+            quantity_delta,
             created_at
-          ) VALUES (?, ?, 'DEDUCTION', ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [company_id, outlet_id, reference_id, item.product_id, -item.quantity]
+          ) VALUES (?, ?, ?, 'SALE', ?, ?, ?, CURRENT_TIMESTAMP)`,
+          [company_id, outlet_id, TransactionType.SALE, reference_id, item.product_id, -item.quantity]
         );
       }
 
@@ -337,12 +355,13 @@ export async function restoreStock(
             company_id,
             outlet_id,
             transaction_type,
+            reference_type,
             reference_id,
             product_id,
-            quantity,
+            quantity_delta,
             created_at
-          ) VALUES (?, ?, 'RESTORATION', ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [company_id, outlet_id, reference_id, item.product_id, item.quantity]
+          ) VALUES (?, ?, ?, 'REFUND', ?, ?, ?, CURRENT_TIMESTAMP)`,
+          [company_id, outlet_id, TransactionType.REFUND, reference_id, item.product_id, item.quantity]
         );
       }
 
@@ -451,12 +470,13 @@ export async function adjustStock(
           company_id,
           outlet_id,
           transaction_type,
+          reference_type,
           reference_id,
           product_id,
-          quantity,
+          quantity_delta,
           created_at
-        ) VALUES (?, ?, 'ADJUSTMENT', ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [company_id, outlet_id, reference_id ?? `ADJ-${Date.now()}`, product_id, adjustment_quantity]
+        ) VALUES (?, ?, ?, 'ADJUSTMENT', ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [company_id, outlet_id, TransactionType.ADJUSTMENT, reference_id ?? `ADJ-${Date.now()}`, product_id, adjustment_quantity]
       );
 
       if (!connection) {
@@ -550,12 +570,13 @@ export async function reserveStock(
             company_id,
             outlet_id,
             transaction_type,
+            reference_type,
             reference_id,
             product_id,
-            quantity,
+            quantity_delta,
             created_at
-          ) VALUES (?, ?, 'RESERVATION', ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [company_id, outlet_id, reference_id, item.product_id, item.quantity]
+          ) VALUES (?, ?, ?, 'RESERVATION', ?, ?, ?, CURRENT_TIMESTAMP)`,
+          [company_id, outlet_id, TransactionType.RESERVATION, reference_id, item.product_id, item.quantity]
         );
       }
 
@@ -648,12 +669,13 @@ export async function releaseStock(
               company_id,
               outlet_id,
               transaction_type,
+              reference_type,
               reference_id,
               product_id,
-              quantity,
+              quantity_delta,
               created_at
-            ) VALUES (?, ?, 'RELEASE', ?, ?, ?, CURRENT_TIMESTAMP)`,
-            [company_id, outlet_id, reference_id, item.product_id, releaseQty]
+            ) VALUES (?, ?, ?, 'RELEASE', ?, ?, ?, CURRENT_TIMESTAMP)`,
+            [company_id, outlet_id, TransactionType.RELEASE, reference_id, item.product_id, releaseQty]
           );
         }
       }
@@ -696,8 +718,9 @@ export async function getStockLevels(
     const params: (number | number[])[] = [company_id, outlet_id];
 
     if (product_ids && product_ids.length > 0) {
-      query += ` AND product_id IN (?)`;
-      params.push(product_ids);
+      const placeholders = product_ids.map(() => '?').join(',');
+      query += ` AND product_id IN (${placeholders})`;
+      params.push(...product_ids);
     }
 
     query += ` ORDER BY product_id`;
@@ -727,7 +750,7 @@ export async function getStockTransactions(
   outlet_id: number | null,
   options: {
     product_id?: number;
-    transaction_type?: string;
+    transaction_type?: number;
     since?: string;
     limit?: number;
     offset?: number;
@@ -778,9 +801,10 @@ export async function getStockTransactions(
         company_id,
         outlet_id,
         transaction_type,
+        reference_type,
         reference_id,
         product_id,
-        quantity,
+        quantity_delta,
         created_at
       FROM inventory_transactions
       ${whereClause}
@@ -794,9 +818,10 @@ export async function getStockTransactions(
       company_id: row.company_id,
       outlet_id: row.outlet_id,
       transaction_type: row.transaction_type,
+      reference_type: row.reference_type,
       reference_id: row.reference_id,
       product_id: row.product_id,
-      quantity: Number(row.quantity),
+      quantity_delta: Number(row.quantity_delta),
       created_at: row.created_at
     }));
 
@@ -840,7 +865,7 @@ export async function getLowStockAlerts(
     );
 
     return rows.map(row => ({
-      product_id: row.id,
+      product_id: row.product_id,
       sku: row.sku,
       name: row.name,
       quantity: Number(row.quantity),

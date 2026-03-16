@@ -424,7 +424,7 @@ describe("Stock Service", { concurrency: false }, () => {
       const { transactions } = await getStockTransactions(
         TEST_COMPANY_ID,
         TEST_OUTLET_ID,
-        { transaction_type: "ADJUSTMENT", limit: 10 },
+        { transaction_type: 5, limit: 10 },
         connection
       );
 

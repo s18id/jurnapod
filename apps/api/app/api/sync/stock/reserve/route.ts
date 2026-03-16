@@ -149,11 +149,12 @@ export const POST = withAuth(
             company_id,
             outlet_id,
             transaction_type,
+            reference_type,
             reference_id,
             product_id,
-            quantity,
+            quantity_delta,
             created_at
-          ) VALUES (?, ?, 'RESERVATION', ?, ?, ?, CURRENT_TIMESTAMP)`,
+          ) VALUES (?, ?, 3, 'RESERVATION', ?, ?, ?, CURRENT_TIMESTAMP)`,
           [company_id, outlet_id, client_tx_id, reservations[0].product_id, reservations[0].quantity]
         );
 

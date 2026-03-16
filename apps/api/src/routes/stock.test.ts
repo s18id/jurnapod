@@ -99,9 +99,9 @@ describe("Stock Routes", { concurrency: false }, () => {
       );
 
       assert.equal(rows.length, 1);
-      assert.equal(rows[0].quantity, 100);
-      assert.equal(rows[0].available_quantity, 100);
-      assert.equal(rows[0].reserved_quantity, 0);
+      assert.equal(Number(rows[0].quantity), 100);
+      assert.equal(Number(rows[0].available_quantity), 100);
+      assert.equal(Number(rows[0].reserved_quantity), 0);
     });
 
     test("should retrieve stock transactions", async () => {
@@ -171,9 +171,9 @@ describe("Stock Routes", { concurrency: false }, () => {
       // Record transaction
       await connection.execute(
         `INSERT INTO inventory_transactions (
-          company_id, outlet_id, transaction_type, reference_id, 
-          product_id, quantity, created_at
-        ) VALUES (?, ?, 'ADJUSTMENT', ?, ?, ?, CURRENT_TIMESTAMP)`,
+          company_id, outlet_id, transaction_type, reference_type,
+          reference_id, product_id, quantity_delta, created_at
+        ) VALUES (?, ?, 5, 'ADJUSTMENT', ?, ?, ?, CURRENT_TIMESTAMP)`,
         [TEST_COMPANY_ID, TEST_OUTLET_ID, `TEST-ADJ-${Date.now()}`, TEST_PRODUCT_ID, adjustmentQty]
       );
 
