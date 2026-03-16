@@ -71,12 +71,12 @@ class SharedMySQLDbClient extends MySQLJournalsDbClient {
 /**
  * Create JournalsService instance with MySQL adapter and audit service
  */
-function createJournalsService(): JournalsService {
+async function createJournalsService(): Promise<JournalsService> {
   const pool = getDbPool();
   const sharedDbClient = new SharedMySQLDbClient(pool);
   
-  // Import AuditService class
-  const { AuditService } = require("@jurnapod/modules-platform");
+  // Import AuditService class using dynamic import
+  const { AuditService } = await import("@jurnapod/modules-platform");
   
   // Create audit service with the SAME db client to share transactions
   const auditService = new AuditService(sharedDbClient);
@@ -97,9 +97,9 @@ function createJournalsService(): JournalsService {
 // Singleton instance
 let journalsServiceInstance: JournalsService | null = null;
 
-function getJournalsService(): JournalsService {
+async function getJournalsService(): Promise<JournalsService> {
   if (!journalsServiceInstance) {
-    journalsServiceInstance = createJournalsService();
+    journalsServiceInstance = await createJournalsService();
   }
   return journalsServiceInstance;
 }
@@ -111,7 +111,7 @@ export async function createManualJournalEntry(
   data: ManualJournalEntryCreateRequest,
   userId?: number
 ): Promise<JournalBatchResponse> {
-  const service = getJournalsService();
+  const service = await getJournalsService();
   return service.createManualEntry(data, userId);
 }
 
@@ -119,14 +119,14 @@ export async function getJournalBatch(
   batchId: number,
   companyId: number
 ): Promise<JournalBatchResponse> {
-  const service = getJournalsService();
+  const service = await getJournalsService();
   return service.getJournalBatch(batchId, companyId);
 }
 
 export async function listJournalBatches(
   filters: JournalListQuery
 ): Promise<JournalBatchResponse[]> {
-  const service = getJournalsService();
+  const service = await getJournalsService();
   return service.listJournalBatches(filters);
 }
 
