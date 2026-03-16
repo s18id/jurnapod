@@ -13,6 +13,8 @@ import type {
 import { syncAuditor, syncVersionManager } from "@jurnapod/sync-core";
 import { BackofficeDataService, type DatabaseConnection } from "./core/backoffice-data-service.js";
 import { createBackofficeSyncEndpoints } from "./endpoints/backoffice-sync-endpoints.js";
+import { BatchProcessor, type BatchProcessorConfig } from "./batch/batch-processor.js";
+import { ExportScheduler } from "./scheduler/export-scheduler.js";
 
 export class BackofficeSyncModule implements SyncModule {
   readonly moduleId = "backoffice";
@@ -21,6 +23,14 @@ export class BackofficeSyncModule implements SyncModule {
 
   private dataService?: BackofficeDataService;
   private logger?: any;
+  private batchProcessor?: BatchProcessor;
+  private exportScheduler?: ExportScheduler;
+  private batchProcessorConfig: BatchProcessorConfig = {
+    maxConcurrentJobs: 3,
+    pollIntervalMs: 30_000,
+    retryDelayMs: 60_000,
+    cleanupIntervalMs: 300_000
+  };
 
   constructor(public readonly config: SyncModuleConfig) {
     // Initialize endpoints with this module's handleSync method
@@ -31,9 +41,23 @@ export class BackofficeSyncModule implements SyncModule {
     this.dataService = new BackofficeDataService(context.database);
     this.logger = context.logger;
     
+    // Initialize batch processor
+    this.batchProcessor = new BatchProcessor(context.database, this.batchProcessorConfig);
+    
+    // Initialize export scheduler
+    this.exportScheduler = new ExportScheduler(context.database);
+    this.exportScheduler.setBatchProcessor(this.batchProcessor);
+    
     this.logger?.info(`Initialized backoffice sync module with config:`, {
       moduleId: this.config.module_id,
-      frequencies: this.config.frequencies
+      frequencies: this.config.frequencies,
+      batchProcessor: {
+        maxConcurrentJobs: this.batchProcessorConfig.maxConcurrentJobs,
+        pollIntervalMs: this.batchProcessorConfig.pollIntervalMs
+      },
+      exportScheduler: {
+        pollIntervalMs: 60000
+      }
     });
   }
 
@@ -131,7 +155,12 @@ export class BackofficeSyncModule implements SyncModule {
       // Test database connectivity with a simple query
       await (this.dataService as any).db.query('SELECT 1');
       
-      return { healthy: true, message: "Backoffice sync module operational" };
+      const batchStatus = this.getBatchProcessorStatus();
+      const message = batchStatus 
+        ? "Backoffice sync module and batch processor operational" 
+        : "Backoffice sync module operational (batch processor not available)";
+      
+      return { healthy: true, message };
     } catch (error) {
       return { 
         healthy: false, 
@@ -141,8 +170,49 @@ export class BackofficeSyncModule implements SyncModule {
   }
 
   async cleanup(): Promise<void> {
+    await this.stopExportScheduler();
+    await this.stopBatchProcessor();
     this.dataService = undefined;
     this.logger = undefined;
+  }
+
+  async startBatchProcessor(): Promise<void> {
+    if (this.batchProcessor) {
+      await this.batchProcessor.start();
+      this.logger?.info("Batch processor started");
+    }
+  }
+
+  async stopBatchProcessor(): Promise<void> {
+    if (this.batchProcessor) {
+      await this.batchProcessor.stop();
+      this.logger?.info("Batch processor stopped");
+    }
+  }
+
+  async startExportScheduler(): Promise<void> {
+    if (this.exportScheduler) {
+      await this.exportScheduler.start();
+      this.logger?.info("Export scheduler started");
+    }
+  }
+
+  async stopExportScheduler(): Promise<void> {
+    if (this.exportScheduler) {
+      await this.exportScheduler.stop();
+      this.logger?.info("Export scheduler stopped");
+    }
+  }
+
+  getExportScheduler(): ExportScheduler | undefined {
+    return this.exportScheduler;
+  }
+
+  getBatchProcessorStatus(): { available: boolean } | null {
+    if (!this.batchProcessor) return null;
+    return {
+      available: true
+    };
   }
 
   private async handleRealtimeSync(request: SyncRequest): Promise<any> {
