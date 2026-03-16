@@ -37,7 +37,8 @@ export function getDbPool(): Pool {
     charset: normalizeDbCharset(env.db.collation),
     waitForConnections: true,
     connectionLimit: env.db.connectionLimit,
-    queueLimit: 0
+    queueLimit: 0,
+    dateStrings: true
   });
 
   globalForDb.__jurnapodApiDbPool = pool;
