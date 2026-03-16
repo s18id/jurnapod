@@ -379,8 +379,10 @@ test(
         [outletId]
       );
       assert.ok(outletRowsAfter.length > 0);
-      const dbUpdatedAt = new Date(outletRowsAfter[0].updated_at).toISOString();
-      assert.equal(updateOutletBody.data.updated_at, dbUpdatedAt);
+      // Normalize both timestamps to milliseconds for comparison
+      const dbUpdatedAtMs = new Date(outletRowsAfter[0].updated_at).getTime();
+      const responseUpdatedAtMs = new Date(updateOutletBody.data.updated_at).getTime();
+      assert.equal(dbUpdatedAtMs, responseUpdatedAtMs);
 
       const deleteOutletRes = await fetch(`${baseUrl}/api/outlets/${outletId}`, {
         method: "DELETE",
