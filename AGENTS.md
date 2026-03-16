@@ -76,6 +76,46 @@ Important:
   ```
 - Flag any test file that uses database connections but lacks this cleanup hook.
 
+## Definition of Done (MANDATORY)
+
+**Before marking ANY story as DONE, the following MUST be completed:**
+
+### Implementation Checklist
+- [ ] All Acceptance Criteria implemented with evidence
+- [ ] No known technical debt (or debt items formally created in sprint-status.yaml)
+- [ ] Code follows repo-wide operating principles (see above)
+- [ ] No breaking changes without cross-package alignment
+
+### Testing Requirements
+- [ ] Unit tests written and passing (show test output in completion notes)
+- [ ] Integration tests for API boundaries
+- [ ] Error path/happy path testing completed
+- [ ] Database pool cleanup hooks present (see Test Cleanup section)
+
+### Quality Gates
+- [ ] Code review completed with no blockers
+- [ ] AI review conducted (use `bmad-code-review` agent)
+- [ ] Review feedback addressed or formally deferred
+
+### Documentation
+- [ ] Schema changes documented (if applicable)
+- [ ] API changes reflected in contracts
+- [ ] Dev Notes include files modified/created
+
+### Production Readiness
+- [ ] Feature is deployable (no feature flags hiding incomplete work)
+- [ ] No hardcoded values or secrets in code
+- [ ] Performance considerations addressed
+
+### Completion Evidence
+Story completion notes MUST include:
+- List of files created/modified
+- Test execution evidence (passing tests)
+- Screenshots or logs for UI changes
+- Any known limitations or follow-up work
+
+**IMPORTANT**: A story marked "DONE" with incomplete items is technical debt. Debt compounds. Do it right or formally track it.
+
 ## AI Model Configuration
 
 BMAD uses the following model strategy:

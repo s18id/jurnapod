@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-16T12:30:00+07:00
+last_updated: 2026-03-16T14:45:00+07:00
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -61,7 +61,13 @@ development_status:
   2-4-pos-offline-mode-local-storage: done
   2-5-pos-sync-transactions-when-online: done
   2-6-pos-duplicate-prevention-during-sync: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
+
+  # Cleanup Sprint: Complete Retro Commitments & Fix Technical Debt
+  cleanup-sprint: in-progress
+  cleanup-1-notification-service: ready-for-dev
+  cleanup-2-duplicate-check-api: ready-for-dev
+  cleanup-3-stock-validation: ready-for-dev
 
   # Epic 3: Accounting - GL Posting & Reports
   epic-3: done
