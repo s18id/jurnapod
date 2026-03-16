@@ -3,8 +3,6 @@
 
 export {
   SyncAuditService,
-  syncAuditService,
-  getSyncAuditService,
 } from "./audit-service";
 
 export type {

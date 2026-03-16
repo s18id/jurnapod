@@ -44,9 +44,9 @@ CREATE TABLE sync_audit_events (
   KEY idx_operation (operation_type, status),
   KEY idx_tier (tier_name, created_at),
   KEY idx_status_time (status, created_at),
-  CONSTRAINT chk_sync_audit_events_operation_type CHECK (operation_type IN ('PUSH', 'PULL', 'VERSION_BUMP')),
-  CONSTRAINT chk_sync_audit_events_tier_name CHECK (tier_name IN ('REALTIME', 'DAILY', 'MASTER_DATA')),
-  CONSTRAINT chk_sync_audit_events_status CHECK (status IN ('SUCCESS', 'FAILED', 'PARTIAL'))
+  CONSTRAINT chk_sync_audit_events_operation_type CHECK (operation_type IN ('PUSH', 'PULL', 'VERSION_BUMP', 'HEALTH_CHECK')),
+  CONSTRAINT chk_sync_audit_events_tier_name CHECK (tier_name IN ('REALTIME', 'OPERATIONAL', 'MASTER', 'ADMIN', 'ANALYTICS', 'default')),
+  CONSTRAINT chk_sync_audit_events_status CHECK (status IN ('SUCCESS', 'FAILED', 'PARTIAL', 'IN_PROGRESS'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 PARTITION BY RANGE (YEAR(created_at)) (
   PARTITION p2024 VALUES LESS THAN (2025),
@@ -88,5 +88,8 @@ CREATE TABLE sync_audit_events_archive (
   KEY idx_archive_operation (operation_type, status),
   KEY idx_archive_tier (tier_name, created_at),
   KEY idx_archive_status_time (status, created_at),
-  KEY idx_archive_archived_at (archived_at)
+  KEY idx_archive_archived_at (archived_at),
+  CONSTRAINT chk_archive_sync_audit_events_operation_type CHECK (operation_type IN ('PUSH', 'PULL', 'VERSION_BUMP', 'HEALTH_CHECK')),
+  CONSTRAINT chk_archive_sync_audit_events_tier_name CHECK (tier_name IN ('REALTIME', 'OPERATIONAL', 'MASTER', 'ADMIN', 'ANALYTICS', 'default')),
+  CONSTRAINT chk_archive_sync_audit_events_status CHECK (status IN ('SUCCESS', 'FAILED', 'PARTIAL', 'IN_PROGRESS'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
