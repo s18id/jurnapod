@@ -1,0 +1,7 @@
+ide: opencode
+configured_date: 2026-03-14T23:55:14.158Z
+last_updated: 2026-03-15T08:07:18.168Z
+configuration:
+  default_model: opencode-go/minimax-m2.5
+  code_model: openai/gpt-5.1-codex-mini
+  reasoning_model: anthropic/claude-3-5-sonnet-20241022
