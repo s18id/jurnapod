@@ -21,7 +21,8 @@ const required = [
   'DB_USER',
   'DB_PASSWORD',
   'DB_NAME',
-  'AUTH_JWT_ACCESS_SECRET'
+  'AUTH_JWT_ACCESS_SECRET',
+  'AUTH_REFRESH_SECRET'
 ];
 
 const missing = required.filter(key => !process.env[key]);
@@ -34,3 +35,28 @@ if (missing.length > 0) {
 }
 
 console.log('✅ Environment variables validated');
+
+// Optional database connectivity check
+async function checkDatabaseConnection() {
+  try {
+    const mysql = await import('mysql2/promise');
+    const connection = await mysql.createConnection({
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT || 3306,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      connectTimeout: 5000
+    });
+    await connection.end();
+    console.log('✅ Database connection verified');
+    return true;
+  } catch (error) {
+    console.warn('⚠️  Database connection failed:', error.message);
+    console.warn('   The API will likely fail to start. Check your DB configuration.');
+    console.warn(`   Connection: ${process.env.DB_USER}@${process.env.DB_HOST}:${process.env.DB_PORT || 3306}/${process.env.DB_NAME}`);
+    return false;
+  }
+}
+
+await checkDatabaseConnection();

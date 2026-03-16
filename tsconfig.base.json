@@ -9,6 +9,9 @@
     "paths": {
       "@jurnapod/shared": ["packages/shared/src/index.ts"],
       "@jurnapod/core": ["packages/core/src/index.ts"],
+      "@jurnapod/sync-core": ["packages/sync-core/src/index.ts"],
+      "@jurnapod/pos-sync": ["packages/pos-sync/src/index.ts"],
+      "@jurnapod/backoffice-sync": ["packages/backoffice-sync/src/index.ts"],
       "@/lib/*": ["apps/api/src/lib/*"],
       "@/lib": ["apps/api/src/lib"]
     },

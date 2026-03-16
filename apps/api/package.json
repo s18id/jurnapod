@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nodemon --watch src --ext ts --exec 'node --import tsx src/server.ts'",
+    "dev": "nodemon --watch src --watch app --ext ts --exec 'node --import tsx src/server.ts'",
     "build": "tsc --noEmit",
     "start": "NODE_ENV=production node --import tsx src/server.ts",
     "lint": "eslint . --max-warnings=0",
@@ -21,6 +21,9 @@
     "@jurnapod/modules-accounting": "0.1.0",
     "@jurnapod/modules-platform": "0.1.0",
     "@jurnapod/shared": "0.1.0",
+    "@jurnapod/sync-core": "0.1.0",
+    "@jurnapod/pos-sync": "0.1.0",
+    "@jurnapod/backoffice-sync": "0.1.0",
     "@node-rs/argon2": "^2.0.2",
     "bcryptjs": "^3.0.2",
     "hono": "^4.0.0",

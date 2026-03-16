@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm run build -w @jurnapod/offline-db",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
