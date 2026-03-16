@@ -17,9 +17,9 @@ type StaticPageRow = RowDataPacket & {
   title: string;
   content_md: string;
   status: StaticPageStatus;
-  published_at: Date | null;
-  created_at: Date;
-  updated_at: Date;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
   meta_json: string | null;
 };
 
@@ -28,8 +28,8 @@ type StaticPageSummaryRow = RowDataPacket & {
   slug: string;
   title: string;
   status: StaticPageStatus;
-  updated_at: Date;
-  published_at: Date | null;
+  updated_at: string;
+  published_at: string | null;
 };
 
 export type StaticPageSummary = {
@@ -37,8 +37,8 @@ export type StaticPageSummary = {
   slug: string;
   title: string;
   status: StaticPageStatus;
-  updated_at: Date;
-  published_at: Date | null;
+  updated_at: string;
+  published_at: string | null;
 };
 
 export type StaticPageDetail = {
@@ -47,8 +47,8 @@ export type StaticPageDetail = {
   title: string;
   content_md: string;
   status: StaticPageStatus;
-  updated_at: Date;
-  published_at: Date | null;
+  updated_at: string;
+  published_at: string | null;
   meta_json: Record<string, any> | null;
 };
 

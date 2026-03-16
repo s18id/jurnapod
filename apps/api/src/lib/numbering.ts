@@ -36,7 +36,7 @@ type NumberingTemplateRow = RowDataPacket & {
   pattern: string;
   reset_period: string;
   current_value: number;
-  last_reset: Date | string | null;
+  last_reset: string | null;
   is_active: number;
 };
 
@@ -119,12 +119,12 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-function needsReset(lastReset: Date | string | null, resetPeriod: ResetPeriod, now: Date): boolean {
+function needsReset(lastReset: string | null, resetPeriod: ResetPeriod, now: Date): boolean {
   if (resetPeriod === "NEVER" || !lastReset) {
     return false;
   }
   
-  const lastResetDate = typeof lastReset === "string" ? new Date(lastReset) : lastReset;
+  const lastResetDate = new Date(lastReset);
   
   if (resetPeriod === "YEARLY") {
     return lastResetDate.getFullYear() !== now.getFullYear();
@@ -172,8 +172,8 @@ export async function generateDocumentNumber(
       const shouldReset = needsReset(template.last_reset, template.reset_period as ResetPeriod, now);
 
       let newValue: number;
-      let newLastReset: Date | null = template.last_reset
-        ? (typeof template.last_reset === "string" ? new Date(template.last_reset) : template.last_reset)
+      let newLastReset: string | null = template.last_reset
+        ? template.last_reset
         : null;
 
       if (shouldReset) {

@@ -41,8 +41,8 @@ type OutletTableRow = RowDataPacket & {
   zone: string | null;
   capacity: number | null;
   status: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 type OutletTableCodeRow = RowDataPacket & {
@@ -111,8 +111,8 @@ function normalizeOutletTable(row: OutletTableRow): OutletTableFullResponse {
     zone: row.zone,
     capacity: row.capacity,
     status: row.status,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
+    created_at: row.created_at,
+    updated_at: row.updated_at
   };
 }
 

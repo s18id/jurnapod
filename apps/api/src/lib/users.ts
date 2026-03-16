@@ -46,8 +46,8 @@ type UserRow = RowDataPacket & {
   name: string | null;
   email: string;
   is_active: number;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 export type RoleRow = RowDataPacket & {
@@ -446,8 +446,8 @@ function normalizeUserRow(row: UserRow): Omit<UserProfile, "global_roles" | "out
     name: row.name,
     email: row.email,
     is_active: row.is_active === 1,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
+    created_at: row.created_at,
+    updated_at: row.updated_at
   };
 }
 
@@ -1408,8 +1408,8 @@ type ModuleRoleRow = RowDataPacket & {
   role_code: string;
   module: string;
   permission_mask: number;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ModuleRoleResponse = {
@@ -1463,8 +1463,8 @@ export async function listModuleRoles(params: {
     role_code: row.role_code,
     module: row.module,
     permission_mask: Number(row.permission_mask ?? 0),
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
+    created_at: row.created_at,
+    updated_at: row.updated_at
   }));
 }
 
@@ -1568,8 +1568,8 @@ export async function setModuleRolePermission(params: {
       role_code: row.role_code,
       module: row.module,
       permission_mask: Number(row.permission_mask ?? 0),
-      created_at: row.created_at.toISOString(),
-      updated_at: row.updated_at.toISOString()
+      created_at: row.created_at,
+      updated_at: row.updated_at
     };
   } catch (error) {
     await connection.rollback();

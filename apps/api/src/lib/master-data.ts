@@ -21,7 +21,7 @@ type ItemRow = RowDataPacket & {
   item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
   item_group_id: number | null;
   is_active: number;
-  updated_at: Date;
+  updated_at: string;
 };
 
 type ItemGroupRow = RowDataPacket & {
@@ -31,7 +31,7 @@ type ItemGroupRow = RowDataPacket & {
   code: string | null;
   name: string;
   is_active: number;
-  updated_at: Date;
+  updated_at: string;
 };
 
 type ItemPriceRow = RowDataPacket & {
@@ -41,7 +41,7 @@ type ItemPriceRow = RowDataPacket & {
   item_id: number;
   price: string | number;
   is_active: number;
-  updated_at: Date;
+  updated_at: string;
   item_group_id?: number | null;
   item_group_name?: string | null;
 };
@@ -53,7 +53,7 @@ type SupplyRow = RowDataPacket & {
   name: string;
   unit: string;
   is_active: number;
-  updated_at: Date;
+  updated_at: string;
 };
 
 type FixedAssetRow = RowDataPacket & {
@@ -64,10 +64,10 @@ type FixedAssetRow = RowDataPacket & {
   asset_tag: string | null;
   name: string;
   serial_number: string | null;
-  purchase_date: Date | null;
+  purchase_date: string | null;
   purchase_cost: string | number | null;
   is_active: number;
-  updated_at: Date;
+  updated_at: string;
 };
 
 type FixedAssetCategoryRow = RowDataPacket & {
@@ -81,7 +81,7 @@ type FixedAssetCategoryRow = RowDataPacket & {
   expense_account_id: number | null;
   accum_depr_account_id: number | null;
   is_active: number;
-  updated_at: Date;
+  updated_at: string;
 };
 
 type OutletTableRow = RowDataPacket & {
@@ -93,7 +93,7 @@ type OutletTableRow = RowDataPacket & {
   zone: string | null;
   capacity: number | null;
   status: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
-  updated_at: Date;
+  updated_at: string;
 };
 
 type ReservationRow = RowDataPacket & {
@@ -104,15 +104,15 @@ type ReservationRow = RowDataPacket & {
   customer_name: string;
   customer_phone: string | null;
   guest_count: number;
-  reservation_at: Date;
+  reservation_at: string;
   duration_minutes: number | null;
   status: "BOOKED" | "CONFIRMED" | "ARRIVED" | "SEATED" | "COMPLETED" | "CANCELLED" | "NO_SHOW";
   notes: string | null;
   linked_order_id: string | null;
-  arrived_at: Date | null;
-  seated_at: Date | null;
-  cancelled_at: Date | null;
-  updated_at: Date;
+  arrived_at: string | null;
+  seated_at: string | null;
+  cancelled_at: string | null;
+  updated_at: string;
 };
 
 type VersionRow = RowDataPacket & {
@@ -303,7 +303,7 @@ function normalizeItem(row: ItemRow) {
     type: row.item_type,
     item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
     is_active: row.is_active === 1,
-    updated_at: new Date(row.updated_at).toISOString()
+    updated_at: row.updated_at
   };
 }
 
@@ -315,7 +315,7 @@ function normalizeItemGroup(row: ItemGroupRow) {
     code: row.code,
     name: row.name,
     is_active: row.is_active === 1,
-    updated_at: new Date(row.updated_at).toISOString()
+    updated_at: row.updated_at
   };
 }
 
@@ -329,7 +329,7 @@ function normalizeItemPrice(row: ItemPriceRow) {
     is_active: row.is_active === 1,
     item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
     item_group_name: row.item_group_name ?? null,
-    updated_at: new Date(row.updated_at).toISOString()
+    updated_at: row.updated_at
   };
 }
 
@@ -341,7 +341,7 @@ function normalizeSupply(row: SupplyRow) {
     name: row.name,
     unit: row.unit,
     is_active: row.is_active === 1,
-    updated_at: new Date(row.updated_at).toISOString()
+    updated_at: row.updated_at
   };
 }
 
@@ -353,7 +353,7 @@ function normalizeOutletTable(row: OutletTableRow) {
     zone: row.zone,
     capacity: row.capacity == null ? null : Number(row.capacity),
     status: row.status,
-    updated_at: new Date(row.updated_at).toISOString()
+    updated_at: row.updated_at
   };
 }
 
@@ -364,15 +364,15 @@ function normalizeReservation(row: ReservationRow) {
     customer_name: row.customer_name,
     customer_phone: row.customer_phone,
     guest_count: Number(row.guest_count),
-    reservation_at: new Date(row.reservation_at).toISOString(),
+    reservation_at: row.reservation_at,
     duration_minutes: row.duration_minutes == null ? null : Number(row.duration_minutes),
     status: row.status,
     notes: row.notes,
     linked_order_id: row.linked_order_id,
-    arrived_at: row.arrived_at ? new Date(row.arrived_at).toISOString() : null,
-    seated_at: row.seated_at ? new Date(row.seated_at).toISOString() : null,
-    cancelled_at: row.cancelled_at ? new Date(row.cancelled_at).toISOString() : null,
-    updated_at: new Date(row.updated_at).toISOString()
+    arrived_at: row.arrived_at ? row.arrived_at : null,
+    seated_at: row.seated_at ? row.seated_at : null,
+    cancelled_at: row.cancelled_at ? row.cancelled_at : null,
+    updated_at: row.updated_at
   };
 }
 
@@ -385,10 +385,10 @@ function normalizeFixedAsset(row: FixedAssetRow) {
     asset_tag: row.asset_tag,
     name: row.name,
     serial_number: row.serial_number,
-    purchase_date: row.purchase_date ? new Date(row.purchase_date).toISOString() : null,
+    purchase_date: row.purchase_date ? row.purchase_date : null,
     purchase_cost: row.purchase_cost == null ? null : Number(row.purchase_cost),
     is_active: row.is_active === 1,
-    updated_at: new Date(row.updated_at).toISOString()
+    updated_at: row.updated_at
   };
 }
 
@@ -404,7 +404,7 @@ function normalizeFixedAssetCategory(row: FixedAssetCategoryRow) {
     expense_account_id: row.expense_account_id == null ? null : Number(row.expense_account_id),
     accum_depr_account_id: row.accum_depr_account_id == null ? null : Number(row.accum_depr_account_id),
     is_active: row.is_active === 1,
-    updated_at: new Date(row.updated_at).toISOString()
+    updated_at: row.updated_at
   };
 }
 
@@ -2687,13 +2687,13 @@ async function readOpenOrderSyncPayload(
       order_id: String(row.order_id),
       company_id: Number(row.company_id),
       outlet_id: Number(row.outlet_id),
-      base_order_updated_at: row.base_order_updated_at ? new Date(row.base_order_updated_at as string).toISOString() : null,
+      base_order_updated_at: row.base_order_updated_at ? row.base_order_updated_at : null,
       event_type: String(row.event_type) as SyncPullPayload["order_updates"][number]["event_type"],
       delta_json: String(row.delta_json),
       actor_user_id: row.actor_user_id == null ? null : Number(row.actor_user_id),
       device_id: String(row.device_id),
-      event_at: new Date(row.event_at as string).toISOString(),
-      created_at: new Date(row.created_at as string).toISOString()
+      event_at: row.event_at,
+      created_at: row.created_at
     }));
 
     const nextCursor = orderUpdates.length > 0 ? orderUpdates[orderUpdates.length - 1].sequence_no : ordersCursor;
@@ -2713,10 +2713,10 @@ async function readOpenOrderSyncPayload(
         order_status: String(row.order_status) as SyncPullPayload["open_orders"][number]["order_status"],
         order_state: String(row.order_state) as SyncPullPayload["open_orders"][number]["order_state"],
         paid_amount: Number(row.paid_amount),
-        opened_at: new Date(row.opened_at as string).toISOString(),
-        closed_at: row.closed_at ? new Date(row.closed_at as string).toISOString() : null,
+        opened_at: row.opened_at,
+        closed_at: row.closed_at ? row.closed_at : null,
         notes: row.notes == null ? null : String(row.notes),
-        updated_at: new Date(row.updated_at as string).toISOString()
+        updated_at: row.updated_at
       })),
       open_order_lines: (linesRows[0] as RowDataPacket[]).map((row) => ({
         order_id: String(row.order_id),
@@ -2729,7 +2729,7 @@ async function readOpenOrderSyncPayload(
         unit_price_snapshot: Number(row.unit_price_snapshot),
         qty: Number(row.qty),
         discount_amount: Number(row.discount_amount),
-        updated_at: new Date(row.updated_at as string).toISOString()
+        updated_at: row.updated_at
       })),
       order_updates: orderUpdates,
       orders_cursor: nextCursor

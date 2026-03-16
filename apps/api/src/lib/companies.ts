@@ -314,6 +314,7 @@ export type CompanyResponse = {
   tax_id: string | null;
   email: string | null;
   phone: string | null;
+  timezone: string | null;
   address_line1: string | null;
   address_line2: string | null;
   city: string | null;
@@ -337,13 +338,14 @@ type CompanyRow = RowDataPacket & {
   tax_id: string | null;
   email: string | null;
   phone: string | null;
+  timezone: string | null;
   address_line1: string | null;
   address_line2: string | null;
   city: string | null;
   postal_code: string | null;
-  created_at: Date;
-  updated_at: Date;
-  deleted_at: Date | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
 };
 
 class ConnectionAuditDbClient {
@@ -401,13 +403,14 @@ function normalizeCompanyRow(row: CompanyRow): CompanyResponse {
     tax_id: row.tax_id,
     email: row.email,
     phone: row.phone,
+    timezone: row.timezone,
     address_line1: row.address_line1,
     address_line2: row.address_line2,
     city: row.city,
     postal_code: row.postal_code,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString(),
-    deleted_at: row.deleted_at ? row.deleted_at.toISOString() : null
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    deleted_at: row.deleted_at
   };
 }
 
@@ -663,7 +666,7 @@ async function ensureCompanyExists(
 ): Promise<CompanyRow> {
   const includeDeleted = options?.includeDeleted ?? false;
   const [rows] = await connection.execute<CompanyRow[]>(
-    `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+    `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
      FROM companies
      WHERE id = ?
      ${includeDeleted ? "" : "AND deleted_at IS NULL"}`,
@@ -697,7 +700,7 @@ export async function listCompanies(params: {
   }
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const [rows] = await pool.execute<CompanyRow[]>(
-    `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+    `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
      FROM companies
      ${whereClause}
      ORDER BY name ASC`,
@@ -717,7 +720,7 @@ export async function getCompany(
   const pool = getDbPool();
   const includeDeleted = options?.includeDeleted ?? false;
   const [rows] = await pool.execute<CompanyRow[]>(
-    `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+    `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
      FROM companies
      WHERE id = ?
      ${includeDeleted ? "" : "AND deleted_at IS NULL"}`,

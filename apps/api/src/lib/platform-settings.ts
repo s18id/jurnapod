@@ -13,9 +13,9 @@ type PlatformSettingRow = RowDataPacket & {
   key: string;
   value_json: string;
   is_sensitive: number;
-  updated_at: Date;
+  updated_at: string;
   updated_by: number | null;
-  created_at: Date;
+  created_at: string;
 };
 
 /**

@@ -25,17 +25,17 @@ type FiscalYearRow = RowDataPacket & {
   company_id: number;
   code: string;
   name: string;
-  start_date: string | Date;
-  end_date: string | Date;
+  start_date: string;
+  end_date: string;
   status: FiscalYearStatus;
-  created_at: string | Date;
-  updated_at: string | Date;
+  created_at: string;
+  updated_at: string;
 };
 
 type FiscalYearRangeRow = RowDataPacket & {
   id: number;
-  start_date: string | Date;
-  end_date: string | Date;
+  start_date: string;
+  end_date: string;
 };
 
 export class FiscalYearNotFoundError extends Error {}
@@ -49,20 +49,12 @@ export class FiscalYearSelectionError extends Error {}
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 const ALLOW_MULTIPLE_OPEN_SETTING: SettingKey = "accounting.allow_multiple_open_fiscal_years";
 
-function formatDateOnly(value: string | Date): string {
-  if (typeof value === "string") {
-    return value.slice(0, 10);
-  }
-
-  return value.toISOString().slice(0, 10);
+function formatDateOnly(value: string): string {
+  return value.slice(0, 10);
 }
 
-function formatDateTime(value: string | Date): string {
-  if (typeof value === "string") {
-    return new Date(value).toISOString();
-  }
-
-  return value.toISOString();
+function formatDateTime(value: string): string {
+  return value;
 }
 
 function normalizeFiscalYear(row: FiscalYearRow): FiscalYear {

@@ -10,7 +10,7 @@ type FixedAssetRow = RowDataPacket & {
   id: number;
   company_id: number;
   outlet_id: number | null;
-  purchase_date: Date | string | null;
+  purchase_date: string | null;
   purchase_cost: string | number | null;
 };
 
@@ -20,15 +20,15 @@ type DepreciationPlanRow = RowDataPacket & {
   asset_id: number;
   outlet_id: number | null;
   method: "STRAIGHT_LINE" | "DECLINING_BALANCE" | "SUM_OF_YEARS";
-  start_date: Date | string;
+  start_date: string;
   useful_life_months: number;
   salvage_value: string | number;
   purchase_cost_snapshot: string | number;
   expense_account_id: number;
   accum_depr_account_id: number;
   status: "DRAFT" | "ACTIVE" | "VOID";
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 type DepreciationRunRow = RowDataPacket & {
@@ -37,12 +37,12 @@ type DepreciationRunRow = RowDataPacket & {
   plan_id: number;
   period_year: number;
   period_month: number;
-  run_date: Date | string;
+  run_date: string;
   amount: string | number;
   journal_batch_id: number | null;
   status: "POSTED" | "VOID";
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 type AccessCheckRow = RowDataPacket & {
@@ -241,8 +241,8 @@ function normalizePlan(row: DepreciationPlanRow): DepreciationPlan {
     expense_account_id: Number(row.expense_account_id),
     accum_depr_account_id: Number(row.accum_depr_account_id),
     status: row.status,
-    created_at: new Date(row.created_at).toISOString(),
-    updated_at: new Date(row.updated_at).toISOString()
+    created_at: row.created_at,
+    updated_at: row.updated_at
   };
 }
 
@@ -257,8 +257,8 @@ function normalizeRun(row: DepreciationRunRow): DepreciationRun {
     amount: Number(row.amount),
     journal_batch_id: row.journal_batch_id == null ? null : Number(row.journal_batch_id),
     status: row.status,
-    created_at: new Date(row.created_at).toISOString(),
-    updated_at: new Date(row.updated_at).toISOString()
+    created_at: row.created_at,
+    updated_at: row.updated_at
   };
 }
 

@@ -50,8 +50,8 @@ type OutletRow = RowDataPacket & {
   email: string | null;
   timezone: string | null;
   is_active: number;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 type OutletActor = {
@@ -120,8 +120,8 @@ function mapRowToOutlet(row: OutletRow): OutletFullResponse {
     email: row.email,
     timezone: row.timezone,
     is_active: Boolean(row.is_active),
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
+    created_at: row.created_at,
+    updated_at: row.updated_at
   };
 }
 

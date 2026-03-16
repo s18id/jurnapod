@@ -15,8 +15,8 @@ export interface CompanySetting {
   value_json: string;
   created_by_user_id: number | null;
   updated_by_user_id: number | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CompanySettingWithValue extends Omit<CompanySetting, "value_json"> {

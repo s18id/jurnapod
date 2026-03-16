@@ -19,9 +19,9 @@ type EmailOutboxRow = RowDataPacket & {
   status: string;
   error_message: string | null;
   attempts: number;
-  next_retry_at: Date | null;
-  created_at: Date;
-  sent_at: Date | null;
+  next_retry_at: string | null;
+  created_at: string;
+  sent_at: string | null;
 };
 
 export async function queueEmail(params: {

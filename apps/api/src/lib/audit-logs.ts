@@ -19,7 +19,7 @@ type AuditLogRow = RowDataPacket & {
   ip_address: string | null;
   payload_json: string;
   changes_json: string | null;
-  created_at: Date;
+  created_at: string;
 };
 
 function normalizeAuditLog(row: AuditLogRow): AuditLogResponse {
@@ -37,7 +37,7 @@ function normalizeAuditLog(row: AuditLogRow): AuditLogResponse {
     ip_address: row.ip_address ?? null,
     payload_json: row.payload_json,
     changes_json: row.changes_json ?? null,
-    created_at: new Date(row.created_at).toISOString()
+    created_at: row.created_at
   };
 }
 

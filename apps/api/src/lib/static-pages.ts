@@ -13,16 +13,16 @@ type StaticPageRow = RowDataPacket & {
   slug: string;
   title: string;
   content_md: string;
-  updated_at: Date;
-  published_at: Date | null;
+  updated_at: string;
+  published_at: string | null;
 };
 
 export type PublicStaticPage = {
   slug: string;
   title: string;
   content_html: string;
-  updated_at: Date;
-  published_at: Date | null;
+  updated_at: string;
+  published_at: string | null;
 };
 
 type CacheEntry = {

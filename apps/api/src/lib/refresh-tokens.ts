@@ -14,8 +14,8 @@ type RefreshTokenRow = RowDataPacket & {
   id: number;
   user_id: number;
   company_id: number;
-  expires_at: Date;
-  revoked_at: Date | null;
+  expires_at: string;
+  revoked_at: string | null;
 };
 
 export type RefreshTokenIssueContext = {
