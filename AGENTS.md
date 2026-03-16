@@ -20,6 +20,14 @@ Important:
 - Avoid MySQL/MariaDB syntax drift in migrations (for example, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` is not portable across engines/versions).
 - For additive rerunnable DDL, prefer `information_schema` existence checks plus guarded dynamic `ALTER TABLE` statements.
 
+## Import path conventions
+- Use `@/` alias for imports from `apps/api/src/`
+  - `@/lib/db` → `apps/api/src/lib/db`
+  - `@/lib/auth-guard` → `apps/api/src/lib/auth-guard`
+  - `@/lib/response` → `apps/api/src/lib/response`
+- Do NOT use relative paths like `../../../../src/lib/` - they fail to resolve in some contexts.
+- Example: `import { getDbPool } from "@/lib/db";`
+
 ## Review guidelines
 
 ### Severity
