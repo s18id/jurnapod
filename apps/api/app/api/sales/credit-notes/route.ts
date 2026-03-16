@@ -8,6 +8,7 @@ import {
 import { ZodError, z } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth";
 import { requireAccess, requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
+import { getCompany } from "../../../../src/lib/companies";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import {
   createCreditNote,
@@ -70,6 +71,10 @@ export const GET = withAuth(
         outletIds = await listUserOutletIds(auth.userId, auth.companyId);
       }
 
+      // Get company timezone for date boundary conversion
+      const company = await getCompany(auth.companyId);
+      const timezone = company.timezone ?? 'UTC';
+
       const result = await listCreditNotes(auth.companyId, {
         outletIds,
         invoiceId: parsed.invoice_id,
@@ -77,7 +82,8 @@ export const GET = withAuth(
         dateFrom: parsed.date_from,
         dateTo: parsed.date_to,
         limit: parsed.limit,
-        offset: parsed.offset
+        offset: parsed.offset,
+        timezone
       });
 
       return successResponse({

@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { NumericIdSchema, SalesInvoiceDueTermSchema } from "@jurnapod/shared";
+import { DateOnlySchema, NumericIdSchema, SalesInvoiceDueTermSchema } from "@jurnapod/shared";
 import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { errorResponse, successResponse } from "../../../../../../src/lib/response";
 import {
@@ -16,8 +16,8 @@ const numberingTemplateConflictMessage =
 
 const ConvertToInvoiceSchema = z.object({
   outlet_id: NumericIdSchema,
-  invoice_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  invoice_date: DateOnlySchema,
+  due_date: DateOnlySchema.optional(),
   due_term: SalesInvoiceDueTermSchema.optional(),
   invoice_no: z.string().trim().min(1).max(64).optional(),
   tax_amount: z.number().finite().nonnegative().optional(),
