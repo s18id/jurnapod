@@ -9,8 +9,10 @@ import type { Context } from "hono";
 import { compress } from "hono/compress";
 import { logger as honoLogger } from "hono/logger";
 import { serve } from "@hono/node-server";
+import { createServer } from "node:http";
 import { assertAppEnvReady } from "./lib/env.js";
 import { initializeSyncModules, cleanupSyncModules } from "./lib/sync-modules.js";
+import { initWebSocketManager } from "./lib/websocket/index.js";
 
 // Validate environment configuration before starting server
 assertAppEnvReady();
@@ -258,22 +260,36 @@ app.onError((error: unknown) => {
   );
 });
 
-const server = serve(
-  {
-    fetch: app.fetch,
-    port: PORT,
-    hostname: HOST
-  },
-  (info: { address: string; port: number }) => {
-    console.log(`API server running on http://${info.address}:${info.port}`);
+const server = createServer(async (req, res) => {
+  // Let Hono handle the request
+  try {
+    await app.fetch(req as any, res as any);
+  } catch (error) {
+    console.error("Request handling error:", error);
+    if (!res.writableEnded) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ success: false, error: { code: "INTERNAL_SERVER_ERROR", message: "Internal Server Error" } }));
+    }
   }
-);
+});
+
+// Initialize WebSocket manager
+const wsManager = initWebSocketManager(server);
+wsManager.start();
+
+server.listen(PORT, HOST, () => {
+  console.log(`API server running on http://${HOST}:${PORT}`);
+  console.log(`WebSocket server running on ws://${HOST}:${PORT}/ws`);
+});
 
 // Handle graceful shutdown
 const shutdown = async () => {
   console.log("\nShutting down API server...");
   
-  // Cleanup sync modules first
+  // Stop WebSocket server
+  wsManager.stop();
+  
+  // Cleanup sync modules
   await cleanupSyncModules();
   
   server.close(() => {
