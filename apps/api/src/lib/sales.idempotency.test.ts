@@ -273,9 +273,6 @@ test(
           createdAccountIds
         );
       }
-
-      await pool.end();
-      await closeDbPool();
     }
   }
 );
@@ -424,9 +421,11 @@ test(
           createdAccountIds
         );
       }
-
-      await pool.end();
-      await closeDbPool();
     }
   }
 );
+
+// Standard DB pool cleanup - runs after all tests in this file
+test.after(async () => {
+  await closeDbPool();
+});

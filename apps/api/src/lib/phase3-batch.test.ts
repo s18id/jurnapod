@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadEnvIfPresent } from "../../tests/integration/integration-harness.mjs";
 import { getDbPool, closeDbPool } from "./db";
+import { createTestFixture, type TestFixtureContext } from "../../tests/integration/fixtures";
 import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
@@ -97,37 +98,41 @@ test("Phase3: Can create and retrieve a scheduled export", { timeout: 60000 }, a
   // For now, we just verify the scheduled_exports table works
   const dbPool = getDbPool();
   const runId = Date.now();
+  let fixture: TestFixtureContext | null = null;
+  let exportId: number | null = null;
   
-  const [companies] = await dbPool.execute<RowDataPacket[]>(`SELECT id FROM companies LIMIT 1`);
-  
-  if (companies.length === 0) {
-    console.log("Skipping: No companies in database");
-    return;
+  try {
+    // Create test fixture instead of relying on existing data
+    fixture = await createTestFixture(dbPool, "phase3");
+    const companyId = fixture.company.id;
+    
+    const [insertResult] = await dbPool.execute(
+      `INSERT INTO scheduled_exports (
+        company_id, name, report_type, export_format, schedule_type, schedule_config,
+        recipients, delivery_method, next_run_at, created_by_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+      [companyId, `Test Export ${runId}`, 'SALES', 'CSV', 'ONCE', '{"hour": 0}', '[{"email": "test@example.com", "type": "TO"}]', 'EMAIL', fixture.user.id]
+    );
+    
+    exportId = Number((insertResult as { insertId: number }).insertId);
+    
+    // Verify the export was created
+    const [exports] = await dbPool.execute<RowDataPacket[]>(
+      `SELECT id, name, report_type FROM scheduled_exports WHERE id = ?`,
+      [exportId]
+    );
+    
+    assert.strictEqual(exports.length, 1, "Scheduled export should be created");
+    assert.strictEqual(exports[0].name, `Test Export ${runId}`);
+  } finally {
+    // Cleanup test data
+    if (exportId) {
+      await dbPool.execute(`DELETE FROM scheduled_exports WHERE id = ?`, [exportId]);
+    }
+    if (fixture) {
+      await fixture.cleanup();
+    }
   }
-  
-  const companyId = Number(companies[0].id);
-  
-  const [insertResult] = await dbPool.execute(
-    `INSERT INTO scheduled_exports (
-      company_id, name, report_type, export_format, schedule_type, schedule_config,
-      recipients, delivery_method, next_run_at, created_by_user_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1)`,
-    [companyId, `Test Export ${runId}`, 'SALES', 'CSV', 'ONCE', '{"hour": 0}', '[{"email": "test@example.com", "type": "TO"}]', 'EMAIL']
-  );
-  
-  const exportId = Number((insertResult as { insertId: number }).insertId);
-  
-  // Verify the export was created
-  const [exports] = await dbPool.execute<RowDataPacket[]>(
-    `SELECT id, name, report_type FROM scheduled_exports WHERE id = ?`,
-    [exportId]
-  );
-  
-  assert.strictEqual(exports.length, 1, "Scheduled export should be created");
-  assert.strictEqual(exports[0].name, `Test Export ${runId}`);
-  
-  // Cleanup
-  await dbPool.execute(`DELETE FROM scheduled_exports WHERE id = ?`, [exportId]);
 });
 
 test("Phase3: email_outbox has attachment_path for export delivery", { timeout: 30000 }, async () => {
