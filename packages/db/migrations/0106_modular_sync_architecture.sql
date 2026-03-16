@@ -99,6 +99,23 @@ CREATE TABLE IF NOT EXISTS sync_operations (
     INDEX idx_sync_operations_completed (completed_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Add deleted_at column to outlets if it doesn't exist (for soft-delete support)
+SET @deleted_at_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() 
+    AND TABLE_NAME = 'outlets' 
+    AND COLUMN_NAME = 'deleted_at'
+);
+
+SET @add_deleted_at_sql = IF(@deleted_at_exists = 0, 
+    'ALTER TABLE outlets ADD COLUMN deleted_at DATETIME NULL DEFAULT NULL', 
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @add_deleted_at_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- Initialize sync tier versions for existing companies with MASTER tier version from sync_data_versions
 INSERT IGNORE INTO sync_tier_versions (company_id, tier, current_version, last_updated_at)
 SELECT 
