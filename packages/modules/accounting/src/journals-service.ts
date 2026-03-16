@@ -7,6 +7,7 @@ import type {
   JournalListQuery,
   JournalLineResponse
 } from "@jurnapod/shared";
+import { toRfc3339Required } from "@jurnapod/shared";
 
 /**
  * Database client interface for dependency injection
@@ -266,21 +267,21 @@ export class JournalsService {
       doc_type: batch.doc_type,
       doc_id: batch.doc_id,
       client_ref: batch.client_ref ?? null,
-      posted_at: batch.posted_at,
-      created_at: batch.created_at,
-      updated_at: batch.updated_at,
+      posted_at: toRfc3339Required(batch.posted_at),
+      created_at: toRfc3339Required(batch.created_at),
+      updated_at: toRfc3339Required(batch.updated_at),
       lines: lines.map(line => ({
         id: line.id,
         journal_batch_id: line.journal_batch_id,
         company_id: line.company_id,
         outlet_id: line.outlet_id,
         account_id: line.account_id,
-        line_date: typeof line.line_date === 'string' ? line.line_date.split('T')[0] : line.line_date.toISOString().split('T')[0],
+        line_date: typeof line.line_date === 'string' ? line.line_date.split('T')[0] : (line.line_date instanceof Date ? line.line_date.toISOString().split('T')[0] : line.line_date),
         debit: parseFloat(line.debit),
         credit: parseFloat(line.credit),
         description: line.description,
-        created_at: line.created_at,
-        updated_at: line.updated_at
+        created_at: toRfc3339Required(line.created_at),
+        updated_at: toRfc3339Required(line.updated_at)
       }))
     };
   }

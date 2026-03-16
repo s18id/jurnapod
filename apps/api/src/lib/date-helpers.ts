@@ -11,6 +11,8 @@
  * - Output: UTC ISO string
  */
 
+export { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
+
 /**
  * Parse RFC 3339 datetime and convert to UTC ISO string
  * @param rfc3339 - RFC 3339 datetime (e.g., "2026-03-16T17:30:00+07:00")
@@ -20,21 +22,6 @@ export function normalizeDateTime(rfc3339: string): string {
   const date = new Date(rfc3339);
   if (isNaN(date.getTime())) {
     throw new Error(`Invalid RFC 3339 datetime: ${rfc3339}`);
-  }
-  return date.toISOString();
-}
-
-/**
- * Normalize MySQL or any datetime to RFC 3339 UTC ISO string
- * Use this when returning datetime values in API responses
- * @param value - MySQL datetime ("2026-03-16 17:16:16"), Date object, or ISO string
- * @returns UTC ISO string (e.g., "2026-03-16T10:16:16.000Z") or null if input is null/undefined
- */
-export function toRfc3339(value: string | Date | null | undefined): string | null {
-  if (value === null || value === undefined) return null;
-  const date = typeof value === 'string' ? new Date(value) : value;
-  if (isNaN(date.getTime())) {
-    throw new Error(`Invalid datetime: ${value}`);
   }
   return date.toISOString();
 }

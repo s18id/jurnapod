@@ -5,7 +5,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection, QueryResult } from "mysql2/promise";
 import { AuditService } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
-import { toRfc3339 } from "./date-helpers";
+import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 export class CompanyNotFoundError extends Error {}
 export class CompanyCodeExistsError extends Error {}
@@ -412,8 +412,8 @@ function normalizeCompanyRow(row: CompanyRow): CompanyResponse {
     address_line2: row.address_line2,
     city: row.city,
     postal_code: row.postal_code,
-    created_at: toRfc3339(row.created_at),
-    updated_at: toRfc3339(row.updated_at),
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at),
     deleted_at: toRfc3339(row.deleted_at)
   };
 }

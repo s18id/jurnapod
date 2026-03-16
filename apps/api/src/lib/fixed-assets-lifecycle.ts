@@ -509,7 +509,7 @@ async function recomputeAssetBookFromEvents(
       accum_depreciation: 0,
       accum_impairment: 0,
       carrying_amount: 0,
-      disposed_at: disposedAt
+      disposed_at: disposedAt.toISOString()
     };
   }
 

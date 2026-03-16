@@ -124,6 +124,9 @@ export const GET_transactions = withAuth(
       const productId = productIdRaw ? parseInt(productIdRaw, 10) : undefined;
       const limit = limitRaw ? parseInt(limitRaw, 10) : 100;
       const offset = offsetRaw ? parseInt(offsetRaw, 10) : 0;
+      
+      // Parse transaction type to number
+      const transactionTypeNum = transactionType ? parseInt(transactionType, 10) : undefined;
 
       connection = await dbPool.getConnection();
       const { transactions, total } = await getStockTransactions(
@@ -131,7 +134,7 @@ export const GET_transactions = withAuth(
         outletId,
         {
           product_id: productId,
-          transaction_type: transactionType ?? undefined,
+          transaction_type: transactionTypeNum,
           limit,
           offset
         },

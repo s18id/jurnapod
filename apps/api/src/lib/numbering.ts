@@ -178,7 +178,7 @@ export async function generateDocumentNumber(
 
       if (shouldReset) {
         newValue = 1;
-        newLastReset = now;
+        newLastReset = now.toISOString();
       } else {
         newValue = template.current_value + 1;
       }

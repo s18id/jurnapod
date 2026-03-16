@@ -230,7 +230,7 @@ export async function rotateRefreshToken(
       return { success: false, reason: "revoked" };
     }
 
-    if (current.expires_at.getTime() <= Date.now()) {
+    if (new Date(current.expires_at).getTime() <= Date.now()) {
       await connection.rollback();
       return { success: false, reason: "expired" };
     }

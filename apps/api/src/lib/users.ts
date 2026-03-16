@@ -8,7 +8,7 @@ import { NumericIdSchema, RoleSchema } from "@jurnapod/shared";
 import { hashPassword, type PasswordHashPolicy } from "./password-hash";
 import { getDbPool } from "./db";
 import { getAppEnv } from "./env";
-import { toRfc3339 } from "./date-helpers";
+import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 export class UserNotFoundError extends Error {}
 export class UserEmailExistsError extends Error {}
@@ -447,8 +447,8 @@ function normalizeUserRow(row: UserRow): Omit<UserProfile, "global_roles" | "out
     name: row.name,
     email: row.email,
     is_active: row.is_active === 1,
-    created_at: toRfc3339(row.created_at),
-    updated_at: toRfc3339(row.updated_at)
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at)
   };
 }
 
@@ -1464,8 +1464,8 @@ export async function listModuleRoles(params: {
     role_code: row.role_code,
     module: row.module,
     permission_mask: Number(row.permission_mask ?? 0),
-    created_at: toRfc3339(row.created_at),
-    updated_at: toRfc3339(row.updated_at)
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at)
   }));
 }
 
@@ -1569,8 +1569,8 @@ export async function setModuleRolePermission(params: {
       role_code: row.role_code,
       module: row.module,
       permission_mask: Number(row.permission_mask ?? 0),
-      created_at: toRfc3339(row.created_at),
-      updated_at: toRfc3339(row.updated_at)
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at)
     };
   } catch (error) {
     await connection.rollback();

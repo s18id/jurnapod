@@ -55,3 +55,33 @@ export type DateOnly = z.infer<typeof DateOnlySchema>;
 export type Timezone = z.infer<typeof TimezoneSchema>;
 export type DateRangeQuery = z.infer<typeof DateRangeQuerySchema>;
 export type DateRangeWithTimezone = z.infer<typeof DateRangeWithTimezoneSchema>;
+
+/**
+ * Normalize MySQL or any datetime to RFC 3339 UTC ISO string
+ * Use this when returning datetime values in API responses
+ * @param value - MySQL datetime ("2026-03-16 17:16:16"), Date object, or ISO string
+ * @returns UTC ISO string (e.g., "2026-03-16T10:16:16.000Z") or null if input is null/undefined
+ */
+export function toRfc3339(value: string | Date | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (isNaN(date.getTime())) {
+    throw new Error(`Invalid datetime: ${value}`);
+  }
+  return date.toISOString();
+}
+
+/**
+ * Normalize MySQL or any datetime to RFC 3339 UTC ISO string (non-null version)
+ * Use this for required datetime fields that are guaranteed to have values
+ * @param value - MySQL datetime ("2026-03-16 17:16:16"), Date object, or ISO string
+ * @returns UTC ISO string (e.g., "2026-03-16T10:16:16.000Z")
+ * @throws Error if value is null, undefined, or invalid
+ */
+export function toRfc3339Required(value: string | Date): string {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (isNaN(date.getTime())) {
+    throw new Error(`Invalid datetime: ${value}`);
+  }
+  return date.toISOString();
+}

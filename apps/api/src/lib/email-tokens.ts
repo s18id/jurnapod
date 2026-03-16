@@ -76,7 +76,7 @@ export async function createEmailToken(params: {
     ]
   );
 
-  return { token, expiresAt };
+  return { token, expiresAt: expiresAt.toISOString() };
 }
 
 export async function validateEmailToken(
