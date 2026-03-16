@@ -59,8 +59,8 @@ export async function createTestFixture(
   
   // Create outlet
   const [outletResult] = await dbPool.execute(
-    `INSERT INTO outlets (company_id, name, code, address, phone, email, is_active, created_at, updated_at) 
-     VALUES (?, ?, ?, '', '', '', 1, NOW(), NOW())`,
+    `INSERT INTO outlets (company_id, name, code, address_line1, address_line2, phone, email, is_active, created_at, updated_at) 
+     VALUES (?, ?, ?, '', '', '', '', 1, NOW(), NOW())`,
     [companyId, `${prefix} Outlet ${runId}`, `${prefix.toUpperCase()}OUT${uuid}`]
   );
   const outletId = Number((outletResult as any).insertId);
