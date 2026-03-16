@@ -3,7 +3,7 @@
 
 import type { RowDataPacket } from "mysql2";
 import { getDbPool } from "./db";
-import type { AuditLogQuery, AuditLogResponse } from "@jurnapod/shared";
+import type { AuditLogQuery, AuditLogResponse, AuditStatusCode } from "@jurnapod/shared";
 
 type AuditLogRow = RowDataPacket & {
   id: number;
@@ -15,6 +15,7 @@ type AuditLogRow = RowDataPacket & {
   action: string;
   result: "SUCCESS" | "FAIL";
   success: number;
+  status: number;
   ip_address: string | null;
   payload_json: string;
   changes_json: string | null;
@@ -32,6 +33,7 @@ function normalizeAuditLog(row: AuditLogRow): AuditLogResponse {
     action: row.action,
     result: row.result,
     success: row.success === 1,
+    status: (row.status ?? (row.success === 1 ? 1 : 0)) as AuditStatusCode, // Default to success/fail if status not available
     ip_address: row.ip_address ?? null,
     payload_json: row.payload_json,
     changes_json: row.changes_json ?? null,
@@ -86,7 +88,7 @@ export async function queryAuditLogs(
 
   const [rows] = await pool.execute<AuditLogRow[]>(
     `SELECT id, company_id, outlet_id, user_id, entity_type, entity_id,
-            action, result, success, ip_address, payload_json, changes_json, created_at
+            action, result, success, status, ip_address, payload_json, changes_json, created_at
      FROM audit_logs
      WHERE ${whereClause}
      ORDER BY created_at DESC, id DESC
