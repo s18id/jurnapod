@@ -9,36 +9,37 @@
 
 # Agent to Model Mappings
 agent_models:
-  # Core/Master agents - use minimax for orchestration
+  # Core/Master agents - use kimi for orchestration (needs full context)
   bmad-master:
-    model: "opencode-go/minimax-m2.5"
-    description: "Orchestration and complex decision making"
+    model: "opencode-go/kimi-k2.5"
+    description: "Orchestration and complex decision making - needs full project state"
     
-  # Development agents - use Codex for code tasks (best for coding)
+  # Development agents - narrow scope tasks on minimax, broader on kimi
+  # Decomposition strategy: break into 2-4 hour focused chunks
   bmad-dev:
-    model: "openai/gpt-5.1-codex-mini"
-    description: "Code implementation and debugging"
+    model: "opencode-go/kimi-k2.5"
+    description: "Main dev with decomposition strategy - broader context needed"
     
   bmad-quick-flow-solo-dev:
-    model: "openai/gpt-5.1-codex-mini"
-    description: "Rapid implementation"
+    model: "opencode-go/minimax-m2.5"
+    description: "Rapid implementation - narrow focused tasks"
     
   bmad-quick-dev:
-    model: "openai/gpt-5.1-codex-mini"
-    description: "Quick spec implementation"
+    model: "opencode-go/minimax-m2.5"
+    description: "Quick fixes - narrow scope tasks"
     
   bmad-dev-story:
-    model: "openai/gpt-5.1-codex-mini"
-    description: "Story-based implementation"
+    model: "opencode-go/kimi-k2.5"
+    description: "Story implementation with clear AC boundaries"
     
-  # QA/Testing agents - use minimax
+  # QA/Testing agents - standardized workflows on minimax
   bmad-qa:
     model: "opencode-go/minimax-m2.5"
-    description: "Test generation"
+    description: "Test generation - standardized patterns"
     
   bmad-qa-generate-e2e-tests:
     model: "opencode-go/minimax-m2.5"
-    description: "E2E test creation"
+    description: "E2E test creation - focused tasks"
     
   bmad-testarch-test-design:
     model: "opencode-go/minimax-m2.5"
@@ -78,16 +79,16 @@ agent_models:
     description: "Market research and analysis"
     
   bmad-architect:
-    model: "opencode-go/minimax-m2.5"
-    description: "Architecture design"
+    model: "anthropic/claude-3-5-sonnet-20241022"
+    description: "Architecture design - complex reasoning for high-value decisions"
     
   bmad-pm:
-    model: "opencode-go/minimax-m2.5"
-    description: "Product management"
+    model: "opencode-go/kimi-k2.5"
+    description: "Product management - needs full project context"
     
   bmad-sm:
-    model: "opencode-go/minimax-m2.5"
-    description: "Scrum master tasks"
+    model: "opencode-go/kimi-k2.5"
+    description: "Scrum master tasks - needs sprint/project continuity"
     
   # UX/Design agents
   bmad-ux-designer:
@@ -165,17 +166,17 @@ agent_models:
     description: "Ideation sessions"
     
   bmad-create-epics-and-stories:
-    model: "opencode-go/minimax-m2.5"
-    description: "Epic/story breakdown"
+    model: "opencode-go/kimi-k2.5"
+    description: "Epic/story breakdown - needs project scope understanding"
     
   bmad-create-story:
-    model: "opencode-go/minimax-m2.5"
-    description: "Story creation"
+    model: "opencode-go/kimi-k2.5"
+    description: "Story creation - needs technical constraints context"
     
   # Architecture/Planning
   bmad-create-architecture:
-    model: "opencode-go/minimax-m2.5"
-    description: "Architecture design"
+    model: "anthropic/claude-3-5-sonnet-20241022"
+    description: "Solution design with trade-offs - complex reasoning"
     
   bmad-quick-spec:
     model: "opencode-go/minimax-m2.5"
@@ -187,37 +188,37 @@ agent_models:
     
   # Sprint/Project Management
   bmad-sprint-planning:
-    model: "opencode-go/minimax-m2.5"
-    description: "Sprint planning"
+    model: "opencode-go/kimi-k2.5"
+    description: "Sprint planning - needs full context"
     
   bmad-sprint-status:
-    model: "opencode-go/minimax-m2.5"
-    description: "Sprint status"
+    model: "opencode-go/kimi-k2.5"
+    description: "Sprint status - needs current state awareness"
     
   bmad-retrospective:
-    model: "opencode-go/minimax-m2.5"
-    description: "Retrospectives"
+    model: "opencode-go/kimi-k2.5"
+    description: "Retrospectives - needs project history and context"
     
   bmad-correct-course:
-    model: "opencode-go/minimax-m2.5"
-    description: "Course correction"
+    model: "opencode-go/kimi-k2.5"
+    description: "Course correction - needs deep understanding of current state"
     
   # Utility agents
   bmad-help:
-    model: "opencode-go/minimax-m2.5"
-    description: "Help and guidance"
+    model: "opencode-go/kimi-k2.5"
+    description: "Help and guidance - needs project awareness"
     
   bmad-party-mode:
-    model: "opencode-go/minimax-m2.5"
-    description: "Multi-agent orchestration"
+    model: "opencode-go/kimi-k2.5"
+    description: "Multi-agent orchestration - requires context awareness"
     
   bmad-document-project:
-    model: "opencode-go/minimax-m2.5"
-    description: "Project documentation"
+    model: "opencode-go/kimi-k2.5"
+    description: "Project documentation - needs comprehensive analysis"
     
   bmad-generate-project-context:
-    model: "opencode-go/minimax-m2.5"
-    description: "Context generation"
+    model: "opencode-go/kimi-k2.5"
+    description: "Context generation - must understand project deeply"
     
   bmad-index-docs:
     model: "opencode-go/minimax-m2.5"
