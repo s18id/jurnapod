@@ -142,6 +142,7 @@ No comprehensive UX spec found - UX work is derived from existing UI plans in do
 | Epic 4: Items & Catalog | FR25, FR26, FR27 |
 | Epic 5: Settings | FR19, FR20, FR21 |
 | Epic 6: Reporting | FR22, FR23, FR24 |
+| Epic 7: Sync Infrastructure | (Technical Debt) |
 
 ## Epic List
 
@@ -151,6 +152,7 @@ Epic 3: Accounting - GL Posting & Reports
 Epic 4: Items & Catalog - Product Management
 Epic 5: Settings - Tax, Payment, Module Configuration
 Epic 6: Reporting - Sales Reports & Exports
+Epic 7: Sync Infrastructure - Technical Debt Fixes
 
 ---
 
@@ -909,3 +911,102 @@ So that **I can look up past sales**.
 **Given** transaction search  
 **When** manager searches by receipt number, date, or amount  
 **Then** matching transactions are returned
+
+---
+
+## Epic 7: Sync Infrastructure - Technical Debt Fixes
+
+Critical infrastructure fixes required for production readiness of the modular sync system.
+
+### Story 7.1: Fix Sync Version Manager Database Integration
+
+As a **system**,
+I want **version tracking to persist to the database**,
+So that **version numbers survive server restarts and scale to high-volume outlets**.
+
+**Acceptance Criteria:**
+
+**Given** a company with sync tier versions  
+**When** the version manager increments a tier version  
+**Then** the version is stored in the `sync_tier_versions` table  
+**And** survives server restart
+
+**Given** a high-volume outlet with frequent REALTIME updates  
+**When** version increments exceed 4.2 billion  
+**Then** no integer overflow occurs (BIGINT supports ~18 quintillion)
+
+**Given** a request for current version  
+**When** queryDatabaseVersion() is called  
+**Then** the actual database value is returned (not hardcoded)
+
+---
+
+### Story 7.2: Implement Audit Event Persistence
+
+As an **administrator**,
+I want **sync operations to be audit-logged persistently**,
+So that **I can investigate issues and track system behavior after restarts**.
+
+**Acceptance Criteria:**
+
+**Given** a sync operation (push/pull)  
+**When** the operation completes  
+**Then** an audit event is written to the database  
+**And** includes: timestamp, operation_type, tier, status, duration_ms, company_id
+
+**Given** a server restart  
+**When** the system comes back online  
+**Then** previous audit events are still queryable from the database
+
+**Given** an audit log query  
+**When** filtering by company_id and date range  
+**Then** results are returned within 500ms (indexed properly)
+
+---
+
+### Story 7.3: Add Authentication & Rate Limiting to Sync API
+
+As a **security engineer**,
+I want **sync API endpoints to require authentication and enforce rate limits**,
+So that **the system is protected from abuse and reconnaissance**.
+
+**Acceptance Criteria:**
+
+**Given** an unauthenticated request to `/api/sync/health`  
+**When** the request is made  
+**Then** the request is rejected with 401 Unauthorized
+
+**Given** an authenticated user  
+**When** they make more than 120 REALTIME requests per minute  
+**Then** subsequent requests return 429 Too Many Requests  
+**And** include RateLimit-Remaining header
+
+**Given** a valid request within limits  
+**When** the response is returned  
+**Then** it includes headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
+
+---
+
+### Story 7.4: Fix Database Schema & Data Retention
+
+As an **operator**,
+I want **database indexes optimized and retention policies enforced**,
+So that **the system performs well at scale and data doesn't grow unbounded**.
+
+**Acceptance Criteria:**
+
+**Given** a query on backoffice_sync_queue by company and status  
+**When** filtering by company_id and sync_status  
+**Then** the query uses composite index (not separate index scans)
+
+**Given** sync_operations records older than 30 days  
+**When** the retention job runs  
+**Then** those records are automatically purged
+
+**Given** audit logs older than 90 days  
+**When** the retention job runs  
+**Then** those records are archived or purged
+
+**Given** backoffice_sync_queue records completed more than 7 days ago  
+**When** the retention job runs  
+**Then** those records are automatically purged

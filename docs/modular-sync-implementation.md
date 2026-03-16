@@ -10,36 +10,48 @@ The Jurnapod modular sync architecture has been successfully implemented, provid
 
 | Tier | Frequency | Data Types | POS Usage | Backoffice Usage |
 |------|-----------|------------|-----------|------------------|
-| **REALTIME** | WebSocket/SSE | Active orders, table status | Live updates | Dashboard updates |
+| **REALTIME** | WebSocket/SSE (when connected) | Active orders, table status | Live updates | Dashboard updates |
 | **OPERATIONAL** | 30s-2min | Tables, reservations | Frequent polling | Moderate polling |
 | **MASTER** | 5-10min | Items, prices, tax rates | Periodic refresh | Periodic refresh |
 | **ADMIN** | 30min-daily | User permissions, settings | Startup only | Administrative tasks |
 | **ANALYTICS** | Hourly-daily | Reports, audit logs | Not used | Batch processing |
+
+> **Note**: REALTIME tier requires network connectivity. For offline operation, POS falls back to OPERATIONAL/MASTER tier polling.
 
 ### **Modular Structure**
 
 ```
 packages/
 ├── sync-core/           # Shared sync infrastructure
-├── pos-sync/           # POS-specific sync module
-└── backoffice-sync/    # Future: Backoffice sync module
+├── pos-sync/            # POS-specific sync module
+└── backoffice-sync/     # Pre-positioned (Phase 3 implementation)
 
 apps/api/app/api/sync/
-├── pull/               # Legacy endpoint (maintained)
-├── push/               # Legacy endpoint (maintained)
-├── pos/                # New modular POS endpoints
+├── pull/                # Legacy endpoint (maintained)
+├── push/                # Legacy endpoint (maintained)
+├── pos/                 # New modular POS endpoints
 │   ├── realtime/
 │   ├── operational/
 │   ├── master/
 │   └── admin/
-└── health/             # Sync module health check
+└── health/              # Sync module health check
 ```
+
+> **Note**: `backoffice_sync_queue` table is pre-positioned for Phase 3. `pos_sync_metadata` and `backoffice_sync_queue` follow different patterns (metadata vs queue) intentionally—their data lifecycle and access patterns differ significantly.
 
 ## New API Endpoints
 
 ### **POS Modular Sync Endpoints**
 
 All endpoints require authentication with outlet-level permissions.
+
+**Rate Limits:**
+- REALTIME: 120 requests/minute
+- OPERATIONAL: 60 requests/minute
+- MASTER: 30 requests/minute
+- ADMIN: 10 requests/minute
+
+> **Security Note**: All endpoints use parameterized queries for `outlet_id` and `since_version` to prevent injection.
 
 #### `GET /api/sync/pos/realtime?outlet_id={id}`
 - **Purpose**: Real-time data for active operations
@@ -81,16 +93,25 @@ All endpoints require authentication with outlet-level permissions.
 - **Purpose**: Operational data (tables, reservations)
 - **Frequency**: Every 30 seconds
 - **Auth**: OWNER, ADMIN, ACCOUNTANT, CASHIER
+- **Rate Limit**: 60 requests/minute
 - **Parameters**:
   - `outlet_id` (required): Outlet identifier
   - `since_version` (optional): For incremental sync
-- **Response**: Tables and reservations data
+  - `limit` (optional, default 1000): Max records per response
+  - `cursor` (optional): For paginated continuation
+- **Response**: Tables and reservations data with pagination metadata
 
 #### `GET /api/sync/pos/master?outlet_id={id}&since_version={version}`
 - **Purpose**: Master data (items, prices, tax rates)
 - **Frequency**: Every 5 minutes
 - **Auth**: OWNER, ADMIN, ACCOUNTANT, CASHIER
-- **Response**: Complete catalog and configuration data
+- **Rate Limit**: 30 requests/minute
+- **Parameters**:
+  - `outlet_id` (required): Outlet identifier
+  - `since_version` (optional): For incremental sync
+  - `limit` (optional, default 5000): Max items per response
+  - `cursor` (optional): For paginated continuation
+- **Response**: Complete catalog and configuration data with pagination metadata
 
 #### `GET /api/sync/pos/admin?outlet_id={id}`
 - **Purpose**: Administrative data (outlet config, permissions)
@@ -100,23 +121,20 @@ All endpoints require authentication with outlet-level permissions.
 
 #### `GET /api/sync/health`
 - **Purpose**: Health check for sync modules
-- **Auth**: None (public endpoint)
+- **Auth**: Requires valid JWT token (public access removed for security)
+- **Rate Limit**: 60 requests/minute per IP
 - **Response**:
 ```json
 {
   "success": true,
   "data": {
     "status": "healthy",
-    "modules": {
-      "pos": {
-        "healthy": true,
-        "message": "POS sync module operational"
-      }
-    },
     "timestamp": "2026-03-16T10:30:00.000Z"
   }
 }
 ```
+
+> **Security Note**: Internal module details removed from public response to prevent reconnaissance.
 
 ## Database Schema
 
@@ -127,11 +145,13 @@ All endpoints require authentication with outlet-level permissions.
 CREATE TABLE sync_tier_versions (
     company_id BIGINT UNSIGNED NOT NULL,
     tier ENUM('REALTIME', 'OPERATIONAL', 'MASTER', 'ADMIN', 'ANALYTICS') NOT NULL,
-    current_version INT UNSIGNED NOT NULL DEFAULT 0,
+    current_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
     last_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (company_id, tier)
 );
 ```
+
+> **Schema Note**: Uses BIGINT UNSIGNED (max ~18 quintillion) to prevent overflow under high-frequency REALTIME tier updates. INT would exhaust in months at high-volume outlets.
 
 #### `pos_sync_metadata`
 ```sql
@@ -155,9 +175,17 @@ CREATE TABLE backoffice_sync_queue (
     document_type ENUM('INVOICE', 'PAYMENT', 'JOURNAL', 'REPORT', 'RECONCILIATION') NOT NULL,
     tier ENUM('OPERATIONAL', 'MASTER', 'ADMIN', 'ANALYTICS') NOT NULL,
     sync_status ENUM('PENDING', 'PROCESSING', 'SUCCESS', 'FAILED') NOT NULL DEFAULT 'PENDING',
-    PRIMARY KEY (id)
+    retry_count INT UNSIGNED NOT NULL DEFAULT 0,
+    next_retry_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_company_status (company_id, sync_status),
+    INDEX idx_tier_status (tier, sync_status),
+    INDEX idx_next_retry (next_retry_at)
 );
 ```
+
+> **Schema Note**: Added indexes on `(company_id, sync_status)` and `(tier, sync_status)` for efficient polling. Added `retry_count` and `next_retry_at` for exponential backoff.
 
 #### `sync_operations`
 ```sql
@@ -191,7 +219,12 @@ CALL BumpSyncTiers(company_id, 'MASTER,OPERATIONAL');
 
 #### 1. Sync Core (`@jurnapod/sync-core`)
 - **Module Registry**: Central registration and management
-- **Authentication**: JWT validation and RBAC
+- **Authentication**: JWT validation with token lifecycle management
+- **Token Strategy**:
+  - Access token expiry: 15 minutes
+  - Refresh token expiry: 7 days
+  - Refresh endpoint: `/api/auth/refresh`
+  - Revocation: Token blacklist for compromised tokens
 - **Audit Logging**: Comprehensive sync operation tracking
 - **Version Management**: Multi-tier version tracking
 - **Transport Layer**: HTTP client with retry logic
@@ -224,6 +257,44 @@ POS Client -> API Route -> Auth Guard -> Sync Module -> Data Service -> Database
 - Existing POS clients continue to work without changes
 - `sync_data_versions` table continues to be updated
 - Gradual migration supported with feature flags
+
+## Idempotency & Conflict Resolution
+
+### **Idempotency**
+
+All push operations from POS must include a client-generated idempotency key:
+
+```json
+{
+  "client_tx_id": "uuid-v4-string",
+  "outlet_id": 1,
+  "data": { ... }
+}
+```
+
+> **Critical**: `client_tx_id` is required for all write operations. The system rejects duplicates within 24 hours, preventing duplicate records from network retries.
+
+### **Clock Skew Handling**
+
+> **TODO**: Implement NTP synchronization requirement for POS clients.
+
+- All timestamps in API responses are UTC
+- POS clients should synchronize device clock within ±5 minutes of NTP
+- `since_version` preferred over timestamp-based sync for offline resilience
+
+### **Conflict Resolution**
+
+> **TODO**: Offline-first conflict resolution strategy to be defined in Phase 3.
+
+**Current Implementation**:
+- POS operations use `client_tx_id` for idempotency
+- Server-side deduplication prevents duplicate inserts
+- Last-write-wins for simple field updates
+
+**Required for Production**:
+- Field-level conflict detection
+- Client-side merge UI for complex conflicts
+- Audit trail for all conflict resolutions
 
 ## Usage Examples
 
@@ -269,12 +340,21 @@ syncModuleRegistry.register(new CustomSyncModule(config));
 
 ## Performance Benefits
 
-### **Measured Improvements**
+> **Note**: The following metrics are targets pending measurement. Actual performance will vary by outlet size, network conditions, and hardware.
 
-- **50% reduction** in POS sync time through tier-based data filtering
-- **40% reduction** in bandwidth usage via selective data transmission
-- **< 1 second** real-time updates for critical operations
-- **99.9% reliability** maintained for offline POS operations
+### **Target Improvements**
+
+- **Target: 50% reduction** in POS sync time through tier-based data filtering
+- **Target: 40% reduction** in bandwidth usage via selective data transmission
+- **Target: < 1 second** real-time updates for critical operations
+- **Target: 99.9% reliability** maintained for offline POS operations
+
+### **Measurement Plan**
+
+Performance will be validated via:
+1. Load testing with synthetic POS traffic
+2. A/B testing against legacy endpoints
+3. Real-world telemetry from pilot outlets
 
 ### **Scalability**
 
@@ -303,6 +383,15 @@ Every sync operation is comprehensively logged:
 - Success/failure rates
 - Average response times
 - Bandwidth usage patterns
+
+### **Data Retention Policy**
+| Table | Retention | Archival |
+|-------|-----------|----------|
+| `sync_operations` | 30 days | Compressed to cold storage |
+| Audit logs | 90 days | Compressed to cold storage |
+| `backoffice_sync_queue` | 7 days after completion | Auto-purged |
+
+> **Operational Note**: Implement TTL (Time-To-Live) or scheduled purge jobs for production deployment.
 
 ## Development & Testing
 
@@ -380,4 +469,16 @@ curl -H "Authorization: Bearer $JWT" \
 - Code examples for common scenarios
 - Troubleshooting guides
 
-The modular sync architecture successfully addresses the original requirements for differentiating sync between POS and backoffice while maintaining full backward compatibility and providing a solid foundation for future enhancements.
+The modular sync architecture provides a foundation for tier-based differentiation between POS and backoffice while maintaining backward compatibility. 
+
+> **Known Gaps** (addressed in future phases):
+> - Offline-first conflict resolution strategy
+> - WebSocket/SSE for REALTIME tier
+> - Backoffice sync module implementation
+
+**Pre-deployment Checklist**:
+- [ ] Rate limiting configured at API gateway
+- [ ] Data retention jobs scheduled
+- [ ] Performance baseline measurements collected
+- [ ] Conflict resolution strategy defined
+- [ ] Token revocation implemented
