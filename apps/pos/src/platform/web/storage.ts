@@ -23,6 +23,7 @@ import type {
   SaleRow,
   SyncMetadataRow,
   SyncScopeConfigRow,
+  InventoryStockRow,
   PosOfflineDb,
   LocalSaleStatus,
   SaleSyncStatus
@@ -437,6 +438,29 @@ export class WebStorageAdapter implements PosStoragePort {
     callback: (tx: unknown) => Promise<T>
   ): Promise<T> {
     return await this.db.transaction(mode, tables, callback);
+  }
+
+  async getInventoryStock(input: {
+    company_id: number;
+    outlet_id: number;
+    item_id: number;
+  }): Promise<InventoryStockRow | undefined> {
+    const pk = `${input.company_id}:${input.outlet_id}:${input.item_id}`;
+    return await this.db.inventory_stock.get(pk);
+  }
+
+  async putInventoryStock(stock: InventoryStockRow): Promise<void> {
+    await this.db.inventory_stock.put(stock);
+  }
+
+  async getInventoryStockByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<InventoryStockRow[]> {
+    return await this.db.inventory_stock
+      .where("[company_id+outlet_id]")
+      .equals([input.company_id, input.outlet_id])
+      .toArray();
   }
 }
 

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm run build -w @jurnapod/offline-db",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
@@ -23,7 +24,8 @@
     "dompurify": "^3.2.4",
     "marked": "^12.0.2",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "reconnecting-websocket": "^4.4.0"
   },
   "devDependencies": {
     "@types/dompurify": "^3.2.0",

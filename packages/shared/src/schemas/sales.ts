@@ -3,8 +3,7 @@
 
 import { z } from "zod";
 import { DocumentStatusSchema, MoneySchema, NumericIdSchema } from "./common";
-
-const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+import { DateOnlySchema } from "./datetime";
 
 // Money helpers for cent-exact validation
 const MONEY_SCALE = 100;
@@ -162,7 +161,8 @@ export const SalesInvoiceListQuerySchema = PaginationQuerySchema.extend({
   status: SalesInvoiceStatusSchema.optional(),
   payment_status: SalesInvoicePaymentStatusSchema.optional(),
   date_from: DateOnlySchema.optional(),
-  date_to: DateOnlySchema.optional()
+  date_to: DateOnlySchema.optional(),
+  timezone: z.string().trim().max(64).optional()
 });
 
 // Phase 8: Payment split input schema
@@ -341,7 +341,8 @@ export const SalesPaymentListQuerySchema = PaginationQuerySchema.extend({
   outlet_id: NumericIdSchema.optional(),
   status: DocumentStatusSchema.optional(),
   date_from: DateOnlySchema.optional(),
-  date_to: DateOnlySchema.optional()
+  date_to: DateOnlySchema.optional(),
+  timezone: z.string().trim().max(64).optional()
 });
 
 export const SalesPaymentPostRequestSchema = z.object({
@@ -450,7 +451,8 @@ export const SalesOrderListQuerySchema = PaginationQuerySchema.extend({
   outlet_id: NumericIdSchema.optional(),
   status: SalesOrderStatusSchema.optional(),
   date_from: DateOnlySchema.optional(),
-  date_to: DateOnlySchema.optional()
+  date_to: DateOnlySchema.optional(),
+  timezone: z.string().trim().max(64).optional()
 });
 
 export const SalesCreditNoteStatusSchema = z.enum(["DRAFT", "POSTED", "VOID"]);
@@ -523,7 +525,8 @@ export const SalesCreditNoteListQuerySchema = PaginationQuerySchema.extend({
   invoice_id: NumericIdSchema.optional(),
   status: SalesCreditNoteStatusSchema.optional(),
   date_from: DateOnlySchema.optional(),
-  date_to: DateOnlySchema.optional()
+  date_to: DateOnlySchema.optional(),
+  timezone: z.string().trim().max(64).optional()
 });
 
 export type SalesInvoicePaymentStatus = z.infer<

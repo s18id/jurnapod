@@ -23,16 +23,16 @@ type ReservationDbRow = RowDataPacket & {
   customer_name: string;
   customer_phone: string | null;
   guest_count: number;
-  reservation_at: Date;
+  reservation_at: string;
   duration_minutes: number | null;
   status: ReservationStatus;
   notes: string | null;
   linked_order_id: string | null;
-  created_at: Date;
-  updated_at: Date;
-  arrived_at: Date | null;
-  seated_at: Date | null;
-  cancelled_at: Date | null;
+  created_at: string;
+  updated_at: string;
+  arrived_at: string | null;
+  seated_at: string | null;
+  cancelled_at: string | null;
 };
 
 type OutletTableStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";

@@ -462,6 +462,7 @@ export async function recordLoginAudit(record: LoginAuditRecord): Promise<void> 
   const pool = getDbPool();
   const success = record.reason === "success";
   const normalizedResult = success ? "SUCCESS" : "FAIL";
+  const status = success ? 1 : 0; // Using status codes: 1=SUCCESS, 0=FAIL
   await pool.execute(
     `INSERT INTO audit_logs (
        company_id,
@@ -470,14 +471,16 @@ export async function recordLoginAudit(record: LoginAuditRecord): Promise<void> 
        action,
        result,
        success,
+       status,
        ip_address,
        payload_json
-     ) VALUES (?, NULL, ?, 'AUTH_LOGIN', ?, ?, ?, ?)`,
+     ) VALUES (?, NULL, ?, 'AUTH_LOGIN', ?, ?, ?, ?, ?)`,
     [
       record.companyId,
       record.userId,
       normalizedResult,
-      success ? 1 : 0,
+      success ? 1 : 0, // Legacy success field for backward compatibility
+      status,
       record.ipAddress,
       JSON.stringify({
         company_code: record.companyCode,

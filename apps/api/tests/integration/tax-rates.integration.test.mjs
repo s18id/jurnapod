@@ -196,6 +196,13 @@ test(
       }
 
       const companyId = Number(owner.company_id);
+      // Clean up in proper order to respect foreign key constraints
+      await db.execute(
+        `DELETE sit FROM sales_invoice_taxes sit
+         INNER JOIN sales_invoices si ON si.id = sit.sales_invoice_id
+         WHERE si.company_id = ?`,
+        [companyId]
+      );
       await db.execute(
         `DELETE FROM company_tax_defaults WHERE company_id = ?`,
         [companyId]

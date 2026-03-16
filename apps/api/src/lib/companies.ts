@@ -5,6 +5,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection, QueryResult } from "mysql2/promise";
 import { AuditService } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
+import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 export class CompanyNotFoundError extends Error {}
 export class CompanyCodeExistsError extends Error {}
@@ -314,6 +315,8 @@ export type CompanyResponse = {
   tax_id: string | null;
   email: string | null;
   phone: string | null;
+  timezone: string | null;
+  currency_code: string | null;
   address_line1: string | null;
   address_line2: string | null;
   city: string | null;
@@ -337,13 +340,15 @@ type CompanyRow = RowDataPacket & {
   tax_id: string | null;
   email: string | null;
   phone: string | null;
+  timezone: string | null;
+  currency_code: string | null;
   address_line1: string | null;
   address_line2: string | null;
   city: string | null;
   postal_code: string | null;
-  created_at: Date;
-  updated_at: Date;
-  deleted_at: Date | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
 };
 
 class ConnectionAuditDbClient {
@@ -401,13 +406,15 @@ function normalizeCompanyRow(row: CompanyRow): CompanyResponse {
     tax_id: row.tax_id,
     email: row.email,
     phone: row.phone,
+    timezone: row.timezone,
+    currency_code: row.currency_code,
     address_line1: row.address_line1,
     address_line2: row.address_line2,
     city: row.city,
     postal_code: row.postal_code,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString(),
-    deleted_at: row.deleted_at ? row.deleted_at.toISOString() : null
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at),
+    deleted_at: toRfc3339(row.deleted_at)
   };
 }
 
@@ -663,7 +670,7 @@ async function ensureCompanyExists(
 ): Promise<CompanyRow> {
   const includeDeleted = options?.includeDeleted ?? false;
   const [rows] = await connection.execute<CompanyRow[]>(
-    `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+    `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
      FROM companies
      WHERE id = ?
      ${includeDeleted ? "" : "AND deleted_at IS NULL"}`,
@@ -677,60 +684,6 @@ async function ensureCompanyExists(
   return rows[0];
 }
 
-
-/**
- * List companies (optionally scoped to a company id)
- */
-export async function listCompanies(params: {
-  companyId?: number;
-  includeDeleted?: boolean;
-}): Promise<CompanyResponse[]> {
-  const pool = getDbPool();
-  const conditions: string[] = [];
-  const values: Array<number> = [];
-  if (params.companyId) {
-    conditions.push("id = ?");
-    values.push(params.companyId);
-  }
-  if (!params.includeDeleted) {
-    conditions.push("deleted_at IS NULL");
-  }
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const [rows] = await pool.execute<CompanyRow[]>(
-    `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
-     FROM companies
-     ${whereClause}
-     ORDER BY name ASC`,
-    values
-  );
-
-  return rows.map((row) => normalizeCompanyRow(row));
-}
-
-/**
- * Get a single company by ID
- */
-export async function getCompany(
-  companyId: number,
-  options?: { includeDeleted?: boolean }
-): Promise<CompanyResponse> {
-  const pool = getDbPool();
-  const includeDeleted = options?.includeDeleted ?? false;
-  const [rows] = await pool.execute<CompanyRow[]>(
-    `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
-     FROM companies
-     WHERE id = ?
-     ${includeDeleted ? "" : "AND deleted_at IS NULL"}`,
-    [companyId]
-  );
-
-  if (rows.length === 0) {
-    throw new CompanyNotFoundError(`Company with id ${companyId} not found`);
-  }
-
-  return normalizeCompanyRow(rows[0]);
-}
-
 /**
  * Create a new company
  */
@@ -741,6 +694,8 @@ export async function createCompany(params: {
   tax_id?: string | null;
   email?: string | null;
   phone?: string | null;
+  timezone?: string | null;
+  currency_code?: string | null;
   address_line1?: string | null;
   address_line2?: string | null;
   city?: string | null;
@@ -766,8 +721,8 @@ export async function createCompany(params: {
 
     // Insert company with profile fields
     const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO companies (code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO companies (code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         params.code,
         params.name,
@@ -775,6 +730,8 @@ export async function createCompany(params: {
         params.tax_id ?? null,
         params.email ?? null,
         params.phone ?? null,
+        params.timezone ?? 'UTC',
+        params.currency_code ?? 'IDR',
         params.address_line1 ?? null,
         params.address_line2 ?? null,
         params.city ?? null,
@@ -791,7 +748,7 @@ export async function createCompany(params: {
     const auditContext = buildAuditContext(companyId, params.actor);
 
     const [rows] = await connection.execute<CompanyRow[]>(
-      `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+      `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
        FROM companies
        WHERE id = ?`,
       [companyId]
@@ -819,6 +776,59 @@ export async function createCompany(params: {
 }
 
 /**
+ * List companies (optionally scoped to a company id)
+ */
+export async function listCompanies(params: {
+  companyId?: number;
+  includeDeleted?: boolean;
+}): Promise<CompanyResponse[]> {
+  const pool = getDbPool();
+  const conditions: string[] = [];
+  const values: Array<number> = [];
+  if (params.companyId) {
+    conditions.push("id = ?");
+    values.push(params.companyId);
+  }
+  if (!params.includeDeleted) {
+    conditions.push("deleted_at IS NULL");
+  }
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const [rows] = await pool.execute<CompanyRow[]>(
+    `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+     FROM companies
+     ${whereClause}
+     ORDER BY name ASC`,
+    values
+  );
+
+  return rows.map((row) => normalizeCompanyRow(row));
+}
+
+/**
+ * Get a single company by ID
+ */
+export async function getCompany(
+  companyId: number,
+  options?: { includeDeleted?: boolean }
+): Promise<CompanyResponse> {
+  const pool = getDbPool();
+  const includeDeleted = options?.includeDeleted ?? false;
+  const [rows] = await pool.execute<CompanyRow[]>(
+    `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+     FROM companies
+     WHERE id = ?
+     ${includeDeleted ? "" : "AND deleted_at IS NULL"}`,
+    [companyId]
+  );
+
+  if (rows.length === 0) {
+    throw new CompanyNotFoundError(`Company with id ${companyId} not found`);
+  }
+
+  return normalizeCompanyRow(rows[0]);
+}
+
+/**
  * Update a company
  */
 export async function updateCompany(params: {
@@ -828,6 +838,8 @@ export async function updateCompany(params: {
   tax_id?: string | null;
   email?: string | null;
   phone?: string | null;
+  timezone?: string | null;
+  currency_code?: string | null;
   address_line1?: string | null;
   address_line2?: string | null;
   city?: string | null;
@@ -868,6 +880,14 @@ export async function updateCompany(params: {
       updates.push("phone = ?");
       values.push(params.phone);
     }
+    if (params.timezone !== undefined && params.timezone !== currentCompany.timezone) {
+      updates.push("timezone = ?");
+      values.push(params.timezone);
+    }
+    if (params.currency_code !== undefined && params.currency_code !== currentCompany.currency_code) {
+      updates.push("currency_code = ?");
+      values.push(params.currency_code);
+    }
     if (params.address_line1 !== undefined && params.address_line1 !== currentCompany.address_line1) {
       updates.push("address_line1 = ?");
       values.push(params.address_line1);
@@ -905,6 +925,8 @@ export async function updateCompany(params: {
           tax_id: currentCompany.tax_id,
           email: currentCompany.email,
           phone: currentCompany.phone,
+          timezone: currentCompany.timezone,
+          currency_code: currentCompany.currency_code,
           address_line1: currentCompany.address_line1,
           address_line2: currentCompany.address_line2,
           city: currentCompany.city,
@@ -916,6 +938,8 @@ export async function updateCompany(params: {
           tax_id: params.tax_id ?? currentCompany.tax_id,
           email: params.email ?? currentCompany.email,
           phone: params.phone ?? currentCompany.phone,
+          timezone: params.timezone ?? currentCompany.timezone,
+          currency_code: params.currency_code ?? currentCompany.currency_code,
           address_line1: params.address_line1 ?? currentCompany.address_line1,
           address_line2: params.address_line2 ?? currentCompany.address_line2,
           city: params.city ?? currentCompany.city,
@@ -927,7 +951,7 @@ export async function updateCompany(params: {
     await connection.commit();
 
     const [rows] = await connection.execute<CompanyRow[]>(
-      `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
+      `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
        FROM companies WHERE id = ?`,
       [params.companyId]
     );

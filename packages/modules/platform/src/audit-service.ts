@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { AuditLogEntryRequest, AuditAction, AuditEntityType, AuditResult } from "@jurnapod/shared";
+import type { AuditLogEntryRequest, AuditAction, AuditEntityType, AuditResult, AuditStatusCode } from "@jurnapod/shared";
+import { AuditStatus } from "@jurnapod/shared";
 
 /**
  * Database client interface for audit logging
@@ -50,6 +51,7 @@ export class AuditService {
       entity_id: String(entityId),
       action: "CREATE",
       result: "SUCCESS",
+      status: AuditStatus.SUCCESS,
       payload
     });
   }
@@ -73,6 +75,7 @@ export class AuditService {
       entity_id: String(entityId),
       action: "UPDATE",
       result: "SUCCESS",
+      status: AuditStatus.SUCCESS,
       changes: {
         before: changes.before,
         after: changes.after
@@ -95,6 +98,7 @@ export class AuditService {
       entity_id: String(entityId),
       action: "DELETE",
       result: "SUCCESS",
+      status: AuditStatus.SUCCESS,
       payload
     });
   }
@@ -114,6 +118,7 @@ export class AuditService {
       entity_id: String(entityId),
       action: "DEACTIVATE",
       result: "SUCCESS",
+      status: AuditStatus.SUCCESS,
       payload: payload || {}
     });
   }
@@ -133,6 +138,7 @@ export class AuditService {
       entity_id: String(entityId),
       action: "REACTIVATE",
       result: "SUCCESS",
+      status: AuditStatus.SUCCESS,
       payload: payload || {}
     });
   }
@@ -146,7 +152,8 @@ export class AuditService {
     entityId: string | number,
     action: AuditAction,
     payload?: Record<string, any>,
-    result: AuditResult = "SUCCESS"
+    result: AuditResult = "SUCCESS",
+    status: AuditStatusCode = AuditStatus.SUCCESS
   ): Promise<void> {
     return this.log({
       ...context,
@@ -154,6 +161,7 @@ export class AuditService {
       entity_id: String(entityId),
       action,
       result,
+      status,
       payload: payload || {}
     });
   }
@@ -165,9 +173,9 @@ export class AuditService {
     const sql = `
       INSERT INTO audit_logs (
         company_id, outlet_id, user_id, entity_type, entity_id,
-        action, result, success, ip_address, payload_json, changes_json, created_at
+        action, result, success, status, ip_address, payload_json, changes_json, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
 
     const params = [
@@ -178,7 +186,8 @@ export class AuditService {
       entry.entity_id,
       entry.action,
       entry.result,
-      entry.result === "SUCCESS" ? 1 : 0,
+      entry.result === "SUCCESS" ? 1 : 0, // Legacy success field for backward compatibility
+      entry.status ?? (entry.result === "SUCCESS" ? AuditStatus.SUCCESS : AuditStatus.FAIL),
       entry.ip_address ?? null,
       JSON.stringify(entry.payload || {}),
       entry.changes ? JSON.stringify(entry.changes) : null

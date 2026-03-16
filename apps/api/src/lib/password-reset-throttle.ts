@@ -9,7 +9,7 @@ import { getAppEnv } from "./env";
 type ThrottleRow = RowDataPacket & {
   key_hash: string;
   request_count: number;
-  window_started_at: Date;
+  window_started_at: string;
 };
 
 export type PasswordResetThrottleKey = {

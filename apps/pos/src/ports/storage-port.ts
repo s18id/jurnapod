@@ -24,7 +24,8 @@ import type {
   SaleItemRow,
   SaleRow,
   SyncMetadataRow,
-  SyncScopeConfigRow
+  SyncScopeConfigRow,
+  InventoryStockRow
 } from "@jurnapod/offline-db/dexie";
 
 export interface PosStoragePort {
@@ -150,4 +151,18 @@ export interface PosStoragePort {
     tables: string[],
     callback: (tx: unknown) => Promise<T>
   ): Promise<T>;
+
+  // Inventory stock operations
+  getInventoryStock(input: {
+    company_id: number;
+    outlet_id: number;
+    item_id: number;
+  }): Promise<InventoryStockRow | undefined>;
+
+  putInventoryStock(stock: InventoryStockRow): Promise<void>;
+
+  getInventoryStockByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+  }): Promise<InventoryStockRow[]>;
 }

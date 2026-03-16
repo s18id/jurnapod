@@ -45,11 +45,32 @@ export const AuditEntityTypeSchema = z.enum([
 export type AuditEntityType = z.infer<typeof AuditEntityTypeSchema>;
 
 /**
- * Audit log result
+ * Audit log result (legacy field)
  */
 export const AuditResultSchema = z.enum(["SUCCESS", "FAIL"]);
 
 export type AuditResult = z.infer<typeof AuditResultSchema>;
+
+/**
+ * Audit log status codes (TINYINT)
+ */
+export const AuditStatus = {
+  FAIL: 0,
+  SUCCESS: 1,
+  PARTIAL: 2,
+  PENDING: 3,
+  CANCELLED: 4,
+  TIMEOUT: 5,
+  RETRY: 6,
+  CORRUPTED: 7
+} as const;
+
+export type AuditStatusCode = typeof AuditStatus[keyof typeof AuditStatus];
+
+export const AuditStatusSchema = z.union([
+  z.literal(0), z.literal(1), z.literal(2), z.literal(3),
+  z.literal(4), z.literal(5), z.literal(6), z.literal(7)
+]);
 
 /**
  * Audit log entry request (for creating audit logs)
@@ -61,7 +82,8 @@ export const AuditLogEntryRequestSchema = z.object({
   entity_type: AuditEntityTypeSchema,
   entity_id: z.string(),
   action: AuditActionSchema,
-  result: AuditResultSchema.default("SUCCESS"),
+  result: AuditResultSchema.default("SUCCESS"), // Legacy field for backward compatibility
+  status: AuditStatusSchema.default(1), // New canonical status field
   ip_address: z.string().max(45).nullable().optional(),
   payload: z.record(z.any()).optional(),
   changes: z
@@ -85,8 +107,9 @@ export const AuditLogResponseSchema = z.object({
   entity_type: z.string().nullable(),
   entity_id: z.string().nullable(),
   action: z.string(),
-  result: AuditResultSchema,
-  success: z.boolean(),
+  result: AuditResultSchema, // Legacy field
+  success: z.boolean(), // Derived from status for backward compatibility
+  status: AuditStatusSchema, // New canonical status field
   ip_address: z.string().nullable(),
   payload_json: z.string(),
   changes_json: z.string().nullable(),

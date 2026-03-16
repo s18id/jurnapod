@@ -18,4 +18,7 @@ e2e-tests/screenshots/
 # Capacitor native projects
 apps/pos/android/
 apps/pos/ios/
-_bmad
+
+# BMAD configuration - ignore everything except _config
+_bmad/*
+!_bmad/_config

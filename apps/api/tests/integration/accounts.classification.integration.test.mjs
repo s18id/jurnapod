@@ -715,8 +715,8 @@ test(
         `${baseUrl}/api/accounts/tree?company_id=${companyId}&include_inactive=false`,
         { headers: { authorization: `Bearer ${accessToken}` } }
       );
-      assert.equal(treeResponse.status, 200, "GET /api/accounts/tree should return 200");
       const treeBody = await treeResponse.json();
+      assert.equal(treeResponse.status, 200, "GET /api/accounts/tree should return 200, response: " + JSON.stringify(treeBody));
       assert.equal(treeBody.success, true, "GET /api/accounts/tree should succeed");
 
       const rootNode = treeBody.data.find((node) => node.code === rootCode);

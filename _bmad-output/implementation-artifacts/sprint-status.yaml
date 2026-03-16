@@ -1,5 +1,5 @@
 # generated: 2026-03-15T09:32:00.000Z
-# last_updated: 2026-03-15T09:40:00.000Z
+# last_updated: 2026-03-16T17:00:00.000Z
 # project: jurnapod
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-15T14:44:17+07:00
+last_updated: 2026-03-16T17:30:00+07:00
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -43,52 +43,81 @@ story_location: _bmad-output/implementation-artifacts
 
 development_status:
   # Epic 1: Foundation - Auth, Company & Outlet Management
+  # NOTE: All stories DISCOVERED already implemented (not built by us)
   epic-1: done
-  1-1-user-login-email-password-google-sso: done
-  1-2-jwt-token-management-refresh: done
-  1-3-rbac-role-definitions-permissions: done
-  1-4-admin-user-management-crud: done
-  1-5-company-settings-management-enhanced: done
-  1-6-outlet-management-crud: done
-  1-7-outlet-specific-settings-enhanced: done
-  epic-1-retrospective: optional
+  1-1-user-login-email-password-google-sso: done  # DISCOVERED - already existed
+  1-2-jwt-token-management-refresh: done  # DISCOVERED - already existed
+  1-3-rbac-role-definitions-permissions: done  # DISCOVERED - already existed
+  1-4-admin-user-management-crud: done  # DISCOVERED - already existed
+  1-5-company-settings-management-enhanced: done  # DISCOVERED - already existed
+  1-6-outlet-management-crud: done  # DISCOVERED - already existed
+  1-7-outlet-specific-settings-enhanced: done  # DISCOVERED - already existed
+  epic-1-retrospective: done
 
   # Epic 2: POS - Offline-first Point of Sale
+  # NOTE: All stories DISCOVERED already implemented (not built by us)
   epic-2: done
-  2-1-pos-cart-add-items-quantities: done
-  2-2-pos-cart-apply-discounts: done
-  2-3-pos-process-multiple-payment-methods: done
-  2-4-pos-offline-mode-local-storage: done
-  2-5-pos-sync-transactions-when-online: done
-  2-6-pos-duplicate-prevention-during-sync: done
-  epic-2-retrospective: optional
+  2-1-pos-cart-add-items-quantities: done  # DISCOVERED - already existed
+  2-2-pos-cart-apply-discounts: done  # DISCOVERED - already existed
+  2-3-pos-process-multiple-payment-methods: done  # DISCOVERED - already existed
+  2-4-pos-offline-mode-local-storage: done  # DISCOVERED - already existed
+  2-5-pos-sync-transactions-when-online: done  # DISCOVERED - already existed
+  2-6-pos-duplicate-prevention-during-sync: done  # DISCOVERED - already existed
+  epic-2-retrospective: done
+
+  # Cleanup Sprint: Complete Retro Commitments & Fix Technical Debt
+  # NOTE: All stories BUILT BY US (actual implementation)
+  cleanup-sprint: done
+  cleanup-1-notification-service: done  # BUILT - notification infrastructure
+  cleanup-2-duplicate-check-api: done  # BUILT - duplicate check API
+  cleanup-3-stock-validation: done  # BUILT - stock validation system
 
   # Epic 3: Accounting - GL Posting & Reports
+  # NOTE: All stories DISCOVERED already implemented (not built by us)
   epic-3: done
-  3-1-automatic-journal-entry-pos: done
-  3-2-manual-journal-entry-creation: done
-  3-3-journal-batch-history: done
-  3-4-trial-balance-report: done
-  3-5-general-ledger-report: done
-  epic-3-retrospective: optional
+  3-1-automatic-journal-entry-pos: done  # DISCOVERED - already existed
+  3-2-manual-journal-entry-creation: done  # DISCOVERED - already existed
+  3-3-journal-batch-history: done  # DISCOVERED - already existed
+  3-4-trial-balance-report: done  # DISCOVERED - already existed
+  3-5-general-ledger-report: done  # DISCOVERED - already existed
+  epic-3-retrospective: done
 
   # Epic 4: Items & Catalog - Product Management
-  epic-4: in-progress
-  4-1-item-product-management-crud: in-progress
-  4-2-outlet-specific-pricing: backlog
-  4-3-multiple-item-types: backlog
-  epic-4-retrospective: optional
+  # NOTE: Core stories DISCOVERED already implemented (not built by us)
+  # Debt stories SPECS CREATED (not yet implemented)
+  epic-4: done
+  4-1-item-product-management-crud: done  # DISCOVERED - already existed
+  4-2-outlet-specific-pricing: done  # DISCOVERED - already existed
+  4-3-multiple-item-types: done  # DISCOVERED - already existed
+  # Debt Stories (specs created, ready to implement)
+  4-4-recipe-bom-composition: backlog  # SPEC CREATED - needs implementation
+  4-5-cogs-integration: backlog  # SPEC CREATED - needs implementation
+  4-6-cost-tracking-methods: backlog  # SPEC CREATED - needs implementation
+  4-7-item-variants: backlog  # TODO - spec not created
+  4-8-barcode-image-support: backlog  # TODO - spec not created
+  epic-4-retrospective: done
 
   # Epic 5: Settings - Tax, Payment, Module Configuration
-  epic-5: backlog
-  5-1-tax-rate-configuration: backlog
-  5-2-payment-method-configuration: backlog
-  5-3-module-enable-disable-per-company: backlog
-  epic-5-retrospective: optional
+  # NOTE: All stories DISCOVERED already implemented (not built by us)
+  epic-5: done
+  5-1-tax-rate-configuration: done  # DISCOVERED - already existed
+  5-2-payment-method-configuration: done  # DISCOVERED - already existed
+  5-3-module-enable-disable-per-company: done  # DISCOVERED - already existed
+  epic-5-retrospective: done
 
   # Epic 6: Reporting - Sales Reports & Exports
-  epic-6: backlog
-  6-1-sales-reports-date-range: backlog
-  6-2-export-reports-accountants: backlog
-  6-3-pos-transaction-history: backlog
-  epic-6-retrospective: optional
+  # NOTE: All stories DISCOVERED already implemented (not built by us)
+  epic-6: done
+  6-1-sales-reports-date-range: done  # DISCOVERED - already existed
+  6-2-export-reports-accountants: done  # DISCOVERED - already existed
+  6-3-pos-transaction-history: done  # DISCOVERED - already existed
+  epic-6-retrospective: done
+
+  # Epic 7: Sync Infrastructure - Technical Debt Fixes
+  # NOTE: All stories COMPLETED - Critical production blockers resolved
+  epic-7: done
+  7-1-sync-version-manager-db-integration: done  # BUILT - BIGINT migration + DB integration + 36 tests
+  7-2-sync-audit-event-persistence: done  # BUILT - Audit table + service + integration + 40 tests
+  7-3-sync-api-auth-rate-limiting: done  # BUILT - Auth wrapper + rate limiting + 44 tests
+  7-4-sync-schema-indexes-retention: done  # BUILT - Composite indexes + retention job + 69 tests
+  epic-7-retrospective: done

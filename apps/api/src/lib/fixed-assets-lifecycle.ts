@@ -24,7 +24,7 @@ type FixedAssetRow = RowDataPacket & {
   outlet_id: number | null;
   name: string;
   purchase_cost: string | number | null;
-  disposed_at: Date | string | null;
+  disposed_at: string | null;
 };
 
 type FixedAssetBookRow = RowDataPacket & {
@@ -35,7 +35,7 @@ type FixedAssetBookRow = RowDataPacket & {
   accum_depreciation: string | number;
   accum_impairment: string | number;
   carrying_amount: string | number;
-  as_of_date: Date | string;
+  as_of_date: string;
   last_event_id: number;
 };
 
@@ -44,16 +44,16 @@ type FixedAssetEventRow = RowDataPacket & {
   company_id: number;
   asset_id: number;
   event_type: string;
-  event_date: Date | string;
+  event_date: string;
   outlet_id: number | null;
   journal_batch_id: number | null;
   status: string;
   idempotency_key: string;
   event_data: string;
-  created_at: Date;
+  created_at: string;
   created_by: number;
   voided_by: number | null;
-  voided_at: Date | null;
+  voided_at: string | null;
 };
 
 type AccessCheckRow = RowDataPacket & {
@@ -468,7 +468,7 @@ async function recomputeAssetBookFromEvents(
   accum_depreciation: number;
   accum_impairment: number;
   carrying_amount: number;
-  disposed_at: Date | null;
+  disposed_at: string | null;
 }> {
   const [events] = await executor.execute<FixedAssetEventRow[]>(
     `SELECT id, company_id, asset_id, event_type, event_date, outlet_id, journal_batch_id, status, idempotency_key, event_data, created_at, created_by, voided_by, voided_at
@@ -509,7 +509,7 @@ async function recomputeAssetBookFromEvents(
       accum_depreciation: 0,
       accum_impairment: 0,
       carrying_amount: 0,
-      disposed_at: disposedAt
+      disposed_at: disposedAt.toISOString()
     };
   }
 

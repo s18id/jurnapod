@@ -31,6 +31,8 @@ export interface SyncPullResponse {
       item_group_id: number | null;
       is_active: boolean;
       updated_at: string;
+      track_stock: boolean;
+      low_stock_threshold: number | null;
     }>;
     item_groups: Array<{
       id: number;

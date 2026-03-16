@@ -17,7 +17,7 @@ export type OrderStatus = "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED";
 
 export type ActiveOrderState = "OPEN" | "CLOSED";
 
-export type OutboxJobType = "SYNC_POS_TX" | "SYNC_POS_ORDER_UPDATE";
+export type OutboxJobType = "SYNC_POS_TX" | "SYNC_POS_ORDER_UPDATE" | "STOCK_RESERVATION" | "STOCK_RELEASE";
 
 export type OutboxJobStatus = "PENDING" | "SENT" | "FAILED";
 
@@ -60,6 +60,20 @@ export interface ProductCacheRow {
   price_updated_at: string;
   data_version: number;
   pulled_at: string;
+  track_stock: boolean;
+  low_stock_threshold: number | null;
+}
+
+export interface InventoryStockRow {
+  pk: string;
+  company_id: number;
+  outlet_id: number;
+  item_id: number;
+  quantity_on_hand: number;
+  quantity_reserved: number;
+  quantity_available: number;
+  last_updated_at: string;
+  data_version: number;
 }
 
 export interface OutletTableRow {
@@ -219,6 +233,7 @@ export interface SaleRow {
   data_version: number | null;
   created_at: string;
   completed_at: string | null;
+  stock_checked: boolean;
 }
 
 export interface SaleItemRow {
@@ -426,4 +441,56 @@ export class SaleTotalsMismatchError extends OfflineStateError {
     this.expected = expected;
     this.actual = actual;
   }
+}
+
+export class InsufficientStockError extends OfflineStateError {
+  readonly itemId: number;
+  readonly itemName: string;
+  readonly requestedQty: number;
+  readonly availableQty: number;
+
+  constructor(itemId: number, itemName: string, requestedQty: number, availableQty: number) {
+    super("INSUFFICIENT_STOCK", `Insufficient stock for "${itemName}": requested ${requestedQty}, available ${availableQty}`);
+    this.name = "InsufficientStockError";
+    this.itemId = itemId;
+    this.itemName = itemName;
+    this.requestedQty = requestedQty;
+    this.availableQty = availableQty;
+  }
+}
+
+export class StockValidationError extends OfflineStateError {
+  readonly details: Array<{ itemId: number; itemName: string; requestedQty: number; availableQty: number }>;
+
+  constructor(details: Array<{ itemId: number; itemName: string; requestedQty: number; availableQty: number }>) {
+    const summary = details.map(d => `"${d.itemName}": ${d.requestedQty} > ${d.availableQty}`).join("; ");
+    super("STOCK_VALIDATION_ERROR", `Stock validation failed: ${summary}`);
+    this.name = "StockValidationError";
+    this.details = details;
+  }
+}
+
+export interface StockReservationRow {
+  reservation_id: string;
+  sale_id: string;
+  company_id: number;
+  outlet_id: number;
+  item_id: number;
+  quantity: number;
+  created_at: string;
+  expires_at: string | null;
+}
+
+export interface CheckStockInput {
+  item_id: number;
+  quantity: number;
+}
+
+export interface CheckStockResult {
+  item_id: number;
+  available: boolean;
+  quantity_on_hand: number;
+  quantity_reserved: number;
+  quantity_available: number;
+  track_stock: boolean;
 }

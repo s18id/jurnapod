@@ -13,6 +13,8 @@ import {
   NumberingTemplateNotFoundError
 } from "./numbering";
 import type { DocumentType } from "./numbering";
+import { toDateTimeRangeWithTimezone } from "./date-helpers";
+import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 type SalesInvoiceRow = RowDataPacket & {
   id: number;
@@ -20,7 +22,7 @@ type SalesInvoiceRow = RowDataPacket & {
   outlet_id: number;
   invoice_no: string;
   client_ref?: string | null;
-  invoice_date: Date | string;
+  invoice_date: string;
   due_date?: Date | string | null;
   status: "DRAFT" | "APPROVED" | "POSTED" | "VOID";
   payment_status: "UNPAID" | "PARTIAL" | "PAID";
@@ -32,8 +34,8 @@ type SalesInvoiceRow = RowDataPacket & {
   approved_at?: Date | string | null;
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 type SalesInvoiceLineRow = RowDataPacket & {
@@ -102,6 +104,7 @@ type InvoiceListFilters = {
   dateTo?: string;
   limit?: number;
   offset?: number;
+  timezone?: string;
 };
 
 type PaymentListFilters = {
@@ -111,6 +114,7 @@ type PaymentListFilters = {
   dateTo?: string;
   limit?: number;
   offset?: number;
+  timezone?: string;
 };
 
 export type SalesInvoice = {
@@ -177,7 +181,7 @@ type SalesPaymentRow = RowDataPacket & {
   invoice_id: number;
   payment_no: string;
   client_ref?: string | null;
-  payment_at: Date | string;
+  payment_at: string;
   account_id: number;
   account_name?: string;
   method?: "CASH" | "QRIS" | "CARD";
@@ -192,8 +196,8 @@ type SalesPaymentRow = RowDataPacket & {
   shortfall_settled_at?: Date | string | null;
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 export type SalesPaymentSplit = {
@@ -342,8 +346,8 @@ function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
     approved_at: row.approved_at ? toMysqlDateTime(row.approved_at.toString()) : null,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
-    created_at: new Date(row.created_at).toISOString(),
-    updated_at: new Date(row.updated_at).toISOString()
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at)
   };
 }
 
@@ -689,14 +693,25 @@ function buildInvoiceWhereClause(companyId: number, filters: InvoiceListFilters)
     values.push(filters.paymentStatus);
   }
 
-  if (filters.dateFrom) {
-    conditions.push("invoice_date >= ?");
-    values.push(filters.dateFrom);
+  // Handle timezone conversion for date range
+  let dateFrom = filters.dateFrom;
+  let dateTo = filters.dateTo;
+
+  if (dateFrom && dateTo && filters.timezone && filters.timezone !== 'UTC') {
+    const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, filters.timezone);
+    // Convert to date-only format for comparison
+    dateFrom = range.fromStartUTC.slice(0, 10);
+    dateTo = range.toEndUTC.slice(0, 10);
   }
 
-  if (filters.dateTo) {
+  if (dateFrom) {
+    conditions.push("invoice_date >= ?");
+    values.push(dateFrom);
+  }
+
+  if (dateTo) {
     conditions.push("invoice_date <= ?");
-    values.push(filters.dateTo);
+    values.push(dateTo);
   }
 
   return { clause: conditions.join(" AND "), values, isEmpty: false };
@@ -1267,7 +1282,7 @@ function normalizePayment(row: SalesPaymentRow): SalesPayment {
     invoice_id: Number(row.invoice_id),
     payment_no: row.payment_no,
     client_ref: row.client_ref ?? null,
-    payment_at: new Date(row.payment_at).toISOString(),
+    payment_at: row.payment_at,
     account_id: Number(row.account_id),
     account_name: row.account_name,
     method: row.method,
@@ -1288,11 +1303,11 @@ function normalizePayment(row: SalesPaymentRow): SalesPayment {
     shortfall_settled_as_loss: row.shortfall_settled_as_loss === 1 ? true : row.shortfall_settled_as_loss === 0 ? false : undefined,
     shortfall_reason: row.shortfall_reason ?? null,
     shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : null,
-    shortfall_settled_at: row.shortfall_settled_at ? new Date(row.shortfall_settled_at).toISOString() : null,
+    shortfall_settled_at: row.shortfall_settled_at ? toRfc3339(row.shortfall_settled_at) : null,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
-    created_at: new Date(row.created_at).toISOString(),
-    updated_at: new Date(row.updated_at).toISOString()
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at)
   };
 }
 
@@ -1515,14 +1530,25 @@ function buildPaymentWhereClause(companyId: number, filters: PaymentListFilters)
     values.push(filters.status);
   }
 
-  if (filters.dateFrom) {
-    conditions.push("sp.payment_at >= ?");
-    values.push(filters.dateFrom);
+  // Handle timezone conversion for date range
+  let dateFrom = filters.dateFrom;
+  let dateTo = filters.dateTo;
+
+  if (dateFrom && dateTo && filters.timezone && filters.timezone !== 'UTC') {
+    const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, filters.timezone);
+    // Convert to date-only format for comparison
+    dateFrom = range.fromStartUTC.slice(0, 10);
+    dateTo = range.toEndUTC.slice(0, 10);
   }
 
-  if (filters.dateTo) {
+  if (dateFrom) {
+    conditions.push("sp.payment_at >= ?");
+    values.push(dateFrom);
+  }
+
+  if (dateTo) {
     conditions.push("sp.payment_at <= ?");
-    values.push(filters.dateTo);
+    values.push(dateTo);
   }
 
   return { clause: conditions.join(" AND "), values, isEmpty: false };
@@ -2185,21 +2211,21 @@ type SalesOrderRow = RowDataPacket & {
   outlet_id: number;
   order_no: string;
   client_ref?: string | null;
-  order_date: Date | string;
-  expected_date: Date | string | null;
+  order_date: string;
+  expected_date: string | null;
   status: SalesOrderStatus;
   notes: string | null;
   subtotal: string | number;
   tax_amount: string | number;
   grand_total: string | number;
   confirmed_by_user_id: number | null;
-  confirmed_at: Date | null;
+  confirmed_at: string | null;
   completed_by_user_id: number | null;
-  completed_at: Date | null;
+  completed_at: string | null;
   created_by_user_id: number | null;
   updated_by_user_id: number | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 type SalesOrderLineRow = RowDataPacket & {
@@ -2268,6 +2294,7 @@ type OrderListFilters = {
   dateTo?: string;
   limit?: number;
   offset?: number;
+  timezone?: string;
 };
 
 function buildOrderLines(
@@ -2885,14 +2912,25 @@ export async function listOrders(
     values.push(filters.status);
   }
 
-  if (filters.dateFrom) {
-    conditions.push("order_date >= ?");
-    values.push(filters.dateFrom);
+  // Handle timezone conversion for date range
+  let dateFrom = filters.dateFrom;
+  let dateTo = filters.dateTo;
+
+  if (dateFrom && dateTo && filters.timezone && filters.timezone !== 'UTC') {
+    const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, filters.timezone);
+    // Convert to date-only format for comparison
+    dateFrom = range.fromStartUTC.slice(0, 10);
+    dateTo = range.toEndUTC.slice(0, 10);
   }
 
-  if (filters.dateTo) {
+  if (dateFrom) {
+    conditions.push("order_date >= ?");
+    values.push(dateFrom);
+  }
+
+  if (dateTo) {
     conditions.push("order_date <= ?");
-    values.push(filters.dateTo);
+    values.push(dateTo);
   }
 
   const whereClause = conditions.join(" AND ");
@@ -3189,7 +3227,7 @@ type SalesCreditNoteRow = RowDataPacket & {
   outlet_id: number;
   invoice_id: number;
   credit_note_no: string;
-  credit_note_date: Date | string;
+  credit_note_date: string;
   client_ref?: string | null;
   status: "DRAFT" | "POSTED" | "VOID";
   reason?: string | null;
@@ -3197,8 +3235,8 @@ type SalesCreditNoteRow = RowDataPacket & {
   amount: string | number;
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 type SalesCreditNoteLineRow = RowDataPacket & {
@@ -3225,8 +3263,8 @@ export interface SalesCreditNoteDetail {
   amount: number;
   created_by_user_id: number | null;
   updated_by_user_id: number | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
   lines: Array<{
     id: number;
     credit_note_id: number;
@@ -3252,6 +3290,7 @@ type CreditNoteListFilters = {
   dateTo?: string;
   limit?: number;
   offset?: number;
+  timezone?: string;
 };
 
 const MONEY_SCALE_CN = 100;
@@ -3609,14 +3648,25 @@ export async function listCreditNotes(
       params.push(filters.status);
     }
 
-    if (filters.dateFrom) {
-      conditions.push("credit_note_date >= ?");
-      params.push(filters.dateFrom);
+    // Handle timezone conversion for date range
+    let dateFrom = filters.dateFrom;
+    let dateTo = filters.dateTo;
+
+    if (dateFrom && dateTo && filters.timezone && filters.timezone !== 'UTC') {
+      const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, filters.timezone);
+      // Convert to date-only format for comparison
+      dateFrom = range.fromStartUTC.slice(0, 10);
+      dateTo = range.toEndUTC.slice(0, 10);
     }
 
-    if (filters.dateTo) {
+    if (dateFrom) {
+      conditions.push("credit_note_date >= ?");
+      params.push(dateFrom);
+    }
+
+    if (dateTo) {
       conditions.push("credit_note_date <= ?");
-      params.push(filters.dateTo);
+      params.push(dateTo);
     }
 
     const whereClause = conditions.join(" AND ");
@@ -3657,8 +3707,8 @@ export async function listCreditNotes(
         amount: Number(row.amount),
         created_by_user_id: row.created_by_user_id ?? null,
         updated_by_user_id: row.updated_by_user_id ?? null,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
+        created_at: toRfc3339Required(row.created_at),
+        updated_at: toRfc3339Required(row.updated_at),
         lines: lines.map((line) => ({
           id: line.id,
           credit_note_id: line.credit_note_id,
@@ -3834,7 +3884,7 @@ export async function postCreditNote(
       credit_note_no: creditNote.credit_note_no,
       credit_note_date: formatDateOnly(creditNote.credit_note_date),
       amount: Number(creditNote.amount),
-      updated_at: creditNote.updated_at.toISOString()
+      updated_at: creditNote.updated_at
     });
 
     await connection.execute<ResultSetHeader>(
@@ -3918,7 +3968,7 @@ export async function voidCreditNote(
         credit_note_no: creditNote.credit_note_no,
         credit_note_date: formatDateOnly(creditNote.credit_note_date),
         amount: Number(creditNote.amount),
-        updated_at: creditNote.updated_at.toISOString()
+      updated_at: creditNote.updated_at
       });
 
       const [invoiceResult] = await connection.execute<RowDataPacket[]>(

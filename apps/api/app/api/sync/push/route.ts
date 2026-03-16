@@ -21,6 +21,41 @@ import {
   type SyncPushPostingHookResult,
   runSyncPushPostingHook
 } from "../../../../src/lib/sync-push-posting";
+import { SyncAuditService, type AuditDbClient } from "@jurnapod/modules-platform/sync";
+
+// Helper to create audit service with proper DB client adapter
+function createSyncAuditService(dbPool: ReturnType<typeof getDbPool>): SyncAuditService {
+  const client: AuditDbClient = {
+    query: async <T = unknown>(sql: string, params?: unknown[]): Promise<T[]> => {
+      const [rows] = await dbPool.query(sql, params as (string | number | Date | null)[]);
+      return rows as T[];
+    },
+    execute: async (sql: string, params?: unknown[]) => {
+      const [result] = await dbPool.execute(sql, params as (string | number | Date | null)[]);
+      return {
+        affectedRows: (result as { affectedRows: number }).affectedRows,
+        insertId: (result as { insertId?: number }).insertId,
+      };
+    },
+    getConnection: async () => {
+      const conn = await dbPool.getConnection();
+      return {
+        beginTransaction: () => conn.beginTransaction(),
+        commit: () => conn.commit(),
+        rollback: () => conn.rollback(),
+        execute: async (sql: string, params?: unknown[]) => {
+          const [result] = await conn.execute(sql, params as (string | number | Date | null)[]);
+          return {
+            affectedRows: (result as { affectedRows: number }).affectedRows,
+            insertId: (result as { insertId?: number }).insertId,
+          };
+        },
+        release: () => conn.release(),
+      };
+    },
+  };
+  return new SyncAuditService(client);
+}
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 const MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE = 1205;
@@ -1363,16 +1398,26 @@ async function parseOutletIdForGuard(request: Request): Promise<number> {
   }
 }
 
+function getTierFromRequest(request: Request): string {
+  const tier = request.headers.get("x-sync-tier");
+  return tier ?? "default";
+}
+
 export const POST = withAuth(
   async (request, auth) => {
     const correlationId = getRequestCorrelationId(request);
     const injectFailureAfterHeaderInsert = shouldInjectFailureAfterHeaderInsert(request);
     const forcedRetryableErrno = readForcedRetryableErrno(request);
+    const startTime = Date.now();
+    const tier = getTierFromRequest(request);
+    let eventId: bigint | undefined;
+    let auditService: SyncAuditService | undefined;
 
     try {
       const payload = await request.json();
       const input = syncPushRequestSchemaWithOffset.parse(payload);
       const dbPool = getDbPool();
+      auditService = createSyncAuditService(dbPool);
       const results: SyncPushResultItem[] = [];
       const orderUpdateResults: Array<{
         update_id: string;
@@ -1384,6 +1429,16 @@ export const POST = withAuth(
         result: "OK" | "DUPLICATE" | "ERROR";
         message?: string;
       }> = [];
+
+      // Start audit event
+      eventId = await auditService.startEvent({
+        companyId: auth.companyId,
+        outletId: input.outlet_id,
+        operationType: "PUSH",
+        tierName: tier,
+        status: "IN_PROGRESS",
+        startedAt: new Date()
+      });
 
       const taxDbConnection = await dbPool.getConnection();
       try {
@@ -1789,8 +1844,30 @@ export const POST = withAuth(
         item_cancellation_results: itemCancellationResults
       });
 
+      // Calculate items count
+      const itemsCount = input.transactions.length + (input.order_updates?.length ?? 0);
+
+      // Complete audit event on success
+      await auditService.completeEvent(eventId, {
+        status: "SUCCESS",
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime,
+        itemsCount
+      });
+
       return successResponse(response, 200, withCorrelationHeaders(correlationId));
     } catch (error) {
+      // Complete audit event on failure
+      if (eventId !== undefined && auditService !== undefined) {
+        await auditService.completeEvent(eventId, {
+          status: "FAILED",
+          completedAt: new Date(),
+          durationMs: Date.now() - startTime,
+          errorCode: error instanceof Error ? error.name : "UNKNOWN",
+          errorMessage: error instanceof Error ? error.message : "Unknown error"
+        });
+      }
+
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse(
           "INVALID_REQUEST",

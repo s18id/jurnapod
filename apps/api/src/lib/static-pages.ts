@@ -5,6 +5,7 @@ import type { RowDataPacket } from "mysql2";
 import { marked } from "marked";
 import sanitizeHtml, { type IOptions } from "sanitize-html";
 import { getDbPool } from "./db";
+import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
@@ -13,16 +14,16 @@ type StaticPageRow = RowDataPacket & {
   slug: string;
   title: string;
   content_md: string;
-  updated_at: Date;
-  published_at: Date | null;
+  updated_at: string;
+  published_at: string | null;
 };
 
 export type PublicStaticPage = {
   slug: string;
   title: string;
   content_html: string;
-  updated_at: Date;
-  published_at: Date | null;
+  updated_at: string;
+  published_at: string | null;
 };
 
 type CacheEntry = {
@@ -127,8 +128,8 @@ export async function getPublishedStaticPage(slug: string): Promise<PublicStatic
     slug: row.slug,
     title: row.title,
     content_html: contentHtml,
-    updated_at: row.updated_at,
-    published_at: row.published_at
+    updated_at: toRfc3339Required(row.updated_at),
+    published_at: toRfc3339(row.published_at)
   };
 
   setCachedPage(slug, page);

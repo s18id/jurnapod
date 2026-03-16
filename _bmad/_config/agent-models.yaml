@@ -1,0 +1,236 @@
+# BMAD Agent Model Configuration
+# Maps BMAD agents to optimal AI models based on capability and cost
+# Generated: 2026-03-15
+
+# Strategy: OpenCode Go Primary (your subscription)
+# - Use opencode-go/minimax-m2.5 as primary for most tasks
+# - Use openai/gpt-5.1-codex-mini for code-specific tasks
+# - Use anthropic/claude-3-5-sonnet for complex reasoning only
+
+# Agent to Model Mappings
+agent_models:
+  # Core/Master agents - use kimi for orchestration (needs full context)
+  bmad-master:
+    model: "opencode-go/kimi-k2.5"
+    description: "Orchestration and complex decision making - needs full project state"
+    
+  # Development agents - narrow scope tasks on minimax, broader on kimi
+  # Decomposition strategy: break into 2-4 hour focused chunks
+  bmad-dev:
+    model: "opencode-go/kimi-k2.5"
+    description: "Main dev with decomposition strategy - broader context needed"
+    
+  bmad-quick-flow-solo-dev:
+    model: "opencode-go/minimax-m2.5"
+    description: "Rapid implementation - narrow focused tasks"
+    
+  bmad-quick-dev:
+    model: "opencode-go/minimax-m2.5"
+    description: "Quick fixes - narrow scope tasks"
+    
+  bmad-dev-story:
+    model: "opencode-go/kimi-k2.5"
+    description: "Story implementation with clear AC boundaries"
+    
+  # QA/Testing agents - standardized workflows on minimax
+  bmad-qa:
+    model: "opencode-go/minimax-m2.5"
+    description: "Test generation - standardized patterns"
+    
+  bmad-qa-generate-e2e-tests:
+    model: "opencode-go/minimax-m2.5"
+    description: "E2E test creation - focused tasks"
+    
+  bmad-testarch-test-design:
+    model: "opencode-go/minimax-m2.5"
+    description: "Test strategy design"
+    
+  bmad-testarch-framework:
+    model: "opencode-go/minimax-m2.5"
+    description: "Test framework setup"
+    
+  bmad-testarch-atdd:
+    model: "opencode-go/minimax-m2.5"
+    description: "Acceptance test generation"
+    
+  bmad-testarch-trace:
+    model: "opencode-go/minimax-m2.5"
+    description: "Traceability matrix"
+    
+  bmad-testarch-nfr:
+    model: "opencode-go/minimax-m2.5"
+    description: "Non-functional requirements testing"
+    
+  bmad-testarch-ci:
+    model: "opencode-go/minimax-m2.5"
+    description: "CI pipeline setup"
+    
+  bmad-testarch-automate:
+    model: "opencode-go/minimax-m2.5"
+    description: "Test automation expansion"
+    
+  bmad-testarch-test-review:
+    model: "opencode-go/minimax-m2.5"
+    description: "Test quality review"
+    
+  # Planning/Analysis agents
+  bmad-analyst:
+    model: "opencode-go/minimax-m2.5"
+    description: "Market research and analysis"
+    
+  bmad-architect:
+    model: "anthropic/claude-3-5-sonnet-20241022"
+    description: "Architecture design - complex reasoning for high-value decisions"
+    
+  bmad-pm:
+    model: "opencode-go/kimi-k2.5"
+    description: "Product management - needs full project context"
+    
+  bmad-sm:
+    model: "opencode-go/kimi-k2.5"
+    description: "Scrum master tasks - needs sprint/project continuity"
+    
+  # UX/Design agents
+  bmad-ux-designer:
+    model: "opencode-go/minimax-m2.5"
+    description: "User experience design"
+    
+  bmad-create-ux-design:
+    model: "opencode-go/minimax-m2.5"
+    description: "UX specification creation"
+    
+  # Documentation agents
+  bmad-tech-writer:
+    model: "opencode-go/minimax-m2.5"
+    description: "Technical documentation"
+    
+  bmad-shard-doc:
+    model: "opencode-go/minimax-m2.5"
+    description: "Document organization"
+    
+  # Review agents - use kimi-k2.5 for consistency with implementation context
+  # and deep codebase understanding from ongoing work
+  bmad-code-review:
+    model: "opencode-go/kimi-k2.5"
+    description: "Adversarial code review"
+    
+  bmad-review-adversarial-general:
+    model: "opencode-go/kimi-k2.5"
+    description: "Critical review"
+    
+  bmad-review-edge-case-hunter:
+    model: "opencode-go/kimi-k2.5"
+    description: "Edge case analysis"
+    
+  bmad-editorial-review-prose:
+    model: "opencode-go/kimi-k2.5"
+    description: "Prose review"
+    
+  bmad-editorial-review-structure:
+    model: "opencode-go/kimi-k2.5"
+    description: "Structure review"
+    
+  # Research agents
+  bmad-market-research:
+    model: "opencode-go/minimax-m2.5"
+    description: "Market analysis"
+    
+  bmad-domain-research:
+    model: "opencode-go/minimax-m2.5"
+    description: "Domain research"
+    
+  bmad-technical-research:
+    model: "opencode-go/minimax-m2.5"
+    description: "Technical research"
+    
+  # PRD/Requirements
+  bmad-create-prd:
+    model: "opencode-go/minimax-m2.5"
+    description: "PRD creation"
+    
+  bmad-edit-prd:
+    model: "opencode-go/minimax-m2.5"
+    description: "PRD editing"
+    
+  bmad-validate-prd:
+    model: "opencode-go/minimax-m2.5"
+    description: "PRD validation"
+    
+  # Product/Design agents
+  bmad-create-product-brief:
+    model: "opencode-go/minimax-m2.5"
+    description: "Product brief creation"
+    
+  bmad-brainstorming:
+    model: "opencode-go/minimax-m2.5"
+    description: "Ideation sessions"
+    
+  bmad-create-epics-and-stories:
+    model: "opencode-go/kimi-k2.5"
+    description: "Epic/story breakdown - needs project scope understanding"
+    
+  bmad-create-story:
+    model: "opencode-go/kimi-k2.5"
+    description: "Story creation - needs technical constraints context"
+    
+  # Architecture/Planning
+  bmad-create-architecture:
+    model: "anthropic/claude-3-5-sonnet-20241022"
+    description: "Solution design with trade-offs - complex reasoning"
+    
+  bmad-quick-spec:
+    model: "opencode-go/minimax-m2.5"
+    description: "Quick tech spec"
+    
+  bmad-check-implementation-readiness:
+    model: "opencode-go/minimax-m2.5"
+    description: "Implementation readiness check"
+    
+  # Sprint/Project Management
+  bmad-sprint-planning:
+    model: "opencode-go/kimi-k2.5"
+    description: "Sprint planning - needs full context"
+    
+  bmad-sprint-status:
+    model: "opencode-go/kimi-k2.5"
+    description: "Sprint status - needs current state awareness"
+    
+  bmad-retrospective:
+    model: "opencode-go/kimi-k2.5"
+    description: "Retrospectives - needs project history and context"
+    
+  bmad-correct-course:
+    model: "opencode-go/kimi-k2.5"
+    description: "Course correction - needs deep understanding of current state"
+    
+  # Utility agents
+  bmad-help:
+    model: "opencode-go/kimi-k2.5"
+    description: "Help and guidance - needs project awareness"
+    
+  bmad-party-mode:
+    model: "opencode-go/kimi-k2.5"
+    description: "Multi-agent orchestration - requires context awareness"
+    
+  bmad-document-project:
+    model: "opencode-go/kimi-k2.5"
+    description: "Project documentation - needs comprehensive analysis"
+    
+  bmad-generate-project-context:
+    model: "opencode-go/kimi-k2.5"
+    description: "Context generation - must understand project deeply"
+    
+  bmad-index-docs:
+    model: "opencode-go/minimax-m2.5"
+    description: "Documentation indexing"
+    
+  bmad-teach-me-testing:
+    model: "opencode-go/minimax-m2.5"
+    description: "Testing education"
+    
+  bmad-advanced-elicitation:
+    model: "opencode-go/minimax-m2.5"
+    description: "Requirements elicitation"
+
+# Default fallback model
+default_model: "opencode-go/minimax-m2.5"

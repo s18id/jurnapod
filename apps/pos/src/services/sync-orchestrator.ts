@@ -228,6 +228,8 @@ export class SyncOrchestrator {
         price_updated_at: string;
         data_version: number;
         pulled_at: string;
+        track_stock: boolean;
+        low_stock_threshold: number | null;
       }> = [];
 
       if (catalogAdvanced) {
@@ -258,7 +260,9 @@ export class SyncOrchestrator {
               item_updated_at: item.updated_at,
               price_updated_at: price.updated_at,
               data_version: dataVersion,
-              pulled_at: now
+              pulled_at: now,
+              track_stock: item.track_stock ?? false,
+              low_stock_threshold: item.low_stock_threshold ?? 0
             };
           })
           .filter((row): row is NonNullable<typeof row> => row !== null);

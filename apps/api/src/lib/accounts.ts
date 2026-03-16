@@ -162,12 +162,12 @@ class SharedMySQLDbClient extends MySQLAccountsDbClient {
  * Create AccountsService instance with MySQL adapter and audit service
  * Both services share the same db client to support transactions
  */
-function createAccountsService(): AccountsService {
+async function createAccountsService(): Promise<AccountsService> {
   const pool = getDbPool();
   const sharedDbClient = new SharedMySQLDbClient(pool);
   
-  // Import AuditService class
-  const { AuditService } = require("@jurnapod/modules-platform");
+  // Import AuditService class using dynamic import
+  const { AuditService } = await import("@jurnapod/modules-platform");
   
   // Create audit service with the SAME db client to share transactions
   const auditService = new AuditService(sharedDbClient);
@@ -179,9 +179,9 @@ function createAccountsService(): AccountsService {
 // Singleton instance
 let accountsServiceInstance: AccountsService | null = null;
 
-function getAccountsService(): AccountsService {
+async function getAccountsService(): Promise<AccountsService> {
   if (!accountsServiceInstance) {
-    accountsServiceInstance = createAccountsService();
+    accountsServiceInstance = await createAccountsService();
   }
   return accountsServiceInstance;
 }
@@ -190,17 +190,17 @@ function getAccountsService(): AccountsService {
  * Export service methods
  */
 export async function listAccounts(query: AccountListQuery): Promise<AccountResponse[]> {
-  const service = getAccountsService();
+  const service = await getAccountsService();
   return service.listAccounts(query);
 }
 
 export async function getAccountById(accountId: number, companyId: number): Promise<AccountResponse> {
-  const service = getAccountsService();
+  const service = await getAccountsService();
   return service.getAccountById(accountId, companyId);
 }
 
 export async function createAccount(data: AccountCreateRequest, userId?: number): Promise<AccountResponse> {
-  const service = getAccountsService();
+  const service = await getAccountsService();
   return service.createAccount(data, userId);
 }
 
@@ -210,27 +210,27 @@ export async function updateAccount(
   companyId: number,
   userId?: number
 ): Promise<AccountResponse> {
-  const service = getAccountsService();
+  const service = await getAccountsService();
   return service.updateAccount(accountId, data, companyId, userId);
 }
 
 export async function deactivateAccount(accountId: number, companyId: number, userId?: number): Promise<AccountResponse> {
-  const service = getAccountsService();
+  const service = await getAccountsService();
   return service.deactivateAccount(accountId, companyId, userId);
 }
 
 export async function reactivateAccount(accountId: number, companyId: number, userId?: number): Promise<AccountResponse> {
-  const service = getAccountsService();
+  const service = await getAccountsService();
   return service.reactivateAccount(accountId, companyId, userId);
 }
 
 export async function getAccountTree(companyId: number, includeInactive = false): Promise<AccountTreeNode[]> {
-  const service = getAccountsService();
+  const service = await getAccountsService();
   return service.getAccountTree(companyId, includeInactive);
 }
 
 export async function isAccountInUse(accountId: number, companyId: number): Promise<boolean> {
-  const service = getAccountsService();
+  const service = await getAccountsService();
   return service.isAccountInUse(accountId, companyId);
 }
 

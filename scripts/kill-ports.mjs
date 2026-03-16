@@ -1,13 +1,37 @@
 #!/usr/bin/env node
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 const execAsync = promisify(exec);
+
+// Load .env for port discovery
+function loadEnv() {
+  try {
+    const envPath = resolve(process.cwd(), '.env');
+    const envContent = readFileSync(envPath, 'utf8');
+    for (const line of envContent.split('\n')) {
+      const match = line.match(/^([^=:#]+)=(.*)$/);
+      if (match && !process.env[match[1]]) {
+        process.env[match[1]] = match[2];
+      }
+    }
+  } catch (error) {
+    // .env not found, use defaults
+  }
+}
+
+loadEnv();
+
 const ports = process.argv.slice(2).map(p => parseInt(p, 10));
 
-// Default ports if none provided
+// Default ports from env or fallback
 if (ports.length === 0) {
-  ports.push(3001, 3002, 5173); // API, Backoffice, POS
+  const apiPort = parseInt(process.env.PORT || process.env.API_PORT || '3001', 10);
+  const backofficePort = parseInt(process.env.BACKOFFICE_PORT || '3002', 10);
+  const posPort = parseInt(process.env.POS_PORT || '5173', 10);
+  ports.push(apiPort, backofficePort, posPort);
 }
 
 // Validate ports

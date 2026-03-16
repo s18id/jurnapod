@@ -6,6 +6,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { AuditService, type AuditDbClient } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
 import { invalidateStaticPageCache } from "./static-pages";
+import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
 
@@ -17,9 +18,9 @@ type StaticPageRow = RowDataPacket & {
   title: string;
   content_md: string;
   status: StaticPageStatus;
-  published_at: Date | null;
-  created_at: Date;
-  updated_at: Date;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
   meta_json: string | null;
 };
 
@@ -28,8 +29,8 @@ type StaticPageSummaryRow = RowDataPacket & {
   slug: string;
   title: string;
   status: StaticPageStatus;
-  updated_at: Date;
-  published_at: Date | null;
+  updated_at: string;
+  published_at: string | null;
 };
 
 export type StaticPageSummary = {
@@ -37,8 +38,8 @@ export type StaticPageSummary = {
   slug: string;
   title: string;
   status: StaticPageStatus;
-  updated_at: Date;
-  published_at: Date | null;
+  updated_at: string;
+  published_at: string | null;
 };
 
 export type StaticPageDetail = {
@@ -47,8 +48,8 @@ export type StaticPageDetail = {
   title: string;
   content_md: string;
   status: StaticPageStatus;
-  updated_at: Date;
-  published_at: Date | null;
+  updated_at: string;
+  published_at: string | null;
   meta_json: Record<string, any> | null;
 };
 
@@ -143,8 +144,8 @@ function mapStaticPage(row: StaticPageRow): StaticPageDetail {
     title: row.title,
     content_md: row.content_md,
     status: row.status,
-    updated_at: row.updated_at,
-    published_at: row.published_at,
+    updated_at: toRfc3339Required(row.updated_at),
+    published_at: toRfc3339(row.published_at),
     meta_json: parseMetaJson(row.meta_json)
   };
 }
@@ -204,8 +205,8 @@ export async function listStaticPages(search?: string): Promise<StaticPageSummar
     slug: row.slug,
     title: row.title,
     status: row.status,
-    updated_at: row.updated_at,
-    published_at: row.published_at
+    updated_at: toRfc3339Required(row.updated_at),
+    published_at: toRfc3339(row.published_at)
   }));
 }
 

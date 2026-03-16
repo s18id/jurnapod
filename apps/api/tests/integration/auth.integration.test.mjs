@@ -766,11 +766,11 @@ test(
         `CREATE TRIGGER \`${triggerName}\`
          BEFORE INSERT ON audit_logs
          FOR EACH ROW
-         SET NEW.result = IF(
-           JSON_UNQUOTE(JSON_EXTRACT(NEW.payload_json, '$.user_agent')) = '${auditFailureUserAgent}',
-           'BROKEN',
-           NEW.result
-         )`
+         BEGIN
+           IF JSON_UNQUOTE(JSON_EXTRACT(NEW.payload_json, '$.user_agent')) = '${auditFailureUserAgent}' THEN
+             SET NEW.status = 99; -- Invalid status will violate constraint (valid range: 0-7)
+           END IF;
+         END`
       );
       triggerCreated = true;
 

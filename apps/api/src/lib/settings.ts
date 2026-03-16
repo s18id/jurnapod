@@ -3,6 +3,7 @@
 
 import { getDbPool } from "./db";
 import type { RowDataPacket } from "mysql2";
+import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 export type SettingValueType = "string" | "number" | "boolean" | "json";
 
@@ -15,8 +16,8 @@ export interface CompanySetting {
   value_json: string;
   created_by_user_id: number | null;
   updated_by_user_id: number | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CompanySettingWithValue extends Omit<CompanySetting, "value_json"> {
@@ -179,8 +180,8 @@ export async function listSettings(params: ListSettingsParams): Promise<CompanyS
     value: deserializeValue(row.value_json, row.value_type),
     created_by_user_id: row.created_by_user_id,
     updated_by_user_id: row.updated_by_user_id,
-    created_at: row.created_at,
-    updated_at: row.updated_at
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at)
   }));
 }
 
@@ -221,8 +222,8 @@ export async function getSetting(params: GetSettingParams): Promise<CompanySetti
     value: deserializeValue(row.value_json, row.value_type),
     created_by_user_id: row.created_by_user_id,
     updated_by_user_id: row.updated_by_user_id,
-    created_at: row.created_at,
-    updated_at: row.updated_at
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at)
   };
 }
 

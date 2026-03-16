@@ -5,6 +5,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { AuditService } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
+import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 
@@ -41,8 +42,8 @@ type OutletTableRow = RowDataPacket & {
   zone: string | null;
   capacity: number | null;
   status: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };
 
 type OutletTableCodeRow = RowDataPacket & {
@@ -111,8 +112,8 @@ function normalizeOutletTable(row: OutletTableRow): OutletTableFullResponse {
     zone: row.zone,
     capacity: row.capacity,
     status: row.status,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at)
   };
 }
 

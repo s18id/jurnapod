@@ -21,9 +21,9 @@ type EmailTokenRow = RowDataPacket & {
   email: string;
   token_hash: string;
   type: string;
-  expires_at: Date;
-  used_at: Date | null;
-  created_at: Date;
+  expires_at: string;
+  used_at: string | null;
+  created_at: string;
   created_by: number | null;
 };
 
@@ -55,7 +55,7 @@ export async function createEmailToken(params: {
   email: string;
   type: EmailTokenType;
   createdBy: number;
-}): Promise<{ token: string; expiresAt: Date }> {
+}): Promise<{ token: string; expiresAt: string }> {
   const pool = getDbPool();
   const ttlMinutes = getTokenTtlMinutes(params.type);
   const token = generateToken();
@@ -76,7 +76,7 @@ export async function createEmailToken(params: {
     ]
   );
 
-  return { token, expiresAt };
+  return { token, expiresAt: expiresAt.toISOString() };
 }
 
 export async function validateEmailToken(
@@ -205,7 +205,7 @@ export async function validateAndConsumeToken(
 export async function getEmailTokenInfo(
   token: string,
   type: EmailTokenType
-): Promise<{ userId: number; companyId: number; email: string; expiresAt: Date } | null> {
+): Promise<{ userId: number; companyId: number; email: string; expiresAt: string } | null> {
   const pool = getDbPool();
   const tokenHash = hashToken(token);
 

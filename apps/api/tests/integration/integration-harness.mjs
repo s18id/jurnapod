@@ -103,7 +103,8 @@ export function createDbPool(options = {}) {
     ...config,
     waitForConnections: true,
     connectionLimit: options.connectionLimit ?? 10,
-    queueLimit: 0
+    queueLimit: 0,
+    dateStrings: true
   });
 }
 
@@ -186,6 +187,9 @@ export function startApiServer(port, options = {}) {
 
 export async function waitForHealthcheck(baseUrl, childProcess, serverLogs) {
   const startedAt = Date.now();
+
+  // Wait for server to initialize (TypeScript compilation, module loading)
+  await delay(2000);
 
   while (Date.now() - startedAt < TEST_TIMEOUT_MS) {
     if (childProcess.exitCode != null) {

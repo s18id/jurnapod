@@ -7,6 +7,7 @@ import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-
 import { resolveDefaultFiscalYearDateRange, FiscalYearSelectionError } from "../../../../src/lib/fiscal-years";
 import { listJournalBatches } from "../../../../src/lib/reports";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
+import { getCompany } from "../../../../src/lib/companies";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive().optional(),
@@ -69,6 +70,10 @@ export const GET = withAuth(
         outletIds = await listUserOutletIds(auth.userId, auth.companyId);
       }
 
+      // Get company timezone for date boundary conversion
+      const company = await getCompany(auth.companyId);
+      const timezone = company.timezone ?? 'UTC';
+
       const report = await listJournalBatches({
         companyId: auth.companyId,
         outletIds,
@@ -78,7 +83,8 @@ export const GET = withAuth(
         asOfId: parsed.as_of_id,
         includeUnassignedOutlet: typeof parsed.outlet_id !== "number",
         limit: parsed.limit,
-        offset: parsed.offset
+        offset: parsed.offset,
+        timezone
       });
 
       return successResponse({

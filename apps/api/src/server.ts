@@ -9,6 +9,13 @@ import type { Context } from "hono";
 import { compress } from "hono/compress";
 import { logger as honoLogger } from "hono/logger";
 import { serve } from "@hono/node-server";
+import { createServer } from "node:http";
+import { assertAppEnvReady } from "./lib/env.js";
+import { initializeSyncModules, cleanupSyncModules } from "./lib/sync-modules.js";
+import { initWebSocketManager } from "./lib/websocket/index.js";
+
+// Validate environment configuration before starting server
+assertAppEnvReady();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,11 +79,16 @@ function toApiRoutePath(routesRoot: string, routeFilePath: string): string {
 async function listRouteFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true });
   const files: string[] = [];
+  const dynamics: string[] = [];
 
   for (const entry of entries) {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
-      files.push(...(await listRouteFiles(fullPath)));
+      if (entry.name.startsWith("[")) {
+        dynamics.push(...(await listRouteFiles(fullPath)))
+      } else {
+        files.push(...(await listRouteFiles(fullPath)));
+      }
       continue;
     }
 
@@ -85,16 +97,29 @@ async function listRouteFiles(dir: string): Promise<string[]> {
     }
   }
 
+  if (dynamics.length > 0) {
+    for (const dynamic of dynamics) {
+      if (dynamic.length > 0){
+          files.push(dynamic)
+      }
+    }
+  }
+
   return files;
 }
 
 function cloneRequestForHandler(request: Request): Request {
   const isBodylessMethod = request.method === "GET" || request.method === "HEAD";
-  return new Request(request.url, {
+  const init: RequestInit = {
     method: request.method,
     headers: request.headers,
     body: isBodylessMethod ? undefined : request.body
-  });
+  };
+  // Required for streaming bodies in Node.js fetch
+  if (!isBodylessMethod && request.body) {
+    (init as any).duplex = 'half';
+  }
+  return new Request(request.url, init);
 }
 
 function registerRoute(app: Hono, routePath: string, method: HttpMethod, handler: (request: Request) => Promise<Response> | Response): void {
@@ -206,6 +231,13 @@ app.use("/api/*", async (c: any, next: () => Promise<void>) => {
 
 await registerRoutes(app);
 
+// Initialize sync modules after routes are registered
+try {
+  await initializeSyncModules();
+} catch (error) {
+  console.error("Failed to initialize sync modules. Server will continue without modular sync.", error);
+}
+
 app.notFound(() => {
   return Response.json(
     {
@@ -233,20 +265,113 @@ app.onError((error: unknown) => {
   );
 });
 
-const server = serve(
-  {
-    fetch: app.fetch,
-    port: PORT,
-    hostname: HOST
-  },
-  (info: { address: string; port: number }) => {
-    console.log(`API server running on http://${info.address}:${info.port}`);
+// Helper to read request body from Node.js stream
+function readRequestBody(req: any): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+// Create Node.js server with Hono adapter
+const server = createServer(async (req, res) => {
+  // Convert Node.js req to Web Standard Request
+  try {
+    // Build the full URL
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers.host || `${HOST}:${PORT}`;
+    const url = `${protocol}://${host}${req.url}`;
+    
+    // Convert Node.js headers to Web Standard Headers
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value !== undefined) {
+        if (Array.isArray(value)) {
+          value.forEach(v => headers.append(key, v));
+        } else {
+          headers.set(key, value);
+        }
+      }
+    }
+    
+    // Read request body for non-GET/HEAD methods
+    let body: Buffer | undefined;
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      body = await readRequestBody(req);
+    }
+    
+    // Create Web Standard Request from Node.js req
+    const requestInit: RequestInit = {
+      method: req.method,
+      headers: headers,
+    };
+    
+    if (body && body.length > 0) {
+      requestInit.body = body as any;
+      // Required for streaming bodies in Node.js fetch
+      (requestInit as any).duplex = 'half';
+    }
+    
+    const request = new Request(url, requestInit);
+    
+    // Call Hono's fetch with the proper Request object
+    const response = await app.fetch(request);
+    
+    // Write response back to Node.js res
+    res.statusCode = response.status;
+    response.headers.forEach((value, key) => {
+      res.setHeader(key, value);
+    });
+    
+    // Stream response body to Node.js res
+    if (response.body) {
+      const reader = response.body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(Buffer.from(value));
+        }
+        res.end();
+      } catch (error) {
+        console.error("Error streaming response:", error);
+        if (!res.writableEnded) {
+          res.end();
+        }
+      }
+    } else {
+      res.end();
+    }
+  } catch (error) {
+    console.error("Request handling error:", error);
+    if (!res.writableEnded) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ success: false, error: { code: "INTERNAL_SERVER_ERROR", message: "Internal Server Error" } }));
+    }
   }
-);
+});
+
+// Initialize WebSocket manager
+const wsManager = initWebSocketManager(server);
+wsManager.start();
+
+server.listen(PORT, HOST, () => {
+  console.log(`API server running on http://${HOST}:${PORT}`);
+  console.log(`WebSocket server running on ws://${HOST}:${PORT}/ws`);
+});
 
 // Handle graceful shutdown
-const shutdown = () => {
+const shutdown = async () => {
   console.log("\nShutting down API server...");
+  
+  // Stop WebSocket server
+  wsManager.stop();
+  
+  // Cleanup sync modules
+  await cleanupSyncModules();
+  
   server.close(() => {
     console.log("API server stopped");
     process.exit(0);

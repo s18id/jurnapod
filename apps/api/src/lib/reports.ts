@@ -4,6 +4,7 @@
 import type { RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "./db";
+import { toDateTimeRangeWithTimezone, normalizeDate } from "./date-helpers";
 
 type PosTransactionRow = RowDataPacket & {
   id: number;
@@ -15,7 +16,7 @@ type PosTransactionRow = RowDataPacket & {
   reservation_id: number | null;
   guest_count: number | null;
   order_status: "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED" | null;
-  trx_at: Date;
+  trx_at: string;
   gross_total: number | string | null;
   paid_total: number | string | null;
   item_count: number | null;
@@ -44,7 +45,7 @@ type JournalBatchRow = RowDataPacket & {
   outlet_name: string | null;
   doc_type: string;
   doc_id: number;
-  posted_at: Date;
+  posted_at: string;
   total_debit: number | string;
   total_credit: number | string;
   line_count: number;
@@ -76,7 +77,7 @@ type GeneralLedgerLineRow = RowDataPacket & {
   account_id: number;
   account_code: string;
   account_name: string;
-  line_date: Date;
+  line_date: string;
   debit: number | string;
   credit: number | string;
   description: string;
@@ -85,7 +86,7 @@ type GeneralLedgerLineRow = RowDataPacket & {
   journal_batch_id: number;
   doc_type: string;
   doc_id: number;
-  posted_at: Date;
+  posted_at: string;
 };
 
 type ProfitLossRow = RowDataPacket & {
@@ -114,8 +115,8 @@ type ReceivablesAgeingRow = RowDataPacket & {
   invoice_no: string;
   outlet_id: number;
   outlet_name: string | null;
-  invoice_date: Date;
-  due_date: Date | null;
+  invoice_date: string;
+  due_date: string | null;
   outstanding_amount: number | string;
   days_overdue: number | string;
 };
@@ -126,6 +127,7 @@ type BaseFilter = {
   dateFrom: string;
   dateTo: string;
   userId?: number;
+  timezone?: string;
 };
 
 type PosTransactionFilter = BaseFilter & {
@@ -164,11 +166,12 @@ type WorksheetFilter = BaseFilter & {
   includeUnassignedOutlet?: boolean;
 };
 
-type ReceivablesAgeingFilter = {
+export interface ReceivablesAgeingFilter {
   companyId: number;
-  outletIds: readonly number[];
-  asOfDate: string;
-};
+  outletIds?: number[];
+  asOfDate?: string;
+  timezone?: string;
+}
 
 function toNumber(value: number | string | null | undefined): number {
   return Number(value ?? 0);
@@ -190,11 +193,11 @@ function buildOutletPredicate(
   return { sql: clause, values: [...outletIds] };
 }
 
-function toIsoDateTime(value: Date): string {
+function toIsoDateTime(value: Date | string): string {
   return new Date(value).toISOString();
 }
 
-function toIsoDate(value: Date): string {
+function toIsoDate(value: Date | string): string {
   return new Date(value).toISOString().slice(0, 10);
 }
 
@@ -207,7 +210,20 @@ function toMysqlDateTime(value: string): string {
   return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
-function toDateTimeRange(dateFrom: string, dateTo: string): { fromStart: string; nextDayStart: string } {
+function toDateTimeRange(dateFrom: string, dateTo: string, timezone?: string): { fromStart: string; nextDayStart: string } {
+  if (timezone && timezone !== 'UTC') {
+    // Use timezone-aware boundaries
+    const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, timezone);
+    // Convert to MySQL DATETIME format (YYYY-MM-DD HH:MM:SS)
+    const fromStart = range.fromStartUTC.slice(0, 19).replace("T", " ");
+    // For end boundary, add 1ms and convert to next day start
+    const endDate = new Date(range.toEndUTC);
+    endDate.setUTCMilliseconds(endDate.getUTCMilliseconds() + 1);
+    const nextDayStart = endDate.toISOString().slice(0, 10) + " 00:00:00";
+    return { fromStart, nextDayStart };
+  }
+
+  // Fallback to original UTC behavior
   const fromStart = `${dateFrom} 00:00:00`;
   const [year, month, day] = dateTo.split("-").map((value) => Number(value));
   const nextDay = new Date(Date.UTC(year, month - 1, day));
@@ -256,7 +272,7 @@ function buildOutletInClause(outletIds: readonly number[]): { sql: string; value
 export async function listPosTransactions(filter: PosTransactionFilter) {
   const pool = getDbPool();
   const outletClause = buildOutletInClause(filter.outletIds);
-  const range = toDateTimeRange(filter.dateFrom, filter.dateTo);
+  const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
   const asOf = filter.asOf ?? new Date().toISOString();
   const asOfSql = toMysqlDateTime(asOf);
 
@@ -382,7 +398,7 @@ export async function listDailySalesSummary(
 ) {
   const pool = getDbPool();
   const outletClause = buildOutletInClause(filter.outletIds);
-  const range = toDateTimeRange(filter.dateFrom, filter.dateTo);
+  const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
   const hasUserScope = typeof filter.userId === "number";
 
   const viewValues: Array<number | string> = [
@@ -482,7 +498,7 @@ export async function listPosPaymentsSummary(
 ) {
   const pool = getDbPool();
   const outletClause = buildOutletInClause(filter.outletIds);
-  const range = toDateTimeRange(filter.dateFrom, filter.dateTo);
+  const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
 
   const values: Array<number | string> = [
     filter.companyId,
@@ -552,7 +568,7 @@ function buildOutletInClauseForJournals(
 export async function listJournalBatches(filter: JournalFilter) {
   const pool = getDbPool();
   const outletClause = buildOutletInClauseForJournals(filter.outletIds, filter.includeUnassignedOutlet ?? true);
-  const range = toDateTimeRange(filter.dateFrom, filter.dateTo);
+  const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
   const asOf = filter.asOf ?? new Date().toISOString();
   const asOfSql = toMysqlDateTime(asOf);
   const coreValues: Array<number | string> = [
@@ -919,7 +935,8 @@ export async function getProfitLoss(filter: ProfitLossFilter) {
 export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter) {
   const pool = getDbPool();
 
-  if (filter.outletIds.length === 0) {
+  const outletIds = filter.outletIds ?? [];
+  if (outletIds.length === 0) {
     return {
       buckets: {
         current: 0,
@@ -933,7 +950,16 @@ export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter
     };
   }
 
-  const outletClause = buildOutletPredicate("i.outlet_id", filter.outletIds, false);
+  const outletClause = buildOutletPredicate("i.outlet_id", outletIds, false);
+
+  let asOfUTC: string | undefined;
+  if (filter.asOfDate) {
+    if (filter.timezone && filter.timezone !== 'UTC') {
+      asOfUTC = normalizeDate(filter.asOfDate, filter.timezone, 'end');
+    } else {
+      asOfUTC = filter.asOfDate + "T23:59:59.999Z";
+    }
+  }
 
   const [rows] = await pool.execute<ReceivablesAgeingRow[]>(
     `SELECT i.id AS invoice_id,
@@ -951,7 +977,7 @@ export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter
        AND (i.grand_total - i.paid_total) > 0
        AND ${outletClause.sql}
      ORDER BY days_overdue DESC, i.invoice_date ASC, i.id ASC`,
-    [filter.asOfDate, filter.companyId, ...outletClause.values]
+    [asOfUTC ?? new Date().toISOString().slice(0, 10), filter.companyId, ...outletClause.values]
   );
 
   const buckets = {

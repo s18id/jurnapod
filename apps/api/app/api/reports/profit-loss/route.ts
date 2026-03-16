@@ -6,6 +6,7 @@ import { listUserOutletIds, userHasOutletAccess } from "../../../../src/lib/auth
 import { requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { resolveDefaultFiscalYearDateRange, FiscalYearSelectionError } from "../../../../src/lib/fiscal-years";
 import { getProfitLoss } from "../../../../src/lib/reports";
+import { getCompany } from "../../../../src/lib/companies";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 
 const querySchema = z.object({
@@ -58,6 +59,10 @@ export const GET = withAuth(
       const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
       const roundDecimals = parsed.round ?? 2;
 
+      // Get company timezone for date boundary conversion
+      const company = await getCompany(auth.companyId);
+      const timezone = company.timezone ?? 'UTC';
+
       let outletIds: number[];
       if (typeof parsed.outlet_id === "number") {
         const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
@@ -74,7 +79,8 @@ export const GET = withAuth(
         outletIds,
         dateFrom,
         dateTo,
-        includeUnassignedOutlet: typeof parsed.outlet_id !== "number"
+        includeUnassignedOutlet: typeof parsed.outlet_id !== "number",
+        timezone
       });
 
       const roundedTotals = {
