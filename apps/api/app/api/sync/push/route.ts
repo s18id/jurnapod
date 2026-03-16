@@ -21,6 +21,7 @@ import {
   type SyncPushPostingHookResult,
   runSyncPushPostingHook
 } from "../../../../src/lib/sync-push-posting";
+import { syncAuditService } from "@jurnapod/modules-platform/sync";
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 const MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE = 1205;
@@ -1363,11 +1364,19 @@ async function parseOutletIdForGuard(request: Request): Promise<number> {
   }
 }
 
+function getTierFromRequest(request: Request): string {
+  const tier = request.headers.get("x-sync-tier");
+  return tier ?? "default";
+}
+
 export const POST = withAuth(
   async (request, auth) => {
     const correlationId = getRequestCorrelationId(request);
     const injectFailureAfterHeaderInsert = shouldInjectFailureAfterHeaderInsert(request);
     const forcedRetryableErrno = readForcedRetryableErrno(request);
+    const startTime = Date.now();
+    const tier = getTierFromRequest(request);
+    let eventId: bigint | undefined;
 
     try {
       const payload = await request.json();
@@ -1384,6 +1393,16 @@ export const POST = withAuth(
         result: "OK" | "DUPLICATE" | "ERROR";
         message?: string;
       }> = [];
+
+      // Start audit event
+      eventId = await syncAuditService.startEvent({
+        companyId: auth.companyId,
+        outletId: input.outlet_id,
+        operationType: "PUSH",
+        tierName: tier,
+        status: "IN_PROGRESS",
+        startedAt: new Date()
+      });
 
       const taxDbConnection = await dbPool.getConnection();
       try {
@@ -1789,8 +1808,30 @@ export const POST = withAuth(
         item_cancellation_results: itemCancellationResults
       });
 
+      // Calculate items count
+      const itemsCount = input.transactions.length + (input.order_updates?.length ?? 0);
+
+      // Complete audit event on success
+      await syncAuditService.completeEvent(eventId, {
+        status: "SUCCESS",
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime,
+        itemsCount
+      });
+
       return successResponse(response, 200, withCorrelationHeaders(correlationId));
     } catch (error) {
+      // Complete audit event on failure
+      if (eventId !== undefined) {
+        await syncAuditService.completeEvent(eventId, {
+          status: "FAILED",
+          completedAt: new Date(),
+          durationMs: Date.now() - startTime,
+          errorCode: error instanceof Error ? error.name : "UNKNOWN",
+          errorMessage: error instanceof Error ? error.message : "Unknown error"
+        });
+      }
+
       if (error instanceof ZodError || error instanceof SyntaxError) {
         return errorResponse(
           "INVALID_REQUEST",
