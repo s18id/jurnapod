@@ -103,7 +103,8 @@ export function createDbPool(options = {}) {
     ...config,
     waitForConnections: true,
     connectionLimit: options.connectionLimit ?? 10,
-    queueLimit: 0
+    queueLimit: 0,
+    dateStrings: true
   });
 }
 
