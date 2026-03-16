@@ -3,6 +3,7 @@
 
 import type { RowDataPacket } from "mysql2";
 import { getDbPool } from "./db";
+import { toRfc3339 } from "./date-helpers";
 import type { AuditLogQuery, AuditLogResponse, AuditStatusCode } from "@jurnapod/shared";
 
 type AuditLogRow = RowDataPacket & {
@@ -37,7 +38,7 @@ function normalizeAuditLog(row: AuditLogRow): AuditLogResponse {
     ip_address: row.ip_address ?? null,
     payload_json: row.payload_json,
     changes_json: row.changes_json ?? null,
-    created_at: row.created_at
+    created_at: toRfc3339(row.created_at)
   };
 }
 

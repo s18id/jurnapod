@@ -5,6 +5,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { AuditService } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
+import { toRfc3339 } from "./date-helpers";
 
 export class OutletNotFoundError extends Error {}
 export class OutletCodeExistsError extends Error {}
@@ -106,12 +107,6 @@ function buildAuditContext(companyId: number, actor: OutletActor) {
   };
 }
 
-function normalizeDateTime(dateTime: string | Date | null): string | null {
-  if (!dateTime) return null;
-  const date = typeof dateTime === 'string' ? new Date(dateTime) : dateTime;
-  return date.toISOString();
-}
-
 function mapRowToOutlet(row: OutletRow): OutletFullResponse {
   return {
     id: Number(row.id),
@@ -126,8 +121,8 @@ function mapRowToOutlet(row: OutletRow): OutletFullResponse {
     email: row.email,
     timezone: row.timezone,
     is_active: Boolean(row.is_active),
-    created_at: normalizeDateTime(row.created_at),
-    updated_at: normalizeDateTime(row.updated_at)
+    created_at: toRfc3339(row.created_at),
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 

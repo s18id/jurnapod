@@ -5,6 +5,7 @@ import type { RowDataPacket } from "mysql2";
 import { marked } from "marked";
 import sanitizeHtml, { type IOptions } from "sanitize-html";
 import { getDbPool } from "./db";
+import { toRfc3339 } from "./date-helpers";
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
@@ -127,8 +128,8 @@ export async function getPublishedStaticPage(slug: string): Promise<PublicStatic
     slug: row.slug,
     title: row.title,
     content_html: contentHtml,
-    updated_at: row.updated_at,
-    published_at: row.published_at
+    updated_at: toRfc3339(row.updated_at),
+    published_at: toRfc3339(row.published_at)
   };
 
   setCachedPage(slug, page);

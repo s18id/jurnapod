@@ -12,6 +12,7 @@ import {
 import type { SyncPullPayload, SyncPullResponse } from "@jurnapod/shared";
 import { SyncPullConfigSchema } from "@jurnapod/shared";
 import { getDbPool } from "./db";
+import { toRfc3339 } from "./date-helpers";
 
 type ItemRow = RowDataPacket & {
   id: number;
@@ -303,7 +304,7 @@ function normalizeItem(row: ItemRow) {
     type: row.item_type,
     item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
     is_active: row.is_active === 1,
-    updated_at: row.updated_at
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -315,7 +316,7 @@ function normalizeItemGroup(row: ItemGroupRow) {
     code: row.code,
     name: row.name,
     is_active: row.is_active === 1,
-    updated_at: row.updated_at
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -329,7 +330,7 @@ function normalizeItemPrice(row: ItemPriceRow) {
     is_active: row.is_active === 1,
     item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
     item_group_name: row.item_group_name ?? null,
-    updated_at: row.updated_at
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -341,7 +342,7 @@ function normalizeSupply(row: SupplyRow) {
     name: row.name,
     unit: row.unit,
     is_active: row.is_active === 1,
-    updated_at: row.updated_at
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -353,7 +354,7 @@ function normalizeOutletTable(row: OutletTableRow) {
     zone: row.zone,
     capacity: row.capacity == null ? null : Number(row.capacity),
     status: row.status,
-    updated_at: row.updated_at
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -369,10 +370,10 @@ function normalizeReservation(row: ReservationRow) {
     status: row.status,
     notes: row.notes,
     linked_order_id: row.linked_order_id,
-    arrived_at: row.arrived_at ? row.arrived_at : null,
-    seated_at: row.seated_at ? row.seated_at : null,
-    cancelled_at: row.cancelled_at ? row.cancelled_at : null,
-    updated_at: row.updated_at
+    arrived_at: row.arrived_at ? toRfc3339(row.arrived_at) : null,
+    seated_at: row.seated_at ? toRfc3339(row.seated_at) : null,
+    cancelled_at: row.cancelled_at ? toRfc3339(row.cancelled_at) : null,
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -388,7 +389,7 @@ function normalizeFixedAsset(row: FixedAssetRow) {
     purchase_date: row.purchase_date ? row.purchase_date : null,
     purchase_cost: row.purchase_cost == null ? null : Number(row.purchase_cost),
     is_active: row.is_active === 1,
-    updated_at: row.updated_at
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -404,7 +405,7 @@ function normalizeFixedAssetCategory(row: FixedAssetCategoryRow) {
     expense_account_id: row.expense_account_id == null ? null : Number(row.expense_account_id),
     accum_depr_account_id: row.accum_depr_account_id == null ? null : Number(row.accum_depr_account_id),
     is_active: row.is_active === 1,
-    updated_at: row.updated_at
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -2687,13 +2688,13 @@ async function readOpenOrderSyncPayload(
       order_id: String(row.order_id),
       company_id: Number(row.company_id),
       outlet_id: Number(row.outlet_id),
-      base_order_updated_at: row.base_order_updated_at ? row.base_order_updated_at : null,
+      base_order_updated_at: row.base_order_updated_at ? toRfc3339(row.base_order_updated_at) : null,
       event_type: String(row.event_type) as SyncPullPayload["order_updates"][number]["event_type"],
       delta_json: String(row.delta_json),
       actor_user_id: row.actor_user_id == null ? null : Number(row.actor_user_id),
       device_id: String(row.device_id),
-      event_at: row.event_at,
-      created_at: row.created_at
+      event_at: toRfc3339(row.event_at),
+      created_at: toRfc3339(row.created_at)
     }));
 
     const nextCursor = orderUpdates.length > 0 ? orderUpdates[orderUpdates.length - 1].sequence_no : ordersCursor;
@@ -2713,10 +2714,10 @@ async function readOpenOrderSyncPayload(
         order_status: String(row.order_status) as SyncPullPayload["open_orders"][number]["order_status"],
         order_state: String(row.order_state) as SyncPullPayload["open_orders"][number]["order_state"],
         paid_amount: Number(row.paid_amount),
-        opened_at: row.opened_at,
-        closed_at: row.closed_at ? row.closed_at : null,
+        opened_at: toRfc3339(row.opened_at),
+        closed_at: row.closed_at ? toRfc3339(row.closed_at) : null,
         notes: row.notes == null ? null : String(row.notes),
-        updated_at: row.updated_at
+        updated_at: toRfc3339(row.updated_at)
       })),
       open_order_lines: (linesRows[0] as RowDataPacket[]).map((row) => ({
         order_id: String(row.order_id),
@@ -2729,7 +2730,7 @@ async function readOpenOrderSyncPayload(
         unit_price_snapshot: Number(row.unit_price_snapshot),
         qty: Number(row.qty),
         discount_amount: Number(row.discount_amount),
-        updated_at: row.updated_at
+        updated_at: toRfc3339(row.updated_at)
       })),
       order_updates: orderUpdates,
       orders_cursor: nextCursor

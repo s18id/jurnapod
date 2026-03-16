@@ -6,6 +6,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { AuditService, type AuditDbClient } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
 import { invalidateStaticPageCache } from "./static-pages";
+import { toRfc3339 } from "./date-helpers";
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
 
@@ -143,8 +144,8 @@ function mapStaticPage(row: StaticPageRow): StaticPageDetail {
     title: row.title,
     content_md: row.content_md,
     status: row.status,
-    updated_at: row.updated_at,
-    published_at: row.published_at,
+    updated_at: toRfc3339(row.updated_at),
+    published_at: toRfc3339(row.published_at),
     meta_json: parseMetaJson(row.meta_json)
   };
 }
@@ -204,8 +205,8 @@ export async function listStaticPages(search?: string): Promise<StaticPageSummar
     slug: row.slug,
     title: row.title,
     status: row.status,
-    updated_at: row.updated_at,
-    published_at: row.published_at
+    updated_at: toRfc3339(row.updated_at),
+    published_at: toRfc3339(row.published_at)
   }));
 }
 

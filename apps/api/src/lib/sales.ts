@@ -13,7 +13,7 @@ import {
   NumberingTemplateNotFoundError
 } from "./numbering";
 import type { DocumentType } from "./numbering";
-import { toDateTimeRangeWithTimezone } from "./date-helpers";
+import { toDateTimeRangeWithTimezone, toRfc3339 } from "./date-helpers";
 
 type SalesInvoiceRow = RowDataPacket & {
   id: number;
@@ -345,8 +345,8 @@ function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
     approved_at: row.approved_at ? toMysqlDateTime(row.approved_at.toString()) : null,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
-    created_at: row.created_at,
-    updated_at: row.updated_at
+    created_at: toRfc3339(row.created_at),
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -1302,11 +1302,11 @@ function normalizePayment(row: SalesPaymentRow): SalesPayment {
     shortfall_settled_as_loss: row.shortfall_settled_as_loss === 1 ? true : row.shortfall_settled_as_loss === 0 ? false : undefined,
     shortfall_reason: row.shortfall_reason ?? null,
     shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : null,
-    shortfall_settled_at: row.shortfall_settled_at ? row.shortfall_settled_at : null,
+    shortfall_settled_at: row.shortfall_settled_at ? toRfc3339(row.shortfall_settled_at) : null,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
-    created_at: row.created_at,
-    updated_at: row.updated_at
+    created_at: toRfc3339(row.created_at),
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -3706,8 +3706,8 @@ export async function listCreditNotes(
         amount: Number(row.amount),
         created_by_user_id: row.created_by_user_id ?? null,
         updated_by_user_id: row.updated_by_user_id ?? null,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
+        created_at: toRfc3339(row.created_at),
+        updated_at: toRfc3339(row.updated_at),
         lines: lines.map((line) => ({
           id: line.id,
           credit_note_id: line.credit_note_id,

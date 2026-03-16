@@ -5,6 +5,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "./db";
 import { postDepreciationRunToJournal } from "./depreciation-posting";
+import { toRfc3339 } from "./date-helpers";
 
 type FixedAssetRow = RowDataPacket & {
   id: number;
@@ -241,8 +242,8 @@ function normalizePlan(row: DepreciationPlanRow): DepreciationPlan {
     expense_account_id: Number(row.expense_account_id),
     accum_depr_account_id: Number(row.accum_depr_account_id),
     status: row.status,
-    created_at: row.created_at,
-    updated_at: row.updated_at
+    created_at: toRfc3339(row.created_at),
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
@@ -257,8 +258,8 @@ function normalizeRun(row: DepreciationRunRow): DepreciationRun {
     amount: Number(row.amount),
     journal_batch_id: row.journal_batch_id == null ? null : Number(row.journal_batch_id),
     status: row.status,
-    created_at: row.created_at,
-    updated_at: row.updated_at
+    created_at: toRfc3339(row.created_at),
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 

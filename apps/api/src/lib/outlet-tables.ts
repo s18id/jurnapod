@@ -5,6 +5,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { AuditService } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
+import { toRfc3339 } from "./date-helpers";
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 
@@ -111,8 +112,8 @@ function normalizeOutletTable(row: OutletTableRow): OutletTableFullResponse {
     zone: row.zone,
     capacity: row.capacity,
     status: row.status,
-    created_at: row.created_at,
-    updated_at: row.updated_at
+    created_at: toRfc3339(row.created_at),
+    updated_at: toRfc3339(row.updated_at)
   };
 }
 
