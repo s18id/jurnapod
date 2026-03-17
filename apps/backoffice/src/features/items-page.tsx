@@ -31,6 +31,8 @@ import {
   IconDownload,
   IconTag,
   IconDots,
+  IconBan,
+  IconCheck,
 } from "@tabler/icons-react";
 import { apiRequest } from "../lib/api-client";
 import { useItems, type Item, type ItemType } from "../hooks/use-items";
@@ -288,6 +290,30 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
     }
   };
 
+  const handleToggleActive = async (item: Item) => {
+    setSubmitting(true);
+    setActionError(null);
+
+    try {
+      await apiRequest(
+        `/inventory/items/${item.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ is_active: !item.is_active }),
+        },
+        accessToken
+      );
+
+      await refreshItems();
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Failed to update item"
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleExport = () => {
     // TODO: Implement export functionality
     // This will be handled in a separate story
@@ -322,6 +348,13 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
 
   return (
     <Stack gap="md" p="md">
+      {/* Action Error Alert */}
+      {actionError && (
+        <Alert color="red" icon={<IconAlertCircle size={16} />} onClose={() => setActionError(null)} withCloseButton>
+          {actionError}
+        </Alert>
+      )}
+
       {/* Header */}
       <Group justify="space-between" align="center">
         <div>
@@ -476,6 +509,14 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                           Edit
                         </Menu.Item>
                         <Menu.Item
+                          leftSection={item.is_active ? <IconBan size={14} /> : <IconCheck size={14} />}
+                          color={item.is_active ? "orange" : "green"}
+                          onClick={() => handleToggleActive(item)}
+                          disabled={submitting}
+                        >
+                          {item.is_active ? "Disable" : "Enable"}
+                        </Menu.Item>
+                        <Menu.Item
                           leftSection={<IconTrash size={14} />}
                           color="red"
                           onClick={() => openDelete(item.id)}
@@ -545,6 +586,14 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                             onClick={() => openEdit(item)}
                           >
                             Edit
+                          </Menu.Item>
+                          <Menu.Item
+                            leftSection={item.is_active ? <IconBan size={14} /> : <IconCheck size={14} />}
+                            color={item.is_active ? "orange" : "green"}
+                            onClick={() => handleToggleActive(item)}
+                            disabled={submitting}
+                          >
+                            {item.is_active ? "Disable" : "Enable"}
                           </Menu.Item>
                           <Menu.Item
                             leftSection={<IconTrash size={14} />}

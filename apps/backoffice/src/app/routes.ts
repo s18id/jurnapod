@@ -161,7 +161,7 @@ export const APP_ROUTES: readonly AppRoute[] = [
   // LEGACY: Hidden from menu, redirects to /items
   {
     path: "/items-prices",
-    label: "Items & Prices (Legacy)",
+    label: "Items & Prices",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "inventory"
   },

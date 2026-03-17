@@ -82,7 +82,7 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   },
   {
     label: "Inventory",
-    paths: ["/item-groups", "/items-prices", "/supplies", "/fixed-assets", "/inventory-settings"]
+    paths: ["/item-groups", "/items", "/prices", "/supplies", "/fixed-assets", "/inventory-settings"]
   },
   {
     label: "Settings",
