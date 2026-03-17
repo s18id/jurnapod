@@ -10,6 +10,7 @@
 
 import { getDbPool } from "@/lib/db";
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { createCostLayer } from "@/lib/cost-tracking";
 
 /**
  * Transaction Type Constants
@@ -104,6 +105,59 @@ interface ProductRow extends RowDataPacket {
   name: string;
   track_stock: number;
   low_stock_threshold: number | null;
+}
+
+interface CostSummaryRow extends RowDataPacket {
+  current_avg_cost: number | null;
+}
+
+interface PriceRow extends RowDataPacket {
+  price: number | null;
+}
+
+/**
+ * Resolve unit cost for inbound stock movements.
+ * Priority:
+ * 1. inventory_item_costs.current_avg_cost
+ * 2. latest item_prices.price
+ * 3. throw if not found (fail-closed)
+ */
+async function resolveInboundUnitCost(
+  conn: PoolConnection,
+  companyId: number,
+  itemId: number
+): Promise<number> {
+  // Try inventory_item_costs first
+  const [costRows] = await conn.execute<CostSummaryRow[]>(
+    `SELECT current_avg_cost
+     FROM inventory_item_costs
+     WHERE company_id = ? AND item_id = ?`,
+    [companyId, itemId]
+  );
+
+  const avgCost = costRows[0]?.current_avg_cost;
+  if (avgCost !== null && avgCost !== undefined && Number(avgCost) > 0) {
+    return Number(avgCost);
+  }
+
+  // Fallback to item_prices
+  const [priceRows] = await conn.execute<PriceRow[]>(
+    `SELECT price
+     FROM item_prices
+     WHERE company_id = ? AND item_id = ?
+     ORDER BY updated_at DESC, id DESC
+     LIMIT 1`,
+    [companyId, itemId]
+  );
+
+  const price = priceRows[0]?.price;
+  if (price !== null && price !== undefined && Number(price) > 0) {
+    return Number(price);
+  }
+
+  throw new Error(
+    `Unable to determine unit cost for item ${itemId}. No cost history or pricing data available.`
+  );
 }
 
 /**
@@ -350,7 +404,7 @@ export async function restoreStock(
         }
 
         // Record transaction
-        await conn.execute(
+        const [txResult] = await conn.execute<ResultSetHeader>(
           `INSERT INTO inventory_transactions (
             company_id,
             outlet_id,
@@ -362,6 +416,19 @@ export async function restoreStock(
             created_at
           ) VALUES (?, ?, ?, 'REFUND', ?, ?, ?, CURRENT_TIMESTAMP)`,
           [company_id, outlet_id, TransactionType.REFUND, reference_id, item.product_id, item.quantity]
+        );
+
+        // Create cost layer for inbound movement
+        const unitCost = await resolveInboundUnitCost(conn, company_id, item.product_id);
+        await createCostLayer(
+          {
+            companyId: company_id,
+            itemId: item.product_id,
+            transactionId: txResult.insertId,
+            unitCost,
+            quantity: item.quantity,
+          },
+          conn
         );
       }
 
@@ -465,7 +532,7 @@ export async function adjustStock(
       }
 
       // Record adjustment transaction
-      await conn.execute(
+      const [txResult] = await conn.execute<ResultSetHeader>(
         `INSERT INTO inventory_transactions (
           company_id,
           outlet_id,
@@ -478,6 +545,21 @@ export async function adjustStock(
         ) VALUES (?, ?, ?, 'ADJUSTMENT', ?, ?, ?, CURRENT_TIMESTAMP)`,
         [company_id, outlet_id, TransactionType.ADJUSTMENT, reference_id ?? `ADJ-${Date.now()}`, product_id, adjustment_quantity]
       );
+
+      // Create cost layer for positive inbound adjustments only
+      if (adjustment_quantity > 0) {
+        const unitCost = await resolveInboundUnitCost(conn, company_id, product_id);
+        await createCostLayer(
+          {
+            companyId: company_id,
+            itemId: product_id,
+            transactionId: txResult.insertId,
+            unitCost,
+            quantity: adjustment_quantity,
+          },
+          conn
+        );
+      }
 
       if (!connection) {
         await conn.commit();
