@@ -12,6 +12,7 @@ export * from "./schemas/depreciation";
 export * from "./schemas/fiscal-years";
 export * from "./schemas/fixed-assets";
 export * from "./schemas/feature-flags";
+export * from "./schemas/inventory-cost";
 export * from "./schemas/journals";
 export * from "./schemas/master-data";
 export * from "./schemas/modules";

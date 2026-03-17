@@ -6,7 +6,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "./db";
 import { calculateTaxLines, listCompanyDefaultTaxRates } from "./taxes";
 import { postCreditNoteToJournal, postSalesInvoiceToJournal, postSalesPaymentToJournal, voidCreditNoteToJournal } from "./sales-posting";
-import { postCogsForSale } from "./cogs-posting";
+import { deductStockForSaleWithCogs } from "@/services/stock";
 import {
   DOCUMENT_TYPES,
   getNextDocumentNumber,
@@ -1343,24 +1343,33 @@ export async function postInvoice(
         }));
 
       if (inventoryItems.length > 0) {
-        const cogsResult = await postCogsForSale(
+        // AC7: Use method-correct cost consumption via deductStockForSaleWithCogs
+        // This ensures FIFO/LIFO/AVG are used correctly (not legacy average fallback)
+        const stockItems = inventoryItems.map((item) => ({
+          product_id: item.itemId,
+          quantity: item.quantity
+        }));
+
+        const { cogsResult } = await deductStockForSaleWithCogs(
           {
-            saleId: `INV-${postedInvoice.id}`,
-            companyId: postedInvoice.company_id,
-            outletId: postedInvoice.outlet_id,
-            items: inventoryItems,
-            saleDate: new Date(`${postedInvoice.invoice_date}T00:00:00.000Z`),
-            postedBy: actor?.userId ?? 0
+            company_id: postedInvoice.company_id,
+            outlet_id: postedInvoice.outlet_id,
+            items: stockItems,
+            reference_id: `INV-${postedInvoice.id}`,
+            user_id: actor?.userId ?? 0,
+            sale_id: `INV-${postedInvoice.id}`,
+            sale_date: new Date(`${postedInvoice.invoice_date}T00:00:00.000Z`),
+            cogs_enabled: true
           },
           connection
         );
 
-        if (!cogsResult.success) {
+        if (!cogsResult?.success) {
           const itemSummary = inventoryItems
             .map((item) => `item:${item.itemId} qty:${item.quantity}`)
             .join("; ");
           throw new Error(
-            `COGS posting failed for invoice ${postedInvoice.id} (${postedInvoice.invoice_no}): ${(cogsResult.errors ?? []).join(", ")}. Items: ${itemSummary}`
+            `COGS posting failed for invoice ${postedInvoice.id} (${postedInvoice.invoice_no}): ${(cogsResult?.errors ?? []).join(", ")}. Items: ${itemSummary}`
           );
         }
       }

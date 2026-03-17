@@ -58,16 +58,18 @@ async function setCompanyCostingMethod(
   companyId: number,
   method: string
 ): Promise<void> {
+  // Clean up both canonical and legacy keys for test isolation
   await conn.execute(
     `DELETE FROM company_settings
-     WHERE company_id = ? AND \`key\` = ? AND outlet_id IS NULL`,
-    [companyId, "inventory_costing_method"]
+     WHERE company_id = ? AND \`key\` IN (?, ?) AND outlet_id IS NULL`,
+    [companyId, "inventory.costing_method", "inventory_costing_method"]
   );
 
+  // Set the canonical key (inventory.costing_method) - matches production settings system
   await conn.execute(
     `INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, outlet_id)
      VALUES (?, ?, ?, 'string', NULL)`,
-    [companyId, "inventory_costing_method", JSON.stringify(method)]
+    [companyId, "inventory.costing_method", JSON.stringify(method)]
   );
 }
 
@@ -94,8 +96,8 @@ async function cleanupTestData(conn: PoolConnection): Promise<void> {
     [TEST_COMPANY_ID]
   );
   await conn.execute(
-    `DELETE FROM company_settings WHERE company_id = ? AND \`key\` = ?`,
-    [TEST_COMPANY_ID, "inventory_costing_method"]
+    `DELETE FROM company_settings WHERE company_id = ? AND \`key\` IN (?, ?)`,
+    [TEST_COMPANY_ID, "inventory_costing_method", "inventory.costing_method"]
   );
   await conn.execute(
     `DELETE FROM outlets WHERE company_id = ?`,
@@ -833,14 +835,57 @@ test("Cost Tracking Database Tests", async (t) => {
     );
   });
 
+  await t.test("Settings key priority: canonical key is preferred", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Canonical Key Priority Test ${RUN_ID}`);
+
+    // Set up legacy key only first
+    await conn.execute(
+      `DELETE FROM company_settings WHERE company_id = ? AND \`key\` IN (?, ?)`,
+      [TEST_COMPANY_ID, "inventory_costing_method", "inventory.costing_method"]
+    );
+
+    await conn.execute(
+      `INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, created_at, updated_at)
+       VALUES (?, ?, ?, 'string', NOW(), NOW())
+       ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = NOW()`,
+      [TEST_COMPANY_ID, "inventory_costing_method", JSON.stringify("FIFO")]
+    );
+
+    // Verify legacy key is read when canonical doesn't exist
+    const methodLegacy = await getCompanyCostingMethod(TEST_COMPANY_ID, conn);
+    assert.strictEqual(methodLegacy, "FIFO");
+
+    // Now add canonical key with different value
+    await conn.execute(
+      `INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, created_at, updated_at)
+       VALUES (?, ?, ?, 'string', NOW(), NOW())
+       ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = NOW()`,
+      [TEST_COMPANY_ID, "inventory.costing_method", JSON.stringify("LIFO")]
+    );
+
+    // Verify canonical key wins over legacy
+    const methodCanonical = await getCompanyCostingMethod(TEST_COMPANY_ID, conn);
+    assert.strictEqual(methodCanonical, "LIFO");
+
+    // Remove canonical key, verify legacy is still there and read
+    await conn.execute(
+      `DELETE FROM company_settings WHERE company_id = ? AND \`key\` = ?`,
+      [TEST_COMPANY_ID, "inventory.costing_method"]
+    );
+
+    const methodFallback = await getCompanyCostingMethod(TEST_COMPANY_ID, conn);
+    assert.strictEqual(methodFallback, "FIFO");
+  });
+
   await t.test("Default method when not configured is AVG", async () => {
     // Create a unique item for this test
     const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Default Method Test ${RUN_ID}`);
 
-    // Clean settings
+    // Clean settings - both canonical and legacy keys
     await conn.execute(
-      `DELETE FROM company_settings WHERE company_id = ? AND \`key\` = ?`,
-      [TEST_COMPANY_ID, "inventory_costing_method"]
+      `DELETE FROM company_settings WHERE company_id = ? AND \`key\` IN (?, ?)`,
+      [TEST_COMPANY_ID, "inventory_costing_method", "inventory.costing_method"]
     );
 
     // Create layers

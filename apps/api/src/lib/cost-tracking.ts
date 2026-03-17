@@ -378,16 +378,23 @@ export async function getCompanyCostingMethod(
 
   try {
     // Read costing method from company_settings
-    // Key: 'inventory_costing_method'
-    // Value: 'AVG' | 'FIFO' | 'LIFO' (stored in value_json)
+    // Priority:
+    // 1. 'inventory.costing_method' (canonical key used by settings system)
+    // 2. 'inventory_costing_method' (legacy key for backward compatibility)
     // Default: 'AVG'
     const [rows] = await connection.execute(
-      `SELECT value_json, value_type 
+      `SELECT value_json, value_type, \`key\`
        FROM company_settings 
-       WHERE company_id = ? AND \`key\` = ? AND outlet_id IS NULL
-       ORDER BY updated_at DESC, id DESC
+       WHERE company_id = ? AND \`key\` IN (?, ?) AND outlet_id IS NULL
+       ORDER BY FIELD(\`key\`, ?, ?), updated_at DESC, id DESC
        LIMIT 1`,
-      [companyId, "inventory_costing_method"]
+      [
+        companyId,
+        "inventory.costing_method",
+        "inventory_costing_method",
+        "inventory.costing_method", // canonical key prioritized
+        "inventory_costing_method", // legacy key fallback
+      ]
     );
 
     const setting = (rows as any[])[0];
@@ -568,6 +575,199 @@ export async function getItemCostSummary(
       currentAvgCost: Number(summary.current_avg_cost),
       totalLayersQty: Number(summary.total_layers_qty),
       totalLayersCost: Number(summary.total_layers_cost),
+    };
+  } finally {
+    if (shouldReleaseConn) {
+      connection.release();
+    }
+  }
+}
+
+/**
+ * Extended cost layer with consumption history for auditability
+ */
+export interface CostLayerWithConsumption extends CostLayer {
+  reference?: string | null;
+  consumedBy?: Array<{
+    transactionId: number;
+    quantity: number;
+    consumedAt: string;
+  }>;
+}
+
+/**
+ * Extended cost summary with method-specific breakdown
+ */
+export interface ItemCostSummaryExtended extends ItemCostSummary {
+  lastUpdated: string;
+  methodSpecific?: {
+    avg?: {
+      weightedAverage: number;
+      totalValue: number;
+    };
+    fifo?: {
+      oldestLayerCost: number;
+      layerCount: number;
+    };
+    lifo?: {
+      newestLayerCost: number;
+      layerCount: number;
+    };
+  };
+}
+
+/**
+ * Get cost layers with consumption history for auditability
+ * Company-scoped with strict tenant isolation
+ */
+export async function getItemCostLayersWithConsumption(
+  companyId: number,
+  itemId: number,
+  conn?: PoolConnection
+): Promise<CostLayerWithConsumption[]> {
+  const shouldReleaseConn = !conn;
+  const connection = conn ?? (await getDbPool().getConnection());
+
+  try {
+    // Get layers ordered by acquisition (FIFO order)
+    const [layerRows] = await connection.execute(
+      `SELECT
+        l.id, l.company_id, l.item_id, l.transaction_id,
+        l.unit_cost, l.original_qty, l.remaining_qty,
+        l.acquired_at,
+        t.reference_type as transaction_reference_type,
+        t.reference_id as transaction_reference_id
+       FROM inventory_cost_layers l
+       LEFT JOIN inventory_transactions t ON l.transaction_id = t.id
+       WHERE l.company_id = ? AND l.item_id = ?
+       ORDER BY l.acquired_at ASC, l.id ASC`,
+      [companyId, itemId]
+    );
+
+    const layers = layerRows as any[];
+    if (layers.length === 0) return [];
+
+    // Get consumption history for FIFO/LIFO layers
+    const layerIds = layers.map((l) => l.id);
+    const placeholders = layerIds.map(() => "?").join(", ");
+
+    const [consumptionRows] = await connection.execute(
+      `SELECT
+        layer_id, transaction_id, consumed_qty, consumed_at
+       FROM cost_layer_consumption
+       WHERE layer_id IN (${placeholders})
+       ORDER BY consumed_at ASC`,
+      layerIds
+    );
+
+    const consumptionMap = new Map<number, Array<{ transactionId: number; quantity: number; consumedAt: string }>>();
+    (consumptionRows as any[]).forEach((c) => {
+      const list = consumptionMap.get(c.layer_id) ?? [];
+      list.push({
+        transactionId: c.transaction_id,
+        quantity: Number(c.consumed_qty),
+        consumedAt: c.consumed_at instanceof Date ? c.consumed_at.toISOString() : c.consumed_at,
+      });
+      consumptionMap.set(c.layer_id, list);
+    });
+
+    return layers.map((layer) => ({
+      id: layer.id,
+      companyId: layer.company_id,
+      itemId: layer.item_id,
+      transactionId: layer.transaction_id,
+      unitCost: Number(layer.unit_cost),
+      originalQty: Number(layer.original_qty),
+      remainingQty: Number(layer.remaining_qty),
+      acquiredAt: layer.acquired_at,
+      reference: layer.transaction_reference_id ?? null,
+      consumedBy: consumptionMap.get(layer.id),
+    }));
+  } finally {
+    if (shouldReleaseConn) {
+      connection.release();
+    }
+  }
+}
+
+/**
+ * Get extended cost summary with method-specific details
+ */
+export async function getItemCostSummaryExtended(
+  companyId: number,
+  itemId: number,
+  conn?: PoolConnection
+): Promise<ItemCostSummaryExtended | null> {
+  const shouldReleaseConn = !conn;
+  const connection = conn ?? (await getDbPool().getConnection());
+
+  try {
+    // Get base summary
+    const summary = await getItemCostSummary(companyId, itemId, connection);
+    if (!summary) return null;
+
+    // Get costing method
+    const method = await getCompanyCostingMethod(companyId, connection);
+
+    // Get layer statistics
+    const [layerStats] = await connection.execute(
+      `SELECT 
+        COUNT(*) as layer_count,
+        MIN(acquired_at) as oldest_acquired,
+        MAX(acquired_at) as newest_acquired
+       FROM inventory_cost_layers
+       WHERE company_id = ? AND item_id = ? AND remaining_qty > 0`,
+      [companyId, itemId]
+    );
+
+    const stats = (layerStats as any[])[0];
+    const layerCount = Number(stats?.layer_count ?? 0);
+
+    // Build method-specific breakdown
+    const methodSpecific: ItemCostSummaryExtended["methodSpecific"] = {};
+
+    if (method === "AVG") {
+      methodSpecific.avg = {
+        weightedAverage: summary.currentAvgCost ?? 0,
+        totalValue: summary.totalLayersCost,
+      };
+    } else if (layerCount > 0) {
+      // Get edge layer costs for FIFO/LIFO
+      if (method === "FIFO" && stats.oldest_acquired) {
+        const [oldestRows] = await connection.execute(
+          `SELECT unit_cost 
+           FROM inventory_cost_layers
+           WHERE company_id = ? AND item_id = ? AND remaining_qty > 0
+           ORDER BY acquired_at ASC, id ASC
+           LIMIT 1`,
+          [companyId, itemId]
+        );
+        const oldest = (oldestRows as any[])[0];
+        methodSpecific.fifo = {
+          oldestLayerCost: Number(oldest?.unit_cost ?? 0),
+          layerCount,
+        };
+      } else if (method === "LIFO" && stats.newest_acquired) {
+        const [newestRows] = await connection.execute(
+          `SELECT unit_cost 
+           FROM inventory_cost_layers
+           WHERE company_id = ? AND item_id = ? AND remaining_qty > 0
+           ORDER BY acquired_at DESC, id DESC
+           LIMIT 1`,
+          [companyId, itemId]
+        );
+        const newest = (newestRows as any[])[0];
+        methodSpecific.lifo = {
+          newestLayerCost: Number(newest?.unit_cost ?? 0),
+          layerCount,
+        };
+      }
+    }
+
+    return {
+      ...summary,
+      lastUpdated: new Date().toISOString(),
+      methodSpecific,
     };
   } finally {
     if (shouldReleaseConn) {

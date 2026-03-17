@@ -491,6 +491,143 @@ export async function deductStockWithCost(
 }
 
 /**
+ * Deduct stock for a sale and post COGS using method-correct costs.
+ * Combines stock deduction, cost consumption, and COGS journal posting in one atomic operation.
+ * 
+ * This closes AC7 gap: ensures sales/invoice posting uses FIFO/LIFO/AVG correctly (not legacy average fallback).
+ * 
+ * @param input - Sale details including items to deduct and COGS posting parameters
+ * @param connection - Optional existing transaction connection
+ * @returns Stock deduction results with COGS posting result
+ * @throws Error if stock deduction or COGS posting fails (fail-closed)
+ */
+export interface DeductStockForSaleInput {
+  company_id: number;
+  outlet_id: number;
+  items: StockItem[];
+  reference_id: string;
+  user_id: number;
+  sale_id: string;
+  sale_date: Date;
+  cogs_enabled: boolean;
+}
+
+export interface DeductStockForSaleResult {
+  stockResults: StockDeductResult[];
+  cogsResult: {
+    success: boolean;
+    journalBatchId?: number;
+    totalCogs: number;
+    errors?: string[];
+  } | null;
+}
+
+export async function deductStockForSaleWithCogs(
+  input: DeductStockForSaleInput,
+  connection?: PoolConnection
+): Promise<DeductStockForSaleResult> {
+  const { company_id, outlet_id, items, reference_id, user_id, sale_id, sale_date, cogs_enabled } = input;
+  
+  const dbPool = getDbPool();
+  // If no external connection, we manage our own transaction for atomicity
+  const conn = connection ?? await dbPool.getConnection();
+  const shouldRelease = !connection;
+  
+  try {
+    if (!connection) {
+      await conn.beginTransaction();
+    }
+    
+    // First, deduct stock with cost consumption (method-correct via deductStockWithCost)
+    const stockResults = await deductStockWithCost(
+      company_id,
+      outlet_id,
+      items,
+      reference_id,
+      user_id,
+      conn // Always pass our managed connection for atomicity
+    );
+    
+    // If COGS is not enabled, commit and return stock results only
+    if (!cogs_enabled || stockResults.length === 0) {
+      if (!connection) {
+        await conn.commit();
+      }
+      return {
+        stockResults,
+        cogsResult: null
+      };
+    }
+    
+    // Build COGS items from consumed costs (no recalculation - uses method-correct costs)
+    const cogsItems = stockResults.map((result) => ({
+      itemId: result.itemId,
+      quantity: result.quantity,
+      unitCost: result.unitCost,
+      totalCost: result.totalCost
+    }));
+    
+    // Import postCogsForSale dynamically to avoid circular dependency
+    const { postCogsForSale } = await import("@/lib/cogs-posting.js");
+    
+    // Post COGS with pre-computed costs
+    const cogsResult = await postCogsForSale(
+      {
+        saleId: sale_id,
+        companyId: company_id,
+        outletId: outlet_id,
+        items: cogsItems,
+        saleDate: sale_date,
+        postedBy: user_id
+      },
+      conn // Always pass our managed connection for atomicity
+    );
+    
+    if (!cogsResult.success) {
+      throw new Error(
+        `COGS posting failed for sale ${sale_id}: ${(cogsResult.errors ?? []).join(", ")}`
+      );
+    }
+    
+    // Link inventory transactions to COGS journal batch
+    if (cogsResult.journalBatchId) {
+      const inventoryTransactionIds = stockResults.map((r) => r.transactionId);
+      const placeholders = inventoryTransactionIds.map(() => "?").join(", ");
+      await conn.execute(
+        `UPDATE inventory_transactions 
+         SET journal_batch_id = ? 
+         WHERE id IN (${placeholders})`,
+        [cogsResult.journalBatchId, ...inventoryTransactionIds]
+      );
+    }
+    
+    // Commit if we own the transaction
+    if (!connection) {
+      await conn.commit();
+    }
+    
+    return {
+      stockResults,
+      cogsResult: {
+        success: cogsResult.success,
+        journalBatchId: cogsResult.journalBatchId,
+        totalCogs: cogsResult.totalCogs
+      }
+    };
+  } catch (error) {
+    // Rollback if we own the transaction
+    if (!connection) {
+      await conn.rollback();
+    }
+    throw error;
+  } finally {
+    if (shouldRelease) {
+      conn.release();
+    }
+  }
+}
+
+/**
  * Restore stock (for voids/refunds)
  * Increases quantity and available_quantity
  */

@@ -602,6 +602,51 @@ test("COGS Posting Service", async (t) => {
       assert.equal(creditedAccounts.has(inventoryAccountA), true);
       assert.equal(creditedAccounts.has(inventoryAccountB), true);
     });
+
+    await t2.test("should use pre-computed costs without recalculation (AC7)", async () => {
+      // This test verifies that when costs are pre-computed (from FIFO/LIFO/AVG),
+      // they are used directly without falling back to legacy average calculation
+      const itemId = await createTestItem(
+        conn, TEST_COMPANY_ID, 'Precomputed Cost Item', 'PRODUCT', true,
+        cogsAccountId, inventoryAccountId
+      );
+      
+      // Pre-computed costs that would differ from any legacy calculation
+      const preComputedUnitCost = 7.50;
+      const quantity = 4;
+      const preComputedTotalCost = preComputedUnitCost * quantity;
+      
+      const result = await postCogsForSale({
+        saleId: 'SALE-PRECOMPUTE',
+        companyId: TEST_COMPANY_ID,
+        outletId: TEST_OUTLET_ID,
+        items: [{ 
+          itemId, 
+          quantity, 
+          unitCost: preComputedUnitCost, 
+          totalCost: preComputedTotalCost 
+        }],
+        saleDate: new Date(),
+        postedBy: TEST_USER_ID
+      }, conn);
+      
+      assert.strictEqual(result.success, true, JSON.stringify(result.errors));
+      // Verify pre-computed total was used, not recalculated
+      assert.strictEqual(result.totalCogs, preComputedTotalCost);
+      
+      const batchId = result.journalBatchId!;
+      
+      // Verify journal is balanced
+      const [lineRows] = await conn.execute<RowDataPacket[]>(
+        `SELECT debit, credit FROM journal_lines WHERE journal_batch_id = ?`,
+        [batchId]
+      );
+      const lines = lineRows as any[];
+      const totalDebits = lines.reduce((sum, line) => sum + Number(line.debit), 0);
+      const totalCredits = lines.reduce((sum, line) => sum + Number(line.credit), 0);
+      assert.strictEqual(totalDebits, totalCredits);
+      assert.strictEqual(totalDebits, preComputedTotalCost);
+    });
   });
 
   await t.test("Helper functions", async (t2) => {

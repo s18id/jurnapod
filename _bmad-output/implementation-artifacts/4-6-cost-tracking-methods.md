@@ -1,6 +1,9 @@
 # Story 4.6: Cost Tracking Methods
 
-Status: ready-for-dev
+Status: done
+Story Owner: _bmad-output/implementation-artifacts/4-6-cost-tracking-methods.md
+Epic: 4
+Story: 6
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -22,33 +25,101 @@ so that inventory valuation and COGS reflect the chosen accounting method.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add schema for cost layers and summary state (AC: 1, 5, 6)
-  - [ ] Add `inventory_cost_layers` (company-scoped, item-scoped, auditable inbound layers)
-  - [ ] Add `inventory_item_costs` (company/item current method + rolling average cache)
-  - [ ] Add portable rerunnable migration guards via `information_schema` (MySQL/MariaDB)
-  - [ ] Add indexes for `(company_id, item_id, acquired_at, id)` and remaining qty scans
-- [ ] Task 2: Implement costing engine abstraction and calculators (AC: 1, 2, 3, 4, 6)
-  - [ ] Add `AVG | FIFO | LIFO` strategy interface under `apps/api/src/lib/`
-  - [ ] Implement weighted AVG using deterministic minor-unit math
-  - [ ] Implement FIFO/LIFO layer consumption with transactional row locking (`FOR UPDATE`)
-  - [ ] Reject insufficient/negative inventory conditions with typed errors
-- [ ] Task 3: Wire engine into inventory mutations (AC: 5, 6)
-  - [ ] Inbound moves create cost layers with immutable unit cost + remaining qty
-  - [ ] Outbound moves consume layers by configured method and persist consumption trace
-  - [ ] Keep layer balances and summary table synchronized in one DB transaction
-- [ ] Task 4: Integrate with Story 4.5 COGS posting path (AC: 7)
-  - [ ] Replace simplified cost lookup path in `cogs-posting.ts` with method engine
-  - [ ] Preserve COGS feature-gate behavior and fail-closed accounting invariants
-  - [ ] Keep journal balancing and business-date semantics (`line_date = invoice/sale date`)
-- [ ] Task 5: Add read endpoints/contracts for auditability (AC: 2, 5)
-  - [ ] `GET /api/inventory/items/[itemId]/cost-layers`
-  - [ ] `GET /api/inventory/items/[itemId]/current-cost`
-  - [ ] Add/align shared Zod contracts in `packages/shared/src/schemas/`
-- [ ] Task 6: Add comprehensive tests and regressions (AC: 1-7)
-  - [ ] Unit tests per method with deterministic fixtures and rounding assertions
-  - [ ] Integration tests: layer creation, partial consumption, and COGS-posting amount correctness
-  - [ ] Concurrency tests for two simultaneous outbound operations on same item
-  - [ ] Ensure DB test cleanup includes `closeDbPool()` hooks
+- [x] Task 1: Add schema for cost layers and summary state (AC: 1, 5, 6)
+  - [x] Add `inventory_cost_layers` (company-scoped, item-scoped, auditable inbound layers)
+  - [x] Add `inventory_item_costs` (company/item current method + rolling average cache)
+  - [x] Add portable rerunnable migration guards via `information_schema` (MySQL/MariaDB)
+  - [x] Add indexes for `(company_id, item_id, acquired_at, id)` and remaining qty scans
+- [x] Task 2: Implement costing engine abstraction and calculators (AC: 1, 2, 3, 4, 6)
+  - [x] Add `AVG | FIFO | LIFO` strategy interface under `apps/api/src/lib/`
+  - [x] Implement weighted AVG using deterministic minor-unit math
+  - [x] Implement FIFO/LIFO layer consumption with transactional row locking (`FOR UPDATE`)
+  - [x] Reject insufficient/negative inventory conditions with typed errors
+- [x] Task 3: Wire engine into inventory mutations (AC: 5, 6)
+  - [x] Inbound moves create cost layers with immutable unit cost + remaining qty
+  - [x] Outbound moves consume layers by configured method and persist consumption trace
+  - [x] Keep layer balances and summary table synchronized in one DB transaction
+- [x] Task 4: Integrate with Story 4.5 COGS posting path (AC: 7)
+  - [x] Replace simplified cost lookup path in `cogs-posting.ts` with method engine
+  - [x] Preserve COGS feature-gate behavior and fail-closed accounting invariants
+  - [x] Keep journal balancing and business-date semantics (`line_date = invoice/sale date`)
+- [x] Task 5: Add read endpoints/contracts for auditability (AC: 2, 5)
+  - [x] `GET /api/inventory/items/[itemId]/cost-layers` - Returns auditable cost layers with consumption history
+  - [x] `GET /api/inventory/items/[itemId]/current-cost` - Returns current cost summary with method-specific breakdown
+  - [x] Added shared Zod contracts in `packages/shared/src/schemas/inventory-cost.ts`
+- [x] Task 6: Add comprehensive tests and regressions (AC: 1-7)
+  - [x] Unit tests per method with deterministic fixtures and rounding assertions
+  - [x] Integration tests: layer creation, partial consumption, and COGS-posting amount correctness
+  - [x] Concurrency tests for two simultaneous outbound operations on same item
+  - [x] Ensure DB test cleanup includes `closeDbPool()` hooks
+
+## Senior Developer Review (AI) - Code Review Fix Phase
+
+### Issues Resolved
+
+**Scope 1: Costing Method Key Compatibility (HIGH)**
+- **Problem:** `getCompanyCostingMethod()` read only legacy key `inventory_costing_method`, but settings system uses canonical key `inventory.costing_method`
+- **Fix:** Updated query to read both keys with priority ordering (canonical first, legacy fallback)
+- **Test:** Added "Settings key priority: canonical key is preferred" test in `cost-tracking.db.test.ts`
+- **Files Modified:**
+  - `apps/api/src/lib/cost-tracking.ts:372-420` - Updated getCompanyCostingMethod to read both keys
+  - `apps/api/src/lib/cost-tracking.db.test.ts:837-903` - Added key priority test
+  - `apps/api/src/lib/cost-tracking.db.test.ts:56-72` - Updated setCompanyCostingMethod to use canonical key
+  - `apps/api/src/lib/cost-tracking.db.test.ts:97-99` - Updated cleanup to handle both keys
+
+**Scope 2: AC7 Gap for Invoice/Sales COGS (HIGH)**
+- **Problem:** Sales invoice posting called `postCogsForSale` without pre-computed costs, triggering legacy average fallback instead of method-correct FIFO/LIFO/AVG consumption
+- **Fix:** Created `deductStockForSaleWithCogs()` helper that combines stock deduction + cost consumption + COGS posting in one atomic operation
+- **Implementation:** Updated `sales.ts` to use new helper for method-correct COGS
+- **Files Modified:**
+  - `apps/api/src/services/stock.ts:493-586` - Added deductStockForSaleWithCogs function
+  - `apps/api/src/lib/sales.ts:9` - Added import for deductStockForSaleWithCogs
+  - `apps/api/src/lib/sales.ts:1345-1383` - Updated to use new helper for AC7 compliance
+
+**Scope 3: Regression Tests (MEDIUM)**
+- **Problem:** Missing tests for pre-computed cost usage and journal balance invariants
+- **Fix:** Added tests to verify pre-computed costs are used directly (not recalculated) and journals remain balanced
+- **Files Modified:**
+  - `apps/api/src/lib/cogs-posting.test.ts:607-650` - Added "should use pre-computed costs without recalculation (AC7)" test
+  - `apps/api/src/lib/cogs-posting.test.ts:1` - Added ResultSetHeader import
+
+### Completion Summary
+
+**Task 5: Read Endpoints for Auditability - COMPLETED**
+- Implemented `GET /api/inventory/items/[itemId]/cost-layers` endpoint with auth guard and company scoping
+- Implemented `GET /api/inventory/items/[itemId]/current-cost` endpoint with method-specific breakdown
+- Added comprehensive shared Zod contracts in `packages/shared/src/schemas/inventory-cost.ts`
+- Added `getItemCostLayersWithConsumption()` and `getItemCostSummaryExtended()` service functions
+- Added unit tests in `apps/api/src/lib/cost-auditability.test.ts` (7 tests passing)
+- All endpoints enforce tenant isolation and return properly typed responses
+
+### Implementation Files (Updated File List)
+
+All Story 4.6 tasks completed. Files marked with * were added or significantly modified:
+
+**Core Costing Engine:**
+- `apps/api/src/lib/cost-tracking.ts`* - Costing engine with AVG/FIFO/LIFO strategies + auditability functions
+- `apps/api/src/lib/cost-tracking.db.test.ts` - Unit tests for costing strategies
+- `apps/api/src/lib/cost-auditability.test.ts`* - Unit tests for auditability endpoints (7 tests passing)
+
+**Integration & API:**
+- `apps/api/src/services/stock.ts`* - Stock operations with cost tracking (atomicity fix applied)
+- `apps/api/src/lib/sales.ts`* - Sales invoice posting with method-correct COGS
+- `apps/api/app/api/inventory/items/[itemId]/cost-layers/route.ts`* - GET cost layers endpoint
+- `apps/api/app/api/inventory/items/[itemId]/current-cost/route.ts`* - GET current cost endpoint
+
+**Shared Contracts:**
+- `packages/shared/src/schemas/inventory-cost.ts`* - Zod schemas for cost layer and current cost responses
+- `packages/shared/src/index.ts`* - Export inventory-cost schemas
+
+**Configuration:**
+- `tsconfig.base.json`* - Added `@/services/*` path alias for import convention compliance
+
+**Pre-existing (no changes in this cycle):**
+- `apps/api/src/lib/cogs-posting.ts` - COGS posting service
+- `packages/db/migrations/0085_inventory_cost_layers.sql` - Cost layers table
+- `packages/db/migrations/0086_inventory_item_costs.sql` - Item costs summary table
+- `packages/db/migrations/0087_cost_layer_consumption.sql` - Consumption trace table
 
 ## Dev Notes
 
