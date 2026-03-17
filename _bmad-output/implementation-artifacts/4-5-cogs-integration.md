@@ -1,7 +1,7 @@
 # Story 4.5: COGS Integration with Epic 3
 
 **Epic:** Items & Catalog - Product Management  
-**Status:** review  
+**Status:** done  
 **Priority:** High  
 **Estimated Effort:** 6-8 hours  
 **Created:** 2026-03-16  
