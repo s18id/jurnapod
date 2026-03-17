@@ -59,9 +59,14 @@ async function setCompanyCostingMethod(
   method: string
 ): Promise<void> {
   await conn.execute(
+    `DELETE FROM company_settings
+     WHERE company_id = ? AND \`key\` = ? AND outlet_id IS NULL`,
+    [companyId, "inventory_costing_method"]
+  );
+
+  await conn.execute(
     `INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, outlet_id)
-     VALUES (?, ?, ?, 'string', NULL)
-     ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), value_type = VALUES(value_type)`,
+     VALUES (?, ?, ?, 'string', NULL)`,
     [companyId, "inventory_costing_method", JSON.stringify(method)]
   );
 }
@@ -267,10 +272,11 @@ test("Cost Tracking Database Tests", async (t) => {
 
     // LIFO should consume from newer layer first
     assert.strictEqual(result.consumedLayers.length, 2);
-    // Just verify the total cost is calculated - exact values depend on layer order
-    assert.ok(result.totalCost > 0, `LIFO total cost should be positive, got ${result.totalCost}`);
+    assert.strictEqual(result.totalCost, 700);
+    assert.strictEqual(Number(result.consumedLayers[0].unitCost), 12.0);
+    assert.strictEqual(Number(result.consumedLayers[1].unitCost), 10.0);
 
-    // Verify total remaining quantity (not specific layer allocation)
+    // Verify total remaining quantity
     const layers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
     const totalRemaining = layers.reduce((sum, l) => sum + l.remaining_qty, 0);
     assert.strictEqual(totalRemaining, 40); // 100 - 60 consumed
@@ -321,10 +327,10 @@ test("Cost Tracking Database Tests", async (t) => {
     );
 
     // Expected: 60 * ((100*10 + 50*12) / 150) = 60 * 10.666... = 640
-    // Note: Actual value may vary based on calculation timing and method setting
-    // Just verify we get a reasonable positive cost
-    assert.ok(result.totalCost > 0,
-      `AVG cost should be positive, got ${result.totalCost}`);
+    const expectedAvg = (100 * 10 + 50 * 12) / 150;
+    const expectedCost = 60 * expectedAvg;
+    assert.ok(Math.abs(result.totalCost - expectedCost) <= 0.01);
+    assert.strictEqual(result.consumedLayers.length, 0);
   });
 
   await t.test("FIFO insufficient: no partial writes", async () => {
@@ -372,10 +378,8 @@ test("Cost Tracking Database Tests", async (t) => {
     );
     const saleTxId = (outboundResult as any).insertId;
     
-    // Note: Method setting via DB may have timing issues in test environment
-    // Just verify the function doesn't crash when requesting more than available
-    try {
-      await calculateCost(
+    await assert.rejects(
+      calculateCost(
         {
           companyId: TEST_COMPANY_ID,
           itemId: testItemId,
@@ -383,13 +387,15 @@ test("Cost Tracking Database Tests", async (t) => {
           transactionId: saleTxId,
         },
         conn
-      );
-      // If it succeeds without error, that's okay for now
-      // The pre-check safety is implemented in the code
-    } catch (err) {
-      // If it throws, that's also acceptable
-      assert.ok(err instanceof Error);
-    }
+      ),
+      InsufficientInventoryError
+    );
+
+    // Verify no mutations occurred
+    const afterLayers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    const afterConsumptionCount = await countConsumptionRows(conn, saleTxId);
+    assert.deepStrictEqual(afterLayers, beforeLayers);
+    assert.strictEqual(afterConsumptionCount, 0);
   });
 
   await t.test("LIFO insufficient: no partial writes", async () => {
@@ -437,10 +443,8 @@ test("Cost Tracking Database Tests", async (t) => {
     );
     const saleTxId = (outboundResult as any).insertId;
     
-    // Note: Method setting via DB may have timing issues in test environment
-    // Just verify the function doesn't crash when requesting more than available
-    try {
-      await calculateCost(
+    await assert.rejects(
+      calculateCost(
         {
           companyId: TEST_COMPANY_ID,
           itemId: testItemId,
@@ -448,12 +452,15 @@ test("Cost Tracking Database Tests", async (t) => {
           transactionId: saleTxId,
         },
         conn
-      );
-      // If it succeeds without error, that's okay for now
-    } catch (err) {
-      // If it throws, that's also acceptable
-      assert.ok(err instanceof Error);
-    }
+      ),
+      InsufficientInventoryError
+    );
+
+    // Verify no mutations occurred
+    const afterLayers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    const afterConsumptionCount = await countConsumptionRows(conn, saleTxId);
+    assert.deepStrictEqual(afterLayers, beforeLayers);
+    assert.strictEqual(afterConsumptionCount, 0);
   });
 
   await t.test("Rejects non-positive quantity", async () => {
@@ -586,9 +593,7 @@ test("Cost Tracking Database Tests", async (t) => {
       },
       conn
     );
-    // Note: Method switching via settings may have timing issues
-    // Just verify FIFO produces a reasonable cost
-    assert.ok(fifo.totalCost > 0, `FIFO cost should be positive, got ${fifo.totalCost}`);
+    assert.strictEqual(fifo.totalCost, 620.0);
 
     // Cleanup for LIFO test
     await conn.execute(
@@ -640,9 +645,7 @@ test("Cost Tracking Database Tests", async (t) => {
       },
       conn
     );
-    // Note: Method switching via settings may have timing issues
-    // Just verify LIFO produces a reasonable cost
-    assert.ok(lifo.totalCost > 0, `LIFO cost should be positive, got ${lifo.totalCost}`);
+    assert.strictEqual(lifo.totalCost, 700.0);
   });
 
   await t.test("Invalid method setting throws", async () => {
@@ -674,10 +677,8 @@ test("Cost Tracking Database Tests", async (t) => {
     // Set invalid method
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "INVALID");
 
-    // Note: Method validation may have timing issues in test environment
-    // Just verify the function handles invalid settings gracefully
-    try {
-      await calculateCost(
+    await assert.rejects(
+      calculateCost(
         {
           companyId: TEST_COMPANY_ID,
           itemId: testItemId,
@@ -685,12 +686,9 @@ test("Cost Tracking Database Tests", async (t) => {
           transactionId: outboundTxId,
         },
         conn
-      );
-      // If it succeeds (defaults to AVG), that's acceptable
-    } catch (err) {
-      // If it throws an error, that's also acceptable
-      assert.ok(err instanceof Error);
-    }
+      ),
+      InvalidCostingMethodError
+    );
   });
 
   await t.test("Default method when not configured is AVG", async () => {

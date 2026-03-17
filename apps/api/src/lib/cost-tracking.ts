@@ -129,8 +129,8 @@ class AVGCostingStrategy implements CostingStrategy {
     );
 
     const summary = (summaryRows as any[])[0];
-    const avgCost = summary?.current_avg_cost ?? 0;
-    const availableQty = summary?.total_layers_qty ?? 0;
+    const avgCost = Number(summary?.current_avg_cost ?? 0);
+    const availableQty = Number(summary?.total_layers_qty ?? 0);
 
     // Validate sufficient inventory
     if (availableQty < input.quantity) {
@@ -178,7 +178,7 @@ class FIFOCostingStrategy implements CostingStrategy {
 
     // PRE-CHECK: Calculate total available BEFORE any mutations
     const totalAvailable = layers.reduce(
-      (sum, layer) => sum + layer.remaining_qty,
+      (sum, layer) => sum + Number(layer.remaining_qty),
       0
     );
 
@@ -194,7 +194,9 @@ class FIFOCostingStrategy implements CostingStrategy {
     for (const layer of layers) {
       if (remainingToConsume <= 0) break;
 
-      const consumeFromLayer = Math.min(remainingToConsume, layer.remaining_qty);
+      const layerRemainingQty = Number(layer.remaining_qty);
+      const layerUnitCost = Number(layer.unit_cost);
+      const consumeFromLayer = Math.min(remainingToConsume, layerRemainingQty);
 
       // Update layer remaining quantity
       await conn.execute(
@@ -205,7 +207,7 @@ class FIFOCostingStrategy implements CostingStrategy {
       );
 
       // Record consumption trace
-      const layerTotalCost = consumeFromLayer * layer.unit_cost;
+      const layerTotalCost = consumeFromLayer * layerUnitCost;
       await conn.execute(
         `INSERT INTO cost_layer_consumption 
          (company_id, layer_id, transaction_id, consumed_qty, unit_cost, total_cost)
@@ -215,7 +217,7 @@ class FIFOCostingStrategy implements CostingStrategy {
           layer.id,
           input.transactionId,
           consumeFromLayer,
-          layer.unit_cost,
+          layerUnitCost,
           layerTotalCost,
         ]
       );
@@ -223,7 +225,7 @@ class FIFOCostingStrategy implements CostingStrategy {
       consumedLayers.push({
         layerId: layer.id,
         consumedQty: consumeFromLayer,
-        unitCost: layer.unit_cost,
+        unitCost: layerUnitCost,
       });
 
       totalCost += layerTotalCost;
@@ -263,7 +265,7 @@ class LIFOCostingStrategy implements CostingStrategy {
 
     // PRE-CHECK: Calculate total available BEFORE any mutations
     const totalAvailable = layers.reduce(
-      (sum, layer) => sum + layer.remaining_qty,
+      (sum, layer) => sum + Number(layer.remaining_qty),
       0
     );
 
@@ -279,7 +281,9 @@ class LIFOCostingStrategy implements CostingStrategy {
     for (const layer of layers) {
       if (remainingToConsume <= 0) break;
 
-      const consumeFromLayer = Math.min(remainingToConsume, layer.remaining_qty);
+      const layerRemainingQty = Number(layer.remaining_qty);
+      const layerUnitCost = Number(layer.unit_cost);
+      const consumeFromLayer = Math.min(remainingToConsume, layerRemainingQty);
 
       // Update layer remaining quantity
       await conn.execute(
@@ -290,7 +294,7 @@ class LIFOCostingStrategy implements CostingStrategy {
       );
 
       // Record consumption trace
-      const layerTotalCost = consumeFromLayer * layer.unit_cost;
+      const layerTotalCost = consumeFromLayer * layerUnitCost;
       await conn.execute(
         `INSERT INTO cost_layer_consumption 
          (company_id, layer_id, transaction_id, consumed_qty, unit_cost, total_cost)
@@ -300,7 +304,7 @@ class LIFOCostingStrategy implements CostingStrategy {
           layer.id,
           input.transactionId,
           consumeFromLayer,
-          layer.unit_cost,
+          layerUnitCost,
           layerTotalCost,
         ]
       );
@@ -308,7 +312,7 @@ class LIFOCostingStrategy implements CostingStrategy {
       consumedLayers.push({
         layerId: layer.id,
         consumedQty: consumeFromLayer,
-        unitCost: layer.unit_cost,
+        unitCost: layerUnitCost,
       });
 
       totalCost += layerTotalCost;
@@ -355,7 +359,9 @@ export async function getCompanyCostingMethod(
     const [rows] = await connection.execute(
       `SELECT value_json, value_type 
        FROM company_settings 
-       WHERE company_id = ? AND \`key\` = ? AND outlet_id IS NULL`,
+       WHERE company_id = ? AND \`key\` = ? AND outlet_id IS NULL
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 1`,
       [companyId, "inventory_costing_method"]
     );
 
@@ -429,7 +435,7 @@ export async function createCostLayer(
 
   // Update summary table for AVG calculation
   const [existingSummary] = await conn.execute(
-    `SELECT total_layers_qty, total_layers_cost 
+    `SELECT costing_method, total_layers_qty, total_layers_cost 
      FROM inventory_item_costs 
      WHERE company_id = ? AND item_id = ?
      FOR UPDATE`,
@@ -437,20 +443,27 @@ export async function createCostLayer(
   );
 
   const summary = (existingSummary as any[])[0];
-  const newQty = (summary?.total_layers_qty ?? 0) + params.quantity;
-  const newCost =
-    (summary?.total_layers_cost ?? 0) + params.quantity * params.unitCost;
+  const summaryMethod = summary?.costing_method ? String(summary.costing_method) : null;
+  const currentMethod: CostingMethod =
+    summaryMethod === "AVG" || summaryMethod === "FIFO" || summaryMethod === "LIFO"
+      ? summaryMethod
+      : await getCompanyCostingMethod(params.companyId, conn);
+
+  const existingQty = Number(summary?.total_layers_qty ?? 0);
+  const existingCost = Number(summary?.total_layers_cost ?? 0);
+  const newQty = existingQty + params.quantity;
+  const newCost = existingCost + params.quantity * params.unitCost;
   const newAvg = newQty > 0 ? newCost / newQty : 0;
 
   await conn.execute(
-    `INSERT INTO inventory_item_costs 
+     `INSERT INTO inventory_item_costs 
      (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost)
-     VALUES (?, ?, 'AVG', ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
      current_avg_cost = VALUES(current_avg_cost),
      total_layers_qty = VALUES(total_layers_qty),
      total_layers_cost = VALUES(total_layers_cost)`,
-    [params.companyId, params.itemId, newAvg, newQty, newCost]
+    [params.companyId, params.itemId, currentMethod, newAvg, newQty, newCost]
   );
 
   // Return created layer
@@ -527,9 +540,9 @@ export async function getItemCostSummary(
       companyId: summary.company_id,
       itemId: summary.item_id,
       costingMethod: summary.costing_method,
-      currentAvgCost: summary.current_avg_cost,
-      totalLayersQty: summary.total_layers_qty,
-      totalLayersCost: summary.total_layers_cost,
+      currentAvgCost: Number(summary.current_avg_cost),
+      totalLayersQty: Number(summary.total_layers_qty),
+      totalLayersCost: Number(summary.total_layers_cost),
     };
   } finally {
     if (shouldReleaseConn) {
