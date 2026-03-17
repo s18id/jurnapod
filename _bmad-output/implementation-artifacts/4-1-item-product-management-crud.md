@@ -67,7 +67,7 @@ So that **products are available for sale at POS**.
   - `apps/api/app/api/inventory/items/[itemId]/route.ts`
   - `apps/api/src/lib/master-data.ts`
   - `packages/shared/src/schemas/master-data.ts`
-  - `apps/backoffice/src/features/items-prices-page.tsx`
+  - `apps/backoffice/src/features/items-page.tsx`
   - `apps/api/tests/integration/master-data.integration.test.mjs`
 - Do not expand scope into 4.2/4.3 implementation:
   - No outlet-specific pricing matrix redesign in this story
@@ -95,7 +95,7 @@ So that **products are available for sale at POS**.
   - `apps/api/app/api/inventory/items/[itemId]/route.ts` - GET, PATCH, DELETE
 - **Business Logic**: Check `apps/api/src/lib/master-data.ts` for item functions
 - **Shared Schemas**: `packages/shared/src/schemas/master-data.ts`
-- **Backoffice UI**: `apps/backoffice/src/features/items-prices-page.tsx`
+- **Backoffice UI**: `apps/backoffice/src/features/items-page.tsx`
 - **POS Sync**: Items synced via `/api/sync/push` and `/api/sync/pull`
 
 ### Testing Standards
@@ -119,7 +119,7 @@ So that **products are available for sale at POS**.
 
 - This is a brownfield project - item CRUD already exists in the codebase
 - Existing API endpoints implement all CRUD operations
-- Backoffice has comprehensive items-prices page with import/export
+- Backoffice has comprehensive items page with import/export
 - Story implementation is primarily verification and any missing pieces
 
 ### References

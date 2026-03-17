@@ -29,7 +29,7 @@ epics-backoffice-ux.md (UX Improvements - Epics 8-11)
 - **Epic 1:** Foundation - Auth, Company & Outlet Management (7 stories)
 - **Epic 2:** POS - Offline-first Point of Sale (6 stories)
 - **Epic 3:** Accounting - GL Posting & Reports (5 stories)
-- **Epic 4:** Items & Catalog - Product Management (3 stories)
+- **Epic 4:** Items & Catalog - Product Management (3 core stories + technical debt stories)
 - **Epic 5:** Settings - Tax, Payment, Module Configuration (3 stories)
 - **Epic 6:** Reporting - Sales Reports & Exports (3 stories)
 - **Epic 7:** Sync Infrastructure - Technical Debt Fixes (4 stories)
@@ -47,9 +47,9 @@ epics-backoffice-ux.md (UX Improvements - Epics 8-11)
 ## Quick Links
 
 ### For Implementation
-- [Epic 8 Stories](./stories/epic-08/) - Start here (P0) - 8 detailed story files
-- [Epic 9 Stories](./epics-backoffice-ux.md#epic-9-backoffice-users-simplify) - Next priority (P1)
-- [Epic 10 Stories](./epics-backoffice-ux.md#epic-10-backoffice-consistency-standards) - Polish (P2)
+- [Epic 8 Stories](./stories/epic-08/) - COMPLETE (P0) - 8 story files
+- [Epic 9 Stories](./stories/epic-09/) - Ready (P1) - 5 story files
+- [Epic 10 Stories](./epics-backoffice-ux.md#epic-10-backoffice-consistency-standards) - Not started (P2)
 
 ### For Reference
 - [Functional Requirements](./prd.md#functional-requirements) - All 27 FRs

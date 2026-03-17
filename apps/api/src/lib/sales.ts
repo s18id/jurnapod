@@ -6,6 +6,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "./db";
 import { calculateTaxLines, listCompanyDefaultTaxRates } from "./taxes";
 import { postCreditNoteToJournal, postSalesInvoiceToJournal, postSalesPaymentToJournal, voidCreditNoteToJournal } from "./sales-posting";
+import { postCogsForSale } from "./cogs-posting";
 import {
   DOCUMENT_TYPES,
   getNextDocumentNumber,
@@ -59,6 +60,11 @@ type SalesInvoiceTaxRow = RowDataPacket & {
 
 type AccessCheckRow = RowDataPacket & {
   id: number;
+};
+
+type ModuleConfigRow = RowDataPacket & {
+  enabled: number;
+  config_json: string;
 };
 
 type IdRow = RowDataPacket & {
@@ -274,6 +280,61 @@ function sumMoney(values: readonly number[]): number {
     total += value;
   }
   return normalizeMoney(total);
+}
+
+function parseFeatureGateValue(value: unknown): boolean {
+  if (value === 1 || value === true) {
+    return true;
+  }
+
+  if (value === 0 || value === false || value == null) {
+    return false;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "1" || normalized === "true") {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function isCogsFeatureEnabled(
+  executor: QueryExecutor,
+  companyId: number
+): Promise<boolean> {
+  const [rows] = await executor.execute<ModuleConfigRow[]>(
+    `SELECT cm.enabled, cm.config_json
+     FROM company_modules cm
+     INNER JOIN modules m ON m.id = cm.module_id
+     WHERE cm.company_id = ?
+       AND m.code = 'inventory'
+     LIMIT 1`,
+    [companyId]
+  );
+
+  const moduleRow = rows[0];
+  if (!moduleRow || Number(moduleRow.enabled) !== 1) {
+    return false;
+  }
+
+  if (typeof moduleRow.config_json !== "string" || moduleRow.config_json.trim().length === 0) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(moduleRow.config_json) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return false;
+    }
+
+    const cogsEnabled = (parsed as Record<string, unknown>).cogs_enabled;
+    return parseFeatureGateValue(cogsEnabled);
+  } catch {
+    return false;
+  }
 }
 
 // Patch 1: Service precision guard - check if value has more than 2 decimal places
@@ -1256,6 +1317,51 @@ export async function postInvoice(
     }
 
     await postSalesInvoiceToJournal(connection, postedInvoice);
+
+    const cogsFeatureEnabled = await isCogsFeatureEnabled(connection, companyId);
+
+    // Post COGS for inventory-tracked items when feature is enabled
+    const inventoryLines = postedInvoice.lines.filter((line) => line.line_type === "PRODUCT" && line.item_id);
+
+    if (cogsFeatureEnabled && inventoryLines.length > 0) {
+      const itemIds = inventoryLines.map((line) => line.item_id as number);
+      const placeholders = itemIds.map(() => "?").join(", ");
+
+      const [itemRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT id, track_stock FROM items 
+         WHERE company_id = ? AND id IN (${placeholders}) AND track_stock = 1`,
+        [companyId, ...itemIds]
+      );
+
+      const trackStockItemIds = new Set((itemRows as Array<{ id: number }>).map((row) => row.id));
+
+      const inventoryItems = inventoryLines
+        .filter((line) => line.item_id && trackStockItemIds.has(line.item_id))
+        .map((line) => ({
+          itemId: line.item_id as number,
+          quantity: line.qty
+        }));
+
+      if (inventoryItems.length > 0) {
+        const cogsResult = await postCogsForSale(
+          {
+            saleId: `INV-${postedInvoice.id}`,
+            companyId: postedInvoice.company_id,
+            outletId: postedInvoice.outlet_id,
+            items: inventoryItems,
+            saleDate: new Date(postedInvoice.invoice_date),
+            postedBy: actor?.userId ?? 0
+          },
+          connection
+        );
+
+        if (!cogsResult.success) {
+          throw new Error(
+            `COGS posting failed for invoice ${postedInvoice.id}: ${(cogsResult.errors ?? []).join(", ")}`
+          );
+        }
+      }
+    }
 
     return postedInvoice;
   });
@@ -4003,3 +4109,7 @@ export async function voidCreditNote(
     return findCreditNoteDetailWithExecutor(connection, companyId, creditNoteId);
   });
 }
+
+export const __salesTestables = {
+  parseFeatureGateValue
+};

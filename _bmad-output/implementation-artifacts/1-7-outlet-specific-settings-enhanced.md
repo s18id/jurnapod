@@ -1,6 +1,12 @@
-# Story 1.7: Outlet-Specific Settings (Enhanced)
+---
+epic: 1
+story: 1.7
+title: Outlet-Specific Settings (Enhanced)
+status: done
+created: 2026-03-15
+---
 
-Status: complete
+# Story 1.7: Outlet-Specific Settings (Enhanced)
 
 ## Story
 

@@ -33,11 +33,17 @@ import {
   IconDots,
   IconBan,
   IconCheck,
+  IconUpload,
+  IconTools,
 } from "@tabler/icons-react";
 import { apiRequest } from "../lib/api-client";
 import { useItems, type Item, type ItemType } from "../hooks/use-items";
 import { useItemGroups } from "../hooks/use-item-groups";
+import { useAccounts } from "../hooks/use-accounts";
+import { ImportWizard, type ImportWizardConfig, type ImportPlanRow, type ImportResult } from "../components/import-wizard";
+import { downloadCsv, rowsToCsv } from "../lib/import/csv";
 import type { SessionUser } from "../lib/session";
+import { RecipeCompositionEditor } from "./recipe-composition-editor";
 
 interface ItemsPageProps {
   user: SessionUser;
@@ -49,6 +55,8 @@ type ItemFormData = {
   name: string;
   type: ItemType;
   item_group_id: number | null;
+  cogs_account_id: number | null;
+  inventory_asset_account_id: number | null;
   is_active: boolean;
 };
 
@@ -78,6 +86,18 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
     groupMap,
   } = useItemGroups({ user, accessToken });
 
+  // Account hooks for COGS and Inventory Asset accounts
+  const { data: expenseAccounts, loading: expenseAccountsLoading } = useAccounts(
+    user.company_id,
+    accessToken,
+    { is_active: true }
+  );
+  const { data: assetAccounts, loading: assetAccountsLoading } = useAccounts(
+    user.company_id,
+    accessToken,
+    { is_active: true }
+  );
+
   // Filter states
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
@@ -91,6 +111,13 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
     useDisclosure(false);
   const [deleteModalOpen, { open: openDeleteModal, close: closeDeleteModal }] =
     useDisclosure(false);
+  const [importModalOpen, { open: openImportModal, close: closeImportModal }] =
+    useDisclosure(false);
+  const [recipeEditorOpen, { open: openRecipeEditor, close: closeRecipeEditor }] =
+    useDisclosure(false);
+
+  // Recipe editor state
+  const [editingRecipeItem, setEditingRecipeItem] = useState<Item | null>(null);
 
   // Form states
   const [editingItem, setEditingItem] = useState<Item | null>(null);
@@ -100,6 +127,8 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
     name: "",
     type: "PRODUCT",
     item_group_id: null,
+    cogs_account_id: null,
+    inventory_asset_account_id: null,
     is_active: true,
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -140,6 +169,27 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
     }));
   }, [itemGroups]);
 
+  // Account options for COGS (EXPENSE type) and Inventory Asset (ASSET type)
+  const cogsAccountOptions = useMemo(() => {
+    const options = expenseAccounts
+      .filter((acc) => acc.type_name?.toUpperCase() === "EXPENSE" && !acc.is_group)
+      .map((acc) => ({
+        value: String(acc.id),
+        label: `${acc.code} - ${acc.name}`,
+      }));
+    return [{ value: "", label: "Use Company Default" }, ...options];
+  }, [expenseAccounts]);
+
+  const inventoryAccountOptions = useMemo(() => {
+    const options = assetAccounts
+      .filter((acc) => acc.type_name?.toUpperCase() === "ASSET" && !acc.is_group)
+      .map((acc) => ({
+        value: String(acc.id),
+        label: `${acc.code} - ${acc.name}`,
+      }));
+    return [{ value: "", label: "Use Company Default" }, ...options];
+  }, [assetAccounts]);
+
   // Helper functions
   const getGroupName = useCallback(
     (groupId: number | null) => {
@@ -164,6 +214,8 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
       name: "",
       type: "PRODUCT",
       item_group_id: null,
+      cogs_account_id: null,
+      inventory_asset_account_id: null,
       is_active: true,
     });
     setFormErrors({});
@@ -182,6 +234,8 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
       name: item.name,
       type: item.type,
       item_group_id: item.item_group_id,
+      cogs_account_id: item.cogs_account_id,
+      inventory_asset_account_id: item.inventory_asset_account_id,
       is_active: item.is_active,
     });
     setFormErrors({});
@@ -193,6 +247,11 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
     setDeletingItemId(itemId);
     setActionError(null);
     openDeleteModal();
+  };
+
+  const openRecipeEditorForItem = (item: Item) => {
+    setEditingRecipeItem(item);
+    openRecipeEditor();
   };
 
   const validateForm = (): boolean => {
@@ -315,9 +374,82 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
   };
 
   const handleExport = () => {
-    // TODO: Implement export functionality
-    // This will be handled in a separate story
-    console.log("Export items - not yet implemented");
+    const headers = ["ID", "SKU", "Name", "Type", "Group", "Status"];
+    const rows = filteredItems.map((item) => [
+      item.id,
+      item.sku ?? "",
+      item.name,
+      item.type,
+      getGroupName(item.item_group_id),
+      item.is_active ? "Active" : "Inactive",
+    ]);
+    const csv = rowsToCsv(headers, rows);
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    downloadCsv(csv, `items-${date}.csv`);
+  };
+
+  // Import configuration for ImportWizard
+  const importConfig: ImportWizardConfig<ItemFormData> = useMemo(() => ({
+    title: "Import Items",
+    entityName: "items",
+    csvTemplate: "sku,name,type,item_group_code,is_active\nSKU001,Product Name,PRODUCT,GROUP1,true",
+    csvDescription: "CSV format: sku (optional), name (required), type (SERVICE/PRODUCT/INGREDIENT/RECIPE), item_group_code (optional), is_active (true/false)",
+    columns: [
+      { key: "sku", header: "SKU", required: false },
+      { key: "name", header: "Name", required: true },
+      { key: "type", header: "Type", required: true },
+      { key: "item_group_code", header: "Group Code", required: false },
+      { key: "is_active", header: "Active", required: false },
+    ],
+    parseRow: (row: Record<string, string>) => {
+      const type = (row.type?.toUpperCase() as ItemType) || "PRODUCT";
+      if (!["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"].includes(type)) {
+        return null;
+      }
+      return {
+        sku: row.sku?.trim() || null,
+        name: row.name?.trim() || "",
+        type,
+        item_group_id: null, // Will be resolved from group code
+        is_active: row.is_active?.toLowerCase() !== "false",
+      };
+    },
+    validateRow: (parsed: Partial<ItemFormData>) => {
+      if (!parsed.name?.trim()) return "Name is required";
+      if (!parsed.type) return "Type is required";
+      return null;
+    },
+    importFn: async (rows: ImportPlanRow<ItemFormData>[]) => {
+      const results: ImportResult = { success: 0, failed: 0, errors: [] };
+      
+      for (const row of rows) {
+        try {
+          await apiRequest(
+            "/inventory/items",
+            {
+              method: "POST",
+              body: JSON.stringify(row.parsed),
+            },
+            accessToken
+          );
+          results.success++;
+        } catch (err) {
+          results.failed++;
+          results.errors.push({
+            row: row.rowIndex + 1,
+            error: err instanceof Error ? err.message : "Failed to create item",
+          });
+        }
+      }
+      
+      await refreshItems();
+      return results;
+    },
+  }), [accessToken, refreshItems]);
+
+  const handleImportComplete = () => {
+    closeImportModal();
+    refreshItems();
   };
 
   // Loading state
@@ -371,6 +503,13 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
             href="#/prices"
           >
             Manage Prices
+          </Button>
+          <Button
+            variant="light"
+            leftSection={<IconUpload size={16} />}
+            onClick={openImportModal}
+          >
+            Import
           </Button>
           <Button
             leftSection={<IconPlus size={16} />}
@@ -508,6 +647,14 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                         >
                           Edit
                         </Menu.Item>
+                        {item.type === "RECIPE" && (
+                          <Menu.Item
+                            leftSection={<IconTools size={14} />}
+                            onClick={() => openRecipeEditorForItem(item)}
+                          >
+                            Manage Recipe
+                          </Menu.Item>
+                        )}
                         <Menu.Item
                           leftSection={item.is_active ? <IconBan size={14} /> : <IconCheck size={14} />}
                           color={item.is_active ? "orange" : "green"}
@@ -587,6 +734,14 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                           >
                             Edit
                           </Menu.Item>
+                          {item.type === "RECIPE" && (
+                            <Menu.Item
+                              leftSection={<IconTools size={14} />}
+                              onClick={() => openRecipeEditorForItem(item)}
+                            >
+                              Manage Recipe
+                            </Menu.Item>
+                          )}
                           <Menu.Item
                             leftSection={item.is_active ? <IconBan size={14} /> : <IconCheck size={14} />}
                             color={item.is_active ? "orange" : "green"}
@@ -677,6 +832,36 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
             clearable
           />
 
+          <Select
+            label="COGS Account"
+            placeholder="Select expense account for COGS"
+            value={formData.cogs_account_id ? String(formData.cogs_account_id) : ""}
+            onChange={(value) =>
+              setFormData((prev) => ({
+                ...prev,
+                cogs_account_id: value ? Number(value) : null,
+              }))
+            }
+            data={cogsAccountOptions}
+            disabled={expenseAccountsLoading}
+            description="Expense account for Cost of Goods Sold. Uses company default if not selected."
+          />
+
+          <Select
+            label="Inventory Asset Account"
+            placeholder="Select asset account for inventory"
+            value={formData.inventory_asset_account_id ? String(formData.inventory_asset_account_id) : ""}
+            onChange={(value) =>
+              setFormData((prev) => ({
+                ...prev,
+                inventory_asset_account_id: value ? Number(value) : null,
+              }))
+            }
+            data={inventoryAccountOptions}
+            disabled={assetAccountsLoading}
+            description="Asset account for inventory tracking. Uses company default if not selected."
+          />
+
           <Checkbox
             label="Active"
             checked={formData.is_active}
@@ -763,6 +948,36 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
             clearable
           />
 
+          <Select
+            label="COGS Account"
+            placeholder="Select expense account for COGS"
+            value={formData.cogs_account_id ? String(formData.cogs_account_id) : ""}
+            onChange={(value) =>
+              setFormData((prev) => ({
+                ...prev,
+                cogs_account_id: value ? Number(value) : null,
+              }))
+            }
+            data={cogsAccountOptions}
+            disabled={expenseAccountsLoading}
+            description="Expense account for Cost of Goods Sold. Uses company default if not selected."
+          />
+
+          <Select
+            label="Inventory Asset Account"
+            placeholder="Select asset account for inventory"
+            value={formData.inventory_asset_account_id ? String(formData.inventory_asset_account_id) : ""}
+            onChange={(value) =>
+              setFormData((prev) => ({
+                ...prev,
+                inventory_asset_account_id: value ? Number(value) : null,
+              }))
+            }
+            data={inventoryAccountOptions}
+            disabled={assetAccountsLoading}
+            description="Asset account for inventory tracking. Uses company default if not selected."
+          />
+
           <Checkbox
             label="Active"
             checked={formData.is_active}
@@ -815,6 +1030,35 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
           </Group>
         </Stack>
       </Modal>
+
+      {/* Import Wizard Modal */}
+      <Modal
+        opened={importModalOpen}
+        onClose={closeImportModal}
+        title="Import Items"
+        size="xl"
+      >
+        <ImportWizard
+          config={importConfig}
+          onComplete={handleImportComplete}
+          onCancel={closeImportModal}
+        />
+      </Modal>
+
+      {/* Recipe Composition Editor Modal */}
+      {recipeEditorOpen && editingRecipeItem && (
+        <RecipeCompositionEditor
+          recipeId={editingRecipeItem.id}
+          recipeName={editingRecipeItem.name}
+          recipeSku={editingRecipeItem.sku}
+          user={user}
+          accessToken={accessToken}
+          onClose={() => {
+            closeRecipeEditor();
+            setEditingRecipeItem(null);
+          }}
+        />
+      )}
     </Stack>
   );
 }

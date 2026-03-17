@@ -54,6 +54,8 @@ export const PATCH = withAuth(
         name: input.name,
         type: input.type,
         item_group_id: input.item_group_id,
+        cogs_account_id: input.cogs_account_id,
+        inventory_asset_account_id: input.inventory_asset_account_id,
         is_active: input.is_active
       }, {
         userId: auth.userId

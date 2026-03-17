@@ -11,36 +11,46 @@ import {
   Button,
   Select,
   TextInput,
-  Table,
-  ScrollArea,
   Badge,
   Alert,
   Loader,
   Modal,
-  NumberInput,
-  Checkbox,
-  Menu,
   SegmentedControl,
-  Tooltip,
-  ThemeIcon,
-  ActionIcon,
+  useMantineTheme,
+  Anchor,
 } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import {
   IconAlertCircle,
-  IconTrash,
   IconSearch,
-  IconEdit,
   IconPlus,
   IconDownload,
   IconPackage,
-  IconDots,
-  IconAlertTriangle,
+  IconUpload,
+  IconExternalLink,
 } from "@tabler/icons-react";
 import { apiRequest } from "../lib/api-client";
 import { useItems, type Item } from "../hooks/use-items";
 import { useItemGroups } from "../hooks/use-item-groups";
+import { ImportWizard, type ImportWizardConfig, type ImportResult } from "../components/import-wizard";
+import {
+  parsePriceImportRows,
+  buildPriceImportPlan,
+  computePriceImportSummary,
+  type NormalizedPriceImportRow,
+  type PriceImportPlanRow,
+} from "./item-prices-import-utils";
+import { downloadPricesCsv } from "./items-prices-export-utils";
 import type { SessionUser } from "../lib/session";
+import {
+  CreatePriceModal,
+  EditPriceModal,
+  OverridePriceModal,
+  DeletePriceModal,
+  PricesMobileCard,
+  PricesTable,
+  type PriceFormData,
+} from "./prices-page/index";
 
 interface PricesPageProps {
   user: SessionUser;
@@ -66,29 +76,8 @@ interface PriceWithItem extends ItemPrice {
   defaultPrice?: number;
 }
 
-interface PriceFormData {
-  item_id: number;
-  price: number;
-  is_active: boolean;
-  is_company_default?: boolean;
-}
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    minimumFractionDigits: 0,
-  }).format(value);
-}
-
-function calculatePriceDifference(
-  defaultPrice: number,
-  overridePrice: number
-): number {
-  return Math.abs(((overridePrice - defaultPrice) / defaultPrice) * 100);
-}
-
 export function PricesPage({ user, accessToken }: PricesPageProps) {
+  const theme = useMantineTheme();
   const isMobile = useMediaQuery("(max-width: 48em)");
 
   // Data hooks
@@ -113,44 +102,82 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
   const [pricesLoading, setPricesLoading] = useState(true);
   const [pricesError, setPricesError] = useState<string | null>(null);
 
+  // Deep linking: Parse outlet from URL query params
+  const getOutletIdFromUrl = useCallback((): number | null => {
+    if (typeof window === "undefined") return null;
+    const hash = window.location.hash;
+    const queryIndex = hash.indexOf("?");
+    if (queryIndex === -1) return null;
+    const queryString = hash.slice(queryIndex + 1);
+    const params = new URLSearchParams(queryString);
+    const outletParam = params.get("outlet");
+    if (!outletParam) return null;
+    const outletId = parseInt(outletParam, 10);
+    return isNaN(outletId) ? null : outletId;
+  }, []);
+
+  // Deep linking: Update URL with outlet query param
+  const updateUrlWithOutlet = useCallback((outletId: number | null) => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash;
+    const queryIndex = hash.indexOf("?");
+    const baseHash = queryIndex === -1 ? hash : hash.slice(0, queryIndex);
+    
+    if (outletId !== null) {
+      window.location.hash = `${baseHash}?outlet=${outletId}`;
+    } else {
+      window.location.hash = baseHash;
+    }
+  }, []);
+
   // View and filter states
   const [viewMode, setViewMode] = useState<PricingViewMode>("outlet");
-  const [selectedOutletId, setSelectedOutletId] = useState<number>(
-    user.outlets[0]?.id ?? 0
-  );
+  const urlOutletId = getOutletIdFromUrl();
+  const initialOutletId = urlOutletId ?? user.outlets[0]?.id ?? 0;
+  const [selectedOutletId, setSelectedOutletId] = useState<number>(initialOutletId);
   const [searchTerm, setSearchTerm] = useState("");
   const [scopeFilter, setScopeFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<boolean | null>(null);
 
   // Modal states
-  const [
-    createModalOpen,
-    { open: openCreateModal, close: closeCreateModal },
-  ] = useDisclosure(false);
-  const [overrideModalOpen, { open: openOverrideModal, close: closeOverrideModal }] =
-    useDisclosure(false);
-  const [editModalOpen, { open: openEditModal, close: closeEditModal }] =
-    useDisclosure(false);
-  const [deleteModalOpen, { open: openDeleteModal, close: closeDeleteModal }] =
-    useDisclosure(false);
+  const [createModalOpen, { open: openCreateModal, close: closeCreateModal }] = useDisclosure(false);
+  const [overrideModalOpen, { open: openOverrideModal, close: closeOverrideModal }] = useDisclosure(false);
+  const [editModalOpen, { open: openEditModal, close: closeEditModal }] = useDisclosure(false);
+  const [deleteModalOpen, { open: openDeleteModal, close: closeDeleteModal }] = useDisclosure(false);
+  const [importModalOpen, { open: openImportModal, close: closeImportModal }] = useDisclosure(false);
 
-  // Form states
-  const [editingPrice, setEditingPrice] = useState<ItemPrice | null>(null);
+  // Action states
+  const [editingPrice, setEditingPrice] = useState<PriceWithItem | null>(null);
   const [deletingPriceId, setDeletingPriceId] = useState<number | null>(null);
-  const [overrideTarget, setOverrideTarget] = useState<{
-    itemId: number;
-    defaultPrice: number;
-  } | null>(null);
-  const [formData, setFormData] = useState<PriceFormData>({
-    item_id: 0,
-    price: 0,
-    is_active: true,
-    is_company_default: false,
-  });
-  const [overridePrice, setOverridePrice] = useState<string>("");
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [deletingIsDefault, setDeletingIsDefault] = useState(false);
+  const [overrideTarget, setOverrideTarget] = useState<{ itemId: number; defaultPrice: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Handle outlet selection change with URL update
+  const handleOutletChange = useCallback((value: string | null) => {
+    const outletId = value ? Number(value) : null;
+    if (outletId !== null) {
+      setSelectedOutletId(outletId);
+      updateUrlWithOutlet(outletId);
+    }
+  }, [updateUrlWithOutlet]);
+
+  // Listen for hash changes to sync outlet selection (for deep linking)
+  useEffect(() => {
+    const handleHashChange = () => {
+      const outletId = getOutletIdFromUrl();
+      if (outletId !== null && outletId !== selectedOutletId) {
+        // Validate outletId belongs to user's outlets
+        const validOutlet = user.outlets.find(o => o.id === outletId);
+        if (validOutlet) {
+          setSelectedOutletId(outletId);
+        }
+      }
+    };
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, [getOutletIdFromUrl, selectedOutletId, user.outlets]);
 
   // Fetch prices
   const fetchPrices = useCallback(async () => {
@@ -158,26 +185,15 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
     setPricesError(null);
 
     try {
-      // Fetch outlet-specific prices
-      const pricesResponse = await apiRequest<{ data: ItemPrice[] }>(
-        `/inventory/item-prices?outlet_id=${selectedOutletId}`,
-        {},
-        accessToken
-      );
-
-      // Fetch company defaults
-      const defaultsResponse = await apiRequest<{ data: ItemPrice[] }>(
-        "/inventory/item-prices?scope=default",
-        {},
-        accessToken
-      );
+      const [pricesResponse, defaultsResponse] = await Promise.all([
+        apiRequest<{ data: ItemPrice[] }>(`/inventory/item-prices?outlet_id=${selectedOutletId}`, {}, accessToken),
+        apiRequest<{ data: ItemPrice[] }>("/inventory/item-prices?scope=default", {}, accessToken),
+      ]);
 
       setPrices(pricesResponse.data);
       setCompanyDefaults(defaultsResponse.data);
     } catch (err) {
-      setPricesError(
-        err instanceof Error ? err.message : "Failed to fetch prices"
-      );
+      setPricesError(err instanceof Error ? err.message : "Failed to fetch prices");
     } finally {
       setPricesLoading(false);
     }
@@ -204,10 +220,8 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
       }));
     }
 
-    // For outlet view, merge defaults and overrides
     const merged = new Map<number, PriceWithItem>();
 
-    // Add all company defaults first
     companyDefaults.forEach((defaultPrice) => {
       merged.set(defaultPrice.item_id, {
         ...defaultPrice,
@@ -218,7 +232,6 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
       });
     });
 
-    // Override with outlet-specific prices
     prices.forEach((price) => {
       const existing = merged.get(price.item_id);
       if (existing) {
@@ -238,7 +251,6 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
   // Filter prices
   const filteredPrices = useMemo(() => {
     return pricesWithHierarchy.filter((price) => {
-      // Search filter
       if (searchTerm) {
         const search = searchTerm.toLowerCase();
         const nameMatch = price.item?.name.toLowerCase().includes(search) ?? false;
@@ -246,13 +258,11 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
         if (!nameMatch && !skuMatch) return false;
       }
 
-      // Scope filter (only in outlet mode)
       if (viewMode === "outlet" && scopeFilter) {
         if (scopeFilter === "override" && !price.hasOverride) return false;
         if (scopeFilter === "default" && price.hasOverride) return false;
       }
 
-      // Status filter
       if (statusFilter !== null && price.is_active !== statusFilter) {
         return false;
       }
@@ -261,10 +271,8 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
     });
   }, [pricesWithHierarchy, searchTerm, scopeFilter, statusFilter, viewMode]);
 
-  const hasActiveFilters =
-    searchTerm || scopeFilter || statusFilter !== null;
+  const hasActiveFilters = searchTerm || scopeFilter || statusFilter !== null;
 
-  // Helper functions
   const getGroupName = useCallback(
     (groupId: number | null) => {
       if (!groupId) return "-";
@@ -280,71 +288,25 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
     setStatusFilter(null);
   };
 
-  // Form handlers
-  const resetForm = () => {
-    setFormData({
-      item_id: 0,
-      price: 0,
-      is_active: true,
-      is_company_default: viewMode === "defaults",
-    });
-    setOverridePrice("");
-    setFormErrors({});
-    setActionError(null);
-    setOverrideTarget(null);
-  };
-
-  const openCreate = () => {
-    resetForm();
-    openCreateModal();
-  };
-
-  const openEdit = (price: ItemPrice) => {
+  // Action handlers
+  const openEdit = (price: PriceWithItem) => {
     setEditingPrice(price);
-    setFormData({
-      item_id: price.item_id,
-      price: price.price,
-      is_active: price.is_active,
-      is_company_default: price.outlet_id === null,
-    });
-    setFormErrors({});
-    setActionError(null);
     openEditModal();
   };
 
   const openSetOverride = (itemId: number, defaultPrice: number) => {
     setOverrideTarget({ itemId, defaultPrice });
-    setOverridePrice(String(defaultPrice));
-    setActionError(null);
     openOverrideModal();
   };
 
-  const openDelete = (priceId: number) => {
-    setDeletingPriceId(priceId);
-    setActionError(null);
+  const openDelete = (price: PriceWithItem) => {
+    setDeletingPriceId(price.id);
+    setDeletingIsDefault(price.outlet_id === null);
     openDeleteModal();
   };
 
-  const validateForm = (): boolean => {
-    const errors: Record<string, string> = {};
-
-    if (formData.item_id <= 0) {
-      errors.item_id = "Item is required";
-    }
-
-    if (formData.price <= 0) {
-      errors.price = "Price must be greater than 0";
-    }
-
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  const handleCreate = async () => {
-    if (!validateForm()) return;
-
+  const handleCreate = async (formData: PriceFormData) => {
     setSubmitting(true);
-    setActionError(null);
 
     try {
       const payload = {
@@ -362,60 +324,41 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
       );
 
       closeCreateModal();
-      resetForm();
       await fetchPrices();
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Failed to create price"
-      );
+      throw err instanceof Error ? err : new Error("Failed to create price");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleUpdate = async () => {
-    if (!editingPrice || !validateForm()) return;
-
+  const handleUpdate = async (price: number, isActive: boolean) => {
+    if (!editingPrice) return;
     setSubmitting(true);
-    setActionError(null);
 
     try {
       await apiRequest(
         `/inventory/item-prices/${editingPrice.id}`,
         {
           method: "PATCH",
-          body: JSON.stringify({
-            price: formData.price,
-            is_active: formData.is_active,
-          }),
+          body: JSON.stringify({ price, is_active: isActive }),
         },
         accessToken
       );
 
       closeEditModal();
       setEditingPrice(null);
-      resetForm();
       await fetchPrices();
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Failed to update price"
-      );
+      throw err instanceof Error ? err : new Error("Failed to update price");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleCreateOverride = async () => {
+  const handleCreateOverride = async (priceValue: number) => {
     if (!overrideTarget) return;
-
-    const priceValue = parseFloat(overridePrice);
-    if (isNaN(priceValue) || priceValue <= 0) {
-      setActionError("Please enter a valid price");
-      return;
-    }
-
     setSubmitting(true);
-    setActionError(null);
 
     try {
       await apiRequest(
@@ -434,12 +377,9 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
 
       closeOverrideModal();
       setOverrideTarget(null);
-      setOverridePrice("");
       await fetchPrices();
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Failed to create override"
-      );
+      throw err instanceof Error ? err : new Error("Failed to create override");
     } finally {
       setSubmitting(false);
     }
@@ -447,16 +387,12 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
 
   const handleDelete = async () => {
     if (!deletingPriceId) return;
-
     setSubmitting(true);
-    setActionError(null);
 
     try {
       await apiRequest(
         `/inventory/item-prices/${deletingPriceId}`,
-        {
-          method: "DELETE",
-        },
+        { method: "DELETE" },
         accessToken
       );
 
@@ -464,26 +400,86 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
       setDeletingPriceId(null);
       await fetchPrices();
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Failed to delete price"
-      );
+      throw err instanceof Error ? err : new Error("Failed to delete price");
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleExport = () => {
-    // TODO: Implement export functionality
-    console.log("Export prices - not yet implemented");
+    const pricesForExport = viewMode === "defaults" ? companyDefaults : prices;
+    downloadPricesCsv(pricesForExport, items, viewMode, selectedOutletId);
   };
 
-  // Item options for create modal
-  const itemOptions = useMemo(() => {
-    return items.map((item) => ({
-      value: String(item.id),
-      label: `${item.name} (${item.sku ?? "No SKU"})`,
-    }));
-  }, [items]);
+  // Import wizard config
+  const importConfig: ImportWizardConfig<NormalizedPriceImportRow> = useMemo(() => {
+    return {
+      title: "Import Prices",
+      entityName: "prices",
+      csvTemplate: "item_sku,price,is_active,scope,outlet_id\nSKU001,25000,true,outlet,1\nSKU002,30000,true,default,",
+      csvDescription: "Format: item_sku, price, is_active, scope (default/outlet), outlet_id",
+      columns: [
+        { key: "item_sku", header: "Item SKU", required: true },
+        { key: "price", header: "Price", required: true },
+        { key: "is_active", header: "Active", required: false },
+        { key: "scope", header: "Scope", required: true },
+        { key: "outlet_id", header: "Outlet ID", required: false },
+      ],
+      parseRow: (row: Record<string, string>) => {
+        return {
+          item_sku: row.item_sku || "",
+          price: Number(row.price) || 0,
+          is_active: row.is_active?.toLowerCase() === "true",
+          scope: (row.scope?.toLowerCase() === "default" ? "default" : "outlet") as "default" | "outlet",
+          outlet_id: row.outlet_id ? Number(row.outlet_id) : null,
+        };
+      },
+      validateRow: (parsed: Partial<NormalizedPriceImportRow>) => {
+        if (!parsed.item_sku) return "Item SKU is required";
+        if (!parsed.price || parsed.price <= 0) return "Valid price is required";
+        if (!parsed.scope) return "Scope (default/outlet) is required";
+        if (parsed.scope === "outlet" && !parsed.outlet_id) {
+          return "Outlet ID is required for outlet scope";
+        }
+        return null;
+      },
+      importFn: async (rows) => {
+        const results: ImportResult = { success: 0, failed: 0, errors: [] };
+        
+        for (const row of rows) {
+          try {
+            await apiRequest(
+              "/inventory/item-prices",
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  item_id: items.find(i => i.sku?.toLowerCase() === row.parsed.item_sku?.toLowerCase())?.id,
+                  price: row.parsed.price,
+                  is_active: row.parsed.is_active ?? true,
+                  outlet_id: row.parsed.scope === "default" ? null : row.parsed.outlet_id,
+                }),
+              },
+              accessToken
+            );
+            results.success++;
+          } catch (err) {
+            results.failed++;
+            results.errors.push({
+              row: row.rowIndex,
+              error: err instanceof Error ? err.message : "Import failed",
+            });
+          }
+        }
+        
+        return results;
+      },
+    };
+  }, [items, accessToken]);
+
+  const handleImportComplete = () => {
+    closeImportModal();
+    fetchPrices();
+  };
 
   // Loading state
   if (itemsLoading || groupsLoading || pricesLoading) {
@@ -531,8 +527,15 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
             View Items
           </Button>
           <Button
+            variant="light"
+            leftSection={<IconUpload size={16} />}
+            onClick={openImportModal}
+          >
+            Import
+          </Button>
+          <Button
             leftSection={<IconPlus size={16} />}
-            onClick={openCreate}
+            onClick={openCreateModal}
           >
             Create Price
           </Button>
@@ -562,18 +565,17 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
               <Select
                 label="Outlet"
                 value={String(selectedOutletId)}
-                onChange={(value) => setSelectedOutletId(Number(value))}
+                onChange={handleOutletChange}
                 data={outletOptions}
                 style={{ minWidth: 200 }}
               />
             )}
           </Group>
 
-          {/* Hierarchy Explanation */}
           <Alert icon={<IconAlertCircle size={16} />} color="blue" variant="light">
             <Text size="sm">
-              <strong>Pricing Hierarchy:</strong> Company Default prices apply to
-              all outlets. Outlet-specific overrides take precedence.
+              <strong>Pricing Hierarchy:</strong> Company Default prices apply to all outlets. 
+              Outlet-specific overrides take precedence.
             </Text>
           </Alert>
         </Stack>
@@ -606,9 +608,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
             <Select
               placeholder="Status"
               value={statusFilter === null ? null : String(statusFilter)}
-              onChange={(v) =>
-                setStatusFilter(v === null ? null : v === "true")
-              }
+              onChange={(v) => setStatusFilter(v === null ? null : v === "true")}
               data={[
                 { value: "true", label: "Active" },
                 { value: "false", label: "Inactive" },
@@ -624,19 +624,11 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
           </Group>
           {hasActiveFilters && (
             <Group gap="xs">
-              <Text size="xs" c="dimmed">
-                Active filters:
-              </Text>
-              {searchTerm && (
-                <Badge variant="light">Search: {searchTerm}</Badge>
-              )}
-              {scopeFilter && (
-                <Badge variant="light">Scope: {scopeFilter}</Badge>
-              )}
+              <Text size="xs" c="dimmed">Active filters:</Text>
+              {searchTerm && <Badge variant="light">Search: {searchTerm}</Badge>}
+              {scopeFilter && <Badge variant="light">Scope: {scopeFilter}</Badge>}
               {statusFilter !== null && (
-                <Badge variant="light">
-                  Status: {statusFilter ? "Active" : "Inactive"}
-                </Badge>
+                <Badge variant="light">Status: {statusFilter ? "Active" : "Inactive"}</Badge>
               )}
             </Group>
           )}
@@ -654,465 +646,83 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
               : "No prices for this outlet."}
           </Text>
         ) : isMobile ? (
-          // Mobile card view
-          <Stack gap="xs">
-            {filteredPrices.map((price) => {
-              const differencePercent =
-                price.defaultPrice && price.hasOverride
-                  ? calculatePriceDifference(price.defaultPrice, price.price)
-                  : 0;
-              const isSignificantDifference = differencePercent > 20;
-
-              return (
-                <Card key={price.id} withBorder>
-                  <Stack gap="xs">
-                    <Group justify="space-between" align="flex-start">
-                      <div>
-                        <Text size="sm" fw={600}>
-                          {price.item?.name ?? "Unknown Item"}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          {price.item?.sku ?? "No SKU"}
-                        </Text>
-                      </div>
-                      <Badge
-                        color={price.is_active ? "green" : "red"}
-                        variant="light"
-                      >
-                        {price.is_active ? "Active" : "Inactive"}
-                      </Badge>
-                    </Group>
-
-                    <Group justify="space-between" align="center">
-                      <Text size="xs" c="dimmed">
-                        {getGroupName(price.item?.item_group_id ?? null)}
-                      </Text>
-                      <Badge variant="light">{price.item?.type}</Badge>
-                    </Group>
-
-                    {/* Price Display with Hierarchy */}
-                    <Group justify="space-between" align="center">
-                      {viewMode === "outlet" && price.hasOverride ? (
-                        <Stack gap={2}>
-                          <Text size="xs" c="dimmed" td="line-through">
-                            {formatCurrency(price.defaultPrice ?? 0)}
-                          </Text>
-                          <Group gap={4}>
-                            <Badge color="blue" size="sm">
-                              Override
-                            </Badge>
-                            <Text fw={500}>
-                              {formatCurrency(price.price)}
-                            </Text>
-                            {isSignificantDifference && (
-                              <ThemeIcon color="orange" size="sm" variant="light">
-                                <IconAlertTriangle size={12} />
-                              </ThemeIcon>
-                            )}
-                          </Group>
-                        </Stack>
-                      ) : viewMode === "outlet" ? (
-                        <Group gap={4}>
-                          <Badge color="green" size="sm">
-                            Default
-                          </Badge>
-                          <Text>{formatCurrency(price.price)}</Text>
-                        </Group>
-                      ) : (
-                        <Group gap={4}>
-                          <Badge color="green" size="sm">
-                            Default
-                          </Badge>
-                          <Text fw={500}>{formatCurrency(price.price)}</Text>
-                        </Group>
-                      )}
-
-                      <Menu>
-                        <Menu.Target>
-                          <ActionIcon variant="subtle">
-                            <IconDots size={16} />
-                          </ActionIcon>
-                        </Menu.Target>
-                        <Menu.Dropdown>
-                          <Menu.Item
-                            leftSection={<IconEdit size={14} />}
-                            onClick={() => openEdit(price)}
-                          >
-                            Edit
-                          </Menu.Item>
-                          {viewMode === "outlet" && !price.hasOverride && (
-                            <Menu.Item
-                              onClick={() =>
-                                openSetOverride(price.item_id, price.price)
-                              }
-                            >
-                              Set Override
-                            </Menu.Item>
-                          )}
-                          <Menu.Item
-                            leftSection={<IconTrash size={14} />}
-                            color="red"
-                            onClick={() => openDelete(price.id)}
-                          >
-                            Delete
-                          </Menu.Item>
-                        </Menu.Dropdown>
-                      </Menu>
-                    </Group>
-                  </Stack>
-                </Card>
-              );
-            })}
-          </Stack>
+          <PricesMobileCard
+            prices={filteredPrices}
+            viewMode={viewMode}
+            getGroupName={getGroupName}
+            onEdit={openEdit}
+            onSetOverride={openSetOverride}
+            onDelete={openDelete}
+          />
         ) : (
-          // Desktop table view
-          <ScrollArea>
-            <Table highlightOnHover striped stickyHeader>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>ID</Table.Th>
-                  <Table.Th>Item</Table.Th>
-                  <Table.Th>Group</Table.Th>
-                  {viewMode === "outlet" && <Table.Th>Scope</Table.Th>}
-                  <Table.Th>Price</Table.Th>
-                  <Table.Th>Status</Table.Th>
-                  <Table.Th>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {filteredPrices.map((price) => {
-                  const differencePercent =
-                    price.defaultPrice && price.hasOverride
-                      ? calculatePriceDifference(
-                          price.defaultPrice,
-                          price.price
-                        )
-                      : 0;
-                  const isSignificantDifference = differencePercent > 20;
-
-                  return (
-                    <Table.Tr key={price.id}>
-                      <Table.Td>{price.id}</Table.Td>
-                      <Table.Td>
-                        <Text size="sm" fw={500}>
-                          {price.item?.name ?? "Unknown Item"}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          {price.item?.sku ?? "No SKU"}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm">
-                          {getGroupName(price.item?.item_group_id ?? null)}
-                        </Text>
-                      </Table.Td>
-                      {viewMode === "outlet" && (
-                        <Table.Td>
-                          {price.hasOverride ? (
-                            <Badge color="blue" size="sm">
-                              Override
-                            </Badge>
-                          ) : (
-                            <Badge color="green" size="sm">
-                              Default
-                            </Badge>
-                          )}
-                        </Table.Td>
-                      )}
-                      <Table.Td>
-                        {viewMode === "outlet" && price.hasOverride ? (
-                          <Tooltip
-                            label={`Default: ${formatCurrency(
-                              price.defaultPrice ?? 0
-                            )}`}
-                          >
-                            <Stack gap={2}>
-                              <Text size="xs" c="dimmed" td="line-through">
-                                {formatCurrency(price.defaultPrice ?? 0)}
-                              </Text>
-                              <Group gap={4}>
-                                <Text fw={500}>
-                                  {formatCurrency(price.price)}
-                                </Text>
-                                {isSignificantDifference && (
-                                  <ThemeIcon
-                                    color="orange"
-                                    size="sm"
-                                    variant="light"
-                                  >
-                                    <IconAlertTriangle size={12} />
-                                  </ThemeIcon>
-                                )}
-                              </Group>
-                            </Stack>
-                          </Tooltip>
-                        ) : (
-                          <Text fw={500}>{formatCurrency(price.price)}</Text>
-                        )}
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge
-                          color={price.is_active ? "green" : "red"}
-                          variant="light"
-                        >
-                          {price.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Menu>
-                          <Menu.Target>
-                            <Button variant="light" size="xs">
-                              Actions
-                            </Button>
-                          </Menu.Target>
-                          <Menu.Dropdown>
-                            <Menu.Item
-                              leftSection={<IconEdit size={14} />}
-                              onClick={() => openEdit(price)}
-                            >
-                              Edit
-                            </Menu.Item>
-                            {viewMode === "outlet" && !price.hasOverride && (
-                              <Menu.Item
-                                onClick={() =>
-                                  openSetOverride(price.item_id, price.price)
-                                }
-                              >
-                                Set Override
-                              </Menu.Item>
-                            )}
-                            <Menu.Item
-                              leftSection={<IconTrash size={14} />}
-                              color="red"
-                              onClick={() => openDelete(price.id)}
-                            >
-                              Delete
-                            </Menu.Item>
-                          </Menu.Dropdown>
-                        </Menu>
-                      </Table.Td>
-                    </Table.Tr>
-                  );
-                })}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
+          <PricesTable
+            prices={filteredPrices}
+            viewMode={viewMode}
+            getGroupName={getGroupName}
+            onEdit={openEdit}
+            onSetOverride={openSetOverride}
+            onDelete={openDelete}
+          />
         )}
       </Card>
 
-      {/* Create Price Modal */}
-      <Modal
+      {/* Modals */}
+      <CreatePriceModal
         opened={createModalOpen}
         onClose={closeCreateModal}
-        title={viewMode === "defaults" ? "Create Default Price" : "Create Price"}
-        size="md"
-      >
-        <Stack gap="md">
-          {actionError && (
-            <Alert color="red" icon={<IconAlertCircle size={16} />}>
-              {actionError}
-            </Alert>
-          )}
+        onCreate={handleCreate}
+        items={items}
+        isCompanyDefault={viewMode === "defaults"}
+        submitting={submitting}
+      />
 
-          <Select
-            label="Item"
-            placeholder="Select an item"
-            value={formData.item_id ? String(formData.item_id) : ""}
-            onChange={(value) =>
-              setFormData((prev) => ({
-                ...prev,
-                item_id: value ? Number(value) : 0,
-              }))
-            }
-            data={itemOptions}
-            error={formErrors.item_id}
-            required
-            searchable
-          />
-
-          <NumberInput
-            label="Price"
-            placeholder="Enter price"
-            value={formData.price}
-            onChange={(value) =>
-              setFormData((prev) => ({
-                ...prev,
-                price: Number(value) || 0,
-              }))
-            }
-            min={0}
-            decimalScale={2}
-            error={formErrors.price}
-            required
-          />
-
-          <Checkbox
-            label="Set as company default (applies to all outlets)"
-            checked={formData.is_company_default}
-            onChange={(e) =>
-              setFormData((prev) => ({
-                ...prev,
-                is_company_default: e.currentTarget.checked,
-              }))
-            }
-          />
-
-          <Checkbox
-            label="Active"
-            checked={formData.is_active}
-            onChange={(e) =>
-              setFormData((prev) => ({
-                ...prev,
-                is_active: e.currentTarget.checked,
-              }))
-            }
-          />
-
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={closeCreateModal}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreate} loading={submitting}>
-              Create Price
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      {/* Set Override Modal */}
-      <Modal
+      <OverridePriceModal
         opened={overrideModalOpen}
-        onClose={closeOverrideModal}
-        title="Set Outlet Override Price"
-        size="md"
-      >
-        <Stack gap="md">
-          {actionError && (
-            <Alert color="red" icon={<IconAlertCircle size={16} />}>
-              {actionError}
-            </Alert>
-          )}
+        onClose={() => {
+          closeOverrideModal();
+          setOverrideTarget(null);
+        }}
+        onCreate={handleCreateOverride}
+        defaultPrice={overrideTarget?.defaultPrice ?? 0}
+        submitting={submitting}
+      />
 
-          {overrideTarget && (
-            <>
-              <Text size="sm">
-                Create an outlet-specific price override for this item.
-              </Text>
-              <Text size="sm" c="dimmed">
-                Default price: {formatCurrency(overrideTarget.defaultPrice)}
-              </Text>
-
-              <NumberInput
-                label="Override Price"
-                placeholder="Enter override price"
-                value={overridePrice}
-                onChange={(value) => setOverridePrice(String(value))}
-                min={0}
-                decimalScale={2}
-                required
-              />
-
-              <Group justify="flex-end" mt="md">
-                <Button variant="default" onClick={closeOverrideModal}>
-                  Cancel
-                </Button>
-                <Button onClick={handleCreateOverride} loading={submitting}>
-                  Create Override
-                </Button>
-              </Group>
-            </>
-          )}
-        </Stack>
-      </Modal>
-
-      {/* Edit Price Modal */}
-      <Modal
+      <EditPriceModal
         opened={editModalOpen}
-        onClose={closeEditModal}
-        title="Edit Price"
-        size="md"
-      >
-        <Stack gap="md">
-          {actionError && (
-            <Alert color="red" icon={<IconAlertCircle size={16} />}>
-              {actionError}
-            </Alert>
-          )}
+        onClose={() => {
+          closeEditModal();
+          setEditingPrice(null);
+        }}
+        onUpdate={handleUpdate}
+        itemName={editingPrice?.item?.name ?? "Unknown Item"}
+        currentPrice={editingPrice?.price ?? 0}
+        currentIsActive={editingPrice?.is_active ?? true}
+        submitting={submitting}
+      />
 
-          <Text size="sm" fw={500}>
-            {editingPrice?.item_id
-              ? itemMap.get(editingPrice.item_id)?.name ?? "Unknown Item"
-              : "Unknown Item"}
-          </Text>
-
-          <NumberInput
-            label="Price"
-            placeholder="Enter price"
-            value={formData.price}
-            onChange={(value) =>
-              setFormData((prev) => ({
-                ...prev,
-                price: Number(value) || 0,
-              }))
-            }
-            min={0}
-            decimalScale={2}
-            error={formErrors.price}
-            required
-          />
-
-          <Checkbox
-            label="Active"
-            checked={formData.is_active}
-            onChange={(e) =>
-              setFormData((prev) => ({
-                ...prev,
-                is_active: e.currentTarget.checked,
-              }))
-            }
-          />
-
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={closeEditModal}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdate} loading={submitting}>
-              Save Changes
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      {/* Delete Confirmation Modal */}
-      <Modal
+      <DeletePriceModal
         opened={deleteModalOpen}
-        onClose={closeDeleteModal}
-        title="Confirm Delete"
-        size="sm"
+        onClose={() => {
+          closeDeleteModal();
+          setDeletingPriceId(null);
+        }}
+        onDelete={handleDelete}
+        isDefault={deletingIsDefault}
+        submitting={submitting}
+      />
+
+      {/* Import Wizard Modal */}
+      <Modal
+        opened={importModalOpen}
+        onClose={closeImportModal}
+        title="Import Prices"
+        size="lg"
       >
-        <Stack gap="md">
-          {actionError && (
-            <Alert color="red" icon={<IconAlertCircle size={16} />}>
-              {actionError}
-            </Alert>
-          )}
-
-          <Text>Are you sure you want to delete this price?</Text>
-          <Text size="sm" c="dimmed">
-            {viewMode === "defaults"
-              ? "This will remove the company default price."
-              : "This will remove the outlet-specific price override."}
-          </Text>
-
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={closeDeleteModal}>
-              Cancel
-            </Button>
-            <Button color="red" onClick={handleDelete} loading={submitting}>
-              Delete
-            </Button>
-          </Group>
-        </Stack>
+        <ImportWizard
+          config={importConfig}
+          onComplete={handleImportComplete}
+          onCancel={closeImportModal}
+        />
       </Modal>
     </Stack>
   );

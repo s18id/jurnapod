@@ -14,6 +14,8 @@ export type Item = {
   name: string;
   type: ItemType;
   item_group_id: number | null;
+  cogs_account_id: number | null;
+  inventory_asset_account_id: number | null;
   is_active: boolean;
   updated_at: string;
 };

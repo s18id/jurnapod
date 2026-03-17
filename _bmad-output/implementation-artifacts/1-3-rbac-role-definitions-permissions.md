@@ -1,6 +1,12 @@
-# Story 1.3: RBAC - Role Definitions & Permissions
+---
+epic: 1
+story: 1.3
+title: RBAC - Role Definitions & Permissions
+status: done
+created: 2026-03-15
+---
 
-Status: done
+# Story 1.3: RBAC - Role Definitions & Permissions
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

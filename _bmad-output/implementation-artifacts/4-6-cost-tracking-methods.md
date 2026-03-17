@@ -1,442 +1,147 @@
 # Story 4.6: Cost Tracking Methods
 
-**Epic:** Items & Catalog - Product Management  
-**Status:** backlog → ready-for-dev  
-**Priority:** Medium  
-**Estimated Effort:** 8-12 hours  
-**Created:** 2026-03-16  
-**Type:** Technical Debt
+Status: ready-for-dev
 
----
-
-## Context
-
-The inventory settings page allows selecting costing methods (AVG, FIFO, LIFO), but there's no actual implementation. This story builds the cost tracking infrastructure to support accurate inventory valuation and COGS calculation.
-
----
+<!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
 ## Story
 
-As an **accountant**,  
-I want **inventory costs tracked using AVG, FIFO, or LIFO methods**,  
-So that **inventory valuation and COGS reflect the chosen accounting method**.
-
----
+As an accountant,
+I want inventory costs tracked using AVG, FIFO, or LIFO methods,
+so that inventory valuation and COGS reflect the chosen accounting method.
 
 ## Acceptance Criteria
 
-### Cost Method Configuration
+1. Given company inventory settings, when accountant selects costing method (AVG/FIFO/LIFO), then all inventory calculations use that method.
+2. Given the same inventory movements, when different costing methods are applied, then resulting COGS and ending inventory differ per method.
+3. Given AVG method and multiple purchases, when sale occurs, then COGS uses weighted average cost and inventory valuation updates correctly.
+4. Given FIFO/LIFO method and layered purchases, when sale occurs, then cost layers are consumed in chronological/reverse-chronological order.
+5. Given inventory transactions over time, when costs are tracked, then each inbound transaction creates auditable cost layers with remaining quantity and unit cost.
+6. Given partial layer consumption, when subsequent sales happen, then remaining quantities and per-layer balances stay accurate and never go negative.
+7. Given integration with Story 4.5 COGS posting, when sales are posted, then COGS amount comes from method-correct cost calculation.
 
-**Given** company inventory settings  
-**When** accountant selects costing method (AVG/FIFO/LIFO)  
-**Then** all inventory calculations use that method
+## Tasks / Subtasks
 
-**Given** different costing methods  
-**When** methods are applied to same transactions  
-**Then** different costs result (method-specific behavior)
+- [ ] Task 1: Add cost-layer schema and migration guardrails (AC: 1, 5, 6)
+  - [ ] Create `inventory_cost_layers` table without DB enum (use varchar/int code for layer type)
+  - [ ] Create `inventory_item_costs` summary table for fast AVG lookups
+  - [ ] Add MySQL/MariaDB-safe rerunnable DDL using `information_schema` checks
+  - [ ] Add indexes for `(company_id, item_id, acquired_at)` and remaining-quantity lookups
+- [ ] Task 2: Implement costing engine in API service layer (AC: 1, 2, 3, 4, 6)
+  - [ ] Create calculator abstraction for `AVG | FIFO | LIFO`
+  - [ ] Implement weighted AVG computation from inbound layers/summary table
+  - [ ] Implement FIFO and LIFO layer consumption with transactional updates
+  - [ ] Enforce no negative remaining quantity at layer level
+- [ ] Task 3: Integrate cost updates with inventory mutations (AC: 5, 6)
+  - [ ] On purchase/receiving or positive adjustment: create inbound cost layer
+  - [ ] On negative adjustment/sale: consume layers according to active method
+  - [ ] Recalculate/update summary cost table after each relevant mutation
+- [ ] Task 4: Wire Story 4.5 COGS path to method-correct calculator (AC: 7)
+  - [ ] Replace placeholder/simple cost fallback path in COGS service with calculator
+  - [ ] Keep COGS feature-gated behavior: skip when disabled, non-blocking
+  - [ ] Preserve journal balancing and tenant scoping invariants
+- [ ] Task 5: Add API read endpoints for transparency and debugging (AC: 2, 5)
+  - [ ] `GET /inventory/items/[itemId]/cost-layers`
+  - [ ] `GET /inventory/items/[itemId]/current-cost`
+  - [ ] Validate auth, company/outlet access, and response contracts
+- [ ] Task 6: Add tests and regression coverage (AC: 1-7)
+  - [ ] Unit tests per method (AVG/FIFO/LIFO) with deterministic fixtures
+  - [ ] Integration tests for layer creation/consumption and COGS posting amount
+  - [ ] Edge cases: insufficient inventory, zero-cost rows, concurrent sales
+  - [ ] Ensure DB pool cleanup in all DB-using test files
 
-### Average Costing (AVG)
+## Dev Notes
 
-**Given** inventory purchases:
-- 100 units @ $10 = $1,000
-- 50 units @ $12 = $600  
-**When** average cost is calculated  
-**Then** avg cost = ($1,000 + $600) / 150 = $10.67 per unit
+- Build on existing Story 4.5 foundation; do not create parallel costing logic in multiple places.
+- Money and cost precision must remain deterministic (`DECIMAL` in DB, minor-unit-safe math in service).
+- Keep accounting invariant: COGS postings must reconcile with journal totals.
+- Keep POS/sales resilience invariant: if COGS path fails, revenue posting should remain non-blocking where feature-gated behavior requires.
 
-**Given** average cost is $10.67  
-**When** 30 units are sold  
-**Then** COGS = 30 × $10.67 = $320.10
+### Technical Requirements
 
-### FIFO Costing
+- Use `@/` import aliases in API code (no deep relative `../../` imports). [Source: `AGENTS.md` Import path conventions]
+- Avoid DB `ENUM` for new schema additions; represent method/type using `VARCHAR` or integer code.
+- Migrations must be rerunnable and portable for MySQL 8.0+ and MariaDB (non-atomic DDL safe).
+- No `FLOAT/DOUBLE` for monetary/cost fields.
+- All write paths must enforce `company_id`; enforce `outlet_id` where relevant.
 
-**Given** inventory purchases in order:
-1. 100 units @ $10
-2. 50 units @ $12  
-**When** 120 units are sold  
-**Then** COGS = (100 × $10) + (20 × $12) = $1,240  
-**And** remaining inventory = 30 units @ $12 = $360
+### Architecture Compliance
 
-### LIFO Costing
+- Accounting/GL stays source of truth for financial effects. [Source: `docs/adr/ADR-0001-gl-as-source-of-truth.md`]
+- POS/sales offline and retry safety must not regress due to costing changes. [Source: `docs/project-context.md`]
+- Shared contracts go through `packages/shared/src/schemas/*` for API boundaries.
+- COGS remains feature-gated (optional) per inventory module config.
 
-**Given** inventory purchases in order:
-1. 100 units @ $10
-2. 50 units @ $12  
-**When** 120 units are sold  
-**Then** COGS = (50 × $12) + (70 × $10) = $1,300  
-**And** remaining inventory = 30 units @ $10 = $300
+### Library / Framework Requirements
 
-### Cost Layer Tracking
+- Runtime and language: Node.js 20.x + TypeScript.
+- DB access: existing `mysql2` transaction patterns in `apps/api/src/lib/*`.
+- Validation: Zod schemas in `packages/shared` and route-level parse.
+- Keep existing test stack (`node:test`, API integration style in repo).
 
-**Given** inventory transactions over time  
-**When** costs are tracked  
-**Then** each purchase creates a cost layer with quantity and unit cost
+### File Structure Requirements
 
-**Given** inventory is sold  
-**When** costs are consumed  
-**Then** cost layers are reduced according to costing method
+- DB migrations: `packages/db/migrations/*.sql`
+- Cost service implementation: `apps/api/src/lib/` (follow `cogs-posting.ts` and `recipe-composition.ts` structure)
+- Routes: `apps/api/app/api/inventory/**/route.ts`
+- Shared contracts: `packages/shared/src/schemas/`
+- Backoffice display hooks/components only if required by ACs; avoid unnecessary UI churn in this story.
 
----
+### Testing Requirements
 
-## Technical Design
+- Unit tests for calculator methods with table-driven scenarios.
+- Integration tests around posting boundary (sales -> COGS amount correctness).
+- Validate idempotent behavior for retried operations where applicable.
+- Ensure every DB-using test file closes pool:
+  - `test.after(async () => { await closeDbPool(); });`
 
-### Database Schema
+### Previous Story Intelligence (4.5)
 
-```sql
--- Migration: 0XXX_create_inventory_cost_layers.sql
-CREATE TABLE inventory_cost_layers (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  company_id BIGINT UNSIGNED NOT NULL,
-  item_id BIGINT UNSIGNED NOT NULL,
-  layer_type ENUM('PURCHASE', 'ADJUSTMENT', 'OPENING_BALANCE') DEFAULT 'PURCHASE',
-  quantity DECIMAL(10,3) NOT NULL,
-  unit_cost DECIMAL(15,4) NOT NULL,
-  remaining_quantity DECIMAL(10,3) NOT NULL, -- For FIFO/LIFO tracking
-  total_cost DECIMAL(15,4) NOT NULL,
-  transaction_id BIGINT UNSIGNED, -- Reference to purchase/adjustment
-  transaction_type VARCHAR(50), -- 'PURCHASE_ORDER', 'ADJUSTMENT', etc.
-  acquired_at TIMESTAMP NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  
-  FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
-  FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
-  
-  INDEX idx_item_layers (company_id, item_id, acquired_at),
-  INDEX idx_remaining (company_id, item_id, remaining_quantity)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+- Story 4.5 already introduced `cogs-posting.ts` and sales integration hook points; reuse those extension seams.
+- Current system has feature-gated COGS behavior in sales posting path; keep optional behavior intact.
+- Existing COGS implementation and tests surfaced schema-contract mismatch risks; align migrations first, then code.
 
--- Track current average cost per item
-CREATE TABLE inventory_item_costs (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  company_id BIGINT UNSIGNED NOT NULL,
-  item_id BIGINT UNSIGNED NOT NULL,
-  current_avg_cost DECIMAL(15,4) DEFAULT 0,
-  total_quantity DECIMAL(10,3) DEFAULT 0,
-  total_value DECIMAL(15,4) DEFAULT 0,
-  last_calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  
-  FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
-  FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
-  
-  UNIQUE KEY uk_company_item (company_id, item_id),
-  INDEX idx_item_cost (company_id, item_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-```
+### Git Intelligence Summary
 
-### Cost Calculation Service
+- Recent commits show active refactoring in items/prices and heavy API typing cleanup; maintain established patterns rather than introducing new architectural style.
+- Test hygiene fixes were recently needed in integration tests; prioritize deterministic cleanup and fixture isolation.
 
-```typescript
-// packages/modules-inventory/src/costing/cost-calculator.ts
+### Latest Tech Information
 
-type CostingMethod = 'AVG' | 'FIFO' | 'LIFO';
+- MySQL CHECK constraints are enforced from MySQL 8.0.16+; name constraints explicitly for maintainability. [Source: MySQL 8.0 manual: CHECK Constraints]
+- MariaDB supports CHECK constraints and allows `ALTER TABLE ... DROP CONSTRAINT`; syntax differs from MySQL in some versions, so guarded dynamic DDL remains safest. [Source: MariaDB KB: CONSTRAINT / CHECK]
 
-interface CostLayer {
-  id: number;
-  companyId: number;
-  itemId: number;
-  layerType: 'PURCHASE' | 'ADJUSTMENT' | 'OPENING_BALANCE';
-  quantity: number;
-  unitCost: number;
-  remainingQuantity: number;
-  totalCost: number;
-  acquiredAt: Date;
-}
+### Project Structure Notes
 
-interface CostCalculationResult {
-  totalCost: number;
-  layersConsumed: Array<{
-    layerId: number;
-    quantityTaken: number;
-    unitCost: number;
-    lineCost: number;
-  }>;
-  newAvgCost?: number; // For AVG method
-}
+- Existing repo has both planning and implementation artifacts; this file is implementation-ready context, not product spec prose.
+- Costing implementation should avoid adding duplicate domain modules unless required; prefer extending current API lib + shared contract flow first.
 
-// Main calculator class
-export class CostCalculator {
-  constructor(
-    private method: CostingMethod,
-    private companyId: number
-  ) {}
-  
-  async calculateCogs(
-    itemId: number,
-    quantityToSell: number
-  ): Promise<CostCalculationResult> {
-    switch (this.method) {
-      case 'AVG':
-        return this.calculateAvgCost(itemId, quantityToSell);
-      case 'FIFO':
-        return this.calculateFifoCost(itemId, quantityToSell);
-      case 'LIFO':
-        return this.calculateLifoCost(itemId, quantityToSell);
-      default:
-        throw new Error(`Unknown costing method: ${this.method}`);
-    }
-  }
-  
-  async addInventory(
-    itemId: number,
-    quantity: number,
-    unitCost: number,
-    transactionId: number,
-    transactionType: string
-  ): Promise<void> {
-    // Create new cost layer
-    await createCostLayer({
-      companyId: this.companyId,
-      itemId,
-      quantity,
-      remainingQuantity: quantity,
-      unitCost,
-      totalCost: quantity * unitCost,
-      transactionId,
-      transactionType,
-      acquiredAt: new Date()
-    });
-    
-    // Update AVG cost if using AVG method
-    if (this.method === 'AVG') {
-      await recalculateAvgCost(this.companyId, itemId);
-    }
-  }
-  
-  private async calculateAvgCost(
-    itemId: number,
-    quantity: number
-  ): Promise<CostCalculationResult> {
-    const currentCost = await getItemCurrentCost(this.companyId, itemId);
-    const totalCost = quantity * currentCost.currentAvgCost;
-    
-    return {
-      totalCost,
-      layersConsumed: [{
-        layerId: 0, // AVG doesn't use layers
-        quantityTaken: quantity,
-        unitCost: currentCost.currentAvgCost,
-        lineCost: totalCost
-      }]
-    };
-  }
-  
-  private async calculateFifoCost(
-    itemId: number,
-    quantity: number
-  ): Promise<CostCalculationResult> {
-    const layers = await getCostLayers(this.companyId, itemId, 'ASC');
-    return this.consumeLayers(layers, quantity);
-  }
-  
-  private async calculateLifoCost(
-    itemId: number,
-    quantity: number
-  ): Promise<CostCalculationResult> {
-    const layers = await getCostLayers(this.companyId, itemId, 'DESC');
-    return this.consumeLayers(layers, quantity);
-  }
-  
-  private async consumeLayers(
-    layers: CostLayer[],
-    quantityNeeded: number
-  ): Promise<CostCalculationResult> {
-    const consumed: CostCalculationResult['layersConsumed'] = [];
-    let remainingToConsume = quantityNeeded;
-    let totalCost = 0;
-    
-    for (const layer of layers) {
-      if (remainingToConsume <= 0) break;
-      if (layer.remainingQuantity <= 0) continue;
-      
-      const takeFromLayer = Math.min(
-        remainingToConsume,
-        layer.remainingQuantity
-      );
-      
-      const lineCost = takeFromLayer * layer.unitCost;
-      totalCost += lineCost;
-      
-      consumed.push({
-        layerId: layer.id,
-        quantityTaken: takeFromLayer,
-        unitCost: layer.unitCost,
-        lineCost
-      });
-      
-      // Update layer remaining quantity
-      await updateLayerRemainingQuantity(
-        layer.id,
-        layer.remainingQuantity - takeFromLayer
-      );
-      
-      remainingToConsume -= takeFromLayer;
-    }
-    
-    if (remainingToConsume > 0) {
-      throw new InsufficientInventoryError(
-        `Not enough inventory layers to fulfill quantity. Missing: ${remainingToConsume}`
-      );
-    }
-    
-    return { totalCost, layersConsumed: consumed };
-  }
-}
+### References
 
-// Helper functions
-async function recalculateAvgCost(companyId: number, itemId: number): Promise<void> {
-  const layers = await getCostLayers(companyId, itemId);
-  
-  const totalQty = layers.reduce((sum, l) => sum + l.remainingQuantity, 0);
-  const totalValue = layers.reduce(
-    (sum, l) => sum + (l.remainingQuantity * l.unitCost),
-    0
-  );
-  
-  const avgCost = totalQty > 0 ? totalValue / totalQty : 0;
-  
-  await upsertItemCost(companyId, itemId, {
-    currentAvgCost: avgCost,
-    totalQuantity: totalQty,
-    totalValue: totalValue
-  });
-}
-```
+- Epic baseline and FR mapping: [Source: `_bmad-output/planning-artifacts/epics.md#Epic 4`]
+- Product requirements and NFRs: [Source: `_bmad-output/planning-artifacts/prd.md#Functional Requirements`]
+- Architecture constraints and stack: [Source: `_bmad-output/planning-artifacts/architecture.md#Established Patterns`]
+- Previous story learnings: [Source: `_bmad-output/implementation-artifacts/4-5-cogs-integration.md`]
+- Repo operational guardrails: [Source: `AGENTS.md`]
+- Project context summary: [Source: `docs/project-context.md`]
 
-### Integration Points
+## Dev Agent Record
 
-1. **Purchase Orders** - When items received, add to cost layers
-2. **Stock Adjustments** - Adjust cost layers appropriately
-3. **Sales** - Calculate COGS when items sold (Story 4.5)
-4. **Inventory Reports** - Show current valuation by method
+### Agent Model Used
 
----
+openai/gpt-5.3-codex
 
-## Implementation Tasks
+### Debug Log References
 
-### 1. Database (1 hour)
-- [ ] Migration for `inventory_cost_layers` table
-- [ ] Migration for `inventory_item_costs` table
-- [ ] Indexes for performance
-- [ ] Test migrations on MySQL and MariaDB
+- Loaded and analyzed: config, sprint status, template, checklist, epics/prd/architecture, project-context, Story 4.5, existing Story 4.6 draft.
+- Reviewed recent git commits and touched files for implementation pattern continuity.
+- Added latest MySQL/MariaDB CHECK constraint references to migration guardrails.
 
-### 2. Core Costing Module (3 hours)
-- [ ] Create `packages/modules-inventory/src/costing/` module
-- [ ] Implement `CostCalculator` class with all three methods
-- [ ] Implement cost layer CRUD operations
-- [ ] Add average cost recalculation logic
-- [ ] Handle edge cases (negative inventory, zero costs)
+### Completion Notes List
 
-### 3. Purchase Integration (1.5 hours)
-- [ ] Add cost layers when purchase orders received
-- [ ] Handle purchase returns (reverse layers)
-- [ ] Support purchase price adjustments
+- Ultimate context engine analysis completed - comprehensive developer guide created.
+- Story reshaped from high-level draft into implementation-ready blueprint with explicit guardrails.
 
-### 4. Stock Adjustment Integration (1 hour)
-- [ ] Update cost layers on inventory adjustments
-- [ ] Handle positive adjustments (add layers)
-- [ ] Handle negative adjustments (consume layers)
+### File List
 
-### 5. API Endpoints (1 hour)
-- [ ] `GET /inventory/items/[itemId]/cost-layers` - View cost history
-- [ ] `GET /inventory/items/[itemId]/current-cost` - Get current valuation
-- [ ] `POST /inventory/cost-layers/recalculate` - Recalculate AVG costs
-
-### 6. UI Updates (1.5 hours)
-- [ ] Display cost layers in item details
-- [ ] Show current average cost
-- [ ] Cost history chart/graph
-- [ ] Method selection validation
-
-### 7. Testing (2 hours)
-- [ ] Unit tests for each costing method
-- [ ] FIFO/LIFO layer consumption tests
-- [ ] Average cost recalculation tests
-- [ ] Edge case tests (zero qty, negative, etc.)
-- [ ] Integration tests with purchases/sales
-
----
-
-## Files to Create/Modify
-
-### New Files
-```
-packages/db/migrations/0XXX_create_inventory_cost_layers.sql
-packages/db/migrations/0XXX_create_inventory_item_costs.sql
-packages/modules-inventory/src/costing/cost-calculator.ts
-packages/modules-inventory/src/costing/cost-calculator.test.ts
-packages/modules-inventory/src/costing/layer-repository.ts
-packages/modules-inventory/src/costing/index.ts
-apps/api/app/api/inventory/items/[itemId]/cost-layers/route.ts
-apps/api/app/api/inventory/items/[itemId]/current-cost/route.ts
-apps/backoffice/src/features/item-cost-history.tsx
-```
-
-### Modified Files
-```
-apps/api/src/lib/purchase-orders.ts
-  - Add cost layers on item receipt
-
-apps/api/src/lib/stock.ts
-  - Use CostCalculator for COGS (integrate with Story 4.5)
-
-apps/backoffice/src/features/inventory-settings-page.tsx
-  - Validate costing method selection
-
-apps/backoffice/src/features/items-prices-page.tsx
-  - Show current cost in item list
-  - Link to cost history
-```
-
----
-
-## Cost Method Examples
-
-### Scenario: Coffee Inventory
-**Purchases:**
-- Jan 1: 100 units @ $10.00
-- Jan 15: 50 units @ $12.00
-- Jan 20: Sell 120 units
-
-**AVG Method:**
-- Average = ((100 × $10) + (50 × $12)) / 150 = $10.67
-- COGS = 120 × $10.67 = $1,280.40
-- Remaining: 30 units @ $10.67 = $320.10
-
-**FIFO Method:**
-- From Jan 1 layer: 100 units @ $10 = $1,000
-- From Jan 15 layer: 20 units @ $12 = $240
-- COGS = $1,240
-- Remaining: 30 units @ $12 = $360
-
-**LIFO Method:**
-- From Jan 15 layer: 50 units @ $12 = $600
-- From Jan 1 layer: 70 units @ $10 = $700
-- COGS = $1,300
-- Remaining: 30 units @ $10 = $300
-
----
-
-## Definition of Done
-
-- [ ] All three costing methods implemented
-- [ ] Cost layers tracked in database
-- [ ] Purchase integration complete
-- [ ] Adjustment integration complete
-- [ ] API endpoints for cost queries
-- [ ] UI shows cost history and current valuation
-- [ ] Unit tests for all methods
-- [ ] Integration tests passing
-- [ ] Documentation updated
-
----
-
-## Dependencies
-
-- ✅ Inventory settings page (exists)
-- ✅ Items table with inventory tracking
-- 🔧 Story 4.5: COGS Integration (uses this for cost calculation)
-- 🔧 Purchase order system (for adding cost layers)
-
----
-
-**Story Status:** Ready for Development 🔧  
-**Note:** This enhances Story 4.5 (COGS Integration) - can be done in parallel or after
+- `_bmad-output/implementation-artifacts/4-6-cost-tracking-methods.md`

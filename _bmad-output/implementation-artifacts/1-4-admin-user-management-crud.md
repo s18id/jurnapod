@@ -1,6 +1,12 @@
-# Story 1.4: Admin User Management (CRUD)
+---
+epic: 1
+story: 1.4
+title: Admin User Management (CRUD)
+status: done
+created: 2026-03-15
+---
 
-Status: review
+# Story 1.4: Admin User Management (CRUD)
 
 ## Story
 

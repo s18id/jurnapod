@@ -37,7 +37,6 @@ import {
   DailySalesPage,
   ForbiddenPage,
   ItemGroupsPage,
-  ItemsPricesPage,
   ItemsPage,
   PricesPage,
   JournalsPage,
@@ -258,7 +257,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   if (props.path === "/cash-bank") {
     return <CashBankPage user={props.user} accessToken={props.accessToken} />;
   }
-  return <ItemsPricesPage user={props.user} accessToken={props.accessToken} />;
+  // Fallback: redirect to items page
+  window.location.hash = "#/items";
+  return <ItemsPage user={props.user} accessToken={props.accessToken} />;
 }
 
 export function AppRouter() {

@@ -67,6 +67,8 @@ export const ItemCreateRequestSchema = z.object({
   name: z.string().trim().min(1).max(191),
   type: ItemTypeSchema,
   item_group_id: NumericIdSchema.nullable().optional(),
+  cogs_account_id: NumericIdSchema.nullable().optional(),
+  inventory_asset_account_id: NumericIdSchema.nullable().optional(),
   is_active: z.boolean().optional()
 });
 
@@ -76,6 +78,8 @@ export const ItemUpdateRequestSchema = z
     name: z.string().trim().min(1).max(191).optional(),
     type: ItemTypeSchema.optional(),
     item_group_id: NumericIdSchema.nullable().optional(),
+    cogs_account_id: NumericIdSchema.nullable().optional(),
+    inventory_asset_account_id: NumericIdSchema.nullable().optional(),
     is_active: z.boolean().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
@@ -126,6 +130,56 @@ export const ItemGroupBulkCreateRowSchema = z.object({
   name: z.string().trim().min(1).max(191),
   parent_code: optionalShortTextSchemaWithMax64.nullable().optional(),
   is_active: z.boolean().optional()
+});
+
+// Recipe Ingredient Schemas
+export const CreateRecipeIngredientSchema = z.object({
+  ingredient_item_id: NumericIdSchema,
+  quantity: z.coerce.number().finite().positive(),
+  unit_of_measure: z.string().trim().min(1).max(20).optional()
+});
+
+export const UpdateRecipeIngredientSchema = z
+  .object({
+    quantity: z.coerce.number().finite().positive().optional(),
+    unit_of_measure: z.string().trim().min(1).max(20).optional(),
+    is_active: z.boolean().optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided"
+  });
+
+export const RecipeIngredientResponseSchema = z.object({
+  id: NumericIdSchema,
+  recipe_item_id: NumericIdSchema,
+  ingredient_item_id: NumericIdSchema,
+  ingredient_name: z.string(),
+  ingredient_sku: z.string().nullable(),
+  ingredient_type: z.enum(["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"]),
+  quantity: z.number(),
+  unit_of_measure: z.string(),
+  unit_cost: z.number(),
+  total_cost: z.number(),
+  is_active: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string()
+});
+
+export const RecipeCostResponseSchema = z.object({
+  recipe_item_id: NumericIdSchema,
+  total_ingredient_cost: z.number(),
+  ingredient_count: z.number(),
+  ingredients: z.array(
+    z.object({
+      ingredient_item_id: NumericIdSchema,
+      name: z.string(),
+      sku: z.string().nullable(),
+      quantity: z.number(),
+      unit_of_measure: z.string(),
+      unit_cost: z.number(),
+      line_cost: z.number()
+    })
+  )
 });
 
 export const ItemGroupBulkCreateRequestSchema = z.object({
@@ -392,3 +446,9 @@ export const SyncPullResponseSchema = z.object({
 export type ItemType = z.infer<typeof ItemTypeSchema>;
 export type SyncPullPayload = z.infer<typeof SyncPullPayloadSchema>;
 export type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;
+
+// Recipe Ingredient Types
+export type CreateRecipeIngredientRequest = z.infer<typeof CreateRecipeIngredientSchema>;
+export type UpdateRecipeIngredientRequest = z.infer<typeof UpdateRecipeIngredientSchema>;
+export type RecipeIngredientResponse = z.infer<typeof RecipeIngredientResponseSchema>;
+export type RecipeCostResponse = z.infer<typeof RecipeCostResponseSchema>;
