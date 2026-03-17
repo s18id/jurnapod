@@ -331,6 +331,148 @@ test("Cost Tracking Database Tests", async (t) => {
     const expectedCost = 60 * expectedAvg;
     assert.ok(Math.abs(result.totalCost - expectedCost) <= 0.01);
     assert.strictEqual(result.consumedLayers.length, 0);
+
+    // Verify summary state was updated (qty and cost reduced)
+    const summaryAfter = await getItemCostSummary(TEST_COMPANY_ID, testItemId, conn);
+    assert.ok(summaryAfter);
+    assert.strictEqual(summaryAfter!.totalLayersQty, 90); // 150 - 60 consumed
+    assert.ok(Math.abs(summaryAfter!.totalLayersCost - 960) <= 0.01); // 1600 - 640
+    assert.ok(Math.abs(summaryAfter!.currentAvgCost! - expectedAvg) <= 0.01); // avg remains same
+  });
+
+  await t.test("AVG: state depletes correctly on multiple consumes", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `AVG Depletion Test ${RUN_ID}`);
+
+    // Set method to AVG
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
+
+    // Create layer: 100 @ 10
+    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 100);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId1,
+        unitCost: 10.0,
+        quantity: 100,
+      },
+      conn
+    );
+
+    // First consume: 30 units @ 10 = 300
+    const saleTxId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -30);
+    const result1 = await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 30,
+        transactionId: saleTxId1,
+      },
+      conn
+    );
+    assert.strictEqual(result1.totalCost, 300);
+
+    // Verify state after first consume
+    const summary1 = await getItemCostSummary(TEST_COMPANY_ID, testItemId, conn);
+    assert.ok(summary1);
+    assert.strictEqual(summary1!.totalLayersQty, 70); // 100 - 30
+    assert.strictEqual(summary1!.totalLayersCost, 700); // 1000 - 300
+    assert.strictEqual(summary1!.currentAvgCost!, 10); // avg unchanged for same cost
+
+    // Second consume: 40 units @ 10 = 400
+    const saleTxId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -40);
+    const result2 = await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 40,
+        transactionId: saleTxId2,
+      },
+      conn
+    );
+    assert.strictEqual(result2.totalCost, 400);
+
+    // Verify state after second consume
+    const summary2 = await getItemCostSummary(TEST_COMPANY_ID, testItemId, conn);
+    assert.ok(summary2);
+    assert.strictEqual(summary2!.totalLayersQty, 30); // 70 - 40
+    assert.strictEqual(summary2!.totalLayersCost, 300); // 700 - 400
+    assert.strictEqual(summary2!.currentAvgCost!, 10);
+
+    // Third consume: 30 units @ 10 = 300 (exactly remaining)
+    const saleTxId3 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -30);
+    const result3 = await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 30,
+        transactionId: saleTxId3,
+      },
+      conn
+    );
+    assert.strictEqual(result3.totalCost, 300);
+
+    // Verify state after exhaustion
+    const summary3 = await getItemCostSummary(TEST_COMPANY_ID, testItemId, conn);
+    assert.ok(summary3);
+    assert.strictEqual(summary3!.totalLayersQty, 0);
+    assert.strictEqual(summary3!.totalLayersCost, 0);
+    assert.strictEqual(summary3!.currentAvgCost!, 0); // avg 0 when qty 0
+  });
+
+  await t.test("AVG: insufficient inventory after depletion", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `AVG Insufficient Test ${RUN_ID}`);
+
+    // Set method to AVG
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
+
+    // Create layer: 50 @ 10
+    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId1,
+        unitCost: 10.0,
+        quantity: 50,
+      },
+      conn
+    );
+
+    // First consume: 30 units (leaves 20)
+    const saleTxId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -30);
+    await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 30,
+        transactionId: saleTxId1,
+      },
+      conn
+    );
+
+    // Try to consume 30 more (only 20 available)
+    const saleTxId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -30);
+    await assert.rejects(
+      calculateCost(
+        {
+          companyId: TEST_COMPANY_ID,
+          itemId: testItemId,
+          quantity: 30,
+          transactionId: saleTxId2,
+        },
+        conn
+      ),
+      InsufficientInventoryError
+    );
+
+    // Verify state unchanged after failed attempt
+    const summary = await getItemCostSummary(TEST_COMPANY_ID, testItemId, conn);
+    assert.ok(summary);
+    assert.strictEqual(summary!.totalLayersQty, 20);
+    assert.strictEqual(summary!.totalLayersCost, 200);
   });
 
   await t.test("FIFO insufficient: no partial writes", async () => {

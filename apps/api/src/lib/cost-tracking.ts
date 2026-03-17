@@ -121,8 +121,8 @@ class AVGCostingStrategy implements CostingStrategy {
   ): Promise<CostCalculationResult> {
     // Lock summary row to prevent concurrent updates
     const [summaryRows] = await conn.execute(
-      `SELECT current_avg_cost, total_layers_qty 
-       FROM inventory_item_costs 
+      `SELECT costing_method, current_avg_cost, total_layers_qty, total_layers_cost
+       FROM inventory_item_costs
        WHERE company_id = ? AND item_id = ?
        FOR UPDATE`,
       [input.companyId, input.itemId]
@@ -131,6 +131,7 @@ class AVGCostingStrategy implements CostingStrategy {
     const summary = (summaryRows as any[])[0];
     const avgCost = Number(summary?.current_avg_cost ?? 0);
     const availableQty = Number(summary?.total_layers_qty ?? 0);
+    const totalLayersCost = Number(summary?.total_layers_cost ?? 0);
 
     // Validate sufficient inventory
     if (availableQty < input.quantity) {
@@ -140,6 +141,30 @@ class AVGCostingStrategy implements CostingStrategy {
     // Calculate total cost using minor-unit math
     const totalCostMinor = toMinorUnits(avgCost) * input.quantity;
     const totalCost = fromMinorUnits(totalCostMinor);
+
+    // Update summary state: reduce available quantity and total cost
+    const newQty = availableQty - input.quantity;
+    const newTotalCost = totalLayersCost - totalCost;
+    const newAvg = newQty > 0 ? newTotalCost / newQty : 0;
+
+    // Preserve existing costing_method or default to AVG
+    const summaryMethod = summary?.costing_method ? String(summary.costing_method) : null;
+    const currentMethod: CostingMethod =
+      summaryMethod === "AVG" || summaryMethod === "FIFO" || summaryMethod === "LIFO"
+        ? summaryMethod
+        : "AVG";
+
+    await conn.execute(
+      `INSERT INTO inventory_item_costs
+       (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+       costing_method = VALUES(costing_method),
+       current_avg_cost = VALUES(current_avg_cost),
+       total_layers_qty = VALUES(total_layers_qty),
+       total_layers_cost = VALUES(total_layers_cost)`,
+      [input.companyId, input.itemId, currentMethod, newAvg, newQty, newTotalCost]
+    );
 
     // AVG method doesn't track specific layers consumed
     return {
