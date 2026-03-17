@@ -2,21 +2,69 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { createServer } from "node:net";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import mysql from "mysql2/promise";
 import { setupIntegrationTests } from "./integration-harness.mjs";
+
+// Import helpers
+import {
+  readEnv,
+  delay,
+  parseJsonResponse,
+  toMysqlDateTime,
+  getFreePort,
+  startApiServer,
+  waitForHealthcheck,
+  stopApiServer,
+  buildSyncTransaction,
+  assertSyncPushResponseShape,
+  computeLegacyPayloadSha256
+} from "./helpers/sync-push-runtime.mjs";
+
+import {
+  ensureOpenFiscalDate,
+  countAcceptedSyncPushEvents,
+  countDuplicateSyncPushEvents,
+  readAcceptedSyncPushAuditPayload,
+  readPostingHookFailureAuditPayload,
+  readDuplicateSyncPushAuditPayload,
+  countSyncPushPersistedRows,
+  countSyncPushJournalRows,
+  readSyncPushJournalSummary,
+  setCompanyDefaultTaxRate,
+  restoreCompanyDefaultTaxRate,
+  ensureOutletAccountMappings,
+  cleanupCreatedOutletAccountMappings,
+  cleanupSyncPushPersistedArtifacts,
+  cleanupOrderSyncArtifacts,
+  hasTable,
+  POS_SALE_DOC_TYPE,
+  OUTLET_ACCOUNT_MAPPING_KEYS
+} from "./helpers/sync-push-db.mjs";
+
+import {
+  cleanupInventoryAndCostArtifacts,
+  setupTrackedItemWithCost,
+  setupCogsAccounts,
+  enableCogsFeature,
+  disableCogsFeature,
+  cleanupCogsAccounts,
+  cleanupTrackedItems,
+  countCogsJournalRows,
+  getProductStockQuantity,
+  getInventoryTransactions,
+  getCostLayerConsumption,
+  verifyCogsJournalBalance,
+  buildSyncTransactionWithItems
+} from "./helpers/sync-push-costing.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const apiRoot = path.resolve(__dirname, "../..");
 const repoRoot = path.resolve(apiRoot, "../..");
-const serverScriptPath = path.resolve(apiRoot, "src/server.ts");
 const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
@@ -32,8 +80,6 @@ const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
 const SYNC_PUSH_CONCURRENCY_ENV = "JP_SYNC_PUSH_CONCURRENCY";
 const SYNC_PUSH_POSTING_MODE_ENV = "SYNC_PUSH_POSTING_MODE";
 const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
-const POS_SALE_DOC_TYPE = "POS_SALE";
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "AR"];
 
 const testContext = setupIntegrationTests(test);
 const localServerTest =
@@ -53,6 +99,7 @@ function readEnv(name, fallback = null) {
 
   return value;
 }
+
 
 function dbConfigFromEnv() {
   const port = Number(process.env.DB_PORT ?? "3306");
@@ -818,6 +865,215 @@ async function hasTable(db, tableName) {
   );
 
   return rows.length > 0;
+}
+
+// C7/C8: Scope C helpers for COGS integration testing
+
+/**
+ * Cleanup inventory transactions and cost artifacts for a client_tx_id
+ * Extends cleanupSyncPushPersistedArtifacts for Scope C
+ */
+async function cleanupInventoryAndCostArtifacts(db, clientTxId) {
+  // Delete cost layer consumption records first (FK to inventory_transactions)
+  await db.execute(
+    `DELETE clc
+     FROM cost_layer_consumption clc
+     INNER JOIN inventory_transactions it ON it.id = clc.transaction_id
+     WHERE it.reference_id = ?`,
+    [clientTxId]
+  );
+
+  // Delete inventory transactions
+  await db.execute(
+    `DELETE FROM inventory_transactions WHERE reference_id = ?`,
+    [clientTxId]
+  );
+}
+
+/**
+ * Setup test item with stock tracking and cost basis
+ * Returns the created item ID
+ */
+async function setupTrackedItemWithCost(db, companyId, outletId, itemSuffix) {
+  const itemCode = `COGS_TEST_${itemSuffix}_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+
+  // Create tracked item
+  const [itemResult] = await db.execute(
+    `INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, created_at, updated_at)
+     VALUES (?, ?, ?, 'PRODUCT', 1, 1, NOW(), NOW())`,
+    [companyId, itemCode, `COGS Test Item ${itemSuffix}`]
+  );
+  const itemId = Number(itemResult.insertId);
+
+  // Set up stock for the item
+  await db.execute(
+    `INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
+     VALUES (?, ?, ?, 100.0000, 0.0000, 100.0000, NOW(), NOW())
+     ON DUPLICATE KEY UPDATE quantity = 100.0000, available_quantity = 100.0000`,
+    [companyId, outletId, itemId]
+  );
+
+  // Set up cost basis (create inbound receipt transaction + cost layer)
+  const [receiptTx] = await db.execute(
+    `INSERT INTO inventory_transactions 
+     (company_id, outlet_id, product_id, transaction_type, quantity_delta, reference_type, reference_id, created_at)
+     VALUES (?, ?, ?, 6, 100.0000, 'RECEIPT', ?, NOW())`,
+    [companyId, outletId, itemId, `cogs-setup-${itemSuffix}`]
+  );
+
+  await db.execute(
+    `INSERT INTO inventory_cost_layers 
+     (company_id, item_id, transaction_id, unit_cost, original_qty, remaining_qty, acquired_at)
+     VALUES (?, ?, ?, 10.00, 100.0000, 100.0000, NOW())`,
+    [companyId, itemId, receiptTx.insertId]
+  );
+
+  // Update cost summary
+  await db.execute(
+    `INSERT INTO inventory_item_costs 
+     (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost)
+     VALUES (?, ?, 'AVG', 10.00, 100.0000, 1000.00)
+     ON DUPLICATE KEY UPDATE 
+     current_avg_cost = 10.00, total_layers_qty = 100.0000, total_layers_cost = 1000.00`,
+    [companyId, itemId]
+  );
+
+  return itemId;
+}
+
+/**
+ * Setup COGS accounts for company
+ * Returns account IDs needed for COGS posting
+ */
+async function setupCogsAccounts(db, companyId) {
+  // Create COGS expense account
+  const [cogsAccountResult] = await db.execute(
+    `INSERT INTO accounts (company_id, code, name, account_type_id, created_at, updated_at)
+     SELECT ?, ?, ?, at.id, NOW(), NOW()
+     FROM account_types at WHERE at.name = 'EXPENSE'
+     LIMIT 1`,
+    [companyId, `COGS_${randomUUID().replace(/-/g, "").slice(0, 8)}`, 'COGS Test Account']
+  );
+  const cogsAccountId = Number(cogsAccountResult.insertId);
+
+  // Create inventory asset account
+  const [invAccountResult] = await db.execute(
+    `INSERT INTO accounts (company_id, code, name, account_type_id, created_at, updated_at)
+     SELECT ?, ?, ?, at.id, NOW(), NOW()
+     FROM account_types at WHERE at.name = 'ASSET'
+     LIMIT 1`,
+    [companyId, `INV_${randomUUID().replace(/-/g, "").slice(0, 8)}`, 'Inventory Asset Test Account']
+  );
+  const inventoryAssetAccountId = Number(invAccountResult.insertId);
+
+  // Set company defaults
+  await db.execute(
+    `INSERT INTO company_account_mappings (company_id, mapping_key, account_id, created_at, updated_at)
+     VALUES (?, 'COGS_DEFAULT', ?, NOW(), NOW()),
+            (?, 'INVENTORY_ASSET_DEFAULT', ?, NOW(), NOW())
+     ON DUPLICATE KEY UPDATE account_id = VALUES(account_id)`,
+    [companyId, cogsAccountId, companyId, inventoryAssetAccountId]
+  );
+
+  return { cogsAccountId, inventoryAssetAccountId };
+}
+
+/**
+ * Enable COGS feature for company
+ */
+async function enableCogsFeature(db, companyId) {
+  // Ensure inventory module exists and is enabled with cogs_enabled
+  await db.execute(
+    `INSERT INTO modules (code, name, description, created_at, updated_at)
+     VALUES ('inventory', 'Inventory', 'Inventory management', NOW(), NOW())
+     ON DUPLICATE KEY UPDATE name = 'Inventory'`,
+  );
+
+  const [moduleRows] = await db.execute(`SELECT id FROM modules WHERE code = 'inventory'`);
+  const moduleId = moduleRows[0]?.id;
+
+  if (!moduleId) {
+    throw new Error('Inventory module not found');
+  }
+
+  await db.execute(
+    `INSERT INTO company_modules (company_id, module_id, enabled, config_json, created_at, updated_at)
+     VALUES (?, ?, 1, '{"cogs_enabled": true}', NOW(), NOW())
+     ON DUPLICATE KEY UPDATE 
+     enabled = 1, 
+     config_json = '{"cogs_enabled": true}'`,
+    [companyId, moduleId]
+  );
+}
+
+/**
+ * Cleanup test accounts created for COGS
+ */
+async function cleanupCogsAccounts(db, companyId) {
+  await db.execute(
+    `DELETE FROM company_account_mappings 
+     WHERE company_id = ? AND mapping_key IN ('COGS_DEFAULT', 'INVENTORY_ASSET_DEFAULT')`,
+    [companyId]
+  );
+
+  // Find and delete test accounts by name pattern
+  await db.execute(
+    `DELETE FROM accounts 
+     WHERE company_id = ? AND name IN ('COGS Test Account', 'Inventory Asset Test Account')`,
+    [companyId]
+  );
+}
+
+/**
+ * Count COGS journal entries for a client_tx_id
+ */
+async function countCogsJournalRows(db, clientTxId) {
+  const [rows] = await db.execute(
+    `SELECT
+       (SELECT COUNT(*) FROM journal_batches jb
+        INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
+        WHERE jb.doc_type = 'COGS'
+          AND pt.client_tx_id = ?) AS cogs_batch_total,
+       (SELECT COUNT(*) FROM journal_lines jl
+        INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
+        INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
+        WHERE jb.doc_type = 'COGS'
+          AND pt.client_tx_id = ?) AS cogs_line_total`,
+    [clientTxId, clientTxId]
+  );
+
+  return {
+    batch_total: Number(rows[0].cogs_batch_total),
+    line_total: Number(rows[0].cogs_line_total)
+  };
+}
+
+/**
+ * Get stock quantity for a product
+ */
+async function getProductStockQuantity(db, companyId, outletId, productId) {
+  const [rows] = await db.execute(
+    `SELECT quantity FROM inventory_stock
+     WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
+    [companyId, outletId, productId]
+  );
+
+  return rows.length > 0 ? Number(rows[0].quantity) : null;
+}
+
+/**
+ * Get inventory transactions for a client_tx_id
+ */
+async function getInventoryTransactions(db, clientTxId) {
+  const [rows] = await db.execute(
+    `SELECT id, product_id, quantity_delta, transaction_type, journal_batch_id
+     FROM inventory_transactions
+     WHERE reference_id = ?
+     ORDER BY id`,
+    [clientTxId]
+  );
+
+  return rows;
 }
 
 test(
@@ -3707,6 +3963,308 @@ localServerTest(
           [companyId, outletId, tableId]
         );
       }
+    }
+  }
+);
+
+// ============================================================================
+// Scope C COGS Integration Tests
+// ============================================================================
+
+localServerTest(
+  "sync push integration: Scope C - active + cogs_enabled with tracked item",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let childProcess;
+    const createdClientTxIds = [];
+    const createdItemIds = [];
+    let postingFixture = null;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      // Setup COGS accounts and enable feature
+      await setupCogsAccounts(db, companyId);
+      await enableCogsFeature(db, companyId);
+      postingFixture = await ensureOutletAccountMappings(db, companyId, outletId);
+
+      // Create tracked item with cost basis
+      const trackedItemId = await setupTrackedItemWithCost(db, companyId, outletId, "happy");
+      createdItemIds.push(trackedItemId);
+
+      // Record initial stock
+      const initialStock = await getProductStockQuantity(db, companyId, outletId, trackedItemId);
+      assert.equal(initialStock, 100);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, {
+        enableSyncPushTestHooks: true,
+        envOverrides: { [SYNC_PUSH_POSTING_MODE_ENV]: "active" }
+      });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const clientTxId = randomUUID();
+      const trxAt = new Date().toISOString();
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            buildSyncTransactionWithItems({
+              clientTxId,
+              companyId,
+              outletId,
+              cashierUserId: ownerUserId,
+              trxAt,
+              items: [{ itemId: trackedItemId, qty: 5, price: 15000, name: "COGS Test Item" }]
+            })
+          ]
+        })
+      });
+
+      assert.equal(response.status, 200);
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+      assert.deepEqual(body.results, [{ client_tx_id: clientTxId, result: "OK" }]);
+      createdClientTxIds.push(clientTxId);
+
+      // Verify stock reduced
+      const finalStock = await getProductStockQuantity(db, companyId, outletId, trackedItemId);
+      assert.equal(finalStock, 95, "Stock should be reduced by 5");
+
+      // Verify inventory transactions created
+      const invTxs = await getInventoryTransactions(db, clientTxId);
+      assert.equal(invTxs.length, 1, "Should have one inventory transaction");
+      assert.equal(invTxs[0].transaction_type, 1, "Should be SALE type"); // SALE = 1
+      assert.equal(Number(invTxs[0].quantity_delta), -5, "Should deduct 5 qty");
+      assert.ok(invTxs[0].journal_batch_id, "Inventory tx should be linked to COGS journal batch");
+
+      // Verify cost consumption
+      const consumption = await getCostLayerConsumption(db, invTxs[0].id);
+      assert.ok(consumption.length > 0, "Should have cost layer consumption");
+
+      // Verify COGS journal created
+      const cogsRows = await countCogsJournalRows(db, clientTxId);
+      assert.equal(cogsRows.batch_total, 1, "Should have one COGS batch");
+      assert.ok(cogsRows.line_total >= 2, "Should have COGS journal lines (debit + credit)");
+
+      // Verify COGS journal is balanced
+      const balanceCheck = await verifyCogsJournalBalance(db, clientTxId);
+      assert.equal(balanceCheck.balanced, true, "COGS journal should be balanced");
+
+      // Verify POS persisted
+      const persisted = await countSyncPushPersistedRows(db, clientTxId);
+      assert.equal(persisted.tx_total, 1);
+      assert.equal(persisted.item_total, 1);
+
+      // Verify revenue journal also created
+      const journalRows = await countSyncPushJournalRows(db, clientTxId);
+      assert.equal(journalRows.batch_total, 1, "Should have revenue journal batch");
+    } finally {
+      await stopApiServer(childProcess);
+
+      // Cleanup in reverse order
+      for (const clientTxId of createdClientTxIds) {
+        await cleanupInventoryAndCostArtifacts(db, clientTxId);
+        await cleanupSyncPushPersistedArtifacts(db, clientTxId);
+      }
+
+      if (postingFixture) {
+        await cleanupCreatedOutletAccountMappings(db, companyId, outletId, postingFixture);
+      }
+
+      await cleanupCogsAccounts(db, companyId);
+      await disableCogsFeature(db, companyId);
+      await cleanupTrackedItems(db, companyId, createdItemIds);
+    }
+  }
+);
+
+localServerTest(
+  "sync push integration: Scope C - shadow mode still deducts stock and cost",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let childProcess;
+    const createdClientTxIds = [];
+    const createdItemIds = [];
+    let postingFixture = null;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      // Setup COGS accounts and enable feature
+      await setupCogsAccounts(db, companyId);
+      await enableCogsFeature(db, companyId);
+      postingFixture = await ensureOutletAccountMappings(db, companyId, outletId);
+
+      // Create tracked item with cost basis
+      const trackedItemId = await setupTrackedItemWithCost(db, companyId, outletId, "shadow");
+      createdItemIds.push(trackedItemId);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, {
+        enableSyncPushTestHooks: true,
+        envOverrides: { [SYNC_PUSH_POSTING_MODE_ENV]: "shadow" }
+      });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const clientTxId = randomUUID();
+      const trxAt = new Date().toISOString();
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            buildSyncTransactionWithItems({
+              clientTxId,
+              companyId,
+              outletId,
+              cashierUserId: ownerUserId,
+              trxAt,
+              items: [{ itemId: trackedItemId, qty: 3, price: 15000, name: "COGS Test Item" }]
+            })
+          ]
+        })
+      });
+
+      assert.equal(response.status, 200);
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+      createdClientTxIds.push(clientTxId);
+
+      // Verify stock reduced (stock+cost still work in shadow mode)
+      const finalStock = await getProductStockQuantity(db, companyId, outletId, trackedItemId);
+      assert.equal(finalStock, 97, "Stock should be reduced by 3 even in shadow mode");
+
+      // Verify inventory transactions created
+      const invTxs = await getInventoryTransactions(db, clientTxId);
+      assert.equal(invTxs.length, 1, "Should have inventory transaction in shadow mode");
+
+      // Verify cost consumption occurred
+      const consumption = await getCostLayerConsumption(db, invTxs[0].id);
+      assert.ok(consumption.length > 0, "Should consume cost in shadow mode");
+
+      // Verify NO COGS journal (posting mode is shadow)
+      const cogsRows = await countCogsJournalRows(db, clientTxId);
+      assert.equal(cogsRows.batch_total, 0, "Should NOT have COGS batch in shadow mode");
+      assert.equal(cogsRows.line_total, 0, "Should NOT have COGS lines in shadow mode");
+
+      // POS should still be persisted
+      const persisted = await countSyncPushPersistedRows(db, clientTxId);
+      assert.equal(persisted.tx_total, 1);
+    } finally {
+      await stopApiServer(childProcess);
+
+      for (const clientTxId of createdClientTxIds) {
+        await cleanupInventoryAndCostArtifacts(db, clientTxId);
+        await cleanupSyncPushPersistedArtifacts(db, clientTxId);
+      }
+
+      if (postingFixture) {
+        await cleanupCreatedOutletAccountMappings(db, companyId, outletId, postingFixture);
+      }
+
+      await cleanupCogsAccounts(db, companyId);
+      await disableCogsFeature(db, companyId);
+      await cleanupTrackedItems(db, companyId, createdItemIds);
     }
   }
 );
