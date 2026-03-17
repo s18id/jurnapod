@@ -181,6 +181,7 @@ test(
     const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
     const ownerPassword = readEnv("JP_OWNER_PASSWORD");
     const runId = Date.now().toString(36);
+    const invoiceDate = new Date().toISOString().slice(0, 10);
 
     try {
       const [ownerRows] = await db.execute(
@@ -267,7 +268,7 @@ test(
         headers: authHeaders,
         body: JSON.stringify({
           outlet_id: outletId,
-          invoice_date: new Date().toISOString().slice(0, 10),
+          invoice_date: invoiceDate,
           tax_amount: 0,
           lines: [
             {
@@ -309,10 +310,10 @@ test(
       const cogsBatchId = Number(batchRows[0].id);
 
       const [lineRows] = await db.execute(
-        `SELECT debit, credit
-         FROM journal_lines
-         WHERE company_id = ?
-           AND journal_batch_id = ?`,
+        `SELECT debit, credit, line_date
+          FROM journal_lines
+          WHERE company_id = ?
+            AND journal_batch_id = ?`,
         [companyId, cogsBatchId]
       );
       assert.ok(lineRows.length >= 2);
@@ -321,6 +322,7 @@ test(
       const totalCredit = lineRows.reduce((sum, row) => sum + Number(row.credit), 0);
       assert.equal(totalDebit, totalCredit);
       assert.ok(totalDebit > 0);
+      assert.ok(lineRows.every((row) => String(row.line_date).slice(0, 10) === invoiceDate));
     } finally {
       if (createdInvoiceIds.length > 0) {
         await db.execute(

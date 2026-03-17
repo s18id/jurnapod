@@ -547,6 +547,9 @@ npm run db:smoke
 | created_at | datetime | NO | | current_timestamp() |
 | updated_at | datetime | NO | | current_timestamp() on update |
 
+Notes:
+- `journal_lines.line_date` is a business/accounting date (`YYYY-MM-DD`) and should be derived from the source document date (for example `invoice_date`), not from runtime timezone clock conversion.
+
 ### module_roles
 
 | Column | Type | Nullable | Key | Default |

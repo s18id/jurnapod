@@ -38,6 +38,10 @@ So that **financial statements reflect true inventory costs and profitability**.
 **When** it's posted  
 **Then** it debits COGS expense account and credits Inventory Asset account
 
+**Given** a sale has business date `invoice_date`  
+**When** COGS journal lines are written  
+**Then** `journal_lines.line_date` must use that business date (DATE-only), not runtime UTC clock date
+
 **Given** multiple inventory items in one sale  
 **When** COGS is calculated  
 **Then** each item's COGS is calculated separately and summed
@@ -413,6 +417,7 @@ async function createCogsJournalBatch(
 - **Account Resolution:** Item-level accounts resolve first, then company defaults via `company_account_mappings`.
 - **Error Handling:** COGS failures fail closed in invoice posting to preserve accounting invariants.
 - **Journal Structure:** COGS debits remain per item; inventory credits are grouped by inventory asset account to avoid cross-account misposting.
+- **Date Semantics:** `journal_lines.line_date` for COGS uses business sale/invoice date (`YYYY-MM-DD`), keeping posting date timezone-neutral and period-correct.
 
 ### Files Modified/Created
 

@@ -5,6 +5,27 @@
 
 ---
 
+## 0. COGS Journal Date Semantics Fix (2026-03-17)
+
+### Changes Made
+
+#### Business Date for COGS Journal Lines
+**Files:**
+- `apps/api/src/lib/cogs-posting.ts`
+- `apps/api/src/lib/sales.ts`
+- `apps/api/src/lib/cogs-posting.test.ts`
+- `apps/api/tests/integration/cogs-posting.integration.test.mjs`
+
+- `journal_lines.line_date` for COGS now uses sale/invoice business date, not runtime UTC date.
+- `postInvoice()` now passes `invoice_date` explicitly into COGS posting.
+- Added unit/integration assertions for `line_date` correctness.
+
+### Why
+- Prevent accounting period drift from timezone/runtime clock differences.
+- Keep journal date semantics aligned with DATE-only business documents.
+
+---
+
 ## 1. Company Currency Code Support
 
 ### Changes Made

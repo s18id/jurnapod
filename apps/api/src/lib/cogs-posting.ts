@@ -102,6 +102,14 @@ function normalizeMoney(value: number): number {
   return fromMinorUnits(toMinorUnits(value));
 }
 
+function toBusinessDate(value: Date): string {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new CogsPostingError("Invalid saleDate for COGS posting");
+  }
+
+  return value.toISOString().slice(0, 10);
+}
+
 async function hasColumn(
   conn: PoolConnection,
   tableName: string,
@@ -337,7 +345,8 @@ interface CogsPostingRepository extends PostingRepository {
 
 class CogsRepository implements CogsPostingRepository {
   constructor(
-    private readonly dbExecutor: { execute: PoolConnection["execute"] }
+    private readonly dbExecutor: { execute: PoolConnection["execute"] },
+    private readonly lineDate: string
   ) {}
 
   async begin(): Promise<void> {
@@ -378,7 +387,7 @@ class CogsRepository implements CogsPostingRepository {
       request.company_id,
       request.outlet_id ?? null,
       line.account_id,
-      new Date().toISOString().slice(0, 10),
+      this.lineDate,
       line.debit,
       line.credit,
       line.description
@@ -501,6 +510,7 @@ export async function postCogsForSale(
     }
     
     const totalCogs = cogsItems.reduce((sum, item) => sum + item.totalCost, 0);
+    const lineDate = toBusinessDate(input.saleDate);
     
     // Build sale detail for mapper
     const saleDetail: CogsSaleDetail = {
@@ -511,7 +521,7 @@ export async function postCogsForSale(
     };
     
     // Create repository and mapper
-    const repository = new CogsRepository(conn);
+    const repository = new CogsRepository(conn, lineDate);
     const mapper = new CogsPostingMapper(conn, saleDetail);
     
     // Create posting request

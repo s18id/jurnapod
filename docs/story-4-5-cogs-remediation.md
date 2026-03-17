@@ -31,8 +31,12 @@ Story: 4-5-cogs-integration
 6. Integration coverage was added.
    - File: `apps/api/tests/integration/cogs-posting.integration.test.mjs`
    - Added tests for:
-     - COGS journal creation and balancing on invoice posting
-     - tenant isolation for item account id assignment
+      - COGS journal creation and balancing on invoice posting
+      - tenant isolation for item account id assignment
+
+7. COGS journal date semantics were corrected.
+   - Files: `apps/api/src/lib/cogs-posting.ts`, `apps/api/src/lib/sales.ts`
+   - Change: `journal_lines.line_date` now uses invoice business date (`saleDate`/`invoice_date`) instead of runtime UTC date.
 
 ## Test evidence
 

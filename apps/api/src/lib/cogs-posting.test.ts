@@ -351,6 +351,8 @@ test("COGS Posting Service", async (t) => {
 
   await t.test("postCogsForSale", async (t2) => {
     await t2.test("should successfully post COGS journal for sale", async () => {
+      const saleDate = new Date("2026-03-17T00:00:00.000Z");
+
       // Create item with stock
       const itemId = await createTestItem(
         conn, TEST_COMPANY_ID, 'Sale Item', 'PRODUCT', true,
@@ -367,7 +369,7 @@ test("COGS Posting Service", async (t) => {
         items: supportsUnitCost
           ? [{ itemId, quantity: 2 }]
           : [{ itemId, quantity: 2, unitCost: 5, totalCost: 10 }],
-        saleDate: new Date(),
+        saleDate,
         postedBy: TEST_USER_ID
       }, conn);
       
@@ -396,11 +398,13 @@ test("COGS Posting Service", async (t) => {
       assert.strictEqual(Number(lines[0].debit), 10.0);
       assert.strictEqual(Number(lines[0].credit), 0);
       assert.strictEqual(lines[0].account_id, cogsAccountId);
+      assert.strictEqual(String(lines[0].line_date).slice(0, 10), "2026-03-17");
       
       // Check credit (Inventory)
       assert.strictEqual(Number(lines[1].debit), 0);
       assert.strictEqual(Number(lines[1].credit), 10.0);
       assert.strictEqual(lines[1].account_id, inventoryAccountId);
+      assert.strictEqual(String(lines[1].line_date).slice(0, 10), "2026-03-17");
     });
 
     await t2.test("should calculate costs when not provided", async () => {

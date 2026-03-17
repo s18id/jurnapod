@@ -309,6 +309,7 @@ Add `apps/api/app/api/reports/receivables-ageing/route.ts`.
 - `invoice_date` and `due_date` are SQL `DATE`, timezone-neutral.
 - `as_of_date` is treated as local business date string, not datetime.
 - `DATEDIFF(as_of_date, base_date)` avoids timezone drift from datetime conversion.
+- Journal posting `line_date` must use business document date (`invoice_date`) as `DATE`, not server runtime UTC date.
 - `current` includes not-due and due-today invoices.
 
 ---

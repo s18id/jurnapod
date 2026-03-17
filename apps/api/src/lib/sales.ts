@@ -1349,15 +1349,18 @@ export async function postInvoice(
             companyId: postedInvoice.company_id,
             outletId: postedInvoice.outlet_id,
             items: inventoryItems,
-            saleDate: new Date(postedInvoice.invoice_date),
+            saleDate: new Date(`${postedInvoice.invoice_date}T00:00:00.000Z`),
             postedBy: actor?.userId ?? 0
           },
           connection
         );
 
         if (!cogsResult.success) {
+          const itemSummary = inventoryItems
+            .map((item) => `item:${item.itemId} qty:${item.quantity}`)
+            .join("; ");
           throw new Error(
-            `COGS posting failed for invoice ${postedInvoice.id}: ${(cogsResult.errors ?? []).join(", ")}`
+            `COGS posting failed for invoice ${postedInvoice.id} (${postedInvoice.invoice_no}): ${(cogsResult.errors ?? []).join(", ")}. Items: ${itemSummary}`
           );
         }
       }
