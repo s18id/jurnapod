@@ -22,6 +22,8 @@ import {
   runSyncPushPostingHook
 } from "../../../../src/lib/sync-push-posting";
 import { SyncAuditService, type AuditDbClient } from "@jurnapod/modules-platform/sync";
+import { deductStockWithCost, type StockDeductResult } from "../../../../src/services/stock";
+import { postCogsForSale, type CogsPostingResult } from "../../../../src/lib/cogs-posting";
 
 // Helper to create audit service with proper DB client adapter
 function createSyncAuditService(dbPool: ReturnType<typeof getDbPool>): SyncAuditService {
@@ -287,6 +289,188 @@ function buildTaxLinesForTransaction(params: {
     grossAmount: grossSales,
     rates: defaultTaxRates
   }).filter((tax) => tax.amount > 0);
+}
+
+/**
+ * Resolve stock-tracked items and deduct stock with cost consumption.
+ * This is the C3/C4 integration for Scope C (COGS) - stock deduction happens
+ * regardless of posting mode; COGS posting is gated separately.
+ *
+ * @returns Cost details for COGS posting, or null if no tracked items
+ * @throws Error if stock deduction fails (fail-closed)
+ */
+async function resolveAndDeductStockForTransaction(
+  dbConnection: PoolConnection,
+  tx: SyncPushTransactionPayload,
+  posTransactionId: number
+): Promise<StockDeductResult[] | null> {
+  // Only deduct stock for COMPLETED transactions
+  if (tx.status !== "COMPLETED") {
+    return null;
+  }
+
+  if (tx.items.length === 0) {
+    return null;
+  }
+
+  // Get item_ids from transaction
+  const itemIds = tx.items.map((item) => item.item_id);
+  if (itemIds.length === 0) {
+    return null;
+  }
+
+  // Query which items are stock-tracked
+  const placeholders = itemIds.map(() => "?").join(", ");
+  const [trackedRows] = await dbConnection.execute<RowDataPacket[]>(
+    `SELECT id FROM items
+     WHERE company_id = ?
+       AND id IN (${placeholders})
+       AND track_stock = 1`,
+    [tx.company_id, ...itemIds]
+  );
+
+  const trackedItemIds = new Set((trackedRows as Array<{ id: number }>).map((row) => row.id));
+
+  if (trackedItemIds.size === 0) {
+    return null;
+  }
+
+  // Build stock items for tracked products only
+  const stockItems = tx.items
+    .filter((item) => trackedItemIds.has(item.item_id))
+    .map((item) => ({
+      product_id: item.item_id,
+      quantity: item.qty
+    }));
+
+  if (stockItems.length === 0) {
+    return null;
+  }
+
+  // Deduct stock with cost consumption
+  const stockResults = await deductStockWithCost(
+    tx.company_id,
+    tx.outlet_id,
+    stockItems,
+    tx.client_tx_id, // Use client_tx_id as reference for traceability
+    tx.cashier_user_id,
+    dbConnection
+  );
+
+  return stockResults;
+}
+
+/**
+ * Check if COGS feature is enabled for a company.
+ * Reads from company_modules inventory config.
+ */
+async function isCogsFeatureEnabled(
+  dbConnection: PoolConnection,
+  companyId: number
+): Promise<boolean> {
+  const [rows] = await dbConnection.execute<RowDataPacket[]>(
+    `SELECT cm.enabled, cm.config_json
+     FROM company_modules cm
+     INNER JOIN modules m ON m.id = cm.module_id
+     WHERE cm.company_id = ?
+       AND m.code = 'inventory'
+     LIMIT 1`,
+    [companyId]
+  );
+
+  const moduleRow = rows[0];
+  if (!moduleRow || Number(moduleRow.enabled) !== 1) {
+    return false;
+  }
+
+  if (typeof moduleRow.config_json !== "string" || moduleRow.config_json.trim().length === 0) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(moduleRow.config_json) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return false;
+    }
+
+    const cogsEnabled = (parsed as Record<string, unknown>).cogs_enabled;
+    // Support both boolean and string "1"/"true" formats
+    return cogsEnabled === true || cogsEnabled === 1 || cogsEnabled === "1" || cogsEnabled === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Post COGS journal entries from stock deduction results.
+ * C5 implementation: Uses consumed costs directly (no recalculation).
+ *
+ * @returns COGS posting result or null if no tracked items
+ * @throws Error if COGS posting fails (fail-closed)
+ */
+async function postCogsFromStockResults(
+  dbConnection: PoolConnection,
+  tx: SyncPushTransactionPayload,
+  posTransactionId: number,
+  stockResults: StockDeductResult[] | null,
+  postingMode: string
+): Promise<CogsPostingResult | null> {
+  // Skip if no stock was deducted
+  if (!stockResults || stockResults.length === 0) {
+    return null;
+  }
+
+  // Skip COGS posting in disabled/shadow modes (stock still deducted)
+  if (postingMode !== "active") {
+    return null;
+  }
+
+  // Check if COGS feature is enabled
+  const cogsEnabled = await isCogsFeatureEnabled(dbConnection, tx.company_id);
+  if (!cogsEnabled) {
+    return null;
+  }
+
+  // Build COGS items from stock deduction results
+  // Use consumed costs directly - no recalculation
+  const cogsItems = stockResults.map((result) => ({
+    itemId: result.itemId,
+    quantity: result.quantity,
+    unitCost: result.unitCost,
+    totalCost: result.totalCost
+  }));
+
+  // Post COGS with inventory transaction linkage
+  const cogsResult = await postCogsForSale(
+    {
+      saleId: `POS-${posTransactionId}`,
+      companyId: tx.company_id,
+      outletId: tx.outlet_id,
+      items: cogsItems,
+      saleDate: new Date(tx.trx_at),
+      postedBy: tx.cashier_user_id
+    },
+    dbConnection
+  );
+
+  if (!cogsResult.success) {
+    throw new Error(
+      `COGS posting failed: ${(cogsResult.errors ?? []).join(", ")}`
+    );
+  }
+
+  // Link inventory transactions to COGS journal batch
+  if (cogsResult.journalBatchId) {
+    const inventoryTransactionIds = stockResults.map((r) => r.transactionId);
+    await dbConnection.execute(
+      `UPDATE inventory_transactions 
+       SET journal_batch_id = ? 
+       WHERE id IN (${inventoryTransactionIds.map(() => "?").join(", ")})`,
+      [cogsResult.journalBatchId, ...inventoryTransactionIds]
+    );
+  }
+
+  return cogsResult;
 }
 
 function toErrorResult(clientTxId: string, message: string): SyncPushResultItem {
@@ -852,6 +1036,30 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
              amount
            ) VALUES ${taxPlaceholders}`,
           taxValues
+        );
+      }
+
+      // C3/C4: Deduct stock and consume cost layers for tracked items
+      // This runs regardless of posting mode; COGS posting is gated separately
+      let stockDeductResults: StockDeductResult[] | null = null;
+      if (tx.status === "COMPLETED") {
+        stockDeductResults = await resolveAndDeductStockForTransaction(
+          orderDbConnection,
+          tx,
+          posTransactionId
+        );
+      }
+
+      // C5: Post COGS journal entries from consumed costs (only in active mode + cogs_enabled)
+      // This uses the costs calculated during stock deduction, no recalculation
+      const postingMode = process.env.SYNC_PUSH_POSTING_MODE ?? "disabled";
+      if (stockDeductResults && stockDeductResults.length > 0) {
+        await postCogsFromStockResults(
+          orderDbConnection,
+          tx,
+          posTransactionId,
+          stockDeductResults,
+          postingMode
         );
       }
 

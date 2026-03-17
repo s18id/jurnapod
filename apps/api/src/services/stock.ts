@@ -10,7 +10,8 @@
 
 import { getDbPool } from "@/lib/db";
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
-import { createCostLayer } from "@/lib/cost-tracking";
+import { createCostLayer, calculateCost } from "@/lib/cost-tracking";
+import type { CostCalculationResult } from "@/lib/cost-tracking";
 
 /**
  * Transaction Type Constants
@@ -31,6 +32,15 @@ export type TransactionTypeValue = typeof TransactionType[keyof typeof Transacti
 export interface StockItem {
   product_id: number;
   quantity: number;
+}
+
+export interface StockDeductResult {
+  itemId: number;
+  quantity: number;
+  transactionId: number;
+  unitCost: number;
+  totalCost: number;
+  costResult: CostCalculationResult;
 }
 
 export interface StockCheckResult {
@@ -334,6 +344,141 @@ export async function deductStock(
       }
 
       return true;
+    } catch (error) {
+      if (!connection) await conn.rollback();
+      throw error;
+    }
+  } finally {
+    if (shouldRelease) {
+      conn.release();
+    }
+  }
+}
+
+/**
+ * Deduct stock permanently with cost consumption (after transaction completion)
+ * Reduces quantity and available_quantity, consumes cost layers, and returns cost details.
+ * 
+ * This is the outbound costing primitive for COGS integration.
+ * Uses the company's costing method (AVG/FIFO/LIFO) to determine costs.
+ * 
+ * @returns Array of cost details per item for COGS posting
+ * @throws Error if any item fails (fail-closed behavior)
+ */
+export async function deductStockWithCost(
+  company_id: number,
+  outlet_id: number,
+  items: StockItem[],
+  reference_id: string,
+  user_id: number,
+  connection?: PoolConnection
+): Promise<StockDeductResult[]> {
+  const dbPool = getDbPool();
+  const conn = connection ?? await dbPool.getConnection();
+  const shouldRelease = !connection;
+  const results: StockDeductResult[] = [];
+
+  try {
+    if (!connection) {
+      await conn.beginTransaction();
+    }
+
+    try {
+      for (const item of items) {
+        // Verify stock exists and has sufficient quantity (with lock)
+        const [stockRows] = await conn.execute<StockRow[]>(
+          `SELECT quantity, available_quantity
+           FROM inventory_stock
+           WHERE company_id = ?
+             AND product_id = ?
+             AND (outlet_id = ? OR outlet_id IS NULL)
+           ORDER BY outlet_id IS NULL ASC
+           LIMIT 1
+           FOR UPDATE`,
+          [company_id, item.product_id, outlet_id]
+        );
+
+        if (stockRows.length === 0) {
+          throw new Error(`Stock not found for product ${item.product_id} in company ${company_id}`);
+        }
+
+        const stock = stockRows[0];
+        if (Number(stock.quantity) < item.quantity) {
+          throw new Error(
+            `Insufficient stock for product ${item.product_id}: ` +
+            `requested ${item.quantity}, available ${stock.quantity}`
+          );
+        }
+
+        // Record inventory transaction FIRST (capture insertId for cost tracking)
+        const [txResult] = await conn.execute<ResultSetHeader>(
+          `INSERT INTO inventory_transactions (
+            company_id,
+            outlet_id,
+            transaction_type,
+            reference_type,
+            reference_id,
+            product_id,
+            quantity_delta,
+            created_at
+          ) VALUES (?, ?, ?, 'SALE', ?, ?, ?, CURRENT_TIMESTAMP)`,
+          [company_id, outlet_id, TransactionType.SALE, reference_id, item.product_id, -item.quantity]
+        );
+        const transactionId = txResult.insertId;
+
+        // Consume cost using the company's costing method
+        const costResult = await calculateCost(
+          {
+            companyId: company_id,
+            itemId: item.product_id,
+            quantity: item.quantity,
+            transactionId: transactionId, // Required for FIFO/LIFO consumption tracking
+          },
+          conn
+        );
+
+        // Deduct stock - reduce both quantity and available_quantity
+        const [updateResult] = await conn.execute<ResultSetHeader>(
+          `UPDATE inventory_stock
+           SET quantity = quantity - ?,
+               available_quantity = available_quantity - ?,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE company_id = ?
+             AND product_id = ?
+             AND (outlet_id = ? OR outlet_id IS NULL)
+             AND quantity >= ?`,
+          [
+            item.quantity,
+            item.quantity,
+            company_id,
+            item.product_id,
+            outlet_id,
+            item.quantity
+          ]
+        );
+
+        if (updateResult.affectedRows === 0) {
+          throw new Error(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
+        }
+
+        // Calculate weighted average unit cost from consumed layers
+        const unitCost = costResult.totalCost / item.quantity;
+
+        results.push({
+          itemId: item.product_id,
+          quantity: item.quantity,
+          transactionId: transactionId,
+          unitCost: unitCost,
+          totalCost: costResult.totalCost,
+          costResult: costResult,
+        });
+      }
+
+      if (!connection) {
+        await conn.commit();
+      }
+
+      return results;
     } catch (error) {
       if (!connection) await conn.rollback();
       throw error;

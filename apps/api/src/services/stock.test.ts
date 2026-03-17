@@ -360,6 +360,113 @@ describe("Stock Service", { concurrency: false }, () => {
     });
   });
 
+  describe("deductStockWithCost (C1/C2 outbound costing)", () => {
+    test("should deduct stock and return cost details", async () => {
+      const items: StockItem[] = [
+        { product_id: TEST_PRODUCT_ID, quantity: 10 }
+      ];
+      const referenceId = `test-deduct-cost-${Date.now()}`;
+
+      // Set up cost basis for the product (create inbound cost layer first)
+      const { createCostLayer } = await import("../lib/cost-tracking.js");
+      const [inboundTx] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO inventory_transactions 
+         (company_id, outlet_id, product_id, transaction_type, quantity_delta, reference_type, reference_id, created_at)
+         VALUES (?, ?, ?, 6, 100.0000, 'RECEIPT', ?, NOW())`,
+        [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID, `setup-receipt-${Date.now()}`]
+      );
+      await createCostLayer(
+        {
+          companyId: TEST_COMPANY_ID,
+          itemId: TEST_PRODUCT_ID,
+          transactionId: inboundTx.insertId,
+          unitCost: 15.00,
+          quantity: 100,
+        },
+        connection
+      );
+
+      // Import the function
+      const { deductStockWithCost } = await import("../services/stock.js");
+      const result = await deductStockWithCost(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, connection);
+
+      assert.equal(result.length, 1);
+      assert.equal(result[0].itemId, TEST_PRODUCT_ID);
+      assert.equal(result[0].quantity, 10);
+      assert.ok(result[0].transactionId > 0);
+      assert.ok(result[0].unitCost >= 0);
+      assert.ok(result[0].totalCost >= 0);
+
+      // Verify inventory transaction was recorded
+      const [txRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT id, quantity_delta FROM inventory_transactions 
+         WHERE reference_id = ?`,
+        [referenceId]
+      );
+      assert.equal(txRows.length, 1);
+      assert.equal(Number(txRows[0].quantity_delta), -10);
+
+      // Verify cost consumption occurred (cost_layer_consumption for FIFO/LIFO)
+      const [consumptionRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT * FROM cost_layer_consumption 
+         WHERE transaction_id = ?`,
+        [result[0].transactionId]
+      );
+      // Note: Consumption records exist for FIFO/LIFO; for AVG they update inventory_item_costs summary
+
+      // Verify stock was deducted
+      const [stockRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT quantity FROM inventory_stock 
+         WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
+        [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
+      );
+      assert.equal(Number(stockRows[0].quantity), 90);
+
+      // Restore the stock
+      await restoreStock(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, connection);
+    });
+
+    test("should throw on insufficient inventory (fail-closed)", async () => {
+      const items: StockItem[] = [
+        { product_id: TEST_PRODUCT_ID, quantity: 10000 }
+      ];
+      const referenceId = `test-deduct-cost-fail-${Date.now()}`;
+
+      const { deductStockWithCost } = await import("../services/stock.js");
+
+      await assert.rejects(
+        async () => {
+          await deductStockWithCost(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, connection);
+        },
+        /Insufficient stock/
+      );
+
+      // Verify no inventory transaction was created (transaction rolled back)
+      const [txRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) as count FROM inventory_transactions 
+         WHERE reference_id = ?`,
+        [referenceId]
+      );
+      assert.equal(Number(txRows[0].count), 0);
+    });
+
+    test("should throw on stock not found (fail-closed)", async () => {
+      const items: StockItem[] = [
+        { product_id: 999999991, quantity: 1 }
+      ];
+      const referenceId = `test-deduct-cost-notfound-${Date.now()}`;
+
+      const { deductStockWithCost } = await import("../services/stock.js");
+
+      await assert.rejects(
+        async () => {
+          await deductStockWithCost(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, connection);
+        },
+        /Stock not found/
+      );
+    });
+  });
+
   describe("restoreStock", () => {
     test("should restore stock successfully", async () => {
       const items: StockItem[] = [
