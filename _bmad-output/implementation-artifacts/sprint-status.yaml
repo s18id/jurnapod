@@ -1,5 +1,5 @@
 # generated: 2026-03-15T09:32:00.000Z
-# last_updated: 2026-03-16T17:00:00.000Z
+# last_updated: 2026-03-17T20:42:22+07:00
 # project: jurnapod
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-17T23:59:59+07:00
+last_updated: 2026-03-17T20:34:59+07:00
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -92,7 +92,7 @@ development_status:
   # Debt Stories (specs created, ready to implement)
   4-4-recipe-bom-composition: done  # COMPLETE - Recipe/BOM composition with integration tests and cost-basis-first resolution
   4-5-cogs-integration: review  # COMPLETE - Full COGS integration with UI
-  4-6-cost-tracking-methods: ready-for-dev  # STORY CREATED - comprehensive implementation context ready
+  4-6-cost-tracking-methods: in-progress  # DEV STORY STARTED - implementing cost tracking methods
   4-7-item-variants: ready-for-dev  # SPEC CREATED - ready for implementation
   4-8-barcode-image-support: ready-for-dev  # SPEC CREATED - ready for implementation
   4-9-account-mapping-key-int-constants: ready-for-dev  # SPEC CREATED - migrate mapping_key to mapping_type_id constants

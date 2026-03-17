@@ -22,108 +22,112 @@ so that inventory valuation and COGS reflect the chosen accounting method.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add cost-layer schema and migration guardrails (AC: 1, 5, 6)
-  - [ ] Create `inventory_cost_layers` table without DB enum (use varchar/int code for layer type)
-  - [ ] Create `inventory_item_costs` summary table for fast AVG lookups
-  - [ ] Add MySQL/MariaDB-safe rerunnable DDL using `information_schema` checks
-  - [ ] Add indexes for `(company_id, item_id, acquired_at)` and remaining-quantity lookups
-- [ ] Task 2: Implement costing engine in API service layer (AC: 1, 2, 3, 4, 6)
-  - [ ] Create calculator abstraction for `AVG | FIFO | LIFO`
-  - [ ] Implement weighted AVG computation from inbound layers/summary table
-  - [ ] Implement FIFO and LIFO layer consumption with transactional updates
-  - [ ] Enforce no negative remaining quantity at layer level
-- [ ] Task 3: Integrate cost updates with inventory mutations (AC: 5, 6)
-  - [ ] On purchase/receiving or positive adjustment: create inbound cost layer
-  - [ ] On negative adjustment/sale: consume layers according to active method
-  - [ ] Recalculate/update summary cost table after each relevant mutation
-- [ ] Task 4: Wire Story 4.5 COGS path to method-correct calculator (AC: 7)
-  - [ ] Replace placeholder/simple cost fallback path in COGS service with calculator
-  - [ ] Keep COGS feature-gated behavior: skip when disabled, non-blocking
-  - [ ] Preserve journal balancing and tenant scoping invariants
-- [ ] Task 5: Add API read endpoints for transparency and debugging (AC: 2, 5)
-  - [ ] `GET /inventory/items/[itemId]/cost-layers`
-  - [ ] `GET /inventory/items/[itemId]/current-cost`
-  - [ ] Validate auth, company/outlet access, and response contracts
-- [ ] Task 6: Add tests and regression coverage (AC: 1-7)
-  - [ ] Unit tests per method (AVG/FIFO/LIFO) with deterministic fixtures
-  - [ ] Integration tests for layer creation/consumption and COGS posting amount
-  - [ ] Edge cases: insufficient inventory, zero-cost rows, concurrent sales
-  - [ ] Ensure DB pool cleanup in all DB-using test files
+- [ ] Task 1: Add schema for cost layers and summary state (AC: 1, 5, 6)
+  - [ ] Add `inventory_cost_layers` (company-scoped, item-scoped, auditable inbound layers)
+  - [ ] Add `inventory_item_costs` (company/item current method + rolling average cache)
+  - [ ] Add portable rerunnable migration guards via `information_schema` (MySQL/MariaDB)
+  - [ ] Add indexes for `(company_id, item_id, acquired_at, id)` and remaining qty scans
+- [ ] Task 2: Implement costing engine abstraction and calculators (AC: 1, 2, 3, 4, 6)
+  - [ ] Add `AVG | FIFO | LIFO` strategy interface under `apps/api/src/lib/`
+  - [ ] Implement weighted AVG using deterministic minor-unit math
+  - [ ] Implement FIFO/LIFO layer consumption with transactional row locking (`FOR UPDATE`)
+  - [ ] Reject insufficient/negative inventory conditions with typed errors
+- [ ] Task 3: Wire engine into inventory mutations (AC: 5, 6)
+  - [ ] Inbound moves create cost layers with immutable unit cost + remaining qty
+  - [ ] Outbound moves consume layers by configured method and persist consumption trace
+  - [ ] Keep layer balances and summary table synchronized in one DB transaction
+- [ ] Task 4: Integrate with Story 4.5 COGS posting path (AC: 7)
+  - [ ] Replace simplified cost lookup path in `cogs-posting.ts` with method engine
+  - [ ] Preserve COGS feature-gate behavior and fail-closed accounting invariants
+  - [ ] Keep journal balancing and business-date semantics (`line_date = invoice/sale date`)
+- [ ] Task 5: Add read endpoints/contracts for auditability (AC: 2, 5)
+  - [ ] `GET /api/inventory/items/[itemId]/cost-layers`
+  - [ ] `GET /api/inventory/items/[itemId]/current-cost`
+  - [ ] Add/align shared Zod contracts in `packages/shared/src/schemas/`
+- [ ] Task 6: Add comprehensive tests and regressions (AC: 1-7)
+  - [ ] Unit tests per method with deterministic fixtures and rounding assertions
+  - [ ] Integration tests: layer creation, partial consumption, and COGS-posting amount correctness
+  - [ ] Concurrency tests for two simultaneous outbound operations on same item
+  - [ ] Ensure DB test cleanup includes `closeDbPool()` hooks
 
 ## Dev Notes
 
-- Build on existing Story 4.5 foundation; do not create parallel costing logic in multiple places.
-- Money and cost precision must remain deterministic (`DECIMAL` in DB, minor-unit-safe math in service).
-- Keep accounting invariant: COGS postings must reconcile with journal totals.
-- Keep POS/sales resilience invariant: if COGS path fails, revenue posting should remain non-blocking where feature-gated behavior requires.
+- Extend existing implementation seams (`cogs-posting.ts`, `sales.ts`, inventory transactions) and avoid creating parallel costing code paths.
+- This story is accounting-critical: any mismatch between COGS and layer consumption is a blocker.
+- Keep portability and rerunnability as first-class requirements for migrations.
 
 ### Technical Requirements
 
-- Use `@/` import aliases in API code (no deep relative `../../` imports). [Source: `AGENTS.md` Import path conventions]
-- Avoid DB `ENUM` for new schema additions; represent method/type using `VARCHAR` or integer code.
-- Migrations must be rerunnable and portable for MySQL 8.0+ and MariaDB (non-atomic DDL safe).
-- No `FLOAT/DOUBLE` for monetary/cost fields.
-- All write paths must enforce `company_id`; enforce `outlet_id` where relevant.
+- Use `@/` alias imports for API code; no deep relative imports. [Source: `AGENTS.md`]
+- Monetary math must remain deterministic: DB `DECIMAL`, service minor-unit helpers.
+- Never use `FLOAT`/`DOUBLE` for costs or balances.
+- Enforce `company_id` scoping in every query and `outlet_id` where applicable.
+- Prefer immutable corrections over destructive mutation for finalized records.
 
 ### Architecture Compliance
 
-- Accounting/GL stays source of truth for financial effects. [Source: `docs/adr/ADR-0001-gl-as-source-of-truth.md`]
-- POS/sales offline and retry safety must not regress due to costing changes. [Source: `docs/project-context.md`]
-- Shared contracts go through `packages/shared/src/schemas/*` for API boundaries.
-- COGS remains feature-gated (optional) per inventory module config.
+- Accounting/GL remains source of truth; posted sales must reconcile to journals. [Source: `docs/adr/ADR-0001-gl-as-source-of-truth.md`]
+- POS/offline invariants must not regress; retry/idempotency safety stays intact. [Source: `docs/project-context.md`]
+- API boundaries use shared Zod schemas in `packages/shared`.
+- Keep transaction boundaries atomic for all financial writes.
 
 ### Library / Framework Requirements
 
-- Runtime and language: Node.js 20.x + TypeScript.
-- DB access: existing `mysql2` transaction patterns in `apps/api/src/lib/*`.
-- Validation: Zod schemas in `packages/shared` and route-level parse.
-- Keep existing test stack (`node:test`, API integration style in repo).
+- Runtime: Node.js 20.x, TypeScript.
+- API framework patterns: Hono route + auth guard + response envelope conventions.
+- DB access: `mysql2` with explicit transaction handling.
+- Tests: `node:test` unit and API integration style used in `apps/api/tests/integration/`.
 
 ### File Structure Requirements
 
-- DB migrations: `packages/db/migrations/*.sql`
-- Cost service implementation: `apps/api/src/lib/` (follow `cogs-posting.ts` and `recipe-composition.ts` structure)
-- Routes: `apps/api/app/api/inventory/**/route.ts`
+- Migrations: `packages/db/migrations/*.sql`
+- Cost engine/service: `apps/api/src/lib/`
+- Inventory/COGS routes: `apps/api/app/api/inventory/**/route.ts`
 - Shared contracts: `packages/shared/src/schemas/`
-- Backoffice display hooks/components only if required by ACs; avoid unnecessary UI churn in this story.
+- Tests: `apps/api/src/lib/*.test.ts` and `apps/api/tests/integration/*.mjs`
 
 ### Testing Requirements
 
-- Unit tests for calculator methods with table-driven scenarios.
-- Integration tests around posting boundary (sales -> COGS amount correctness).
-- Validate idempotent behavior for retried operations where applicable.
-- Ensure every DB-using test file closes pool:
-  - `test.after(async () => { await closeDbPool(); });`
+- Validate all three methods return expected COGS and ending inventory for the same movement sequence.
+- Validate layer-level remaining qty never drops below zero under concurrent outbound attempts.
+- Validate COGS journal lines stay balanced and use business date semantics.
+- Validate fallback behavior when cost data is unavailable (explicit error path, no silent drift).
+- Ensure DB-using test files close pool in `test.after`.
 
 ### Previous Story Intelligence (4.5)
 
-- Story 4.5 already introduced `cogs-posting.ts` and sales integration hook points; reuse those extension seams.
-- Current system has feature-gated COGS behavior in sales posting path; keep optional behavior intact.
-- Existing COGS implementation and tests surfaced schema-contract mismatch risks; align migrations first, then code.
+- Story 4.5 already provides COGS posting entry points and tenant/account validation patterns.
+- 4.5 introduced fail-closed behavior and transaction-owner handling; 4.6 must preserve both.
+- 4.5 now enforces business-date line posting for COGS (`line_date` from document date), which 4.6 must not regress.
 
 ### Git Intelligence Summary
 
-- Recent commits show active refactoring in items/prices and heavy API typing cleanup; maintain established patterns rather than introducing new architectural style.
-- Test hygiene fixes were recently needed in integration tests; prioritize deterministic cleanup and fixture isolation.
+- Recent commits establish strong patterns around COGS correctness, transaction safety, and date semantics (`ca1bdfe`).
+- Inventory/recipe and COGS code exists and is tested (`b0645d6`), so 4.6 should extend current files, not fork new architecture.
+- Backoffice navigation updates are unrelated; avoid unnecessary UI scope in this story unless required by ACs.
 
 ### Latest Tech Information
 
-- MySQL CHECK constraints are enforced from MySQL 8.0.16+; name constraints explicitly for maintainability. [Source: MySQL 8.0 manual: CHECK Constraints]
-- MariaDB supports CHECK constraints and allows `ALTER TABLE ... DROP CONSTRAINT`; syntax differs from MySQL in some versions, so guarded dynamic DDL remains safest. [Source: MariaDB KB: CONSTRAINT / CHECK]
+- MySQL 8.0 enforces CHECK constraints from 8.0.16+; if used, name constraints explicitly and keep expressions deterministic.
+- MariaDB supports CHECK constraints and `ALTER TABLE ... DROP CONSTRAINT`; syntax behavior differs by version, so guarded migration DDL remains safest.
+- InnoDB locking reads (`SELECT ... FOR UPDATE`) are appropriate for preventing race conditions during layer consumption in concurrent sales.
 
 ### Project Structure Notes
 
-- Existing repo has both planning and implementation artifacts; this file is implementation-ready context, not product spec prose.
-- Costing implementation should avoid adding duplicate domain modules unless required; prefer extending current API lib + shared contract flow first.
+- This is implementation context, not product prose; keep changes scoped to Story 4.6 acceptance criteria.
+- Prefer reusing existing posting and inventory services over adding new cross-package abstractions unless duplication forces extraction.
 
 ### References
 
-- Epic baseline and FR mapping: [Source: `_bmad-output/planning-artifacts/epics.md#Epic 4`]
-- Product requirements and NFRs: [Source: `_bmad-output/planning-artifacts/prd.md#Functional Requirements`]
-- Architecture constraints and stack: [Source: `_bmad-output/planning-artifacts/architecture.md#Established Patterns`]
-- Previous story learnings: [Source: `_bmad-output/implementation-artifacts/4-5-cogs-integration.md`]
-- Repo operational guardrails: [Source: `AGENTS.md`]
+- Epic and story baseline: [Source: `_bmad-output/planning-artifacts/epics.md#Epic 4`]
+- PRD FR/NFR constraints: [Source: `_bmad-output/planning-artifacts/prd.md#Functional Requirements`]
+- Architecture constraints/patterns: [Source: `_bmad-output/planning-artifacts/architecture.md#Established Patterns (from AGENTS.md)`]
+- Previous implementation context: [Source: `_bmad-output/implementation-artifacts/4-5-cogs-integration.md`]
+- Project-wide rules: [Source: `AGENTS.md`]
 - Project context summary: [Source: `docs/project-context.md`]
+- MySQL CHECK constraints: [Source: `https://dev.mysql.com/doc/refman/8.0/en/create-table-check-constraints.html`]
+- MySQL locking reads: [Source: `https://dev.mysql.com/doc/refman/8.0/en/innodb-locking-reads.html`]
+- MariaDB constraints: [Source: `https://mariadb.com/kb/en/constraint/`]
 
 ## Dev Agent Record
 
@@ -133,14 +137,15 @@ openai/gpt-5.3-codex
 
 ### Debug Log References
 
-- Loaded and analyzed: config, sprint status, template, checklist, epics/prd/architecture, project-context, Story 4.5, existing Story 4.6 draft.
-- Reviewed recent git commits and touched files for implementation pattern continuity.
-- Added latest MySQL/MariaDB CHECK constraint references to migration guardrails.
+- Loaded workflow, config, template, checklist, sprint status, and project context.
+- Loaded and analyzed `epics.md`, `prd.md`, `architecture.md`, and UX-related planning artifact.
+- Analyzed previous stories `4-5-cogs-integration.md` and `4-4-recipe-bom-composition.md`.
+- Reviewed recent commits and changed file patterns for implementation continuity.
+- Performed targeted web research for MySQL/MariaDB constraint + locking behavior.
 
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
-- Story reshaped from high-level draft into implementation-ready blueprint with explicit guardrails.
 
 ### File List
 

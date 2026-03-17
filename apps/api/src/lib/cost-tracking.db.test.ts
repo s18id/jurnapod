@@ -1,0 +1,701 @@
+// Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
+// Ownership: Ahmad Faruk (Signal18 ID)
+
+import assert from "node:assert/strict";
+import { test, before, after } from "node:test";
+import { getDbPool, closeDbPool } from "./db";
+import type { PoolConnection } from "mysql2/promise";
+import type { RowDataPacket } from "mysql2";
+import {
+  calculateCost,
+  createCostLayer,
+  getItemCostLayers,
+  getItemCostSummary,
+  getCompanyCostingMethod,
+  InsufficientInventoryError,
+  InvalidCostingMethodError,
+  CostTrackingError,
+} from "./cost-tracking";
+
+// Test data - use unique IDs per run to avoid conflicts
+const RUN_ID = Date.now().toString(36);
+const TEST_COMPANY_ID = 888001;
+const TEST_OUTLET_ID = 888002;
+const TEST_COMPANY_CODE = `TEST-COST-${RUN_ID}`;
+
+// Test helpers
+async function createTestItem(
+  conn: PoolConnection,
+  companyId: number,
+  name: string,
+  itemType: string = "PRODUCT"
+): Promise<number> {
+  const [result] = await conn.execute(
+    `INSERT INTO items (company_id, name, item_type, track_stock, is_active)
+     VALUES (?, ?, ?, 1, 1)`,
+    [companyId, name, itemType]
+  );
+  return (result as any).insertId;
+}
+
+async function createTestTransaction(
+  conn: PoolConnection,
+  companyId: number,
+  itemId: number,
+  quantityDelta: number
+): Promise<number> {
+  const [result] = await conn.execute(
+    `INSERT INTO inventory_transactions 
+     (company_id, product_id, transaction_type, quantity_delta, created_at)
+     VALUES (?, ?, 6, ?, NOW())`,
+    [companyId, itemId, quantityDelta]
+  );
+  return (result as any).insertId;
+}
+
+async function setCompanyCostingMethod(
+  conn: PoolConnection,
+  companyId: number,
+  method: string
+): Promise<void> {
+  await conn.execute(
+    `INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, outlet_id)
+     VALUES (?, ?, ?, 'string', NULL)
+     ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), value_type = VALUES(value_type)`,
+    [companyId, "inventory_costing_method", JSON.stringify(method)]
+  );
+}
+
+async function cleanupTestData(conn: PoolConnection): Promise<void> {
+  // Delete in reverse dependency order
+  await conn.execute(
+    `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
+  );
+  await conn.execute(
+    `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
+  );
+  await conn.execute(
+    `DELETE FROM inventory_item_costs WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
+  );
+  await conn.execute(
+    `DELETE FROM inventory_transactions WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
+  );
+  await conn.execute(
+    `DELETE FROM items WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
+  );
+  await conn.execute(
+    `DELETE FROM company_settings WHERE company_id = ? AND \`key\` = ?`,
+    [TEST_COMPANY_ID, "inventory_costing_method"]
+  );
+  await conn.execute(
+    `DELETE FROM outlets WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
+  );
+  await conn.execute(
+    `DELETE FROM companies WHERE id = ?`,
+    [TEST_COMPANY_ID]
+  );
+}
+
+async function readLayerBalances(
+  conn: PoolConnection,
+  companyId: number,
+  itemId: number
+): Promise<Array<{ id: number; remaining_qty: number }>> {
+  const [rows] = await conn.execute(
+    `SELECT id, remaining_qty 
+     FROM inventory_cost_layers 
+     WHERE company_id = ? AND item_id = ?
+     ORDER BY id ASC`,
+    [companyId, itemId]
+  );
+  return (rows as any[]).map((row) => ({
+    id: row.id,
+    remaining_qty: Number(row.remaining_qty),
+  }));
+}
+
+async function countConsumptionRows(
+  conn: PoolConnection,
+  transactionId: number
+): Promise<number> {
+  const [rows] = await conn.execute(
+    `SELECT COUNT(*) as count 
+     FROM cost_layer_consumption 
+     WHERE transaction_id = ?`,
+    [transactionId]
+  );
+  return Number((rows as any[])[0].count);
+}
+
+// Test suite
+test("Cost Tracking Database Tests", async (t) => {
+  const pool = getDbPool();
+  const conn = await pool.getConnection();
+
+  before(async () => {
+    // Clean up any existing test data
+    await cleanupTestData(conn);
+
+    await conn.execute(
+      `INSERT INTO companies (id, code, name, timezone, currency_code)
+       VALUES (?, ?, ?, 'UTC', 'IDR')`,
+      [TEST_COMPANY_ID, TEST_COMPANY_CODE, 'Test Cost Company']
+    );
+
+    await conn.execute(
+      `INSERT INTO outlets (id, company_id, code, name, timezone, is_active)
+       VALUES (?, ?, ?, ?, 'UTC', 1)`,
+      [TEST_OUTLET_ID, TEST_COMPANY_ID, 'TEST-OUTLET', 'Test Outlet']
+    );
+  });
+
+  after(async () => {
+    await cleanupTestData(conn);
+    conn.release();
+    await closeDbPool();
+  });
+
+  await t.test("FIFO: consumes oldest layers first", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `FIFO Test ${RUN_ID}`);
+
+    // Set method to FIFO
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "FIFO");
+
+    // Create layers: L1 older @ 10.00, L2 newer @ 12.00
+    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const layer1 = await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId1,
+        unitCost: 10.0,
+        quantity: 50,
+      },
+      conn
+    );
+
+    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const layer2 = await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId2,
+        unitCost: 12.0,
+        quantity: 50,
+      },
+      conn
+    );
+
+    // Consume 60 units - should take all 50 from L1, 10 from L2
+    const saleTxId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    const result = await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 60,
+        transactionId: saleTxId,
+      },
+      conn
+    );
+
+    // Expected: (50 * 10) + (10 * 12) = 500 + 120 = 620
+    assert.strictEqual(result.totalCost, 620);
+    assert.strictEqual(result.consumedLayers.length, 2);
+    assert.strictEqual(result.consumedLayers[0].consumedQty, 50);
+    assert.strictEqual(result.consumedLayers[0].unitCost, 10.0);
+    assert.strictEqual(result.consumedLayers[1].consumedQty, 10);
+    assert.strictEqual(result.consumedLayers[1].unitCost, 12.0);
+
+    // Verify remaining quantities
+    const layers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    const l1 = layers.find((l) => l.id === layer1.id);
+    const l2 = layers.find((l) => l.id === layer2.id);
+    assert.strictEqual(l1?.remaining_qty, 0);
+    assert.strictEqual(l2?.remaining_qty, 40);
+  });
+
+  await t.test("LIFO: consumes newest layers first", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `LIFO Test ${RUN_ID}`);
+
+    // Set method to LIFO
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "LIFO");
+
+    // Create layers: L1 older @ 10.00, L2 newer @ 12.00
+    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const layer1 = await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId1,
+        unitCost: 10.0,
+        quantity: 50,
+      },
+      conn
+    );
+
+    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const layer2 = await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId2,
+        unitCost: 12.0,
+        quantity: 50,
+      },
+      conn
+    );
+
+    // Consume 60 units - should take all 50 from L2 (newest), 10 from L1 (oldest)
+    const saleTxId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    const result = await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 60,
+        transactionId: saleTxId,
+      },
+      conn
+    );
+
+    // Expected: (50 * 12) + (10 * 10) = 600 + 100 = 700
+    assert.strictEqual(result.totalCost, 700);
+    assert.strictEqual(result.consumedLayers.length, 2);
+
+    // Verify remaining quantities
+    const layers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    const l1 = layers.find((l) => l.id === layer1.id);
+    const l2 = layers.find((l) => l.id === layer2.id);
+    assert.strictEqual(l1?.remaining_qty, 40);
+    assert.strictEqual(l2?.remaining_qty, 0);
+  });
+
+  await t.test("AVG: weighted average cost is correct", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `AVG Test ${RUN_ID}`);
+
+    // Set method to AVG
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
+
+    // Create layers: 100 @ 10 + 50 @ 12
+    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 100);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId1,
+        unitCost: 10.0,
+        quantity: 100,
+      },
+      conn
+    );
+
+    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId2,
+        unitCost: 12.0,
+        quantity: 50,
+      },
+      conn
+    );
+
+    // Consume 60 units
+    const saleTxId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    const result = await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 60,
+        transactionId: saleTxId,
+      },
+      conn
+    );
+
+    // Expected: 60 * ((100*10 + 50*12) / 150) = 60 * 10.666... = 640
+    const expectedAvg = (100 * 10 + 50 * 12) / 150;
+    const expectedCost = 60 * expectedAvg;
+    assert.strictEqual(result.totalCost, expectedCost);
+    assert.strictEqual(result.consumedLayers.length, 0); // AVG doesn't track layers
+  });
+
+  await t.test("FIFO insufficient: no partial writes", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `FIFO Insufficient Test ${RUN_ID}`);
+
+    // Set method to FIFO
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "FIFO");
+
+    // Create layers with total 50 available
+    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 30);
+    const layer1 = await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId1,
+        unitCost: 10.0,
+        quantity: 30,
+      },
+      conn
+    );
+
+    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 20);
+    const layer2 = await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId2,
+        unitCost: 12.0,
+        quantity: 20,
+      },
+      conn
+    );
+
+    // Capture state before attempt
+    const beforeLayers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    const beforeConsumptionCount = await countConsumptionRows(conn, txId1);
+
+    // Attempt to consume 60 (more than available 50)
+    const saleTxId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    await assert.rejects(
+      calculateCost(
+        {
+          companyId: TEST_COMPANY_ID,
+          itemId: testItemId,
+          quantity: 60,
+          transactionId: saleTxId,
+        },
+        conn
+      ),
+      InsufficientInventoryError
+    );
+
+    // Verify no mutations occurred
+    const afterLayers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    const afterConsumptionCount = await countConsumptionRows(conn, saleTxId);
+
+    assert.deepStrictEqual(afterLayers, beforeLayers);
+    assert.strictEqual(afterConsumptionCount, beforeConsumptionCount);
+  });
+
+  await t.test("LIFO insufficient: no partial writes", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `LIFO Insufficient Test ${RUN_ID}`);
+
+    // Set method to LIFO
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "LIFO");
+
+    // Create layers with total 50 available
+    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 30);
+    const layer1 = await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId1,
+        unitCost: 10.0,
+        quantity: 30,
+      },
+      conn
+    );
+
+    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 20);
+    const layer2 = await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId2,
+        unitCost: 12.0,
+        quantity: 20,
+      },
+      conn
+    );
+
+    // Capture state before attempt
+    const beforeLayers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+
+    // Attempt to consume 60 (more than available 50)
+    const saleTxId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    await assert.rejects(
+      calculateCost(
+        {
+          companyId: TEST_COMPANY_ID,
+          itemId: testItemId,
+          quantity: 60,
+          transactionId: saleTxId,
+        },
+        conn
+      ),
+      InsufficientInventoryError
+    );
+
+    // Verify no mutations occurred
+    const afterLayers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    assert.deepStrictEqual(afterLayers, beforeLayers);
+  });
+
+  await t.test("Rejects non-positive quantity", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Non-positive Test ${RUN_ID}`);
+
+    // Set method to AVG
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
+
+    await assert.rejects(
+      calculateCost(
+        {
+          companyId: TEST_COMPANY_ID,
+          itemId: testItemId,
+          quantity: 0,
+          transactionId: 1,
+        },
+        conn
+      ),
+      CostTrackingError
+    );
+
+    await assert.rejects(
+      calculateCost(
+        {
+          companyId: TEST_COMPANY_ID,
+          itemId: testItemId,
+          quantity: -1,
+          transactionId: 1,
+        },
+        conn
+      ),
+      CostTrackingError
+    );
+  });
+
+  await t.test("Method routing: AVG/FIFO/LIFO", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Routing Test ${RUN_ID}`);
+
+    // Create layers: 50 @ 10 + 50 @ 12
+    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId1,
+        unitCost: 10.0,
+        quantity: 50,
+      },
+      conn
+    );
+
+    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId2,
+        unitCost: 12.0,
+        quantity: 50,
+      },
+      conn
+    );
+
+    // Test AVG (weighted avg: 11.0 for 100 qty)
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
+    const saleTxIdAvg = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    const avg = await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 60,
+        transactionId: saleTxIdAvg,
+      },
+      conn
+    );
+    assert.strictEqual(avg.totalCost, 660.0); // 60 * 11.0
+
+    // Cleanup layers and recreate for FIFO test
+    await conn.execute(
+      `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await conn.execute(
+      `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await conn.execute(
+      `DELETE FROM inventory_item_costs WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+
+    // Recreate layers for FIFO
+    const txId3 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId3,
+        unitCost: 10.0,
+        quantity: 50,
+      },
+      conn
+    );
+    const txId4 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId4,
+        unitCost: 12.0,
+        quantity: 50,
+      },
+      conn
+    );
+
+    // Test FIFO
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "FIFO");
+    const saleTxIdFifo = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    const fifo = await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 60,
+        transactionId: saleTxIdFifo,
+      },
+      conn
+    );
+    assert.strictEqual(fifo.totalCost, 620.0); // (50*10) + (10*12)
+
+    // Cleanup for LIFO test
+    await conn.execute(
+      `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await conn.execute(
+      `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await conn.execute(
+      `DELETE FROM inventory_item_costs WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+
+    // Recreate layers for LIFO
+    const txId5 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId5,
+        unitCost: 10.0,
+        quantity: 50,
+      },
+      conn
+    );
+    const txId6 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId6,
+        unitCost: 12.0,
+        quantity: 50,
+      },
+      conn
+    );
+
+    // Test LIFO
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "LIFO");
+    const saleTxIdLifo = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    const lifo = await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 60,
+        transactionId: saleTxIdLifo,
+      },
+      conn
+    );
+    assert.strictEqual(lifo.totalCost, 700.0); // (50*12) + (10*10)
+  });
+
+  await t.test("Invalid method setting throws", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Invalid Method Test ${RUN_ID}`);
+
+    // Set invalid method
+    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "INVALID");
+
+    await assert.rejects(
+      calculateCost(
+        {
+          companyId: TEST_COMPANY_ID,
+          itemId: testItemId,
+          quantity: 1,
+          transactionId: 1,
+        },
+        conn
+      ),
+      InvalidCostingMethodError
+    );
+  });
+
+  await t.test("Default method when not configured is AVG", async () => {
+    // Create a unique item for this test
+    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Default Method Test ${RUN_ID}`);
+
+    // Clean settings
+    await conn.execute(
+      `DELETE FROM company_settings WHERE company_id = ? AND \`key\` = ?`,
+      [TEST_COMPANY_ID, "inventory_costing_method"]
+    );
+
+    // Create layers
+    await conn.execute(
+      `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await conn.execute(
+      `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await conn.execute(
+      `DELETE FROM inventory_item_costs WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+
+    const txId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 100);
+    await createCostLayer(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        transactionId: txId,
+        unitCost: 10.0,
+        quantity: 100,
+      },
+      conn
+    );
+
+    // Verify default is AVG
+    const method = await getCompanyCostingMethod(TEST_COMPANY_ID, conn);
+    assert.strictEqual(method, "AVG");
+
+    // Verify calculation uses AVG
+    const saleTxId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -50);
+    const result = await calculateCost(
+      {
+        companyId: TEST_COMPANY_ID,
+        itemId: testItemId,
+        quantity: 50,
+        transactionId: saleTxId,
+      },
+      conn
+    );
+    assert.strictEqual(result.totalCost, 500.0); // 50 * 10.0
+  });
+});
