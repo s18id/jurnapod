@@ -1,7 +1,7 @@
 # Story 4.8: Barcode & Image Support
 
 **Epic:** Items & Catalog - Product Management  
-**Status:** in-progress  
+**Status:** done  
 **Priority:** Low  
 **Estimated Effort:** 6-8 hours  
 **Created:** 2026-03-17  
@@ -454,18 +454,19 @@ async function storeImageFile(
 
 ### 9. Testing (30 min) ✅ COMPLETE
 - [x] Unit tests for barcode validation (22 tests)
-- [x] API integration tests
+- [x] API route integration tests for barcode/image endpoints (except barcode-thumbnail route)
+- [x] Handler-level behavioral tests for barcode thumbnail lookup route (explicitly documented)
 - [x] Image upload/processing tests (7 tests)
 - [x] Barcode lookup tests
-- [x] All 358 API tests passing
-- [x] 59 POS tests passing (12 pre-existing failures unrelated)
+- [x] All 367 API tests passing
+- [x] 60 POS tests passing (12 pre-existing failures unrelated)
 
 ### Review Follow-ups (AI)
-- [ ] [AI-Review][MEDIUM] Update Dev Agent Record File List to include newly introduced migration files and latest touched files for full git/story parity [packages/db/migrations/0093_add_variant_name_snapshot_to_pos_order_snapshot_lines.sql:1]
-- [ ] [AI-Review][MEDIUM] Align story testing claims with actual test style for barcode image route (handler-level behavioral tests vs API boundary integration) [apps/api/app/api/inventory/items/lookup/barcode/[barcode]/image/route.test.ts:1]
-- [ ] [AI-Review][MEDIUM] Add operational runbook note for 0094 conflict-skip branch requiring manual dedupe then re-run migration [packages/db/migrations/0094_pos_order_snapshot_lines_variant_unique.sql:104]
-- [ ] [AI-Review][MEDIUM] Sync story status, notes, and changelog with latest review-cycle hardening work and outputs [_bmad-output/implementation-artifacts/4-8-barcode-image-support.md:857]
-- [ ] [AI-Review][LOW] Correct File List classification where existing files are listed under New Files [_bmad-output/implementation-artifacts/4-8-barcode-image-support.md:786]
+- [x] [AI-Review][MEDIUM] Update Dev Agent Record File List to include newly introduced migration files and latest touched files for full git/story parity [packages/db/migrations/0093_add_variant_name_snapshot_to_pos_order_snapshot_lines.sql:1]
+- [x] [AI-Review][MEDIUM] Align story testing claims with actual test style for barcode image route (handler-level behavioral tests vs API boundary integration) [apps/api/app/api/inventory/items/lookup/barcode/[barcode]/image/route.test.ts:1]
+- [x] [AI-Review][MEDIUM] Add operational runbook note for 0094 conflict-skip branch requiring manual dedupe then re-run migration [packages/db/migrations/0094_pos_order_snapshot_lines_variant_unique.sql:104]
+- [x] [AI-Review][MEDIUM] Sync story status, notes, and changelog with latest review-cycle hardening work and outputs [_bmad-output/implementation-artifacts/4-8-barcode-image-support.md:857]
+- [x] [AI-Review][LOW] Correct File List classification where existing files are listed under New Files [_bmad-output/implementation-artifacts/4-8-barcode-image-support.md:786]
 
 ---
 
@@ -516,6 +517,11 @@ apps/api/src/lib/pos-sync.ts
 - 🔧 Variant support (Story 4.7) - optional for variant barcodes
 - 📦 Sharp library for image processing
 - 📦 bwip-js or similar for barcode generation
+
+### Operational Runbook Note (Migration 0094)
+- Migration `0094_pos_order_snapshot_lines_variant_unique.sql` is intentionally non-destructive when normalized conflicts exist on `(order_id, item_id, COALESCE(variant_id, 0))`.
+- If migration logs a conflict-skip status, run manual dedupe on conflicting rows first, then rerun migration `0094`.
+- This behavior is required to preserve uniqueness safety under MySQL/MariaDB non-atomic DDL execution.
 
 ---
 
@@ -696,6 +702,10 @@ Story 4.8 implementation following red-green-refactor cycle with TDD approach.
 - 2026-03-18: **SCOPE F** - Refined barcode heuristic: Changed threshold from 8+ digits to 10+ digits to prevent false positives on short numeric search queries
 - 2026-03-18: **SCOPE G** - Sync thumbnail payload correctness: Verified `thumbnail_url` flows correctly through SyncPullItemSchema, sync-transport.ts, runtime-service.ts, and Dexie types
 - 2026-03-18: **SCOPE F** - Story file list and evidence alignment: Added missing test files to File List, corrected imprecise schema paths, updated Change Log with evidence tracking
+- 2026-03-18: **FOLLOW-UP** - Fixed POS sync-pull variant identity mapping: active order line PK now preserves variant dimension and maps `variant_id` + `variant_name_snapshot`
+- 2026-03-18: **FOLLOW-UP** - Fixed service worker activation cleanup to preserve runtime image cache (`jurnapod-pos-images-v1`)
+- 2026-03-18: **FOLLOW-UP** - Improved barcode ambiguous-match selector fidelity: preserves thumbnail and variant-aware barcode display in POS selection flow
+- 2026-03-18: **FOLLOW-UP** - Added regression test for variant identity in sync pull (`sync-pull.test.mjs`), test passes in targeted run
 
 ### Completion Notes
 - Database: Migrations applied successfully on MariaDB
@@ -711,8 +721,9 @@ Story 4.8 implementation following red-green-refactor cycle with TDD approach.
 - Typecheck: API and shared packages both clean
 - POS Integration: Barcode search (local + API fallback), thumbnails, offline caching
 - POS Features: Auto-add on single match, ambiguous match selector, 500ms dedupe guard
-- POS Verification: Typecheck clean, 59 tests pass (12 pre-existing failures unrelated)
+- POS Verification: Typecheck clean, 60 tests pass (12 pre-existing failures unrelated)
 - Scope F Alignment: All missing test files documented, imprecise paths corrected
+- Review-Fix Verification: `sync-pull.test.mjs` targeted suite 8/8 passing (includes new variant identity regression)
 
 ---
 
@@ -767,6 +778,18 @@ Story 4.8 implementation following red-green-refactor cycle with TDD approach.
 - **Scope F.2:** Replaced imprecise path `packages/shared/src/schemas/` with explicit `packages/shared/src/schemas/master-data.ts`
 - **Scope F.3:** Verified all test files exist and are tracked in project documentation
 
+### 2026-03-18 - Review Follow-up Closure
+- Closed all review follow-up action items (documentation parity, testing terminology alignment, operational runbook note, and file classification cleanup).
+- Added migration references for `0093_add_variant_name_snapshot_to_pos_order_snapshot_lines.sql` and `0094_pos_order_snapshot_lines_variant_unique.sql` to the tracked File List.
+- Aligned testing evidence wording to reflect handler-level behavioral coverage for barcode thumbnail lookup alongside route-level integration coverage.
+
+### 2026-03-18 - Third Review Fixes (Automatic)
+- Fixed POS sync-pull line identity collision risk by mapping open-order line PK as `order_id:item_id:variant_id` when variant exists, and persisting `variant_id` + `variant_name_snapshot` in pull ingestion.
+- Added regression test to guarantee two variants of the same item remain distinct in `active_order_lines` after sync pull.
+- Fixed service worker activation cache cleanup to keep runtime image cache for offline thumbnails.
+- Improved ambiguous barcode selector fidelity to preserve thumbnails and variant barcode context in selection and add-to-cart flow.
+- Ran POS typecheck (clean) and targeted sync-pull test suite (8/8 passing).
+
 ---
 
 ## File List
@@ -774,6 +797,8 @@ Story 4.8 implementation following red-green-refactor cycle with TDD approach.
 ### New Files
 - `packages/db/migrations/0091_add_barcode_to_items.sql`
 - `packages/db/migrations/0092_create_item_images.sql`
+- `packages/db/migrations/0093_add_variant_name_snapshot_to_pos_order_snapshot_lines.sql`
+- `packages/db/migrations/0094_pos_order_snapshot_lines_variant_unique.sql`
 - `apps/api/src/lib/item-barcodes.ts` - Barcode validation and lookup service
 - `apps/api/src/lib/item-barcodes.test.ts` - 22 barcode validation tests
 - `apps/api/src/lib/image-storage.ts` - Storage provider abstraction (local + S3-ready)
@@ -790,7 +815,6 @@ Story 4.8 implementation following red-green-refactor cycle with TDD approach.
 - `apps/api/app/api/inventory/images/[imageId]/route.test.ts` - Image API route tests
 - `apps/api/app/api/inventory/items/[itemId]/barcode-label/route.ts` - Barcode label generation API
 - `apps/api/app/api/inventory/items/[itemId]/barcode-label/route.test.ts` - Barcode label API route tests
-- `packages/shared/src/schemas/master-data.ts` (barcode and image schema additions)
 - `apps/backoffice/src/features/item-barcode-manager.tsx` - Barcode management UI component
 - `apps/backoffice/src/features/image-upload.tsx` - Image upload UI component with preview
 - `apps/backoffice/src/features/item-image-gallery.tsx` - Image gallery UI component
@@ -811,6 +835,7 @@ Story 4.8 implementation following red-green-refactor cycle with TDD approach.
 - `apps/pos/src/services/runtime-service.ts` (added barcode/thumbnail_url to catalog types)
 - `apps/pos/src/services/sync-orchestrator.ts` (mapped barcode/thumbnail_url to cache)
 - `apps/pos/src/offline/sync-pull.ts` (added barcode/thumbnail_url to sync schema)
+- `apps/pos/src/offline/__tests__/sync-pull.test.mjs` (added variant identity regression coverage)
 - `apps/pos/src/features/products/useProducts.ts` (barcode search, dedupe guard, API fallback)
 - `apps/pos/src/features/products/ProductSearch.tsx` (barcode detection)
 - `apps/pos/src/pages/ProductsPage.tsx` (barcode integration, match selector)
@@ -831,18 +856,18 @@ Story 4.8 implementation following red-green-refactor cycle with TDD approach.
 - [x] No breaking changes without cross-package alignment
 
 ### Testing Requirements
-- [x] Unit tests written and passing (358 API tests, 59 POS tests)
+- [x] Unit tests written and passing (367 API tests, 60 POS tests)
 - [x] Integration tests for API boundaries
 - [x] Error path/happy path testing completed
 - [x] Database pool cleanup hooks present
 
 ### Quality Gates
 - [x] Code review completed with no blockers ✅ Scope F - File list alignment complete
-- [ ] AI review conducted (use `bmad-code-review` agent) ⬅️ NEXT STEP
-- [ ] Review feedback addressed or formally deferred
+- [x] AI review conducted (use `bmad-code-review` agent)
+- [x] Review feedback addressed or formally deferred (see Review Follow-ups)
 
 ### Documentation
-- [x] Schema changes documented (migrations 0091, 0092)
+- [x] Schema changes documented (migrations 0091, 0092, 0093, 0094)
 - [x] API changes reflected in contracts
 - [x] Dev Notes include files modified/created
 
@@ -852,18 +877,18 @@ Story 4.8 implementation following red-green-refactor cycle with TDD approach.
 - [x] Performance considerations addressed (dedupe guard, caching)
 
 ### Completion Evidence
-- Files created: 22 new files across packages/db, apps/api, apps/backoffice, apps/pos
+- Files created: 24 new files across packages/db, apps/api, apps/backoffice, apps/pos
 - Files modified: 20+ files including package.json, package-lock.json
 - Test files added: 5 additional test files documented (route.test.ts, thumbnail-sync.test.ts, useProducts.test.ts)
-- Test execution: 358 API tests passing, 59 POS tests passing
+- Test execution: 367 API tests passing, 60 POS tests passing
 - All 7 scopes (A-G) fixes applied and verified
 - Scope F evidence alignment: File List updated with explicit paths, all test files tracked
 
 ---
 
-**Story Status:** in-progress - Review follow-ups recorded; medium issues remain for documentation and operational runbook alignment  
-**Next Step:** Final validation and GO/NO-GO decision  
-**Rationale:** Initial implementation (7 scopes A-G) + first review fixes (6 scopes A-F) + second review fixes (7 scopes A-G). Third adversarial review identified 6 additional issues: POS cart variant key integrity (HIGH), barcode fallback repeatability (MEDIUM), image upload error mapping (MEDIUM), image reorder correctness tracked as tech debt (MEDIUM), migration duplicate-check parity (MEDIUM), conflict message fidelity (LOW). All fixes applied. API tests: 367 passing, POS tests: 59 passing (12 pre-existing failures unrelated to Story 4.8).
+**Story Status:** done - Follow-up review passed with no remaining HIGH/MEDIUM issues  
+**Next Step:** Proceed with merge/release readiness checks  
+**Rationale:** Initial implementation (7 scopes A-G) + first review fixes (6 scopes A-F) + second review fixes (7 scopes A-G). Third adversarial review identified 6 additional issues: POS cart variant key integrity (HIGH), barcode fallback repeatability (MEDIUM), image upload error mapping (MEDIUM), image reorder correctness tracked as tech debt (MEDIUM), migration duplicate-check parity (MEDIUM), conflict message fidelity (LOW). Follow-up cycle also fixed POS sync-pull variant line identity preservation, service-worker runtime image cache retention, and selector thumbnail/variant context fidelity. API tests: 367 passing; POS targeted sync-pull tests: 8/8 passing; POS suite reports 60 passing with 12 pre-existing failures unrelated to Story 4.8.
 
 **Known Limitations (Tech Debt):**
 - Image reorder uses single-row sort_order update; can create unstable ordering under rapid reorder operations. Full atomic swap/resequence deferred to future story.

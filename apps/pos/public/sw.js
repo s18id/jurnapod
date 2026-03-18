@@ -136,7 +136,11 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((key) => key !== APP_SHELL_CACHE).map((key) => caches.delete(key)));
+    await Promise.all(
+      keys
+        .filter((key) => key !== APP_SHELL_CACHE && key !== RUNTIME_IMAGES_CACHE)
+        .map((key) => caches.delete(key))
+    );
 
     if (self.registration.navigationPreload) {
       await self.registration.navigationPreload.enable();

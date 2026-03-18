@@ -285,6 +285,7 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
         variant_name: null,
         sku: product.sku ?? null,
         barcode: product.barcode ?? null,
+        thumbnail_url: product.thumbnail_url ?? null,
         price_snapshot: product.price_snapshot,
         item_type: product.item_type
       }));
@@ -407,14 +408,16 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
       void handleAddProduct(product, match.variant_id);
     } else {
       // API match - find in apiBarcodeMatches and add directly
-      const apiMatch = apiBarcodeMatches.find(m => m.item_id === match.item_id);
+      const apiMatch = apiBarcodeMatches.find(
+        (m) => m.item_id === match.item_id && (m.variant_id ?? null) === (match.variant_id ?? null)
+      );
       if (apiMatch) {
         // Reconstruct RuntimeProductCatalogItem from API match
         const apiProduct: RuntimeProductCatalogItem = {
           item_id: apiMatch.item_id,
           sku: apiMatch.sku,
           barcode: apiMatch.barcode,
-          thumbnail_url: null, // Not available in API match
+          thumbnail_url: apiMatch.thumbnail_url ?? null,
           name: apiMatch.name,
           item_type: apiMatch.item_type,
           price_snapshot: apiMatch.price_snapshot,
@@ -454,7 +457,8 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     name: match.product.name,
     variant_name: match.variant?.variant_name ?? null,
     sku: match.product.sku ?? null,
-    barcode: match.product.barcode ?? null,
+    barcode: match.variant?.barcode ?? match.product.barcode ?? null,
+    thumbnail_url: match.product.thumbnail_url ?? null,
     price_snapshot: match.variant?.price ?? match.product.price_snapshot,
     item_type: match.product.item_type
   }));

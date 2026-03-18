@@ -1,7 +1,7 @@
 # Story 4.9: Account Mapping Key INT Constants
 
 **Epic:** Items & Catalog - Product Management  
-**Status:** review  
+**Status:** done  
 **Priority:** Medium  
 **Estimated Effort:** 10-14 hours  
 **Created:** 2026-03-17  
@@ -123,6 +123,10 @@ So that **mapping logic is faster, less typo-prone, and easier to evolve safely 
 - [x] Update affected unit/integration tests
 - [x] Verify no regression in posting flows and settings save/load
 
+### Review Follow-ups (AI)
+- [x] [AI-Review][HIGH] Resolve git/story evidence mismatch by explicitly documenting that implementation file list is historical implementation scope and current working tree may be clean for Story 4.9 files.
+- [x] [AI-Review][LOW] Clarify testing wording: migration/backfill verification is covered by migration execution checks and service-level regression tests (no dedicated migration harness file in this story).
+
 ---
 
 ## Definition of Done
@@ -132,7 +136,7 @@ So that **mapping logic is faster, less typo-prone, and easier to evolve safely 
 - [x] Posting and settings paths use shared constants + IDs internally
 - [x] API contract compatibility preserved
 - [x] Tests pass (unit + integration for touched areas)
-- [x] Story moved to `review` with evidence
+- [x] Story moved to `done` with evidence
 
 ---
 
@@ -151,6 +155,8 @@ So that **mapping logic is faster, less typo-prone, and easier to evolve safely 
 - Preserved backward compatibility for settings API payload/response (`mapping_key` remains string externally).
 - Added transition-safe logic so runtime works in mixed environments where `mapping_type_id` may not exist yet.
 - Verified regression safety across touched accounting posting paths.
+- Follow-up review note: current working tree did not include uncommitted Story 4.9 code deltas; listed implementation files are historical story implementation scope.
+- Follow-up review note: migration/backfill validation is evidenced via rerunnable migration design and API/service regression tests in touched posting/settings paths.
 
 ### Test Evidence
 - `npm run typecheck -w @jurnapod/shared` ✅
@@ -172,15 +178,20 @@ So that **mapping logic is faster, less typo-prone, and easier to evolve safely 
 - Updated settings account mapping route to persist `mapping_type_id` while preserving string-key contracts.
 - Added test coverage for ID-only mapping rows and compatibility fallback behavior.
 
+### 2026-03-18 - Follow-up Review Closure
+- Resolved review evidence mismatch by documenting file-list scope as implementation-history evidence rather than current uncommitted diff scope.
+- Clarified migration testing wording to match actual verification approach used in this story.
+- Re-validated typecheck and targeted regression tests for shared/API posting helpers.
+
 ---
 
 ## File List
 
-### New Files
+### New Files (Implementation Scope)
 - `packages/db/migrations/0095_account_mapping_type_ids.sql`
 - `packages/shared/src/constants/account-mapping-types.ts`
 
-### Modified Files
+### Modified Files (Implementation Scope)
 - `_bmad-output/implementation-artifacts/4-9-account-mapping-key-int-constants.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `apps/api/app/api/settings/outlet-account-mappings/route.ts`
@@ -191,3 +202,7 @@ So that **mapping logic is faster, less typo-prone, and easier to evolve safely 
 - `apps/api/src/lib/sales.payment-variance.test.ts`
 - `apps/api/src/lib/sync-push-posting.ts`
 - `packages/shared/src/index.ts`
+
+### Follow-up Review Updates (Current Working Tree)
+- `_bmad-output/implementation-artifacts/4-9-account-mapping-key-int-constants.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`

@@ -336,3 +336,92 @@ test("sync pull ingests open orders, lines, updates, and cursor", async () => {
     await db.delete();
   }
 });
+
+test("sync pull preserves variant identity for active order lines", async () => {
+  const db = createPosOfflineDb(`jp-pos-sync-pull-open-order-variants-${crypto.randomUUID()}`);
+  const ts = new Date().toISOString();
+  const orderId = crypto.randomUUID();
+
+  try {
+    await ingestSyncPullIntoProductsCache(
+      {
+        company_id: 1,
+        outlet_id: 10,
+        base_url: "http://127.0.0.1:3001",
+        fetch_impl: fetchWithPayload({
+          success: true,
+          data: {
+            ...createSyncPayload({ dataVersion: 9, outletId: 10, price: 32000 }).data,
+            open_orders: [
+              {
+                order_id: orderId,
+                company_id: 1,
+                outlet_id: 10,
+                service_type: "DINE_IN",
+                table_id: 7,
+                reservation_id: null,
+                guest_count: 2,
+                is_finalized: false,
+                order_status: "OPEN",
+                order_state: "OPEN",
+                paid_amount: 0,
+                opened_at: ts,
+                closed_at: null,
+                notes: null,
+                updated_at: ts
+              }
+            ],
+            open_order_lines: [
+              {
+                order_id: orderId,
+                company_id: 1,
+                outlet_id: 10,
+                item_id: 1001,
+                variant_id: 501,
+                variant_name_snapshot: "Large",
+                sku_snapshot: "AMERICANO-L",
+                name_snapshot: "Americano",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 35000,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: ts
+              },
+              {
+                order_id: orderId,
+                company_id: 1,
+                outlet_id: 10,
+                item_id: 1001,
+                variant_id: 502,
+                variant_name_snapshot: "Iced",
+                sku_snapshot: "AMERICANO-I",
+                name_snapshot: "Americano",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 33000,
+                qty: 2,
+                discount_amount: 0,
+                updated_at: ts
+              }
+            ],
+            order_updates: [],
+            orders_cursor: 0
+          }
+        })
+      },
+      db
+    );
+
+    const lines = await db.active_order_lines.where("order_id").equals(orderId).toArray();
+    const large = lines.find((line) => line.variant_id === 501);
+    const iced = lines.find((line) => line.variant_id === 502);
+
+    assert.equal(lines.length, 2);
+    assert.equal(large?.pk, `${orderId}:1001:501`);
+    assert.equal(large?.variant_name_snapshot, "Large");
+    assert.equal(iced?.pk, `${orderId}:1001:502`);
+    assert.equal(iced?.variant_name_snapshot, "Iced");
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});

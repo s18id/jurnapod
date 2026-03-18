@@ -14,6 +14,7 @@ export interface BarcodeMatch {
   variant_name?: string | null;
   sku: string | null;
   barcode: string | null;
+  thumbnail_url?: string | null;
   price_snapshot: number;
   item_type: ProductItemType;
 }
@@ -68,6 +69,17 @@ export function BarcodeMatchSelector({
               onClick={() => handleSelect(match)}
             >
               <div className="match-info">
+                <div className="match-thumbnail-wrapper">
+                  {match.thumbnail_url ? (
+                    <img
+                      src={match.thumbnail_url}
+                      alt={match.name}
+                      className="match-thumbnail"
+                    />
+                  ) : (
+                    <div className="match-thumbnail match-thumbnail-placeholder" aria-hidden="true">🖼️</div>
+                  )}
+                </div>
                 <div className="match-name">{match.name}</div>
                 {match.variant_name && (
                   <div className="match-variant">{match.variant_name}</div>
@@ -146,6 +158,28 @@ export function BarcodeMatchSelector({
         .match-info {
           flex: 1;
           min-width: 0;
+        }
+
+        .match-thumbnail-wrapper {
+          margin-bottom: 0.5rem;
+        }
+
+        .match-thumbnail {
+          width: 44px;
+          height: 44px;
+          border-radius: 8px;
+          object-fit: cover;
+          border: 1px solid #e5e7eb;
+          display: block;
+        }
+
+        .match-thumbnail-placeholder {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #f1f5f9;
+          color: #64748b;
+          font-size: 1rem;
         }
 
         .match-name {
