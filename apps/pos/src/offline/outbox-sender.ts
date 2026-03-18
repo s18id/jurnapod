@@ -40,6 +40,7 @@ export interface SendOutboxJobToSyncPushInput {
 
 export interface SyncPushTransactionItem {
   item_id: number;
+  variant_id?: number;
   qty: number;
   price_snapshot: number;
   name_snapshot: string;
@@ -97,6 +98,7 @@ export interface SyncPushRequest {
     updated_at: string;
     lines: Array<{
       item_id: number;
+      variant_id?: number;
       sku_snapshot: string | null;
       name_snapshot: string;
       item_type_snapshot: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
@@ -124,6 +126,7 @@ export interface SyncPushRequest {
     update_id?: string;
     order_id: string;
     item_id: number;
+    variant_id?: number;
     company_id: number;
     outlet_id: number;
     cancelled_quantity: number;
@@ -369,6 +372,7 @@ function buildSyncRequest(payload: ParsedOutboxPayload, snapshot: HydratedSaleSn
     discount_code: sale.discount_code ?? null,
     items: snapshot.items.map((item) => ({
       item_id: item.item_id,
+      variant_id: item.variant_id,
       qty: item.qty,
       price_snapshot: item.unit_price_snapshot,
       name_snapshot: item.name_snapshot
@@ -417,6 +421,7 @@ function buildOrderUpdateSyncRequest(
         updated_at: snapshot.order.updated_at,
         lines: snapshot.lines.map((line) => ({
           item_id: line.item_id,
+          variant_id: line.variant_id,
           sku_snapshot: line.sku_snapshot,
           name_snapshot: line.name_snapshot,
           item_type_snapshot: line.item_type_snapshot,
@@ -449,6 +454,7 @@ function buildOrderUpdateSyncRequest(
           update_id: snapshot.update.update_id,
           order_id: snapshot.cancellation.order_id,
           item_id: snapshot.cancellation.item_id,
+          variant_id: snapshot.cancellation.variant_id,
           company_id: snapshot.cancellation.company_id,
           outlet_id: snapshot.cancellation.outlet_id,
           cancelled_quantity: snapshot.cancellation.cancelled_quantity,

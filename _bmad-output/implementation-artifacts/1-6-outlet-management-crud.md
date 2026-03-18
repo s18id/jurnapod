@@ -1,6 +1,12 @@
-# Story 1.6: Outlet Management (CRUD)
+---
+epic: 1
+story: 1.6
+title: Outlet Management (CRUD)
+status: done
+created: 2026-03-15
+---
 
-Status: complete
+# Story 1.6: Outlet Management (CRUD)
 
 ## Story
 

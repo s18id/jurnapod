@@ -5,7 +5,7 @@ import React, { useState, useEffect } from "react";
 import { IonRefresher, IonRefresherContent, type RefresherEventDetail } from "@ionic/react";
 import type { WebBootstrapContext } from "../bootstrap/web.js";
 import { useNavigate } from "react-router-dom";
-import type { RuntimeProductCatalogItem } from "../services/runtime-service.js";
+import type { RuntimeProductCatalogItem, RuntimeProductCatalogItemVariant } from "../services/runtime-service.js";
 import { ProductSearch } from "../features/products/ProductSearch.js";
 import { ProductGrid } from "../features/products/ProductGrid.js";
 import { useProducts } from "../features/products/useProducts.js";
@@ -14,7 +14,9 @@ import { routes } from "../router/routes.js";
 import { formatMoney } from "../shared/utils/money.js";
 import { usePosAppState } from "../router/pos-app-state.js";
 import { ServiceSwitchModal } from "../features/navigation/ServiceSwitchModal.js";
+import { VariantSelector } from "../features/products/VariantSelector.js";
 import type { OrderServiceType } from "../features/cart/useCart.js";
+import { getCartLineKey } from "../features/cart/useCart.js";
 import { useStockValidation } from "../features/stock/useStockValidation.js";
 
 interface ProductsPageProps {
@@ -60,6 +62,10 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     fromServiceType: "TAKEAWAY",
     toServiceType: "TAKEAWAY"
   });
+
+  // Variant selector state
+  const [variantSelectorOpen, setVariantSelectorOpen] = useState(false);
+  const [selectedProductForVariants, setSelectedProductForVariants] = useState<RuntimeProductCatalogItem | null>(null);
 
   const loadProducts = React.useCallback(async () => {
     try {
@@ -148,28 +154,38 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     setServiceSwitchModal((prev) => ({ ...prev, isOpen: false }));
   };
 
-  const handleAddProduct = async (product: RuntimeProductCatalogItem) => {
+  const handleAddProduct = async (product: RuntimeProductCatalogItem, variantId?: number, allowOutOfStockOverride?: boolean) => {
     if (activeOrderContext.service_type === "DINE_IN" && !activeOrderContext.table_id) {
       setDineInGuardMessage("Select a table from the Tables page before adding items for dine-in.");
       return;
     }
 
-    // Check stock availability before adding
+    // Check stock availability before adding (variant-aware)
     clearErrors();
-    const currentQty = cart[product.item_id]?.qty ?? 0;
+    const currentQty = cart[getCartLineKey(product.item_id, variantId)]?.qty ?? 0;
     const requestedQty = currentQty + 1;
-    const stockResult = await checkStock(product.item_id, requestedQty);
-    
-    if (stockResult && stockResult.track_stock && !stockResult.available) {
+    const stockResult = await checkStock(product.item_id, requestedQty, variantId);
+
+    if (stockResult && stockResult.track_stock && !stockResult.available && !allowOutOfStockOverride) {
+      const variantName = variantId
+        ? product.variants?.find(v => v.variant_id === variantId)?.variant_name
+        : undefined;
+      const displayName = variantName ? `${product.name} (${variantName})` : product.name;
       setStockError(
-        `Insufficient stock for ${product.name}. Available: ${stockResult.quantity_available}, Requested: ${requestedQty}`
+        `Insufficient stock for ${displayName}. Available: ${stockResult.quantity_available}, Requested: ${requestedQty}`
       );
       return;
     }
 
     setDineInGuardMessage(null);
     setStockError(null);
-    upsertCartLine(product, { qty: requestedQty });
+
+    // Create product with variant info if variantId provided
+    const productWithVariant = variantId
+      ? { ...product, variant_id: variantId }
+      : product;
+
+    upsertCartLine(productWithVariant, { qty: requestedQty });
     if (payments.length === 0 || payments[0].amount === 0) {
       const fallbackMethod = payments[0]?.method ?? "";
       setPayments([{ method: fallbackMethod, amount: product.price_snapshot }]);
@@ -177,17 +193,31 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
   };
 
   const handleRemoveProduct = (product: RuntimeProductCatalogItem) => {
-    const currentQty = cart[product.item_id]?.qty ?? 0;
+    const currentQty = cart[getCartLineKey(product.item_id, product.variant_id)]?.qty ?? 0;
     if (currentQty > 0) {
       upsertCartLine(product, { qty: currentQty - 1 });
     }
   };
 
   const canRemoveProduct = (product: RuntimeProductCatalogItem): boolean => {
-    const cartLine = cart[product.item_id];
+    const cartLine = cart[getCartLineKey(product.item_id, product.variant_id)];
     if (!cartLine) return true;
     // Can only reduce if current qty is greater than kitchen_sent qty
     return cartLine.qty > cartLine.kitchen_sent_qty;
+  };
+
+  const handleVariantSelect = (product: RuntimeProductCatalogItem) => {
+    setSelectedProductForVariants(product);
+    setVariantSelectorOpen(true);
+  };
+
+  const handleVariantAddToCart = (product: RuntimeProductCatalogItem, variantId: number, allowOutOfStockOverride?: boolean) => {
+    void handleAddProduct(product, variantId, allowOutOfStockOverride);
+  };
+
+  const handleVariantSelectorClose = () => {
+    setVariantSelectorOpen(false);
+    setSelectedProductForVariants(null);
   };
 
   const containerStyles: React.CSSProperties = {
@@ -196,6 +226,9 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
     height: "100%",
     padding: "16px"
   };
+
+  // Get variants for the selected product, or empty array if none selected
+  const currentVariants: RuntimeProductCatalogItemVariant[] = selectedProductForVariants?.variants ?? [];
 
   return (
     <div style={containerStyles}>
@@ -274,6 +307,7 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
           onAddProduct={handleAddProduct}
           onRemoveProduct={handleRemoveProduct}
           canRemoveProduct={canRemoveProduct}
+          onVariantSelect={handleVariantSelect}
         />
       </div>
 
@@ -383,6 +417,15 @@ export function ProductsPage({ context }: ProductsPageProps): JSX.Element {
         onClose={handleServiceSwitchCancel}
         availableTables={outletTables}
         hasActiveItems={cartLines.length > 0}
+      />
+
+      <VariantSelector
+        isOpen={variantSelectorOpen}
+        onClose={handleVariantSelectorClose}
+        product={selectedProductForVariants}
+        variants={currentVariants}
+        onAddToCart={handleVariantAddToCart}
+        allowOutOfStockOverride={true}
       />
     </div>
   );

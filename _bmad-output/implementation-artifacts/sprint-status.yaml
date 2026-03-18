@@ -1,5 +1,5 @@
 # generated: 2026-03-15T09:32:00.000Z
-# last_updated: 2026-03-16T17:00:00.000Z
+# last_updated: 2026-03-17T20:42:22+07:00
 # project: jurnapod
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-16T17:30:00+07:00
+last_updated: 2026-03-18T03:45:00+0000
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -85,16 +85,17 @@ development_status:
   # Epic 4: Items & Catalog - Product Management
   # NOTE: Core stories DISCOVERED already implemented (not built by us)
   # Debt stories SPECS CREATED (not yet implemented)
-  epic-4: done
+  epic-4: in-progress
   4-1-item-product-management-crud: done  # DISCOVERED - already existed
   4-2-outlet-specific-pricing: done  # DISCOVERED - already existed
   4-3-multiple-item-types: done  # DISCOVERED - already existed
   # Debt Stories (specs created, ready to implement)
-  4-4-recipe-bom-composition: backlog  # SPEC CREATED - needs implementation
-  4-5-cogs-integration: backlog  # SPEC CREATED - needs implementation
-  4-6-cost-tracking-methods: backlog  # SPEC CREATED - needs implementation
-  4-7-item-variants: backlog  # TODO - spec not created
-  4-8-barcode-image-support: backlog  # TODO - spec not created
+  4-4-recipe-bom-composition: done  # COMPLETE - Recipe/BOM composition with integration tests and cost-basis-first resolution
+  4-5-cogs-integration: done  # COMPLETE - Full COGS integration with UI
+  4-6-cost-tracking-methods: done  # COMPLETE - All tasks finished including Task 5 (auditability endpoints). 7 new tests passing. API endpoints: cost-layers, current-cost. Shared schemas added.
+  4-7-item-variants: done  # COMPLETE - All HIGH priority issues resolved. Scopes A-F completed: sync pull contract, stock ingestion, reservation safety, end-to-end flow, tests passing. 323 API tests passing, 5/5 sync push tests passing. Typecheck clean across all workspaces.
+  4-8-barcode-image-support: ready-for-dev  # SPEC CREATED - ready for implementation
+  4-9-account-mapping-key-int-constants: ready-for-dev  # SPEC CREATED - migrate mapping_key to mapping_type_id constants
   epic-4-retrospective: done
 
   # Epic 5: Settings - Tax, Payment, Module Configuration
@@ -120,4 +121,17 @@ development_status:
   7-2-sync-audit-event-persistence: done  # BUILT - Audit table + service + integration + 40 tests
   7-3-sync-api-auth-rate-limiting: done  # BUILT - Auth wrapper + rate limiting + 44 tests
   7-4-sync-schema-indexes-retention: done  # BUILT - Composite indexes + retention job + 69 tests
-  epic-7-retrospective: done
+  epic-7-retrospective: done  # COMPLETE - Retrospective saved to epic-7-retro-2026-03-17.md
+
+  # Epic 8: Backoffice-Items-Split (P0) - Split 2,195-line Items & Prices page
+  # NOTE: All stories READY FOR DEVELOPMENT
+  epic-8: done
+  8-1-extract-useitems-hook: done  # COMPLETE - Extract reusable hook with caching
+  8-2-extract-useitemgroups-hook: done  # COMPLETE - Extract item groups hook
+  8-3-create-items-page: done  # COMPLETE - Build dedicated Items page
+  8-4-create-prices-page: done  # COMPLETE - Prices page with visual hierarchy  # COMPLETE - Prices page with ImportWizard and visual hierarchy
+  8-5-build-importwizard-component: done  # COMPLETE - Reusable import wizard
+  8-6-remove-inline-editing: done  # COMPLETE - Explicit edit modals
+  8-7-visual-pricing-hierarchy: done  # COMPLETE - Visual price indicators
+  8-8-update-routing-navigation: done  # COMPLETE - Routes and navigation
+  epic-8-retrospective: done

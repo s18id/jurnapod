@@ -127,6 +127,17 @@ export interface SyncPullResponse {
       cancelled_at: string | null;
       updated_at: string;
     }>;
+    variants?: Array<{
+      id: number;
+      item_id: number;
+      sku: string;
+      variant_name: string;
+      price: number;
+      stock_quantity: number;
+      barcode: string | null;
+      is_active: boolean;
+      attributes: Record<string, string>;
+    }>;
   };
 }
 

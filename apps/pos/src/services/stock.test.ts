@@ -23,6 +23,7 @@ describe("Stock Service", () => {
     await posDb.inventory_stock.clear();
     await posDb.stock_reservations.clear();
     await posDb.products_cache.clear();
+    await posDb.variants_cache.clear();
   });
 
   afterEach(async () => {
@@ -30,6 +31,7 @@ describe("Stock Service", () => {
     await posDb.inventory_stock.clear();
     await posDb.stock_reservations.clear();
     await posDb.products_cache.clear();
+    await posDb.variants_cache.clear();
   });
 
   describe("checkStockAvailability", () => {
@@ -427,6 +429,238 @@ describe("Stock Service", () => {
       const stock = await posDb.inventory_stock.get(`${TEST_COMPANY_ID}:${TEST_OUTLET_ID}:1`);
       expect(stock?.quantity_on_hand).toBe(200);
       expect(stock?.data_version).toBe(5);
+    });
+  });
+
+  describe("Variant Stock Support (Story 4.7 Regression Tests)", () => {
+    it("should check variant stock availability with reservations accounted for", async () => {
+      // Setup variant in cache with stock
+      await posDb.variants_cache.add({
+        pk: `${TEST_COMPANY_ID}:${TEST_OUTLET_ID}:100`,
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        item_id: 1,
+        variant_id: 100,
+        sku: "VAR-001-RED",
+        variant_name: "Red - Small",
+        price: 150,
+        barcode: null,
+        is_active: true,
+        attributes: { color: "Red", size: "Small" },
+        stock_quantity: 50,
+        data_version: 1,
+        pulled_at: new Date().toISOString()
+      });
+
+      // Setup existing reservation for this variant
+      await posDb.stock_reservations.add({
+        reservation_id: crypto.randomUUID(),
+        sale_id: crypto.randomUUID(),
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        item_id: 1,
+        variant_id: 100,
+        quantity: 20,
+        created_at: new Date().toISOString(),
+        expires_at: null
+      });
+
+      // Try to check out 40 units (should fail because 50 - 20 reserved = 30 available)
+      const result = await checkStockAvailability({
+        itemId: 1,
+        quantity: 40,
+        companyId: TEST_COMPANY_ID,
+        outletId: TEST_OUTLET_ID,
+        variantId: 100
+      });
+
+      expect(result.available).toBe(false);
+      expect(result.quantityOnHand).toBe(50);
+      expect(result.quantityReserved).toBe(20);
+      expect(result.quantityAvailable).toBe(-10); // 30 - 40 requested
+    });
+
+    it("should pass validation when variant has sufficient stock", async () => {
+      // Setup variant
+      await posDb.variants_cache.add({
+        pk: `${TEST_COMPANY_ID}:${TEST_OUTLET_ID}:101`,
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        item_id: 2,
+        variant_id: 101,
+        sku: "VAR-002-BLUE",
+        variant_name: "Blue - Medium",
+        price: 200,
+        barcode: null,
+        is_active: true,
+        attributes: { color: "Blue", size: "Medium" },
+        stock_quantity: 100,
+        data_version: 1,
+        pulled_at: new Date().toISOString()
+      });
+
+      // Should pass - requesting 30, stock is 100, no reservations
+      await expect(
+        validateStockForItems({
+          items: [{ itemId: 2, variantId: 101, quantity: 30 }],
+          companyId: TEST_COMPANY_ID,
+          outletId: TEST_OUTLET_ID
+        })
+      ).resolves.not.toThrow();
+    });
+
+    it("should reserve variant stock and track variant_id in reservation", async () => {
+      const saleId = crypto.randomUUID();
+
+      // Setup variant
+      await posDb.variants_cache.add({
+        pk: `${TEST_COMPANY_ID}:${TEST_OUTLET_ID}:102`,
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        item_id: 3,
+        variant_id: 102,
+        sku: "VAR-003-GREEN",
+        variant_name: "Green - Large",
+        price: 175,
+        barcode: null,
+        is_active: true,
+        attributes: { color: "Green", size: "Large" },
+        stock_quantity: 75,
+        data_version: 1,
+        pulled_at: new Date().toISOString()
+      });
+
+      // Reserve variant stock
+      await reserveStock({
+        saleId,
+        items: [{ itemId: 3, variantId: 102, quantity: 25 }],
+        companyId: TEST_COMPANY_ID,
+        outletId: TEST_OUTLET_ID
+      });
+
+      // Check reservation was created with variant_id
+      const reservations = await posDb.stock_reservations.where("sale_id").equals(saleId).toArray();
+      expect(reservations).toHaveLength(1);
+      expect(reservations[0]?.variant_id).toBe(102);
+      expect(reservations[0]?.quantity).toBe(25);
+    });
+
+    it("should prevent overselling variant when multiple reservations exist", async () => {
+      // Setup variant with limited stock
+      await posDb.variants_cache.add({
+        pk: `${TEST_COMPANY_ID}:${TEST_OUTLET_ID}:103`,
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        item_id: 4,
+        variant_id: 103,
+        sku: "VAR-004-LIMITED",
+        variant_name: "Limited Edition",
+        price: 500,
+        barcode: null,
+        is_active: true,
+        attributes: { edition: "Special" },
+        stock_quantity: 10,
+        data_version: 1,
+        pulled_at: new Date().toISOString()
+      });
+
+      // Create multiple existing reservations
+      await posDb.stock_reservations.bulkAdd([
+        {
+          reservation_id: crypto.randomUUID(),
+          sale_id: crypto.randomUUID(),
+          company_id: TEST_COMPANY_ID,
+          outlet_id: TEST_OUTLET_ID,
+          item_id: 4,
+          variant_id: 103,
+          quantity: 4,
+          created_at: new Date().toISOString(),
+          expires_at: null
+        },
+        {
+          reservation_id: crypto.randomUUID(),
+          sale_id: crypto.randomUUID(),
+          company_id: TEST_COMPANY_ID,
+          outlet_id: TEST_OUTLET_ID,
+          item_id: 4,
+          variant_id: 103,
+          quantity: 3,
+          created_at: new Date().toISOString(),
+          expires_at: null
+        }
+      ]);
+
+      // Try to reserve 4 more (10 - 7 = 3 available, so should fail)
+      await expect(
+        validateStockForItems({
+          items: [{ itemId: 4, variantId: 103, quantity: 4 }],
+          companyId: TEST_COMPANY_ID,
+          outletId: TEST_OUTLET_ID
+        })
+      ).rejects.toThrow(InsufficientStockError);
+    });
+
+    it("should handle mixed cart with variant and non-variant items", async () => {
+      // Setup product without variants
+      await posDb.products_cache.add({
+        pk: `${TEST_COMPANY_ID}:${TEST_OUTLET_ID}:5`,
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        item_id: 5,
+        sku: "SIMPLE-001",
+        name: "Simple Product",
+        item_type: "PRODUCT",
+        price_snapshot: 50,
+        is_active: true,
+        item_updated_at: new Date().toISOString(),
+        price_updated_at: new Date().toISOString(),
+        data_version: 1,
+        pulled_at: new Date().toISOString(),
+        track_stock: true,
+        low_stock_threshold: 5
+      });
+
+      await posDb.inventory_stock.add({
+        pk: `${TEST_COMPANY_ID}:${TEST_OUTLET_ID}:5`,
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        item_id: 5,
+        quantity_on_hand: 100,
+        quantity_reserved: 0,
+        quantity_available: 100,
+        last_updated_at: new Date().toISOString(),
+        data_version: 1
+      });
+
+      // Setup variant
+      await posDb.variants_cache.add({
+        pk: `${TEST_COMPANY_ID}:${TEST_OUTLET_ID}:200`,
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        item_id: 6,
+        variant_id: 200,
+        sku: "VAR-MIXED-001",
+        variant_name: "Variant Item",
+        price: 150,
+        barcode: null,
+        is_active: true,
+        attributes: { type: "variant" },
+        stock_quantity: 30,
+        data_version: 1,
+        pulled_at: new Date().toISOString()
+      });
+
+      // Should validate both successfully
+      await expect(
+        validateStockForItems({
+          items: [
+            { itemId: 5, quantity: 50 }, // Non-variant
+            { itemId: 6, variantId: 200, quantity: 20 } // Variant
+          ],
+          companyId: TEST_COMPANY_ID,
+          outletId: TEST_OUTLET_ID
+        })
+      ).resolves.not.toThrow();
     });
   });
 });

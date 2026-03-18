@@ -1,8 +1,12 @@
+---
+epic: 1
+story: 1.2
+title: JWT Token Management & Refresh
+status: done
+created: 2026-03-15
+---
+
 # Story 1.2: JWT Token Management & Refresh
-
-Status: done
-
-<!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
 ## Story
 

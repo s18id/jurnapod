@@ -24,8 +24,8 @@ export interface StockValidationError {
 }
 
 export interface UseStockValidationReturn {
-  checkStock: (itemId: number, quantity: number) => Promise<CheckStockResult | null>;
-  validateItems: (items: Array<{ itemId: number; quantity: number }>) => Promise<boolean>;
+  checkStock: (itemId: number, quantity: number, variantId?: number) => Promise<CheckStockResult | null>;
+  validateItems: (items: Array<{ itemId: number; quantity: number; variantId?: number }>) => Promise<boolean>;
   validationErrors: StockValidationError[];
   isValidating: boolean;
   clearErrors: () => void;
@@ -37,13 +37,14 @@ export function useStockValidation(options: UseStockValidationOptions): UseStock
   const [isValidating, setIsValidating] = useState(false);
 
   const checkStock = useCallback(
-    async (itemId: number, quantity: number): Promise<CheckStockResult | null> => {
+    async (itemId: number, quantity: number, variantId?: number): Promise<CheckStockResult | null> => {
       try {
         const result = await checkStockAvailability({
           itemId,
           quantity,
           companyId,
-          outletId
+          outletId,
+          variantId
         });
         return {
           item_id: itemId,
@@ -61,7 +62,7 @@ export function useStockValidation(options: UseStockValidationOptions): UseStock
   );
 
   const validateItems = useCallback(
-    async (items: Array<{ itemId: number; quantity: number }>): Promise<boolean> => {
+    async (items: Array<{ itemId: number; quantity: number; variantId?: number }>): Promise<boolean> => {
       setIsValidating(true);
       setValidationErrors([]);
 

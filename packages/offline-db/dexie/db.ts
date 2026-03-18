@@ -12,6 +12,7 @@ import type {
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
+  VariantCacheRow,
   SaleItemRow,
   SaleRow,
   SyncMetadataRow,
@@ -38,6 +39,7 @@ export class PosOfflineDb extends Dexie {
   sync_scope_config!: Table<SyncScopeConfigRow, string>;
   inventory_stock!: Table<InventoryStockRow, string>;
   stock_reservations!: Table<StockReservationRow, string>;
+  variants_cache!: Table<VariantCacheRow, string>;
 
   constructor(databaseName: string = POS_DB_NAME) {
     super(databaseName);
@@ -235,6 +237,65 @@ export class PosOfflineDb extends Dexie {
         "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+data_version]",
       stock_reservations:
         "&reservation_id,sale_id,[company_id+outlet_id+item_id],created_at"
+    });
+
+    this.version(13).stores({
+      products_cache:
+        "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+data_version],[company_id+outlet_id+is_active]",
+      outlet_tables: "&pk,[company_id+outlet_id+table_id],[company_id+outlet_id+status],updated_at",
+      reservations:
+        "&pk,[company_id+outlet_id+reservation_at],[company_id+outlet_id+status],[company_id+outlet_id+table_id],updated_at",
+      active_orders:
+        "&pk,&order_id,[company_id+outlet_id+order_state+updated_at],[company_id+outlet_id+order_state+is_finalized+updated_at],[company_id+outlet_id+table_id+order_state],[company_id+outlet_id+reservation_id+order_state],[company_id+outlet_id+source_flow],[company_id+outlet_id+settlement_flow]",
+      active_order_lines: "&pk,[order_id+item_id],[company_id+outlet_id+order_id]",
+      active_order_updates:
+        "&pk,&update_id,[company_id+outlet_id+order_id+event_at],[company_id+outlet_id+sync_status+event_at]",
+      item_cancellations:
+        "&pk,&cancellation_id,[company_id+outlet_id+order_id],[order_id+item_id+cancelled_at],cancelled_at,[company_id+outlet_id+sync_status+cancelled_at]",
+      sales:
+        "&sale_id,&client_tx_id,[company_id+outlet_id+status],[company_id+outlet_id+created_at],sync_status,[company_id+outlet_id+reservation_id],[company_id+outlet_id+table_id]",
+      sale_items: "&line_id,sale_id,[company_id+outlet_id+sale_id]",
+      payments: "&payment_id,sale_id,[company_id+outlet_id+sale_id]",
+      outbox_jobs:
+        "&job_id,&dedupe_key,sale_id,[status+next_attempt_at],[status+lease_expires_at],lease_expires_at,updated_at",
+      sync_metadata: "&pk,[company_id+outlet_id],last_data_version,orders_cursor,updated_at",
+      sync_scope_config: "&pk,[company_id+outlet_id],data_version,updated_at",
+      inventory_stock:
+        "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+data_version]",
+      stock_reservations:
+        "&reservation_id,sale_id,[company_id+outlet_id+item_id],created_at",
+      variants_cache:
+        "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+variant_id],[company_id+outlet_id+is_active]"
+    });
+
+    // Version 14: Add variant_id index to stock_reservations for variant stock tracking
+    this.version(14).stores({
+      products_cache:
+        "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+data_version],[company_id+outlet_id+is_active]",
+      outlet_tables: "&pk,[company_id+outlet_id+table_id],[company_id+outlet_id+status],updated_at",
+      reservations:
+        "&pk,[company_id+outlet_id+reservation_at],[company_id+outlet_id+status],[company_id+outlet_id+table_id],updated_at",
+      active_orders:
+        "&pk,&order_id,[company_id+outlet_id+order_state+updated_at],[company_id+outlet_id+order_state+is_finalized+updated_at],[company_id+outlet_id+table_id+order_state],[company_id+outlet_id+reservation_id+order_state],[company_id+outlet_id+source_flow],[company_id+outlet_id+settlement_flow]",
+      active_order_lines: "&pk,[order_id+item_id],[company_id+outlet_id+order_id]",
+      active_order_updates:
+        "&pk,&update_id,[company_id+outlet_id+order_id+event_at],[company_id+outlet_id+sync_status+event_at]",
+      item_cancellations:
+        "&pk,&cancellation_id,[company_id+outlet_id+order_id],[order_id+item_id+cancelled_at],cancelled_at,[company_id+outlet_id+sync_status+cancelled_at]",
+      sales:
+        "&sale_id,&client_tx_id,[company_id+outlet_id+status],[company_id+outlet_id+created_at],sync_status,[company_id+outlet_id+reservation_id],[company_id+outlet_id+table_id]",
+      sale_items: "&line_id,sale_id,[company_id+outlet_id+sale_id]",
+      payments: "&payment_id,sale_id,[company_id+outlet_id+sale_id]",
+      outbox_jobs:
+        "&job_id,&dedupe_key,sale_id,[status+next_attempt_at],[status+lease_expires_at],lease_expires_at,updated_at",
+      sync_metadata: "&pk,[company_id+outlet_id],last_data_version,orders_cursor,updated_at",
+      sync_scope_config: "&pk,[company_id+outlet_id],data_version,updated_at",
+      inventory_stock:
+        "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+data_version]",
+      stock_reservations:
+        "&reservation_id,sale_id,[company_id+outlet_id+item_id],[company_id+outlet_id+variant_id],created_at",
+      variants_cache:
+        "&pk,[company_id+outlet_id+item_id],[company_id+outlet_id+variant_id],[company_id+outlet_id+is_active]"
     });
   }
 }

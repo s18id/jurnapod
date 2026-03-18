@@ -108,9 +108,11 @@ jurnapod/
 
 ### Current Architecture
 
+> **Note:** API framework successfully migrated from Next.js to Hono 4.0.0
+
 | Component | Technology | Version |
 |-----------|------------|---------|
-| **API** | Next.js | 15.5.12 |
+| **API** | Hono | 4.0.0 |
 | **POS PWA** | Vite + React + Ionic | 8.x |
 | **Backoffice** | React | 18.x |
 | **Database** | MySQL | 8.0.44 |
@@ -123,12 +125,12 @@ jurnapod/
 
 | Aspect | Current | Assessment | Recommendation |
 |--------|---------|------------|----------------|
-| **API Framework** | Next.js | Good | Keep - well supported |
+| **API Framework** | Hono 4.0.0 | Excellent | Migrated - lightweight, fast |
 | **Frontend** | React + Ionic + Vite | Good | Keep - PWA + mobile ready |
-| **Database** | MySQL 8.0 | Good | Keep - meets requirements |
-| **Validation** | Zod | Excellent | Keep - type-safe |
-| **Offline Storage** | Dexie | Good | Keep - IndexedDB wrapper |
-| **Auth** | JWT + Argon2 | Good | Keep - secure |
+| **Database** | MySQL 8.0.44 | Good | Keep - meets requirements |
+| **Validation** | Zod 3.24.1 | Excellent | Keep - type-safe |
+| **Offline Storage** | Dexie (IndexedDB) | Good | Keep - IndexedDB wrapper |
+| **Auth** | JWT (jose) + Argon2id | Good | Keep - secure |
 | **Testing** | Node test + Playwright | Good | Consider adding Vitest |
 
 ### Architecture Gaps Identified
@@ -166,7 +168,7 @@ jurnapod/
 
 | Decision | Current Practice | Status |
 |----------|------------------|--------|
-| **API Style** | REST (Next.js API routes) | ✅ Decided |
+| **API Style** | REST (Hono framework) | ✅ Decided |
 | **Sync Endpoint** | POST /api/sync/push with client_tx_id | ✅ Decided |
 | **Error Responses** | Standard envelope format | To standardize |
 | **Versioning** | Not yet implemented | Future consideration |

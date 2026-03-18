@@ -2,21 +2,69 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { createServer } from "node:net";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import mysql from "mysql2/promise";
 import { setupIntegrationTests } from "./integration-harness.mjs";
+
+// Import helpers
+import {
+  readEnv,
+  delay,
+  parseJsonResponse,
+  toMysqlDateTime,
+  getFreePort,
+  startApiServer,
+  waitForHealthcheck,
+  stopApiServer,
+  buildSyncTransaction,
+  assertSyncPushResponseShape,
+  computeLegacyPayloadSha256
+} from "./helpers/sync-push-runtime.mjs";
+
+import {
+  ensureOpenFiscalDate,
+  countAcceptedSyncPushEvents,
+  countDuplicateSyncPushEvents,
+  readAcceptedSyncPushAuditPayload,
+  readPostingHookFailureAuditPayload,
+  readDuplicateSyncPushAuditPayload,
+  countSyncPushPersistedRows,
+  countSyncPushJournalRows,
+  readSyncPushJournalSummary,
+  setCompanyDefaultTaxRate,
+  restoreCompanyDefaultTaxRate,
+  ensureOutletAccountMappings,
+  cleanupCreatedOutletAccountMappings,
+  cleanupSyncPushPersistedArtifacts,
+  cleanupOrderSyncArtifacts,
+  hasTable,
+  POS_SALE_DOC_TYPE,
+  OUTLET_ACCOUNT_MAPPING_KEYS
+} from "./helpers/sync-push-db.mjs";
+
+import {
+  cleanupInventoryAndCostArtifacts,
+  setupTrackedItemWithCost,
+  setupCogsAccounts,
+  enableCogsFeature,
+  disableCogsFeature,
+  cleanupCogsAccounts,
+  cleanupTrackedItems,
+  countCogsJournalRows,
+  getProductStockQuantity,
+  getInventoryTransactions,
+  getCostLayerConsumption,
+  verifyCogsJournalBalance,
+  buildSyncTransactionWithItems
+} from "./helpers/sync-push-costing.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const apiRoot = path.resolve(__dirname, "../..");
 const repoRoot = path.resolve(apiRoot, "../..");
-const serverScriptPath = path.resolve(apiRoot, "src/server.ts");
 const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
@@ -32,793 +80,12 @@ const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
 const SYNC_PUSH_CONCURRENCY_ENV = "JP_SYNC_PUSH_CONCURRENCY";
 const SYNC_PUSH_POSTING_MODE_ENV = "SYNC_PUSH_POSTING_MODE";
 const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
-const POS_SALE_DOC_TYPE = "POS_SALE";
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["CASH", "QRIS", "CARD", "SALES_REVENUE", "AR"];
 
 const testContext = setupIntegrationTests(test);
 const localServerTest =
   process.env.JP_TEST_BASE_URL && process.env.JP_TEST_ALLOW_LOCAL_SERVER !== "1"
     ? test.skip
     : test;
-
-function readEnv(name, fallback = null) {
-  const value = process.env[name];
-  if (value == null || value.length === 0) {
-    if (fallback != null) {
-      return fallback;
-    }
-
-    throw new Error(`${name} is required for integration test`);
-  }
-
-  return value;
-}
-
-function dbConfigFromEnv() {
-  const port = Number(process.env.DB_PORT ?? "3306");
-  if (!Number.isInteger(port) || port <= 0) {
-    throw new Error("DB_PORT must be a positive integer for integration test");
-  }
-
-  return {
-    host: process.env.DB_HOST ?? "127.0.0.1",
-    port,
-    user: process.env.DB_USER ?? "root",
-    password: process.env.DB_PASSWORD ?? "",
-    database: process.env.DB_NAME ?? "jurnapod"
-  };
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function parseJsonResponse(response) {
-  const body = await response.json();
-  if (body && typeof body === "object" && body.data && typeof body.data === "object") {
-    const data = body.data;
-    if (Array.isArray(data.results)) {
-      return { ...body, results: data.results };
-    }
-  }
-  return body;
-}
-
-function toMysqlDateTime(value) {
-  return new Date(value).toISOString().slice(0, 19).replace("T", " ");
-}
-
-function toDateOnly(value) {
-  if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
-  }
-  if (typeof value === "string" && value.length > 0) {
-    return value.slice(0, 10);
-  }
-  return new Date().toISOString().slice(0, 10);
-}
-
-async function ensureOpenFiscalDate(db, companyId) {
-  const [openRows] = await db.execute(
-    `SELECT id, start_date
-     FROM fiscal_years
-     WHERE company_id = ?
-       AND status = 'OPEN'
-     ORDER BY start_date DESC
-     LIMIT 1`,
-    [companyId]
-  );
-
-  if (openRows.length > 0) {
-    const startDate = toDateOnly(openRows[0].start_date);
-    return {
-      trxAt: `${startDate}T12:00:00.000Z`,
-      createdFiscalYearId: null
-    };
-  }
-
-  const year = new Date().getUTCFullYear();
-  const startDate = `${year}-01-01`;
-  const endDate = `${year}-12-31`;
-  const code = `ITFY${Date.now().toString(36).toUpperCase()}`.slice(0, 32);
-  const name = `Integration Fiscal Year ${year}`;
-  const [insertResult] = await db.execute(
-    `INSERT INTO fiscal_years (company_id, code, name, start_date, end_date, status)
-     VALUES (?, ?, ?, ?, ?, 'OPEN')`,
-    [companyId, code, name, startDate, endDate]
-  );
-
-  return {
-    trxAt: `${startDate}T12:00:00.000Z`,
-    createdFiscalYearId: Number(insertResult.insertId)
-  };
-}
-
-function computeLegacyPayloadSha256(transaction) {
-  const canonical = JSON.stringify({
-    client_tx_id: transaction.client_tx_id,
-    company_id: transaction.company_id,
-    outlet_id: transaction.outlet_id,
-    cashier_user_id: transaction.cashier_user_id,
-    status: transaction.status,
-    trx_at: transaction.trx_at,
-    items: transaction.items.map((item) => ({
-      item_id: item.item_id,
-      qty: item.qty,
-      price_snapshot: item.price_snapshot,
-      name_snapshot: item.name_snapshot
-    })),
-    payments: transaction.payments.map((payment) => ({
-      method: payment.method,
-      amount: payment.amount
-    }))
-  });
-
-  return createHash("sha256").update(canonical).digest("hex");
-}
-
-async function getFreePort() {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("failed to allocate free port"));
-        return;
-      }
-
-      const port = address.port;
-      server.close((closeError) => {
-        if (closeError) {
-          reject(closeError);
-          return;
-        }
-
-        resolve(port);
-      });
-    });
-  });
-}
-
-function startApiServer(port, options = {}) {
-  const enableSyncPushTestHooks = options.enableSyncPushTestHooks === true;
-  const envOverrides = {
-    ...(options.envOverrides ?? {}),
-    [SYNC_PUSH_CONCURRENCY_ENV]: options.envOverrides?.[SYNC_PUSH_CONCURRENCY_ENV] ?? "3"
-  };
-  const childEnv = {
-    ...process.env,
-    NODE_ENV: "test",
-    [SYNC_PUSH_TEST_HOOKS_ENV]: enableSyncPushTestHooks ? "1" : "0",
-    ...envOverrides
-  };
-
-  const serverLogs = [];
-  const childProcess = spawn(process.execPath, ["--import", "tsx", serverScriptPath], {
-    cwd: apiRoot,
-    env: { ...childEnv, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-
-  childProcess.stdout.on("data", (chunk) => {
-    serverLogs.push(chunk.toString());
-    if (serverLogs.length > 200) {
-      serverLogs.shift();
-    }
-  });
-
-  childProcess.stderr.on("data", (chunk) => {
-    serverLogs.push(chunk.toString());
-    if (serverLogs.length > 200) {
-      serverLogs.shift();
-    }
-  });
-
-  return {
-    childProcess,
-    serverLogs
-  };
-}
-
-async function waitForHealthcheck(baseUrl, childProcess, serverLogs) {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < TEST_TIMEOUT_MS) {
-    if (childProcess.exitCode != null) {
-      throw new Error(
-        `API server exited before healthcheck. exitCode=${childProcess.exitCode}\n${serverLogs.join("")}`
-      );
-    }
-
-    try {
-      const response = await fetch(`${baseUrl}/api/health`);
-      if (response.status === 200) {
-        return;
-      }
-    } catch {
-      // Ignore transient startup errors while booting.
-    }
-
-    await delay(500);
-  }
-
-  throw new Error(`API server did not become healthy in time\n${serverLogs.join("")}`);
-}
-
-async function stopApiServer(childProcess) {
-  if (!childProcess || childProcess.exitCode != null) {
-    return;
-  }
-
-  await new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      childProcess.kill("SIGKILL");
-    }, 5000);
-
-    childProcess.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-
-    childProcess.kill("SIGTERM");
-  });
-}
-
-function buildSyncTransaction({ clientTxId, companyId, outletId, cashierUserId, trxAt }) {
-  return {
-    client_tx_id: clientTxId,
-    company_id: companyId,
-    outlet_id: outletId,
-    cashier_user_id: cashierUserId,
-    status: "COMPLETED",
-    trx_at: trxAt,
-    items: [
-      {
-        item_id: 1,
-        qty: 1,
-        price_snapshot: 12500,
-        name_snapshot: "Test Item"
-      }
-    ],
-    payments: [
-      {
-        method: "CASH",
-        amount: 12500
-      }
-    ]
-  };
-}
-
-function assertSyncPushResponseShape(body) {
-  assert.equal(typeof body, "object");
-  assert.notEqual(body, null);
-  const results = body.data?.results ?? body.results;
-  assert.equal(Array.isArray(results), true);
-
-  for (const item of results) {
-    assert.equal(typeof item.client_tx_id, "string");
-    assert.equal(
-      item.result === "OK" || item.result === "DUPLICATE" || item.result === "ERROR",
-      true
-    );
-
-    if ("message" in item && item.message !== undefined) {
-      assert.equal(typeof item.message, "string");
-    }
-  }
-}
-
-async function countAcceptedSyncPushEvents(db, clientTxId) {
-  const [rows] = await db.execute(
-    `SELECT COUNT(*) AS total
-     FROM audit_logs
-     WHERE action = ?
-       AND success = 1
-       AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
-    [SYNC_PUSH_ACCEPTED_AUDIT_ACTION, clientTxId]
-  );
-
-  return Number(rows[0].total);
-}
-
-async function countDuplicateSyncPushEvents(db, clientTxId) {
-  const [rows] = await db.execute(
-    `SELECT COUNT(*) AS total
-     FROM audit_logs
-     WHERE action = ?
-       AND success = 1
-       AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
-    [SYNC_PUSH_DUPLICATE_AUDIT_ACTION, clientTxId]
-  );
-
-  return Number(rows[0].total);
-}
-
-async function readAcceptedSyncPushAuditPayload(db, clientTxId) {
-  const [rows] = await db.execute(
-    `SELECT payload_json
-     FROM audit_logs
-     WHERE action = ?
-       AND success = 1
-       AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
-     ORDER BY id DESC
-     LIMIT 1`,
-    [SYNC_PUSH_ACCEPTED_AUDIT_ACTION, clientTxId]
-  );
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  const payloadJson = String(rows[0].payload_json ?? "{}");
-  return JSON.parse(payloadJson);
-}
-
-async function readPostingHookFailureAuditPayload(db, clientTxId) {
-  const [rows] = await db.execute(
-    `SELECT payload_json
-     FROM audit_logs
-     WHERE action = ?
-       AND result = 'FAIL'
-       AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
-     ORDER BY id DESC
-     LIMIT 1`,
-    [SYNC_PUSH_POSTING_HOOK_FAIL_AUDIT_ACTION, clientTxId]
-  );
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  const payloadJson = String(rows[0].payload_json ?? "{}");
-  return JSON.parse(payloadJson);
-}
-
-async function readDuplicateSyncPushAuditPayload(db, clientTxId) {
-  const [rows] = await db.execute(
-    `SELECT payload_json
-     FROM audit_logs
-     WHERE action = ?
-       AND success = 1
-       AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?
-     ORDER BY id DESC
-     LIMIT 1`,
-    [SYNC_PUSH_DUPLICATE_AUDIT_ACTION, clientTxId]
-  );
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  const payloadJson = String(rows[0].payload_json ?? "{}");
-  return JSON.parse(payloadJson);
-}
-
-async function countSyncPushPersistedRows(db, clientTxId) {
-  const [rows] = await db.execute(
-    `SELECT
-       (SELECT COUNT(*) FROM pos_transactions WHERE client_tx_id = ?) AS tx_total,
-       (
-         SELECT COUNT(*)
-         FROM pos_transaction_items pti
-         INNER JOIN pos_transactions pt ON pt.id = pti.pos_transaction_id
-         WHERE pt.client_tx_id = ?
-       ) AS item_total,
-       (
-         SELECT COUNT(*)
-         FROM pos_transaction_payments ptp
-         INNER JOIN pos_transactions pt ON pt.id = ptp.pos_transaction_id
-         WHERE pt.client_tx_id = ?
-       ) AS payment_total`,
-    [clientTxId, clientTxId, clientTxId]
-  );
-
-  return {
-    tx_total: Number(rows[0].tx_total),
-    item_total: Number(rows[0].item_total),
-    payment_total: Number(rows[0].payment_total)
-  };
-}
-
-async function countSyncPushJournalRows(db, clientTxId) {
-  const [rows] = await db.execute(
-    `SELECT
-       (
-         SELECT COUNT(*)
-         FROM journal_batches jb
-         INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
-         WHERE jb.doc_type = ?
-           AND pt.client_tx_id = ?
-       ) AS batch_total,
-       (
-         SELECT COUNT(*)
-         FROM journal_lines jl
-         INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-         INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
-         WHERE jb.doc_type = ?
-           AND pt.client_tx_id = ?
-       ) AS line_total`,
-    [POS_SALE_DOC_TYPE, clientTxId, POS_SALE_DOC_TYPE, clientTxId]
-  );
-
-  return {
-    batch_total: Number(rows[0].batch_total),
-    line_total: Number(rows[0].line_total)
-  };
-}
-
-async function readSyncPushJournalSummary(db, clientTxId) {
-  const [rows] = await db.execute(
-    `SELECT
-       COALESCE(SUM(jl.debit), 0) AS debit_total,
-       COALESCE(SUM(jl.credit), 0) AS credit_total,
-       COALESCE(SUM(CASE WHEN jl.description LIKE 'POS sales tax%' THEN jl.credit ELSE 0 END), 0) AS tax_credit_total,
-       COALESCE(SUM(CASE WHEN jl.description LIKE 'POS sales tax%' THEN 1 ELSE 0 END), 0) AS tax_line_total
-     FROM journal_lines jl
-     INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-     INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
-     WHERE jb.doc_type = ?
-       AND pt.client_tx_id = ?`,
-    [POS_SALE_DOC_TYPE, clientTxId]
-  );
-
-  return {
-    debit_total: Number(rows[0].debit_total),
-    credit_total: Number(rows[0].credit_total),
-    tax_credit_total: Number(rows[0].tax_credit_total),
-    tax_line_total: Number(rows[0].tax_line_total)
-  };
-}
-
-async function setCompanyDefaultTaxRate(db, companyId, config) {
-  const [defaultRows] = await db.execute(
-    `SELECT tax_rate_id
-     FROM company_tax_defaults
-     WHERE company_id = ?`,
-    [companyId]
-  );
-  const previousDefaults = defaultRows.map((row) => Number(row.tax_rate_id)).filter((id) => id > 0);
-
-  const createAccount = config.withAccount !== false;
-  let createdAccountId = null;
-  if (createAccount) {
-    const accountCode = `ITTAX${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
-    const [accountInsertResult] = await db.execute(
-      `INSERT INTO accounts (company_id, code, name)
-       VALUES (?, ?, ?)`,
-      [companyId, accountCode, "Integration Test Tax Liability"]
-    );
-    createdAccountId = Number(accountInsertResult.insertId);
-  }
-
-  const code = `SYNC_TAX_${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
-  const [insertResult] = await db.execute(
-    `INSERT INTO tax_rates (company_id, code, name, rate_percent, is_inclusive, is_active, account_id)
-     VALUES (?, ?, ?, ?, ?, 1, ?)`,
-    [companyId, code, "Sync Tax", config.rate, config.inclusive ? 1 : 0, createdAccountId]
-  );
-  const taxRateId = Number(insertResult.insertId);
-
-  await db.execute(
-    `DELETE FROM company_tax_defaults WHERE company_id = ?`,
-    [companyId]
-  );
-  await db.execute(
-    `INSERT INTO company_tax_defaults (company_id, tax_rate_id)
-     VALUES (?, ?)`,
-    [companyId, taxRateId]
-  );
-
-  return { previousDefaults, taxRateId, createdAccountId };
-}
-
-async function restoreCompanyDefaultTaxRate(db, companyId, previous) {
-  await db.execute(
-    `DELETE FROM company_tax_defaults WHERE company_id = ?`,
-    [companyId]
-  );
-
-  if (Array.isArray(previous.previousDefaults) && previous.previousDefaults.length > 0) {
-    const placeholders = previous.previousDefaults.map(() => "(?, ?)").join(", ");
-    const values = previous.previousDefaults.flatMap((taxRateId) => [companyId, taxRateId]);
-    await db.execute(
-      `INSERT INTO company_tax_defaults (company_id, tax_rate_id)
-       VALUES ${placeholders}`,
-      values
-    );
-  }
-
-  if (Number.isFinite(previous.taxRateId)) {
-    await db.execute(
-      `DELETE FROM pos_transaction_taxes
-       WHERE company_id = ?
-         AND tax_rate_id = ?`,
-      [companyId, previous.taxRateId]
-    );
-    await db.execute(
-      `DELETE FROM sales_invoice_taxes
-       WHERE company_id = ?
-         AND tax_rate_id = ?`,
-      [companyId, previous.taxRateId]
-    );
-    await db.execute(
-      `DELETE FROM tax_rates WHERE id = ? AND company_id = ?`,
-      [previous.taxRateId, companyId]
-    );
-  }
-
-  if (Number.isFinite(previous.createdAccountId) && Number(previous.createdAccountId) > 0) {
-    await db.execute(
-      `DELETE FROM accounts
-       WHERE company_id = ?
-         AND id = ?`,
-      [companyId, previous.createdAccountId]
-    );
-  }
-}
-
-function buildTestAccountCode(mappingKey) {
-  const suffix = randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
-  const base = `IT${mappingKey.replaceAll("_", "")}${suffix}`;
-  return base.slice(0, 32);
-}
-
-async function ensureOutletAccountMappings(db, companyId, outletId) {
-  const [constraintRows] = await db.execute(
-    `SELECT check_clause
-     FROM information_schema.check_constraints
-     WHERE constraint_schema = DATABASE()
-       AND constraint_name = 'chk_outlet_account_mappings_mapping_key'
-     LIMIT 1`
-  );
-
-  const clause = constraintRows[0]?.check_clause ?? "";
-  if (typeof clause !== "string" || !clause.includes("'CARD'")) {
-    const dropConstraintStatements = [
-      "ALTER TABLE outlet_account_mappings DROP CONSTRAINT chk_outlet_account_mappings_mapping_key",
-      "ALTER TABLE outlet_account_mappings DROP CHECK chk_outlet_account_mappings_mapping_key"
-    ];
-
-    for (const statement of dropConstraintStatements) {
-      try {
-        await db.execute(statement);
-        break;
-      } catch (error) {
-        const message = error?.message ?? "";
-        if (typeof message === "string" && message.includes("doesn't exist")) {
-          break;
-        }
-      }
-    }
-
-    await db.execute(
-      `ALTER TABLE outlet_account_mappings
-       ADD CONSTRAINT chk_outlet_account_mappings_mapping_key
-       CHECK (mapping_key IN ('CASH', 'QRIS', 'CARD', 'SALES_REVENUE', 'AR'))`
-    );
-  }
-
-  const placeholders = OUTLET_ACCOUNT_MAPPING_KEYS.map(() => "?").join(", ");
-  const [existingRows] = await db.execute(
-    `SELECT mapping_key
-     FROM outlet_account_mappings
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND mapping_key IN (${placeholders})`,
-    [companyId, outletId, ...OUTLET_ACCOUNT_MAPPING_KEYS]
-  );
-
-  const existingKeys = new Set(
-    (existingRows).map((row) => String(row.mapping_key ?? "")).filter((value) => value.length > 0)
-  );
-
-  const createdMappingKeys = [];
-  const createdAccountIds = [];
-  const createdPaymentMethodCodes = [];
-
-  for (const mappingKey of OUTLET_ACCOUNT_MAPPING_KEYS) {
-    if (existingKeys.has(mappingKey)) {
-      continue;
-    }
-
-    const accountCode = buildTestAccountCode(mappingKey);
-    const [accountInsertResult] = await db.execute(
-      `INSERT INTO accounts (company_id, code, name)
-       VALUES (?, ?, ?)`,
-      [companyId, accountCode, `Integration Test ${mappingKey}`]
-    );
-    const accountId = Number(accountInsertResult.insertId);
-
-    await db.execute(
-      `INSERT INTO outlet_account_mappings (
-         company_id,
-         outlet_id,
-         mapping_key,
-         account_id
-       ) VALUES (?, ?, ?, ?)`,
-      [companyId, outletId, mappingKey, accountId]
-    );
-
-    createdMappingKeys.push(mappingKey);
-    createdAccountIds.push(accountId);
-  }
-
-  const [paymentTableRows] = await db.execute(
-    `SELECT 1 AS present
-     FROM information_schema.tables
-     WHERE table_schema = DATABASE()
-       AND table_name = 'outlet_payment_method_mappings'
-     LIMIT 1`
-  );
-  const hasPaymentMethodMappingTable = paymentTableRows.length > 0;
-
-  if (hasPaymentMethodMappingTable) {
-    const [paymentMappingRows] = await db.execute(
-      `SELECT method_code
-       FROM outlet_payment_method_mappings
-       WHERE company_id = ?
-         AND outlet_id = ?
-         AND method_code IN ('CASH', 'QRIS', 'CARD')`,
-      [companyId, outletId]
-    );
-
-    const existingMethodCodes = new Set(
-      paymentMappingRows
-        .map((row) => String(row.method_code ?? "").toUpperCase())
-        .filter((value) => value.length > 0)
-    );
-
-    const [accountMappingRows] = await db.execute(
-      `SELECT mapping_key, account_id
-       FROM outlet_account_mappings
-       WHERE company_id = ?
-         AND outlet_id = ?
-         AND mapping_key IN ('CASH', 'QRIS', 'CARD')`,
-      [companyId, outletId]
-    );
-    const accountIdByMethodCode = new Map(
-      accountMappingRows
-        .map((row) => [String(row.mapping_key ?? "").toUpperCase(), Number(row.account_id)])
-        .filter((row) => row[0].length > 0 && Number.isFinite(row[1]))
-    );
-
-    for (const methodCode of ["CASH", "QRIS", "CARD"]) {
-      if (existingMethodCodes.has(methodCode)) {
-        continue;
-      }
-
-      const accountId = accountIdByMethodCode.get(methodCode);
-      if (!accountId) {
-        continue;
-      }
-
-      await db.execute(
-        `INSERT INTO outlet_payment_method_mappings (company_id, outlet_id, method_code, account_id)
-         VALUES (?, ?, ?, ?)`,
-        [companyId, outletId, methodCode, accountId]
-      );
-      createdPaymentMethodCodes.push(methodCode);
-    }
-  }
-
-  return {
-    createdMappingKeys,
-    createdAccountIds,
-    createdPaymentMethodCodes
-  };
-}
-
-async function cleanupCreatedOutletAccountMappings(db, companyId, outletId, fixture) {
-  if (fixture.createdPaymentMethodCodes.length > 0) {
-    const paymentMethodPlaceholders = fixture.createdPaymentMethodCodes.map(() => "?").join(", ");
-    await db.execute(
-      `DELETE FROM outlet_payment_method_mappings
-       WHERE company_id = ?
-         AND outlet_id = ?
-         AND method_code IN (${paymentMethodPlaceholders})`,
-      [companyId, outletId, ...fixture.createdPaymentMethodCodes]
-    );
-  }
-
-  if (fixture.createdMappingKeys.length > 0) {
-    const mappingPlaceholders = fixture.createdMappingKeys.map(() => "?").join(", ");
-    await db.execute(
-      `DELETE FROM outlet_account_mappings
-       WHERE company_id = ?
-         AND outlet_id = ?
-         AND mapping_key IN (${mappingPlaceholders})`,
-      [companyId, outletId, ...fixture.createdMappingKeys]
-    );
-  }
-
-  if (fixture.createdAccountIds.length > 0) {
-    const accountPlaceholders = fixture.createdAccountIds.map(() => "?").join(", ");
-    await db.execute(
-      `DELETE FROM accounts
-       WHERE company_id = ?
-         AND id IN (${accountPlaceholders})`,
-      [companyId, ...fixture.createdAccountIds]
-    );
-  }
-}
-
-async function cleanupSyncPushPersistedArtifacts(db, clientTxId) {
-  await db.execute(
-    `DELETE pti
-     FROM pos_transaction_items pti
-     INNER JOIN pos_transactions pt ON pt.id = pti.pos_transaction_id
-     WHERE pt.client_tx_id = ?`,
-    [clientTxId]
-  );
-
-  await db.execute(
-    `DELETE ptp
-     FROM pos_transaction_payments ptp
-     INNER JOIN pos_transactions pt ON pt.id = ptp.pos_transaction_id
-     WHERE pt.client_tx_id = ?`,
-    [clientTxId]
-  );
-
-  await db.execute(
-    `DELETE jl
-     FROM journal_lines jl
-     INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-     INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
-     WHERE jb.doc_type = ?
-       AND pt.client_tx_id = ?`,
-    [POS_SALE_DOC_TYPE, clientTxId]
-  );
-
-  await db.execute(
-    `DELETE jb
-     FROM journal_batches jb
-     INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
-     WHERE jb.doc_type = ?
-       AND pt.client_tx_id = ?`,
-    [POS_SALE_DOC_TYPE, clientTxId]
-  );
-
-  await db.execute(
-    `DELETE FROM audit_logs
-     WHERE JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.client_tx_id')) = ?`,
-    [clientTxId]
-  );
-
-  await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [clientTxId]);
-}
-
-async function cleanupOrderSyncArtifacts(db, orderId) {
-  try {
-    await db.execute("DELETE FROM pos_item_cancellations WHERE order_id = ?", [orderId]);
-  } catch (error) {
-    if (error?.code !== "ER_NO_SUCH_TABLE") {
-      throw error;
-    }
-  }
-  try {
-    await db.execute("DELETE FROM pos_order_updates WHERE order_id = ?", [orderId]);
-    await db.execute("DELETE FROM pos_order_snapshot_lines WHERE order_id = ?", [orderId]);
-    await db.execute("DELETE FROM pos_order_snapshots WHERE order_id = ?", [orderId]);
-  } catch (error) {
-    if (error?.code !== "ER_NO_SUCH_TABLE") {
-      throw error;
-    }
-  }
-}
-
-async function hasTable(db, tableName) {
-  const [rows] = await db.execute(
-    `SELECT 1 AS present
-     FROM information_schema.tables
-     WHERE table_schema = DATABASE()
-       AND table_name = ?
-     LIMIT 1`,
-    [tableName]
-  );
-
-  return rows.length > 0;
-}
 
 test(
   "sync push integration: test headers are ignored without explicit test-hook mode",
@@ -3707,6 +2974,308 @@ localServerTest(
           [companyId, outletId, tableId]
         );
       }
+    }
+  }
+);
+
+// ============================================================================
+// Scope C COGS Integration Tests
+// ============================================================================
+
+localServerTest(
+  "sync push integration: Scope C - active + cogs_enabled with tracked item",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let childProcess;
+    const createdClientTxIds = [];
+    const createdItemIds = [];
+    let postingFixture = null;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      // Setup COGS accounts and enable feature
+      await setupCogsAccounts(db, companyId);
+      await enableCogsFeature(db, companyId);
+      postingFixture = await ensureOutletAccountMappings(db, companyId, outletId);
+
+      // Create tracked item with cost basis
+      const trackedItemId = await setupTrackedItemWithCost(db, companyId, outletId, "happy");
+      createdItemIds.push(trackedItemId);
+
+      // Record initial stock
+      const initialStock = await getProductStockQuantity(db, companyId, outletId, trackedItemId);
+      assert.equal(initialStock, 100);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, {
+        enableSyncPushTestHooks: true,
+        envOverrides: { [SYNC_PUSH_POSTING_MODE_ENV]: "active" }
+      });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const clientTxId = randomUUID();
+      const trxAt = new Date().toISOString();
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            buildSyncTransactionWithItems({
+              clientTxId,
+              companyId,
+              outletId,
+              cashierUserId: ownerUserId,
+              trxAt,
+              items: [{ itemId: trackedItemId, qty: 5, price: 15000, name: "COGS Test Item" }]
+            })
+          ]
+        })
+      });
+
+      assert.equal(response.status, 200);
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+      assert.deepEqual(body.results, [{ client_tx_id: clientTxId, result: "OK" }]);
+      createdClientTxIds.push(clientTxId);
+
+      // Verify stock reduced
+      const finalStock = await getProductStockQuantity(db, companyId, outletId, trackedItemId);
+      assert.equal(finalStock, 95, "Stock should be reduced by 5");
+
+      // Verify inventory transactions created
+      const invTxs = await getInventoryTransactions(db, clientTxId);
+      assert.equal(invTxs.length, 1, "Should have one inventory transaction");
+      assert.equal(invTxs[0].transaction_type, 1, "Should be SALE type"); // SALE = 1
+      assert.equal(Number(invTxs[0].quantity_delta), -5, "Should deduct 5 qty");
+      assert.ok(invTxs[0].journal_batch_id, "Inventory tx should be linked to COGS journal batch");
+
+      // Verify cost consumption
+      const consumption = await getCostLayerConsumption(db, invTxs[0].id);
+      assert.ok(consumption.length > 0, "Should have cost layer consumption");
+
+      // Verify COGS journal created
+      const cogsRows = await countCogsJournalRows(db, clientTxId);
+      assert.equal(cogsRows.batch_total, 1, "Should have one COGS batch");
+      assert.ok(cogsRows.line_total >= 2, "Should have COGS journal lines (debit + credit)");
+
+      // Verify COGS journal is balanced
+      const balanceCheck = await verifyCogsJournalBalance(db, clientTxId);
+      assert.equal(balanceCheck.balanced, true, "COGS journal should be balanced");
+
+      // Verify POS persisted
+      const persisted = await countSyncPushPersistedRows(db, clientTxId);
+      assert.equal(persisted.tx_total, 1);
+      assert.equal(persisted.item_total, 1);
+
+      // Verify revenue journal also created
+      const journalRows = await countSyncPushJournalRows(db, clientTxId);
+      assert.equal(journalRows.batch_total, 1, "Should have revenue journal batch");
+    } finally {
+      await stopApiServer(childProcess);
+
+      // Cleanup in reverse order
+      for (const clientTxId of createdClientTxIds) {
+        await cleanupInventoryAndCostArtifacts(db, clientTxId);
+        await cleanupSyncPushPersistedArtifacts(db, clientTxId);
+      }
+
+      if (postingFixture) {
+        await cleanupCreatedOutletAccountMappings(db, companyId, outletId, postingFixture);
+      }
+
+      await cleanupCogsAccounts(db, companyId);
+      await disableCogsFeature(db, companyId);
+      await cleanupTrackedItems(db, companyId, createdItemIds);
+    }
+  }
+);
+
+localServerTest(
+  "sync push integration: Scope C - shadow mode still deducts stock and cost",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let childProcess;
+    const createdClientTxIds = [];
+    const createdItemIds = [];
+    let postingFixture = null;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      // Setup COGS accounts and enable feature
+      await setupCogsAccounts(db, companyId);
+      await enableCogsFeature(db, companyId);
+      postingFixture = await ensureOutletAccountMappings(db, companyId, outletId);
+
+      // Create tracked item with cost basis
+      const trackedItemId = await setupTrackedItemWithCost(db, companyId, outletId, "shadow");
+      createdItemIds.push(trackedItemId);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, {
+        enableSyncPushTestHooks: true,
+        envOverrides: { [SYNC_PUSH_POSTING_MODE_ENV]: "shadow" }
+      });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const clientTxId = randomUUID();
+      const trxAt = new Date().toISOString();
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          outlet_id: outletId,
+          transactions: [
+            buildSyncTransactionWithItems({
+              clientTxId,
+              companyId,
+              outletId,
+              cashierUserId: ownerUserId,
+              trxAt,
+              items: [{ itemId: trackedItemId, qty: 3, price: 15000, name: "COGS Test Item" }]
+            })
+          ]
+        })
+      });
+
+      assert.equal(response.status, 200);
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+      createdClientTxIds.push(clientTxId);
+
+      // Verify stock reduced (stock+cost still work in shadow mode)
+      const finalStock = await getProductStockQuantity(db, companyId, outletId, trackedItemId);
+      assert.equal(finalStock, 97, "Stock should be reduced by 3 even in shadow mode");
+
+      // Verify inventory transactions created
+      const invTxs = await getInventoryTransactions(db, clientTxId);
+      assert.equal(invTxs.length, 1, "Should have inventory transaction in shadow mode");
+
+      // Verify cost consumption occurred
+      const consumption = await getCostLayerConsumption(db, invTxs[0].id);
+      assert.ok(consumption.length > 0, "Should consume cost in shadow mode");
+
+      // Verify NO COGS journal (posting mode is shadow)
+      const cogsRows = await countCogsJournalRows(db, clientTxId);
+      assert.equal(cogsRows.batch_total, 0, "Should NOT have COGS batch in shadow mode");
+      assert.equal(cogsRows.line_total, 0, "Should NOT have COGS lines in shadow mode");
+
+      // POS should still be persisted
+      const persisted = await countSyncPushPersistedRows(db, clientTxId);
+      assert.equal(persisted.tx_total, 1);
+    } finally {
+      await stopApiServer(childProcess);
+
+      for (const clientTxId of createdClientTxIds) {
+        await cleanupInventoryAndCostArtifacts(db, clientTxId);
+        await cleanupSyncPushPersistedArtifacts(db, clientTxId);
+      }
+
+      if (postingFixture) {
+        await cleanupCreatedOutletAccountMappings(db, companyId, outletId, postingFixture);
+      }
+
+      await cleanupCogsAccounts(db, companyId);
+      await disableCogsFeature(db, companyId);
+      await cleanupTrackedItems(db, companyId, createdItemIds);
     }
   }
 );

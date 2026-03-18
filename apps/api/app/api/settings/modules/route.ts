@@ -42,13 +42,59 @@ function parseConfigJson(configJson: string): unknown {
   }
 }
 
+function normalizeBinaryConfigValue(value: unknown): 0 | 1 | null {
+  if (value === 1 || value === true) {
+    return 1;
+  }
+
+  if (value === 0 || value === false) {
+    return 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "1" || normalized === "true") {
+      return 1;
+    }
+    if (normalized === "0" || normalized === "false") {
+      return 0;
+    }
+  }
+
+  return null;
+}
+
+function normalizeModuleConfig(moduleCode: ModuleCode, value: unknown): unknown {
+  if (moduleCode !== "inventory") {
+    return value;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const config = { ...(value as Record<string, unknown>) };
+  if (!("cogs_enabled" in config)) {
+    return config;
+  }
+
+  const normalized = normalizeBinaryConfigValue(config.cogs_enabled);
+  if (normalized === null) {
+    throw new Error("INVALID_COGS_ENABLED");
+  }
+
+  config.cogs_enabled = normalized;
+  return config;
+}
+
 function normalizeConfigJson(moduleCode: ModuleCode, configJson: string) {
   const parsed = parseConfigJson(configJson);
   const schema = ModuleConfigSchemaMap[moduleCode];
   const validated = schema.parse(parsed);
+  const normalizedConfig = normalizeModuleConfig(moduleCode, validated);
   return {
-    parsed: validated,
-    normalized: JSON.stringify(sortJsonValue(validated))
+    parsed: normalizedConfig,
+    normalized: JSON.stringify(sortJsonValue(normalizedConfig))
   };
 }
 
@@ -189,7 +235,10 @@ export const PUT = withAuth(
 
       return successResponse(null);
     } catch (error) {
-      if (error instanceof z.ZodError || (error instanceof Error && error.message === "INVALID_JSON")) {
+      if (
+        error instanceof z.ZodError ||
+        (error instanceof Error && (error.message === "INVALID_JSON" || error.message === "INVALID_COGS_ENABLED"))
+      ) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }
 

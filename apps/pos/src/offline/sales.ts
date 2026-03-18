@@ -183,6 +183,20 @@ async function readProductSnapshot(
   return snapshot;
 }
 
+async function readVariantSnapshot(
+  db: PosOfflineDb,
+  companyId: number,
+  outletId: number,
+  variantId: number
+): Promise<import("@jurnapod/offline-db/dexie").VariantCacheRow | null> {
+  const snapshot = await db.variants_cache
+    .where("[company_id+outlet_id+variant_id]")
+    .equals([companyId, outletId, variantId])
+    .first();
+
+  return snapshot ?? null;
+}
+
 export async function createSaleDraft(
   input: CreateSaleDraftInput,
   db: PosOfflineDb = posDb
@@ -248,14 +262,14 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
     // Check stock availability before proceeding
     await validateStockForItems(
       {
-        items: input.items.map((item) => ({ itemId: item.item_id, quantity: item.qty })),
+        items: input.items.map((item) => ({ itemId: item.item_id, variantId: item.variant_id, quantity: item.qty })),
         companyId: currentSale.company_id,
         outletId: currentSale.outlet_id
       },
       db
     );
 
-    return db.transaction("rw", [db.sales, db.products_cache, db.sale_items, db.payments, db.outbox_jobs, db.inventory_stock, db.stock_reservations], async () => {
+    return db.transaction("rw", [db.sales, db.products_cache, db.variants_cache, db.sale_items, db.payments, db.outbox_jobs, db.inventory_stock, db.stock_reservations], async () => {
       const completedAt = nowIso();
       const clientTxId = crypto.randomUUID();
       const trxAt = input.trx_at ?? completedAt;
@@ -263,9 +277,14 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
 
       const itemRows: SaleItemRow[] = [];
       for (const line of input.items) {
-        const snapshot = await readProductSnapshot(db, currentSale.company_id, currentSale.outlet_id, line.item_id);
+        const productSnapshot = await readProductSnapshot(db, currentSale.company_id, currentSale.outlet_id, line.item_id);
+        const variantSnapshot = line.variant_id
+          ? await readVariantSnapshot(db, currentSale.company_id, currentSale.outlet_id, line.variant_id)
+          : null;
         const discountAmount = line.discount_amount ?? 0;
-        const lineTotal = normalizeMoney(line.qty * snapshot.price_snapshot - discountAmount);
+        // Use variant price if available, otherwise product price
+        const unitPrice = variantSnapshot?.price ?? productSnapshot.price_snapshot;
+        const lineTotal = normalizeMoney(line.qty * unitPrice - discountAmount);
         if (lineTotal < 0) {
           throw new ScopeValidationError("line_total must be non-negative");
         }
@@ -276,11 +295,13 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
           company_id: currentSale.company_id,
           outlet_id: currentSale.outlet_id,
           item_id: line.item_id,
-          name_snapshot: snapshot.name,
-          sku_snapshot: snapshot.sku,
-          item_type_snapshot: snapshot.item_type,
+          variant_id: line.variant_id,
+          variant_name_snapshot: variantSnapshot?.variant_name ?? null,
+          name_snapshot: productSnapshot.name,
+          sku_snapshot: variantSnapshot?.sku ?? productSnapshot.sku,
+          item_type_snapshot: productSnapshot.item_type,
           qty: line.qty,
-          unit_price_snapshot: snapshot.price_snapshot,
+          unit_price_snapshot: unitPrice,
           discount_amount: discountAmount,
           line_total: lineTotal
         });
@@ -312,7 +333,7 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
       await reserveStock(
         {
           saleId: currentSale.sale_id,
-          items: input.items.map((item) => ({ itemId: item.item_id, quantity: item.qty })),
+          items: input.items.map((item) => ({ itemId: item.item_id, variantId: item.variant_id, quantity: item.qty })),
           companyId: currentSale.company_id,
           outletId: currentSale.outlet_id
         },

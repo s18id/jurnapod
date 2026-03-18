@@ -19,6 +19,7 @@ import type {
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
+  VariantCacheRow,
   SaleItemRow,
   SaleRow,
   SyncMetadataRow,
@@ -52,6 +53,41 @@ export class WebStorageAdapter implements PosStoragePort {
 
   async upsertProducts(products: ProductCacheRow[]): Promise<void> {
     await this.db.products_cache.bulkPut(products);
+  }
+
+  async getVariantsByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+    is_active?: boolean;
+  }): Promise<VariantCacheRow[]> {
+    const isActive = input.is_active ?? true;
+    const rows = await this.db.variants_cache
+      .toCollection()
+      .filter((row) =>
+        row.company_id === input.company_id &&
+        row.outlet_id === input.outlet_id &&
+        row.is_active === isActive
+      )
+      .toArray();
+
+    return rows;
+  }
+
+  async getVariantsByItem(input: {
+    company_id: number;
+    outlet_id: number;
+    item_id: number;
+  }): Promise<VariantCacheRow[]> {
+    const rows = await this.db.variants_cache
+      .where("[company_id+outlet_id+item_id]")
+      .equals([input.company_id, input.outlet_id, input.item_id])
+      .toArray();
+
+    return rows;
+  }
+
+  async upsertVariants(variants: VariantCacheRow[]): Promise<void> {
+    await this.db.variants_cache.bulkPut(variants);
   }
 
   async getOutletTablesByOutlet(input: {

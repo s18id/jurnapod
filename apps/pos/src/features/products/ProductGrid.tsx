@@ -12,6 +12,7 @@ export interface ProductGridProps {
   onAddProduct: (product: RuntimeProductCatalogItem) => void;
   onRemoveProduct?: (product: RuntimeProductCatalogItem) => void;
   canRemoveProduct?: (product: RuntimeProductCatalogItem) => boolean;
+  onVariantSelect?: (product: RuntimeProductCatalogItem) => void;
 }
 
 export function ProductGrid({
@@ -19,7 +20,8 @@ export function ProductGrid({
   cartQuantities,
   onAddProduct,
   onRemoveProduct,
-  canRemoveProduct
+  canRemoveProduct,
+  onVariantSelect
 }: ProductGridProps): JSX.Element {
   if (products.length === 0) {
     return (
@@ -39,6 +41,7 @@ export function ProductGrid({
           onAdd={() => onAddProduct(product)}
           onRemove={onRemoveProduct ? () => onRemoveProduct(product) : undefined}
           canRemove={canRemoveProduct ? canRemoveProduct(product) : true}
+          onVariantSelect={onVariantSelect ? () => onVariantSelect(product) : undefined}
         />
       ))}
     </IonList>

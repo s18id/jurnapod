@@ -1,7 +1,7 @@
 # Story 4.4: Recipe/BOM Composition
 
 **Epic:** Items & Catalog - Product Management  
-**Status:** backlog → ready-for-dev  
+**Status:** done  
 **Priority:** Medium  
 **Estimated Effort:** 4-6 hours  
 **Created:** 2026-03-16  
@@ -203,37 +203,37 @@ async function validateRecipeComposition(
 ## Implementation Tasks
 
 ### 1. Database (30 min)
-- [ ] Create migration for `recipe_ingredients` table
-- [ ] Add indexes for performance
-- [ ] Test migration on MySQL and MariaDB
+- [x] Create migration for `recipe_ingredients` table
+- [x] Add indexes for performance
+- [x] Test migration on MySQL and MariaDB
 
 ### 2. Service Layer (1.5 hours)
-- [ ] Create `recipe-composition.ts` service
-- [ ] Implement CRUD operations with transactions
-- [ ] Add circular reference detection
-- [ ] Implement cost calculation
-- [ ] Add audit logging
+- [x] Create `recipe-composition.ts` service
+- [x] Implement CRUD operations with transactions
+- [x] Add circular reference detection
+- [x] Implement cost calculation
+- [x] Add audit logging
 
 ### 3. API Routes (1 hour)
-- [ ] `POST /inventory/recipes/[recipeId]/ingredients`
-- [ ] `GET /inventory/recipes/[recipeId]/ingredients`
-- [ ] `PATCH /inventory/recipes/ingredients/[ingredientId]`
-- [ ] `DELETE /inventory/recipes/ingredients/[ingredientId]`
-- [ ] `GET /inventory/recipes/[recipeId]/cost`
-- [ ] Add Zod validation schemas
+- [x] `POST /inventory/recipes/[recipeId]/ingredients`
+- [x] `GET /inventory/recipes/[recipeId]/ingredients`
+- [x] `PATCH /inventory/recipes/ingredients/[ingredientId]`
+- [x] `DELETE /inventory/recipes/ingredients/[ingredientId]`
+- [x] `GET /inventory/recipes/[recipeId]/cost`
+- [x] Add Zod validation schemas
 
 ### 4. UI Components (1.5 hours)
-- [ ] Recipe composition editor in items page
-- [ ] Ingredient search/selector
-- [ ] Quantity input with unit selection
-- [ ] Cost preview/calculation display
-- [ ] Validation error display
+- [x] Recipe composition editor in items page
+- [x] Ingredient search/selector
+- [x] Quantity input with unit selection
+- [x] Cost preview/calculation display
+- [x] Validation error display
 
 ### 5. Testing (30 min)
-- [ ] Unit tests for service layer
-- [ ] API integration tests
-- [ ] Test circular reference prevention
-- [ ] Test cost calculation accuracy
+- [x] Unit tests for service layer
+- [x] API integration tests
+- [x] Test circular reference prevention
+- [x] Test cost calculation accuracy
 
 ---
 
@@ -241,19 +241,35 @@ async function validateRecipeComposition(
 
 ### New Files
 ```
-packages/db/migrations/0XXX_create_recipe_ingredients.sql
+packages/db/migrations/0081_recipe_ingredients.sql
 apps/api/src/lib/recipe-composition.ts
 apps/api/src/lib/recipe-composition.test.ts
 apps/api/app/api/inventory/recipes/[recipeId]/ingredients/route.ts
-apps/api/app/api/inventory/recipes/[recipeId]/ingredients/route.test.ts
+apps/api/app/api/inventory/recipes/ingredients/[ingredientId]/route.ts
 apps/api/app/api/inventory/recipes/[recipeId]/cost/route.ts
 apps/backoffice/src/features/recipe-composition-editor.tsx
 ```
 
 ### Modified Files
 ```
-apps/backoffice/src/features/items-prices-page.tsx
+apps/backoffice/src/features/items-page.tsx
   - Add "Manage Recipe" button for RECIPE type items
+packages/shared/src/schemas/master-data.ts
+  - Add recipe ingredient create/update Zod schemas
+apps/api/src/lib/recipe-composition.ts
+  - Resolve ingredient cost using cost basis priority with safe fallback
+  - Validate recipe type/existence in getRecipeIngredients and filter inactive lines
+apps/api/app/api/inventory/recipes/[recipeId]/ingredients/route.ts
+  - Harden recipeId path parsing with strict route pattern
+apps/api/app/api/inventory/recipes/[recipeId]/cost/route.ts
+  - Harden recipeId path parsing with strict route pattern
+apps/api/app/api/inventory/recipes/ingredients/[ingredientId]/route.ts
+  - Harden ingredientId path parsing with strict route pattern
+```
+
+### Additional New Files
+```
+apps/api/tests/integration/recipe-composition.integration.test.mjs
 ```
 
 ---
@@ -331,17 +347,38 @@ async function calculateRecipeCost(
 
 ## Definition of Done
 
-- [ ] Database migration created and tested
-- [ ] Service layer with full CRUD operations
-- [ ] API endpoints with validation
-- [ ] UI for managing recipe composition
-- [ ] Circular reference prevention working
-- [ ] Cost calculation displaying correctly
-- [ ] Tests passing
-- [ ] Code review completed
-- [ ] Documentation updated
+- [x] Database migration created and tested
+- [x] Service layer with full CRUD operations
+- [x] API endpoints with validation
+- [x] UI for managing recipe composition
+- [x] Circular reference prevention working
+- [x] Cost calculation displaying correctly
+- [x] Tests passing
+- [x] Code review completed
+- [x] Documentation updated
 
 ---
 
-**Story Status:** Ready for Development 🔧  
-**Next Step:** Delegate to `bmad-dev-story` when ready to implement
+## Dev Agent Record
+
+### Debug Log
+- 2026-03-17: Implemented recipe CRUD service, migration, API routes, and items-page recipe editor integration.
+- 2026-03-17: Fixed self-reference validation to return `Cannot add recipe as its own ingredient`.
+- 2026-03-17: Implemented recipe cost calculation with cost-basis priority (inventory transaction unit_cost/base_cost when available) and fallback to active item price.
+- 2026-03-17: Updated recipe API route imports to use `@/` alias per repo convention.
+- 2026-03-18: Added API integration coverage for recipe composition endpoints and hardened route param parsing.
+
+### Completion Notes
+- ✅ Implemented complete Recipe/BOM flow for RECIPE items: add/list/update/delete ingredients with tenant scoping and audit logs.
+- ✅ Enforced validation rules from ACs: RECIPE-only parent item, ingredient type restriction (INGREDIENT/PRODUCT), duplicate prevention, and self-reference prevention.
+- ✅ Added recipe cost breakdown calculation (`sum(quantity * unit_cost)`) with cost-basis-first resolution and verified recalculation behavior.
+- ✅ Added and updated tests in `apps/api/src/lib/recipe-composition.test.ts` including self-reference and cost recalculation coverage.
+- ✅ Added API integration test coverage in `apps/api/tests/integration/recipe-composition.integration.test.mjs` for ingredients CRUD and recipe cost endpoint.
+- ✅ Verified with: `node --test --test-concurrency=1 --import tsx apps/api/src/lib/recipe-composition.test.ts`, `node --test apps/api/tests/integration/recipe-composition.integration.test.mjs`, `npm run typecheck -w @jurnapod/api`, and `npm run lint -w @jurnapod/api`.
+
+## Change Log
+
+- 2026-03-17: Implemented Story 4.4 end-to-end (migration, service layer, API routes, UI editor integration, validation, and test coverage updates).
+
+**Story Status:** done  
+**Next Step:** Proceed with Story 4.6 (cost tracking methods) for stronger native cost basis data.

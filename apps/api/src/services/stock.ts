@@ -10,6 +10,8 @@
 
 import { getDbPool } from "@/lib/db";
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { createCostLayer, calculateCost } from "@/lib/cost-tracking";
+import type { CostCalculationResult } from "@/lib/cost-tracking";
 
 /**
  * Transaction Type Constants
@@ -30,6 +32,15 @@ export type TransactionTypeValue = typeof TransactionType[keyof typeof Transacti
 export interface StockItem {
   product_id: number;
   quantity: number;
+}
+
+export interface StockDeductResult {
+  itemId: number;
+  quantity: number;
+  transactionId: number;
+  unitCost: number;
+  totalCost: number;
+  costResult: CostCalculationResult;
 }
 
 export interface StockCheckResult {
@@ -104,6 +115,59 @@ interface ProductRow extends RowDataPacket {
   name: string;
   track_stock: number;
   low_stock_threshold: number | null;
+}
+
+interface CostSummaryRow extends RowDataPacket {
+  current_avg_cost: number | null;
+}
+
+interface PriceRow extends RowDataPacket {
+  price: number | null;
+}
+
+/**
+ * Resolve unit cost for inbound stock movements.
+ * Priority:
+ * 1. inventory_item_costs.current_avg_cost
+ * 2. latest item_prices.price
+ * 3. throw if not found (fail-closed)
+ */
+async function resolveInboundUnitCost(
+  conn: PoolConnection,
+  companyId: number,
+  itemId: number
+): Promise<number> {
+  // Try inventory_item_costs first
+  const [costRows] = await conn.execute<CostSummaryRow[]>(
+    `SELECT current_avg_cost
+     FROM inventory_item_costs
+     WHERE company_id = ? AND item_id = ?`,
+    [companyId, itemId]
+  );
+
+  const avgCost = costRows[0]?.current_avg_cost;
+  if (avgCost !== null && avgCost !== undefined && Number(avgCost) > 0) {
+    return Number(avgCost);
+  }
+
+  // Fallback to item_prices
+  const [priceRows] = await conn.execute<PriceRow[]>(
+    `SELECT price
+     FROM item_prices
+     WHERE company_id = ? AND item_id = ?
+     ORDER BY updated_at DESC, id DESC
+     LIMIT 1`,
+    [companyId, itemId]
+  );
+
+  const price = priceRows[0]?.price;
+  if (price !== null && price !== undefined && Number(price) > 0) {
+    return Number(price);
+  }
+
+  throw new Error(
+    `Unable to determine unit cost for item ${itemId}. No cost history or pricing data available.`
+  );
 }
 
 /**
@@ -292,6 +356,278 @@ export async function deductStock(
 }
 
 /**
+ * Deduct stock permanently with cost consumption (after transaction completion)
+ * Reduces quantity and available_quantity, consumes cost layers, and returns cost details.
+ * 
+ * This is the outbound costing primitive for COGS integration.
+ * Uses the company's costing method (AVG/FIFO/LIFO) to determine costs.
+ * 
+ * @returns Array of cost details per item for COGS posting
+ * @throws Error if any item fails (fail-closed behavior)
+ */
+export async function deductStockWithCost(
+  company_id: number,
+  outlet_id: number,
+  items: StockItem[],
+  reference_id: string,
+  user_id: number,
+  connection?: PoolConnection
+): Promise<StockDeductResult[]> {
+  const dbPool = getDbPool();
+  const conn = connection ?? await dbPool.getConnection();
+  const shouldRelease = !connection;
+  const results: StockDeductResult[] = [];
+
+  try {
+    if (!connection) {
+      await conn.beginTransaction();
+    }
+
+    try {
+      for (const item of items) {
+        // Verify stock exists and has sufficient quantity (with lock)
+        const [stockRows] = await conn.execute<StockRow[]>(
+          `SELECT quantity, available_quantity
+           FROM inventory_stock
+           WHERE company_id = ?
+             AND product_id = ?
+             AND (outlet_id = ? OR outlet_id IS NULL)
+           ORDER BY outlet_id IS NULL ASC
+           LIMIT 1
+           FOR UPDATE`,
+          [company_id, item.product_id, outlet_id]
+        );
+
+        if (stockRows.length === 0) {
+          throw new Error(`Stock not found for product ${item.product_id} in company ${company_id}`);
+        }
+
+        const stock = stockRows[0];
+        if (Number(stock.quantity) < item.quantity) {
+          throw new Error(
+            `Insufficient stock for product ${item.product_id}: ` +
+            `requested ${item.quantity}, available ${stock.quantity}`
+          );
+        }
+
+        // Record inventory transaction FIRST (capture insertId for cost tracking)
+        const [txResult] = await conn.execute<ResultSetHeader>(
+          `INSERT INTO inventory_transactions (
+            company_id,
+            outlet_id,
+            transaction_type,
+            reference_type,
+            reference_id,
+            product_id,
+            quantity_delta,
+            created_at
+          ) VALUES (?, ?, ?, 'SALE', ?, ?, ?, CURRENT_TIMESTAMP)`,
+          [company_id, outlet_id, TransactionType.SALE, reference_id, item.product_id, -item.quantity]
+        );
+        const transactionId = txResult.insertId;
+
+        // Consume cost using the company's costing method
+        const costResult = await calculateCost(
+          {
+            companyId: company_id,
+            itemId: item.product_id,
+            quantity: item.quantity,
+            transactionId: transactionId, // Required for FIFO/LIFO consumption tracking
+          },
+          conn
+        );
+
+        // Deduct stock - reduce both quantity and available_quantity
+        const [updateResult] = await conn.execute<ResultSetHeader>(
+          `UPDATE inventory_stock
+           SET quantity = quantity - ?,
+               available_quantity = available_quantity - ?,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE company_id = ?
+             AND product_id = ?
+             AND (outlet_id = ? OR outlet_id IS NULL)
+             AND quantity >= ?`,
+          [
+            item.quantity,
+            item.quantity,
+            company_id,
+            item.product_id,
+            outlet_id,
+            item.quantity
+          ]
+        );
+
+        if (updateResult.affectedRows === 0) {
+          throw new Error(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
+        }
+
+        // Calculate weighted average unit cost from consumed layers
+        const unitCost = costResult.totalCost / item.quantity;
+
+        results.push({
+          itemId: item.product_id,
+          quantity: item.quantity,
+          transactionId: transactionId,
+          unitCost: unitCost,
+          totalCost: costResult.totalCost,
+          costResult: costResult,
+        });
+      }
+
+      if (!connection) {
+        await conn.commit();
+      }
+
+      return results;
+    } catch (error) {
+      if (!connection) await conn.rollback();
+      throw error;
+    }
+  } finally {
+    if (shouldRelease) {
+      conn.release();
+    }
+  }
+}
+
+/**
+ * Deduct stock for a sale and post COGS using method-correct costs.
+ * Combines stock deduction, cost consumption, and COGS journal posting in one atomic operation.
+ * 
+ * This closes AC7 gap: ensures sales/invoice posting uses FIFO/LIFO/AVG correctly (not legacy average fallback).
+ * 
+ * @param input - Sale details including items to deduct and COGS posting parameters
+ * @param connection - Optional existing transaction connection
+ * @returns Stock deduction results with COGS posting result
+ * @throws Error if stock deduction or COGS posting fails (fail-closed)
+ */
+export interface DeductStockForSaleInput {
+  company_id: number;
+  outlet_id: number;
+  items: StockItem[];
+  reference_id: string;
+  user_id: number;
+  sale_id: string;
+  sale_date: Date;
+  cogs_enabled: boolean;
+}
+
+export interface DeductStockForSaleResult {
+  stockResults: StockDeductResult[];
+  cogsResult: {
+    success: boolean;
+    journalBatchId?: number;
+    totalCogs: number;
+    errors?: string[];
+  } | null;
+}
+
+export async function deductStockForSaleWithCogs(
+  input: DeductStockForSaleInput,
+  connection?: PoolConnection
+): Promise<DeductStockForSaleResult> {
+  const { company_id, outlet_id, items, reference_id, user_id, sale_id, sale_date, cogs_enabled } = input;
+  
+  const dbPool = getDbPool();
+  // If no external connection, we manage our own transaction for atomicity
+  const conn = connection ?? await dbPool.getConnection();
+  const shouldRelease = !connection;
+  
+  try {
+    if (!connection) {
+      await conn.beginTransaction();
+    }
+    
+    // First, deduct stock with cost consumption (method-correct via deductStockWithCost)
+    const stockResults = await deductStockWithCost(
+      company_id,
+      outlet_id,
+      items,
+      reference_id,
+      user_id,
+      conn // Always pass our managed connection for atomicity
+    );
+    
+    // If COGS is not enabled, commit and return stock results only
+    if (!cogs_enabled || stockResults.length === 0) {
+      if (!connection) {
+        await conn.commit();
+      }
+      return {
+        stockResults,
+        cogsResult: null
+      };
+    }
+    
+    // Build COGS items from consumed costs (no recalculation - uses method-correct costs)
+    const cogsItems = stockResults.map((result) => ({
+      itemId: result.itemId,
+      quantity: result.quantity,
+      unitCost: result.unitCost,
+      totalCost: result.totalCost
+    }));
+    
+    // Import postCogsForSale dynamically to avoid circular dependency
+    const { postCogsForSale } = await import("@/lib/cogs-posting.js");
+    
+    // Post COGS with pre-computed costs
+    const cogsResult = await postCogsForSale(
+      {
+        saleId: sale_id,
+        companyId: company_id,
+        outletId: outlet_id,
+        items: cogsItems,
+        saleDate: sale_date,
+        postedBy: user_id
+      },
+      conn // Always pass our managed connection for atomicity
+    );
+    
+    if (!cogsResult.success) {
+      throw new Error(
+        `COGS posting failed for sale ${sale_id}: ${(cogsResult.errors ?? []).join(", ")}`
+      );
+    }
+    
+    // Link inventory transactions to COGS journal batch
+    if (cogsResult.journalBatchId) {
+      const inventoryTransactionIds = stockResults.map((r) => r.transactionId);
+      const placeholders = inventoryTransactionIds.map(() => "?").join(", ");
+      await conn.execute(
+        `UPDATE inventory_transactions 
+         SET journal_batch_id = ? 
+         WHERE id IN (${placeholders})`,
+        [cogsResult.journalBatchId, ...inventoryTransactionIds]
+      );
+    }
+    
+    // Commit if we own the transaction
+    if (!connection) {
+      await conn.commit();
+    }
+    
+    return {
+      stockResults,
+      cogsResult: {
+        success: cogsResult.success,
+        journalBatchId: cogsResult.journalBatchId,
+        totalCogs: cogsResult.totalCogs
+      }
+    };
+  } catch (error) {
+    // Rollback if we own the transaction
+    if (!connection) {
+      await conn.rollback();
+    }
+    throw error;
+  } finally {
+    if (shouldRelease) {
+      conn.release();
+    }
+  }
+}
+
+/**
  * Restore stock (for voids/refunds)
  * Increases quantity and available_quantity
  */
@@ -350,7 +686,7 @@ export async function restoreStock(
         }
 
         // Record transaction
-        await conn.execute(
+        const [txResult] = await conn.execute<ResultSetHeader>(
           `INSERT INTO inventory_transactions (
             company_id,
             outlet_id,
@@ -362,6 +698,19 @@ export async function restoreStock(
             created_at
           ) VALUES (?, ?, ?, 'REFUND', ?, ?, ?, CURRENT_TIMESTAMP)`,
           [company_id, outlet_id, TransactionType.REFUND, reference_id, item.product_id, item.quantity]
+        );
+
+        // Create cost layer for inbound movement
+        const unitCost = await resolveInboundUnitCost(conn, company_id, item.product_id);
+        await createCostLayer(
+          {
+            companyId: company_id,
+            itemId: item.product_id,
+            transactionId: txResult.insertId,
+            unitCost,
+            quantity: item.quantity,
+          },
+          conn
         );
       }
 
@@ -465,7 +814,7 @@ export async function adjustStock(
       }
 
       // Record adjustment transaction
-      await conn.execute(
+      const [txResult] = await conn.execute<ResultSetHeader>(
         `INSERT INTO inventory_transactions (
           company_id,
           outlet_id,
@@ -478,6 +827,21 @@ export async function adjustStock(
         ) VALUES (?, ?, ?, 'ADJUSTMENT', ?, ?, ?, CURRENT_TIMESTAMP)`,
         [company_id, outlet_id, TransactionType.ADJUSTMENT, reference_id ?? `ADJ-${Date.now()}`, product_id, adjustment_quantity]
       );
+
+      // Create cost layer for positive inbound adjustments only
+      if (adjustment_quantity > 0) {
+        const unitCost = await resolveInboundUnitCost(conn, company_id, product_id);
+        await createCostLayer(
+          {
+            companyId: company_id,
+            itemId: product_id,
+            transactionId: txResult.insertId,
+            unitCost,
+            quantity: adjustment_quantity,
+          },
+          conn
+        );
+      }
 
       if (!connection) {
         await conn.commit();

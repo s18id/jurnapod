@@ -1,6 +1,12 @@
-# Story 1.5: Company Settings Management (Enhanced)
+---
+epic: 1
+story: 1.5
+title: Company Settings Management (Enhanced)
+status: done
+created: 2026-03-15
+---
 
-Status: review
+# Story 1.5: Company Settings Management (Enhanced)
 
 ## Story
 

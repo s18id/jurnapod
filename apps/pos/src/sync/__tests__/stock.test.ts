@@ -84,7 +84,11 @@ const createMockStorage = (): PosStoragePort => {
     upsertSyncMetadata: vi.fn(),
     getSyncScopeConfig: vi.fn(),
     upsertSyncScopeConfig: vi.fn(),
-    transaction: vi.fn()
+    transaction: vi.fn(),
+    // Variant cache methods
+    getVariantsByOutlet: vi.fn(),
+    getVariantsByItem: vi.fn(),
+    upsertVariants: vi.fn()
   };
 };
 

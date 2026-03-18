@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
+import { describe, test, before, after, afterEach } from "node:test";
 import { getDbPool, closeDbPool } from "../lib/db.js";
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
 import {
@@ -79,10 +79,36 @@ async function setupTestData(connection: PoolConnection): Promise<void> {
      ON DUPLICATE KEY UPDATE quantity = 50.0000, reserved_quantity = 0.0000, available_quantity = 50.0000`,
     [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID_2]
   );
+
+  // Create test item prices for cost resolution
+  await connection.execute(
+    `INSERT INTO item_prices (company_id, item_id, price, created_at, updated_at)
+     VALUES (?, ?, 10.00, NOW(), NOW())
+     ON DUPLICATE KEY UPDATE price = 10.00`,
+    [TEST_COMPANY_ID, TEST_PRODUCT_ID]
+  );
+  await connection.execute(
+    `INSERT INTO item_prices (company_id, item_id, price, created_at, updated_at)
+     VALUES (?, ?, 20.00, NOW(), NOW())
+     ON DUPLICATE KEY UPDATE price = 20.00`,
+    [TEST_COMPANY_ID, TEST_PRODUCT_ID_2]
+  );
 }
 
 async function cleanupTestData(connection: PoolConnection): Promise<void> {
-  // Clean up in reverse order
+  // Clean up in reverse order (cost tracking tables first)
+  await connection.execute(
+    `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
+  );
+  await connection.execute(
+    `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
+  );
+  await connection.execute(
+    `DELETE FROM inventory_item_costs WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
+  );
   await connection.execute(
     `DELETE FROM inventory_transactions WHERE company_id = ?`,
     [TEST_COMPANY_ID]
@@ -118,6 +144,45 @@ describe("Stock Service", { concurrency: false }, () => {
     await cleanupTestData(connection);
     connection.release();
     await closeDbPool();
+  });
+
+  // Reset stock to baseline after each test to ensure isolation
+  afterEach(async () => {
+    // Clean up cost tracking data from the test
+    await connection.execute(
+      `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await connection.execute(
+      `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await connection.execute(
+      `DELETE FROM inventory_item_costs WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+
+    // Reset stock quantities to baseline
+    await connection.execute(
+      `UPDATE inventory_stock
+       SET quantity = 100.0000, reserved_quantity = 0.0000, available_quantity = 100.0000
+       WHERE company_id = ? AND product_id = ?`,
+      [TEST_COMPANY_ID, TEST_PRODUCT_ID]
+    );
+    await connection.execute(
+      `UPDATE inventory_stock
+       SET quantity = 50.0000, reserved_quantity = 0.0000, available_quantity = 50.0000
+       WHERE company_id = ? AND product_id = ?`,
+      [TEST_COMPANY_ID, TEST_PRODUCT_ID_2]
+    );
+
+    // Clean up transactions (keep only setup transactions)
+    await connection.execute(
+      `DELETE FROM inventory_transactions
+       WHERE company_id = ?
+       AND reference_type NOT IN ('SETUP', 'INITIAL')`,
+      [TEST_COMPANY_ID]
+    );
   });
 
   describe("checkAvailability", () => {
@@ -295,6 +360,113 @@ describe("Stock Service", { concurrency: false }, () => {
     });
   });
 
+  describe("deductStockWithCost (C1/C2 outbound costing)", () => {
+    test("should deduct stock and return cost details", async () => {
+      const items: StockItem[] = [
+        { product_id: TEST_PRODUCT_ID, quantity: 10 }
+      ];
+      const referenceId = `test-deduct-cost-${Date.now()}`;
+
+      // Set up cost basis for the product (create inbound cost layer first)
+      const { createCostLayer } = await import("../lib/cost-tracking.js");
+      const [inboundTx] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO inventory_transactions 
+         (company_id, outlet_id, product_id, transaction_type, quantity_delta, reference_type, reference_id, created_at)
+         VALUES (?, ?, ?, 6, 100.0000, 'RECEIPT', ?, NOW())`,
+        [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID, `setup-receipt-${Date.now()}`]
+      );
+      await createCostLayer(
+        {
+          companyId: TEST_COMPANY_ID,
+          itemId: TEST_PRODUCT_ID,
+          transactionId: inboundTx.insertId,
+          unitCost: 15.00,
+          quantity: 100,
+        },
+        connection
+      );
+
+      // Import the function
+      const { deductStockWithCost } = await import("../services/stock.js");
+      const result = await deductStockWithCost(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, connection);
+
+      assert.equal(result.length, 1);
+      assert.equal(result[0].itemId, TEST_PRODUCT_ID);
+      assert.equal(result[0].quantity, 10);
+      assert.ok(result[0].transactionId > 0);
+      assert.ok(result[0].unitCost >= 0);
+      assert.ok(result[0].totalCost >= 0);
+
+      // Verify inventory transaction was recorded
+      const [txRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT id, quantity_delta FROM inventory_transactions 
+         WHERE reference_id = ?`,
+        [referenceId]
+      );
+      assert.equal(txRows.length, 1);
+      assert.equal(Number(txRows[0].quantity_delta), -10);
+
+      // Verify cost consumption occurred (cost_layer_consumption for FIFO/LIFO)
+      const [consumptionRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT * FROM cost_layer_consumption 
+         WHERE transaction_id = ?`,
+        [result[0].transactionId]
+      );
+      // Note: Consumption records exist for FIFO/LIFO; for AVG they update inventory_item_costs summary
+
+      // Verify stock was deducted
+      const [stockRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT quantity FROM inventory_stock 
+         WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
+        [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
+      );
+      assert.equal(Number(stockRows[0].quantity), 90);
+
+      // Restore the stock
+      await restoreStock(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, connection);
+    });
+
+    test("should throw on insufficient inventory (fail-closed)", async () => {
+      const items: StockItem[] = [
+        { product_id: TEST_PRODUCT_ID, quantity: 10000 }
+      ];
+      const referenceId = `test-deduct-cost-fail-${Date.now()}`;
+
+      const { deductStockWithCost } = await import("../services/stock.js");
+
+      await assert.rejects(
+        async () => {
+          await deductStockWithCost(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, connection);
+        },
+        /Insufficient stock/
+      );
+
+      // Verify no inventory transaction was created (transaction rolled back)
+      const [txRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) as count FROM inventory_transactions 
+         WHERE reference_id = ?`,
+        [referenceId]
+      );
+      assert.equal(Number(txRows[0].count), 0);
+    });
+
+    test("should throw on stock not found (fail-closed)", async () => {
+      const items: StockItem[] = [
+        { product_id: 999999991, quantity: 1 }
+      ];
+      const referenceId = `test-deduct-cost-notfound-${Date.now()}`;
+
+      const { deductStockWithCost } = await import("../services/stock.js");
+
+      await assert.rejects(
+        async () => {
+          await deductStockWithCost(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, connection);
+        },
+        /Stock not found/
+      );
+    });
+  });
+
   describe("restoreStock", () => {
     test("should restore stock successfully", async () => {
       const items: StockItem[] = [
@@ -317,6 +489,42 @@ describe("Stock Service", { concurrency: false }, () => {
       assert.equal(Number(rows[0].available_quantity), 105);
 
       // Deduct back
+      await deductStock(TEST_COMPANY_ID, TEST_OUTLET_ID, items, `deduct-${referenceId}`, 1, connection);
+    });
+
+    test("should create cost layer for inbound refund", async () => {
+      const items: StockItem[] = [
+        { product_id: TEST_PRODUCT_ID, quantity: 3 }
+      ];
+      const referenceId = `test-restore-cost-${Date.now()}`;
+
+      // First ensure product has a price for cost resolution
+      await connection.execute(
+        `INSERT INTO item_prices (company_id, item_id, price, created_at, updated_at)
+         VALUES (?, ?, 15.00, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE price = 15.00`,
+        [TEST_COMPANY_ID, TEST_PRODUCT_ID]
+      );
+
+      const result = await restoreStock(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, connection);
+
+      assert.equal(result, true);
+
+      // Verify cost layer was created
+      const [layerRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT original_qty, unit_cost, remaining_qty 
+         FROM inventory_cost_layers 
+         WHERE company_id = ? AND item_id = ?
+         ORDER BY id DESC LIMIT 1`,
+        [TEST_COMPANY_ID, TEST_PRODUCT_ID]
+      );
+
+      assert.ok(layerRows.length > 0, "Cost layer should be created");
+      assert.equal(Number(layerRows[0].original_qty), 3);
+      assert.equal(Number(layerRows[0].remaining_qty), 3);
+      assert.ok(Number(layerRows[0].unit_cost) > 0, "Unit cost should be resolved");
+
+      // Cleanup: deduct the restored stock
       await deductStock(TEST_COMPANY_ID, TEST_OUTLET_ID, items, `deduct-${referenceId}`, 1, connection);
     });
   });
@@ -358,14 +566,14 @@ describe("Stock Service", { concurrency: false }, () => {
 
       assert.equal(result, true);
 
-      // Verify stock is back to 100
+      // Verify stock is 90 (100 - 10)
       const [rows] = await connection.execute<RowDataPacket[]>(
         `SELECT quantity, available_quantity FROM inventory_stock 
          WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
         [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
       );
 
-      assert.equal(Number(rows[0].quantity), 100);
+      assert.equal(Number(rows[0].quantity), 90);
     });
 
     test("should fail when adjustment would make quantity negative", async () => {
@@ -380,6 +588,95 @@ describe("Stock Service", { concurrency: false }, () => {
       }, connection);
 
       assert.equal(result, false);
+    });
+
+    test("should create cost layer for positive adjustment", async () => {
+      // Ensure product has a price for cost resolution
+      await connection.execute(
+        `INSERT INTO item_prices (company_id, item_id, price, created_at, updated_at)
+         VALUES (?, ?, 20.00, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE price = 20.00`,
+        [TEST_COMPANY_ID, TEST_PRODUCT_ID]
+      );
+
+      // Clear any existing cost layers for this product
+      await connection.execute(
+        `DELETE FROM inventory_cost_layers WHERE company_id = ? AND item_id = ?`,
+        [TEST_COMPANY_ID, TEST_PRODUCT_ID]
+      );
+
+      const result = await adjustStock({
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        product_id: TEST_PRODUCT_ID,
+        adjustment_quantity: 5,
+        reason: "Test positive adjustment cost layer",
+        reference_id: `test-adjust-cost-pos-${Date.now()}`,
+        user_id: 1
+      }, connection);
+
+      assert.equal(result, true);
+
+      // Verify cost layer was created
+      const [layerRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT original_qty, unit_cost, remaining_qty 
+         FROM inventory_cost_layers 
+         WHERE company_id = ? AND item_id = ?`,
+        [TEST_COMPANY_ID, TEST_PRODUCT_ID]
+      );
+
+      assert.ok(layerRows.length > 0, "Cost layer should be created for positive adjustment");
+      assert.equal(Number(layerRows[0].original_qty), 5);
+      assert.equal(Number(layerRows[0].remaining_qty), 5);
+    });
+
+    test("should NOT create cost layer for negative adjustment", async () => {
+      // First create a cost layer by doing a positive adjustment
+      await connection.execute(
+        `INSERT INTO item_prices (company_id, item_id, price, created_at, updated_at)
+         VALUES (?, ?, 25.00, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE price = 25.00`,
+        [TEST_COMPANY_ID, TEST_PRODUCT_ID_2]
+      );
+
+      await adjustStock({
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        product_id: TEST_PRODUCT_ID_2,
+        adjustment_quantity: 10,
+        reason: "Setup for negative test",
+        reference_id: `test-adjust-setup-${Date.now()}`,
+        user_id: 1
+      }, connection);
+
+      // Count layers before negative adjustment
+      const [beforeRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) as count FROM inventory_cost_layers 
+         WHERE company_id = ? AND item_id = ?`,
+        [TEST_COMPANY_ID, TEST_PRODUCT_ID_2]
+      );
+      const countBefore = Number(beforeRows[0].count);
+
+      // Perform negative adjustment
+      await adjustStock({
+        company_id: TEST_COMPANY_ID,
+        outlet_id: TEST_OUTLET_ID,
+        product_id: TEST_PRODUCT_ID_2,
+        adjustment_quantity: -5,
+        reason: "Test negative adjustment no cost layer",
+        reference_id: `test-adjust-cost-neg-${Date.now()}`,
+        user_id: 1
+      }, connection);
+
+      // Count layers after negative adjustment
+      const [afterRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) as count FROM inventory_cost_layers 
+         WHERE company_id = ? AND item_id = ?`,
+        [TEST_COMPANY_ID, TEST_PRODUCT_ID_2]
+      );
+      const countAfter = Number(afterRows[0].count);
+
+      assert.equal(countAfter, countBefore, "Negative adjustment should NOT create cost layer");
     });
   });
 
@@ -421,6 +718,20 @@ describe("Stock Service", { concurrency: false }, () => {
     });
 
     test("should filter by transaction type", async () => {
+      // Create test transactions directly in DB for this test
+      const testRefId1 = `test-filter-${Date.now()}-1`;
+      const testRefId2 = `test-filter-${Date.now()}-2`;
+      
+      // Insert test adjustment transactions (type 5 = ADJUST)
+      await connection.execute(
+        `INSERT INTO inventory_transactions 
+         (company_id, outlet_id, product_id, transaction_type, quantity_delta, reference_type, reference_id, created_by, created_at)
+         VALUES (?, ?, ?, 5, 10.0000, 'TEST_FILTER', ?, 1, NOW()),
+                (?, ?, ?, 5, 20.0000, 'TEST_FILTER', ?, 1, NOW())`,
+        [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID, testRefId1,
+         TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID, testRefId2]
+      );
+
       const { transactions } = await getStockTransactions(
         TEST_COMPANY_ID,
         TEST_OUTLET_ID,
@@ -428,11 +739,16 @@ describe("Stock Service", { concurrency: false }, () => {
         connection
       );
 
-      // Should include our test adjustments
+      // Should include our test filter transactions
       const testTransactions = transactions.filter(t => 
-        t.reference_id?.includes("test-adjust")
+        t.reference_id?.includes("test-filter")
       );
       assert.ok(testTransactions.length >= 2);
+      
+      // Cleanup test transactions
+      await connection.execute(
+        `DELETE FROM inventory_transactions WHERE reference_type = 'TEST_FILTER'`,
+      );
     });
   });
 

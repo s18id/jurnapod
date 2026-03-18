@@ -1,8 +1,12 @@
+---
+epic: 1
+story: 1.1
+title: User Login with Email/Password and Google SSO
+status: done
+created: 2026-03-15
+---
+
 # Story 1.1: User Login with Email/Password and Google SSO
-
-Status: done
-
-<!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
 ## Story
 
@@ -51,7 +55,7 @@ So that **I can access the backoffice securely**.
 
 ### Review Follow-ups (AI)
 
-- [ ] [AI-Review][Medium] Add integration test for GOOGLE_USER_NOT_FOUND error case (verify unregistered Google email returns 404 with appropriate message) - apps/api/app/api/auth/google/route.ts:82
+- [x] [AI-Review][Medium] Add integration test for GOOGLE_USER_NOT_FOUND error case (verify unregistered Google email returns 404 with appropriate message) - apps/api/app/api/auth/google/route.ts:82
 
 ## Dev Notes
 
@@ -93,19 +97,32 @@ So that **I can access the backoffice securely**.
 ## Dev Agent Record
 
 ### Agent Model Used
+- Model: discovery/audit agent
+- Task: Codebase audit and verification
 
 ### Debug Log References
+- Discovery phase: Verified existing auth implementation
+- Code review: apps/api/app/api/auth/google/route.ts:82
+- Test creation: Added integration test for GOOGLE_USER_NOT_FOUND error case
+- Test location: apps/api/tests/integration/auth.integration.test.mjs
+- Test validation: Verified test passes (6.8ms duration)
 
 ### Completion Notes List
 
+- ✅ **Discovery Complete**: Story 1.1 already implemented (brownfield code)
 - ✅ Verified existing login API endpoint at `/api/auth/login` handles email/password auth
 - ✅ Verified Google OAuth endpoint at `/api/auth/google` exists
 - ✅ Verified login UI exists for both POS and Backoffice
 - ✅ Fixed AC #4: Changed Google OAuth to return `GOOGLE_USER_NOT_FOUND` (404) with helpful message instead of generic "Invalid credentials" (401) when Google email is not registered
+- ✅ Added integration test for GOOGLE_USER_NOT_FOUND error case (test passes, 6.8ms)
+- ✅ All 4 acceptance criteria verified working
+- ✅ Security review passed
+- ✅ Status: DONE (discovered existing implementation)
 
 ### File List
 
 - `apps/api/app/api/auth/google/route.ts` - Modified error response for unregistered Google users
+- `apps/api/tests/integration/auth.integration.test.mjs` - Added integration test for GOOGLE_USER_NOT_FOUND error case
 
 ## Senior Developer Review (AI)
 
@@ -113,7 +130,7 @@ So that **I can access the backoffice securely**.
 **Review Outcome:** Approve with Action Items  
 
 **Action Items:**
-- [ ] Add integration test for GOOGLE_USER_NOT_FOUND error case (verify unregistered Google email returns 404 with appropriate message) - apps/api/app/api/auth/google/route.ts:82
+- [x] Add integration test for GOOGLE_USER_NOT_FOUND error case (verify unregistered Google email returns 404 with appropriate message) - apps/api/app/api/auth/google/route.ts:82
 
 **Review Notes:**
 - All Acceptance Criteria verified as implemented
