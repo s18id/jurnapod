@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import React from "react";
+import React, { useState } from "react";
 import { IonBadge, IonItem, IonLabel } from "@ionic/react";
 import { Button } from "../../shared/components/index.js";
 import type { RuntimeProductCatalogItem } from "../../services/runtime-service.js";
@@ -26,6 +26,8 @@ export function ProductCard({
 }: ProductCardProps): JSX.Element {
   const selectorSuffix = (product.sku ?? String(product.item_id)).toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const hasVariants = product.has_variants === true;
+  const [imageError, setImageError] = useState(false);
+  const hasThumbnail = product.thumbnail_url && !imageError;
 
   const handleClick = () => {
     if (hasVariants && onVariantSelect) {
@@ -38,24 +40,58 @@ export function ProductCard({
   return (
     <IonItem lines="full">
       <IonLabel>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>
-          {product.name}
-          {hasVariants && (
-            <IonBadge 
-              color="tertiary" 
-              style={{ 
-                marginLeft: 8, 
-                fontSize: 10,
-                padding: "2px 6px",
-                verticalAlign: "middle"
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {hasThumbnail ? (
+            <img
+              src={product.thumbnail_url!}
+              alt={product.name}
+              onError={() => setImageError(true)}
+              style={{
+                width: 48,
+                height: 48,
+                objectFit: "cover",
+                borderRadius: 4,
+                flexShrink: 0
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                backgroundColor: "#e2e8f0",
+                borderRadius: 4,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                fontSize: 20
               }}
             >
-              Variants
-            </IonBadge>
+              🖼️
+            </div>
           )}
-        </div>
-        <div style={{ fontSize: 12, color: "#64748b" }}>
-          {(product.sku ?? "NO-SKU")} - {formatMoney(product.price_snapshot)}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3 }}>
+              {product.name}
+              {hasVariants && (
+                <IonBadge
+                  color="tertiary"
+                  style={{
+                    marginLeft: 8,
+                    fontSize: 10,
+                    padding: "2px 6px",
+                    verticalAlign: "middle"
+                  }}
+                >
+                  Variants
+                </IonBadge>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+              {(product.sku ?? "NO-SKU")} - {formatMoney(product.price_snapshot)}
+            </div>
+          </div>
         </div>
       </IonLabel>
       <div slot="end" style={{ display: "flex", alignItems: "center", gap: 6 }}>

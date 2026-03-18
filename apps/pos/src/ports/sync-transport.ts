@@ -27,6 +27,8 @@ export interface SyncPullResponse {
       id: number;
       sku: string | null;
       name: string;
+      barcode: string | null;
+      thumbnail_url: string | null;
       type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
       item_group_id: number | null;
       is_active: boolean;
@@ -85,6 +87,8 @@ export interface SyncPullResponse {
       unit_price_snapshot: number;
       qty: number;
       discount_amount: number;
+      variant_id?: number;
+      variant_name_snapshot?: string | null;
       updated_at: string;
     }>;
     order_updates?: Array<{

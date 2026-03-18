@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 const APP_SHELL_CACHE = "jurnapod-pos-app-shell-v5";
+const RUNTIME_IMAGES_CACHE = "jurnapod-pos-images-v1";
 const APP_SHELL_URLS = [
   "/",
   "/index.html",
@@ -12,6 +13,10 @@ const APP_SHELL_URLS = [
   "/screenshots/checkout-mobile.png"
 ];
 
+function isImageRequest(url) {
+  return url.pathname.startsWith("/uploads/");
+}
+
 function isCoreShellPath(pathname) {
   return APP_SHELL_URLS.includes(pathname) || pathname === "/";
 }
@@ -19,7 +24,7 @@ function isCoreShellPath(pathname) {
 async function precacheBuildAssets(cache) {
   try {
     const indexResponse = await fetch("/index.html", { cache: "no-store" });
-    if (!indexResponse.success) {
+    if (!indexResponse.ok) {
       return;
     }
 
@@ -60,6 +65,29 @@ async function cacheFirst(request) {
   const networkResponse = await fetch(request);
   await cacheShellResponse(request, networkResponse);
   return networkResponse;
+}
+
+async function cacheImage(request) {
+  const cache = await caches.open(RUNTIME_IMAGES_CACHE);
+  const cached = await cache.match(request);
+  
+  if (cached) {
+    return cached;
+  }
+  
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse && networkResponse.status === 200) {
+      await cache.put(request, networkResponse.clone());
+    }
+    return networkResponse;
+  } catch (error) {
+    const cachedFallback = await cache.match(request);
+    if (cachedFallback) {
+      return cachedFallback;
+    }
+    throw error;
+  }
 }
 
 async function navigationWithShellFallback(event) {
@@ -131,6 +159,11 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(navigationWithShellFallback(event));
+    return;
+  }
+
+  if (isImageRequest(url)) {
+    event.respondWith(cacheImage(request));
     return;
   }
 

@@ -1983,13 +1983,14 @@ export const POST = withAuth(
             );
 
             if (snapshot.lines.length > 0) {
-              const placeholders = snapshot.lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+              const placeholders = snapshot.lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
               const values = snapshot.lines.flatMap((line) => [
                 snapshot.order_id,
                 snapshot.company_id,
                 snapshot.outlet_id,
                 line.item_id,
                 line.variant_id ?? null,
+                line.variant_name_snapshot ?? null,
                 line.sku_snapshot,
                 line.name_snapshot,
                 line.item_type_snapshot,
@@ -2005,6 +2006,7 @@ export const POST = withAuth(
                    outlet_id,
                    item_id,
                    variant_id,
+                   variant_name_snapshot,
                    sku_snapshot,
                    name_snapshot,
                    item_type_snapshot,

@@ -157,6 +157,7 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
 
   const toCartState = useCallback((snapshotLines: Array<{
     item_id: number;
+    variant_id?: number | null;
     sku_snapshot: string | null;
     name_snapshot: string;
     item_type_snapshot: string;
@@ -166,10 +167,15 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
   }>, orderIsFinalized: boolean): CartState => {
     const next: CartState = {};
     for (const line of snapshotLines) {
-      next[line.item_id] = {
+      // Use composite key for variant lines to preserve variant identity
+      const cartKey = line.variant_id ? `${line.item_id}:${line.variant_id}` : String(line.item_id);
+      next[cartKey] = {
         product: {
           item_id: line.item_id,
+          variant_id: line.variant_id || undefined,
           sku: line.sku_snapshot,
+          barcode: null,
+          thumbnail_url: null,
           name: line.name_snapshot,
           item_type: line.item_type_snapshot as "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE",
           price_snapshot: line.unit_price_snapshot
@@ -302,6 +308,8 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
       notes: cartState.activeOrderContext.notes,
       lines: cartState.cartLines.map((line) => ({
         item_id: line.product.item_id,
+        variant_id: line.product.variant_id,
+        variant_name_snapshot: line.product.variant_name,
         sku_snapshot: line.product.sku,
         name_snapshot: line.product.name,
         item_type_snapshot: line.product.item_type,
@@ -634,7 +642,8 @@ export function PosRouter({ context, cartItemCount = 0 }: PosRouterProps): JSX.E
     for (const [key, line] of Object.entries(cartState.cart)) {
       if (line.kitchen_sent_qty > 0) {
         // Keep line, reset qty to kitchen_sent_qty
-        nextCart[Number(key)] = {
+        // Preserve original key (may be composite like "123:456" for variants)
+        nextCart[key] = {
           ...line,
           qty: line.kitchen_sent_qty
         };

@@ -26,6 +26,8 @@ function createMockProduct(overrides: Partial<RuntimeProductCatalogItem> = {}): 
     item_id: 1,
     variant_id: undefined,
     sku: "SKU-001",
+    barcode: null,
+    thumbnail_url: null,
     name: "Test Product",
     item_type: "PRODUCT",
     price_snapshot: 10.00,

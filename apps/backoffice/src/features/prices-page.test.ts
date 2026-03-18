@@ -71,9 +71,9 @@ function getGroupName(groupMap: Map<number, ItemGroup>, groupId: number | null):
 
 // Mock data
 const mockItems: Item[] = [
-  { id: 1, company_id: 1, sku: "SKU001", name: "Product A", type: "PRODUCT", item_group_id: 1, is_active: true, updated_at: "2026-03-17" },
-  { id: 2, company_id: 1, sku: "SKU002", name: "Product B", type: "PRODUCT", item_group_id: 2, is_active: true, updated_at: "2026-03-17" },
-  { id: 3, company_id: 1, sku: null, name: "Service A", type: "SERVICE", item_group_id: null, is_active: true, updated_at: "2026-03-17" },
+  { id: 1, company_id: 1, sku: "SKU001", name: "Product A", type: "PRODUCT", item_group_id: 1, barcode: null, barcode_type: null, cogs_account_id: null, inventory_asset_account_id: null, is_active: true, updated_at: "2026-03-17" },
+  { id: 2, company_id: 1, sku: "SKU002", name: "Product B", type: "PRODUCT", item_group_id: 2, barcode: null, barcode_type: null, cogs_account_id: null, inventory_asset_account_id: null, is_active: true, updated_at: "2026-03-17" },
+  { id: 3, company_id: 1, sku: null, name: "Service A", type: "SERVICE", item_group_id: null, barcode: null, barcode_type: null, cogs_account_id: null, inventory_asset_account_id: null, is_active: true, updated_at: "2026-03-17" },
 ];
 
 const mockGroups: ItemGroup[] = [
