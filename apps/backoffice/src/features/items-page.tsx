@@ -36,6 +36,8 @@ import {
   IconUpload,
   IconTools,
   IconPackage,
+  IconBarcode,
+  IconPhoto,
 } from "@tabler/icons-react";
 import { apiRequest } from "../lib/api-client";
 import { useItems, type Item, type ItemType } from "../hooks/use-items";
@@ -47,6 +49,9 @@ import { downloadCsv, rowsToCsv } from "../lib/import/csv";
 import type { SessionUser } from "../lib/session";
 import { RecipeCompositionEditor } from "./recipe-composition-editor";
 import { VariantManager } from "./variant-manager";
+import { ItemBarcodeManager } from "./item-barcode-manager";
+import { ImageUpload } from "./image-upload";
+import { ItemImageGallery } from "./item-image-gallery";
 
 interface ItemsPageProps {
   user: SessionUser;
@@ -133,6 +138,11 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
   const [variantManagerOpen, { open: openVariantManager, close: closeVariantManager }] =
     useDisclosure(false);
   const [editingVariantItem, setEditingVariantItem] = useState<Item | null>(null);
+
+  // Barcode and image manager state
+  const [barcodeImageManagerOpen, { open: openBarcodeImageManager, close: closeBarcodeImageManager }] =
+    useDisclosure(false);
+  const [editingBarcodeImageItem, setEditingBarcodeImageItem] = useState<Item | null>(null);
 
   // Form states
   const [editingItem, setEditingItem] = useState<Item | null>(null);
@@ -272,6 +282,11 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
   const openVariantManagerForItem = (item: Item) => {
     setEditingVariantItem(item);
     openVariantManager();
+  };
+
+  const openBarcodeImageManagerForItem = (item: Item) => {
+    setEditingBarcodeImageItem(item);
+    openBarcodeImageManager();
   };
 
   const validateForm = (): boolean => {
@@ -691,6 +706,12 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                           Manage Variants
                         </Menu.Item>
                         <Menu.Item
+                          leftSection={<IconBarcode size={14} />}
+                          onClick={() => openBarcodeImageManagerForItem(item)}
+                        >
+                          Manage Barcode & Images
+                        </Menu.Item>
+                        <Menu.Item
                           leftSection={item.is_active ? <IconBan size={14} /> : <IconCheck size={14} />}
                           color={item.is_active ? "orange" : "green"}
                           onClick={() => handleToggleActive(item)}
@@ -797,6 +818,12 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                             onClick={() => openVariantManagerForItem(item)}
                           >
                             Manage Variants
+                          </Menu.Item>
+                          <Menu.Item
+                            leftSection={<IconBarcode size={14} />}
+                            onClick={() => openBarcodeImageManagerForItem(item)}
+                          >
+                            Manage Barcode & Images
                           </Menu.Item>
                           <Menu.Item
                             leftSection={item.is_active ? <IconBan size={14} /> : <IconCheck size={14} />}
@@ -1138,6 +1165,53 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
               setEditingVariantItem(null);
             }}
           />
+        )}
+      </Modal>
+
+      {/* Barcode & Image Manager Modal */}
+      <Modal
+        opened={barcodeImageManagerOpen}
+        onClose={() => {
+          closeBarcodeImageManager();
+          setEditingBarcodeImageItem(null);
+        }}
+        title={editingBarcodeImageItem ? `Manage Barcode & Images: ${editingBarcodeImageItem.name}` : "Manage Barcode & Images"}
+        size="xl"
+      >
+        {editingBarcodeImageItem && (
+          <Stack gap="xl">
+            <ItemBarcodeManager
+              user={user}
+              accessToken={accessToken}
+              itemId={editingBarcodeImageItem.id}
+              itemName={editingBarcodeImageItem.name}
+              currentBarcode={editingBarcodeImageItem.barcode}
+              currentBarcodeType={editingBarcodeImageItem.barcode_type}
+              onBarcodeUpdate={() => {
+                refreshItems();
+              }}
+            />
+
+            <ImageUpload
+              user={user}
+              accessToken={accessToken}
+              itemId={editingBarcodeImageItem.id}
+              itemName={editingBarcodeImageItem.name}
+              onUploadSuccess={() => {
+                // Refresh images in the gallery
+              }}
+            />
+
+            <ItemImageGallery
+              user={user}
+              accessToken={accessToken}
+              itemId={editingBarcodeImageItem.id}
+              itemName={editingBarcodeImageItem.name}
+              onImagesChange={() => {
+                refreshItems();
+              }}
+            />
+          </Stack>
         )}
       </Modal>
     </Stack>

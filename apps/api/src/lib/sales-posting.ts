@@ -3,6 +3,11 @@
 
 import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/core";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
+import {
+  ACCOUNT_MAPPING_TYPE_ID_BY_CODE,
+  accountMappingIdToCode,
+  type AccountMappingCode
+} from "@jurnapod/shared";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import type { SalesInvoiceDetail, SalesPayment } from "./sales";
@@ -46,54 +51,74 @@ function normalizePaymentMethodCode(method: string): string {
   return normalized;
 }
 
+function resolveMappingCode(row: { mapping_type_id?: number | null; mapping_key?: string | null }): AccountMappingCode | undefined {
+  const fromId = accountMappingIdToCode(row.mapping_type_id);
+  if (fromId) {
+    return fromId;
+  }
+
+  if (typeof row.mapping_key === "string") {
+    const normalized = row.mapping_key.trim().toUpperCase() as AccountMappingCode;
+    if (ACCOUNT_MAPPING_TYPE_ID_BY_CODE[normalized]) {
+      return normalized;
+    }
+  }
+
+  return undefined;
+}
+
 async function readOutletAccountMappingByKey(
   dbExecutor: QueryExecutor,
   companyId: number,
   outletId: number
 ): Promise<OutletAccountMapping> {
   const requiredKeys = ["SALES_REVENUE", "AR"] as const;
-  const placeholders = requiredKeys.map(() => "?").join(", ");
+  const requiredTypeIds = requiredKeys.map((key) => ACCOUNT_MAPPING_TYPE_ID_BY_CODE[key]);
+  const idPlaceholders = requiredTypeIds.map(() => "?").join(", ");
+  const keyPlaceholders = requiredKeys.map(() => "?").join(", ");
   const [rows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_key, account_id
+    `SELECT mapping_type_id, mapping_key, account_id
      FROM outlet_account_mappings
      WHERE company_id = ?
        AND outlet_id = ?
-       AND mapping_key IN (${placeholders})`,
-    [companyId, outletId, ...requiredKeys]
+       AND (mapping_type_id IN (${idPlaceholders}) OR mapping_key IN (${keyPlaceholders}))`,
+    [companyId, outletId, ...requiredTypeIds, ...requiredKeys]
   );
 
   const accountByKey = new Map<string, number>();
-  for (const row of rows as Array<{ mapping_key?: string; account_id?: number }>) {
-    if (typeof row.mapping_key !== "string" || !Number.isFinite(row.account_id)) {
+  for (const row of rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+    const mappingCode = resolveMappingCode(row);
+    if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
     }
 
-    if (!requiredKeys.includes(row.mapping_key as typeof requiredKeys[number])) {
+    if (!requiredKeys.includes(mappingCode as typeof requiredKeys[number])) {
       continue;
     }
 
-    accountByKey.set(row.mapping_key, Number(row.account_id));
+    accountByKey.set(mappingCode, Number(row.account_id));
   }
 
   const [companyRows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_key, account_id
+    `SELECT mapping_type_id, mapping_key, account_id
      FROM company_account_mappings
      WHERE company_id = ?
-       AND mapping_key IN (${placeholders})`,
-    [companyId, ...requiredKeys]
+       AND (mapping_type_id IN (${idPlaceholders}) OR mapping_key IN (${keyPlaceholders}))`,
+    [companyId, ...requiredTypeIds, ...requiredKeys]
   );
 
-  for (const row of companyRows as Array<{ mapping_key?: string; account_id?: number }>) {
-    if (typeof row.mapping_key !== "string" || !Number.isFinite(row.account_id)) {
+  for (const row of companyRows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+    const mappingCode = resolveMappingCode(row);
+    if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
     }
 
-    if (!requiredKeys.includes(row.mapping_key as typeof requiredKeys[number])) {
+    if (!requiredKeys.includes(mappingCode as typeof requiredKeys[number])) {
       continue;
     }
 
-    if (!accountByKey.has(row.mapping_key)) {
-      accountByKey.set(row.mapping_key, Number(row.account_id));
+    if (!accountByKey.has(mappingCode)) {
+      accountByKey.set(mappingCode, Number(row.account_id));
     }
   }
 
@@ -115,36 +140,38 @@ async function readCreditNoteAccountMapping(
   outletId: number
 ): Promise<{ AR: number; SALES_RETURNS: number }> {
   const [rows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_key, account_id
+    `SELECT mapping_type_id, mapping_key, account_id
      FROM outlet_account_mappings
      WHERE company_id = ?
        AND outlet_id = ?
-       AND mapping_key IN ('AR', 'SALES_RETURNS', 'SALES_REVENUE')`,
-    [companyId, outletId]
+       AND (mapping_type_id IN (?, ?, ?) OR mapping_key IN ('AR', 'SALES_RETURNS', 'SALES_REVENUE'))`,
+    [companyId, outletId, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.AR, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_RETURNS, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_REVENUE]
   );
 
   const accountByKey = new Map<string, number>();
-  for (const row of rows as Array<{ mapping_key?: string; account_id?: number }>) {
-    if (typeof row.mapping_key !== "string" || !Number.isFinite(row.account_id)) {
+  for (const row of rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+    const mappingCode = resolveMappingCode(row);
+    if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
     }
-    accountByKey.set(row.mapping_key, Number(row.account_id));
+    accountByKey.set(mappingCode, Number(row.account_id));
   }
 
   const [companyRows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_key, account_id
+    `SELECT mapping_type_id, mapping_key, account_id
      FROM company_account_mappings
      WHERE company_id = ?
-       AND mapping_key IN ('AR', 'SALES_RETURNS', 'SALES_REVENUE')`,
-    [companyId]
+       AND (mapping_type_id IN (?, ?, ?) OR mapping_key IN ('AR', 'SALES_RETURNS', 'SALES_REVENUE'))`,
+    [companyId, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.AR, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_RETURNS, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_REVENUE]
   );
 
-  for (const row of companyRows as Array<{ mapping_key?: string; account_id?: number }>) {
-    if (typeof row.mapping_key !== "string" || !Number.isFinite(row.account_id)) {
+  for (const row of companyRows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+    const mappingCode = resolveMappingCode(row);
+    if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
     }
-    if (!accountByKey.has(row.mapping_key)) {
-      accountByKey.set(row.mapping_key, Number(row.account_id));
+    if (!accountByKey.has(mappingCode)) {
+      accountByKey.set(mappingCode, Number(row.account_id));
     }
   }
 
@@ -187,21 +214,24 @@ async function readOutletPaymentMethodMappings(
   }
 
   const fallbackKeys = ["CASH", "QRIS", "CARD"];
+  const fallbackTypeIds = fallbackKeys.map((key) => ACCOUNT_MAPPING_TYPE_ID_BY_CODE[key as keyof typeof ACCOUNT_MAPPING_TYPE_ID_BY_CODE]);
   const placeholders = fallbackKeys.map(() => "?").join(", ");
+  const typePlaceholders = fallbackTypeIds.map(() => "?").join(", ");
   const [fallbackRows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_key, account_id
+    `SELECT mapping_type_id, mapping_key, account_id
      FROM outlet_account_mappings
      WHERE company_id = ?
        AND outlet_id = ?
-       AND mapping_key IN (${placeholders})`,
-    [companyId, outletId, ...fallbackKeys]
+       AND (mapping_type_id IN (${typePlaceholders}) OR mapping_key IN (${placeholders}))`,
+    [companyId, outletId, ...fallbackTypeIds, ...fallbackKeys]
   );
 
-  for (const row of fallbackRows as Array<{ mapping_key?: string; account_id?: number }>) {
-    if (!row.mapping_key || !Number.isFinite(row.account_id)) {
+  for (const row of fallbackRows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+    const mappingCode = resolveMappingCode(row);
+    if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
     }
-    const methodCode = normalizePaymentMethodCode(String(row.mapping_key));
+    const methodCode = normalizePaymentMethodCode(mappingCode);
     if (!accountByMethod.has(methodCode)) {
       accountByMethod.set(methodCode, Number(row.account_id));
     }
@@ -242,23 +272,24 @@ async function readCompanyPaymentVarianceAccounts(
   companyId: number
 ): Promise<{ gain: number | null; loss: number | null }> {
   const [rows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_key, account_id
+    `SELECT mapping_type_id, mapping_key, account_id
      FROM company_account_mappings
      WHERE company_id = ?
-       AND mapping_key IN ('PAYMENT_VARIANCE_GAIN', 'PAYMENT_VARIANCE_LOSS')`,
-    [companyId]
+       AND (mapping_type_id IN (?, ?) OR mapping_key IN ('PAYMENT_VARIANCE_GAIN', 'PAYMENT_VARIANCE_LOSS'))`,
+    [companyId, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_GAIN, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_LOSS]
   );
 
   let gain: number | null = null;
   let loss: number | null = null;
 
-  for (const row of rows as Array<{ mapping_key?: string; account_id?: number }>) {
-    if (!row.mapping_key || !Number.isFinite(row.account_id)) {
+  for (const row of rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+    const mappingCode = resolveMappingCode(row);
+    if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
     }
-    if (row.mapping_key === "PAYMENT_VARIANCE_GAIN") {
+    if (mappingCode === "PAYMENT_VARIANCE_GAIN") {
       gain = Number(row.account_id);
-    } else if (row.mapping_key === "PAYMENT_VARIANCE_LOSS") {
+    } else if (mappingCode === "PAYMENT_VARIANCE_LOSS") {
       loss = Number(row.account_id);
     }
   }

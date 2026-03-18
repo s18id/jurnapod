@@ -3,6 +3,12 @@
 
 import { ZodError, z } from "zod";
 import type { RowDataPacket } from "mysql2";
+import {
+  ACCOUNT_MAPPING_TYPE_ID_BY_CODE,
+  accountMappingCodeToId,
+  accountMappingIdToCode,
+  type AccountMappingCode
+} from "@jurnapod/shared";
 import { requireAccess, requireAccessForOutletQuery, withAuth } from "../../../../src/lib/auth-guard";
 import { userHasOutletAccess } from "../../../../src/lib/auth";
 import { getDbPool } from "../../../../src/lib/db";
@@ -60,6 +66,22 @@ const invalidJsonGuardError = new ZodError([
   }
 ]);
 
+function resolveMappingCode(row: { mapping_type_id?: number | null; mapping_key?: string | null }): AccountMappingCode | undefined {
+  const fromId = accountMappingIdToCode(row.mapping_type_id);
+  if (fromId) {
+    return fromId;
+  }
+
+  if (typeof row.mapping_key === "string") {
+    const normalized = row.mapping_key.trim().toUpperCase() as AccountMappingCode;
+    if (ACCOUNT_MAPPING_TYPE_ID_BY_CODE[normalized]) {
+      return normalized;
+    }
+  }
+
+  return undefined;
+}
+
 async function parseOutletIdForGuard(request: Request): Promise<number> {
   try {
     const payload = await request.clone().json();
@@ -103,15 +125,29 @@ export const GET = withAuth(
 
       if (parsed.scope === "company") {
         const [rows] = await pool.execute<RowDataPacket[]>(
-          `SELECT mapping_key, account_id
+          `SELECT mapping_type_id, mapping_key, account_id
            FROM company_account_mappings
            WHERE company_id = ?`,
           [auth.companyId]
         );
 
+        const mappings = (rows as Array<{ mapping_type_id?: number | null; mapping_key?: string | null; account_id?: number | null }>)
+          .map((row) => {
+            const mappingCode = resolveMappingCode(row);
+            if (!mappingCode || !Number.isFinite(row.account_id)) {
+              return null;
+            }
+
+            return {
+              mapping_key: mappingCode,
+              account_id: Number(row.account_id)
+            };
+          })
+          .filter((row): row is { mapping_key: AccountMappingCode; account_id: number } => row !== null);
+
         return successResponse({
           scope: "company",
-          mappings: rows as Array<{ mapping_key: string; account_id: number }>
+          mappings
         });
       }
 
@@ -122,7 +158,7 @@ export const GET = withAuth(
 
       const outletId = parsed.outlet_id as number;
       const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT mapping_key, account_id
+        `SELECT mapping_type_id, mapping_key, account_id
          FROM outlet_account_mappings
          WHERE company_id = ?
            AND outlet_id = ?`,
@@ -130,20 +166,28 @@ export const GET = withAuth(
       );
 
       const outletMap = new Map<string, number>();
-      for (const row of outletRows as Array<{ mapping_key: string; account_id: number }>) {
-        outletMap.set(row.mapping_key, row.account_id);
+      for (const row of outletRows as Array<{ mapping_type_id?: number | null; mapping_key?: string | null; account_id?: number }>) {
+        const mappingCode = resolveMappingCode(row);
+        if (!mappingCode || !Number.isFinite(row.account_id)) {
+          continue;
+        }
+        outletMap.set(mappingCode, Number(row.account_id));
       }
 
       const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT mapping_key, account_id
+        `SELECT mapping_type_id, mapping_key, account_id
          FROM company_account_mappings
          WHERE company_id = ?`,
         [auth.companyId]
       );
 
       const companyMap = new Map<string, number>();
-      for (const row of companyRows as Array<{ mapping_key: string; account_id: number }>) {
-        companyMap.set(row.mapping_key, row.account_id);
+      for (const row of companyRows as Array<{ mapping_type_id?: number | null; mapping_key?: string | null; account_id?: number }>) {
+        const mappingCode = resolveMappingCode(row);
+        if (!mappingCode || !Number.isFinite(row.account_id)) {
+          continue;
+        }
+        companyMap.set(mappingCode, Number(row.account_id));
       }
 
       const effectiveMappings: Array<{ mapping_key: string; account_id: number | null; source: "outlet" | "company" | null; company_account_id: number | null }> = mappingKeys.map((key) => {
@@ -204,6 +248,24 @@ export const PUT = withAuth(
         }
 
         const accountIds = Array.from(new Set(parsed.mappings.map((m) => m.account_id)));
+        const mappingsWithTypeId = parsed.mappings.map((mapping) => {
+          const mappingTypeId = accountMappingCodeToId(mapping.mapping_key);
+          if (!mappingTypeId) {
+            throw new ZodError([
+              {
+                code: z.ZodIssueCode.custom,
+                path: ["mappings"],
+                message: `Unsupported mapping key: ${mapping.mapping_key}`
+              }
+            ]);
+          }
+
+          return {
+            ...mapping,
+            mapping_type_id: mappingTypeId
+          };
+        });
+
         if (accountIds.length > 0) {
           const placeholders = accountIds.map(() => "?").join(", ");
           const [rows] = await pool.execute<RowDataPacket[]>(
@@ -221,12 +283,12 @@ export const PUT = withAuth(
         try {
           await connection.beginTransaction();
 
-          for (const mapping of parsed.mappings) {
+          for (const mapping of mappingsWithTypeId) {
             await connection.execute(
-              `INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
-               VALUES (?, ?, ?)
-               ON DUPLICATE KEY UPDATE account_id = VALUES(account_id)`,
-              [auth.companyId, mapping.mapping_key, mapping.account_id]
+              `INSERT INTO company_account_mappings (company_id, mapping_key, mapping_type_id, account_id)
+               VALUES (?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), mapping_type_id = VALUES(mapping_type_id), mapping_key = VALUES(mapping_key)`,
+              [auth.companyId, mapping.mapping_key, mapping.mapping_type_id, mapping.account_id]
             );
           }
 
@@ -247,6 +309,23 @@ export const PUT = withAuth(
       }
 
       const mappingsToUpsert = parsed.mappings.filter((m): m is { mapping_key: typeof mappingKeys[number]; account_id: number } => m.account_id !== "");
+      const mappingsToUpsertWithTypeId = mappingsToUpsert.map((mapping) => {
+        const mappingTypeId = accountMappingCodeToId(mapping.mapping_key);
+        if (!mappingTypeId) {
+          throw new ZodError([
+            {
+              code: z.ZodIssueCode.custom,
+              path: ["mappings"],
+              message: `Unsupported mapping key: ${mapping.mapping_key}`
+            }
+          ]);
+        }
+
+        return {
+          ...mapping,
+          mapping_type_id: mappingTypeId
+        };
+      });
       const mappingsToDelete = parsed.mappings.filter((m) => m.account_id === "").map((m) => m.mapping_key);
 
       const accountIds = Array.from(new Set(mappingsToUpsert.map((m) => m.account_id)));
@@ -267,12 +346,12 @@ export const PUT = withAuth(
       try {
         await connection.beginTransaction();
 
-        for (const mapping of mappingsToUpsert) {
+        for (const mapping of mappingsToUpsertWithTypeId) {
           await connection.execute(
-            `INSERT INTO outlet_account_mappings (company_id, outlet_id, mapping_key, account_id)
-             VALUES (?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE account_id = VALUES(account_id)`,
-            [auth.companyId, parsed.outlet_id, mapping.mapping_key, mapping.account_id]
+            `INSERT INTO outlet_account_mappings (company_id, outlet_id, mapping_key, mapping_type_id, account_id)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), mapping_type_id = VALUES(mapping_type_id), mapping_key = VALUES(mapping_key)`,
+            [auth.companyId, parsed.outlet_id, mapping.mapping_key, mapping.mapping_type_id, mapping.account_id]
           );
         }
 

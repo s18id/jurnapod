@@ -14,6 +14,7 @@ import { SyncPullConfigSchema } from "@jurnapod/shared";
 import { getDbPool } from "./db";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 import { getVariantsForSync } from "./item-variants";
+import { getItemThumbnailsBatch } from "./item-images";
 
 type ItemRow = RowDataPacket & {
   id: number;
@@ -22,6 +23,7 @@ type ItemRow = RowDataPacket & {
   name: string;
   item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
   item_group_id: number | null;
+  barcode: string | null;
   cogs_account_id: number | null;
   inventory_asset_account_id: number | null;
   is_active: number;
@@ -306,6 +308,7 @@ function normalizeItem(row: ItemRow) {
     name: row.name,
     type: row.item_type,
     item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
+    barcode: row.barcode,
     cogs_account_id: row.cogs_account_id == null ? null : Number(row.cogs_account_id),
     inventory_asset_account_id: row.inventory_asset_account_id == null ? null : Number(row.inventory_asset_account_id),
     is_active: row.is_active === 1,
@@ -741,7 +744,7 @@ export async function listItems(companyId: number, filters?: { isActive?: boolea
   const values: Array<number> = [companyId];
 
   let sql =
-    "SELECT id, company_id, sku, name, item_type, item_group_id, cogs_account_id, inventory_asset_account_id, is_active, updated_at FROM items WHERE company_id = ?";
+    "SELECT id, company_id, sku, name, item_type, item_group_id, barcode, cogs_account_id, inventory_asset_account_id, is_active, updated_at FROM items WHERE company_id = ?";
 
   if (typeof filters?.isActive === "boolean") {
     sql += " AND is_active = ?";
@@ -2620,7 +2623,13 @@ export async function buildSyncPullPayload(
     getVariantsForSync(companyId, outletId)
   ]);
 
-  const openOrderSync = await readOpenOrderSyncPayload(companyId, outletId, ordersCursor);
+  const [openOrderSync, thumbnailMap] = await Promise.all([
+    readOpenOrderSyncPayload(companyId, outletId, ordersCursor),
+    getItemThumbnailsBatch(
+      companyId,
+      items.map((item) => item.id)
+    )
+  ]);
 
   return {
     data_version: currentVersion,
@@ -2630,6 +2639,8 @@ export async function buildSyncPullPayload(
       name: item.name,
       type: item.type,
       item_group_id: item.item_group_id,
+      barcode: item.barcode,
+      thumbnail_url: thumbnailMap.get(item.id) ?? null,
       is_active: item.is_active,
       updated_at: item.updated_at
     })),
@@ -2686,7 +2697,7 @@ async function readOpenOrderSyncPayload(
       ),
       pool.execute<RowDataPacket[]>(
         `SELECT order_id, company_id, outlet_id, item_id, sku_snapshot, name_snapshot, item_type_snapshot,
-                unit_price_snapshot, qty, discount_amount, updated_at
+                unit_price_snapshot, qty, discount_amount, variant_id, variant_name_snapshot, updated_at
          FROM pos_order_snapshot_lines
          WHERE company_id = ?
            AND outlet_id = ?`,
@@ -2752,6 +2763,8 @@ async function readOpenOrderSyncPayload(
         unit_price_snapshot: Number(row.unit_price_snapshot),
         qty: Number(row.qty),
         discount_amount: Number(row.discount_amount),
+        variant_id: row.variant_id == null ? undefined : Number(row.variant_id),
+        variant_name_snapshot: row.variant_name_snapshot == null ? undefined : String(row.variant_name_snapshot),
         updated_at: toRfc3339Required(row.updated_at)
       })),
       order_updates: orderUpdates,

@@ -219,6 +219,8 @@ export class SyncOrchestrator {
         outlet_id: number;
         item_id: number;
         sku: string | null;
+        barcode: string | null;
+        thumbnail_url: string | null;
         name: string;
         item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
         item_group_id: number | null;
@@ -255,6 +257,8 @@ export class SyncOrchestrator {
               outlet_id: scope.outlet_id,
               item_id: item.id,
               sku: item.sku,
+              barcode: item.barcode ?? null,
+              thumbnail_url: item.thumbnail_url ?? null,
               name: item.name,
               item_type: item.type,
               item_group_id: groupId,
@@ -368,11 +372,15 @@ export class SyncOrchestrator {
 
         for (const order of openOrders) {
           const lines = (orderLineMap.get(order.order_id) ?? []).map((line) => ({
-            pk: `${line.order_id}:${line.item_id}`,
+            pk: line.variant_id
+              ? `${line.order_id}:${line.item_id}:${line.variant_id}`
+              : `${line.order_id}:${line.item_id}`,
             order_id: line.order_id,
             company_id: line.company_id,
             outlet_id: line.outlet_id,
             item_id: line.item_id,
+            variant_id: line.variant_id,
+            variant_name_snapshot: line.variant_name_snapshot,
             sku_snapshot: line.sku_snapshot,
             name_snapshot: line.name_snapshot,
             item_type_snapshot: line.item_type_snapshot,

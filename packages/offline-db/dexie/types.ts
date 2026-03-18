@@ -50,6 +50,8 @@ export interface ProductCacheRow {
   outlet_id: number;
   item_id: number;
   sku: string | null;
+  barcode?: string | null;
+  thumbnail_url?: string | null;
   name: string;
   item_type: ProductItemType;
   item_group_id?: number | null;

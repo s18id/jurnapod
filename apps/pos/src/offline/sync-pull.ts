@@ -22,6 +22,8 @@ const inFlightPullsByScope = new Map<string, Promise<SyncPullIngestResult>>();
 const SyncPullItemSchema = z.object({
   id: z.coerce.number().int().positive(),
   sku: z.string().nullable(),
+  barcode: z.string().nullable().optional(),
+  thumbnail_url: z.string().nullable().optional(),
   name: z.string().min(1),
   type: z.enum(["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"]),
   item_group_id: z.number().int().positive().nullable(),
@@ -87,6 +89,8 @@ const SyncPullOpenOrderLineSchema = z.object({
   unit_price_snapshot: z.number().finite().nonnegative(),
   qty: z.number().positive(),
   discount_amount: z.number().finite().min(0),
+  variant_id: z.number().int().positive().optional(),
+  variant_name_snapshot: z.string().nullable().optional(),
   updated_at: z.string().datetime()
 });
 
@@ -330,6 +334,8 @@ function mapSyncPullToProductRows(
       outlet_id: scope.outlet_id,
       item_id: item.id,
       sku: item.sku,
+      barcode: item.barcode ?? null,
+      thumbnail_url: item.thumbnail_url ?? null,
       name: item.name,
       item_type: item.type,
       item_group_id: groupId,
@@ -393,11 +399,13 @@ function mapSyncPullToOpenOrderRows(payload: SyncPullResponse): ActiveOrderRow[]
 
 function mapSyncPullToOpenOrderLineRows(payload: SyncPullResponse): ActiveOrderLineRow[] {
   return payload.open_order_lines.map((line) => ({
-    pk: `${line.order_id}:${line.item_id}`,
+    pk: line.variant_id ? `${line.order_id}:${line.item_id}:${line.variant_id}` : `${line.order_id}:${line.item_id}`,
     order_id: line.order_id,
     company_id: line.company_id,
     outlet_id: line.outlet_id,
     item_id: line.item_id,
+    variant_id: line.variant_id,
+    variant_name_snapshot: line.variant_name_snapshot ?? null,
     sku_snapshot: line.sku_snapshot,
     name_snapshot: line.name_snapshot,
     item_type_snapshot: line.item_type_snapshot,

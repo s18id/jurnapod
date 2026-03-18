@@ -5,7 +5,14 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "./db";
 import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/core";
-import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
+import {
+  ACCOUNT_MAPPING_TYPE_ID_BY_CODE,
+  accountMappingIdToCode,
+  type AccountMappingCode,
+  type JournalLine,
+  type PostingRequest,
+  type PostingResult
+} from "@jurnapod/shared";
 
 // Constants
 const MONEY_SCALE = 100;
@@ -100,6 +107,22 @@ function fromMinorUnits(value: number): number {
 
 function normalizeMoney(value: number): number {
   return fromMinorUnits(toMinorUnits(value));
+}
+
+function resolveMappingCode(row: { mapping_type_id?: number | null; mapping_key?: string | null }): AccountMappingCode | undefined {
+  const fromId = accountMappingIdToCode(row.mapping_type_id);
+  if (fromId) {
+    return fromId;
+  }
+
+  if (typeof row.mapping_key === "string") {
+    const normalized = row.mapping_key.trim().toUpperCase() as AccountMappingCode;
+    if (ACCOUNT_MAPPING_TYPE_ID_BY_CODE[normalized]) {
+      return normalized;
+    }
+  }
+
+  return undefined;
 }
 
 function toBusinessDate(value: Date): string {
@@ -249,17 +272,32 @@ export async function getItemAccounts(
     
     // Fall back to company defaults if needed
     if (!cogsAccountId || !inventoryAssetAccountId) {
+      const hasMappingTypeId = await hasColumn(conn, "company_account_mappings", "mapping_type_id");
+
       const [companyRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT mapping_key, account_id 
-         FROM company_account_mappings 
-         WHERE company_id = ? AND mapping_key IN ('COGS_DEFAULT', 'INVENTORY_ASSET_DEFAULT')`,
-        [companyId]
+        hasMappingTypeId
+          ? `SELECT mapping_type_id, mapping_key, account_id
+             FROM company_account_mappings
+             WHERE company_id = ?
+               AND (mapping_type_id IN (?, ?) OR mapping_key IN ('COGS_DEFAULT', 'INVENTORY_ASSET_DEFAULT'))`
+          : `SELECT NULL AS mapping_type_id, mapping_key, account_id
+             FROM company_account_mappings
+             WHERE company_id = ?
+               AND mapping_key IN ('COGS_DEFAULT', 'INVENTORY_ASSET_DEFAULT')`,
+        hasMappingTypeId
+          ? [
+              companyId,
+              ACCOUNT_MAPPING_TYPE_ID_BY_CODE.COGS_DEFAULT,
+              ACCOUNT_MAPPING_TYPE_ID_BY_CODE.INVENTORY_ASSET_DEFAULT
+            ]
+          : [companyId]
       );
       
       const accountMap = new Map<string, number>();
       for (const row of companyRows) {
-        if (row.mapping_key && row.account_id) {
-          accountMap.set(row.mapping_key, row.account_id);
+        const mappingCode = resolveMappingCode(row as { mapping_type_id?: number | null; mapping_key?: string | null });
+        if (mappingCode && row.account_id) {
+          accountMap.set(mappingCode, Number(row.account_id));
         }
       }
       

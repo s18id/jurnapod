@@ -21,7 +21,7 @@ export function ProductSearch({ value, onChange }: ProductSearchProps): JSX.Elem
         value={value}
         debounce={SEARCH_DEBOUNCE_MS}
         onIonInput={(event) => onChange((event.detail.value ?? "").toString())}
-        placeholder="Search by name or SKU"
+        placeholder="Search by name, SKU, or scan barcode"
         inputmode="search"
       />
     </div>

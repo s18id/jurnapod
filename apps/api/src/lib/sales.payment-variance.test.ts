@@ -24,6 +24,22 @@ function makeExecutor(impl: (sql: string) => [unknown[], unknown[]]) {
 }
 
 describe("readCompanyPaymentVarianceAccounts", () => {
+  test("supports id-based rows when mapping_key is null", async () => {
+    const db = makeExecutor((sql) => {
+      if (sql.includes("company_account_mappings")) {
+        return [[
+          { mapping_type_id: 5, mapping_key: null, account_id: 700 },
+          { mapping_type_id: 6, mapping_key: null, account_id: 701 }
+        ], []];
+      }
+      return [[], []];
+    });
+
+    const result = await readCompanyPaymentVarianceAccounts(db, 1);
+    assert.equal(result.gain, 700);
+    assert.equal(result.loss, 701);
+  });
+
   test("returns both gain and loss accounts when configured", async () => {
     const db = makeExecutor((sql) => {
       if (sql.includes("company_account_mappings")) {

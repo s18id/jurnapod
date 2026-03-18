@@ -90,6 +90,7 @@ export const SyncPushRequestSchema = z.object({
           z.object({
             item_id: NumericIdSchema,
             variant_id: NumericIdSchema.optional(),
+            variant_name_snapshot: z.string().nullable().optional(),
             sku_snapshot: z.string().nullable(),
             name_snapshot: z.string().min(1),
             item_type_snapshot: z.enum(["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"]),

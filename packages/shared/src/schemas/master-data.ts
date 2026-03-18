@@ -311,6 +311,8 @@ export const SyncPullOpenOrderLineSchema = z.object({
   unit_price_snapshot: z.number().finite().nonnegative(),
   qty: z.number().positive(),
   discount_amount: z.number().finite().min(0),
+  variant_id: z.number().optional(),
+  variant_name_snapshot: z.string().nullable().optional(),
   updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 });
 
@@ -344,6 +346,8 @@ export const SyncPullItemSchema = z.object({
   name: z.string(),
   type: ItemTypeSchema,
   item_group_id: NumericIdSchema.nullable(),
+  barcode: z.string().nullable(),
+  thumbnail_url: z.string().nullable(),
   is_active: z.boolean(),
   updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 });
@@ -538,6 +542,68 @@ export const ItemVariantResponseSchema = z.object({
   updated_at: z.string()
 });
 
+// Barcode Schemas
+export const BarcodeTypeSchema = z.enum(['EAN13', 'UPCA', 'CODE128', 'CUSTOM']);
+
+export const UpdateItemBarcodeSchema = z.object({
+  barcode: z.string().trim().max(100),
+  barcode_type: BarcodeTypeSchema
+});
+
+export const BarcodeLookupResponseSchema = z.object({
+  items: z.array(z.object({
+    id: NumericIdSchema,
+    name: z.string(),
+    sku: z.string().nullable(),
+    barcode: z.string(),
+    base_price: z.number(),
+    image_thumbnail_url: z.string().nullable(),
+    variants: z.array(z.object({
+      id: NumericIdSchema,
+      sku: z.string(),
+      variant_name: z.string(),
+      barcode: z.string(),
+      price: z.number()
+    })).optional()
+  }))
+});
+
+// Image Schemas
+export const UploadImageResponseSchema = z.object({
+  id: NumericIdSchema,
+  item_id: NumericIdSchema,
+  file_name: z.string(),
+  original_url: z.string(),
+  large_url: z.string(),
+  medium_url: z.string(),
+  thumbnail_url: z.string(),
+  width_pixels: z.number(),
+  height_pixels: z.number(),
+  is_primary: z.boolean()
+});
+
+export const ItemImagesResponseSchema = z.object({
+  images: z.array(z.object({
+    id: NumericIdSchema,
+    file_name: z.string(),
+    original_url: z.string(),
+    large_url: z.string(),
+    medium_url: z.string(),
+    thumbnail_url: z.string(),
+    width_pixels: z.number(),
+    height_pixels: z.number(),
+    file_size_bytes: z.number(),
+    is_primary: z.boolean(),
+    sort_order: z.number(),
+    created_at: z.string()
+  }))
+});
+
+export const UpdateImageRequestSchema = z.object({
+  is_primary: z.boolean().optional(),
+  sort_order: z.number().int().optional()
+});
+
 // Item Variant Types
 export type CreateVariantAttributeRequest = z.infer<typeof CreateVariantAttributeSchema>;
 export type UpdateVariantAttributeRequest = z.infer<typeof UpdateVariantAttributeSchema>;
@@ -546,3 +612,13 @@ export type StockAdjustmentRequest = z.infer<typeof StockAdjustmentSchema>;
 export type ItemVariantResponse = z.infer<typeof ItemVariantResponseSchema>;
 export type VariantAttribute = z.infer<typeof VariantAttributeSchema>;
 export type SyncPullVariant = z.infer<typeof SyncPullVariantSchema>;
+
+// Barcode Types
+export type BarcodeType = z.infer<typeof BarcodeTypeSchema>;
+export type UpdateItemBarcodeRequest = z.infer<typeof UpdateItemBarcodeSchema>;
+export type BarcodeLookupResponse = z.infer<typeof BarcodeLookupResponseSchema>;
+
+// Image Types
+export type UploadImageResponse = z.infer<typeof UploadImageResponseSchema>;
+export type ItemImagesResponse = z.infer<typeof ItemImagesResponseSchema>;
+export type UpdateImageRequest = z.infer<typeof UpdateImageRequestSchema>;

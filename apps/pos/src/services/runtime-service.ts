@@ -53,12 +53,15 @@ export interface RuntimeProductCatalogItemVariant {
   variant_name: string;
   price: number;
   stock_quantity: number;
+  barcode: string | null;
 }
 
 export interface RuntimeProductCatalogItem {
   item_id: number;
   variant_id?: number;
   sku: string | null;
+  barcode: string | null;
+  thumbnail_url: string | null;
   name: string;
   variant_name?: string | null;
   item_type: ProductCacheRow["item_type"];
@@ -702,6 +705,8 @@ export class RuntimeService {
       return {
         item_id: row.item_id,
         sku: row.sku,
+        barcode: row.barcode ?? null,
+        thumbnail_url: row.thumbnail_url ?? null,
         name: row.name,
         item_type: row.item_type,
         item_group_id: row.item_group_id ?? null,
@@ -713,7 +718,8 @@ export class RuntimeService {
               variant_id: v.variant_id,
               variant_name: v.variant_name,
               price: v.price,
-              stock_quantity: v.stock_quantity ?? 0
+              stock_quantity: v.stock_quantity ?? 0,
+              barcode: v.barcode ?? null
             }))
           : undefined
       };

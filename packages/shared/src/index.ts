@@ -26,3 +26,4 @@ export * from "./schemas/sales";
 export * from "./schemas/settings";
 export * from "./schemas/taxes";
 export * from "./schemas/users";
+export * from "./constants/account-mapping-types";
