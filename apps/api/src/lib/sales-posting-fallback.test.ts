@@ -22,6 +22,25 @@ function makeExecutor(impl: (sql: string) => [unknown[], unknown[]]) {
 }
 
 describe("readOutletAccountMappingByKey fallback precedence", () => {
+  test("supports id-based mappings without mapping_key values", async () => {
+    const db = makeExecutor((sql) => {
+      if (sql.includes("outlet_account_mappings")) {
+        return [[
+          { mapping_type_id: 1, mapping_key: null, account_id: 100 },
+          { mapping_type_id: 2, mapping_key: null, account_id: 101 }
+        ], []];
+      }
+      if (sql.includes("company_account_mappings")) {
+        return [[], []];
+      }
+      return [[], []];
+    });
+
+    const result = await readOutletAccountMappingByKey(db, 1, 1);
+    assert.equal(result.AR, 100);
+    assert.equal(result.SALES_REVENUE, 101);
+  });
+
   test("outlet override wins over company default", async () => {
     const db = makeExecutor((sql) => {
       if (sql.includes("outlet_account_mappings")) {
@@ -114,6 +133,20 @@ describe("readOutletAccountMappingByKey fallback precedence", () => {
 });
 
 describe("readOutletPaymentMethodMappings fallback precedence", () => {
+  test("legacy fallback resolves by mapping_type_id", async () => {
+    const db = makeExecutor((sql) => {
+      if (sql.includes("outlet_payment_method_mappings")) return [[], []];
+      if (sql.includes("outlet_account_mappings")) {
+        return [[{ mapping_type_id: 10, mapping_key: null, account_id: 901 }], []];
+      }
+      if (sql.includes("company_payment_method_mappings")) return [[], []];
+      return [[], []];
+    });
+
+    const result = await readOutletPaymentMethodMappings(db, 1, 1);
+    assert.equal(result.get("QRIS"), 901);
+  });
+
   test("outlet_payment_method_mappings has highest precedence", async () => {
     const db = makeExecutor((sql) => {
       if (sql.includes("outlet_payment_method_mappings")) {

@@ -1,7 +1,7 @@
 # Story 4.8: Barcode & Image Support
 
 **Epic:** Items & Catalog - Product Management  
-**Status:** review  
+**Status:** in-progress  
 **Priority:** Low  
 **Estimated Effort:** 6-8 hours  
 **Created:** 2026-03-17  
@@ -460,6 +460,13 @@ async function storeImageFile(
 - [x] All 358 API tests passing
 - [x] 59 POS tests passing (12 pre-existing failures unrelated)
 
+### Review Follow-ups (AI)
+- [ ] [AI-Review][MEDIUM] Update Dev Agent Record File List to include newly introduced migration files and latest touched files for full git/story parity [packages/db/migrations/0093_add_variant_name_snapshot_to_pos_order_snapshot_lines.sql:1]
+- [ ] [AI-Review][MEDIUM] Align story testing claims with actual test style for barcode image route (handler-level behavioral tests vs API boundary integration) [apps/api/app/api/inventory/items/lookup/barcode/[barcode]/image/route.test.ts:1]
+- [ ] [AI-Review][MEDIUM] Add operational runbook note for 0094 conflict-skip branch requiring manual dedupe then re-run migration [packages/db/migrations/0094_pos_order_snapshot_lines_variant_unique.sql:104]
+- [ ] [AI-Review][MEDIUM] Sync story status, notes, and changelog with latest review-cycle hardening work and outputs [_bmad-output/implementation-artifacts/4-8-barcode-image-support.md:857]
+- [ ] [AI-Review][LOW] Correct File List classification where existing files are listed under New Files [_bmad-output/implementation-artifacts/4-8-barcode-image-support.md:786]
+
 ---
 
 ## Files to Create/Modify
@@ -854,7 +861,7 @@ Story 4.8 implementation following red-green-refactor cycle with TDD approach.
 
 ---
 
-**Story Status:** review - Third code review findings addressed (Fixes A-F)  
+**Story Status:** in-progress - Review follow-ups recorded; medium issues remain for documentation and operational runbook alignment  
 **Next Step:** Final validation and GO/NO-GO decision  
 **Rationale:** Initial implementation (7 scopes A-G) + first review fixes (6 scopes A-F) + second review fixes (7 scopes A-G). Third adversarial review identified 6 additional issues: POS cart variant key integrity (HIGH), barcode fallback repeatability (MEDIUM), image upload error mapping (MEDIUM), image reorder correctness tracked as tech debt (MEDIUM), migration duplicate-check parity (MEDIUM), conflict message fidelity (LOW). All fixes applied. API tests: 367 passing, POS tests: 59 passing (12 pre-existing failures unrelated to Story 4.8).
 

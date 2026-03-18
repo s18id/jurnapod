@@ -159,6 +159,14 @@ test("COGS Posting Service", async (t) => {
        AND COLUMN_NAME = 'unit_cost'`
   );
   const supportsUnitCost = Number(unitCostColumnRows[0]?.column_exists ?? 0) > 0;
+  const [mappingTypeColumnRows] = await conn.execute<RowDataPacket[]>(
+    `SELECT COUNT(*) AS column_exists
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'company_account_mappings'
+       AND COLUMN_NAME = 'mapping_type_id'`
+  );
+  const supportsMappingTypeId = Number(mappingTypeColumnRows[0]?.column_exists ?? 0) > 0;
   let cogsAccountId: number;
   let inventoryAccountId: number;
   let testItemId: number;
@@ -184,11 +192,19 @@ test("COGS Posting Service", async (t) => {
     inventoryAccountId = await createTestAccount(conn, TEST_COMPANY_ID, '1100-TEST', 'Test Inventory', 'ASSET', 'D');
 
     // Set up company default accounts
-    await conn.execute(
-      `INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
-       VALUES (?, 'COGS_DEFAULT', ?), (?, 'INVENTORY_ASSET_DEFAULT', ?)`,
-      [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
-    );
+    if (supportsMappingTypeId) {
+      await conn.execute(
+        `INSERT INTO company_account_mappings (company_id, mapping_key, mapping_type_id, account_id)
+         VALUES (?, 'COGS_DEFAULT', 7, ?), (?, 'INVENTORY_ASSET_DEFAULT', 8, ?)`,
+        [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
+      );
+    } else {
+      await conn.execute(
+        `INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
+         VALUES (?, 'COGS_DEFAULT', ?), (?, 'INVENTORY_ASSET_DEFAULT', ?)`,
+        [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
+      );
+    }
   });
 
   after(async () => {
@@ -341,11 +357,19 @@ test("COGS Posting Service", async (t) => {
       );
       
       // Restore defaults
-      await conn.execute(
-        `INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
-         VALUES (?, 'COGS_DEFAULT', ?), (?, 'INVENTORY_ASSET_DEFAULT', ?)`,
-        [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
-      );
+      if (supportsMappingTypeId) {
+        await conn.execute(
+          `INSERT INTO company_account_mappings (company_id, mapping_key, mapping_type_id, account_id)
+           VALUES (?, 'COGS_DEFAULT', 7, ?), (?, 'INVENTORY_ASSET_DEFAULT', 8, ?)`,
+          [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
+        );
+      } else {
+        await conn.execute(
+          `INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
+           VALUES (?, 'COGS_DEFAULT', ?), (?, 'INVENTORY_ASSET_DEFAULT', ?)`,
+          [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
+        );
+      }
     });
   });
 
