@@ -13,6 +13,7 @@ import type { SyncPullPayload, SyncPullResponse } from "@jurnapod/shared";
 import { SyncPullConfigSchema } from "@jurnapod/shared";
 import { getDbPool } from "./db";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
+import { getVariantsForSync } from "./item-variants";
 
 type ItemRow = RowDataPacket & {
   id: number;
@@ -2588,10 +2589,11 @@ export async function buildSyncPullPayload(
   const config = await readSyncConfig(companyId);
 
   if (currentVersion <= sinceVersion) {
-    const [openOrderSync, tables, reservations] = await Promise.all([
+    const [openOrderSync, tables, reservations, variants] = await Promise.all([
       readOpenOrderSyncPayload(companyId, outletId, ordersCursor),
       listOutletTables(companyId, outletId),
-      listActiveReservations(companyId, outletId)
+      listActiveReservations(companyId, outletId),
+      getVariantsForSync(companyId, outletId)
     ]);
     return {
       data_version: currentVersion,
@@ -2604,16 +2606,18 @@ export async function buildSyncPullPayload(
       order_updates: openOrderSync.order_updates,
       orders_cursor: openOrderSync.orders_cursor,
       tables,
-      reservations
+      reservations,
+      variants
     };
   }
 
-  const [items, effectivePrices, itemGroups, tables, reservations] = await Promise.all([
+  const [items, effectivePrices, itemGroups, tables, reservations, variants] = await Promise.all([
     listItems(companyId, { isActive: true }),
     listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true }),
     listItemGroups(companyId),
     listOutletTables(companyId, outletId),
-    listActiveReservations(companyId, outletId)
+    listActiveReservations(companyId, outletId),
+    getVariantsForSync(companyId, outletId)
   ]);
 
   const openOrderSync = await readOpenOrderSyncPayload(companyId, outletId, ordersCursor);
@@ -2651,7 +2655,8 @@ export async function buildSyncPullPayload(
     order_updates: openOrderSync.order_updates,
     orders_cursor: openOrderSync.orders_cursor,
     tables,
-    reservations
+    reservations,
+    variants
   };
 }
 

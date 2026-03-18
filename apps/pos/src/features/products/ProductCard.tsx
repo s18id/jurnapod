@@ -13,6 +13,7 @@ export interface ProductCardProps {
   onAdd: () => void;
   onRemove?: () => void;
   canRemove?: boolean;
+  onVariantSelect?: () => void;
 }
 
 export function ProductCard({
@@ -20,14 +21,39 @@ export function ProductCard({
   quantity,
   onAdd,
   onRemove,
-  canRemove = true
+  canRemove = true,
+  onVariantSelect
 }: ProductCardProps): JSX.Element {
   const selectorSuffix = (product.sku ?? String(product.item_id)).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const hasVariants = product.has_variants === true;
+
+  const handleClick = () => {
+    if (hasVariants && onVariantSelect) {
+      onVariantSelect();
+    } else {
+      onAdd();
+    }
+  };
 
   return (
     <IonItem lines="full">
       <IonLabel>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>{product.name}</div>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>
+          {product.name}
+          {hasVariants && (
+            <IonBadge 
+              color="tertiary" 
+              style={{ 
+                marginLeft: 8, 
+                fontSize: 10,
+                padding: "2px 6px",
+                verticalAlign: "middle"
+              }}
+            >
+              Variants
+            </IonBadge>
+          )}
+        </div>
         <div style={{ fontSize: 12, color: "#64748b" }}>
           {(product.sku ?? "NO-SKU")} - {formatMoney(product.price_snapshot)}
         </div>
@@ -54,10 +80,10 @@ export function ProductCard({
               name={`productAdd-${selectorSuffix}`}
               size="small"
               variant="primary"
-              onClick={onAdd}
+              onClick={handleClick}
               style={{ minWidth: "32px" }}
             >
-              +
+              {hasVariants ? "⋮" : "+"}
             </Button>
           </div>
         ) : (
@@ -66,9 +92,9 @@ export function ProductCard({
             name={`productAdd-${selectorSuffix}`}
             size="small"
             variant="primary"
-            onClick={onAdd}
+            onClick={handleClick}
           >
-            Add
+            {hasVariants ? "Select" : "Add"}
           </Button>
         )}
       </div>

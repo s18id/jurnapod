@@ -145,6 +145,7 @@ type SyncPushTransactionPayload = {
   trx_at: string;
   items: Array<{
     item_id: number;
+    variant_id?: number;
     qty: number;
     price_snapshot: number;
     name_snapshot: string;
@@ -176,6 +177,7 @@ type LegacyComparablePayload = {
   trx_at: string;
   items: Array<{
     item_id: number;
+    variant_id?: number;
     qty: number;
     price_snapshot: number;
     name_snapshot: string;
@@ -292,9 +294,54 @@ function buildTaxLinesForTransaction(params: {
 }
 
 /**
+ * Deduct stock from variant when variant_id is present.
+ * This handles variant-level stock tracking separate from item stock.
+ *
+ * @returns true if stock was successfully deducted
+ * @throws Error if stock deduction fails (fail-closed)
+ */
+async function deductVariantStock(
+  dbConnection: PoolConnection,
+  companyId: number,
+  variantId: number,
+  quantity: number
+): Promise<boolean> {
+  // Lock the variant row and check current stock
+  const [variantRows] = await dbConnection.execute<RowDataPacket[]>(
+    `SELECT stock_quantity FROM item_variants
+     WHERE id = ? AND company_id = ? AND is_active = TRUE
+     FOR UPDATE`,
+    [variantId, companyId]
+  );
+
+  if (variantRows.length === 0) {
+    throw new Error(`Variant ${variantId} not found or inactive`);
+  }
+
+  const currentStock = Number(variantRows[0].stock_quantity);
+  const newStock = currentStock - quantity;
+
+  if (newStock < 0) {
+    throw new Error(`Insufficient stock for variant ${variantId}: ${currentStock} < ${quantity}`);
+  }
+
+  // Update variant stock
+  await dbConnection.execute(
+    `UPDATE item_variants
+     SET stock_quantity = ?
+     WHERE id = ? AND company_id = ?`,
+    [newStock, variantId, companyId]
+  );
+
+  return true;
+}
+
+/**
  * Resolve stock-tracked items and deduct stock with cost consumption.
  * This is the C3/C4 integration for Scope C (COGS) - stock deduction happens
  * regardless of posting mode; COGS posting is gated separately.
+ *
+ * Also handles variant-level stock deduction when variant_id is present.
  *
  * @returns Cost details for COGS posting, or null if no tracked items
  * @throws Error if stock deduction fails (fail-closed)
@@ -313,8 +360,23 @@ async function resolveAndDeductStockForTransaction(
     return null;
   }
 
-  // Get item_ids from transaction
-  const itemIds = tx.items.map((item) => item.item_id);
+  // Separate variant items from regular items
+  const variantItems = tx.items.filter((item) => item.variant_id);
+  const regularItems = tx.items.filter((item) => !item.variant_id);
+
+  // Deduct variant stock first
+  for (const item of variantItems) {
+    if (item.variant_id) {
+      await deductVariantStock(dbConnection, tx.company_id, item.variant_id, item.qty);
+    }
+  }
+
+  // Handle regular items with stock tracking
+  if (regularItems.length === 0) {
+    return null;
+  }
+
+  const itemIds = regularItems.map((item) => item.item_id);
   if (itemIds.length === 0) {
     return null;
   }
@@ -336,7 +398,7 @@ async function resolveAndDeductStockForTransaction(
   }
 
   // Build stock items for tracked products only
-  const stockItems = tx.items
+  const stockItems = regularItems
     .filter((item) => trackedItemIds.has(item.item_id))
     .map((item) => ({
       product_id: item.item_id,
@@ -506,6 +568,7 @@ function canonicalizeTransactionForHash(tx: {
   trx_at: string;
   items: Array<{
     item_id: number;
+    variant_id?: number;
     qty: number;
     price_snapshot: number;
     name_snapshot: string;
@@ -536,6 +599,7 @@ function canonicalizeTransactionForHash(tx: {
     trx_at: toMysqlDateTime(tx.trx_at),
     items: tx.items.map((item) => ({
       item_id: item.item_id,
+      variant_id: item.variant_id ?? null,
       qty: item.qty,
       price_snapshot: item.price_snapshot,
       name_snapshot: item.name_snapshot
@@ -562,6 +626,7 @@ function canonicalizeTransactionForLegacyHash(tx: {
   trx_at: string;
   items: Array<{
     item_id: number;
+    variant_id?: number;
     qty: number;
     price_snapshot: number;
     name_snapshot: string;
@@ -580,6 +645,7 @@ function canonicalizeTransactionForLegacyHash(tx: {
     trx_at: trxAtOverride ?? tx.trx_at,
     items: tx.items.map((item) => ({
       item_id: item.item_id,
+      variant_id: item.variant_id ?? null,
       qty: item.qty,
       price_snapshot: item.price_snapshot,
       name_snapshot: item.name_snapshot
@@ -600,6 +666,7 @@ function canonicalizeTransactionForLegacyCompare(payload: LegacyComparablePayloa
     trx_at: payload.trx_at,
     items: payload.items.map((item) => ({
       item_id: item.item_id,
+      variant_id: item.variant_id ?? null,
       qty: item.qty,
       price_snapshot: item.price_snapshot,
       name_snapshot: item.name_snapshot
@@ -958,13 +1025,14 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       }
 
       if (tx.items.length > 0) {
-        const itemPlaceholders = tx.items.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+        const itemPlaceholders = tx.items.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
         const itemValues = (tx.items as SyncPushTransactionPayload["items"]).flatMap((item, index) => [
           posTransactionId,
           tx.company_id,
           tx.outlet_id,
           index + 1,
           item.item_id,
+          item.variant_id ?? null,
           item.qty,
           item.price_snapshot,
           item.name_snapshot
@@ -977,6 +1045,7 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
              outlet_id,
              line_no,
              item_id,
+             variant_id,
              qty,
              price_snapshot,
              name_snapshot
@@ -1264,7 +1333,7 @@ async function readLegacyComparablePayloadByPosTransactionId(
   }
 
   const [itemRows] = await orderDbConnection.execute(
-    `SELECT item_id, qty, price_snapshot, name_snapshot
+    `SELECT item_id, variant_id, qty, price_snapshot, name_snapshot
      FROM pos_transaction_items
      WHERE pos_transaction_id = ?
      ORDER BY line_no ASC`,
@@ -1285,8 +1354,9 @@ async function readLegacyComparablePayloadByPosTransactionId(
     outlet_id: Number(header.outlet_id),
     status: header.status,
     trx_at: header.trx_at,
-    items: (itemRows as Array<{ item_id: number; qty: number; price_snapshot: number; name_snapshot: string }>).map((row) => ({
+    items: (itemRows as Array<{ item_id: number; variant_id?: number; qty: number; price_snapshot: number; name_snapshot: string }>).map((row) => ({
       item_id: Number(row.item_id),
+      variant_id: row.variant_id ? Number(row.variant_id) : undefined,
       qty: Number(row.qty),
       price_snapshot: Number(row.price_snapshot),
       name_snapshot: String(row.name_snapshot)
@@ -1316,6 +1386,7 @@ async function doesLegacyPayloadReplayMatch(
     trx_at: toMysqlDateTime(incomingTx.trx_at),
     items: incomingTx.items.map((item) => ({
       item_id: item.item_id,
+      variant_id: item.variant_id,
       qty: item.qty,
       price_snapshot: item.price_snapshot,
       name_snapshot: item.name_snapshot
@@ -1912,12 +1983,13 @@ export const POST = withAuth(
             );
 
             if (snapshot.lines.length > 0) {
-              const placeholders = snapshot.lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+              const placeholders = snapshot.lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
               const values = snapshot.lines.flatMap((line) => [
                 snapshot.order_id,
                 snapshot.company_id,
                 snapshot.outlet_id,
                 line.item_id,
+                line.variant_id ?? null,
                 line.sku_snapshot,
                 line.name_snapshot,
                 line.item_type_snapshot,
@@ -1932,6 +2004,7 @@ export const POST = withAuth(
                    company_id,
                    outlet_id,
                    item_id,
+                   variant_id,
                    sku_snapshot,
                    name_snapshot,
                    item_type_snapshot,
@@ -1982,11 +2055,12 @@ export const POST = withAuth(
                    company_id,
                    outlet_id,
                    item_id,
+                   variant_id,
                    cancelled_quantity,
                    reason,
                    cancelled_by_user_id,
                    cancelled_at
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
                 [
                   cancellation.cancellation_id,
                   update.update_id,
@@ -1994,6 +2068,7 @@ export const POST = withAuth(
                   cancellation.company_id,
                   cancellation.outlet_id,
                   cancellation.item_id,
+                  cancellation.variant_id ?? null,
                   cancellation.cancelled_quantity,
                   cancellation.reason,
                   cancellation.cancelled_by_user_id,

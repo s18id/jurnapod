@@ -35,15 +35,18 @@ import {
   IconCheck,
   IconUpload,
   IconTools,
+  IconPackage,
 } from "@tabler/icons-react";
 import { apiRequest } from "../lib/api-client";
 import { useItems, type Item, type ItemType } from "../hooks/use-items";
 import { useItemGroups } from "../hooks/use-item-groups";
+import { useItemVariantStats } from "../hooks/use-item-variant-stats";
 import { useAccounts } from "../hooks/use-accounts";
 import { ImportWizard, type ImportWizardConfig, type ImportPlanRow, type ImportResult } from "../components/import-wizard";
 import { downloadCsv, rowsToCsv } from "../lib/import/csv";
 import type { SessionUser } from "../lib/session";
 import { RecipeCompositionEditor } from "./recipe-composition-editor";
+import { VariantManager } from "./variant-manager";
 
 interface ItemsPageProps {
   user: SessionUser;
@@ -86,6 +89,13 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
     groupMap,
   } = useItemGroups({ user, accessToken });
 
+  // Variant stats hook for stock rollup visibility
+  const itemIds = useMemo(() => items.map((item) => item.id), [items]);
+  const {
+    stats: variantStats,
+    // loading: _variantStatsLoading, // Reserved for future loading state UI
+  } = useItemVariantStats({ user, accessToken, itemIds });
+
   // Account hooks for COGS and Inventory Asset accounts
   const { data: expenseAccounts, loading: expenseAccountsLoading } = useAccounts(
     user.company_id,
@@ -118,6 +128,11 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
 
   // Recipe editor state
   const [editingRecipeItem, setEditingRecipeItem] = useState<Item | null>(null);
+
+  // Variant manager state
+  const [variantManagerOpen, { open: openVariantManager, close: closeVariantManager }] =
+    useDisclosure(false);
+  const [editingVariantItem, setEditingVariantItem] = useState<Item | null>(null);
 
   // Form states
   const [editingItem, setEditingItem] = useState<Item | null>(null);
@@ -252,6 +267,11 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
   const openRecipeEditorForItem = (item: Item) => {
     setEditingRecipeItem(item);
     openRecipeEditor();
+  };
+
+  const openVariantManagerForItem = (item: Item) => {
+    setEditingVariantItem(item);
+    openVariantManager();
   };
 
   const validateForm = (): boolean => {
@@ -633,6 +653,15 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                       <Text size="xs" c="dimmed">
                         {getGroupName(item.item_group_id)}
                       </Text>
+                      {(() => {
+                        const stats = variantStats.get(item.id);
+                        if (!stats || !stats.has_variants) return null;
+                        return (
+                          <Text size="xs" c="blue">
+                            Stock: {stats.total_stock} ({stats.variant_count} variants)
+                          </Text>
+                        );
+                      })()}
                     </Group>
                     <Menu>
                       <Menu.Target>
@@ -655,6 +684,12 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                             Manage Recipe
                           </Menu.Item>
                         )}
+                        <Menu.Item
+                          leftSection={<IconPackage size={14} />}
+                          onClick={() => openVariantManagerForItem(item)}
+                        >
+                          Manage Variants
+                        </Menu.Item>
                         <Menu.Item
                           leftSection={item.is_active ? <IconBan size={14} /> : <IconCheck size={14} />}
                           color={item.is_active ? "orange" : "green"}
@@ -689,6 +724,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                   <Table.Th>Group</Table.Th>
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Status</Table.Th>
+                  <Table.Th>Stock</Table.Th>
                   <Table.Th>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -721,6 +757,20 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
+                      {(() => {
+                        const stats = variantStats.get(item.id);
+                        if (!stats || !stats.has_variants) {
+                          return <Text size="sm" c="dimmed">-</Text>;
+                        }
+                        return (
+                          <Group gap="xs">
+                            <Text size="sm" fw={500}>{stats.total_stock}</Text>
+                            <Text size="xs" c="dimmed">({stats.variant_count} variants)</Text>
+                          </Group>
+                        );
+                      })()}
+                    </Table.Td>
+                    <Table.Td>
                       <Menu>
                         <Menu.Target>
                           <Button variant="light" size="xs">
@@ -742,6 +792,12 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
                               Manage Recipe
                             </Menu.Item>
                           )}
+                          <Menu.Item
+                            leftSection={<IconPackage size={14} />}
+                            onClick={() => openVariantManagerForItem(item)}
+                          >
+                            Manage Variants
+                          </Menu.Item>
                           <Menu.Item
                             leftSection={item.is_active ? <IconBan size={14} /> : <IconCheck size={14} />}
                             color={item.is_active ? "orange" : "green"}
@@ -1059,6 +1115,31 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
           }}
         />
       )}
+
+      {/* Variant Manager Modal */}
+      <Modal
+        opened={variantManagerOpen}
+        onClose={() => {
+          closeVariantManager();
+          setEditingVariantItem(null);
+        }}
+        title={editingVariantItem ? `Manage Variants: ${editingVariantItem.name}` : "Manage Variants"}
+        size="xl"
+      >
+        {editingVariantItem && (
+          <VariantManager
+            user={user}
+            accessToken={accessToken}
+            itemId={editingVariantItem.id}
+            itemName={editingVariantItem.name}
+            itemSku={editingVariantItem.sku}
+            onClose={() => {
+              closeVariantManager();
+              setEditingVariantItem(null);
+            }}
+          />
+        )}
+      </Modal>
     </Stack>
   );
 }

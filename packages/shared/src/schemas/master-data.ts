@@ -397,6 +397,18 @@ export const SyncPullConfigSchema = z.object({
     .default(["CASH"])
 });
 
+export const SyncPullVariantSchema = z.object({
+  id: NumericIdSchema,
+  item_id: NumericIdSchema,
+  sku: z.string(),
+  variant_name: z.string(),
+  price: z.number(),
+  stock_quantity: z.number().default(0),
+  barcode: z.string().nullable(),
+  is_active: z.boolean(),
+  attributes: z.record(z.string(), z.string())
+});
+
 export const SyncPullTableSchema = z.object({
   table_id: NumericIdSchema,
   code: z.string().min(1).max(32),
@@ -435,7 +447,8 @@ export const SyncPullPayloadSchema = z.object({
   order_updates: z.array(SyncPullOrderUpdateSchema).default([]),
   orders_cursor: z.number().int().min(0).default(0),
   tables: z.array(SyncPullTableSchema).default([]),
-  reservations: z.array(SyncPullReservationSchema).default([])
+  reservations: z.array(SyncPullReservationSchema).default([]),
+  variants: z.array(SyncPullVariantSchema).default([])
 });
 
 export const SyncPullResponseSchema = z.object({
@@ -452,3 +465,84 @@ export type CreateRecipeIngredientRequest = z.infer<typeof CreateRecipeIngredien
 export type UpdateRecipeIngredientRequest = z.infer<typeof UpdateRecipeIngredientSchema>;
 export type RecipeIngredientResponse = z.infer<typeof RecipeIngredientResponseSchema>;
 export type RecipeCostResponse = z.infer<typeof RecipeCostResponseSchema>;
+
+// Item Variant Schemas
+export const VariantAttributeValueInputSchema = z.object({
+  id: NumericIdSchema.optional(),
+  value: z.string().trim().min(1).max(50),
+  sort_order: z.number().int().default(0)
+});
+
+export const CreateVariantAttributeSchema = z.object({
+  attribute_name: z.string().trim().min(1).max(50),
+  values: z.array(z.string().trim().min(1).max(50)).min(1)
+});
+
+export const UpdateVariantAttributeSchema = z
+  .object({
+    attribute_name: z.string().trim().min(1).max(50).optional(),
+    sort_order: z.number().int().optional(),
+    values: z.array(z.string().trim().min(1).max(50)).optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided"
+  });
+
+export const VariantAttributeValueSchema = z.object({
+  id: NumericIdSchema,
+  value: z.string(),
+  sort_order: z.number()
+});
+
+export const VariantAttributeSchema = z.object({
+  id: NumericIdSchema,
+  attribute_name: z.string(),
+  sort_order: z.number(),
+  values: z.array(VariantAttributeValueSchema)
+});
+
+export const UpdateVariantSchema = z
+  .object({
+    sku: z.string().trim().min(1).max(100).optional(),
+    price_override: z.coerce.number().finite().nonnegative().nullable().optional(),
+    stock_quantity: z.coerce.number().finite().min(0).optional(),
+    barcode: z.string().trim().max(100).nullable().optional(),
+    is_active: z.boolean().optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided"
+  });
+
+export const StockAdjustmentSchema = z.object({
+  adjustment: z.coerce.number().int().finite(),
+  reason: z.string().trim().min(1).max(255)
+});
+
+export const VariantAttributePairSchema = z.object({
+  attribute_name: z.string(),
+  value: z.string()
+});
+
+export const ItemVariantResponseSchema = z.object({
+  id: NumericIdSchema,
+  item_id: NumericIdSchema,
+  sku: z.string(),
+  variant_name: z.string(),
+  price_override: z.number().nullable(),
+  effective_price: z.number(),
+  stock_quantity: z.number(),
+  barcode: z.string().nullable(),
+  is_active: z.boolean(),
+  attributes: z.array(VariantAttributePairSchema),
+  created_at: z.string(),
+  updated_at: z.string()
+});
+
+// Item Variant Types
+export type CreateVariantAttributeRequest = z.infer<typeof CreateVariantAttributeSchema>;
+export type UpdateVariantAttributeRequest = z.infer<typeof UpdateVariantAttributeSchema>;
+export type UpdateVariantRequest = z.infer<typeof UpdateVariantSchema>;
+export type StockAdjustmentRequest = z.infer<typeof StockAdjustmentSchema>;
+export type ItemVariantResponse = z.infer<typeof ItemVariantResponseSchema>;
+export type VariantAttribute = z.infer<typeof VariantAttributeSchema>;
+export type SyncPullVariant = z.infer<typeof SyncPullVariantSchema>;

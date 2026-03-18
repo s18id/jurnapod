@@ -12,3 +12,6 @@ export type { ProductGridProps } from "./ProductGrid.js";
 
 export { useProducts } from "./useProducts.js";
 export type { UseProductsOptions, UseProductsReturn } from "./useProducts.js";
+
+export { VariantSelector } from "./VariantSelector.js";
+export type { VariantSelectorProps, Variant } from "./VariantSelector.js";

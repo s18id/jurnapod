@@ -26,6 +26,7 @@ export type {
   OutboxJobType,
   OutboxJobStatus,
   ProductCacheRow,
+  VariantCacheRow,
   OutletTableRow,
   ReservationRow,
   ActiveOrderRow,

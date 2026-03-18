@@ -178,6 +178,7 @@ export function useCheckout({
           sale_id: draft.sale_id,
           items: cartLines.map((line) => ({
             item_id: line.product.item_id,
+            variant_id: line.product.variant_id,
             qty: line.qty,
             discount_amount: line.discount_amount
           })),

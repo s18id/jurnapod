@@ -31,6 +31,7 @@ export interface CheckStockAvailabilityInput {
   quantity: number;
   outletId?: number;
   companyId?: number;
+  variantId?: number;
 }
 
 export interface CheckStockAvailabilityResult {
@@ -42,14 +43,14 @@ export interface CheckStockAvailabilityResult {
 }
 
 export interface ValidateStockForItemsInput {
-  items: Array<{ itemId: number; quantity: number }>;
+  items: Array<{ itemId: number; quantity: number; variantId?: number }>;
   companyId: number;
   outletId: number;
 }
 
 export interface ReserveStockInput {
   saleId: string;
-  items: Array<{ itemId: number; quantity: number }>;
+  items: Array<{ itemId: number; quantity: number; variantId?: number }>;
   companyId: number;
   outletId: number;
 }
@@ -87,11 +88,58 @@ async function getProductWithStock(
   return { product, stock };
 }
 
+async function getVariantStock(
+  db: PosOfflineDb,
+  companyId: number,
+  outletId: number,
+  variantId: number
+): Promise<{ variant: { variant_id: number; price: number; stock_quantity: number } | null; quantityReserved: number }> {
+  const variant = await db.variants_cache
+    .where("[company_id+outlet_id+variant_id]")
+    .equals([companyId, outletId, variantId])
+    .first() ?? null;
+
+  // Calculate total reserved quantity for this variant across all active reservations
+  const reservations = await db.stock_reservations
+    .where("[company_id+outlet_id+variant_id]")
+    .equals([companyId, outletId, variantId])
+    .toArray();
+
+  const quantityReserved = reservations.reduce((sum, r) => sum + r.quantity, 0);
+
+  return { variant, quantityReserved };
+}
+
 export async function checkStockAvailability(
   input: CheckStockAvailabilityInput,
   db: PosOfflineDb = posDb
 ): Promise<CheckStockAvailabilityResult> {
-  const { itemId, quantity, outletId, companyId } = input;
+  const { itemId, quantity, outletId, companyId, variantId } = input;
+
+  // If variantId is provided, check variant stock instead of item stock
+  if (variantId && companyId && outletId) {
+    const { variant, quantityReserved } = await getVariantStock(db, companyId, outletId, variantId);
+
+    if (!variant) {
+      return {
+        available: false,
+        quantityOnHand: 0,
+        quantityReserved: 0,
+        quantityAvailable: 0,
+        trackStock: true
+      };
+    }
+
+    const quantityOnHand = variant.stock_quantity ?? 0;
+    const quantityAvailable = Math.max(0, quantityOnHand - quantityReserved);
+    return {
+      available: quantityAvailable >= quantity,
+      quantityOnHand,
+      quantityReserved,
+      quantityAvailable: quantityAvailable - quantity,
+      trackStock: true
+    };
+  }
 
   if (!companyId || !outletId) {
     const firstProduct = await db.products_cache.limit(1).first();
@@ -164,10 +212,10 @@ export async function validateStockForItems(
   const stockChecks = await Promise.all(
     items.map(async (item) => {
       const result = await checkStockAvailability(
-        { itemId: item.itemId, quantity: item.quantity, companyId, outletId },
+        { itemId: item.itemId, quantity: item.quantity, companyId, outletId, variantId: item.variantId },
         db
       );
-      return { itemId: item.itemId, quantity: item.quantity, result };
+      return { itemId: item.itemId, quantity: item.quantity, variantId: item.variantId, result };
     })
   );
 
@@ -175,14 +223,29 @@ export async function validateStockForItems(
 
   for (const check of stockChecks) {
     if (check.result.trackStock && !check.result.available) {
-      const product = await db.products_cache
-        .where("[company_id+outlet_id+item_id]")
-        .equals([companyId, outletId, check.itemId])
-        .first();
+      let itemName: string;
+      
+      if (check.variantId) {
+        const variant = await db.variants_cache
+          .where("[company_id+outlet_id+variant_id]")
+          .equals([companyId, outletId, check.variantId])
+          .first();
+        const product = await db.products_cache
+          .where("[company_id+outlet_id+item_id]")
+          .equals([companyId, outletId, check.itemId])
+          .first();
+        itemName = variant ? `${product?.name ?? `Item #${check.itemId}`} (${variant.variant_name})` : (product?.name ?? `Item #${check.itemId}`);
+      } else {
+        const product = await db.products_cache
+          .where("[company_id+outlet_id+item_id]")
+          .equals([companyId, outletId, check.itemId])
+          .first();
+        itemName = product?.name ?? `Item #${check.itemId}`;
+      }
       
       insufficientItems.push({
         itemId: check.itemId,
-        itemName: product?.name ?? `Item #${check.itemId}`,
+        itemName,
         requestedQty: check.quantity,
         availableQty: check.result.quantityAvailable
       });
@@ -212,8 +275,38 @@ export async function reserveStock(
   const expiresAt = computeExpiration();
   const timestamp = nowIso();
 
-  await db.transaction("rw", [db.inventory_stock, db.stock_reservations], async () => {
+  await db.transaction("rw", [db.inventory_stock, db.variants_cache, db.stock_reservations], async () => {
     for (const item of items) {
+      // If variantId is provided, handle variant stock reservation
+      if (item.variantId) {
+        const variant = await db.variants_cache
+          .where("[company_id+outlet_id+variant_id]")
+          .equals([companyId, outletId, item.variantId])
+          .first();
+
+        if (!variant) {
+          continue;
+        }
+
+        // For variants, we track reservations but don't modify variant stock directly
+        // The variant stock is decremented when the sale is synced to the server
+        const reservation: StockReservationRow = {
+          reservation_id: crypto.randomUUID(),
+          sale_id: saleId,
+          company_id: companyId,
+          outlet_id: outletId,
+          item_id: item.itemId,
+          variant_id: item.variantId,
+          quantity: item.quantity,
+          created_at: timestamp,
+          expires_at: expiresAt
+        };
+
+        await db.stock_reservations.add(reservation);
+        continue;
+      }
+
+      // Handle non-variant item stock reservation
       const product = await db.products_cache
         .where("[company_id+outlet_id+item_id]")
         .equals([companyId, outletId, item.itemId])

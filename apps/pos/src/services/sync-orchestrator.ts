@@ -206,6 +206,7 @@ export class SyncOrchestrator {
       const nextOrdersCursor = response.data.orders_cursor ?? ordersCursor ?? 0;
       const tables = response.data.tables ?? [];
       const reservations = response.data.reservations ?? [];
+      const variants = response.data.variants ?? [];
 
       // Build lookup maps
       const now = new Date().toISOString();
@@ -233,6 +234,9 @@ export class SyncOrchestrator {
       }> = [];
 
       if (catalogAdvanced) {
+        // Build set of item_ids that have variants
+        const variantItemIds = new Set(variants.map((v) => v.item_id));
+
         // Join items with prices for this outlet
         productRows = prices
           .filter((price) => price.outlet_id === scope.outlet_id)
@@ -262,7 +266,8 @@ export class SyncOrchestrator {
               data_version: dataVersion,
               pulled_at: now,
               track_stock: item.track_stock ?? false,
-              low_stock_threshold: item.low_stock_threshold ?? 0
+              low_stock_threshold: item.low_stock_threshold ?? 0,
+              has_variants: variantItemIds.has(item.id)
             };
           })
           .filter((row): row is NonNullable<typeof row> => row !== null);
@@ -281,6 +286,27 @@ export class SyncOrchestrator {
 
         // Upsert both new/updated products and stale products
         await this.storage.upsertProducts([...productRows, ...staleProducts]);
+
+        // Upsert variants if present
+        if (variants.length > 0) {
+          const variantRows = variants.map((variant) => ({
+            pk: `${scope.company_id}:${scope.outlet_id}:${variant.id}`,
+            company_id: scope.company_id,
+            outlet_id: scope.outlet_id,
+            item_id: variant.item_id,
+            variant_id: variant.id,
+            sku: variant.sku,
+            variant_name: variant.variant_name,
+            price: variant.price,
+            barcode: variant.barcode,
+            is_active: variant.is_active,
+            attributes: variant.attributes,
+            data_version: dataVersion,
+            pulled_at: now,
+            stock_quantity: variant.stock_quantity ?? 0
+          }));
+          await this.storage.upsertVariants(variantRows);
+        }
       }
 
       const effectiveDataVersion = catalogAdvanced ? dataVersion : previousDataVersion;

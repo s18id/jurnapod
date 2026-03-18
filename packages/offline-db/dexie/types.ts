@@ -62,6 +62,24 @@ export interface ProductCacheRow {
   pulled_at: string;
   track_stock: boolean;
   low_stock_threshold: number | null;
+  has_variants?: boolean;
+}
+
+export interface VariantCacheRow {
+  pk: string;
+  company_id: number;
+  outlet_id: number;
+  item_id: number;
+  variant_id: number;
+  sku: string;
+  variant_name: string;
+  price: number;
+  barcode: string | null;
+  is_active: boolean;
+  attributes: Record<string, string>;
+  data_version: number;
+  pulled_at: string;
+  stock_quantity: number;
 }
 
 export interface InventoryStockRow {
@@ -139,6 +157,7 @@ export interface ItemCancellationRow {
   cancellation_id: string;
   order_id: string;
   item_id: number;
+  variant_id?: number;
   company_id: number;
   outlet_id: number;
   cancelled_quantity: number;
@@ -155,6 +174,8 @@ export interface ActiveOrderLineRow {
   company_id: number;
   outlet_id: number;
   item_id: number;
+  variant_id?: number;
+  variant_name_snapshot?: string | null;
   sku_snapshot: string | null;
   name_snapshot: string;
   item_type_snapshot: ProductItemType;
@@ -242,6 +263,8 @@ export interface SaleItemRow {
   company_id: number;
   outlet_id: number;
   item_id: number;
+  variant_id?: number;
+  variant_name_snapshot?: string | null;
   name_snapshot: string;
   sku_snapshot: string | null;
   item_type_snapshot: ProductItemType;
@@ -301,6 +324,7 @@ export interface CreateSaleDraftResult {
 
 export interface CompleteSaleItemInput {
   item_id: number;
+  variant_id?: number;
   qty: number;
   discount_amount?: number;
 }
@@ -476,6 +500,7 @@ export interface StockReservationRow {
   company_id: number;
   outlet_id: number;
   item_id: number;
+  variant_id?: number;
   quantity: number;
   created_at: string;
   expires_at: string | null;

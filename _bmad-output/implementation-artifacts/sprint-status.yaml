@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-18T00:54:45+0700
+last_updated: 2026-03-18T03:45:00+0000
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -93,7 +93,7 @@ development_status:
   4-4-recipe-bom-composition: done  # COMPLETE - Recipe/BOM composition with integration tests and cost-basis-first resolution
   4-5-cogs-integration: done  # COMPLETE - Full COGS integration with UI
   4-6-cost-tracking-methods: done  # COMPLETE - All tasks finished including Task 5 (auditability endpoints). 7 new tests passing. API endpoints: cost-layers, current-cost. Shared schemas added.
-  4-7-item-variants: ready-for-dev  # SPEC CREATED - ready for implementation
+  4-7-item-variants: done  # COMPLETE - All HIGH priority issues resolved. Scopes A-F completed: sync pull contract, stock ingestion, reservation safety, end-to-end flow, tests passing. 323 API tests passing, 5/5 sync push tests passing. Typecheck clean across all workspaces.
   4-8-barcode-image-support: ready-for-dev  # SPEC CREATED - ready for implementation
   4-9-account-mapping-key-int-constants: ready-for-dev  # SPEC CREATED - migrate mapping_key to mapping_type_id constants
   epic-4-retrospective: done

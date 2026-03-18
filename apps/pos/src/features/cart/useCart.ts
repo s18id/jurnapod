@@ -31,10 +31,19 @@ export interface CartLineState {
   discount_amount: number;
 }
 
-export type CartState = Record<number, CartLineState>;
+// Use composite key: "itemId:variantId" or just "itemId" for non-variant items
+export type CartState = Record<string, CartLineState>;
+
+export function getCartLineKey(itemId: number, variantId?: number): string {
+  return variantId ? `${itemId}:${variantId}` : String(itemId);
+}
 
 function cartToList(cart: CartState): CartLineState[] {
   return Object.values(cart).filter((line) => line.qty > 0);
+}
+
+function getLineKey(product: RuntimeProductCatalogItem): string {
+  return product.variant_id ? `${product.item_id}:${product.variant_id}` : String(product.item_id);
 }
 
 export interface UseCartOptions {
@@ -103,7 +112,8 @@ export function useCart({
   const upsertCartLine = useCallback(
     (product: RuntimeProductCatalogItem, patch: Partial<Pick<CartLineState, "qty" | "discount_amount">>) => {
       setCart((previous) => {
-        const existing = previous[product.item_id] ?? {
+        const lineKey = getLineKey(product);
+        const existing = previous[lineKey] ?? {
           product,
           qty: 1,
           kitchen_sent_qty: 0,  // Renamed from committed_qty
@@ -118,13 +128,13 @@ export function useCart({
 
         if (nextQty === 0 && minQty === 0) {
           const next = { ...previous };
-          delete next[product.item_id];
+          delete next[lineKey];
           return next;
         }
 
         return {
           ...previous,
-          [product.item_id]: {
+          [lineKey]: {
             product,
             qty: nextQty,
             kitchen_sent_qty: existing.kitchen_sent_qty,  // Renamed from committed_qty
@@ -204,7 +214,7 @@ export function useCart({
       setCart((previous) => {
         const next: CartState = {};
         for (const [itemId, line] of Object.entries(previous)) {
-          next[Number(itemId)] = {
+          next[itemId] = {
             ...line,
             kitchen_sent_qty: line.qty  // Renamed from committed_qty
           };

@@ -21,6 +21,7 @@ import type {
   OutboxJobRow,
   PaymentRow,
   ProductCacheRow,
+  VariantCacheRow,
   SaleItemRow,
   SaleRow,
   SyncMetadataRow,
@@ -37,6 +38,21 @@ export interface PosStoragePort {
   }): Promise<ProductCacheRow[]>;
 
   upsertProducts(products: ProductCacheRow[]): Promise<void>;
+
+  // Variant cache operations
+  getVariantsByOutlet(input: {
+    company_id: number;
+    outlet_id: number;
+    is_active?: boolean;
+  }): Promise<VariantCacheRow[]>;
+
+  getVariantsByItem(input: {
+    company_id: number;
+    outlet_id: number;
+    item_id: number;
+  }): Promise<VariantCacheRow[]>;
+
+  upsertVariants(variants: VariantCacheRow[]): Promise<void>;
 
   // Outlet tables operations
   getOutletTablesByOutlet(input: {

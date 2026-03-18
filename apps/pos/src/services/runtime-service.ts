@@ -13,6 +13,7 @@ import type { NetworkPort } from "../ports/network-port.js";
 import type {
   OutletTableRow,
   ProductCacheRow,
+  VariantCacheRow,
   ReservationRow,
   ActiveOrderRow,
   ActiveOrderLineRow,
@@ -47,14 +48,25 @@ export interface RuntimeCheckoutConfig {
   payment_methods: string[];
 }
 
+export interface RuntimeProductCatalogItemVariant {
+  variant_id: number;
+  variant_name: string;
+  price: number;
+  stock_quantity: number;
+}
+
 export interface RuntimeProductCatalogItem {
   item_id: number;
+  variant_id?: number;
   sku: string | null;
   name: string;
+  variant_name?: string | null;
   item_type: ProductCacheRow["item_type"];
   item_group_id?: number | null;
   item_group_name?: string | null;
   price_snapshot: number;
+  has_variants?: boolean;
+  variants?: RuntimeProductCatalogItemVariant[];
 }
 
 export type RuntimeTableStatus = OutletTableRow["status"];
@@ -140,6 +152,8 @@ export interface RuntimeActiveOrderLine {
   company_id: number;
   outlet_id: number;
   item_id: number;
+  variant_id?: number;
+  variant_name_snapshot?: string | null;
   sku_snapshot: string | null;
   name_snapshot: string;
   item_type_snapshot: ProductCacheRow["item_type"];
@@ -156,6 +170,8 @@ export interface RuntimeActiveOrderSnapshot {
 
 export interface RuntimeActiveOrderLineInput {
   item_id: number;
+  variant_id?: number;
+  variant_name_snapshot?: string | null;
   sku_snapshot: string | null;
   name_snapshot: string;
   item_type_snapshot: ProductCacheRow["item_type"];
@@ -202,6 +218,7 @@ export interface ListRuntimeActiveOrdersOptions {
 export interface CancelRuntimeActiveOrderLineInput {
   order_id: string;
   item_id: number;
+  variant_id?: number;
   cancel_qty: number;
   reason: string;
   actor_user_id?: number | null;
@@ -322,6 +339,8 @@ function mapActiveOrderLineRow(row: ActiveOrderLineRow): RuntimeActiveOrderLine 
     company_id: row.company_id,
     outlet_id: row.outlet_id,
     item_id: row.item_id,
+    variant_id: row.variant_id,
+    variant_name_snapshot: row.variant_name_snapshot,
     sku_snapshot: row.sku_snapshot,
     name_snapshot: row.name_snapshot,
     item_type_snapshot: row.item_type_snapshot,
@@ -362,8 +381,8 @@ export class RuntimeService {
     return orderId;
   }
 
-  private buildActiveOrderLinePk(orderId: string, itemId: number): string {
-    return `${orderId}:${itemId}`;
+  private buildActiveOrderLinePk(orderId: string, itemId: number, variantId?: number): string {
+    return variantId ? `${orderId}:${itemId}:${variantId}` : `${orderId}:${itemId}`;
   }
 
   private buildActiveOrderUpdatePk(updateId: string): string {
@@ -403,6 +422,10 @@ export class RuntimeService {
     });
   }
 
+  private buildLineIdentity(itemId: number, variantId?: number): string {
+    return `${itemId}:${variantId ?? 'null'}`;
+  }
+
   private createActiveOrderUpdateEvent(input: {
     scope: RuntimeOutletScope;
     orderId: string;
@@ -413,8 +436,12 @@ export class RuntimeService {
     timestamp: string;
   }): ActiveOrderUpdateRow | null {
     const existingOrder = input.existingOrder;
-    const existingLineMap = new Map(input.existingLines.map((line) => [line.item_id, line]));
-    const nextLineMap = new Map(input.nextLines.map((line) => [line.item_id, line]));
+    const existingLineMap = new Map(
+      input.existingLines.map((line) => [this.buildLineIdentity(line.item_id, line.variant_id), line])
+    );
+    const nextLineMap = new Map(
+      input.nextLines.map((line) => [this.buildLineIdentity(line.item_id, line.variant_id), line])
+    );
 
     let eventType: OrderUpdateEventType = "SNAPSHOT_FINALIZED";
 
@@ -427,16 +454,20 @@ export class RuntimeService {
     } else if ((existingOrder.notes ?? null) !== (input.nextOrder.notes ?? null)) {
       eventType = "NOTES_CHANGED";
     } else {
-      const added = input.nextLines.find((line) => !existingLineMap.has(line.item_id));
+      const added = input.nextLines.find(
+        (line) => !existingLineMap.has(this.buildLineIdentity(line.item_id, line.variant_id))
+      );
       if (added) {
         eventType = "ITEM_ADDED";
       } else {
-        const removed = input.existingLines.find((line) => !nextLineMap.has(line.item_id));
+        const removed = input.existingLines.find(
+          (line) => !nextLineMap.has(this.buildLineIdentity(line.item_id, line.variant_id))
+        );
         if (removed) {
           eventType = "ITEM_REMOVED";
         } else {
           const qtyChanged = input.nextLines.find((line) => {
-            const before = existingLineMap.get(line.item_id);
+            const before = existingLineMap.get(this.buildLineIdentity(line.item_id, line.variant_id));
             return before && before.qty !== line.qty;
           });
           if (qtyChanged) {
@@ -642,23 +673,51 @@ export class RuntimeService {
   async getProductCatalog(
     scope: RuntimeOutletScope
   ): Promise<RuntimeProductCatalogItem[]> {
-    const rows = await this.storage.getProductsByOutlet({
-      company_id: scope.company_id,
-      outlet_id: scope.outlet_id,
-      is_active: true
-    });
+    const [rows, allVariants] = await Promise.all([
+      this.storage.getProductsByOutlet({
+        company_id: scope.company_id,
+        outlet_id: scope.outlet_id,
+        is_active: true
+      }),
+      this.storage.getVariantsByOutlet({
+        company_id: scope.company_id,
+        outlet_id: scope.outlet_id,
+        is_active: true
+      })
+    ]);
 
     rows.sort((left, right) => left.name.localeCompare(right.name));
 
-    return rows.map((row) => ({
-      item_id: row.item_id,
-      sku: row.sku,
-      name: row.name,
-      item_type: row.item_type,
-      item_group_id: row.item_group_id ?? null,
-      item_group_name: row.item_group_name ?? null,
-      price_snapshot: row.price_snapshot
-    }));
+    const variantsByItem = new Map<number, VariantCacheRow[]>();
+    for (const variant of allVariants) {
+      const existing = variantsByItem.get(variant.item_id) ?? [];
+      existing.push(variant);
+      variantsByItem.set(variant.item_id, existing);
+    }
+
+    return rows.map((row) => {
+      const itemVariants = variantsByItem.get(row.item_id) ?? [];
+      const hasVariants = row.has_variants === true && itemVariants.length > 0;
+
+      return {
+        item_id: row.item_id,
+        sku: row.sku,
+        name: row.name,
+        item_type: row.item_type,
+        item_group_id: row.item_group_id ?? null,
+        item_group_name: row.item_group_name ?? null,
+        price_snapshot: row.price_snapshot,
+        has_variants: hasVariants,
+        variants: hasVariants
+          ? itemVariants.map((v) => ({
+              variant_id: v.variant_id,
+              variant_name: v.variant_name,
+              price: v.price,
+              stock_quantity: v.stock_quantity ?? 0
+            }))
+          : undefined
+      };
+    });
   }
 
   async getOutletTables(scope: RuntimeOutletScope): Promise<RuntimeOutletTable[]> {
@@ -1005,11 +1064,13 @@ export class RuntimeService {
     const lineRows: ActiveOrderLineRow[] = lineInputs
       .filter((line) => line.qty > 0)
       .map((line) => ({
-        pk: this.buildActiveOrderLinePk(orderId, line.item_id),
+        pk: this.buildActiveOrderLinePk(orderId, line.item_id, line.variant_id),
         order_id: orderId,
         company_id: scope.company_id,
         outlet_id: scope.outlet_id,
         item_id: line.item_id,
+        variant_id: line.variant_id,
+        variant_name_snapshot: line.variant_name_snapshot,
         sku_snapshot: line.sku_snapshot,
         name_snapshot: line.name_snapshot,
         item_type_snapshot: line.item_type_snapshot,
@@ -1080,7 +1141,9 @@ export class RuntimeService {
         }
 
         const existingLines = await this.storage.getActiveOrderLines(input.order_id);
-        const targetLine = existingLines.find((line) => line.item_id === input.item_id);
+        const targetLine = existingLines.find((line) =>
+          line.item_id === input.item_id && line.variant_id === input.variant_id
+        );
         if (!targetLine) {
           throw new Error("Order line not found");
         }
@@ -1100,7 +1163,7 @@ export class RuntimeService {
 
         const nextLines: ActiveOrderLineRow[] = existingLines
           .flatMap((line) => {
-            if (line.item_id !== input.item_id) {
+            if (line.item_id !== input.item_id || line.variant_id !== input.variant_id) {
               return [line];
             }
 
@@ -1154,6 +1217,7 @@ export class RuntimeService {
           cancellation_id: cancellationId,
           order_id: input.order_id,
           item_id: input.item_id,
+          variant_id: input.variant_id,
           company_id: scope.company_id,
           outlet_id: scope.outlet_id,
           cancelled_quantity: input.cancel_qty,

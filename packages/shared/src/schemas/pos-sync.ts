@@ -25,6 +25,7 @@ export const OrderUpdateEventTypeSchema = z.enum([
 
 export const PosItemSchema = z.object({
   item_id: NumericIdSchema,
+  variant_id: NumericIdSchema.optional(),
   qty: z.number().positive(),
   price_snapshot: z.number().nonnegative(),
   name_snapshot: z.string().min(1)
@@ -88,6 +89,7 @@ export const SyncPushRequestSchema = z.object({
         lines: z.array(
           z.object({
             item_id: NumericIdSchema,
+            variant_id: NumericIdSchema.optional(),
             sku_snapshot: z.string().nullable(),
             name_snapshot: z.string().min(1),
             item_type_snapshot: z.enum(["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"]),
@@ -124,6 +126,7 @@ export const SyncPushRequestSchema = z.object({
         update_id: UUID.optional(),
         order_id: UUID,
         item_id: NumericIdSchema,
+        variant_id: NumericIdSchema.optional(),
         company_id: NumericIdSchema,
         outlet_id: NumericIdSchema,
         cancelled_quantity: z.number().positive(),
