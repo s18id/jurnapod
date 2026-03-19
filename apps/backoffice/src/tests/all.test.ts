@@ -6,5 +6,8 @@
 import "../lib/outbox-guards.test";
 import "../hooks/use-item-groups.test";
 import "../hooks/use-items.test";
+import "../hooks/use-table-board.test";
 import "../components/import-wizard.test";
 import "../features/prices-page.test";
+import "../features/table-board-page.test";
+import "../app/routes.test";

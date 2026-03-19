@@ -149,13 +149,13 @@ export async function getTableBoard(
       to2.guest_count,
       COALESCE(to2.version, 1) as version,
       (
-        SELECT MIN(r.reservation_time)
+        SELECT MIN(r.reservation_at)
         FROM reservations r
         WHERE r.company_id = ot.company_id
           AND r.outlet_id = ot.outlet_id
           AND r.table_id = ot.id
           AND r.status_id IN (1, 2)
-          AND r.reservation_time >= NOW()
+          AND r.reservation_at >= NOW()
       ) as next_reservation_start_at,
       COALESCE(to2.updated_at, ot.updated_at) as updated_at
     FROM outlet_tables ot

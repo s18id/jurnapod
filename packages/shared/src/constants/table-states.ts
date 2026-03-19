@@ -187,6 +187,34 @@ export const OutletTableStatusIdLabels: Record<OutletTableStatusIdType, string> 
   [OutletTableStatusId.UNAVAILABLE]: 'Unavailable',
 };
 
+export type OutletTableStatusText = 'AVAILABLE' | 'RESERVED' | 'OCCUPIED' | 'UNAVAILABLE';
+
+const OUTLET_TABLE_STATUS_TO_ID: Record<OutletTableStatusText, OutletTableStatusIdType> = {
+  AVAILABLE: OutletTableStatusId.AVAILABLE,
+  RESERVED: OutletTableStatusId.RESERVED,
+  OCCUPIED: OutletTableStatusId.OCCUPIED,
+  UNAVAILABLE: OutletTableStatusId.UNAVAILABLE,
+};
+
+export function outletTableStatusToId(status: OutletTableStatusText): OutletTableStatusIdType {
+  return OUTLET_TABLE_STATUS_TO_ID[status];
+}
+
+export function outletTableStatusFromId(statusId: OutletTableStatusIdType): OutletTableStatusText {
+  switch (statusId) {
+    case OutletTableStatusId.AVAILABLE:
+      return 'AVAILABLE';
+    case OutletTableStatusId.RESERVED:
+      return 'RESERVED';
+    case OutletTableStatusId.OCCUPIED:
+      return 'OCCUPIED';
+    case OutletTableStatusId.UNAVAILABLE:
+      return 'UNAVAILABLE';
+    default:
+      return 'AVAILABLE';
+  }
+}
+
 // ============================================================================
 // VALIDATION UTILITIES
 // ============================================================================

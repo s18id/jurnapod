@@ -163,6 +163,14 @@ test(
     const payloadOccupied = buildValidBulkPayload({ status: "OCCUPIED" });
     const result2 = OutletTableBulkCreateRequestSchema.safeParse(payloadOccupied);
     assert.equal(result2.success, false, "Should reject derived status OCCUPIED");
+
+    const payloadReservedInt = buildValidBulkPayload({ status_id: 2 });
+    const result3 = OutletTableBulkCreateRequestSchema.safeParse(payloadReservedInt);
+    assert.equal(result3.success, false, "Should reject derived status_id=2");
+
+    const payloadAvailableInt = buildValidBulkPayload({ status_id: 1 });
+    const result4 = OutletTableBulkCreateRequestSchema.safeParse(payloadAvailableInt);
+    assert.equal(result4.success, true, "Should accept operational status_id=1");
   }
 );
 
@@ -255,8 +263,10 @@ test(
 
       for (const table of tables) {
         assert.equal(table.status, "AVAILABLE", "All tables should have AVAILABLE status");
+        assert.equal(table.status_id, 1, "All tables should include status_id=1");
         assert.match(table.code, new RegExp(`^BK-${runId.toUpperCase()}-`), "Code should match template");
       }
+
     } finally {
       if (createdTableIds.length > 0) {
         const placeholders = createdTableIds.map(() => "?").join(", ");

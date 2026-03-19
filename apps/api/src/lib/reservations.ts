@@ -6,6 +6,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { randomBytes } from "node:crypto";
 import { getDbPool } from "./db";
 import {
+  OutletTableStatusId,
   ReservationStatusV2,
   TableOccupancyStatus,
   type ReservationStatusV2Type,
@@ -367,11 +368,20 @@ async function setTableStatus(
   tableId: number,
   status: OutletTableStatus
 ): Promise<void> {
+  const statusId =
+    status === "UNAVAILABLE"
+      ? OutletTableStatusId.UNAVAILABLE
+      : status === "OCCUPIED"
+        ? OutletTableStatusId.OCCUPIED
+        : status === "RESERVED"
+          ? OutletTableStatusId.RESERVED
+          : OutletTableStatusId.AVAILABLE;
+
   await connection.execute(
     `UPDATE outlet_tables
-     SET status = ?, updated_at = CURRENT_TIMESTAMP
+     SET status = ?, status_id = ?, updated_at = CURRENT_TIMESTAMP
      WHERE company_id = ? AND outlet_id = ? AND id = ?`,
-    [status, companyId, outletId, tableId]
+    [status, statusId, companyId, outletId, tableId]
   );
 }
 

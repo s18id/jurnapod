@@ -1,22 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { FlatCompat } from "@eslint/eslintrc";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
-
-const config = [
-  ...compat.extends("next/core-web-vitals"),
+export default [
   {
-    ignores: ["dist/**", "node_modules/**"],
-  },
+    ignores: ["dist/**", "node_modules/**"]
+  }
 ];
-
-export default config;

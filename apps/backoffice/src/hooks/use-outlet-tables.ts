@@ -156,9 +156,9 @@ export async function updateOutletTable(
 }
 
 /**
- * Delete an outlet table
+ * Deactivate an outlet table
  */
-export async function deleteOutletTable(
+export async function deactivateOutletTable(
   outletId: number,
   tableId: number,
   accessToken: string
@@ -166,8 +166,10 @@ export async function deleteOutletTable(
   await apiRequest<{ success: true }>(
     `/outlets/${outletId}/tables/${tableId}`,
     {
-      method: "DELETE"
+      method: "PATCH"
     },
     accessToken
   );
 }
+
+export const deleteOutletTable = deactivateOutletTable;

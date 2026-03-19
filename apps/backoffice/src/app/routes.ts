@@ -120,6 +120,12 @@ export const APP_ROUTES: readonly AppRoute[] = [
     requiredModule: "pos"
   },
   {
+    path: "/table-board",
+    label: "Table Board",
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"],
+    requiredModule: "pos"
+  },
+  {
     path: "/sync-queue",
     label: "Sync Queue",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],

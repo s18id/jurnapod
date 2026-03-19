@@ -75,6 +75,7 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
       "/pos-payments",
       "/outlet-tables",
       "/reservations",
+      "/table-board",
       "/sync-queue",
       "/sync-history",
       "/pwa-settings"

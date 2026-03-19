@@ -9,7 +9,8 @@ import { errorResponse, successResponse } from "../../../../../src/lib/response"
 import {
   listOutletTablesByOutlet,
   createOutletTable,
-  OutletTableCodeExistsError
+  OutletTableCodeExistsError,
+  OutletTableStatusConflictError
 } from "../../../../../src/lib/outlet-tables";
 
 export const GET = withAuth(
@@ -66,6 +67,7 @@ export const POST = withAuth(
         zone: input.zone ?? null,
         capacity: input.capacity ?? null,
         status: input.status ?? "AVAILABLE",
+        status_id: input.status_id,
         actor: {
           userId: auth.userId,
           outletId: outletId,
@@ -81,6 +83,10 @@ export const POST = withAuth(
 
       if (error instanceof OutletTableCodeExistsError) {
         return errorResponse("DUPLICATE_TABLE", error.message, 409);
+      }
+
+      if (error instanceof OutletTableStatusConflictError) {
+        return errorResponse("TABLE_STATUS_CONFLICT", error.message, 409);
       }
 
       console.error("POST /api/outlets/:outletId/tables failed", error);
