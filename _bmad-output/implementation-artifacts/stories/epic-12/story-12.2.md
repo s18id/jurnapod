@@ -1,6 +1,6 @@
 # Story 12.2: Shared Constants and Zod Schemas
 
-Status: review
+Status: done
 
 ## Story
 
@@ -75,6 +75,18 @@ so that API contracts remain consistent across frontend, backend, and POS.
 - [x] Task 4.2: Verify nullable fields use proper TypeScript nullable types - ✅ VERIFIED (.nullable().optional() pattern)
 - [x] Task 4.3: Run TypeScript typecheck across packages/shared - ✅ VERIFIED (npm run typecheck passed)
 - [x] Task 4.4: Verify no type errors in dependent packages - ✅ VERIFIED (build successful)
+
+### Review Follow-ups (AI)
+
+- [x] [AI-Review][HIGH] Create missing claimed files or uncheck false-complete tasks: `packages/shared/src/__tests__/table-reservation.test.ts`, `packages/shared/test-schemas.mjs`. [story-12.2.md:302]
+- [x] [AI-Review][HIGH] Align `ReservationStatusId` constants with migration-backed legacy mapping used in Story 12.1 compatibility notes. [packages/shared/src/constants/table-states.ts:86]
+- [x] [AI-Review][HIGH] Align `OutletTableStatusId` constants with migration-backed legacy mapping (`AVAILABLE=1`, `RESERVED=2`, `OCCUPIED=5`, `UNAVAILABLE=7`). [packages/shared/src/constants/table-states.ts:110]
+- [x] [AI-Review][HIGH] Fix schema type mismatch for `posOrderId` in service session/event schemas to match DB `CHAR(36)` order id contract. [packages/shared/src/schemas/table-reservation.ts:93]
+- [x] [AI-Review][HIGH] Harden `TableEventSchema.clientTxId` to required non-null string to match DB idempotency invariant. [packages/shared/src/schemas/table-reservation.ts:128]
+- [x] [AI-Review][HIGH] Ensure tenant fields are required on request schemas where AC3 mandates `companyId` + `outletId` requirement. [packages/shared/src/schemas/table-reservation.ts:242]
+- [x] [AI-Review][HIGH] Reconcile checked task claims for "schemas match DB exactly" and "tenant fields required" with actual implementation evidence. [story-12.2.md:74]
+- [x] [AI-Review][HIGH] Keep story status in-progress until HIGH findings are resolved and re-reviewed clean. [story-12.2.md:3]
+- [x] [AI-Review][MEDIUM] Reconcile File List with actual repository artifacts for auditability. [story-12.2.md:294]
 
 ## Dev Notes
 
@@ -244,6 +256,9 @@ N/A - Story creation phase
 - TypeScript compilation successful
 - All exports confirmed in index.ts
 - Type definitions generated successfully
+- 2026-03-19 follow-up remediation: fixed legacy constant mappings and schema contract mismatches
+- Added missing artifacts: `packages/shared/src/__tests__/table-reservation.test.ts`, `packages/shared/test-schemas.mjs`
+- Validation rerun: `npm run typecheck -w @jurnapod/shared`, `npm run build -w @jurnapod/shared`, `npm run lint -w @jurnapod/shared`
 
 ### Completion Notes List
 
@@ -291,6 +306,24 @@ All shared constants and Zod schemas have been verified and are production-ready
 **Next Steps:**
 Ready for Story 12.3: Table Occupancy API Endpoints
 
+✅ **2026-03-19 Review Follow-up Remediation**
+
+**Summary:**
+Resolved all review follow-ups for story 12.2 by aligning shared constants/schemas with migration contracts and adding missing verification artifacts.
+
+**Fixes Implemented:**
+- Updated `ReservationStatusId` to migration-compatible values (`BOOKED=1`, `CONFIRMED=2`, `ARRIVED=3`, `SEATED=4`, `CANCELLED=5`, `COMPLETED=6`, `NO_SHOW=7`).
+- Updated `OutletTableStatusId` to migration-compatible values (`AVAILABLE=1`, `RESERVED=2`, `OCCUPIED=5`, `UNAVAILABLE=7`).
+- Updated `posOrderId` schema types from bigint to `CHAR(36)`-compatible string in service session/event and request schemas.
+- Made `TableEventSchema.clientTxId` required and non-null.
+- Added required tenant fields (`companyId`, `outletId`) to request schemas.
+- Created missing test artifacts listed in story file.
+
+**Validation Evidence:**
+- `npm run typecheck -w @jurnapod/shared` ✅ PASS
+- `npm run build -w @jurnapod/shared` ✅ PASS
+- `npm run lint -w @jurnapod/shared` ✅ PASS (placeholder script)
+
 ### File List
 
 **Files Verified:**
@@ -302,12 +335,48 @@ Ready for Story 12.3: Table Occupancy API Endpoints
 - [x] `packages/shared/src/__tests__/table-reservation.test.ts` - Test file for schema validation
 - [x] `packages/shared/test-schemas.mjs` - Runtime validation test script
 
+**Files Modified (follow-up remediation):**
+- [x] `packages/shared/src/constants/table-states.ts` - Fixed legacy status constant mappings
+- [x] `packages/shared/src/schemas/table-reservation.ts` - Fixed DB contract mismatches and tenant-required request fields
+
 **Verification Summary:**
 - All constants match database migration values
 - All schemas defined with proper validation
 - TypeScript typecheck passed
 - Build successful
 - Exports properly configured
+
+## Senior Developer Review (AI)
+
+- Reviewer: bmad-code-review
+- Date: 2026-03-19
+- Outcome: Changes Requested
+- Summary: 8 HIGH and 1 MEDIUM findings. Main gaps are schema/constant mismatch with DB contracts and false-complete task/file claims.
+
+### Action Items
+
+- [x] [HIGH] Create missing claimed test/verification files or uncheck corresponding completed tasks.
+- [x] [HIGH] Fix `ReservationStatusId` legacy compatibility mapping.
+- [x] [HIGH] Fix `OutletTableStatusId` legacy compatibility mapping.
+- [x] [HIGH] Align `posOrderId` schema type with DB `CHAR(36)` contract.
+- [x] [HIGH] Make `TableEventSchema.clientTxId` required/non-null.
+- [x] [HIGH] Enforce required tenant fields in request schemas per AC3.
+- [x] [HIGH] Correct false-complete task claims for DB/schema parity and tenant requirements.
+- [x] [HIGH] Keep story status in-progress until findings are closed.
+- [x] [MEDIUM] Reconcile story File List with actual repo artifacts.
+
+### Re-review (Closure)
+
+- Reviewer: bmad-code-review
+- Date: 2026-03-19
+- Outcome: Approved
+- Summary: No HIGH findings remain. Medium findings fixed (action-item deduplication and executable validation artifact).
+
+## Change Log
+
+- 2026-03-19: Code review found 8 HIGH + 1 MEDIUM issues; added review follow-ups and moved story to in-progress.
+- 2026-03-19: Resolved review follow-ups; aligned constants/schemas with DB contracts, added missing artifacts, reran validation checks, and moved story to review.
+- 2026-03-19: Re-review clean after medium fixes; removed duplicated unresolved action items and made validation artifact executable. Story moved to done.
 
 ---
 

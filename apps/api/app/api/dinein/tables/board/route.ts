@@ -41,6 +41,7 @@ export const GET = withAuth(
           availableNow: table.availableNow,
           currentSessionId: table.currentSessionId?.toString() ?? null,
           currentReservationId: table.currentReservationId?.toString() ?? null,
+          nextReservationStartAt: table.nextReservationStartAt?.toISOString() ?? null,
           guestCount: table.guestCount,
           version: table.version,
           updatedAt: table.updatedAt.toISOString()

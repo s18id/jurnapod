@@ -26,6 +26,7 @@ import {
 
 export const IdSchema = z.bigint().positive();
 export const OptionalIdSchema = z.bigint().positive().nullable().optional();
+export const OptionalOrderIdSchema = z.string().length(36).nullable().optional();
 
 export const TimestampSchema = z.date();
 export const OptionalTimestampSchema = z.date().nullable().optional();
@@ -90,7 +91,7 @@ export const TableServiceSessionSchema = z.object({
   completedAt: OptionalTimestampSchema,
   guestCount: z.number().int().positive(),
   guestName: z.string().max(255).nullable().optional(),
-  posOrderId: OptionalIdSchema,
+  posOrderId: OptionalOrderIdSchema,
   totalAmount: z.number().min(0).nullable().optional(),
   serverUserId: OptionalIdSchema,
   cashierUserId: OptionalIdSchema,
@@ -125,7 +126,7 @@ export const TableEventSchema = z.object({
   outletId: IdSchema,
   tableId: IdSchema,
   eventTypeId: TableEventTypeIdSchema,
-  clientTxId: z.string().max(255).nullable().optional(),
+  clientTxId: z.string().min(1).max(255),
   occupancyVersionBefore: z.number().int().min(0).nullable().optional(),
   occupancyVersionAfter: z.number().int().min(0).nullable().optional(),
   eventData: TableEventDataSchema.nullable().optional(),
@@ -133,7 +134,7 @@ export const TableEventSchema = z.object({
   statusIdAfter: TableOccupancyStatusIdSchema.nullable().optional(),
   serviceSessionId: OptionalIdSchema,
   reservationId: OptionalIdSchema,
-  posOrderId: OptionalIdSchema,
+  posOrderId: OptionalOrderIdSchema,
   syncedAt: OptionalTimestampSchema,
   sourceDevice: z.string().max(255).nullable().optional(),
   occurredAt: TimestampSchema,
@@ -184,6 +185,8 @@ export type Reservation = z.infer<typeof ReservationSchema>;
 
 // Create Table Occupancy
 export const CreateTableOccupancyRequestSchema = z.object({
+  companyId: IdSchema,
+  outletId: IdSchema,
   tableId: IdSchema,
   statusId: TableOccupancyStatusIdSchema.default(TableOccupancyStatus.AVAILABLE),
   serviceSessionId: OptionalIdSchema,
@@ -196,6 +199,8 @@ export type CreateTableOccupancyRequest = z.infer<typeof CreateTableOccupancyReq
 
 // Update Table Occupancy (with optimistic locking)
 export const UpdateTableOccupancyRequestSchema = z.object({
+  companyId: IdSchema,
+  outletId: IdSchema,
   occupancyId: IdSchema,
   expectedVersion: z.number().int().min(1),
   statusId: TableOccupancyStatusIdSchema.optional(),
@@ -209,10 +214,12 @@ export type UpdateTableOccupancyRequest = z.infer<typeof UpdateTableOccupancyReq
 
 // Create Service Session
 export const CreateServiceSessionRequestSchema = z.object({
+  companyId: IdSchema,
+  outletId: IdSchema,
   tableId: IdSchema,
   guestCount: z.number().int().positive(),
   guestName: z.string().max(255).nullable().optional(),
-  posOrderId: OptionalIdSchema,
+  posOrderId: OptionalOrderIdSchema,
   serverUserId: OptionalIdSchema,
   notes: z.string().nullable().optional(),
 });
@@ -221,6 +228,8 @@ export type CreateServiceSessionRequest = z.infer<typeof CreateServiceSessionReq
 
 // Create Table Event (POS sync)
 export const CreateTableEventRequestSchema = z.object({
+  companyId: IdSchema,
+  outletId: IdSchema,
   tableId: IdSchema,
   eventTypeId: TableEventTypeIdSchema,
   clientTxId: z.string().max(255),
@@ -231,7 +240,7 @@ export const CreateTableEventRequestSchema = z.object({
   statusIdAfter: TableOccupancyStatusIdSchema.nullable().optional(),
   serviceSessionId: OptionalIdSchema,
   reservationId: OptionalIdSchema,
-  posOrderId: OptionalIdSchema,
+  posOrderId: OptionalOrderIdSchema,
   occurredAt: TimestampSchema,
   sourceDevice: z.string().max(255).optional(),
 });
@@ -240,6 +249,7 @@ export type CreateTableEventRequest = z.infer<typeof CreateTableEventRequestSche
 
 // Create Reservation
 export const CreateReservationRequestSchema = z.object({
+  companyId: IdSchema,
   outletId: IdSchema,
   tableId: OptionalIdSchema,
   reservationTime: z.coerce.date(),
@@ -258,6 +268,7 @@ export type CreateReservationRequest = z.infer<typeof CreateReservationRequestSc
 // ============================================================================
 
 export const PosTableSyncRequestSchema = z.object({
+  companyId: IdSchema,
   clientTxId: z.string().max(255),
   outletId: IdSchema,
   tableId: IdSchema,

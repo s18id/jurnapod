@@ -84,22 +84,24 @@ export const TableEventTypeLabels: Record<TableEventTypeType, string> = {
 // Note: 0096 migration adds status_id alongside existing VARCHAR status
 // ============================================================================
 export const ReservationStatusId = {
-  PENDING: 1,
+  BOOKED: 1,
   CONFIRMED: 2,
-  CHECKED_IN: 3,
-  COMPLETED: 4,
+  ARRIVED: 3,
+  SEATED: 4,
   CANCELLED: 5,
-  NO_SHOW: 6,
+  COMPLETED: 6,
+  NO_SHOW: 7,
 } as const;
 
 export type ReservationStatusIdType = typeof ReservationStatusId[keyof typeof ReservationStatusId];
 
 export const ReservationStatusIdLabels: Record<ReservationStatusIdType, string> = {
-  [ReservationStatusId.PENDING]: 'Pending',
+  [ReservationStatusId.BOOKED]: 'Booked',
   [ReservationStatusId.CONFIRMED]: 'Confirmed',
-  [ReservationStatusId.CHECKED_IN]: 'Checked In',
-  [ReservationStatusId.COMPLETED]: 'Completed',
+  [ReservationStatusId.ARRIVED]: 'Arrived',
+  [ReservationStatusId.SEATED]: 'Seated',
   [ReservationStatusId.CANCELLED]: 'Cancelled',
+  [ReservationStatusId.COMPLETED]: 'Completed',
   [ReservationStatusId.NO_SHOW]: 'No Show',
 };
 
@@ -109,18 +111,18 @@ export const ReservationStatusIdLabels: Record<ReservationStatusIdType, string> 
 // ============================================================================
 export const OutletTableStatusId = {
   AVAILABLE: 1,
-  OCCUPIED: 2,
-  RESERVED: 3,
-  OUT_OF_SERVICE: 4,
+  RESERVED: 2,
+  OCCUPIED: 5,
+  UNAVAILABLE: 7,
 } as const;
 
 export type OutletTableStatusIdType = typeof OutletTableStatusId[keyof typeof OutletTableStatusId];
 
 export const OutletTableStatusIdLabels: Record<OutletTableStatusIdType, string> = {
   [OutletTableStatusId.AVAILABLE]: 'Available',
-  [OutletTableStatusId.OCCUPIED]: 'Occupied',
   [OutletTableStatusId.RESERVED]: 'Reserved',
-  [OutletTableStatusId.OUT_OF_SERVICE]: 'Out of Service',
+  [OutletTableStatusId.OCCUPIED]: 'Occupied',
+  [OutletTableStatusId.UNAVAILABLE]: 'Unavailable',
 };
 
 // ============================================================================

@@ -3,6 +3,7 @@
 
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
+import { randomUUID } from "node:crypto";
 import { getDbPool } from "./db";
 import {
   TableOccupancyStatus,
@@ -32,6 +33,21 @@ export class TableOccupancyConflictError extends Error {
 export class TableNotAvailableError extends Error {
   constructor(tableId: bigint, currentStatus: number) {
     super(`Table ${tableId} is not available (status: ${currentStatus})`);
+  }
+}
+
+export class TableNotFoundError extends Error {
+  constructor(tableId: bigint) {
+    super(`Table ${tableId} not found`);
+  }
+}
+
+export class TableNotOccupiedError extends Error {
+  constructor(
+    tableId: bigint,
+    public readonly currentStatus: number
+  ) {
+    super(`Table ${tableId} is not occupied (status: ${currentStatus})`);
   }
 }
 
@@ -70,6 +86,7 @@ export type TableBoardItem = {
   currentReservationId: bigint | null;
   guestCount: number | null;
   version: number;
+  nextReservationStartAt: Date | null;
   updatedAt: Date;
 };
 
@@ -131,12 +148,20 @@ export async function getTableBoard(
       to2.reservation_id as current_reservation_id,
       to2.guest_count,
       COALESCE(to2.version, 1) as version,
+      (
+        SELECT MIN(r.reservation_time)
+        FROM reservations r
+        WHERE r.company_id = ot.company_id
+          AND r.outlet_id = ot.outlet_id
+          AND r.table_id = ot.id
+          AND r.status_id IN (1, 2)
+          AND r.reservation_time >= NOW()
+      ) as next_reservation_start_at,
       COALESCE(to2.updated_at, ot.updated_at) as updated_at
     FROM outlet_tables ot
     LEFT JOIN table_occupancy to2 ON ot.id = to2.table_id
     WHERE ot.company_id = ?
       AND ot.outlet_id = ?
-      AND ot.is_active = 1
     ORDER BY ot.zone, ot.code`,
     [companyId, outletId]
   );
@@ -153,6 +178,7 @@ export async function getTableBoard(
     currentReservationId: row.current_reservation_id ? BigInt(row.current_reservation_id) : null,
     guestCount: row.guest_count,
     version: row.version,
+    nextReservationStartAt: row.next_reservation_start_at ? new Date(row.next_reservation_start_at) : null,
     updatedAt: new Date(row.updated_at)
   }));
 }
@@ -292,7 +318,7 @@ export async function holdTable(
       outletId: input.outletId,
       tableId: input.tableId,
       eventTypeId: TableEventType.RESERVATION_CREATED,
-      clientTxId: null,
+      clientTxId: randomUUID(),
       occupancyVersionBefore: currentState.version,
       occupancyVersionAfter: currentState.version + 1,
       eventData: { reason: "Table held for reservation", heldUntil: input.heldUntil.toISOString() },
@@ -422,7 +448,7 @@ export async function seatTable(
       outletId: input.outletId,
       tableId: input.tableId,
       eventTypeId: TableEventType.TABLE_OPENED,
-      clientTxId: null,
+      clientTxId: randomUUID(),
       occupancyVersionBefore: currentState.version,
       occupancyVersionAfter: currentState.version + 1,
       eventData: { 
@@ -500,7 +526,7 @@ export async function releaseTable(
 
     // 3. Check table is occupied
     if (currentState.statusId !== TableOccupancyStatus.OCCUPIED) {
-      throw new Error(`Table ${input.tableId} is not occupied (status: ${currentState.statusId})`);
+      throw new TableNotOccupiedError(input.tableId, currentState.statusId);
     }
 
     // 4. Update service session to COMPLETED
@@ -557,7 +583,7 @@ export async function releaseTable(
       outletId: input.outletId,
       tableId: input.tableId,
       eventTypeId: TableEventType.TABLE_CLOSED,
-      clientTxId: null,
+      clientTxId: randomUUID(),
       occupancyVersionBefore: currentState.version,
       occupancyVersionAfter: currentState.version + 1,
       eventData: { reason: "Table released" },
@@ -661,7 +687,7 @@ type TableEventData = {
   outletId: bigint;
   tableId: bigint;
   eventTypeId: number;
-  clientTxId: string | null;
+  clientTxId: string;
   occupancyVersionBefore: number;
   occupancyVersionAfter: number;
   eventData: Record<string, unknown> | null;
@@ -669,7 +695,7 @@ type TableEventData = {
   statusIdAfter: number | null;
   serviceSessionId: bigint | null;
   reservationId: bigint | null;
-  posOrderId: bigint | null;
+  posOrderId: string | null;
   occurredAt: Date;
   createdBy: string;
 };
@@ -735,4 +761,23 @@ export async function ensureTableOccupancy(
       [companyId, outletId, tableId, TableOccupancyStatus.AVAILABLE, createdBy]
     );
   }
+}
+
+/**
+ * Verify that a table exists in the outlet
+ * Returns true if the table exists, false otherwise
+ */
+export async function verifyTableExists(
+  connection: PoolConnection,
+  companyId: bigint,
+  outletId: bigint,
+  tableId: bigint
+): Promise<boolean> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT id FROM outlet_tables 
+     WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+    [companyId, outletId, tableId]
+  );
+
+  return rows.length > 0;
 }

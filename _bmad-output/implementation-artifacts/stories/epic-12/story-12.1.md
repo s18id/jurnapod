@@ -322,15 +322,16 @@ All 4 migrations (0096-0099) successfully applied to database. Schema verified w
 **Schema State:**
 - outlet_tables.status_id: ✅ Added with backfill
 - reservations.status_id: ✅ Added with backfill  
-- table_occupancy: ✅ Created with 16 columns, 6 indexes, 3 CHECK constraints
-- table_service_sessions: ✅ Created with 18 columns, 9 indexes, 3 CHECK constraints
-- table_events: ✅ Created with 19 columns, 10 indexes, 1 CHECK constraint
+- table_occupancy: ✅ Created with tenant/scope integrity + occupancy guard triggers
+- table_service_sessions: ✅ Created with lifecycle + tenant/scope guard triggers
+- table_events: ✅ Created with idempotency hardening and append-only UPDATE/DELETE blockers
 
 **Verification:**
 - All tables created successfully
 - All indexes created
-- All CHECK constraints applied (simplified versions)
+- Constraint strategy validated (FKs, checks, and triggers per engine compatibility)
 - Backfill executed (0 records - no existing outlet_tables)
+- AC7 hardening checks added to verification script (0100-0103)
 
 ✅ **2026-03-19 Follow-up Remediation Complete (Post Review)**
 
@@ -354,10 +355,12 @@ All 4 migrations (0096-0099) successfully applied to database. Schema verified w
 
 **Key Fixes Applied:**
 1. Removed CHECK constraint COMMENT clauses (MariaDB incompatibility)
-2. Simplified complex CHECK constraints to basic value checks
+2. Replaced non-portable multi-column CHECK enforcement with trigger-based guards where needed
 3. Fixed pos_order_id type from BIGINT UNSIGNED to CHAR(36) to match pos_order_snapshots.order_id
-4. Removed FK constraints to table_service_sessions from table_occupancy (circular dependency)
-5. All migrations are rerunnable/idempotent
+4. Added missing `table_occupancy.service_session_id -> table_service_sessions.id` FK with safe ordering strategy
+5. Hardened `table_events.client_tx_id` (NOT NULL + uniqueness for existing installs)
+6. Enforced append-only semantics on `table_events` via explicit `SIGNAL` triggers on UPDATE/DELETE
+7. All migrations are rerunnable/idempotent across MariaDB and MySQL 8
 
 ## Tasks / Subtasks
 
@@ -371,6 +374,7 @@ All 4 migrations (0096-0099) successfully applied to database. Schema verified w
 - [x] [AI-Review][HIGH] Fix verification script expected column counts so AC3/AC4 checks do not false-fail. [packages/db/scripts/verify-story-12-1.sql:140]
 - [x] [AI-Review][MEDIUM] Fix 0096 NOT NULL hardening guard for first-run reliability. [packages/db/migrations/0096_table_state_int_columns.sql:56]
 - [x] [AI-Review][MEDIUM] Reconcile story File List traceability with corrective migration and verification updates. [packages/db/migrations/0100_story_12_1_review_fixes.sql:1]
+- [x] [AI-Review][MEDIUM] Extend verification coverage to include 0100-0103 hardening outcomes. [packages/db/scripts/verify-story-12-1.sql:259]
 
 ## Senior Developer Review (AI)
 
@@ -403,6 +407,7 @@ All 4 migrations (0096-0099) successfully applied to database. Schema verified w
 - 2026-03-19: Implemented remediation in 0096-0099 and verification script; added 0100 corrective migration for already-applied environments.
 - 2026-03-19: Validated compatibility on MariaDB (`db3307`) and MySQL 8 (`jp-mysql8-test`). Story moved to review.
 - 2026-03-19: Added 0101/0102/0103 hardening migrations (tenant-scope + append-only SIGNAL guard), re-ran review with no HIGH/MEDIUM findings, and moved story to done.
+- 2026-03-19: Extended verification script with AC7 hardening checks for 0100-0103 (NOT NULL, FK presence, required trigger set).
 
 ---
 
@@ -426,9 +431,9 @@ This story implements the foundational database schema for the Table Reservation
 5. **Rerunnable migrations** for safety (MySQL/MariaDB compatibility)
 
 **Success Criteria:**
-- All 4 migrations execute without errors
+- Base and corrective migrations for Story 12.1 execute without errors
 - Schema matches specification exactly
 - All existing tables get occupancy records
-- CHECK constraints prevent invalid data
+- Invalid lifecycle/scope mutations are blocked via compatible constraint/trigger strategy
 - Optimistic locking works for concurrent updates
-- Idempotency prevents duplicate events
+- Idempotency prevents duplicate events and append-only event history is preserved

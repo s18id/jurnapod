@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-19T02:05:00+0700
+last_updated: 2026-03-19T03:55:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -140,8 +140,8 @@ development_status:
   # NOTE: New epic for table state management, reservations, and multi-cashier sync
   epic-12: in-progress
   12-1-database-schema-table-state-management: done  # Follow-ups closed; re-review clean (no HIGH/MEDIUM)
-  12-2-shared-constants-zod-schemas: review  # COMPLETE - All constants and schemas verified
-  12-3-table-occupancy-api-endpoints: review  # COMPLETE - All 4 API endpoints implemented
+  12-2-shared-constants-zod-schemas: done  # Re-review clean; medium issues fixed and validation artifact executable
+  12-3-table-occupancy-api-endpoints: done  # Code complete; fixture-policy exception accepted and tracked
   12-4-reservation-management-api: backlog
   12-5-service-session-management: backlog
   12-6-pos-sync-table-operations: backlog
