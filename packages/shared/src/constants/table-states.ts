@@ -80,6 +80,30 @@ export const TableEventTypeLabels: Record<TableEventTypeType, string> = {
 };
 
 // ============================================================================
+// RESERVATION STATUS (Story 12.4 - Reservation Management API)
+// Used by POST /reservations, PATCH /reservations/:id, and GET /reservations
+// ============================================================================
+export const ReservationStatusV2 = {
+  PENDING: 1,
+  CONFIRMED: 2,
+  CHECKED_IN: 3,
+  NO_SHOW: 4,
+  CANCELLED: 5,
+  COMPLETED: 6,
+} as const;
+
+export type ReservationStatusV2Type = typeof ReservationStatusV2[keyof typeof ReservationStatusV2];
+
+export const ReservationStatusV2Labels: Record<ReservationStatusV2Type, string> = {
+  [ReservationStatusV2.PENDING]: 'Pending',
+  [ReservationStatusV2.CONFIRMED]: 'Confirmed',
+  [ReservationStatusV2.CHECKED_IN]: 'Checked In',
+  [ReservationStatusV2.NO_SHOW]: 'No Show',
+  [ReservationStatusV2.CANCELLED]: 'Cancelled',
+  [ReservationStatusV2.COMPLETED]: 'Completed',
+};
+
+// ============================================================================
 // RESERVATION STATUS (legacy migrations, for reference)
 // Note: 0096 migration adds status_id alongside existing VARCHAR status
 // ============================================================================
@@ -143,6 +167,10 @@ export function isValidTableEventType(eventType: number): eventType is TableEven
 
 export function isValidReservationStatusId(status: number): status is ReservationStatusIdType {
   return Object.values(ReservationStatusId).includes(status as ReservationStatusIdType);
+}
+
+export function isValidReservationStatusV2(status: number): status is ReservationStatusV2Type {
+  return Object.values(ReservationStatusV2).includes(status as ReservationStatusV2Type);
 }
 
 export function isValidOutletTableStatusId(status: number): status is OutletTableStatusIdType {

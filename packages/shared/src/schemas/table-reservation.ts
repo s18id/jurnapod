@@ -18,7 +18,9 @@ import {
   TableEventType,
   ReservationStatusId,
   OutletTableStatusId,
+  ReservationStatusV2,
 } from '../constants/table-states';
+import { NumericIdSchema } from './common';
 
 // ============================================================================
 // BASE SCHEMAS
@@ -247,7 +249,7 @@ export const CreateTableEventRequestSchema = z.object({
 
 export type CreateTableEventRequest = z.infer<typeof CreateTableEventRequestSchema>;
 
-// Create Reservation
+// Create Reservation (Story 12.2 - legacy naming)
 export const CreateReservationRequestSchema = z.object({
   companyId: IdSchema,
   outletId: IdSchema,
@@ -262,6 +264,56 @@ export const CreateReservationRequestSchema = z.object({
 });
 
 export type CreateReservationRequest = z.infer<typeof CreateReservationRequestSchema>;
+
+// ============================================================================
+// RESERVATION API SCHEMAS (Story 12.4)
+// ============================================================================
+
+const reservationStatusValues = Object.values(ReservationStatusV2) as [number, ...number[]];
+
+export const ReservationStatusIdSchemaV2 = z
+  .number()
+  .int()
+  .refine((val) => reservationStatusValues.includes(val), {
+    message: 'Invalid reservation status ID',
+  });
+
+// For POST /reservations
+export const CreateReservationSchemaV2 = z.object({
+  partySize: z.number().int().min(1),
+  customerName: z.string().min(1).max(100),
+  customerPhone: z.string().optional(),
+  customerEmail: z.string().email().optional(),
+  reservationTime: z.string().datetime(),
+  durationMinutes: z.number().int().min(15).default(90),
+  tableId: NumericIdSchema.optional(),
+  notes: z.string().max(500).optional(),
+});
+
+export type CreateReservationV2 = z.infer<typeof CreateReservationSchemaV2>;
+
+// For PATCH /reservations/:id
+export const UpdateReservationStatusSchemaV2 = z.object({
+  statusId: z.number().int().min(1).max(6),
+  tableId: NumericIdSchema.optional(),
+  cancellationReason: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+export type UpdateReservationStatusV2 = z.infer<typeof UpdateReservationStatusSchemaV2>;
+
+// For GET /reservations query params
+export const ListReservationsQuerySchemaV2 = z.object({
+  limit: z.number().int().min(1).max(100).default(20),
+  offset: z.number().int().min(0).default(0),
+  statusId: z.number().int().optional(),
+  tableId: NumericIdSchema.optional(),
+  customerName: z.string().optional(),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+export type ListReservationsQueryV2 = z.infer<typeof ListReservationsQuerySchemaV2>;
 
 // ============================================================================
 // POS SYNC SCHEMAS (Offline-first)
