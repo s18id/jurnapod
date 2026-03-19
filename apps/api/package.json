@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run test:unit",
     "test:unit": "node --test --test-concurrency=1 --import tsx src/**/*.test.ts",
+    "test:unit:single": "node --test --test-concurrency=1 --import tsx",
     "test:unit:auth": "node --test --test-concurrency=1 --import tsx src/lib/auth.test.ts",
     "test:unit:supplies": "node --test --test-concurrency=1 --import tsx src/lib/master-data.supplies.test.ts",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.integration.test.mjs",

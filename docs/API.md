@@ -78,6 +78,118 @@ Content-Type: application/json
 }
 ```
 
+### Push Table Events (Table Occupancy Sync)
+
+```http
+POST /api/sync/push/table-events
+Content-Type: application/json
+
+{
+  "outlet_id": 1,
+  "events": [
+    {
+      "client_tx_id": "pos-evt-001",
+      "table_id": 12,
+      "expected_table_version": 3,
+      "event_type": 2,
+      "payload": { "guest_count": 4 },
+      "recorded_at": "2026-03-19T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+**Success response (`200`):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "results": [
+      {
+        "client_tx_id": "pos-evt-001",
+        "status": "OK",
+        "table_version": 4,
+        "conflict_payload": null,
+        "errorMessage": null
+      }
+    ],
+    "sync_timestamp": "2026-03-19T10:00:00.500Z"
+  }
+}
+```
+
+**Conflict response (`409`):**
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "CONFLICT",
+    "message": "Table state conflict detected"
+  },
+  "details": [
+    {
+      "client_tx_id": "pos-evt-001",
+      "status": "CONFLICT",
+      "table_version": 5,
+      "conflict_payload": {
+        "current_occupancy": {
+          "status_id": 2,
+          "guest_count": 2,
+          "service_session_id": 9001
+        },
+        "active_session": {
+          "id": 9001,
+          "status_id": 1,
+          "started_at": "2026-03-19T09:55:00.000Z"
+        },
+        "current_version": 5,
+        "conflict_reason": "Table state has changed since last sync (optimistic version mismatch)"
+      }
+    }
+  ]
+}
+```
+
+### Pull Table State (Table Occupancy Sync)
+
+```http
+GET /api/sync/pull/table-state?outlet_id=1&cursor=1500&limit=100
+```
+
+**Response (`200`):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "tables": [
+      {
+        "table_id": 12,
+        "table_number": "A-12",
+        "status": 2,
+        "current_session_id": 9001,
+        "version": 5,
+        "staleness_ms": 1200
+      }
+    ],
+    "events": [
+      {
+        "id": 1501,
+        "table_id": 12,
+        "event_type": "2",
+        "payload": { "guest_count": 4 },
+        "recorded_at": "2026-03-19T10:00:00.000Z"
+      }
+    ],
+    "next_cursor": "1501",
+    "has_more": false,
+    "sync_timestamp": "2026-03-19T10:00:00.500Z"
+  }
+}
+```
+
 **Response (idempotent):**
 ```json
 {

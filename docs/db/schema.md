@@ -1156,6 +1156,21 @@ The following tables/columns are part of table reservation and multi-cashier syn
 | finalized_by | varchar(255) | Actor identifier |
 | client_tx_id | varchar(255) | Idempotency key |
 
+### table_events (sync/audit fields)
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| client_tx_id | varchar(255) | Idempotency key per company/outlet |
+| occupancy_version_before | int unsigned null | Optimistic version before applying event |
+| occupancy_version_after | int unsigned null | Optimistic version after applying event |
+| occurred_at | datetime | Client-recorded event timestamp |
+| is_conflict | tinyint unsigned | Conflict-attempt flag (0/1) |
+| conflict_reason | varchar(500) null | Human-readable conflict reason for audit traceability |
+
+Indexes:
+- `uq_table_events_client_tx` on `(company_id, outlet_id, client_tx_id)` for idempotent replay.
+- `idx_table_events_conflict` on `(is_conflict, occurred_at)` for conflict audit queries.
+
 ### POS snapshot precision note
 
 - `table_service_session_lines.unit_price` uses `DECIMAL(15,4)` for in-session precision.

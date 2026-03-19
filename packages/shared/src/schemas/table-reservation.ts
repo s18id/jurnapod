@@ -425,3 +425,132 @@ export function validateReservation(data: unknown): Reservation {
 export function validatePosSyncRequest(data: unknown): PosTableSyncRequest {
   return PosTableSyncRequestSchema.parse(data);
 }
+
+// ============================================================================
+// TABLE SYNC SCHEMAS (Story 12.6 - POS Sync for Table Operations)
+// ============================================================================
+
+// Push result status enum
+export const TableSyncPushStatusSchema = z.enum(['OK', 'DUPLICATE', 'ERROR', 'CONFLICT']);
+export type TableSyncPushStatus = z.infer<typeof TableSyncPushStatusSchema>;
+
+// Table event for push request
+// IDs are coerced from strings to numbers since JSON doesn't support bigint
+export const TableSyncPushEventSchema = z.object({
+  client_tx_id: z.string().min(1).max(255),
+  table_id: z.coerce.number().int().positive(),
+  expected_table_version: z.number().int().positive(),
+  event_type: z.number().int(), // References TableEventType constant
+  payload: z.record(z.unknown()),
+  recorded_at: z.string().datetime(),
+});
+
+export type TableSyncPushEvent = z.infer<typeof TableSyncPushEventSchema>;
+
+// Push Request Schema (POS → API)
+export const TableSyncPushRequestSchema = z.object({
+  outlet_id: z.coerce.number().int().positive(),
+  events: z.array(TableSyncPushEventSchema).min(1),
+});
+
+export type TableSyncPushRequest = z.infer<typeof TableSyncPushRequestSchema>;
+
+// Conflict payload for push response
+export const TableSyncConflictPayloadSchema = z.object({
+  current_occupancy: z.object({
+    status_id: z.number().int(),
+    guest_count: z.number().int().nullable().optional(),
+    service_session_id: z.coerce.number().int().positive().nullable().optional(),
+  }),
+  active_session: z.object({
+    id: z.coerce.number().int().positive().optional(),
+    status_id: z.number().int().optional(),
+    started_at: z.string().datetime().optional(),
+  }).nullable(),
+  current_version: z.number().int().positive(),
+  conflict_reason: z.string(),
+});
+
+export type TableSyncConflictPayload = z.infer<typeof TableSyncConflictPayloadSchema>;
+
+// Push result per event
+export const TableSyncPushResultSchema = z.object({
+  client_tx_id: z.string(),
+  status: TableSyncPushStatusSchema,
+  table_version: z.number().int().positive().optional().nullable(),
+  conflict_payload: TableSyncConflictPayloadSchema.optional().nullable(),
+  errorMessage: z.string().optional().nullable(),
+});
+
+export type TableSyncPushResult = z.infer<typeof TableSyncPushResultSchema>;
+
+// Push Response Schema (API → POS)
+export const TableSyncPushResponseSchema = z.object({
+  results: z.array(TableSyncPushResultSchema),
+  sync_timestamp: z.string().datetime(),
+});
+
+export type TableSyncPushResponse = z.infer<typeof TableSyncPushResponseSchema>;
+
+// Pull Request Schema (POS → API)
+export const TableSyncPullRequestSchema = z.object({
+  outlet_id: z.coerce.number().int().positive(),
+  cursor: z.string().optional(),
+  limit: z.number().int().min(1).max(500).default(100),
+});
+
+export type TableSyncPullRequest = z.infer<typeof TableSyncPullRequestSchema>;
+
+// Table occupancy snapshot for pull response
+export const TableSyncTableSnapshotSchema = z.object({
+  table_id: z.coerce.number().int().positive(),
+  table_number: z.string(),
+  status: z.number().int(), // References TableOccupancyStatus constant
+  current_session_id: z.coerce.number().int().positive().nullable(),
+  version: z.number().int().positive(),
+  staleness_ms: z.number().int().min(0),
+});
+
+export type TableSyncTableSnapshot = z.infer<typeof TableSyncTableSnapshotSchema>;
+
+// Incremental table event for pull response
+export const TableSyncIncrementalEventSchema = z.object({
+  id: z.coerce.number().int().positive(), // Event ID
+  table_id: z.coerce.number().int().positive(),
+  event_type: z.string(),
+  payload: z.record(z.unknown()),
+  recorded_at: z.string().datetime(),
+});
+
+export type TableSyncIncrementalEvent = z.infer<typeof TableSyncIncrementalEventSchema>;
+
+// Pull Response Schema (API → POS)
+export const TableSyncPullResponseSchema = z.object({
+  tables: z.array(TableSyncTableSnapshotSchema),
+  events: z.array(TableSyncIncrementalEventSchema),
+  next_cursor: z.string().nullable(),
+  has_more: z.boolean(),
+  sync_timestamp: z.string().datetime(),
+});
+
+export type TableSyncPullResponse = z.infer<typeof TableSyncPullResponseSchema>;
+
+// ============================================================================
+// TABLE SYNC VALIDATION HELPERS
+// ============================================================================
+
+export function validateTableSyncPushRequest(data: unknown): TableSyncPushRequest {
+  return TableSyncPushRequestSchema.parse(data);
+}
+
+export function validateTableSyncPushResponse(data: unknown): TableSyncPushResponse {
+  return TableSyncPushResponseSchema.parse(data);
+}
+
+export function validateTableSyncPullRequest(data: unknown): TableSyncPullRequest {
+  return TableSyncPullRequestSchema.parse(data);
+}
+
+export function validateTableSyncPullResponse(data: unknown): TableSyncPullResponse {
+  return TableSyncPullResponseSchema.parse(data);
+}
