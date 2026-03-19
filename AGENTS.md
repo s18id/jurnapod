@@ -64,6 +64,139 @@ Important:
 - For API integration tests, expect API-driven setup/mutations; DB only for cleanup/read-only verification.
 - Flag new code paths that filter `audit_logs` by `result` instead of `success`.
 
+### Test Commands and Directory Structure
+
+**Always run tests from the repository root directory `/home/ahmad/jurnapod`**
+
+**API Unit Tests:**
+```bash
+cd /home/ahmad/jurnapod
+npm run test:unit -w @jurnapod/api
+```
+
+**API Type Check:**
+```bash
+cd /home/ahmad/jurnapod
+npm run typecheck -w @jurnapod/api
+```
+
+**API Build:**
+```bash
+cd /home/ahmad/jurnapod
+npm run build -w @jurnapod/api
+```
+
+**API Lint:**
+```bash
+cd /home/ahmad/jurnapod
+npm run lint -w @jurnapod/api
+```
+
+**Important:**
+- Use `-w @jurnapod/api` flag to run commands in the API workspace
+- Do NOT change into `apps/api` subdirectory - commands must run from root
+- This ensures proper monorepo workspace resolution
+
+**Quick Validation Script (run all checks):**
+```bash
+cd /home/ahmad/jurnapod
+echo "=== Running API Type Check ===" && \
+npm run typecheck -w @jurnapod/api && \
+echo "✓ Type check passed" && \
+echo "" && \
+echo "=== Running API Build ===" && \
+npm run build -w @jurnapod/api && \
+echo "✓ Build passed" && \
+echo "" && \
+echo "=== Running API Lint ===" && \
+npm run lint -w @jurnapod/api && \
+echo "✓ Lint passed" && \
+echo "" && \
+echo "=== Running API Unit Tests ===" && \
+npm run test:unit -w @jurnapod/api && \
+echo "✓ All tests passed"
+```
+
+**Alternative: Run all API validation in sequence:**
+```bash
+cd /home/ahmad/jurnapod
+npm run typecheck -w @jurnapod/api && npm run build -w @jurnapod/api && npm run lint -w @jurnapod/api && npm run test:unit -w @jurnapod/api
+```
+
+### Backoffice Testing Commands
+
+**Backoffice Type Check:**
+```bash
+cd /home/ahmad/jurnapod
+npm run typecheck -w @jurnapod/backoffice
+```
+
+**Backoffice Build:**
+```bash
+cd /home/ahmad/jurnapod
+npm run build -w @jurnapod/backoffice
+```
+
+**Backoffice Lint:**
+```bash
+cd /home/ahmad/jurnapod
+npm run lint -w @jurnapod/backoffice
+```
+
+**Backoffice Tests:**
+```bash
+cd /home/ahmad/jurnapod
+npm run test -w @jurnapod/backoffice
+```
+
+### POS Testing Commands
+
+**POS Type Check:**
+```bash
+cd /home/ahmad/jurnapod
+npm run typecheck -w @jurnapod/pos
+```
+
+**POS Build:**
+```bash
+cd /home/ahmad/jurnapod
+npm run build -w @jurnapod/pos
+```
+
+**POS Lint:**
+```bash
+cd /home/ahmad/jurnapod
+npm run lint -w @jurnapod/pos
+```
+
+**POS Unit Tests:**
+```bash
+cd /home/ahmad/jurnapod
+npm run test -w @jurnapod/pos
+```
+
+**POS E2E Tests (requires build and running server):**
+```bash
+cd /home/ahmad/jurnapod
+# First install Playwright browsers (one-time setup)
+npm run qa:e2e:install -w @jurnapod/pos
+# Then run E2E tests
+npm run qa:e2e -w @jurnapod/pos
+```
+
+### Testing Command Summary by Workspace
+
+| Workspace | Type Check | Build | Lint | Unit Tests | E2E Tests |
+|-----------|------------|-------|------|------------|-----------|
+| **API** | `npm run typecheck -w @jurnapod/api` | `npm run build -w @jurnapod/api` | `npm run lint -w @jurnapod/api` | `npm run test:unit -w @jurnapod/api` | — |
+| **Backoffice** | `npm run typecheck -w @jurnapod/backoffice` | `npm run build -w @jurnapod/backoffice` | `npm run lint -w @jurnapod/backoffice` | `npm run test -w @jurnapod/backoffice` | — |
+| **POS** | `npm run typecheck -w @jurnapod/pos` | `npm run build -w @jurnapod/pos` | `npm run lint -w @jurnapod/pos` | `npm run test -w @jurnapod/pos` | `npm run qa:e2e -w @jurnapod/pos` |
+
+**Current Status (as of last validation):**
+- **API**: ✅ All checks passing (TypeScript, Build, Lint, 374 tests)
+- **Backoffice**: ⚠️ Type check and lint have issues; tests passing (93 tests)
+- **POS**: ⚠️ Tests have some failures (60/72 passing); TypeScript and build passing
+
 ### Test cleanup (CRITICAL)
 - **All unit tests using `getDbPool()` must close the pool after completion.**
 - Without cleanup, tests hang indefinitely.
