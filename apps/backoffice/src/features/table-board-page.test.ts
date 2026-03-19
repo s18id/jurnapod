@@ -134,6 +134,24 @@ describe("Table Board page helpers", () => {
     assert.strictEqual(text, "Version conflict detected. Board refreshed.");
   });
 
+  test("resolves session modal title from session detail", async () => {
+    const pageModule = await import("./table-board-page");
+    assert.strictEqual(pageModule.resolveSessionModalTitle(null), "Session Detail");
+    assert.strictEqual(
+      pageModule.resolveSessionModalTitle({
+        id: "88",
+        tableCode: "A1",
+        tableName: "Alpha 1",
+        statusLabel: "Active",
+        guestCount: 2,
+        startedAt: "2026-03-20T10:00:00.000Z",
+        lineCount: 3,
+        totalAmount: 120000
+      }),
+      "Session 88"
+    );
+  });
+
   test("executes HOLD action with expected version and refresh", async () => {
     const pageModule = await import("./table-board-page");
     const calls: Array<{ path: string; init?: RequestInit; token?: string }> = [];

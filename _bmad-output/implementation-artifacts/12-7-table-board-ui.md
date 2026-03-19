@@ -1,6 +1,6 @@
 # Story 12.7: Table Board UI
 
-Status: review
+Status: done
 
 ## Story
 
@@ -50,7 +50,7 @@ so that I can quickly see availability and manage seating.
   - [x] Subtask 3.1: Add action menu per card/row (Hold, Seat, Release, View Session)
   - [x] Subtask 3.2: Wire Hold/Seat/Release to existing dine-in endpoints with `X-Expected-Version` from board payload
   - [x] Subtask 3.3: Handle 409 responses explicitly with current-state feedback and refetch board
-  - [x] Subtask 3.4: Wire View Session to existing session detail route flow (`/dinein/sessions/:id` API-backed view behavior)
+  - [x] Subtask 3.4: Wire View Session to existing session detail route flow (`/dinein/sessions/:id` API-backed view behavior) and present details in modal
 
 - [x] Task 4: Integrate route/navigation and role/module access (AC: 1,4)
   - [x] Subtask 4.1: Add `"/table-board"` route to `apps/backoffice/src/app/routes.ts` with pos module guard
@@ -225,9 +225,11 @@ openai/gpt-5.3-codex
 - Implemented `useTableBoard` data hook with API envelope parsing, 8-second polling, cleanup, last-updated tracking, and recent-change detection
 - Implemented `TableBoardPage` with zone grouping, status color semantics, grid/list toggle, filters (status/zone/capacity/search), and freshness indicator
 - Added table action menu (Hold/Seat/Release/View Session) with optimistic version headers and explicit conflict refresh behavior
+- Updated View Session UX to open a modal immediately with loading state, then render fetched session details
 - Added route integration for `/table-board` with POS module gating and role boundaries aligned to reservations/outlet-tables policies
 - Added focused tests: hook helpers + polling cleanup, page filtering/grouping/action helper logic, and route/module/role access checks
 - Expanded action-flow tests for hold/seat/release to assert endpoint path, `X-Expected-Version` header, payload shape, conflict normalization, and guaranteed board refetch on both success/error
+- Added focused session modal helper coverage for modal title resolution
 - Follow-up fixes from BMAD code review:
   - aligned `/table-board` route access with story actor scope by allowing `CASHIER`
   - improved table-board test evidence for numeric payload coercion and status mapping normalization
@@ -237,7 +239,7 @@ openai/gpt-5.3-codex
 - Fixed backoffice lint configuration baseline by replacing invalid `next/core-web-vitals` extension with flat config ignores to restore lint execution
 - Working tree includes uncommitted iterative review/fix changes across API, shared contracts, and backoffice while story remains in `review` for final merge gate.
 - Validation evidence:
-  - `npm run test -w @jurnapod/backoffice` (108/108 pass)
+  - `npm run test -w @jurnapod/backoffice` (114/114 pass)
   - `npm run typecheck -w @jurnapod/backoffice` (pass)
   - `npm run lint -w @jurnapod/backoffice` (pass)
 
@@ -270,3 +272,4 @@ openai/gpt-5.3-codex
 ## Change Log
 
 - 2026-03-19: Implemented Story 12.7 table board UI end-to-end (data hook, page, actions, route integration, and tests) and passed backoffice validation suite.
+- 2026-03-20: Updated Table Board session detail presentation to modal UX with immediate-open loading state and refreshed test evidence.

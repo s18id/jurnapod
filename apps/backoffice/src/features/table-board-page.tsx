@@ -9,6 +9,7 @@ import {
   Card,
   Group,
   Menu,
+  Modal,
   NumberInput,
   SegmentedControl,
   Select,
@@ -252,6 +253,10 @@ type SessionDetail = {
 
 type ViewMode = "grid" | "list";
 
+export function resolveSessionModalTitle(sessionDetail: SessionDetail | null): string {
+  return sessionDetail ? `Session ${sessionDetail.id}` : "Session Detail";
+}
+
 export function TableBoardPage(props: TableBoardPageProps) {
   const { user, accessToken } = props;
   const [selectedOutletId, setSelectedOutletId] = useState<number | null>(null);
@@ -265,6 +270,8 @@ export function TableBoardPage(props: TableBoardPageProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
+  const [sessionDetailOpen, setSessionDetailOpen] = useState(false);
+  const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
 
   const outlets = useOutletsFull(user.company_id, accessToken);
   const board = useTableBoard(selectedOutletId, accessToken, 8000);
@@ -320,6 +327,9 @@ export function TableBoardPage(props: TableBoardPageProps) {
     if (!selectedOutletId || !row.currentSessionId) {
       return;
     }
+    setSessionDetailOpen(true);
+    setSessionDetailLoading(true);
+    setSessionDetail(null);
     setBusyTableId(row.tableId);
     setActionError(null);
     try {
@@ -334,6 +344,7 @@ export function TableBoardPage(props: TableBoardPageProps) {
       setActionError(message);
     } finally {
       setBusyTableId(null);
+      setSessionDetailLoading(false);
     }
   };
 
@@ -525,21 +536,46 @@ export function TableBoardPage(props: TableBoardPageProps) {
         </PageCard>
       )}
 
-      {sessionDetail && (
-        <PageCard
-          title={`Session ${sessionDetail.id}`}
-          actions={<Button variant="default" onClick={() => setSessionDetail(null)}>Close</Button>}
-        >
-          <Stack gap="xs">
-            <Text>Table: {sessionDetail.tableCode} - {sessionDetail.tableName}</Text>
-            <Text>Status: {sessionDetail.statusLabel}</Text>
-            <Text>Guests: {sessionDetail.guestCount ?? 0}</Text>
-            <Text>Started: {new Date(sessionDetail.startedAt).toLocaleString()}</Text>
-            <Text>Lines: {sessionDetail.lineCount}</Text>
-            <Text>Total Amount: {sessionDetail.totalAmount}</Text>
-          </Stack>
-        </PageCard>
-      )}
+      <Modal
+        opened={sessionDetailOpen}
+        onClose={() => {
+          setSessionDetailOpen(false);
+          setSessionDetailLoading(false);
+          setSessionDetail(null);
+        }}
+        title={<Title order={4}>{resolveSessionModalTitle(sessionDetail)}</Title>}
+        centered
+        size="md"
+      >
+        <Stack gap="xs">
+          {sessionDetailLoading && <Text c="dimmed">Loading session detail...</Text>}
+          {!sessionDetailLoading && sessionDetail && (
+            <>
+              <Text>Table: {sessionDetail.tableCode} - {sessionDetail.tableName}</Text>
+              <Text>Status: {sessionDetail.statusLabel}</Text>
+              <Text>Guests: {sessionDetail.guestCount ?? 0}</Text>
+              <Text>Started: {new Date(sessionDetail.startedAt).toLocaleString()}</Text>
+              <Text>Lines: {sessionDetail.lineCount}</Text>
+              <Text>Total Amount: {sessionDetail.totalAmount}</Text>
+            </>
+          )}
+          {!sessionDetailLoading && !sessionDetail && (
+            <Text c="dimmed">No session details available.</Text>
+          )}
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => {
+                setSessionDetailOpen(false);
+                setSessionDetailLoading(false);
+                setSessionDetail(null);
+              }}
+            >
+              Close
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }
