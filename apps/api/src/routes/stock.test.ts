@@ -61,8 +61,12 @@ async function cleanupTestData(connection: PoolConnection): Promise<void> {
     [TEST_COMPANY_ID]
   );
   await connection.execute(
-    `DELETE FROM items WHERE company_id = ? AND id = ?`,
-    [TEST_COMPANY_ID, TEST_PRODUCT_ID]
+    `DELETE FROM item_prices WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
+  );
+  await connection.execute(
+    `DELETE FROM items WHERE company_id = ?`,
+    [TEST_COMPANY_ID]
   );
   await connection.execute(
     `DELETE FROM outlets WHERE company_id = ? AND id = ?`,

@@ -93,6 +93,122 @@ Content-Type: application/json
 
 ---
 
+## Dine-in Service Sessions
+
+Service sessions support multi-cashier operation with offline-safe idempotency.
+
+### Lifecycle
+
+`ACTIVE -> LOCKED_FOR_PAYMENT -> CLOSED`
+
+### Finalize Checkpoints (recommended model)
+
+- Session lines remain canonical in `table_service_session_lines` while service is active.
+- Each `finalize-batch` operation syncs current open lines to `pos_order_snapshot_lines` so other cashiers see the latest finalized order state.
+- Payment close performs final settlement and table release.
+
+### Add Line
+
+```http
+POST /api/dinein/sessions/:sessionId/lines?outletId=1
+Content-Type: application/json
+
+{
+  "itemId": 101,
+  "itemName": "Nasi Goreng",
+  "unitPrice": 35000,
+  "quantity": 2,
+  "notes": "Less spicy",
+  "clientTxId": "line-a1b2c3"
+}
+```
+
+**Response:** `201 Created`
+
+### Finalize Batch (checkpoint sync)
+
+```http
+POST /api/dinein/sessions/:sessionId/finalize-batch?outletId=1
+Content-Type: application/json
+
+{
+  "clientTxId": "finalize-batch-1-a1b2c3",
+  "notes": "First order finalized"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "sessionId": "5001",
+    "batchNo": 1,
+    "sessionVersion": 7,
+    "syncedLinesCount": 3
+  }
+}
+```
+
+### Adjust Line (cancel/reduce before processing)
+
+```http
+POST /api/dinein/sessions/:sessionId/lines/:lineId/adjust?outletId=1
+Content-Type: application/json
+
+{
+  "clientTxId": "adjust-1-a1b2c3",
+  "action": "REDUCE_QTY",
+  "qtyDelta": 1,
+  "reason": "Customer changed mind"
+}
+```
+
+Rules:
+- `reason` is required.
+- Adjustment is allowed only when item is not yet processed.
+- Endpoint is idempotent by `(company_id, outlet_id, client_tx_id)`.
+
+### Lock Payment
+
+```http
+POST /api/dinein/sessions/:sessionId/lock-payment?outletId=1
+Content-Type: application/json
+
+{
+  "clientTxId": "lock-a1b2c3",
+  "posOrderSnapshotId": "snapshot-123"
+}
+```
+
+### Close Session
+
+```http
+POST /api/dinein/sessions/:sessionId/close?outletId=1
+Content-Type: application/json
+
+{
+  "clientTxId": "close-a1b2c3"
+}
+```
+
+Notes:
+- Close consumes persisted snapshot linkage from the session lifecycle.
+- Close finalizes POS snapshot and releases table occupancy.
+- Close does not accept caller snapshot override.
+
+### Recommended multi-cashier flow
+
+1. Seat customer and add lines.
+2. `finalize-batch` for first order.
+3. Add additional lines.
+4. `finalize-batch` again.
+5. Adjust pending item with reason.
+6. Lock payment then close.
+
+---
+
 ## Sales
 
 ### Create Invoice
@@ -267,4 +383,3 @@ All endpoints return standard error format:
 - [API Contracts](../apps/api/src/routes) - Full request/response schemas
 - [Development Guide](DEVELOPMENT.md)
 - [Production Deployment](PRODUCTION.md)
-

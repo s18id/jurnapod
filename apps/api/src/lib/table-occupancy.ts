@@ -493,7 +493,7 @@ export async function seatTable(
 
 /**
  * Release a table after service
- * Marks session as COMPLETED and resets occupancy to AVAILABLE
+ * Marks session as CLOSED and resets occupancy to AVAILABLE
  */
 export async function releaseTable(
   input: ReleaseTableInput
@@ -529,19 +529,19 @@ export async function releaseTable(
       throw new TableNotOccupiedError(input.tableId, currentState.statusId);
     }
 
-    // 4. Update service session to COMPLETED
+    // 4. Update service session to CLOSED (Story 12.5: status 3 = CLOSED)
     if (currentState.serviceSessionId) {
       await connection.execute(
         `UPDATE table_service_sessions
          SET status_id = ?,
-             completed_at = NOW(),
+             closed_at = NOW(),
              updated_at = NOW(),
              updated_by = ?
          WHERE id = ?
            AND company_id = ?
            AND outlet_id = ?`,
         [
-          2, // COMPLETED status
+          3, // CLOSED status (Story 12.5)
           input.updatedBy,
           currentState.serviceSessionId,
           input.companyId,

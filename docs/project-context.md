@@ -9,7 +9,7 @@
 - **Runtime**: Node.js 20.x
 - **Monorepo**: pnpm workspaces
 - **Apps**: 
-  - `@jurnapod/api` - Next.js API routes
+  - `@jurnapod/api` - Hono.js API routes
   - `@jurnapod/backoffice` - Admin dashboard (React/Mantine)
   - `@jurnapod/pos` - Point of Sale (PWA)
 - **Packages**:

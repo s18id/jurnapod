@@ -18,6 +18,13 @@
 3. `service_session` (commercial context): open dine-in ticket and order mutations.
 4. `table_event` (audit + sync): append-only events for replay/idempotency.
 
+### Service session checkpoint model
+
+- Working state lives in `table_service_session_lines` while session is ACTIVE.
+- Each `finalize-batch` operation snapshots finalized lines into POS snapshot lines for cross-cashier visibility.
+- Payment close is the final settlement step and table release.
+- This avoids real-time dual-write on every line mutation.
+
 ## 3. Status/Type Modeling Rule (No ENUM)
 
 Use integer columns (`TINYINT`/`SMALLINT`) and shared constants in code.
@@ -175,6 +182,8 @@ Response shape for table board:
 - `POST /api/dinein/tables/:tableId/release`
 - `POST /api/dinein/sessions/open`
 - `POST /api/dinein/sessions/:id/lines` add/update/remove lines (idempotent)
+- `POST /api/dinein/sessions/:id/finalize-batch` finalize current open lines and sync checkpoint
+- `POST /api/dinein/sessions/:id/lines/:lineId/adjust` cancel/reduce pending item with reason
 - `POST /api/dinein/sessions/:id/lock-payment`
 - `POST /api/dinein/sessions/:id/close`
 
@@ -196,6 +205,7 @@ Sync:
 3. Duplicate `client_tx_id` must not create duplicate table/session effects.
 4. Finalized commercial state changes remain auditable via append-only events.
 5. Money/order effects still reconcile to GL posting rules.
+6. Finalize checkpoints must produce deterministic snapshot state across all cashier terminals.
 
 ## 10. Migration Guidance (MySQL + MariaDB)
 

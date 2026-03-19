@@ -15,6 +15,7 @@ import { z } from 'zod';
 import {
   TableOccupancyStatus,
   ServiceSessionStatus,
+  ServiceSessionLineState,
   TableEventType,
   ReservationStatusId,
   OutletTableStatusId,
@@ -98,9 +99,20 @@ export const TableServiceSessionSchema = z.object({
   serverUserId: OptionalIdSchema,
   cashierUserId: OptionalIdSchema,
   notes: z.string().nullable().optional(),
+  sessionVersion: z.number().int().min(1).optional(),
+  lastFinalizedBatchNo: z.number().int().min(0).optional(),
 }).merge(AuditFieldsSchema);
 
 export type TableServiceSession = z.infer<typeof TableServiceSessionSchema>;
+
+const serviceSessionLineStateValues = Object.values(ServiceSessionLineState) as [number, ...number[]];
+
+export const ServiceSessionLineStateIdSchema = z
+  .number()
+  .int()
+  .refine((val) => serviceSessionLineStateValues.includes(val), {
+    message: 'Invalid service session line state ID',
+  });
 
 // ============================================================================
 // TABLE EVENT SCHEMAS
@@ -248,6 +260,50 @@ export const CreateTableEventRequestSchema = z.object({
 });
 
 export type CreateTableEventRequest = z.infer<typeof CreateTableEventRequestSchema>;
+
+// Finalize Session Batch (checkpoint sync)
+export const FinalizeSessionBatchRequestSchema = z.object({
+  clientTxId: z.string().min(1).max(255),
+  notes: z.string().max(500).optional(),
+});
+
+export type FinalizeSessionBatchRequest = z.infer<typeof FinalizeSessionBatchRequestSchema>;
+
+export const FinalizeSessionBatchResponseSchema = z.object({
+  sessionId: z.string(),
+  batchNo: z.number().int().min(1),
+  sessionVersion: z.number().int().min(1),
+  syncedLinesCount: z.number().int().min(0),
+});
+
+export type FinalizeSessionBatchResponse = z.infer<typeof FinalizeSessionBatchResponseSchema>;
+
+// Adjust Session Line (cancel/reduce before processing)
+export const AdjustSessionLineActionSchema = z.enum(['CANCEL', 'REDUCE_QTY']);
+
+export const AdjustSessionLineRequestSchema = z.object({
+  clientTxId: z.string().min(1).max(255),
+  action: AdjustSessionLineActionSchema,
+  qtyDelta: z.number().int().positive().optional(),
+  reason: z.string().min(1).max(500),
+}).superRefine((value, ctx) => {
+  if (value.action === 'REDUCE_QTY' && value.qtyDelta === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['qtyDelta'],
+      message: 'qtyDelta is required for REDUCE_QTY action',
+    });
+  }
+  if (value.action === 'CANCEL' && value.qtyDelta !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['qtyDelta'],
+      message: 'qtyDelta must be omitted for CANCEL action',
+    });
+  }
+});
+
+export type AdjustSessionLineRequest = z.infer<typeof AdjustSessionLineRequestSchema>;
 
 // Create Reservation (Story 12.2 - legacy naming)
 export const CreateReservationRequestSchema = z.object({

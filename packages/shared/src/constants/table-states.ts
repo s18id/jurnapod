@@ -36,24 +36,44 @@ export const TableOccupancyStatusLabels: Record<TableOccupancyStatusType, string
 // ============================================================================
 // SERVICE SESSION STATUS (table_service_sessions.status_id)
 // Represents the commercial lifecycle of a dine-in session
+// Story 12.5: ACTIVE -> LOCKED_FOR_PAYMENT -> CLOSED
 // ============================================================================
 export const ServiceSessionStatus = {
   ACTIVE: 1,
-  COMPLETED: 2,
-  CANCELLED: 3,
+  LOCKED_FOR_PAYMENT: 2,
+  CLOSED: 3,
 } as const;
 
 export type ServiceSessionStatusType = typeof ServiceSessionStatus[keyof typeof ServiceSessionStatus];
 
 export const ServiceSessionStatusLabels: Record<ServiceSessionStatusType, string> = {
   [ServiceSessionStatus.ACTIVE]: 'Active',
-  [ServiceSessionStatus.COMPLETED]: 'Completed',
-  [ServiceSessionStatus.CANCELLED]: 'Cancelled',
+  [ServiceSessionStatus.LOCKED_FOR_PAYMENT]: 'Locked for Payment',
+  [ServiceSessionStatus.CLOSED]: 'Closed',
+};
+
+// ============================================================================
+// SERVICE SESSION LINE STATE (table_service_session_lines.line_state)
+// Finalize checkpoint lifecycle for line-level mutations
+// ============================================================================
+export const ServiceSessionLineState = {
+  OPEN: 1,
+  FINALIZED: 2,
+  VOIDED: 3,
+} as const;
+
+export type ServiceSessionLineStateType = typeof ServiceSessionLineState[keyof typeof ServiceSessionLineState];
+
+export const ServiceSessionLineStateLabels: Record<ServiceSessionLineStateType, string> = {
+  [ServiceSessionLineState.OPEN]: 'Open',
+  [ServiceSessionLineState.FINALIZED]: 'Finalized',
+  [ServiceSessionLineState.VOIDED]: 'Voided',
 };
 
 // ============================================================================
 // TABLE EVENT TYPES (table_events.event_type_id)
 // Classification of events in the append-only event log
+// Story 12.5: Added session management event types (9-16)
 // ============================================================================
 export const TableEventType = {
   TABLE_OPENED: 1,
@@ -64,6 +84,15 @@ export const TableEventType = {
   STATUS_CHANGED: 6,
   GUEST_COUNT_CHANGED: 7,
   TABLE_TRANSFERRED: 8,
+  // Story 12.5: Service Session Management Events
+  SESSION_LINE_ADDED: 9,
+  SESSION_LINE_UPDATED: 10,
+  SESSION_LINE_REMOVED: 11,
+  SESSION_LOCKED: 12,
+  SESSION_CLOSED: 13,
+  SESSION_BATCH_FINALIZED: 14,
+  SESSION_LINE_ADJUSTED: 15,
+  SESSION_VERSION_BUMPED: 16,
 } as const;
 
 export type TableEventTypeType = typeof TableEventType[keyof typeof TableEventType];
@@ -77,6 +106,15 @@ export const TableEventTypeLabels: Record<TableEventTypeType, string> = {
   [TableEventType.STATUS_CHANGED]: 'Status Changed',
   [TableEventType.GUEST_COUNT_CHANGED]: 'Guest Count Changed',
   [TableEventType.TABLE_TRANSFERRED]: 'Table Transferred',
+  // Story 12.5: Service Session Management Event Labels
+  [TableEventType.SESSION_LINE_ADDED]: 'Session Line Added',
+  [TableEventType.SESSION_LINE_UPDATED]: 'Session Line Updated',
+  [TableEventType.SESSION_LINE_REMOVED]: 'Session Line Removed',
+  [TableEventType.SESSION_LOCKED]: 'Session Locked',
+  [TableEventType.SESSION_CLOSED]: 'Session Closed',
+  [TableEventType.SESSION_BATCH_FINALIZED]: 'Session Batch Finalized',
+  [TableEventType.SESSION_LINE_ADJUSTED]: 'Session Line Adjusted',
+  [TableEventType.SESSION_VERSION_BUMPED]: 'Session Version Bumped',
 };
 
 // ============================================================================
@@ -159,6 +197,10 @@ export function isValidTableOccupancyStatus(status: number): status is TableOccu
 
 export function isValidServiceSessionStatus(status: number): status is ServiceSessionStatusType {
   return Object.values(ServiceSessionStatus).includes(status as ServiceSessionStatusType);
+}
+
+export function isValidServiceSessionLineState(status: number): status is ServiceSessionLineStateType {
+  return Object.values(ServiceSessionLineState).includes(status as ServiceSessionLineStateType);
 }
 
 export function isValidTableEventType(eventType: number): eventType is TableEventTypeType {

@@ -220,7 +220,7 @@ So that I can add items, process payments, and close tables.
 
 **Given** an occupied table with active session
 **When** POST /api/dinein/sessions/:id/lines is called
-**Then** order line is added to linked pos_order
+**Then** order line is added to session working lines
 **And** SESSION_LINE_ADDED event is logged
 **And** operation is idempotent via client_tx_id
 
@@ -240,10 +240,22 @@ So that I can add items, process payments, and close tables.
 **And** no further line modifications are allowed
 **And** SESSION_LOCKED event is logged
 
+**Given** an active session with new or changed lines
+**When** POST /api/dinein/sessions/:id/finalize-batch is called
+**Then** current open lines are checkpointed with next batch number
+**And** checkpoint lines are synced to pos_order_snapshot_lines
+**And** SESSION_BATCH_FINALIZED event is logged
+**And** multi-cashier clients can refresh from updated session version
+
+**Given** a pending line item not yet processed
+**When** POST /api/dinein/sessions/:id/lines/:lineId/adjust is called with reason
+**Then** line can be cancelled or reduced with audit traceability
+**And** SESSION_LINE_ADJUSTED event is logged
+
 **Given** payment completed
 **When** POST /api/dinein/sessions/:id/close is called
 **Then** session status changes to CLOSED
-**And** linked pos_order is finalized
+**And** linked pos_order snapshot is finalized using persisted snapshot linkage
 **And** occupancy is released (table becomes AVAILABLE)
 **And** SESSION_CLOSED event is logged
 
@@ -251,6 +263,8 @@ So that I can add items, process payments, and close tables.
 - POST /api/dinein/sessions/:id/lines
 - PATCH /api/dinein/sessions/:id/lines/:lineId
 - DELETE /api/dinein/sessions/:id/lines/:lineId
+- POST /api/dinein/sessions/:id/finalize-batch
+- POST /api/dinein/sessions/:id/lines/:lineId/adjust
 - POST /api/dinein/sessions/:id/lock-payment
 - POST /api/dinein/sessions/:id/close
 
