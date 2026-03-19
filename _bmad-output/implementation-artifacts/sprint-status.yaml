@@ -1,5 +1,5 @@
 # generated: 2026-03-15T09:32:00.000Z
-# last_updated: 2026-03-17T20:42:22+07:00
+# last_updated: 2026-03-20T01:19:57+0700
 # project: jurnapod
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-20T00:23:40+0700
+last_updated: 2026-03-20T01:19:57+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -146,4 +146,4 @@ development_status:
   12-5-service-session-management: done  # Code review follow-ups resolved; deterministic replay, fixture policy alignment, and traceability updates complete.
   12-6-pos-sync-table-operations: done
   12-7-table-board-ui: done  # Session detail UX updated to modal with immediate-open loading state; backoffice validation rerun passing
-  12-8-reservation-calendar-ui: backlog
+  12-8-reservation-calendar-ui: done

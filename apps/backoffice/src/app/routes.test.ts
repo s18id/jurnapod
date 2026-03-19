@@ -30,3 +30,23 @@ describe("table-board route", () => {
     assert.strictEqual(userCanAccessRoute(["CASHIER"], route!), true);
   });
 });
+
+describe("reservation-calendar route", () => {
+  test("is registered with POS module requirement", () => {
+    const route = findRoute("/reservation-calendar");
+    assert.ok(route, "Route should exist");
+    assert.strictEqual(route?.requiredModule, "pos");
+  });
+
+  test("is filtered out when pos module is disabled", () => {
+    const filtered = filterRoutesByModules(APP_ROUTES, { pos: false });
+    const route = filtered.find((item) => item.path === "/reservation-calendar");
+    assert.strictEqual(route, undefined);
+  });
+
+  test("is accessible for accountant role", () => {
+    const route = findRoute("/reservation-calendar");
+    assert.ok(route, "Route should exist");
+    assert.strictEqual(userCanAccessRoute(["ACCOUNTANT"], route!), true);
+  });
+});
