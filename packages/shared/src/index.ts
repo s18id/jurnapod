@@ -27,3 +27,5 @@ export * from "./schemas/settings";
 export * from "./schemas/taxes";
 export * from "./schemas/users";
 export * from "./constants/account-mapping-types";
+export * from "./constants/table-states";
+export * from "./schemas/table-reservation";
