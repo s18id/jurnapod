@@ -3,14 +3,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  Accordion,
   Alert,
   Badge,
   Button,
   Checkbox,
   Group,
   Modal,
-  ScrollArea,
   Select,
   Stack,
   Text,
@@ -34,6 +32,7 @@ import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
 import { DataTable } from "../components/DataTable";
 import { FilterBar } from "../components/FilterBar";
+import { OutletRoleMatrix } from "../components/OutletRoleMatrix";
 import { PageCard } from "../components/PageCard";
 import type { OutletResponse, Role, RoleResponse, UserResponse } from "@jurnapod/shared";
 
@@ -88,199 +87,6 @@ const ROLE_HELP_TEXT: Record<string, string> = {
   CASHIER: "Runs checkout and sales transactions.",
   ACCOUNTANT: "Reviews journals and financial records."
 };
-
-type OutletRoleAssignmentsFieldProps = {
-  title: string;
-  outlets: OutletResponse[];
-  roles: RoleResponse[];
-  actorMaxRoleLevel: number;
-  maxHeight: number;
-  outletRoleCodesFor: (outletId: number) => string[];
-  onUpdateRoleCode: (outletId: number, roleCode: string, checked: boolean) => void;
-  onSetRoleForOutlets: (outletIds: number[], roleCode: string, checked: boolean) => void;
-  onSetAllAssignableRolesForOutlets: (outletIds: number[]) => void;
-  onClearRolesForOutlets: (outletIds: number[]) => void;
-};
-
-function OutletRoleAssignmentsField(props: OutletRoleAssignmentsFieldProps) {
-  const {
-    title,
-    outlets,
-    roles,
-    actorMaxRoleLevel,
-    maxHeight,
-    outletRoleCodesFor,
-    onUpdateRoleCode,
-    onSetRoleForOutlets,
-    onSetAllAssignableRolesForOutlets,
-    onClearRolesForOutlets
-  } = props;
-  const [searchValue, setSearchValue] = useState("");
-
-  const normalizedSearch = searchValue.trim().toLowerCase();
-  const filteredOutlets = useMemo(
-    () =>
-      outlets.filter((outlet) => {
-        if (!normalizedSearch) {
-          return true;
-        }
-        const haystack = `${outlet.name} ${outlet.code}`.toLowerCase();
-        return haystack.includes(normalizedSearch);
-      }),
-    [normalizedSearch, outlets]
-  );
-
-  const assignableRoles = useMemo(
-    () => roles.filter((role) => role.role_level < actorMaxRoleLevel),
-    [roles, actorMaxRoleLevel]
-  );
-
-  const filteredOutletIds = useMemo(() => filteredOutlets.map((outlet) => outlet.id), [filteredOutlets]);
-  const totalSelectedRoleCount = useMemo(
-    () =>
-      outlets.reduce((count, outlet) => {
-        const selected = outletRoleCodesFor(outlet.id);
-        return count + selected.length;
-      }, 0),
-    [outletRoleCodesFor, outlets]
-  );
-  const selectedOutletCount = useMemo(
-    () => outlets.filter((outlet) => outletRoleCodesFor(outlet.id).length > 0).length,
-    [outletRoleCodesFor, outlets]
-  );
-  const hasSelectionInFilteredOutlets = useMemo(
-    () => filteredOutlets.some((outlet) => outletRoleCodesFor(outlet.id).length > 0),
-    [filteredOutlets, outletRoleCodesFor]
-  );
-
-  return (
-    <div>
-      <Text fw={600} size="sm" mb={4}>
-        {title}
-      </Text>
-      <Text size="xs" c="dimmed" mb="xs" role="status" aria-live="polite">
-        {selectedOutletCount} outlets assigned, {totalSelectedRoleCount} role selections total.
-      </Text>
-
-      <Stack gap="xs" mb="sm">
-        <TextInput
-          label="Search outlets"
-          placeholder="Search by outlet name or code"
-          value={searchValue}
-          onChange={(event) => setSearchValue(event.currentTarget.value)}
-        />
-        <Group gap="xs" wrap="wrap">
-          <Button
-            size="xs"
-            variant="default"
-            onClick={() => onClearRolesForOutlets(filteredOutletIds)}
-            disabled={filteredOutletIds.length === 0 || !hasSelectionInFilteredOutlets}
-          >
-            Clear filtered outlets
-          </Button>
-          {assignableRoles.map((role) => (
-            <Button
-              key={`bulk-add-${role.code}`}
-              size="xs"
-              variant="light"
-              onClick={() => onSetRoleForOutlets(filteredOutletIds, role.code, true)}
-              disabled={filteredOutletIds.length === 0}
-            >
-              Add {role.name} to filtered
-            </Button>
-          ))}
-        </Group>
-      </Stack>
-
-      <ScrollArea h={maxHeight} type="auto">
-        <Stack gap="sm">
-          {outlets.length === 0 ? (
-            <Text size="sm" c="dimmed">
-              No outlets available.
-            </Text>
-          ) : roles.length === 0 ? (
-            <Text size="sm" c="dimmed">
-              No outlet-scoped roles available.
-            </Text>
-          ) : filteredOutlets.length === 0 ? (
-            <Text size="sm" c="dimmed">
-              No outlets match your search.
-            </Text>
-          ) : (
-            <Accordion variant="separated" multiple>
-              {filteredOutlets.map((outlet) => {
-                const selectedRoleCodes = outletRoleCodesFor(outlet.id);
-                return (
-                  <Accordion.Item key={outlet.id} value={String(outlet.id)}>
-                    <Accordion.Control>
-                      <Group justify="space-between" wrap="nowrap">
-                        <div>
-                          <Text size="sm" fw={600}>
-                            {outlet.name}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {outlet.code}
-                          </Text>
-                        </div>
-                        <Badge variant="light" color={selectedRoleCodes.length > 0 ? "teal" : "gray"}>
-                          {selectedRoleCodes.length} selected
-                        </Badge>
-                      </Group>
-                    </Accordion.Control>
-                    <Accordion.Panel>
-                      <Stack gap="xs">
-                        <Group gap="xs" wrap="wrap">
-                          <Button
-                            size="xs"
-                            variant="subtle"
-                            onClick={() => onSetAllAssignableRolesForOutlets([outlet.id])}
-                            disabled={assignableRoles.length === 0}
-                          >
-                            Select all assignable
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="subtle"
-                            color="red"
-                            onClick={() => onClearRolesForOutlets([outlet.id])}
-                            disabled={selectedRoleCodes.length === 0}
-                          >
-                            Clear outlet
-                          </Button>
-                        </Group>
-
-                        {roles.map((role) => {
-                          const checked = selectedRoleCodes.includes(role.code);
-                          const disabled = role.role_level >= actorMaxRoleLevel;
-                          return (
-                            <Checkbox
-                              key={`${outlet.id}-${role.code}`}
-                              label={role.name}
-                              description={
-                                disabled
-                                  ? `Requires higher privilege. ${ROLE_HELP_TEXT[role.code] ?? ""}`.trim()
-                                  : ROLE_HELP_TEXT[role.code] ?? "Outlet-scoped operational role."
-                              }
-                              checked={checked}
-                              disabled={disabled}
-                              onChange={(event) =>
-                                onUpdateRoleCode(outlet.id, role.code, event.currentTarget.checked)
-                              }
-                            />
-                          );
-                        })}
-                      </Stack>
-                    </Accordion.Panel>
-                  </Accordion.Item>
-                );
-              })}
-            </Accordion>
-          )}
-        </Stack>
-      </ScrollArea>
-    </div>
-  );
-}
 
 export function UsersPage(props: UsersPageProps) {
   const { user, accessToken } = props;
@@ -1249,7 +1055,7 @@ export function UsersPage(props: UsersPageProps) {
                 aria-label="Global role selection"
               />
 
-              <OutletRoleAssignmentsField
+              <OutletRoleMatrix
                 title="Outlet Roles"
                 outlets={outletsQuery.data || []}
                 roles={outletRoleOptions}
