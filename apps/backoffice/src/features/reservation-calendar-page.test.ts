@@ -656,4 +656,178 @@ describe("Reservation Calendar page helpers", () => {
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.errorMessage, "Customer name is required.");
   });
+
+  test("edit-group mode calls updateReservationGroupFn with correct payload", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+
+    const capturedPayloads: Array<{
+      customer_name?: string;
+      customer_phone?: string | null;
+      guest_count?: number;
+      reservation_at?: string;
+      duration_minutes?: number;
+      notes?: string | null;
+      table_ids?: number[];
+    }> = [];
+
+    const result = await pageModule.executeReservationFormAction({
+      mode: "edit-group",
+      selectedOutletId: 5,
+      editingGroupId: 42,
+      editingReservationId: null,
+      formState: {
+        tableId: null,
+        customerName: "Updated Group Name",
+        customerPhone: "+1111111111",
+        guestCount: 8,
+        reservationAt: new Date("2026-03-20T20:00:00.000Z"),
+        durationMinutes: 150,
+        notes: "Updated group notes"
+      },
+      accessToken: "token",
+      isMultiTable: true,
+      selectedTableIds: [1, 2, 3, 4],
+      updateReservationGroupFn: async (groupId, payload) => {
+        capturedPayloads.push(payload);
+        return {
+          group_id: groupId,
+          reservation_ids: [101, 102, 103, 104],
+          updated_tables: [1, 2, 3, 4],
+          removed_tables: []
+        };
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(capturedPayloads.length, 1);
+    assert.strictEqual(capturedPayloads[0]!.customer_name, "Updated Group Name");
+    assert.strictEqual(capturedPayloads[0]!.customer_phone, "+1111111111");
+    assert.strictEqual(capturedPayloads[0]!.guest_count, 8);
+    assert.strictEqual(capturedPayloads[0]!.duration_minutes, 150);
+    assert.strictEqual(capturedPayloads[0]!.notes, "Updated group notes");
+    assert.deepStrictEqual(capturedPayloads[0]!.table_ids, [1, 2, 3, 4]);
+  });
+
+  test("edit-group mode does not include table_ids when unchecking multi-table", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+
+    const capturedPayloads: Array<{
+      table_ids?: number[];
+    }> = [];
+
+    // Note: tableId is required by validation even though it's not used in edit-group mode
+    const result = await pageModule.executeReservationFormAction({
+      mode: "edit-group",
+      selectedOutletId: 5,
+      editingGroupId: 42,
+      editingReservationId: null,
+      formState: {
+        tableId: 1, // Required by validation even though edit-group doesn't use it
+        customerName: "Group",
+        customerPhone: "",
+        guestCount: 8,
+        reservationAt: new Date("2026-03-20T20:00:00.000Z"),
+        durationMinutes: 150,
+        notes: ""
+      },
+      accessToken: "token",
+      isMultiTable: false, // Not multi-table - should not send table_ids
+      selectedTableIds: [], // Empty
+      updateReservationGroupFn: async (groupId, payload) => {
+        capturedPayloads.push(payload);
+        return {
+          group_id: groupId,
+          reservation_ids: [],
+          updated_tables: [],
+          removed_tables: []
+        };
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, true);
+    // table_ids should NOT be in payload when isMultiTable is false
+    assert.strictEqual(capturedPayloads[0]!.table_ids, undefined);
+  });
+
+  test("edit-group mode returns error when no editingGroupId", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+
+    const result = await pageModule.executeReservationFormAction({
+      mode: "edit-group",
+      selectedOutletId: 5,
+      editingGroupId: null, // Missing group ID
+      editingReservationId: null,
+      formState: {
+        tableId: null,
+        customerName: "Group",
+        customerPhone: "",
+        guestCount: 8,
+        reservationAt: new Date("2026-03-20T20:00:00.000Z"),
+        durationMinutes: 150,
+        notes: ""
+      },
+      accessToken: "token",
+      isMultiTable: true,
+      selectedTableIds: [1, 2],
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.ok(
+      result.errorMessage?.includes("missing reservation id") ||
+      result.errorMessage?.includes("Cannot edit reservation")
+    );
+  });
+
+  test("updateReservationGroupFn failure returns error in edit-group mode", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+
+    const result = await pageModule.executeReservationFormAction({
+      mode: "edit-group",
+      selectedOutletId: 5,
+      editingGroupId: 42,
+      editingReservationId: null,
+      formState: {
+        tableId: null,
+        customerName: "Group",
+        customerPhone: "",
+        guestCount: 8,
+        reservationAt: new Date("2026-03-20T20:00:00.000Z"),
+        durationMinutes: 150,
+        notes: ""
+      },
+      accessToken: "token",
+      isMultiTable: true,
+      selectedTableIds: [1, 2, 3],
+      updateReservationGroupFn: async () => {
+        throw new Error("Insufficient capacity");
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.errorMessage, "Insufficient capacity");
+  });
 });

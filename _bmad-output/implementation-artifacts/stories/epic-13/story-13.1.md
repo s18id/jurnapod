@@ -1,6 +1,6 @@
 # Story 13.1: Large Party Reservation Groups (Multi-Table Support)
 
-Status: in-progress
+Status: done
 
 ## Story
 

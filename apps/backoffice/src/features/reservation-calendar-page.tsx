@@ -44,7 +44,7 @@ import { getStoredCompanyTimezone, refreshSessionUser, type SessionUser } from "
 import { useOutletsFull } from "../hooks/use-outlets";
 import { useOutletTables } from "../hooks/use-outlet-tables";
 import { createReservation, updateReservation } from "../hooks/use-reservations";
-import { cancelReservationGroup, createReservationGroup, getReservationGroup, useTableSuggestions } from "../hooks/use-reservation-groups";
+import { cancelReservationGroup, createReservationGroup, getReservationGroup, updateReservationGroup, useTableSuggestions } from "../hooks/use-reservation-groups";
 import {
   DEFAULT_RESERVATION_DURATION_MINUTES,
   buildDailyUtilization,
@@ -74,7 +74,7 @@ type ReservationFormState = {
   notes: string;
 };
 
-type ReservationFormMode = "create" | "edit";
+type ReservationFormMode = "create" | "edit" | "edit-group";
 
 type ReservationFormExecutionResult = {
   ok: boolean;
@@ -135,6 +135,7 @@ export async function executeReservationFormAction(input: {
   mode: ReservationFormMode;
   selectedOutletId: number | null;
   editingReservationId: number | null;
+  editingGroupId?: number | null;
   formState: ReservationFormState;
   accessToken: string;
   isMultiTable?: boolean;
@@ -150,6 +151,15 @@ export async function executeReservationFormAction(input: {
     duration_minutes: number;
     notes: string | null;
   }, accessToken: string) => Promise<{ group_id: number; reservation_ids: number[] }>;
+  updateReservationGroupFn?: (groupId: number, data: {
+    customer_name?: string;
+    customer_phone?: string | null;
+    guest_count?: number;
+    reservation_at?: string;
+    duration_minutes?: number;
+    notes?: string | null;
+    table_ids?: number[];
+  }, accessToken: string) => Promise<{ group_id: number; reservation_ids: number[]; updated_tables: number[]; removed_tables: number[] }>;
   updateReservationFn?: (reservationId: number, data: ReservationUpdateRequest, accessToken: string) => Promise<ReservationRow>;
   refetchCalendar: () => Promise<unknown>;
   refetchTables: () => Promise<unknown>;
@@ -210,8 +220,34 @@ export async function executeReservationFormAction(input: {
         };
         await createFn(payload, input.accessToken);
       }
+    } else if (input.mode === "edit-group" && input.editingGroupId) {
+      // Group edit: update the entire group
+      const updateGroupFn = input.updateReservationGroupFn ?? updateReservationGroup;
+      const updatePayload: {
+        customer_name?: string;
+        customer_phone?: string | null;
+        guest_count?: number;
+        reservation_at?: string;
+        duration_minutes?: number;
+        notes?: string | null;
+        table_ids?: number[];
+      } = {
+        customer_name: input.formState.customerName.trim(),
+        customer_phone: input.formState.customerPhone.trim() || null,
+        guest_count: Math.max(2, Math.round(input.formState.guestCount)),
+        reservation_at: input.formState.reservationAt.toISOString(),
+        duration_minutes: Math.max(15, Math.round(input.formState.durationMinutes)),
+        notes: input.formState.notes.trim() || null
+      };
+
+      // Only include table_ids if in multi-table mode with selections
+      if (input.isMultiTable && input.selectedTableIds && input.selectedTableIds.length >= 2) {
+        updatePayload.table_ids = input.selectedTableIds;
+      }
+
+      await updateGroupFn(input.editingGroupId, updatePayload, input.accessToken);
     } else if (input.editingReservationId) {
-      // For edits, always use single-table update (multi-table edit not yet supported)
+      // Individual reservation edit (not part of a group edit)
       const editPayload = {
         table_id: input.formState.tableId,
         customer_name: input.formState.customerName.trim(),
@@ -425,6 +461,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<ReservationFormMode>("create");
   const [editingReservationId, setEditingReservationId] = useState<number | null>(null);
+  const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
   const [formState, setFormState] = useState<ReservationFormState>(emptyFormState);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -578,6 +615,15 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     accessToken
   });
 
+  // Listen for cross-page invalidation events
+  useEffect(() => {
+    const handleInvalidation = () => {
+      calendar.refetch();
+    };
+    window.addEventListener("reservation-invalidation", handleInvalidation);
+    return () => window.removeEventListener("reservation-invalidation", handleInvalidation);
+  }, [calendar]);
+
   useEffect(() => {
     if (selectedOutletId || outlets.loading || outlets.data.length === 0) {
       return;
@@ -691,18 +737,65 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     setFormOpen(true);
   }, [anchorDate, defaultDurationMinutes]);
 
-  const openEditModal = useCallback((row: ReservationRow) => {
-    setFormMode("edit");
-    setEditingReservationId(row.reservation_id);
-    setFormState(createFormFromReservation(row, defaultDurationMinutes));
+  const openEditModal = useCallback(async (row: ReservationRow) => {
     setFormError(null);
+    setFormError(null);
+
+    // Check if this reservation is part of a group
+    if (row.reservation_group_id) {
+      // Load full group details for group editing
+      try {
+        const groupDetail = await getReservationGroup(row.reservation_group_id, accessToken);
+        const firstReservation = groupDetail.reservations[0];
+        if (firstReservation) {
+          // Calculate duration from timestamps
+          const startTs = firstReservation.reservation_start_ts ?? new Date(firstReservation.reservation_at).getTime();
+          const endTs = firstReservation.reservation_end_ts ?? startTs + (defaultDurationMinutes ?? 120) * 60 * 1000;
+          const durationMinutes = Math.round((endTs - startTs) / 60 / 1000);
+
+          setFormMode("edit-group");
+          setEditingGroupId(row.reservation_group_id);
+          setEditingReservationId(row.reservation_id);
+          setFormState({
+            tableId: null,
+            customerName: row.customer_name || "Group Reservation",
+            customerPhone: row.customer_phone || "",
+            guestCount: groupDetail.total_guest_count,
+            reservationAt: new Date(firstReservation.reservation_at),
+            durationMinutes: durationMinutes,
+            notes: row.notes || ""
+          });
+          // Pre-select all tables from the group
+          setIsMultiTable(true);
+          setSelectedTableIds(groupDetail.reservations.map(r => r.table_id));
+        }
+      } catch {
+        // Fall back to individual edit if group load fails
+        setFormMode("edit");
+        setEditingGroupId(null);
+        setEditingReservationId(row.reservation_id);
+        setFormState(createFormFromReservation(row, defaultDurationMinutes));
+        setIsMultiTable(false);
+        setSelectedTableIds([]);
+      }
+    } else {
+      // Regular individual edit
+      setFormMode("edit");
+      setEditingGroupId(null);
+      setEditingReservationId(row.reservation_id);
+      setFormState(createFormFromReservation(row, defaultDurationMinutes));
+      setIsMultiTable(false);
+      setSelectedTableIds([]);
+    }
+
     setFormOpen(true);
-  }, [defaultDurationMinutes]);
+  }, [accessToken, defaultDurationMinutes]);
 
   const closeFormModal = useCallback(() => {
     setFormOpen(false);
     setFormError(null);
     setEditingReservationId(null);
+    setEditingGroupId(null);
     setIsMultiTable(false);
     setSelectedTableIds([]);
     setSuggestions([]);
@@ -718,6 +811,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       mode: formMode,
       selectedOutletId,
       editingReservationId,
+      editingGroupId,
       formState,
       accessToken,
       isMultiTable,
@@ -738,6 +832,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     accessToken,
     calendar,
     closeFormModal,
+    editingGroupId,
     editingReservationId,
     formMode,
     formState,
@@ -1183,7 +1278,11 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       <Modal
         opened={formOpen}
         onClose={closeFormModal}
-        title={<Title order={4}>{formMode === "create" ? "Create Reservation" : "Edit Reservation"}</Title>}
+        title={<Title order={4}>
+          {formMode === "create" ? "Create Reservation" : 
+           formMode === "edit-group" ? `Edit Group #${editingGroupId}` : 
+           "Edit Reservation"}
+        </Title>}
         centered
         size="md"
       >
@@ -1191,6 +1290,34 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
           {formError && (
             <Alert color="red" title="Cannot save">
               {formError}
+            </Alert>
+          )}
+
+          {/* Show "Part of Group" notice when editing individual reservation in a group */}
+          {formMode === "edit" && detailReservation?.reservation_group_id && (
+            <Alert color="violet" variant="light" title="Part of Group">
+              <Stack gap="xs">
+                <Text size="sm">
+                  This reservation is part of Group #{detailReservation.reservation_group_id}.
+                  Editing it will only affect this single reservation, not the entire group.
+                </Text>
+                {detailGroup && detailGroup.reservations.length > 1 && (
+                  <>
+                    <Text size="sm" fw={500}>
+                      Other tables in this group:
+                    </Text>
+                    <Group gap="xs">
+                      {detailGroup.reservations
+                        .filter(r => r.reservation_id !== detailReservation.reservation_id)
+                        .map(r => (
+                          <Badge key={r.reservation_id} color="violet" variant="light" size="sm">
+                            {r.table_code} - {r.table_name}
+                          </Badge>
+                        ))}
+                    </Group>
+                  </>
+                )}
+              </Stack>
             </Alert>
           )}
 
@@ -1223,9 +1350,14 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
 
           <Checkbox
             label="Large party (multiple tables)"
-            description="For parties requiring 2+ tables"
+            description={
+              formMode === "edit-group"
+                ? "This group requires multiple tables (cannot be changed)"
+                : "For parties requiring 2+ tables"
+            }
             checked={isMultiTable}
             onChange={(event) => setIsMultiTable(event.currentTarget.checked)}
+            disabled={formMode === "edit-group"}
           />
 
           <TextInput

@@ -11,8 +11,37 @@ import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
 import { getCompany } from "../../../src/lib/companies";
 import { toDateTimeRangeWithTimezone } from "../../../src/lib/date-helpers";
 import { getOutlet } from "../../../src/lib/outlets";
-import { createReservation, listReservations, ReservationValidationError } from "../../../src/lib/reservations";
+import { createReservation, listReservationsV2, ReservationValidationError } from "../../../src/lib/reservations";
 import { errorResponse, successResponse } from "../../../src/lib/response";
+import { buildPaginationMeta } from "../../../src/lib/pagination";
+
+// Map status string to status ID
+const STATUS_TO_ID: Record<string, number> = {
+  BOOKED: 1,
+  CONFIRMED: 2,
+  ARRIVED: 3,
+  COMPLETED: 4,
+  NO_SHOW: 5,
+  CANCELLED: 6
+};
+
+const ID_TO_STATUS: Record<number, string> = {
+  1: "BOOKED",
+  2: "CONFIRMED",
+  3: "ARRIVED",
+  4: "COMPLETED",
+  5: "NO_SHOW",
+  6: "CANCELLED"
+};
+
+function mapStatusToStatusId(status?: string): number | undefined {
+  if (!status) return undefined;
+  return STATUS_TO_ID[status];
+}
+
+function getStatusString(statusId: number): string {
+  return ID_TO_STATUS[statusId] ?? "BOOKED";
+}
 
 function parseOutletIdForListGuard(request: Request): number {
   const outletIdRaw = new URL(request.url).searchParams.get("outlet_id");
@@ -162,8 +191,47 @@ export const GET = withAuth(
         : null;
       const normalizedQuery = applyDateOnlyRange(query, timezone);
 
-      const rows = await listReservations(auth.companyId, normalizedQuery);
-      return successResponse(rows);
+      const limit = Number(normalizedQuery.limit) || 50;
+      const offset = Number(normalizedQuery.offset) || 0;
+
+      // Use listReservationsV2 which returns total count
+      const result = await listReservationsV2({
+        companyId: BigInt(auth.companyId),
+        outletId: BigInt(normalizedQuery.outlet_id),
+        limit,
+        offset,
+        statusId: normalizedQuery.status ? mapStatusToStatusId(normalizedQuery.status) : undefined,
+        fromDate: normalizedQuery.from ? new Date(normalizedQuery.from) : undefined,
+        toDate: normalizedQuery.to ? new Date(normalizedQuery.to) : undefined,
+        useOverlapFilter: normalizedQuery.overlap_filter
+      });
+
+      const meta = buildPaginationMeta(result.total, limit, offset);
+
+      // Convert bigints to strings for JSON serialization
+      // Match ReservationRowSchema format
+      const serializedReservations = result.reservations.map((r) => ({
+        reservation_id: r.id.toString(),
+        company_id: r.companyId.toString(),
+        outlet_id: r.outletId.toString(),
+        reservation_group_id: null,
+        table_id: r.tableId?.toString() ?? null,
+        customer_name: r.customerName,
+        customer_phone: r.customerPhone,
+        guest_count: r.partySize,
+        reservation_at: r.reservationTime.toISOString(),
+        duration_minutes: r.durationMinutes,
+        status: getStatusString(r.statusId),
+        notes: r.notes,
+        linked_order_id: null,
+        created_at: r.createdAt.toISOString(),
+        updated_at: r.updatedAt.toISOString(),
+        arrived_at: null,
+        seated_at: null,
+        cancelled_at: null
+      }));
+
+      return successResponse({ data: serializedReservations, meta });
     } catch (error) {
       if (error instanceof MissingReservationTimezoneError) {
         return errorResponse("INVALID_REQUEST", error.message, 400);

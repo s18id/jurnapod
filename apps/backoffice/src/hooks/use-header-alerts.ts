@@ -118,7 +118,15 @@ export function useHeaderAlerts(userId: number | null): HeaderAlertData {
     refresh();
     const intervalId = window.setInterval(refresh, POLL_INTERVAL_MS);
 
-    const handleFocus = () => refresh();
+    let focusDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleFocus = () => {
+      // Debounce focus events to prevent rapid-fire refreshes
+      if (focusDebounceTimer) return;
+      focusDebounceTimer = setTimeout(() => {
+        focusDebounceTimer = null;
+        refresh();
+      }, 1000);
+    };
     const handleOnline = () => refresh();
 
     window.addEventListener("focus", handleFocus);
@@ -128,6 +136,7 @@ export function useHeaderAlerts(userId: number | null): HeaderAlertData {
       window.clearInterval(intervalId);
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("online", handleOnline);
+      if (focusDebounceTimer) clearTimeout(focusDebounceTimer);
     };
   }, [userId, refresh]);
 

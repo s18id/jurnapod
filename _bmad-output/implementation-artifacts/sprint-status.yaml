@@ -1,5 +1,5 @@
 # generated: 2026-03-15T09:32:00.000Z
-# last_updated: 2026-03-20T21:20:00+0700
+# last_updated: 2026-03-20T23:50:00+0700
 # project: jurnapod
 # project_key: NOKEY
 # tracking_system: file-system
@@ -153,5 +153,9 @@ development_status:
 
   # Epic 13: Large Party Reservations (Multi-Table Support)
   # NOTE: Feature for parties requiring 2+ tables with table suggestions and group management
-  epic-13: done  # COMPLETE - All stories done
-  13-1-reservation-groups-large-party-support: done  # COMPLETE - Round 1 + Round 2 review fixes resolved (race-condition, tenant isolation, timezone policy, deterministic tests, docs)
+  epic-13: done
+  13-1-reservation-groups-large-party-support: done  # COMPLETE - Round 1 + Round 2 review fixes resolved (race-condition, tenant isolation, timezone policy, deterministic tests, docs) | FINAL REVIEW 2026-03-20
+  13-2-reservation-group-editing: done  # COMPLETE - 13.2.1 fixes approved and tests added
+  13-2-1-reservation-group-editing-critical-fixes: done  # APPROVED - Code review clean; all CRITICAL + MEDIUM issues resolved
+  13-2-2-reservation-group-editing-test-coverage: done  # COMPLETE - 13 backend tests + 4 frontend tests passing (422 API tests, 162 backoffice tests)
+  13-3-reservation-list-improvements: done  # COMPLETE - Pagination, date defaults, auto-select outlet, shared modal, performance fixes

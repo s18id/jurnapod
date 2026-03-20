@@ -6,6 +6,7 @@ import { apiRequest } from "../lib/api-client";
 import type {
   ReservationGroupCreateRequest,
   ReservationGroupDetail,
+  ReservationGroupUpdateRequest,
   TableSuggestion,
   TableSuggestionQuery
 } from "@jurnapod/shared";
@@ -63,6 +64,28 @@ export async function cancelReservationGroup(
     `/reservation-groups/${groupId}`,
     {
       method: "DELETE"
+    },
+    accessToken
+  );
+  return response.data;
+}
+
+/**
+ * Update an existing reservation group
+ */
+export async function updateReservationGroup(
+  groupId: number,
+  data: ReservationGroupUpdateRequest,
+  accessToken: string
+): Promise<{ group_id: number; reservation_ids: number[]; updated_tables: number[]; removed_tables: number[] }> {
+  const response = await apiRequest<{
+    success: true;
+    data: { group_id: number; reservation_ids: number[]; updated_tables: number[]; removed_tables: number[] };
+  }>(
+    `/reservation-groups/${groupId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data)
     },
     accessToken
   );
@@ -131,6 +154,8 @@ export function useTableSuggestions(
 export function useReservationGroups(accessToken: string) {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   const createGroup = useCallback(
     async (data: ReservationGroupCreateRequest): Promise<{ group_id: number; reservation_ids: number[] } | null> => {
@@ -151,9 +176,36 @@ export function useReservationGroups(accessToken: string) {
     [accessToken]
   );
 
+  const updateGroup = useCallback(
+    async (groupId: number, data: ReservationGroupUpdateRequest): Promise<{ 
+      group_id: number; 
+      reservation_ids: number[]; 
+      updated_tables: number[]; 
+      removed_tables: number[];
+    } | null> => {
+      setUpdating(true);
+      setUpdateError(null);
+
+      try {
+        const result = await updateReservationGroup(groupId, data, accessToken);
+        return result;
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Failed to update reservation group";
+        setUpdateError(message);
+        return null;
+      } finally {
+        setUpdating(false);
+      }
+    },
+    [accessToken]
+  );
+
   return {
     createGroup,
     creating,
-    createError
+    createError,
+    updateGroup,
+    updating,
+    updateError
   };
 }

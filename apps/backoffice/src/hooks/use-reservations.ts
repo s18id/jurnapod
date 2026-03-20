@@ -35,7 +35,7 @@ export function extractReservationRowsFromApiPayload(payload: unknown): Reservat
 }
 
 /**
- * Hook to fetch reservations with filters
+ * Hook to fetch reservations with filters and pagination
  */
 export function useReservations(
   query: Partial<ReservationListQuery> | null,
@@ -44,6 +44,7 @@ export function useReservations(
   const [data, setData] = useState<ReservationRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [total, setTotal] = useState<number>(0);
 
   const outletId = query?.outlet_id ?? null;
   const status = query?.status;
@@ -58,6 +59,7 @@ export function useReservations(
   const refetch = useCallback(async () => {
     if (!outletId) {
       setData([]);
+      setTotal(0);
       setError(null);
       setLoading(false);
       return;
@@ -78,15 +80,33 @@ export function useReservations(
       if (limit) params.set("limit", limit.toString());
       if (offset) params.set("offset", offset.toString());
 
-      const response = await apiRequest<unknown>(
+      const response = await apiRequest<{
+        success: true;
+        data: {
+          data: unknown[];
+          meta: {
+            total: number;
+            page: number;
+            page_size: number;
+            total_pages: number;
+          };
+        };
+      }>(
         `/reservations?${params.toString()}`,
         {},
         accessToken
       );
-      setData(extractReservationRowsFromApiPayload(response));
+      
+      // Extract reservations and total from nested response
+      const reservationData = response.data.data;
+      const meta = response.data.meta;
+      
+      setData(extractReservationRowsFromApiPayload({ data: reservationData, success: true }));
+      setTotal(meta?.total ?? reservationData.length);
     } catch (e: any) {
       setError(e.message || "Failed to fetch reservations");
       setData([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -96,7 +116,7 @@ export function useReservations(
     refetch();
   }, [refetch]);
 
-  return { data, loading, error, refetch };
+  return { data, loading, error, refetch, total };
 }
 
 /**
@@ -114,6 +134,10 @@ export async function createReservation(
     },
     accessToken
   );
+  // Broadcast invalidation to all reservation pages
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("reservation-invalidation"));
+  }
   return response.data;
 }
 
@@ -133,6 +157,10 @@ export async function updateReservation(
     },
     accessToken
   );
+  // Broadcast invalidation to all reservation pages
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("reservation-invalidation"));
+  }
   return response.data;
 }
 

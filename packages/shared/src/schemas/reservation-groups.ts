@@ -107,6 +107,30 @@ export const TableSuggestionResponseSchema = z.object({
   suggestions: z.array(TableSuggestionSchema)
 });
 
+/**
+ * Request to update an existing reservation group.
+ * All fields are optional - only provide fields you want to change.
+ */
+export const ReservationGroupUpdateRequestSchema = z.object({
+  customer_name: z.string().trim().min(1).max(191).optional(),
+  customer_phone: z.string().trim().max(64).nullable().optional(),
+  guest_count: z.coerce.number().int().min(2).max(100).optional(),
+  reservation_at: z.string().datetime({ offset: true }).optional(), // ISO 8601
+  duration_minutes: z.coerce.number().int().min(15).max(480).optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+  table_ids: z.array(NumericIdSchema).min(2).max(10).optional() // If provided, replaces all tables
+});
+
+/**
+ * Response for group update
+ */
+export const ReservationGroupUpdateResponseSchema = z.object({
+  group_id: NumericIdSchema,
+  reservation_ids: z.array(NumericIdSchema),
+  updated_tables: z.array(NumericIdSchema),
+  removed_tables: z.array(NumericIdSchema)
+});
+
 // Type exports
 export type ReservationGroupRow = z.infer<typeof ReservationGroupRowSchema>;
 export type ReservationGroupCreateRequest = z.infer<typeof ReservationGroupCreateRequestSchema>;
@@ -117,3 +141,5 @@ export type ReservationGroupReservation = z.infer<typeof ReservationGroupReserva
 export type ReservationGroupDetail = z.infer<typeof ReservationGroupDetailSchema>;
 export type ReservationGroupCreateResponse = z.infer<typeof ReservationGroupCreateResponseSchema>;
 export type TableSuggestionResponse = z.infer<typeof TableSuggestionResponseSchema>;
+export type ReservationGroupUpdateRequest = z.infer<typeof ReservationGroupUpdateRequestSchema>;
+export type ReservationGroupUpdateResponse = z.infer<typeof ReservationGroupUpdateResponseSchema>;

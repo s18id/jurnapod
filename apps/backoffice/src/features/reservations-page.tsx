@@ -1,25 +1,24 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
   Group,
   Modal,
+  Pagination,
   Select,
   Stack,
   Text,
   TextInput,
-  Title,
-  NumberInput,
-  Textarea,
   Badge
 } from "@mantine/core";
-// Note: Using TextInput for datetime until @mantine/dates is installed
 import { DataTable } from "../components/DataTable";
 import { PageCard } from "../components/PageCard";
 import { FilterBar } from "../components/FilterBar";
+import { ReservationFormModal } from "../components/ReservationFormModal";
+import { UniversalPaginator } from "../components/UniversalPaginator";
 import type { SessionUser } from "../lib/session";
 import {
   isReservationFinalStatus,
@@ -31,12 +30,27 @@ import { useOutletsFull } from "../hooks/use-outlets";
 import { useOutletTables } from "../hooks/use-outlet-tables";
 import {
   useReservations,
-  createReservation,
-  updateReservation,
-  cancelReservation
+  cancelReservation,
+  updateReservation
 } from "../hooks/use-reservations";
 import type { ColumnDef } from "@tanstack/react-table";
-import type { OutletTableResponse, ReservationRow, ReservationStatus } from "@jurnapod/shared";
+import type { ReservationRow, ReservationStatus } from "@jurnapod/shared";
+
+const PAGE_SIZE = 50;
+
+function getThisMonthRange(): { dateFrom: string; dateTo: string } {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const formatDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return {
+    dateFrom: formatDate(firstDay),
+    dateTo: formatDate(lastDay)
+  };
+}
 
 type ReservationsPageProps = {
   user: SessionUser;
@@ -45,65 +59,47 @@ type ReservationsPageProps = {
 
 type DialogMode = "create" | "edit" | null;
 
-interface FormData {
-  table_id: number | null;
-  customer_name: string;
-  customer_phone: string | null;
-  guest_count: number;
-  reservation_at: Date | null;
-  duration_minutes: number | null;
-  notes: string | null;
+// Memoized cell components to prevent unnecessary re-renders
+interface TableCellProps {
+  reservation: ReservationRow;
+  tableCode: string | null;
 }
 
-const emptyForm: FormData = {
-  table_id: null,
-  customer_name: "",
-  customer_phone: null,
-  guest_count: 2,
-  reservation_at: null,
-  duration_minutes: 120,
-  notes: null
-};
+const TableCell = memo(function TableCell({ reservation, tableCode }: TableCellProps) {
+  const isFinal = isReservationFinalStatus(reservation.status);
+  return <Text c={isFinal ? "dimmed" : undefined}>{tableCode ?? "—"}</Text>;
+});
 
-function formatDateTimeLocalInput(date: Date): string {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  const hours = `${date.getHours()}`.padStart(2, "0");
-  const minutes = `${date.getMinutes()}`.padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+interface StatusCellProps {
+  status: ReservationStatus;
 }
 
-function parseDateTimeLocalInput(value: string): Date | null {
-  if (!value) {
-    return null;
-  }
+const StatusCell = memo(function StatusCell({ status }: StatusCellProps) {
+  const statusConfig = RESERVATION_STATUS_META[status];
+  return (
+    <Badge color={statusConfig.badgeColor} variant="light">
+      {statusConfig.label}
+    </Badge>
+  );
+});
 
-  const [datePart, timePart] = value.split("T");
-  if (!datePart || !timePart) {
-    return null;
-  }
-
-  const [yearRaw, monthRaw, dayRaw] = datePart.split("-");
-  const [hourRaw, minuteRaw] = timePart.split(":");
-  const year = Number(yearRaw);
-  const month = Number(monthRaw);
-  const day = Number(dayRaw);
-  const hour = Number(hourRaw);
-  const minute = Number(minuteRaw);
-
-  if (
-    !Number.isInteger(year) ||
-    !Number.isInteger(month) ||
-    !Number.isInteger(day) ||
-    !Number.isInteger(hour) ||
-    !Number.isInteger(minute)
-  ) {
-    return null;
-  }
-
-  return new Date(year, month - 1, day, hour, minute, 0, 0);
+interface CustomerCellProps {
+  name: string;
+  phone: string | null;
 }
+
+const CustomerCell = memo(function CustomerCell({ name, phone }: CustomerCellProps) {
+  return (
+    <Stack gap={0}>
+      <Text fw={600}>{name}</Text>
+      {phone && (
+        <Text size="xs" c="dimmed">
+          {phone}
+        </Text>
+      )}
+    </Stack>
+  );
+});
 
 export function ReservationsPage(props: ReservationsPageProps) {
   const { user, accessToken } = props;
@@ -115,16 +111,18 @@ export function ReservationsPage(props: ReservationsPageProps) {
   const [selectedOutletId, setSelectedOutletId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<ReservationStatus | null>(null);
 
+  // Date range filter - default to this month
+  const thisMonth = getThisMonthRange();
+  const [dateFrom, setDateFrom] = useState<string | null>(thisMonth.dateFrom);
+  const [dateTo, setDateTo] = useState<string | null>(thisMonth.dateTo);
+
+  // Pagination
+  const [page, setPage] = useState(1);
+
   // Dialog state
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingReservation, setEditingReservation] = useState<ReservationRow | null>(null);
-  const [formData, setFormData] = useState<FormData>(emptyForm);
-  const [formErrors, setFormErrors] = useState<Partial<Record<keyof FormData, string>>>({});
-  const [submitting, setSubmitting] = useState(false);
   const [statusUpdatingReservationId, setStatusUpdatingReservationId] = useState<number | null>(
-    null
-  );
-  const [tableAssigningReservationId, setTableAssigningReservationId] = useState<number | null>(
     null
   );
 
@@ -140,73 +138,46 @@ export function ReservationsPage(props: ReservationsPageProps) {
   const outlets = useOutletsFull(userCompanyId, accessToken);
   const tables = useOutletTables(selectedOutletId, accessToken);
 
-  const reservationQuery = useMemo(
-    () =>
-      selectedOutletId
-        ? { outlet_id: selectedOutletId, status: statusFilter || undefined }
-        : null,
-    [selectedOutletId, statusFilter]
-  );
-  const reservations = useReservations(reservationQuery, accessToken);
+  // Auto-select first outlet when outlets load
+  useEffect(() => {
+    if (!selectedOutletId && outlets.data.length > 0) {
+      setSelectedOutletId(Number(outlets.data[0].id));
+    }
+  }, [outlets.data, selectedOutletId]);
 
-  // Search/filter
-  const [searchTerm, setSearchTerm] = useState("");
-
-  // Filter reservations by search
-  const filteredReservations = useMemo(() => {
-    if (!searchTerm.trim()) return reservations.data;
-    const term = searchTerm.toLowerCase();
-    return reservations.data.filter(
-      (r) =>
-        r.customer_name.toLowerCase().includes(term) ||
-        (r.customer_phone && r.customer_phone.toLowerCase().includes(term))
-    );
-  }, [reservations.data, searchTerm]);
-
-  const tableById = useMemo(() => {
-    const map = new Map<number, OutletTableResponse>();
+  // Table code lookup
+  const tableCodeById = useMemo(() => {
+    const map = new Map<number, string>();
     for (const table of tables.data) {
-      map.set(table.id, table);
+      map.set(table.id, table.code);
     }
     return map;
   }, [tables.data]);
 
-  const editingReservationTableId = editingReservation?.table_id ?? null;
-
-  const assignableTableOptions = useMemo(
+  const reservationQuery = useMemo(
     () =>
-      tables.data
-        .filter((table) => table.status === "AVAILABLE")
-        .map((table) => ({
-          value: table.id.toString(),
-          label: `${table.code} - ${table.name} (${table.zone || "No zone"})`
-        })),
-    [tables.data]
+      selectedOutletId
+        ? {
+            outlet_id: selectedOutletId,
+            status: statusFilter || undefined,
+            date_from: dateFrom || undefined,
+            date_to: dateTo || undefined,
+            limit: PAGE_SIZE,
+            offset: (page - 1) * PAGE_SIZE
+          }
+        : null,
+    [selectedOutletId, statusFilter, dateFrom, dateTo, page]
   );
+  const reservations = useReservations(reservationQuery, accessToken);
 
-  const modalTableOptions = useMemo(() => {
-    const base = assignableTableOptions;
-    if (dialogMode !== "edit" || !editingReservationTableId) return base;
-
-    const currentId = editingReservationTableId;
-    const hasCurrent = base.some((o) => o.value === currentId.toString());
-    if (hasCurrent) return base;
-
-    const currentTable = tableById.get(currentId);
-    const currentLabel = currentTable
-      ? `${currentTable.code} - ${currentTable.name} (${currentTable.zone || "No zone"})`
-      : `Table #${currentId}`;
-
-    return [{ value: currentId.toString(), label: currentLabel }, ...base];
-  }, [assignableTableOptions, dialogMode, editingReservationTableId, tableById]);
-
-  // Close dialog helper
-  const closeDialog = useCallback(() => {
-    setDialogMode(null);
-    setEditingReservation(null);
-    setFormData(emptyForm);
-    setFormErrors({});
-  }, []);
+  // Listen for cross-page invalidation events
+  useEffect(() => {
+    const handleInvalidation = () => {
+      reservations.refetch();
+    };
+    window.addEventListener("reservation-invalidation", handleInvalidation);
+    return () => window.removeEventListener("reservation-invalidation", handleInvalidation);
+  }, [reservations]);
 
   // Open create dialog
   const openCreateDialog = useCallback(() => {
@@ -214,124 +185,21 @@ export function ReservationsPage(props: ReservationsPageProps) {
       setError("Please select an outlet first");
       return;
     }
-    setFormData(emptyForm);
-    setFormErrors({});
+    setEditingReservation(null);
     setDialogMode("create");
   }, [selectedOutletId]);
 
   // Open edit dialog
   const openEditDialog = useCallback((reservation: ReservationRow) => {
     setEditingReservation(reservation);
-    setFormData({
-      table_id: reservation.table_id,
-      customer_name: reservation.customer_name,
-      customer_phone: reservation.customer_phone,
-      guest_count: reservation.guest_count,
-      reservation_at: new Date(reservation.reservation_at),
-      duration_minutes: reservation.duration_minutes,
-      notes: reservation.notes
-    });
-    setFormErrors({});
     setDialogMode("edit");
   }, []);
 
-  // Validate form
-  const validateForm = useCallback((): boolean => {
-    const errors: Partial<Record<keyof FormData, string>> = {};
-
-    if (!formData.customer_name.trim()) {
-      errors.customer_name = "Customer name is required";
-    }
-    if (formData.guest_count < 1) {
-      errors.guest_count = "Guest count must be at least 1";
-    }
-    if (!formData.reservation_at) {
-      errors.reservation_at = "Reservation date/time is required";
-    }
-
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  }, [formData]);
-
-  // Handle submit
-  const handleSubmit = useCallback(async () => {
-    if (!validateForm()) return;
-    if (!selectedOutletId) {
-      setError("No outlet selected");
-      return;
-    }
-
-    const selectedTableId = formData.table_id;
-    if (selectedTableId != null) {
-      const isCurrentAssignedInEdit =
-        dialogMode === "edit" && editingReservation?.table_id === selectedTableId;
-
-      const selectedTable = tableById.get(selectedTableId);
-      const isAvailableNow = selectedTable?.status === "AVAILABLE";
-
-      if (!isCurrentAssignedInEdit && !isAvailableNow) {
-        setFormErrors((prev) => ({
-          ...prev,
-          table_id: "Selected table is no longer available"
-        }));
-        return;
-      }
-    }
-
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      if (dialogMode === "create") {
-        await createReservation(
-          {
-            outlet_id: selectedOutletId,
-            table_id: formData.table_id || undefined,
-            customer_name: formData.customer_name.trim(),
-            customer_phone: formData.customer_phone?.trim() || null,
-            guest_count: formData.guest_count,
-            reservation_at: formData.reservation_at!.toISOString(),
-            duration_minutes: formData.duration_minutes || undefined,
-            notes: formData.notes?.trim() || null
-          },
-          accessToken
-        );
-        setSuccessMessage("Reservation created successfully");
-      } else if (dialogMode === "edit" && editingReservation) {
-        await updateReservation(
-          editingReservation.reservation_id,
-          {
-            table_id: formData.table_id || undefined,
-            customer_name: formData.customer_name.trim(),
-            customer_phone: formData.customer_phone?.trim() || null,
-            guest_count: formData.guest_count,
-            reservation_at: formData.reservation_at!.toISOString(),
-            duration_minutes: formData.duration_minutes || undefined,
-            notes: formData.notes?.trim() || null
-          },
-          accessToken
-        );
-        setSuccessMessage("Reservation updated successfully");
-      }
-
-      await reservations.refetch();
-      closeDialog();
-    } catch (e: any) {
-      setError(e.message || "Failed to save reservation");
-    } finally {
-      setSubmitting(false);
-    }
-  }, [
-    dialogMode,
-    formData,
-    editingReservation,
-    selectedOutletId,
-    accessToken,
-    validateForm,
-    reservations,
-    closeDialog,
-    tableById
-  ]);
+  // Close dialog helper
+  const closeDialog = useCallback(() => {
+    setDialogMode(null);
+    setEditingReservation(null);
+  }, []);
 
   // Handle cancel reservation
   const handleCancel = useCallback(async () => {
@@ -376,30 +244,6 @@ export function ReservationsPage(props: ReservationsPageProps) {
     [accessToken, reservations, tables]
   );
 
-  const handleAssignTable = useCallback(
-    async (reservation: ReservationRow, nextTableId: number | null) => {
-      setTableAssigningReservationId(reservation.reservation_id);
-      setError(null);
-
-      try {
-        await updateReservation(
-          reservation.reservation_id,
-          {
-            table_id: nextTableId
-          },
-          accessToken
-        );
-        setSuccessMessage("Reservation table assignment updated");
-        await Promise.all([reservations.refetch(), tables.refetch()]);
-      } catch (e: any) {
-        setError(e.message || "Failed to assign table");
-      } finally {
-        setTableAssigningReservationId(null);
-      }
-    },
-    [accessToken, reservations, tables]
-  );
-
   // Clear success message on timeout
   useEffect(() => {
     if (successMessage) {
@@ -415,14 +259,10 @@ export function ReservationsPage(props: ReservationsPageProps) {
         id: "customer",
         header: "Customer",
         cell: (info) => (
-          <Stack gap={0}>
-            <Text fw={600}>{info.row.original.customer_name}</Text>
-            {info.row.original.customer_phone && (
-              <Text size="xs" c="dimmed">
-                {info.row.original.customer_phone}
-              </Text>
-            )}
-          </Stack>
+          <CustomerCell
+            name={info.row.original.customer_name}
+            phone={info.row.original.customer_phone}
+          />
         )
       },
       {
@@ -440,60 +280,17 @@ export function ReservationsPage(props: ReservationsPageProps) {
       {
         id: "table",
         header: "Table",
-        cell: (info) => {
-          const reservation = info.row.original;
-          const table = reservation.table_id ? tableById.get(reservation.table_id) : null;
-          const isFinal = isReservationFinalStatus(reservation.status);
-          const options = reservation.table_id
-            ? (() => {
-                const hasCurrent = assignableTableOptions.some(
-                  (option) => option.value === reservation.table_id!.toString()
-                );
-                if (hasCurrent) {
-                  return assignableTableOptions;
-                }
-
-                const currentLabel = table
-                  ? `${table.code} - ${table.name} (${table.zone || "No zone"})`
-                  : `Table #${reservation.table_id}`;
-                return [
-                  {
-                    value: reservation.table_id.toString(),
-                    label: currentLabel
-                  },
-                  ...assignableTableOptions
-                ];
-              })()
-            : assignableTableOptions;
-
-          if (isFinal) {
-            return <Text c="dimmed">{table ? table.code : "—"}</Text>;
-          }
-
-          return (
-            <Select
-              size="xs"
-              placeholder="No table assigned"
-              data={options}
-              value={reservation.table_id?.toString() || null}
-              onChange={(value) => void handleAssignTable(reservation, value ? Number(value) : null)}
-              clearable
-              disabled={tableAssigningReservationId === reservation.reservation_id}
-            />
-          );
-        }
+        cell: (info) => (
+          <TableCell
+            reservation={info.row.original}
+            tableCode={info.row.original.table_id ? tableCodeById.get(info.row.original.table_id) ?? null : null}
+          />
+        )
       },
       {
         id: "status",
         header: "Status",
-        cell: (info) => {
-          const statusConfig = RESERVATION_STATUS_META[info.row.original.status];
-          return (
-            <Badge color={statusConfig.badgeColor} variant="light">
-              {statusConfig.label}
-            </Badge>
-          );
-        }
+        cell: (info) => <StatusCell status={info.row.original.status} />
       },
       {
         id: "actions",
@@ -541,12 +338,9 @@ export function ReservationsPage(props: ReservationsPageProps) {
     ],
     [
       openEditDialog,
-      tableById,
-      assignableTableOptions,
-      handleAssignTable,
+      tableCodeById,
       handleStatusTransition,
-      statusUpdatingReservationId,
-      tableAssigningReservationId
+      statusUpdatingReservationId
     ]
   );
 
@@ -572,7 +366,10 @@ export function ReservationsPage(props: ReservationsPageProps) {
                   label: `${o.code} - ${o.name}`
                 }))}
                 value={selectedOutletId?.toString() || null}
-                onChange={(value) => setSelectedOutletId(value ? Number(value) : null)}
+                onChange={(value) => {
+                  setSelectedOutletId(value ? Number(value) : null);
+                  setPage(1);
+                }}
                 clearable
               />
             )}
@@ -586,7 +383,10 @@ export function ReservationsPage(props: ReservationsPageProps) {
                   label: `${o.code} - ${o.name}`
                 }))}
                 value={selectedOutletId?.toString() || null}
-                onChange={(value) => setSelectedOutletId(value ? Number(value) : null)}
+                onChange={(value) => {
+                  setSelectedOutletId(value ? Number(value) : null);
+                  setPage(1);
+                }}
                 clearable
               />
             )}
@@ -596,16 +396,44 @@ export function ReservationsPage(props: ReservationsPageProps) {
               placeholder="All statuses"
               data={RESERVATION_STATUS_OPTIONS}
               value={statusFilter}
-              onChange={(value) => setStatusFilter(value as ReservationStatus | null)}
+              onChange={(value) => {
+                setStatusFilter(value as ReservationStatus | null);
+                setPage(1);
+              }}
               clearable
             />
 
             <TextInput
-              label="Search"
-              placeholder="Search by customer name or phone"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.currentTarget.value)}
+              label="From Date"
+              type="date"
+              value={dateFrom || ""}
+              onChange={(e) => {
+                setDateFrom(e.currentTarget.value || null);
+                setPage(1);
+              }}
             />
+
+            <TextInput
+              label="To Date"
+              type="date"
+              value={dateTo || ""}
+              onChange={(e) => {
+                setDateTo(e.currentTarget.value || null);
+                setPage(1);
+              }}
+            />
+
+            <Button
+              size="sm"
+              variant="subtle"
+              onClick={() => {
+                setDateFrom(null);
+                setDateTo(null);
+                setPage(1);
+              }}
+            >
+              Clear Dates
+            </Button>
           </FilterBar>
 
           {error && (
@@ -628,144 +456,55 @@ export function ReservationsPage(props: ReservationsPageProps) {
       </PageCard>
 
       {selectedOutletId && (
-        <PageCard title={`Reservations (${filteredReservations.length})`}>
+        <PageCard
+          title="Reservations"
+        >
           {reservations.loading && <Text c="dimmed">Loading reservations...</Text>}
-          {!reservations.loading && filteredReservations.length === 0 && (
+          {!reservations.loading && reservations.data.length === 0 && (
             <Text c="dimmed">No reservations found. Create a new reservation to get started.</Text>
           )}
-          {!reservations.loading && filteredReservations.length > 0 && (
-            <DataTable
-              columns={columns}
-              data={filteredReservations}
-              emptyState="No reservations found matching your search"
-            />
+          {!reservations.loading && reservations.data.length > 0 && (
+            <>
+              <DataTable
+                columns={columns}
+                data={reservations.data}
+                emptyState="No reservations found"
+              />
+              <UniversalPaginator
+                total={reservations.total}
+                pageSize={PAGE_SIZE}
+                page={page}
+                onPageChange={setPage}
+                loading={reservations.loading}
+              />
+            </>
           )}
         </PageCard>
       )}
 
-      {/* Create/Edit Dialog */}
-      <Modal
-        opened={dialogMode !== null}
-        onClose={closeDialog}
-        title={
-          <Title order={4}>
-            {dialogMode === "create" ? "Create Reservation" : "Edit Reservation"}
-          </Title>
-        }
-        centered
-        size="md"
-      >
-        <Stack gap="md">
-          <TextInput
-            label="Customer Name"
-            placeholder="Enter customer name"
-            value={formData.customer_name}
-            onChange={(e) => setFormData({ ...formData, customer_name: e.currentTarget.value })}
-            error={formErrors.customer_name}
-            required
-          />
-
-          <TextInput
-            label="Customer Phone"
-            placeholder="Enter phone number"
-            value={formData.customer_phone || ""}
-            onChange={(e) =>
-              setFormData({ ...formData, customer_phone: e.currentTarget.value || null })
-            }
-          />
-
-          <NumberInput
-            label="Number of Guests"
-            placeholder="Number of guests"
-            value={formData.guest_count}
-            onChange={(value) =>
-              setFormData({
-                ...formData,
-                guest_count: typeof value === "number" ? value : 1
-              })
-            }
-            min={1}
-            max={100}
-            error={formErrors.guest_count}
-            required
-          />
-
-          <TextInput
-            label="Reservation Date & Time"
-            type="datetime-local"
-            placeholder="Select date and time"
-            value={
-              formData.reservation_at
-                ? formatDateTimeLocalInput(formData.reservation_at)
-                : ""
-            }
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                reservation_at: parseDateTimeLocalInput(e.currentTarget.value)
-              })
-            }
-            error={formErrors.reservation_at}
-            required
-          />
-
-          <NumberInput
-            label="Duration (minutes)"
-            placeholder="Reservation duration"
-            value={formData.duration_minutes || ""}
-            onChange={(value) =>
-              setFormData({
-                ...formData,
-                duration_minutes: typeof value === "number" ? value : null
-              })
-            }
-            min={15}
-            max={480}
-          />
-
-          <Select
-            label="Table (Optional)"
-            placeholder="Select a table"
-            data={modalTableOptions}
-            value={formData.table_id?.toString() || null}
-            onChange={(value) => {
-              setFormData((prev) => ({ ...prev, table_id: value ? Number(value) : null }));
-              setFormErrors((prev) => {
-                if (!prev.table_id) {
-                  return prev;
-                }
-                const { table_id, ...rest } = prev;
-                return rest;
-              });
-            }}
-            clearable
-            error={formErrors.table_id}
-          />
-
-          <Textarea
-            label="Notes"
-            placeholder="Special requests or notes"
-            value={formData.notes || ""}
-            onChange={(e) => setFormData({ ...formData, notes: e.currentTarget.value || null })}
-            rows={3}
-          />
-
-          <Group justify="flex-end">
-            <Button variant="default" onClick={closeDialog}>
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} loading={submitting}>
-              {dialogMode === "create" ? "Create" : "Save"}
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+      {/* Create/Edit Reservation Modal */}
+      {selectedOutletId && (
+        <ReservationFormModal
+          opened={dialogMode !== null}
+          onClose={closeDialog}
+          mode={dialogMode === "edit" ? "edit" : "create"}
+          reservation={editingReservation}
+          outletId={selectedOutletId}
+          accessToken={accessToken}
+          enableMultiTable={true}
+          showTableSuggestions={true}
+          defaultDurationMinutes={120}
+          onSuccess={() => {
+            reservations.refetch();
+          }}
+        />
+      )}
 
       {/* Cancel Confirmation */}
       <Modal
         opened={cancelConfirm !== null}
         onClose={() => setCancelConfirm(null)}
-        title={<Title order={4}>Confirm Cancellation</Title>}
+        title="Confirm Cancellation"
         centered
       >
         <Stack gap="md">
