@@ -140,6 +140,16 @@ export async function executeReservationFormAction(input: {
   isMultiTable?: boolean;
   selectedTableIds?: number[];
   createReservationFn?: (data: ReservationCreateRequest, accessToken: string) => Promise<ReservationRow>;
+  createReservationGroupFn?: (data: {
+    outlet_id: number;
+    customer_name: string;
+    customer_phone: string | null;
+    guest_count: number;
+    table_ids: number[];
+    reservation_at: string;
+    duration_minutes: number;
+    notes: string | null;
+  }, accessToken: string) => Promise<{ group_id: number; reservation_ids: number[] }>;
   updateReservationFn?: (reservationId: number, data: ReservationUpdateRequest, accessToken: string) => Promise<ReservationRow>;
   refetchCalendar: () => Promise<unknown>;
   refetchTables: () => Promise<unknown>;
@@ -168,6 +178,7 @@ export async function executeReservationFormAction(input: {
   }
 
   const createFn = input.createReservationFn ?? createReservation;
+  const createGroupFn = input.createReservationGroupFn ?? createReservationGroup;
   const updateFn = input.updateReservationFn ?? updateReservation;
 
   try {
@@ -184,7 +195,7 @@ export async function executeReservationFormAction(input: {
           duration_minutes: Math.max(15, Math.round(input.formState.durationMinutes)),
           notes: input.formState.notes.trim() || null
         };
-        await createReservationGroup(groupPayload, input.accessToken);
+        await createGroupFn(groupPayload, input.accessToken);
       } else {
         // Create single-table reservation
         const payload: ReservationCreateRequest = {

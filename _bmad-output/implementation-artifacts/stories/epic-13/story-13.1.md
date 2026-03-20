@@ -1,6 +1,6 @@
 # Story 13.1: Large Party Reservation Groups (Multi-Table Support)
 
-Status: done
+Status: in-progress
 
 ## Story
 
@@ -100,6 +100,15 @@ so that I can accommodate groups larger than single-table capacity with automati
 - [x] [AI-Review][MEDIUM] Clear suggestions state on empty fetch responses to avoid stale suggestion cards after query changes. [apps/backoffice/src/features/reservation-calendar-page.tsx] — Removed `length > 0` guard; `setSuggestions(fetchedSuggestions)` is now unconditional.
 - [x] [AI-Review][MEDIUM] Reconcile story File List with current git reality (including untracked one-time DB script) for audit transparency. [packages/db/scripts/one-time/backfill-outlet-timezones.sql] — File list updated to reflect actual tracked files; the one-time script was created by a prior migration and is not part of this story's scope.
 
+### Review Follow-ups (AI - Round 2)
+
+- [x] [AI-Review][HIGH] Prevent reservation-group create race conditions by enforcing overlap validation inside the same transaction as inserts (or use locking strategy) to avoid double-booking under concurrent requests. [apps/api/src/lib/reservation-groups.ts] — `createReservationGroupWithTables` now locks selected table rows with `FOR UPDATE`, re-checks conflicts inside the TX, and rolls back on any overlap detected.
+- [x] [AI-Review][HIGH] Harden tenant scoping in group detail reservation fetch by filtering reservation rows with `company_id` (and outlet scope where applicable). [apps/api/src/lib/reservation-groups.ts:405] — Reservation query now includes `AND r.company_id = ? AND r.outlet_id = ?` using the already-fetched group row's scope.
+- [x] [AI-Review][HIGH] Remove UTC fallback from one-time timezone backfill; follow canonical timezone rule (`outlet -> company`, no UTC fallback when missing). [packages/db/scripts/one-time/backfill-outlet-timezones.sql] — Changed `COALESCE(c.timezone, 'UTC')` to `c.timezone` with `WHERE c.timezone IS NOT NULL`; unresolved outlets (company also NULL) are reported separately.
+- [x] [AI-Review][MEDIUM] Update API docs to match actual cancel behavior (linked reservations are cancelled then ungrouped/deleted) and current 409 conflict semantics. [docs/API.md] — Cancel section now describes: cancel → unlink → delete; 409 section fully enumerates protected statuses.
+- [x] [AI-Review][MEDIUM] Replace weak multi-table branch test that relies on network failure outcome with deterministic assertion via proper mocking strategy. [apps/backoffice/src/features/reservation-calendar-page.test.ts] — Added injectable `createReservationGroupFn` parameter; test now asserts multi-table branch calls injected function with correct payload.
+- [x] [AI-Review][MEDIUM] Align story completion notes/file list with intentional rollback deletion: remove claims that `0113_rollback_reservation_groups.sql` exists, and explicitly document this design decision. [story-13.1.md] — Rollback migration intentionally omitted; no destructive rollback script exists by design.
+
 ## Dev Notes
 
 ### Implementation Summary
@@ -155,8 +164,11 @@ opencode-go/minimax-m2.7
 
 **Database Migrations:**
 - `packages/db/migrations/0111_create_reservation_groups.sql` - reservation_groups table
-- `packages/db/migrations/0112_add_reservation_group_id.sql` - FK column in reservations
-- `packages/db/migrations/0113_rollback_reservation_groups.sql` - Rollback script
+- `packages/db/migrations/0112_add_reservation_group_id.sql` - FK column in reservations (rerunnable, MySQL/MariaDB-safe)
+- NOTE: Rollback migration `0113` intentionally omitted — no destructive rollback script by design.
+
+**One-time Scripts:**
+- `packages/db/scripts/one-time/backfill-outlet-timezones.sql` - Backfill outlet timezone from company (no UTC fallback; canonical rule compliance)
 
 **Shared Types:**
 - `packages/shared/src/schemas/reservation-groups.ts` - All group schemas
@@ -192,7 +204,7 @@ opencode-go/minimax-m2.7
 **Database Migrations:**
 - `packages/db/migrations/0111_create_reservation_groups.sql`
 - `packages/db/migrations/0112_add_reservation_group_id.sql`
-- `packages/db/migrations/0113_rollback_reservation_groups.sql`
+- `packages/db/scripts/one-time/backfill-outlet-timezones.sql` (canonical timezone rule compliance; no rollback migration by design)
 
 **Shared Types:**
 - `packages/shared/src/schemas/reservation-groups.ts`
@@ -261,8 +273,17 @@ opencode-go/minimax-m2.7
 
 - 2026-03-20 (review fixes): All HIGH/MEDIUM AI-review findings resolved
   - Backend: tenant guard in availability check, group cancel now sets CANCELLED status
-  - Migration: `0112` and `0113` made fully rerunnable/idempotent with `information_schema` guards
+  - Migration: `0112` made fully rerunnable/idempotent with `information_schema` guards; `0113` rollback intentionally omitted by design
   - Frontend: suggestions auto-fetch via `useEffect`, empty results clear stale cards
   - Detail modal: shows all linked tables from group detail API
   - Hook tests: replaced placeholder mocks with real `fetch`-mocked behavior tests
   - Expanded calendar page tests for multi-table validation coverage
+
+- 2026-03-20 (review fixes — Round 2): Race-condition hardening, tenant isolation, timezone policy
+  - Backend TX: `createReservationGroupWithTables` now authoritative gate — locks selected tables with `FOR UPDATE`, rechecks overlaps inside same TX, no TOCTTOU window
+  - Tenant isolation: group detail reservations query scoped to `company_id + outlet_id` from group row
+  - Route error map: `"not available"` → 409 CONFLICT; `"requires at least 2"` → 400 INVALID_REQUEST
+  - Timezone script: removed UTC fallback; only backfills where `company.timezone IS NOT NULL`
+  - Deterministic tests: injectable `createReservationGroupFn` param; 5 new coverage tests for conflict, lock-failure, capacity, DELETE path
+  - Docs: cancel behavior fully described (cancel → unlink → delete); 409 enumerates all protected statuses
+  - Story: removed stale `0113` artifact references; documented intentional rollback deletion; file list includes one-time timezone script

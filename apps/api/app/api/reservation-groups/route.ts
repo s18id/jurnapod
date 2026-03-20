@@ -123,6 +123,20 @@ export const POST = withAuth(
         return errorResponse("INVALID_REQUEST", "Invalid request format", 400);
       }
 
+      if (error instanceof Error) {
+        const msg = error.message;
+        if (
+          msg.includes("not available") ||
+          msg.includes("not found") ||
+          msg.includes("Cannot reserve")
+        ) {
+          return errorResponse("CONFLICT", msg, 409);
+        }
+        if (msg.includes("requires at least 2") || msg.includes("more than 10")) {
+          return errorResponse("INVALID_REQUEST", msg, 400);
+        }
+      }
+
       console.error("POST /api/reservation-groups failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Failed to create reservation group", 500);
     }

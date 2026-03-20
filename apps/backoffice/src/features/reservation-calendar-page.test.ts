@@ -575,34 +575,37 @@ describe("Reservation Calendar page helpers", () => {
     assert.strictEqual(result.errorMessage, "Select at least 2 tables for a large party reservation.");
   });
 
-  test("multi-table mode requires 2+ tables — 3 tables passes validation", async () => {
+  test("multi-table mode calls createReservationGroupFn with correct payload", async () => {
     const pageModule = await import("./reservation-calendar-page");
 
-    // When isMultiTable=true and selectedTableIds=[1,2,3] (2+ tables),
-    // validation passes and createReservationGroup is called directly.
-    // Since we cannot intercept the direct module-level call,
-    // we verify the validation by confirming createFn (fallback mock) is NOT called,
-    // while knowing createReservationGroup would be called instead.
-    let createFnCalled = false;
+    const capturedPayloads: Array<{
+      outlet_id: number;
+      customer_name: string;
+      guest_count: number;
+      table_ids: number[];
+      reservation_at: string;
+      duration_minutes: number;
+    }> = [];
+
     const result = await pageModule.executeReservationFormAction({
       mode: "create",
-      selectedOutletId: 1,
+      selectedOutletId: 5,
       editingReservationId: null,
       formState: {
         tableId: null,
         customerName: "Large Party",
-        customerPhone: "",
+        customerPhone: "+9876543210",
         guestCount: 10,
         reservationAt: new Date("2026-03-20T19:00:00.000Z"),
-        durationMinutes: 120,
-        notes: ""
+        durationMinutes: 90,
+        notes: "Anniversary dinner"
       },
       accessToken: "token",
       isMultiTable: true,
-      selectedTableIds: [1, 2, 3], // 2+ tables — passes validation
-      createReservationFn: async () => {
-        createFnCalled = true;
-        throw new Error("createFn should not be called for multi-table");
+      selectedTableIds: [1, 2, 3],
+      createReservationGroupFn: async (payload) => {
+        capturedPayloads.push(payload as typeof capturedPayloads[number]);
+        return { group_id: 42, reservation_ids: [101, 102, 103] };
       },
       refetchCalendar: async () => {
         return;
@@ -612,10 +615,13 @@ describe("Reservation Calendar page helpers", () => {
       }
     });
 
-    // createFn is NOT called for multi-table (createReservationGroup is called instead)
-    assert.strictEqual(createFnCalled, false);
-    // Result is not ok because createReservationGroup fails without a mock
-    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(capturedPayloads.length, 1);
+    assert.strictEqual(capturedPayloads[0]!.outlet_id, 5);
+    assert.strictEqual(capturedPayloads[0]!.customer_name, "Large Party");
+    assert.strictEqual(capturedPayloads[0]!.guest_count, 10);
+    assert.deepStrictEqual(capturedPayloads[0]!.table_ids, [1, 2, 3]);
+    assert.strictEqual(capturedPayloads[0]!.duration_minutes, 90);
   });
 
   test("requires customer name even in multi-table mode", async () => {

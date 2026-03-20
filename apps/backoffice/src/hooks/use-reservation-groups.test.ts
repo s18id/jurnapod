@@ -233,3 +233,126 @@ describe("cancelReservationGroup", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests — createReservationGroup error paths (TX conflict simulation)
+// ---------------------------------------------------------------------------
+describe("createReservationGroup error paths", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("throws when tables are not available (409 from in-TX conflict check)", async () => {
+    const { createReservationGroup } = await import("./use-reservation-groups.js");
+
+    await assert.rejects(
+      () =>
+        withMockedFetch(
+          {
+            ok: false,
+            status: 409,
+            body: { data: { code: "CONFLICT", message: "Tables not available: A1, A2" } }
+          },
+          () =>
+            createReservationGroup(
+              {
+                outlet_id: 1,
+                customer_name: "Large Party",
+                guest_count: 8,
+                table_ids: [1, 2],
+                reservation_at: "2026-03-20T19:00:00+07:00"
+              },
+              "tok"
+            )
+        ),
+      (err: unknown) => {
+        const e = err as { message?: string };
+        return e.message?.includes("Tables not available") ?? false;
+      }
+    );
+  });
+
+  test("throws when one or more tables are not available (repo lock failure)", async () => {
+    const { createReservationGroup } = await import("./use-reservation-groups.js");
+
+    await assert.rejects(
+      () =>
+        withMockedFetch(
+          {
+            ok: false,
+            status: 409,
+            body: { data: { code: "CONFLICT", message: "One or more tables are not available" } }
+          },
+          () =>
+            createReservationGroup(
+              {
+                outlet_id: 1,
+                customer_name: "Large Party",
+                guest_count: 8,
+                table_ids: [1, 2],
+                reservation_at: "2026-03-20T19:00:00+07:00"
+              },
+              "tok"
+            )
+        ),
+      (err: unknown) => {
+        const e = err as { message?: string };
+        return e.message?.includes("not available") ?? false;
+      }
+    );
+  });
+
+  test("throws when insufficient capacity (400)", async () => {
+    const { createReservationGroup } = await import("./use-reservation-groups.js");
+
+    await assert.rejects(
+      () =>
+        withMockedFetch(
+          {
+            ok: false,
+            status: 400,
+            body: { data: { code: "INVALID_REQUEST", message: "Insufficient capacity: 4 seats for 10 guests" } }
+          },
+          () =>
+            createReservationGroup(
+              {
+                outlet_id: 1,
+                customer_name: "Too Many",
+                guest_count: 10,
+                table_ids: [1],
+                reservation_at: "2026-03-20T19:00:00+07:00"
+              },
+              "tok"
+            )
+        ),
+      (err: unknown) => {
+        const e = err as { message?: string };
+        return e.message?.includes("Insufficient capacity") ?? false;
+      }
+    );
+  });
+
+  test("cancelReservationGroup calls DELETE with correct group id in path", async () => {
+    const { cancelReservationGroup } = await import("./use-reservation-groups.js");
+
+    let receivedPath = "";
+    globalThis.fetch = (async (path: RequestInfo | URL) => {
+      receivedPath = path.toString();
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { success: true, data: { deleted: true, ungrouped_count: 2 } };
+        }
+      } as unknown as Response;
+    }) as typeof globalThis.fetch;
+
+    const result = await cancelReservationGroup(99, "tok");
+
+    assert.strictEqual(receivedPath, "/api/reservation-groups/99");
+    assert.strictEqual(result.deleted, true);
+    assert.strictEqual(result.ungrouped_count, 2);
+  });
+});

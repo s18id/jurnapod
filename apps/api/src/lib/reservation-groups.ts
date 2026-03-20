@@ -62,7 +62,52 @@ export async function createReservationGroupWithTables(input: {
     const durationMs = (input.durationMinutes ?? 120) * 60 * 1000;
     const endTs = startTs + durationMs;
 
-    // 1. Create reservation group
+    // 1. Lock selected table rows to prevent concurrent modifications
+    //    This also serializes concurrent group bookings that share tables.
+    const placeholders = input.tableIds.map(() => "?").join(",");
+    const [lockedTables] = await conn.execute<Array<RowDataPacket>>(
+      `SELECT id FROM outlet_tables
+       WHERE company_id = ?
+         AND outlet_id = ?
+         AND id IN (${placeholders})
+         AND status = 'AVAILABLE'
+       FOR UPDATE`,
+      [input.companyId, input.outletId, ...input.tableIds]
+    );
+
+    if (lockedTables.length !== input.tableIds.length) {
+      // One or more tables unavailable or not found
+      await conn.rollback();
+      throw new Error("One or more tables are not available");
+    }
+
+    // 2. Re-check for overlapping reservations inside the transaction.
+    //    This is the authoritative conflict gate — no TOCTTOU window exists
+    //    because we hold row locks on the tables until commit.
+    const [conflicts] = await conn.execute<Array<RowDataPacket>>(
+      `SELECT r.id, r.table_id, t.code as table_code, t.name as table_name,
+              r.reservation_start_ts, r.reservation_end_ts
+       FROM reservations r
+       JOIN outlet_tables t ON r.table_id = t.id
+       WHERE r.company_id = ?
+         AND r.outlet_id = ?
+         AND r.table_id IN (${placeholders})
+         AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
+         AND r.reservation_start_ts IS NOT NULL
+         AND r.reservation_end_ts IS NOT NULL
+         AND r.reservation_start_ts < ?
+         AND r.reservation_end_ts > ?
+       FOR UPDATE`,
+      [input.companyId, input.outletId, ...input.tableIds, endTs, startTs]
+    );
+
+    if (conflicts.length > 0) {
+      await conn.rollback();
+      const conflictTables = [...new Set(conflicts.map(c => (c as { table_code: string }).table_code))];
+      throw new Error(`Tables not available: ${conflictTables.join(", ")}`);
+    }
+
+    // 3. Create reservation group
     const [groupResult] = await conn.execute<ResultSetHeader>(
       `INSERT INTO reservation_groups (company_id, outlet_id, total_guest_count)
        VALUES (?, ?, ?)`,
@@ -72,10 +117,10 @@ export async function createReservationGroupWithTables(input: {
     const groupId = groupResult.insertId;
     const reservationIds: number[] = [];
 
-    // 2. Create individual reservations (one per table)
+    // 4. Create individual reservations (one per table)
     for (const tableId of input.tableIds) {
       const [resResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO reservations 
+        `INSERT INTO reservations
          (company_id, outlet_id, reservation_group_id, table_id,
           customer_name, customer_phone, guest_count,
           reservation_at, reservation_start_ts, reservation_end_ts,
@@ -381,6 +426,7 @@ export async function getReservationGroup(input: {
     const group = groups[0]!;
 
     // 2. Get all reservations in group with table details
+    //    Strictly scoped to the group's company + outlet to prevent data-integrity drift leakage.
     const [reservations] = await conn.execute<Array<RowDataPacket & {
       reservation_id: number;
       table_id: number;
@@ -391,7 +437,7 @@ export async function getReservationGroup(input: {
       reservation_start_ts: number | null;
       reservation_end_ts: number | null;
     }>>(
-      `SELECT 
+      `SELECT
          r.id as reservation_id,
          r.table_id,
          t.code as table_code,
@@ -403,8 +449,10 @@ export async function getReservationGroup(input: {
        FROM reservations r
        JOIN outlet_tables t ON r.table_id = t.id
        WHERE r.reservation_group_id = ?
+         AND r.company_id = ?
+         AND r.outlet_id = ?
        ORDER BY t.id ASC`,
-      [group.id]
+      [group.id, group.company_id, group.outlet_id]
     );
 
     return {

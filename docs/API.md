@@ -492,8 +492,8 @@ Authorization: Bearer {access_token}
 ```
 
 **Errors:**
-- `400` - Invalid request (missing fields, insufficient capacity)
-- `409` - Tables not available (conflict with existing reservation)
+- `400` - Invalid request (missing fields, not enough tables, insufficient capacity)
+- `409` - Tables not available (conflict detected — tables already booked for overlapping time window)
 
 ### Get Reservation Group
 
@@ -532,7 +532,8 @@ Authorization: Bearer {access_token}
 
 ### Cancel Reservation Group
 
-Ungroups all reservations and deletes the group.
+Cancels all linked reservations, then unlinks and deletes the group.
+All linked reservations are set to `CANCELLED` status before the group row is removed.
 
 ```http
 DELETE /api/reservation-groups/{group_id}
@@ -552,7 +553,8 @@ Authorization: Bearer {access_token}
 
 **Errors:**
 - `404` - Group not found
-- `409` - Cannot cancel group with reservations in final status (SEATED, COMPLETED)
+- `409` - Cannot cancel group: all reservations must be in `BOOKED` or `CONFIRMED` status.
+  Reservations that are `ARRIVED`, `SEATED`, `COMPLETED`, `CANCELLED`, or `NO_SHOW` cannot be cancelled via this endpoint.
 
 ### Get Table Suggestions
 
