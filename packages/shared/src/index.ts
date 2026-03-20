@@ -22,6 +22,7 @@ export * from "./schemas/outlet-tables";
 export * from "./schemas/posting";
 export * from "./schemas/pos-sync";
 export * from "./schemas/reservations";
+export * from "./schemas/reservation-groups";
 export * from "./schemas/sales";
 export * from "./schemas/settings";
 export * from "./schemas/taxes";
