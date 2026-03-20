@@ -1,6 +1,6 @@
 # Story 12.9: Reservation Calendar Hourly Granularity
 
-Status: review
+Status: done
 
 ## Story
 

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-20T21:20:00+0700
+last_updated: 2026-03-21T00:00:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -85,7 +85,7 @@ development_status:
   # Epic 4: Items & Catalog - Product Management
   # NOTE: Core stories DISCOVERED already implemented (not built by us)
   # Debt stories SPECS CREATED (not yet implemented)
-  epic-4: in-progress
+  epic-4: done
   4-1-item-product-management-crud: done  # DISCOVERED - already existed
   4-2-outlet-specific-pricing: done  # DISCOVERED - already existed
   4-3-multiple-item-types: done  # DISCOVERED - already existed
@@ -138,7 +138,8 @@ development_status:
 
   # Epic 12: Table Reservation and POS Multi-Cashier Sync
   # NOTE: New epic for table state management, reservations, and multi-cashier sync
-  epic-12: in-progress
+  epic-12: done
+  epic-12-retrospective: done  # COMPLETE - Retrospective saved to epic-12-retro-2026-03-21.md
   12-1-database-schema-table-state-management: done  # Follow-ups closed; re-review clean (no HIGH/MEDIUM)
   12-2-shared-constants-zod-schemas: done  # Re-review clean; medium issues fixed and validation artifact executable
   12-3-table-occupancy-api-endpoints: done  # Code complete; fixture-policy exception accepted and tracked
