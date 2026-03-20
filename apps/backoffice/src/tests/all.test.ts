@@ -16,3 +16,4 @@ import "../features/reservation-calendar-page.test";
 import "../app/routes.test";
 import "../features/users-page-telemetry.test";
 import "../features/users-page-filters.test";
+import "../features/users-page-account.test";

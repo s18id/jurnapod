@@ -1,6 +1,6 @@
 # Story 9.3: Consolidated Row Action Menus
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -101,17 +101,27 @@ minimax-m2.7 (dev-story implementation)
 - Role-based action visibility enforced via disabled prop and title tooltips
 - WCAG 2.1 AA compliance via Mantine's built-in keyboard navigation and ARIA attributes
 - Telemetry events emit action-menu-open, action-select, and action-error with metadata (page, actorRole, outcome)
-- All tests pass (171 tests across backoffice)
+- All tests pass (185 tests across backoffice)
 
 **Tests Added:**
-- `users-page-telemetry.test.ts`: 10 unit tests for telemetry functions and action visibility logic
+- `users-page-telemetry.test.ts`: Unit tests for telemetry functions and action visibility logic
 
 **Files Modified:**
-- `apps/backoffice/src/features/users-page.tsx` - Added Menu imports, Icon imports, replaced action buttons with Menu component, added telemetry helpers
+- `apps/backoffice/src/features/users-page.tsx` - Added Menu imports, Icon imports, replaced action buttons with Menu component, added telemetry module integration
+- `apps/backoffice/src/features/users-page-telemetry.test.ts` - Updated to test real telemetry module with event capture
 - `apps/backoffice/src/tests/all.test.ts` - Added import for new test file
+
+**Files Created:**
+- `apps/backoffice/src/lib/telemetry.ts` - New telemetry utility module for action tracking
+
+**Code Review Fixes Applied (2026-03-21):**
+1. **Telemetry abstraction**: Replaced inline `console.log` calls with proper telemetry module (`lib/telemetry.ts`) that can be swapped for production analytics APIs
+2. **Error telemetry**: Added `trackActionError` calls in `handleDeactivate` and `handleReactivate` catch blocks to capture operation failures
+3. **Module exports**: `setTelemetryHandler` allows custom telemetry backends in production
 
 ### File List
 
-- `apps/backoffice/src/features/users-page.tsx` - Replaced 5 individual action buttons with Mantine Menu dropdown
-- `apps/backoffice/src/features/users-page-telemetry.test.ts` - New test file for telemetry and action visibility logic (10 tests)
-- `apps/backoffice/src/tests/all.test.ts` - Added import for new test file
+- `apps/backoffice/src/features/users-page.tsx` - Replaced 5 individual action buttons with Mantine Menu dropdown, integrated telemetry module
+- `apps/backoffice/src/features/users-page-telemetry.test.ts` - Test file for telemetry and action visibility logic
+- `apps/backoffice/src/lib/telemetry.ts` - New telemetry utility module for action tracking
+- `apps/backoffice/src/tests/all.test.ts` - Added import for test file

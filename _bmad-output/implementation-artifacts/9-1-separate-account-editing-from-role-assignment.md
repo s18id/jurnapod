@@ -1,6 +1,6 @@
 # Story 9.1: Separate Account Editing from Role Assignment
 
-Status: review
+Status: done
 
 ## Story
 
@@ -113,8 +113,11 @@ Implementation completed with all tasks and subtasks checked off.
 ### File List
 
 - `apps/backoffice/src/features/users-page.tsx` - main implementation (modified)
-- `apps/backoffice/src/features/users-page.test.tsx` - tests (updated)
+- `apps/backoffice/src/features/users-page-account.test.ts` - integration tests for account/access separation (created)
+- `apps/backoffice/src/components/dirty-confirm-dialog.tsx` - unsaved changes confirmation dialog (created)
+- `apps/backoffice/src/tests/all.test.ts` - test aggregator (updated)
 
 ## Change Log
 
 - 2026-03-21: Implemented Story 9.1 - Split Edit dialog into "Edit Account" and "Manage Access" surfaces with separate form state, unsaved-changes confirmation, and WCAG 2.1 AA accessibility improvements. All 162 backoffice tests passing.
+- 2026-03-21: Code review - Added integration tests (users-page-account.test.ts) to verify profile-only mutations don't affect role/outlet state. Fixed missing test file for Subtask 2.3. All 196 tests passing.

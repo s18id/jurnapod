@@ -1,73 +1,33 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { describe, it } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
+import {
+  trackActionMenuOpen,
+  trackActionSelect,
+  trackActionError,
+  setTelemetryHandler,
+  type TelemetryEvent,
+} from "../lib/telemetry";
 
-// Telemetry event types
-interface TelemetryEvent {
-  event: string;
-  page: string;
-  actorRole: string;
-  outcome: "success" | "error";
-  actionName?: string;
-  errorMessage?: string;
-  timestamp: number;
-}
+// Telemetry event types for test assertions
+type UserActionName =
+  | "edit-user"
+  | "manage-roles"
+  | "assign-outlets"
+  | "change-password"
+  | "deactivate"
+  | "reactivate";
 
-// Simple in-memory telemetry store for testing
-const telemetryEvents: TelemetryEvent[] = [];
-
-function emitTelemetry(event: TelemetryEvent): void {
-  telemetryEvents.push(event);
-  // In production, this would send to a telemetry service
-  console.log("[Telemetry]", JSON.stringify(event));
-}
-
-function trackActionMenuOpen(page: string, actorRole: string): void {
-  emitTelemetry({
-    event: "action-menu-open",
-    page,
-    actorRole,
-    outcome: "success",
-    timestamp: Date.now(),
-  });
-}
-
-function trackActionSelect(
-  page: string,
-  actorRole: string,
-  actionName: string,
-  outcome: "success" | "error",
-  errorMessage?: string
-): void {
-  emitTelemetry({
-    event: "action-select",
-    page,
-    actorRole,
-    outcome,
-    actionName,
-    errorMessage,
-    timestamp: Date.now(),
-  });
-}
-
-function trackActionError(
-  page: string,
-  actorRole: string,
-  actionName: string,
-  errorMessage: string
-): void {
-  emitTelemetry({
-    event: "action-error",
-    page,
-    actorRole,
-    outcome: "error",
-    actionName,
-    errorMessage,
-    timestamp: Date.now(),
-  });
-}
+const USER_ACTION_ORDER: UserActionName[] = [
+  "edit-user",
+  "manage-roles",
+  "assign-outlets",
+  "change-password",
+  "deactivate",
+  "reactivate",
+];
 
 // Role-based action visibility logic
 interface ActionVisibility {
@@ -88,88 +48,85 @@ function computeActionVisibility(
   const isSuperAdminUser = targetUserGlobalRoles.includes("SUPER_ADMIN");
 
   return {
-    canEdit: true, // Everyone can edit (subject to server-side validation)
+    canEdit: true,
     canManageRoles: !isSelf && !isSuperAdminUser,
-    canChangePassword: true, // Everyone can change password (subject to server-side validation)
+    canChangePassword: true,
     canDeactivate: !isSelf && !isSuperAdminUser,
     isSelf,
     isSuperAdminUser,
   };
 }
 
-// Action order for consistent UX
-type UserActionName =
-  | "edit-user"
-  | "manage-roles"
-  | "assign-outlets"
-  | "change-password"
-  | "deactivate"
-  | "reactivate";
-
-const USER_ACTION_ORDER: UserActionName[] = [
-  "edit-user",
-  "manage-roles",
-  "assign-outlets",
-  "change-password",
-  "deactivate",
-  "reactivate",
-];
-
 function getActionOrder(): UserActionName[] {
   return [...USER_ACTION_ORDER];
 }
 
 // Tests
-describe("Users Page Telemetry - trackActionMenuOpen", () => {
-  it("emits action-menu-open event with correct metadata", () => {
-    const initialCount = telemetryEvents.length;
-    trackActionMenuOpen("users", "ADMIN");
+describe("Users Page Telemetry", () => {
+  const capturedEvents: TelemetryEvent[] = [];
 
-    assert.strictEqual(telemetryEvents.length, initialCount + 1);
-    const event = telemetryEvents[telemetryEvents.length - 1];
-    assert.strictEqual(event.event, "action-menu-open");
-    assert.strictEqual(event.page, "users");
-    assert.strictEqual(event.actorRole, "ADMIN");
-    assert.strictEqual(event.outcome, "success");
-    assert.ok(event.timestamp > 0);
-  });
-});
-
-describe("Users Page Telemetry - trackActionSelect", () => {
-  it("emits action-select event on success", () => {
-    const initialCount = telemetryEvents.length;
-    trackActionSelect("users", "ADMIN", "edit-user", "success");
-
-    assert.strictEqual(telemetryEvents.length, initialCount + 1);
-    const event = telemetryEvents[telemetryEvents.length - 1];
-    assert.strictEqual(event.event, "action-select");
-    assert.strictEqual(event.page, "users");
-    assert.strictEqual(event.actorRole, "ADMIN");
-    assert.strictEqual(event.actionName, "edit-user");
-    assert.strictEqual(event.outcome, "success");
+  beforeEach(() => {
+    capturedEvents.length = 0;
+    setTelemetryHandler((event) => {
+      capturedEvents.push(event);
+    });
   });
 
-  it("emits action-select event on error with error message", () => {
-    const initialCount = telemetryEvents.length;
-    trackActionSelect("users", "ADMIN", "edit-user", "error", "Network failure");
-
-    assert.strictEqual(telemetryEvents.length, initialCount + 1);
-    const event = telemetryEvents[telemetryEvents.length - 1];
-    assert.strictEqual(event.outcome, "error");
-    assert.strictEqual(event.errorMessage, "Network failure");
+  afterEach(() => {
+    // Reset to default console logging
+    setTelemetryHandler((event) => {
+      console.log("[Telemetry]", JSON.stringify(event));
+    });
   });
-});
 
-describe("Users Page Telemetry - trackActionError", () => {
-  it("emits action-error event with correct metadata", () => {
-    const initialCount = telemetryEvents.length;
-    trackActionError("users", "ADMIN", "edit-user", "Server rejected request");
+  describe("trackActionMenuOpen", () => {
+    it("emits action-menu-open event with correct metadata", () => {
+      trackActionMenuOpen("users", "ADMIN");
 
-    assert.strictEqual(telemetryEvents.length, initialCount + 1);
-    const event = telemetryEvents[telemetryEvents.length - 1];
-    assert.strictEqual(event.event, "action-error");
-    assert.strictEqual(event.outcome, "error");
-    assert.strictEqual(event.errorMessage, "Server rejected request");
+      assert.strictEqual(capturedEvents.length, 1);
+      const event = capturedEvents[0];
+      assert.strictEqual(event.event, "action-menu-open");
+      assert.strictEqual(event.page, "users");
+      assert.strictEqual(event.actorRole, "ADMIN");
+      assert.strictEqual(event.outcome, "success");
+      assert.ok(event.timestamp > 0);
+    });
+  });
+
+  describe("trackActionSelect", () => {
+    it("emits action-select event on success", () => {
+      trackActionSelect("users", "ADMIN", "edit-user", "success");
+
+      assert.strictEqual(capturedEvents.length, 1);
+      const event = capturedEvents[0];
+      assert.strictEqual(event.event, "action-select");
+      assert.strictEqual(event.page, "users");
+      assert.strictEqual(event.actorRole, "ADMIN");
+      assert.strictEqual(event.actionName, "edit-user");
+      assert.strictEqual(event.outcome, "success");
+    });
+
+    it("emits action-error event on error with error message", () => {
+      trackActionSelect("users", "ADMIN", "edit-user", "error", "Network failure");
+
+      assert.strictEqual(capturedEvents.length, 1);
+      const event = capturedEvents[0];
+      assert.strictEqual(event.event, "action-error");
+      assert.strictEqual(event.outcome, "error");
+      assert.strictEqual(event.errorMessage, "Network failure");
+    });
+  });
+
+  describe("trackActionError", () => {
+    it("emits action-error event with correct metadata", () => {
+      trackActionError("users", "ADMIN", "edit-user", "Server rejected request");
+
+      assert.strictEqual(capturedEvents.length, 1);
+      const event = capturedEvents[0];
+      assert.strictEqual(event.event, "action-error");
+      assert.strictEqual(event.outcome, "error");
+      assert.strictEqual(event.errorMessage, "Server rejected request");
+    });
   });
 });
 

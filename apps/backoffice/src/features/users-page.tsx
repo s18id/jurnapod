@@ -37,6 +37,7 @@ import { DirtyConfirmDialog } from "../components/dirty-confirm-dialog";
 import { FilterBar } from "../components/FilterBar";
 import { OutletRoleMatrix } from "../components/OutletRoleMatrix";
 import { PageCard } from "../components/PageCard";
+import { trackActionMenuOpen, trackActionSelect, trackActionError } from "../lib/telemetry";
 import type { OutletResponse, Role, RoleResponse, UserResponse } from "@jurnapod/shared";
 import {
   IconDots,
@@ -675,11 +676,11 @@ export function UsersPage(props: UsersPageProps) {
       setSuccessMessage("User deactivated successfully");
       await usersQuery.refetch({ force: true });
     } catch (deactivateError) {
-      if (deactivateError instanceof ApiError) {
-        setError(deactivateError.message);
-      } else {
-        setError("Failed to deactivate user");
-      }
+      const errorMsg = deactivateError instanceof ApiError 
+        ? deactivateError.message 
+        : "Failed to deactivate user";
+      setError(errorMsg);
+      trackActionError("users", user.global_roles[0] ?? "UNKNOWN", "deactivate", errorMsg);
     }
   };
   
@@ -697,11 +698,11 @@ export function UsersPage(props: UsersPageProps) {
       setSuccessMessage("User reactivated successfully");
       await usersQuery.refetch({ force: true });
     } catch (reactivateError) {
-      if (reactivateError instanceof ApiError) {
-        setError(reactivateError.message);
-      } else {
-        setError("Failed to reactivate user");
-      }
+      const errorMsg = reactivateError instanceof ApiError 
+        ? reactivateError.message 
+        : "Failed to reactivate user";
+      setError(errorMsg);
+      trackActionError("users", user.global_roles[0] ?? "UNKNOWN", "reactivate", errorMsg);
     }
   };
 
@@ -848,33 +849,12 @@ export function UsersPage(props: UsersPageProps) {
           const roleTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
           const deactivateTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
 
-          // Telemetry helpers
-          const currentActorRole = user.global_roles[0] ?? "UNKNOWN";
-          const emitMenuOpen = () => {
-            console.log(JSON.stringify({
-              event: "action-menu-open",
-              page: "users",
-              actorRole: currentActorRole,
-              outcome: "success",
-              timestamp: Date.now(),
-            }));
-          };
-          const emitActionSelect = (actionName: string, outcome: "success" | "error", errorMessage?: string) => {
-            console.log(JSON.stringify({
-              event: outcome === "success" ? "action-select" : "action-error",
-              page: "users",
-              actorRole: currentActorRole,
-              actionName,
-              outcome,
-              errorMessage,
-              timestamp: Date.now(),
-            }));
-          };
+          const actorRole = user.global_roles[0] ?? "UNKNOWN";
 
           return (
             <Menu>
               <Menu.Target>
-                <ActionIcon variant="subtle" onClick={emitMenuOpen}>
+                <ActionIcon variant="subtle" onClick={() => trackActionMenuOpen("users", actorRole)}>
                   <IconDots size={16} />
                 </ActionIcon>
               </Menu.Target>
@@ -882,7 +862,7 @@ export function UsersPage(props: UsersPageProps) {
                 <Menu.Item
                   leftSection={<IconEdit size={14} />}
                   onClick={() => {
-                    emitActionSelect("edit-user", "success");
+                    trackActionSelect("users", actorRole, "edit-user", "success");
                     openAccountDialog(targetUser);
                   }}
                 >
@@ -891,7 +871,7 @@ export function UsersPage(props: UsersPageProps) {
                 <Menu.Item
                   leftSection={<IconShield size={14} />}
                   onClick={() => {
-                    emitActionSelect("manage-roles", "success");
+                    trackActionSelect("users", actorRole, "manage-roles", "success");
                     openAccessDialog(targetUser);
                   }}
                   disabled={disableRoleAction}
@@ -902,7 +882,7 @@ export function UsersPage(props: UsersPageProps) {
                 <Menu.Item
                   leftSection={<IconBuildingStore size={14} />}
                   onClick={() => {
-                    emitActionSelect("assign-outlets", "success");
+                    trackActionSelect("users", actorRole, "assign-outlets", "success");
                     openAccessDialog(targetUser);
                   }}
                   disabled={disableRoleAction}
@@ -913,7 +893,7 @@ export function UsersPage(props: UsersPageProps) {
                 <Menu.Item
                   leftSection={<IconLock size={14} />}
                   onClick={() => {
-                    emitActionSelect("change-password", "success");
+                    trackActionSelect("users", actorRole, "change-password", "success");
                     openPasswordDialog(targetUser);
                   }}
                 >
@@ -924,9 +904,8 @@ export function UsersPage(props: UsersPageProps) {
                     leftSection={<IconBan size={14} />}
                     color="red"
                     onClick={() => {
-                      emitActionSelect("deactivate", "success");
-                      setConfirmState({ action: "deactivate", user: targetUser });
-                    }}
+                      trackActionSelect("users", actorRole, "deactivate", "success");
+                      setConfirmState({ action: "deactivate", user: targetUser });}}
                     disabled={disableDeactivateAction}
                     title={deactivateTooltip}
                   >
@@ -937,7 +916,7 @@ export function UsersPage(props: UsersPageProps) {
                     leftSection={<IconCheck size={14} />}
                     color="green"
                     onClick={() => {
-                      emitActionSelect("reactivate", "success");
+                      trackActionSelect("users", actorRole, "reactivate", "success");
                       setConfirmState({ action: "reactivate", user: targetUser });
                     }}
                     disabled={isSelf}
