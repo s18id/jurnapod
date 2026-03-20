@@ -164,7 +164,7 @@ development_status:
   # Epic 9: Backoffice User Management UX Simplification
   # NOTE: UX improvements for user management - separate account editing, matrix-based role assignment, consolidated actions, standard filters
   epic-9: in-progress
-  9-1-separate-account-editing-from-role-assignment: ready-for-dev  # Story 9.1 from epics.md
+  9-1-separate-account-editing-from-role-assignment: review  # COMPLETE - Split dialogs, unsaved-changes, WCAG AA
   9-2-matrix-based-outlet-role-assignment: ready-for-dev  # Story 9.2 from epics.md
   9-3-consolidated-row-action-menus: ready-for-dev  # Story 9.3 from epics.md
   9-4-standard-filters-and-modal-ux-behavior: ready-for-dev  # Story 9.4 from epics.md

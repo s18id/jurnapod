@@ -42,7 +42,26 @@ type UsersPageProps = {
   accessToken: string;
 };
 
-type DialogMode = "create" | "edit" | "roles" | "outlets" | "password" | null;
+// Dialog modes split into Account-focused and Access-focused flows
+type AccountDialogMode = "account-create" | "account-edit" | null;
+type AccessDialogMode = "access-create" | "access-edit" | null;
+type LegacyDialogMode = "password" | null; // Keep password as legacy for now
+
+type DialogMode = AccountDialogMode | AccessDialogMode | LegacyDialogMode;
+
+// Account form - profile-only fields
+type AccountFormData = {
+  company_id?: number | null;
+  email: string;
+  password: string;
+  is_active: boolean;
+};
+
+// Access form - roles and outlet assignments
+type AccessFormData = {
+  global_role_codes: string[];
+  outlet_role_assignments: Array<{ outlet_id: number; role_codes: string[] }>;
+};
 
 type UserFormData = {
   company_id?: number | null;
@@ -284,6 +303,18 @@ export function UsersPage(props: UsersPageProps) {
     { action: "deactivate" | "reactivate"; user: UserResponse } | null
   >(null);
   
+  // Separate form state for account and access dialogs
+  const [accountFormData, setAccountFormData] = useState<AccountFormData>({
+    email: "",
+    password: "",
+    is_active: true
+  });
+  const [accessFormData, setAccessFormData] = useState<AccessFormData>({
+    global_role_codes: [],
+    outlet_role_assignments: []
+  });
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  
   // UI state
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -300,7 +331,7 @@ export function UsersPage(props: UsersPageProps) {
   const rolesQuery = useRoles(accessToken, activeCompanyId);
   const companiesQuery = useCompanies(accessToken, { enabled: isSuperAdmin });
   const outletCompanyId =
-    isSuperAdmin && dialogMode === "create"
+    isSuperAdmin && dialogMode === "account-create"
       ? (formData.company_id ?? activeCompanyId)
       : activeCompanyId;
   const outletsQuery = useOutlets(outletCompanyId, accessToken);
@@ -394,46 +425,40 @@ export function UsersPage(props: UsersPageProps) {
       ...emptyForm,
       company_id: isSuperAdmin ? activeCompanyId : null
     });
+    setAccountFormData({
+      email: "",
+      password: "",
+      is_active: true
+    });
+    setAccessFormData({
+      global_role_codes: [],
+      outlet_role_assignments: []
+    });
     setFormErrors({});
     setEditingUser(null);
-    setDialogMode("create");
+    setDialogMode("account-create");
     setError(null);
     setSuccessMessage(null);
+    setHasUnsavedChanges(false);
   };
   
-  const openEditDialog = (targetUser: UserResponse) => {
-    setFormData({
+  const openAccountDialog = (targetUser: UserResponse) => {
+    setAccountFormData({
       email: targetUser.email,
       password: "",
-      global_role_codes: targetUser.global_roles,
-      outlet_role_assignments: targetUser.outlet_role_assignments.map((assignment) => ({
-        outlet_id: assignment.outlet_id,
-        role_codes: assignment.role_codes
-      })),
       is_active: targetUser.is_active
     });
     setFormErrors({});
     setEditingUser(targetUser);
-    setDialogMode("edit");
+    setDialogMode("account-edit");
     setError(null);
     setSuccessMessage(null);
+    setHasUnsavedChanges(false);
   };
   
-  const openRolesDialog = (targetUser: UserResponse) => {
-    setFormData({
-      ...emptyForm,
-      global_role_codes: targetUser.global_roles
-    });
-    setFormErrors({});
-    setEditingUser(targetUser);
-    setDialogMode("roles");
-    setError(null);
-    setSuccessMessage(null);
-  };
-  
-  const openOutletsDialog = (targetUser: UserResponse) => {
-    setFormData({
-      ...emptyForm,
+  const openAccessDialog = (targetUser: UserResponse) => {
+    setAccessFormData({
+      global_role_codes: targetUser.global_roles,
       outlet_role_assignments: targetUser.outlet_role_assignments.map((assignment) => ({
         outlet_id: assignment.outlet_id,
         role_codes: assignment.role_codes
@@ -441,9 +466,10 @@ export function UsersPage(props: UsersPageProps) {
     });
     setFormErrors({});
     setEditingUser(targetUser);
-    setDialogMode("outlets");
+    setDialogMode("access-edit");
     setError(null);
     setSuccessMessage(null);
+    setHasUnsavedChanges(false);
   };
   
   const openPasswordDialog = (targetUser: UserResponse) => {
@@ -453,6 +479,7 @@ export function UsersPage(props: UsersPageProps) {
     setDialogMode("password");
     setError(null);
     setSuccessMessage(null);
+    setHasUnsavedChanges(false);
   };
   
   const closeDialog = () => {
@@ -460,27 +487,34 @@ export function UsersPage(props: UsersPageProps) {
     setEditingUser(null);
     setFormData(emptyForm);
     setFormErrors({});
+    setHasUnsavedChanges(false);
   };
   
   const validateForm = (): boolean => {
     const errors: Partial<Record<keyof UserFormData, string>> = {};
     
-    if (dialogMode === "create" || dialogMode === "edit") {
-      if (dialogMode === "create" && isSuperAdmin && !formData.company_id) {
+    if (dialogMode === "account-create") {
+      if (isSuperAdmin && !formData.company_id) {
         errors.company_id = "Company is required";
       }
-      if (!formData.email.trim()) {
+      if (!accountFormData.email.trim()) {
         errors.email = "Email is required";
-      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountFormData.email)) {
         errors.email = "Invalid email format";
       }
       
-      if (dialogMode === "create" && !formData.password) {
+      if (!accountFormData.password) {
         errors.password = "Password is required";
-      }
-      
-      if (formData.password && formData.password.length < 8) {
+      } else if (accountFormData.password.length < 8) {
         errors.password = "Password must be at least 8 characters";
+      }
+    }
+    
+    if (dialogMode === "account-edit") {
+      if (!accountFormData.email.trim()) {
+        errors.email = "Email is required";
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountFormData.email)) {
+        errors.email = "Invalid email format";
       }
     }
     
@@ -496,6 +530,10 @@ export function UsersPage(props: UsersPageProps) {
     return Object.keys(errors).length === 0;
   };
   
+  const validateAccessForm = (): boolean => {
+    return true;
+  };
+  
   const handleSubmit = async () => {
     if (!validateForm()) return;
     
@@ -504,69 +542,72 @@ export function UsersPage(props: UsersPageProps) {
     setSuccessMessage(null);
     
     try {
-      if (dialogMode === "create") {
+      if (dialogMode === "account-create") {
         const targetCompanyId = isSuperAdmin
           ? (formData.company_id ?? activeCompanyId)
           : activeCompanyId;
         await createUser({
           company_id: targetCompanyId,
-          email: formData.email,
-          password: formData.password,
+          email: accountFormData.email,
+          password: accountFormData.password,
           role_codes:
-            formData.global_role_codes.length > 0
-              ? (formData.global_role_codes as Role[])
+            accessFormData.global_role_codes.length > 0
+              ? (accessFormData.global_role_codes as Role[])
               : undefined,
           outlet_role_assignments:
-            formData.outlet_role_assignments.length > 0
-              ? formData.outlet_role_assignments.map((assignment) => ({
+            accessFormData.outlet_role_assignments.length > 0
+              ? accessFormData.outlet_role_assignments.map((assignment) => ({
                   outlet_id: assignment.outlet_id,
                   role_codes: assignment.role_codes as Role[]
                 }))
               : undefined,
-          is_active: formData.is_active
+          is_active: accountFormData.is_active
         }, accessToken);
         setSuccessMessage("User created successfully");
         await usersQuery.refetch({ force: true });
         closeDialog();
-      } else if (dialogMode === "edit" && editingUser) {
+      } else if (dialogMode === "account-edit" && editingUser) {
         await updateUser(editingUser.id, {
-          email: formData.email !== editingUser.email ? formData.email : undefined
+          email: accountFormData.email !== editingUser.email ? accountFormData.email : undefined
         }, accessToken);
-        setSuccessMessage("User updated successfully");
+        if (accountFormData.is_active !== editingUser.is_active) {
+          if (accountFormData.is_active) {
+            await reactivateUser(editingUser.id, accessToken);
+          } else {
+            await deactivateUser(editingUser.id, accessToken);
+          }
+        }
+        setSuccessMessage("User account updated successfully");
         await usersQuery.refetch({ force: true });
         closeDialog();
-      } else if (dialogMode === "roles" && editingUser) {
+      } else if (dialogMode === "access-edit" && editingUser) {
         if (editingUser.id === user.id) {
-          setError("You cannot update your own roles.");
+          setError("You cannot update your own access.");
           return;
         }
-        await updateUserRoles(editingUser.id, {
-          role_codes: formData.global_role_codes as Role[]
-        }, accessToken);
-        setSuccessMessage("User roles updated successfully");
-        await usersQuery.refetch({ force: true });
-        closeDialog();
-      } else if (dialogMode === "outlets" && editingUser) {
-        if (editingUser.id === user.id) {
-          setError("You cannot update your own outlet roles.");
-          return;
+        
+        // Update global roles
+        if (accessFormData.global_role_codes) {
+          await updateUserRoles(editingUser.id, {
+            role_codes: accessFormData.global_role_codes as Role[]
+          }, accessToken);
         }
+        
+        // Update outlet roles in parallel
         const existingOutletIds = new Set(
           editingUser.outlet_role_assignments.map((assignment) => assignment.outlet_id)
         );
         const desiredOutletIds = new Set(
-          formData.outlet_role_assignments.map((assignment) => assignment.outlet_id)
+          accessFormData.outlet_role_assignments.map((assignment) => assignment.outlet_id)
         );
 
-        // Update outlet roles in parallel (much faster for users with many outlets)
-        const updatePromises = formData.outlet_role_assignments.map((assignment) =>
+        const updatePromises = accessFormData.outlet_role_assignments.map((assignment) =>
           updateUserRoles(editingUser.id, {
             outlet_id: assignment.outlet_id,
             role_codes: assignment.role_codes as Role[]
           }, accessToken)
         );
 
-        // Remove roles from outlets that are no longer assigned (also in parallel)
         const deletePromises = [...existingOutletIds]
           .filter(outletId => !desiredOutletIds.has(outletId))
           .map(outletId =>
@@ -576,10 +617,9 @@ export function UsersPage(props: UsersPageProps) {
             }, accessToken)
           );
 
-        // Wait for all updates and deletes to complete
         await Promise.all([...updatePromises, ...deletePromises]);
 
-        setSuccessMessage("User outlet roles updated successfully");
+        setSuccessMessage("User access updated successfully");
         await usersQuery.refetch({ force: true });
         closeDialog();
       } else if (dialogMode === "password" && editingUser) {
@@ -675,6 +715,89 @@ export function UsersPage(props: UsersPageProps) {
       return;
     }
     mutateOutletRoleAssignments((roleMap) => {
+      outletIds.forEach((outletId) => {
+        roleMap.delete(outletId);
+      });
+    });
+  };
+  
+  // Access form outlet role functions
+  const accessOutletRoleCodesFor = (outletId: number) =>
+    accessFormData.outlet_role_assignments.find((assignment) => assignment.outlet_id === outletId)
+      ?.role_codes ?? [];
+
+  const mutateAccessOutletRoleAssignments = (
+    mutate: (roleMap: Map<number, Set<string>>) => void
+  ) => {
+    setAccessFormData((prev) => {
+      const roleMap = new Map<number, Set<string>>(
+        prev.outlet_role_assignments.map((assignment) => [assignment.outlet_id, new Set(assignment.role_codes)])
+      );
+      mutate(roleMap);
+      const nextAssignments = [...roleMap.entries()]
+        .filter(([, roleCodes]) => roleCodes.size > 0)
+        .map(([outlet_id, roleCodes]) => ({ outlet_id, role_codes: [...roleCodes] }));
+      return { ...prev, outlet_role_assignments: nextAssignments };
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  const updateAccessOutletRoleCode = (outletId: number, roleCode: string, checked: boolean) => {
+    mutateAccessOutletRoleAssignments((roleMap) => {
+      const roleSet = roleMap.get(outletId) ?? new Set<string>();
+      if (checked) {
+        roleSet.add(roleCode);
+      } else {
+        roleSet.delete(roleCode);
+      }
+      if (roleSet.size === 0) {
+        roleMap.delete(outletId);
+      } else {
+        roleMap.set(outletId, roleSet);
+      }
+    });
+  };
+
+  const setAccessOutletRoleCodeForOutlets = (outletIds: number[], roleCode: string, checked: boolean) => {
+    if (outletIds.length === 0) {
+      return;
+    }
+    mutateAccessOutletRoleAssignments((roleMap) => {
+      outletIds.forEach((outletId) => {
+        const roleSet = roleMap.get(outletId) ?? new Set<string>();
+        if (checked) {
+          roleSet.add(roleCode);
+        } else {
+          roleSet.delete(roleCode);
+        }
+        if (roleSet.size === 0) {
+          roleMap.delete(outletId);
+        } else {
+          roleMap.set(outletId, roleSet);
+        }
+      });
+    });
+  };
+
+  const setAllAssignableAccessRoleCodesForOutlets = (outletIds: number[]) => {
+    if (outletIds.length === 0) {
+      return;
+    }
+    const assignableRoleCodes = outletRoleOptions
+      .filter((role) => role.role_level < actorMaxRoleLevel)
+      .map((role) => role.code);
+    mutateAccessOutletRoleAssignments((roleMap) => {
+      outletIds.forEach((outletId) => {
+        roleMap.set(outletId, new Set(assignableRoleCodes));
+      });
+    });
+  };
+
+  const clearAccessOutletRolesForOutlets = (outletIds: number[]) => {
+    if (outletIds.length === 0) {
+      return;
+    }
+    mutateAccessOutletRoleAssignments((roleMap) => {
       outletIds.forEach((outletId) => {
         roleMap.delete(outletId);
       });
@@ -873,27 +996,18 @@ export function UsersPage(props: UsersPageProps) {
               <Button
                 size="xs"
                 variant="light"
-                onClick={() => openEditDialog(targetUser)}
+                onClick={() => openAccountDialog(targetUser)}
               >
-                Edit
+                Edit Account
               </Button>
               <Button
                 size="xs"
                 variant="light"
-                onClick={() => openRolesDialog(targetUser)}
+                onClick={() => openAccessDialog(targetUser)}
                 disabled={disableRoleAction}
                 title={roleTooltip}
               >
-                Roles
-              </Button>
-              <Button
-                size="xs"
-                variant="light"
-                onClick={() => openOutletsDialog(targetUser)}
-                disabled={disableRoleAction}
-                title={roleTooltip}
-              >
-                Outlet Roles
+                Manage Access
               </Button>
               <Button
                 size="xs"
@@ -929,7 +1043,7 @@ export function UsersPage(props: UsersPageProps) {
         }
       }
     ];
-  }, [openEditDialog, openOutletsDialog, openPasswordDialog, openRolesDialog, user.id]);
+  }, [openAccountDialog, openAccessDialog, openPasswordDialog, user.id]);
   
   return (
     <>
@@ -1041,10 +1155,10 @@ export function UsersPage(props: UsersPageProps) {
         onClose={closeDialog}
         title={
           <Title order={4}>
-            {dialogMode === "create" && "Create New User"}
-            {dialogMode === "edit" && "Edit User"}
-            {dialogMode === "roles" && "Manage User Roles"}
-            {dialogMode === "outlets" && "Manage Outlet Roles"}
+            {dialogMode === "account-create" && "Create New User"}
+            {dialogMode === "account-edit" && "Edit Account"}
+            {dialogMode === "access-create" && "Grant Access"}
+            {dialogMode === "access-edit" && "Manage Access"}
             {dialogMode === "password" && "Change Password"}
           </Title>
         }
@@ -1052,61 +1166,87 @@ export function UsersPage(props: UsersPageProps) {
         size="lg"
       >
         <Stack gap="md">
-          {(dialogMode === "create" || dialogMode === "edit") && (
-            <TextInput
-              label="Email"
-              placeholder="user@example.com"
-              value={formData.email}
-              onChange={(event) => setFormData({ ...formData, email: event.currentTarget.value })}
-              error={formErrors.email}
-              withAsterisk
-            />
+          {(dialogMode === "account-create" || dialogMode === "account-edit") && (
+            <>
+              <TextInput
+                label="Email"
+                placeholder="user@example.com"
+                value={accountFormData.email}
+                onChange={(event) => {
+                  setAccountFormData({ ...accountFormData, email: event.currentTarget.value });
+                  setHasUnsavedChanges(true);
+                }}
+                error={formErrors.email}
+                withAsterisk
+                aria-label="Email address"
+              />
+
+              {dialogMode === "account-create" && isSuperAdmin ? (
+                <Select
+                  label="Company"
+                  placeholder="Select company"
+                  data={companyOptions}
+                  value={formData.company_id ? String(formData.company_id) : ""}
+                  onChange={(value) => {
+                    const nextValue = value ? Number(value) : null;
+                    setFormData({
+                      ...formData,
+                      company_id: nextValue,
+                      outlet_role_assignments: []
+                    });
+                    setHasUnsavedChanges(true);
+                  }}
+                  error={formErrors.company_id}
+                  disabled={companyOptions.length === 0}
+                  withAsterisk
+                  aria-label="Company selection"
+                />
+              ) : null}
+
+              {dialogMode === "account-create" ? (
+                <TextInput
+                  label="Password"
+                  placeholder="Minimum 8 characters"
+                  type="password"
+                  value={accountFormData.password}
+                  onChange={(event) => {
+                    setAccountFormData({ ...accountFormData, password: event.currentTarget.value });
+                    setHasUnsavedChanges(true);
+                  }}
+                  error={formErrors.password}
+                  withAsterisk
+                  aria-label="Password"
+                />
+              ) : null}
+
+              <Checkbox
+                label="Active"
+                checked={accountFormData.is_active}
+                onChange={(event) => {
+                  setAccountFormData({ ...accountFormData, is_active: event.currentTarget.checked });
+                  setHasUnsavedChanges(true);
+                }}
+                aria-label="User active status"
+              />
+            </>
           )}
 
-          {dialogMode === "create" && isSuperAdmin ? (
-            <Select
-              label="Company"
-              placeholder="Select company"
-              data={companyOptions}
-              value={formData.company_id ? String(formData.company_id) : ""}
-              onChange={(value) => {
-                const nextValue = value ? Number(value) : null;
-                setFormData({
-                  ...formData,
-                  company_id: nextValue,
-                  outlet_role_assignments: []
-                });
-              }}
-              error={formErrors.company_id}
-              disabled={companyOptions.length === 0}
-              withAsterisk
-            />
-          ) : null}
-
-          {dialogMode === "create" ? (
-            <TextInput
-              label="Password"
-              placeholder="Minimum 8 characters"
-              type="password"
-              value={formData.password}
-              onChange={(event) => setFormData({ ...formData, password: event.currentTarget.value })}
-              error={formErrors.password}
-              withAsterisk
-            />
-          ) : null}
-
-          {dialogMode === "create" ? (
-            <Stack gap="sm">
+          {(dialogMode === "access-create" || dialogMode === "access-edit") && (
+            <>
               <Select
                 label="Global Role"
                 description="A user can have only one global role"
                 placeholder="Select a global role (optional)"
-                value={formData.global_role_codes[0] ?? ""}
-                onChange={(value) => setFormData({ ...formData, global_role_codes: value ? [value] : [] })}
+                value={accessFormData.global_role_codes[0] ?? ""}
+                onChange={(value) => {
+                  setAccessFormData({ ...accessFormData, global_role_codes: value ? [value] : [] });
+                  setHasUnsavedChanges(true);
+                }}
                 data={globalRoleOptions
                   .filter((role) => role.role_level < actorMaxRoleLevel)
                   .map((role) => ({ value: role.code, label: role.name }))}
                 allowDeselect
+                aria-label="Global role selection"
               />
 
               <OutletRoleAssignmentsField
@@ -1115,49 +1255,14 @@ export function UsersPage(props: UsersPageProps) {
                 roles={outletRoleOptions}
                 actorMaxRoleLevel={actorMaxRoleLevel}
                 maxHeight={300}
-                outletRoleCodesFor={outletRoleCodesFor}
-                onUpdateRoleCode={updateOutletRoleCode}
-                onSetRoleForOutlets={setOutletRoleCodeForOutlets}
-                onSetAllAssignableRolesForOutlets={setAllAssignableRoleCodesForOutlets}
-                onClearRolesForOutlets={clearOutletRolesForOutlets}
+                outletRoleCodesFor={accessOutletRoleCodesFor}
+                onUpdateRoleCode={updateAccessOutletRoleCode}
+                onSetRoleForOutlets={setAccessOutletRoleCodeForOutlets}
+                onSetAllAssignableRolesForOutlets={setAllAssignableAccessRoleCodesForOutlets}
+                onClearRolesForOutlets={clearAccessOutletRolesForOutlets}
               />
-
-              <Checkbox
-                label="Active"
-                checked={formData.is_active}
-                onChange={(event) => setFormData({ ...formData, is_active: event.currentTarget.checked })}
-              />
-            </Stack>
-          ) : null}
-
-          {dialogMode === "roles" ? (
-            <Select
-              label="Global Role"
-              description="A user can have only one global role"
-              placeholder="Select a global role (optional)"
-              value={formData.global_role_codes[0] ?? ""}
-              onChange={(value) => setFormData({ ...formData, global_role_codes: value ? [value] : [] })}
-              data={globalRoleOptions
-                .filter((role) => role.role_level < actorMaxRoleLevel)
-                .map((role) => ({ value: role.code, label: role.name }))}
-              allowDeselect
-            />
-          ) : null}
-
-          {dialogMode === "outlets" ? (
-            <OutletRoleAssignmentsField
-              title="Select Outlet Roles"
-              outlets={outletsQuery.data || []}
-              roles={outletRoleOptions}
-              actorMaxRoleLevel={actorMaxRoleLevel}
-              maxHeight={320}
-              outletRoleCodesFor={outletRoleCodesFor}
-              onUpdateRoleCode={updateOutletRoleCode}
-              onSetRoleForOutlets={setOutletRoleCodeForOutlets}
-              onSetAllAssignableRolesForOutlets={setAllAssignableRoleCodesForOutlets}
-              onClearRolesForOutlets={clearOutletRolesForOutlets}
-            />
-          ) : null}
+            </>
+          )}
 
           {dialogMode === "password" ? (
             <TextInput
@@ -1168,11 +1273,12 @@ export function UsersPage(props: UsersPageProps) {
               onChange={(event) => setFormData({ ...formData, password: event.currentTarget.value })}
               error={formErrors.password}
               withAsterisk
+              aria-label="New password"
             />
           ) : null}
 
           {error ? (
-            <Alert color="red" title="Unable to save">
+            <Alert color="red" title="Unable to save" role="alert" aria-live="polite">
               {error}
             </Alert>
           ) : null}
