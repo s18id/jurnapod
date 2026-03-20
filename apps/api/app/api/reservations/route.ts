@@ -120,6 +120,27 @@ async function resolveReservationTimezone(companyId: number, outletId: number): 
   return pickReservationTimezone(outletTimezone, companyTimezone);
 }
 
+/**
+ * GET /api/reservations
+ * 
+ * List reservations with flexible filtering
+ * 
+ * Query Parameters:
+ * - outlet_id (required): Outlet ID
+ * - date_from, date_to (optional): Date range in YYYY-MM-DD format
+ * - overlap_filter (optional, boolean): Enable calendar mode
+ *   - true: Returns reservations that overlap with the date range (calendar view)
+ *   - false (default): Returns reservations that start within the date range (reports)
+ * - status, from, to (optional): Additional filters
+ * - limit, offset (optional): Pagination
+ * 
+ * @example
+ * // Calendar view: show cross-midnight reservations
+ * GET /api/reservations?outlet_id=1&date_from=2025-12-31&date_to=2025-12-31&overlap_filter=true
+ * 
+ * // Report view: count each reservation once
+ * GET /api/reservations?outlet_id=1&date_from=2025-12-31&date_to=2025-12-31
+ */
 export const GET = withAuth(
   async (request, auth) => {
     try {
@@ -129,6 +150,7 @@ export const GET = withAuth(
         status: url.searchParams.get("status") ?? undefined,
         date_from: url.searchParams.get("date_from") ?? undefined,
         date_to: url.searchParams.get("date_to") ?? undefined,
+        overlap_filter: url.searchParams.get("overlap_filter") ?? undefined,
         from: url.searchParams.get("from") ?? undefined,
         to: url.searchParams.get("to") ?? undefined,
         limit: url.searchParams.get("limit") ?? undefined,

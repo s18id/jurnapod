@@ -111,6 +111,7 @@ export interface ListReservationsParams {
   customerName?: string;
   fromDate?: Date;
   toDate?: Date;
+  useOverlapFilter?: boolean; // Enables interval overlap for calendar views
 }
 
 export interface UpdateStatusInput {
@@ -583,6 +584,17 @@ async function hasActiveReservationOnTable(
 // LEGACY EXPORTS (Backward Compatibility)
 // ============================================================================
 
+/**
+ * List reservations (legacy interface)
+ * 
+ * Date filtering modes:
+ * - Calendar mode (overlap_filter=true): Returns reservations that overlap with the date range.
+ * - Report mode (overlap_filter=false, default): Returns reservations that START within the date range.
+ * 
+ * @param companyId - Company ID
+ * @param query - Query parameters including optional overlap_filter flag
+ * @returns List of reservation rows
+ */
 export async function listReservations(
   companyId: number,
   query: ReservationListQuery
@@ -595,13 +607,44 @@ export async function listReservations(
     where.push("status = ?");
     params.push(query.status);
   }
-  if (query.from) {
-    where.push("((reservation_start_ts IS NOT NULL AND reservation_start_ts >= ?) OR (reservation_start_ts IS NULL AND reservation_at >= ?))");
-    params.push(toUnixMs(query.from), toDbDateTime(query.from));
-  }
-  if (query.to) {
-    where.push("((reservation_start_ts IS NOT NULL AND reservation_start_ts <= ?) OR (reservation_start_ts IS NULL AND reservation_at <= ?))");
-    params.push(toUnixMs(query.to), toDbDateTime(query.to));
+  
+  // Date filtering: calendar mode uses interval overlap, report mode uses point-in-time
+  if (query.from && query.to) {
+    if (query.overlap_filter) {
+      // Calendar mode: show reservations that touch any part of the date range
+      // Interval overlap: reservation_start < filter_end AND reservation_end > filter_start
+      where.push(
+        "((reservation_start_ts IS NOT NULL AND reservation_end_ts IS NOT NULL " +
+        "  AND reservation_start_ts < ? AND reservation_end_ts > ?) " +
+        "OR (reservation_start_ts IS NULL AND reservation_at >= ? AND reservation_at <= ?))"
+      );
+      params.push(
+        toUnixMs(query.to) + 1,      // start < filter_end (exclusive)
+        toUnixMs(query.from),         // end > filter_start (exclusive)
+        toDbDateTime(query.from),     // legacy fallback: point-in-time
+        toDbDateTime(query.to)
+      );
+    } else {
+      // Report mode: point-in-time filtering (reservation counted on start date only)
+      where.push("((reservation_start_ts IS NOT NULL AND reservation_start_ts >= ? AND reservation_start_ts <= ?) OR (reservation_start_ts IS NULL AND reservation_at >= ? AND reservation_at <= ?))");
+      params.push(toUnixMs(query.from), toUnixMs(query.to), toDbDateTime(query.from), toDbDateTime(query.to));
+    }
+  } else if (query.from) {
+    if (query.overlap_filter) {
+      where.push("((reservation_start_ts IS NOT NULL AND reservation_end_ts IS NOT NULL AND reservation_end_ts > ?) OR (reservation_start_ts IS NULL AND reservation_at >= ?))");
+      params.push(toUnixMs(query.from), toDbDateTime(query.from));
+    } else {
+      where.push("((reservation_start_ts IS NOT NULL AND reservation_start_ts >= ?) OR (reservation_start_ts IS NULL AND reservation_at >= ?))");
+      params.push(toUnixMs(query.from), toDbDateTime(query.from));
+    }
+  } else if (query.to) {
+    if (query.overlap_filter) {
+      where.push("((reservation_start_ts IS NOT NULL AND reservation_start_ts < ?) OR (reservation_start_ts IS NULL AND reservation_at <= ?))");
+      params.push(toUnixMs(query.to) + 1, toDbDateTime(query.to));
+    } else {
+      where.push("((reservation_start_ts IS NOT NULL AND reservation_start_ts <= ?) OR (reservation_start_ts IS NULL AND reservation_at <= ?))");
+      params.push(toUnixMs(query.to), toDbDateTime(query.to));
+    }
   }
 
   params.push(query.limit, query.offset);
@@ -1286,6 +1329,21 @@ async function getReservationV2WithConnection(
 /**
  * List reservations with filtering and pagination (Story 12.4 interface)
  */
+/**
+ * List reservations with flexible filtering
+ * 
+ * Date filtering modes:
+ * - Calendar mode (useOverlapFilter=true): Returns reservations that overlap with the date range.
+ *   A reservation appears on ANY day it occupies, even partially.
+ *   Example: NYE party (Dec 31 11PM - Jan 1 2AM) shows on BOTH Dec 31 AND Jan 1.
+ * 
+ * - Report mode (useOverlapFilter=false, default): Returns reservations that START within the date range.
+ *   Each reservation is counted once, on its start date.
+ *   Example: NYE party (Dec 31 11PM - Jan 1 2AM) shows ONLY on Dec 31.
+ * 
+ * @param params - Query parameters including optional useOverlapFilter flag
+ * @returns Paginated list of reservations with total count
+ */
 export async function listReservationsV2(
   params: ListReservationsParams
 ): Promise<{ reservations: Reservation[]; total: number }> {
@@ -1324,14 +1382,63 @@ export async function listReservationsV2(
     queryParams.push(`%${params.customerName}%`);
   }
 
-  if (params.fromDate) {
-    whereConditions.push('((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts >= ?) OR (r.reservation_start_ts IS NULL AND r.reservation_at >= ?))');
-    queryParams.push(toUnixMs(params.fromDate), toDbDateTime(params.fromDate));
-  }
-
-  if (params.toDate) {
-    whereConditions.push('((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts <= ?) OR (r.reservation_start_ts IS NULL AND r.reservation_at <= ?))');
-    queryParams.push(toUnixMs(params.toDate), toDbDateTime(params.toDate));
+  // Date filtering: calendar mode uses interval overlap, report mode uses point-in-time
+  if (params.fromDate && params.toDate) {
+    if (params.useOverlapFilter) {
+      // Calendar mode: show reservations that touch any part of the date range
+      // Interval overlap: reservation_start < filter_end AND reservation_end > filter_start
+      whereConditions.push(
+        '((r.reservation_start_ts IS NOT NULL AND r.reservation_end_ts IS NOT NULL ' +
+        '  AND r.reservation_start_ts < ? AND r.reservation_end_ts > ?) ' +
+        'OR (r.reservation_start_ts IS NULL AND r.reservation_at >= ? AND r.reservation_at <= ?))'
+      );
+      queryParams.push(
+        toUnixMs(params.toDate) + 1,      // start < filter_end (exclusive)
+        toUnixMs(params.fromDate),         // end > filter_start (exclusive)
+        toDbDateTime(params.fromDate),     // legacy fallback: point-in-time
+        toDbDateTime(params.toDate)
+      );
+    } else {
+      // Report mode: point-in-time filtering (reservation counted on start date only)
+      whereConditions.push(
+        '((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts >= ? AND r.reservation_start_ts <= ?) ' +
+        'OR (r.reservation_start_ts IS NULL AND r.reservation_at >= ? AND r.reservation_at <= ?))'
+      );
+      queryParams.push(
+        toUnixMs(params.fromDate),
+        toUnixMs(params.toDate),
+        toDbDateTime(params.fromDate),
+        toDbDateTime(params.toDate)
+      );
+    }
+  } else if (params.fromDate) {
+    if (params.useOverlapFilter) {
+      whereConditions.push(
+        '((r.reservation_start_ts IS NOT NULL AND r.reservation_end_ts IS NOT NULL AND r.reservation_end_ts > ?) ' +
+        'OR (r.reservation_start_ts IS NULL AND r.reservation_at >= ?))'
+      );
+      queryParams.push(toUnixMs(params.fromDate), toDbDateTime(params.fromDate));
+    } else {
+      whereConditions.push(
+        '((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts >= ?) ' +
+        'OR (r.reservation_start_ts IS NULL AND r.reservation_at >= ?))'
+      );
+      queryParams.push(toUnixMs(params.fromDate), toDbDateTime(params.fromDate));
+    }
+  } else if (params.toDate) {
+    if (params.useOverlapFilter) {
+      whereConditions.push(
+        '((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts < ?) ' +
+        'OR (r.reservation_start_ts IS NULL AND r.reservation_at <= ?))'
+      );
+      queryParams.push(toUnixMs(params.toDate) + 1, toDbDateTime(params.toDate));
+    } else {
+      whereConditions.push(
+        '((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts <= ?) ' +
+        'OR (r.reservation_start_ts IS NULL AND r.reservation_at <= ?))'
+      );
+      queryParams.push(toUnixMs(params.toDate), toDbDateTime(params.toDate));
+    }
   }
 
   // Get total count
