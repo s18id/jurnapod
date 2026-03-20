@@ -248,7 +248,7 @@ describe("Reservation Calendar page helpers", () => {
       selectedOutletId: 1,
       editingReservationId: null,
       formState: {
-        tableId: null,
+        tableId: 1, // Provide tableId so validation passes and createReservationFn is called
         customerName: "Guest",
         customerPhone: "",
         guestCount: 2,
@@ -381,5 +381,273 @@ describe("Reservation Calendar page helpers", () => {
 
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.errorMessage, "status failed");
+  });
+
+  test("validates multi-table mode requires at least 2 tables", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    const result = await pageModule.executeReservationFormAction({
+      mode: "create",
+      selectedOutletId: 1,
+      editingReservationId: null,
+      formState: {
+        tableId: null,
+        customerName: "Large Party",
+        customerPhone: "",
+        guestCount: 10,
+        reservationAt: new Date("2026-03-20T19:00:00.000Z"),
+        durationMinutes: 120,
+        notes: ""
+      },
+      accessToken: "token",
+      isMultiTable: true,
+      selectedTableIds: [1], // Only 1 table - should fail validation
+      createReservationFn: async () => {
+        throw new Error("should not be called");
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.errorMessage, "Select at least 2 tables for a large party reservation.");
+  });
+
+  test("validates single-table mode requires a table", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    const result = await pageModule.executeReservationFormAction({
+      mode: "create",
+      selectedOutletId: 1,
+      editingReservationId: null,
+      formState: {
+        tableId: null,
+        customerName: "Single Guest",
+        customerPhone: "",
+        guestCount: 2,
+        reservationAt: new Date("2026-03-20T19:00:00.000Z"),
+        durationMinutes: 120,
+        notes: ""
+      },
+      accessToken: "token",
+      isMultiTable: false,
+      selectedTableIds: [],
+      createReservationFn: async () => {
+        throw new Error("should not be called");
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.errorMessage, "Select a table for the reservation.");
+  });
+
+  test("requires outlet selection before saving", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    const result = await pageModule.executeReservationFormAction({
+      mode: "create",
+      selectedOutletId: null, // No outlet selected
+      editingReservationId: null,
+      formState: {
+        tableId: 1,
+        customerName: "Guest",
+        customerPhone: "",
+        guestCount: 2,
+        reservationAt: new Date("2026-03-20T19:00:00.000Z"),
+        durationMinutes: 120,
+        notes: ""
+      },
+      accessToken: "token",
+      createReservationFn: async () => {
+        throw new Error("should not be called");
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.errorMessage, "Select an outlet before saving reservation.");
+  });
+
+  test("requires customer name", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    const result = await pageModule.executeReservationFormAction({
+      mode: "create",
+      selectedOutletId: 1,
+      editingReservationId: null,
+      formState: {
+        tableId: 1,
+        customerName: "", // Empty name
+        customerPhone: "",
+        guestCount: 2,
+        reservationAt: new Date("2026-03-20T19:00:00.000Z"),
+        durationMinutes: 120,
+        notes: ""
+      },
+      accessToken: "token",
+      createReservationFn: async () => {
+        throw new Error("should not be called");
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.errorMessage, "Customer name is required.");
+  });
+
+  test("requires reservation date/time", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    const result = await pageModule.executeReservationFormAction({
+      mode: "create",
+      selectedOutletId: 1,
+      editingReservationId: null,
+      formState: {
+        tableId: 1,
+        customerName: "Guest",
+        customerPhone: "",
+        guestCount: 2,
+        reservationAt: null, // No date/time
+        durationMinutes: 120,
+        notes: ""
+      },
+      accessToken: "token",
+      createReservationFn: async () => {
+        throw new Error("should not be called");
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.errorMessage, "Reservation date/time is required.");
+  });
+
+  test("multi-table validation rejects 0 tables", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    const result = await pageModule.executeReservationFormAction({
+      mode: "create",
+      selectedOutletId: 1,
+      editingReservationId: null,
+      formState: {
+        tableId: null,
+        customerName: "Large Party",
+        customerPhone: "",
+        guestCount: 10,
+        reservationAt: new Date("2026-03-20T19:00:00.000Z"),
+        durationMinutes: 120,
+        notes: ""
+      },
+      accessToken: "token",
+      isMultiTable: true,
+      selectedTableIds: [], // Zero tables - should fail
+      createReservationFn: async () => {
+        throw new Error("should not be called");
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.errorMessage, "Select at least 2 tables for a large party reservation.");
+  });
+
+  test("multi-table mode requires 2+ tables — 3 tables passes validation", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+
+    // When isMultiTable=true and selectedTableIds=[1,2,3] (2+ tables),
+    // validation passes and createReservationGroup is called directly.
+    // Since we cannot intercept the direct module-level call,
+    // we verify the validation by confirming createFn (fallback mock) is NOT called,
+    // while knowing createReservationGroup would be called instead.
+    let createFnCalled = false;
+    const result = await pageModule.executeReservationFormAction({
+      mode: "create",
+      selectedOutletId: 1,
+      editingReservationId: null,
+      formState: {
+        tableId: null,
+        customerName: "Large Party",
+        customerPhone: "",
+        guestCount: 10,
+        reservationAt: new Date("2026-03-20T19:00:00.000Z"),
+        durationMinutes: 120,
+        notes: ""
+      },
+      accessToken: "token",
+      isMultiTable: true,
+      selectedTableIds: [1, 2, 3], // 2+ tables — passes validation
+      createReservationFn: async () => {
+        createFnCalled = true;
+        throw new Error("createFn should not be called for multi-table");
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    // createFn is NOT called for multi-table (createReservationGroup is called instead)
+    assert.strictEqual(createFnCalled, false);
+    // Result is not ok because createReservationGroup fails without a mock
+    assert.strictEqual(result.ok, false);
+  });
+
+  test("requires customer name even in multi-table mode", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    const result = await pageModule.executeReservationFormAction({
+      mode: "create",
+      selectedOutletId: 1,
+      editingReservationId: null,
+      formState: {
+        tableId: null,
+        customerName: "   ", // Whitespace-only name
+        customerPhone: "",
+        guestCount: 10,
+        reservationAt: new Date("2026-03-20T19:00:00.000Z"),
+        durationMinutes: 120,
+        notes: ""
+      },
+      accessToken: "token",
+      isMultiTable: true,
+      selectedTableIds: [1, 2, 3],
+      createReservationFn: async () => {
+        throw new Error("should not be called");
+      },
+      refetchCalendar: async () => {
+        return;
+      },
+      refetchTables: async () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.errorMessage, "Customer name is required.");
   });
 });

@@ -457,6 +457,143 @@ file: <ods/xlsx file>
 
 ---
 
+## Reservation Groups (Large Party Support)
+
+### Create Reservation Group (Multi-Table)
+
+Creates a reservation group for parties requiring 2+ tables.
+
+```http
+POST /api/reservation-groups
+Content-Type: application/json
+Authorization: Bearer {access_token}
+
+{
+  "outlet_id": 1,
+  "customer_name": "Smith Party",
+  "customer_phone": "+1234567890",
+  "guest_count": 10,
+  "table_ids": [1, 2, 3],
+  "reservation_at": "2026-03-20T19:00:00+07:00",
+  "duration_minutes": 120,
+  "notes": "Birthday celebration"
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "data": {
+    "group_id": 123,
+    "reservation_ids": [456, 457, 458]
+  }
+}
+```
+
+**Errors:**
+- `400` - Invalid request (missing fields, insufficient capacity)
+- `409` - Tables not available (conflict with existing reservation)
+
+### Get Reservation Group
+
+```http
+GET /api/reservation-groups/{group_id}
+Authorization: Bearer {access_token}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": 123,
+    "company_id": 1,
+    "outlet_id": 1,
+    "group_name": null,
+    "total_guest_count": 10,
+    "created_at": "2026-03-20T10:00:00.000Z",
+    "updated_at": "2026-03-20T10:00:00.000Z",
+    "reservations": [
+      {
+        "reservation_id": 456,
+        "table_id": 1,
+        "table_code": "A1",
+        "table_name": "Table 1",
+        "status": "BOOKED",
+        "reservation_at": "2026-03-20T19:00:00.000Z",
+        "reservation_start_ts": 1742494800000,
+        "reservation_end_ts": 1742502000000
+      }
+    ]
+  }
+}
+```
+
+### Cancel Reservation Group
+
+Ungroups all reservations and deletes the group.
+
+```http
+DELETE /api/reservation-groups/{group_id}
+Authorization: Bearer {access_token}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "deleted": true,
+    "ungrouped_count": 3
+  }
+}
+```
+
+**Errors:**
+- `404` - Group not found
+- `409` - Cannot cancel group with reservations in final status (SEATED, COMPLETED)
+
+### Get Table Suggestions
+
+Suggests optimal table combinations for large parties.
+
+```http
+GET /api/reservation-groups/suggest-tables?outlet_id=1&guest_count=10&reservation_at=2026-03-20T19:00:00+07:00&duration_minutes=120
+Authorization: Bearer {access_token}
+```
+
+**Query Parameters:**
+- `outlet_id` (required) - Outlet ID
+- `guest_count` (required) - Number of guests (2-100)
+- `reservation_at` (required) - ISO 8601 datetime
+- `duration_minutes` (optional) - Duration in minutes (default: 120)
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "suggestions": [
+      {
+        "tables": [
+          { "id": 1, "code": "A1", "name": "Table 1", "capacity": 4, "zone": "main" },
+          { "id": 2, "code": "A2", "name": "Table 2", "capacity": 4, "zone": "main" },
+          { "id": 3, "code": "B1", "name": "Table 3", "capacity": 4, "zone": "patio" }
+        ],
+        "total_capacity": 12,
+        "excess_capacity": 2,
+        "score": 220
+      }
+    ]
+  }
+}
+```
+
+**Scoring:** Lower score is better. Prefers fewer tables with less excess capacity.
+
+---
+
 ## Error Responses
 
 All endpoints return standard error format:
@@ -478,6 +615,7 @@ All endpoints return standard error format:
 - `401` - Unauthorized
 - `403` - Forbidden
 - `404` - Not Found
+- `409` - Conflict (e.g., table not available, group has active reservations)
 - `422` - Unprocessable Entity
 - `500` - Internal Server Error
 

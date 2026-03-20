@@ -143,19 +143,21 @@ export async function checkMultiTableAvailability(input: {
 }> {
   const conn = await getConnection();
   try {
-    // 1. Get table details
+    // 1. Get table details (tenant-scoped)
     const [tables] = await conn.execute<Array<RowDataPacket & {
       id: number;
       code: string;
       name: string;
       capacity: number;
     }>>(
-      `SELECT id, code, name, capacity 
-       FROM outlet_tables 
-       WHERE outlet_id = ? 
-         AND id IN (?)
-         AND status = 'AVAILABLE'`,
-      [input.outletId, input.tableIds]
+      `SELECT ot.id, ot.code, ot.name, ot.capacity
+       FROM outlet_tables ot
+       JOIN outlets o ON ot.outlet_id = o.id
+       WHERE o.company_id = ?
+         AND ot.outlet_id = ?
+         AND ot.id IN (?)
+         AND ot.status = 'AVAILABLE'`,
+      [input.companyId, input.outletId, input.tableIds]
     );
 
     const totalCapacity = tables.reduce((sum, t) => sum + t.capacity, 0);
@@ -440,7 +442,7 @@ export async function getReservationGroup(input: {
  * 4. Delete the group
  * 
  * @returns Deletion result with count of ungrouped reservations
- */
+  */
 export async function deleteReservationGroupSafe(input: {
   companyId: number;
   groupId: number;
@@ -459,28 +461,39 @@ export async function deleteReservationGroupSafe(input: {
       throw new Error("Reservation group not found or access denied");
     }
 
-    // 2. Check all reservations in group are cancellable
+    // 2. Check all reservations in group are cancellable (only BOOKED/CONFIRMED allowed)
     const [reservations] = await conn.execute<Array<RowDataPacket & {
       id: number;
       status: string;
     }>>(
-      `SELECT id, status FROM reservations 
+      `SELECT id, status FROM reservations
        WHERE reservation_group_id = ? AND company_id = ?`,
       [input.groupId, input.companyId]
     );
 
-    const hasFinalStatus = reservations.some(
-      r => ['SEATED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(r.status)
+    const hasNonCancellableStatus = reservations.some(
+      r => ['ARRIVED', 'SEATED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(r.status)
     );
 
-    if (hasFinalStatus) {
-      throw new Error("Cannot delete group with reservations in final status");
+    if (hasNonCancellableStatus) {
+      throw new Error("Cannot cancel group with reservations that have already started");
     }
 
-    // 3. Ungroup all reservations (set group_id to NULL)
+    const hasUnprocessableStatus = reservations.some(
+      r => !['BOOKED', 'CONFIRMED'].includes(r.status)
+    );
+
+    if (hasUnprocessableStatus) {
+      throw new Error("All reservations in group must be in BOOKED or CONFIRMED status to cancel");
+    }
+
+    // 3. Cancel all linked reservations (set status + timestamp, then unlink)
     await conn.execute(
-      `UPDATE reservations 
-       SET reservation_group_id = NULL, updated_at = NOW()
+      `UPDATE reservations
+       SET status = 'CANCELLED',
+           cancelled_at = NOW(),
+           reservation_group_id = NULL,
+           updated_at = NOW()
        WHERE reservation_group_id = ? AND company_id = ?`,
       [input.groupId, input.companyId]
     );

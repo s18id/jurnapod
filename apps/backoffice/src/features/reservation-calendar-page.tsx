@@ -7,6 +7,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Group,
   Modal,
   NumberInput,
@@ -24,9 +25,11 @@ import { DatePickerInput } from "@mantine/dates";
 import type {
   OutletTableResponse,
   ReservationCreateRequest,
+  ReservationGroupDetail,
   ReservationRow,
   ReservationStatus,
-  ReservationUpdateRequest
+  ReservationUpdateRequest,
+  TableSuggestion
 } from "@jurnapod/shared";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
@@ -41,6 +44,7 @@ import { getStoredCompanyTimezone, refreshSessionUser, type SessionUser } from "
 import { useOutletsFull } from "../hooks/use-outlets";
 import { useOutletTables } from "../hooks/use-outlet-tables";
 import { createReservation, updateReservation } from "../hooks/use-reservations";
+import { cancelReservationGroup, createReservationGroup, getReservationGroup, useTableSuggestions } from "../hooks/use-reservation-groups";
 import {
   DEFAULT_RESERVATION_DURATION_MINUTES,
   buildDailyUtilization,
@@ -52,6 +56,8 @@ import {
   type ReservationCalendarViewMode,
   useReservationCalendar
 } from "../hooks/use-reservation-calendar";
+import { TableMultiSelect } from "../components/TableMultiSelect";
+import { TableSuggestions } from "../components/TableSuggestions";
 
 type ReservationCalendarPageProps = {
   user: SessionUser;
@@ -131,6 +137,8 @@ export async function executeReservationFormAction(input: {
   editingReservationId: number | null;
   formState: ReservationFormState;
   accessToken: string;
+  isMultiTable?: boolean;
+  selectedTableIds?: number[];
   createReservationFn?: (data: ReservationCreateRequest, accessToken: string) => Promise<ReservationRow>;
   updateReservationFn?: (reservationId: number, data: ReservationUpdateRequest, accessToken: string) => Promise<ReservationRow>;
   refetchCalendar: () => Promise<unknown>;
@@ -146,37 +154,63 @@ export async function executeReservationFormAction(input: {
     return { ok: false, errorMessage: "Reservation date/time is required." };
   }
 
-  const payload: ReservationCreateRequest = {
-    outlet_id: input.selectedOutletId,
-    table_id: input.formState.tableId,
-    customer_name: input.formState.customerName.trim(),
-    customer_phone: input.formState.customerPhone.trim() || null,
-    guest_count: Math.max(1, Math.round(input.formState.guestCount)),
-    reservation_at: input.formState.reservationAt.toISOString(),
-    duration_minutes: Math.max(15, Math.round(input.formState.durationMinutes)),
-    notes: input.formState.notes.trim() || null
-  };
+  const isMultiTable = input.isMultiTable ?? false;
+  const selectedTableIds = input.selectedTableIds ?? [];
+
+  // Multi-table validation
+  if (isMultiTable && selectedTableIds.length < 2) {
+    return { ok: false, errorMessage: "Select at least 2 tables for a large party reservation." };
+  }
+
+  // Single-table validation
+  if (!isMultiTable && !input.formState.tableId) {
+    return { ok: false, errorMessage: "Select a table for the reservation." };
+  }
 
   const createFn = input.createReservationFn ?? createReservation;
   const updateFn = input.updateReservationFn ?? updateReservation;
 
   try {
     if (input.mode === "create") {
-      await createFn(payload, input.accessToken);
+      if (isMultiTable && selectedTableIds.length >= 2) {
+        // Create multi-table reservation group
+        const groupPayload = {
+          outlet_id: input.selectedOutletId,
+          customer_name: input.formState.customerName.trim(),
+          customer_phone: input.formState.customerPhone.trim() || null,
+          guest_count: Math.max(2, Math.round(input.formState.guestCount)),
+          table_ids: selectedTableIds,
+          reservation_at: input.formState.reservationAt.toISOString(),
+          duration_minutes: Math.max(15, Math.round(input.formState.durationMinutes)),
+          notes: input.formState.notes.trim() || null
+        };
+        await createReservationGroup(groupPayload, input.accessToken);
+      } else {
+        // Create single-table reservation
+        const payload: ReservationCreateRequest = {
+          outlet_id: input.selectedOutletId,
+          table_id: input.formState.tableId,
+          customer_name: input.formState.customerName.trim(),
+          customer_phone: input.formState.customerPhone.trim() || null,
+          guest_count: Math.max(1, Math.round(input.formState.guestCount)),
+          reservation_at: input.formState.reservationAt.toISOString(),
+          duration_minutes: Math.max(15, Math.round(input.formState.durationMinutes)),
+          notes: input.formState.notes.trim() || null
+        };
+        await createFn(payload, input.accessToken);
+      }
     } else if (input.editingReservationId) {
-      await updateFn(
-        input.editingReservationId,
-        {
-          table_id: payload.table_id,
-          customer_name: payload.customer_name,
-          customer_phone: payload.customer_phone,
-          guest_count: payload.guest_count,
-          reservation_at: payload.reservation_at,
-          duration_minutes: payload.duration_minutes,
-          notes: payload.notes
-        },
-        input.accessToken
-      );
+      // For edits, always use single-table update (multi-table edit not yet supported)
+      const editPayload = {
+        table_id: input.formState.tableId,
+        customer_name: input.formState.customerName.trim(),
+        customer_phone: input.formState.customerPhone.trim() || null,
+        guest_count: Math.max(1, Math.round(input.formState.guestCount)),
+        reservation_at: input.formState.reservationAt.toISOString(),
+        duration_minutes: Math.max(15, Math.round(input.formState.durationMinutes)),
+        notes: input.formState.notes.trim() || null
+      };
+      await updateFn(input.editingReservationId, editPayload, input.accessToken);
     } else {
       return { ok: false, errorMessage: "Cannot edit reservation: missing reservation id." };
     }
@@ -383,8 +417,13 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
   const [formState, setFormState] = useState<ReservationFormState>(emptyFormState);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [isMultiTable, setIsMultiTable] = useState(false);
+  const [selectedTableIds, setSelectedTableIds] = useState<number[]>([]);
+  const [suggestions, setSuggestions] = useState<TableSuggestion[]>([]);
 
   const [detailReservation, setDetailReservation] = useState<ReservationRow | null>(null);
+  const [detailGroup, setDetailGroup] = useState<ReservationGroupDetail | null>(null);
+  const [loadingDetailGroup, setLoadingDetailGroup] = useState(false);
   const [reminderNotice, setReminderNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -394,6 +433,28 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     user.company_timezone ?? getStoredCompanyTimezone()
   );
   const [timezoneRefreshAttempted, setTimezoneRefreshAttempted] = useState(false);
+
+  // Fetch group details when opening a grouped reservation
+  useEffect(() => {
+    if (!detailReservation?.reservation_group_id) {
+      setDetailGroup(null);
+      return;
+    }
+
+    setLoadingDetailGroup(true);
+    setDetailGroup(null);
+
+    getReservationGroup(detailReservation.reservation_group_id, accessToken)
+      .then((group) => {
+        setDetailGroup(group);
+      })
+      .catch(() => {
+        setDetailGroup(null);
+      })
+      .finally(() => {
+        setLoadingDetailGroup(false);
+      });
+  }, [detailReservation?.reservation_group_id, accessToken]);
 
   const touchStartX = useRef<number | null>(null);
 
@@ -465,6 +526,36 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       setDefaultDurationMinutes(DEFAULT_RESERVATION_DURATION_MINUTES);
     });
   }, [accessToken]);
+
+  // Reset multi-table selections when mode changes
+  useEffect(() => {
+    if (!isMultiTable) {
+      setSelectedTableIds([]);
+      setSuggestions([]);
+    }
+  }, [isMultiTable]);
+
+  // Fetch suggestions when multi-table mode and reservation time is set
+  const suggestionQuery = useMemo(() => {
+    if (!isMultiTable || !formState.reservationAt || !selectedOutletId) {
+      return null;
+    }
+    return {
+      outlet_id: selectedOutletId,
+      guest_count: formState.guestCount,
+      reservation_at: formState.reservationAt.toISOString(),
+      duration_minutes: formState.durationMinutes
+    };
+  }, [isMultiTable, formState.reservationAt, formState.guestCount, formState.durationMinutes, selectedOutletId]);
+
+  const { suggestions: fetchedSuggestions } = useTableSuggestions(
+    suggestionQuery,
+    accessToken
+  );
+
+  useEffect(() => {
+    setSuggestions(fetchedSuggestions);
+  }, [fetchedSuggestions]);
 
   const calendar = useReservationCalendar({
     outletId: selectedOutletTimezone ? selectedOutletId : null,
@@ -583,6 +674,9 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       reservationAt: new Date(anchorDate)
     });
     setFormError(null);
+    setIsMultiTable(false);
+    setSelectedTableIds([]);
+    setSuggestions([]);
     setFormOpen(true);
   }, [anchorDate, defaultDurationMinutes]);
 
@@ -598,6 +692,9 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     setFormOpen(false);
     setFormError(null);
     setEditingReservationId(null);
+    setIsMultiTable(false);
+    setSelectedTableIds([]);
+    setSuggestions([]);
   }, []);
 
   const submitForm = useCallback(async () => {
@@ -612,6 +709,8 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       editingReservationId,
       formState,
       accessToken,
+      isMultiTable,
+      selectedTableIds,
       refetchCalendar: calendar.refetch,
       refetchTables: outletTables.refetch
     });
@@ -631,8 +730,10 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     editingReservationId,
     formMode,
     formState,
+    isMultiTable,
     outletTables,
-    selectedOutletId
+    selectedOutletId,
+    selectedTableIds
   ]);
 
   const updateReservationStatus = useCallback(
@@ -669,6 +770,31 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     setReminderNotice(reminder.notice);
     setActionSuccess(reminder.success);
   }, []);
+
+  const cancelGroup = useCallback(
+    async (row: ReservationRow) => {
+      if (!row.reservation_group_id) return;
+
+      setUpdatingStatusId(row.reservation_id);
+      setActionError(null);
+      setActionSuccess(null);
+
+      try {
+        await cancelReservationGroup(row.reservation_group_id, accessToken);
+        setActionSuccess(`Group #${row.reservation_group_id} cancelled.`);
+        setDetailReservation(null);
+        setDetailGroup(null);
+        await calendar.refetch();
+        await outletTables.refetch();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to cancel group";
+        setActionError(message);
+      } finally {
+        setUpdatingStatusId(null);
+      }
+    },
+    [accessToken, calendar, outletTables]
+  );
 
   return (
     <Stack gap="md">
@@ -879,9 +1005,16 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
                                     <Text size="sm" fw={600} lineClamp={1}>
                                       {row.customer_name}
                                     </Text>
-                                    <Badge color={RESERVATION_STATUS_META[row.status].badgeColor} variant="light" size="xs">
-                                      {getReservationStatusLabel(row.status)}
-                                    </Badge>
+                                    <Group gap={4}>
+                                      {row.reservation_group_id && (
+                                        <Badge color="violet" variant="light" size="xs">
+                                          Group
+                                        </Badge>
+                                      )}
+                                      <Badge color={RESERVATION_STATUS_META[row.status].badgeColor} variant="light" size="xs">
+                                        {getReservationStatusLabel(row.status)}
+                                      </Badge>
+                                    </Group>
                                   </Group>
                                    <Text size="xs" c="dimmed">
                                      {formatReservationTimeWithDayOffset(row, defaultDurationMinutes, selectedOutletTimezone)} · {row.guest_count} guests · {tableLabel}
@@ -953,7 +1086,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
                                           setReminderNotice(null);
                                         }}
                                       >
-                                        {block.customerName}
+                                        {block.customerName}{block.row.reservation_group_id ? " (G)" : ""}
                                       </Button>
                                     );
                                   })}
@@ -1002,19 +1135,26 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
                                     setReminderNotice(null);
                                   }}
                                 >
-                                  <Stack gap={2} style={{ width: "100%" }}>
+<Stack gap={2} style={{ width: "100%" }}>
                                     <Group justify="space-between" wrap="nowrap" gap="xs">
                                       <Text size="sm" fw={600} lineClamp={1}>
                                         {row.customer_name}
                                       </Text>
-                                      <Badge color={RESERVATION_STATUS_META[row.status].badgeColor} variant="light" size="xs">
-                                        {getReservationStatusLabel(row.status)}
-                                      </Badge>
+                                      <Group gap={4}>
+                                        {row.reservation_group_id && (
+                                          <Badge color="violet" variant="light" size="xs">
+                                            Group
+                                          </Badge>
+                                        )}
+                                        <Badge color={RESERVATION_STATUS_META[row.status].badgeColor} variant="light" size="xs">
+                                          {getReservationStatusLabel(row.status)}
+                                        </Badge>
+                                      </Group>
                                     </Group>
                                      <Text size="xs" c="dimmed">
                                        {formatReservationTimeWithDayOffset(row, defaultDurationMinutes, selectedOutletTimezone)} · {row.guest_count} guests · {tableLabel}
                                      </Text>
-                                  </Stack>
+                                </Stack>
                                 </Button>
                               );
                             })}
@@ -1070,6 +1210,13 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
             required
           />
 
+          <Checkbox
+            label="Large party (multiple tables)"
+            description="For parties requiring 2+ tables"
+            checked={isMultiTable}
+            onChange={(event) => setIsMultiTable(event.currentTarget.checked)}
+          />
+
           <TextInput
             label="Reservation Date & Time"
             type="datetime-local"
@@ -1096,14 +1243,33 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
             }
           />
 
-          <Select
-            label="Suggested Table"
-            placeholder="Pick available table"
-            data={suggestedTableOptions}
-            value={formState.tableId?.toString() ?? null}
-            onChange={(value) => setFormState((current) => ({ ...current, tableId: value ? Number(value) : null }))}
-            clearable
-          />
+          {isMultiTable ? (
+            <>
+              <Text size="sm" fw={500}>
+                Table Suggestions for {formState.guestCount} guests
+              </Text>
+              <TableSuggestions
+                suggestions={suggestions}
+                guestCount={formState.guestCount}
+                onSelect={setSelectedTableIds}
+              />
+              <TableMultiSelect
+                availableTables={outletTables.data}
+                selectedTableIds={selectedTableIds}
+                onChange={setSelectedTableIds}
+                guestCount={formState.guestCount}
+              />
+            </>
+          ) : (
+            <Select
+              label="Suggested Table"
+              placeholder="Pick available table"
+              data={suggestedTableOptions}
+              value={formState.tableId?.toString() ?? null}
+              onChange={(value) => setFormState((current) => ({ ...current, tableId: value ? Number(value) : null }))}
+              clearable
+            />
+          )}
 
           <Textarea
             label="Notes"
@@ -1125,7 +1291,10 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
 
       <Modal
         opened={detailReservation !== null}
-        onClose={() => setDetailReservation(null)}
+        onClose={() => {
+          setDetailReservation(null);
+          setDetailGroup(null);
+        }}
         title={<Title order={4}>Reservation Detail</Title>}
         centered
         size="md"
@@ -1133,7 +1302,14 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
         {detailReservation ? (
           <Stack gap="sm">
             <Group justify="space-between">
-              <Text fw={600}>{detailReservation.customer_name}</Text>
+              <Group gap="xs">
+                <Text fw={600}>{detailReservation.customer_name}</Text>
+                {detailReservation.reservation_group_id && (
+                  <Badge color="violet" variant="light" size="xs">
+                    Group #{detailReservation.reservation_group_id}
+                  </Badge>
+                )}
+              </Group>
               <Badge color={RESERVATION_STATUS_META[detailReservation.status].badgeColor}>
                 {getReservationStatusLabel(detailReservation.status)}
               </Badge>
@@ -1144,39 +1320,87 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
               {detailReservation.duration_minutes == null ? " (default)" : ""}
             </Text>
             <Text size="sm">Guests: {detailReservation.guest_count}</Text>
-            <Text size="sm">Table: {detailReservation.table_id ? `#${detailReservation.table_id}` : "Not assigned"}</Text>
+            {detailGroup && detailGroup.reservations.length > 1 ? (
+              <Stack gap={4}>
+                <Text size="sm">
+                  Tables ({detailGroup.reservations.length}):
+                </Text>
+                {detailGroup.reservations.map((r) => (
+                  <Group key={r.reservation_id} gap="xs">
+                    <Badge color="violet" variant="light" size="xs">
+                      #{r.table_code}
+                    </Badge>
+                    <Text size="xs">{r.table_name}</Text>
+                    <Badge color={RESERVATION_STATUS_META[r.status as ReservationStatus]?.badgeColor ?? "gray"} variant="light" size="xs">
+                      {r.status}
+                    </Badge>
+                  </Group>
+                ))}
+              </Stack>
+            ) : (
+              <Text size="sm">Table: {detailReservation.table_id ? `#${detailReservation.table_id}` : "Not assigned"}</Text>
+            )}
             {detailReservation.notes && <Text size="sm">Notes: {detailReservation.notes}</Text>}
 
             <Group justify="space-between" mt="sm" wrap="wrap">
-              <Button
-                variant="default"
-                onClick={() => openEditModal(detailReservation)}
-                disabled={isReservationFinalStatus(detailReservation.status)}
-              >
-                Edit
-              </Button>
-              <Button
-                color="red"
-                variant="light"
-                loading={updatingStatusId === detailReservation.reservation_id}
-                disabled={isReservationFinalStatus(detailReservation.status)}
-                onClick={() => void updateReservationStatus(detailReservation, "CANCELLED")}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="light"
-                loading={updatingStatusId === detailReservation.reservation_id}
-                disabled={getCheckInTargetStatus(detailReservation.status) === null}
-                onClick={() => {
-                  const nextStatus = getCheckInTargetStatus(detailReservation.status);
-                  if (nextStatus) {
-                    void updateReservationStatus(detailReservation, nextStatus);
-                  }
-                }}
-              >
-                Check In
-              </Button>
+              {detailReservation.reservation_group_id ? (
+                <>
+                  <Button
+                    color="violet"
+                    variant="light"
+                    loading={updatingStatusId === detailReservation.reservation_id}
+                    disabled={isReservationFinalStatus(detailReservation.status)}
+                    onClick={() => void cancelGroup(detailReservation)}
+                  >
+                    Cancel Group
+                  </Button>
+                  <Button
+                    variant="light"
+                    loading={updatingStatusId === detailReservation.reservation_id}
+                    disabled={getCheckInTargetStatus(detailReservation.status) === null}
+                    onClick={() => {
+                      const nextStatus = getCheckInTargetStatus(detailReservation.status);
+                      if (nextStatus) {
+                        void updateReservationStatus(detailReservation, nextStatus);
+                      }
+                    }}
+                  >
+                    Check In
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="default"
+                    onClick={() => openEditModal(detailReservation)}
+                    disabled={isReservationFinalStatus(detailReservation.status)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    color="red"
+                    variant="light"
+                    loading={updatingStatusId === detailReservation.reservation_id}
+                    disabled={isReservationFinalStatus(detailReservation.status)}
+                    onClick={() => void updateReservationStatus(detailReservation, "CANCELLED")}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="light"
+                    loading={updatingStatusId === detailReservation.reservation_id}
+                    disabled={getCheckInTargetStatus(detailReservation.status) === null}
+                    onClick={() => {
+                      const nextStatus = getCheckInTargetStatus(detailReservation.status);
+                      if (nextStatus) {
+                        void updateReservationStatus(detailReservation, nextStatus);
+                      }
+                    }}
+                  >
+                    Check In
+                  </Button>
+                </>
+              )}
               <Button variant="light" color="blue" onClick={() => handleSendReminder(detailReservation)}>
                 Send Reminder
               </Button>

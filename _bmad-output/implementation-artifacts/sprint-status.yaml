@@ -1,5 +1,5 @@
 # generated: 2026-03-15T09:32:00.000Z
-# last_updated: 2026-03-20T16:04:34+0700
+# last_updated: 2026-03-20T20:30:00+0700
 # project: jurnapod
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-20T16:04:34+0700
+last_updated: 2026-03-20T20:30:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -150,3 +150,8 @@ development_status:
   12-9-reservation-calendar-hourly-granularity: done
   12-10-reservation-canonical-start-end-unix-timestamps: done
   12-11-unified-dine-in-table-journey-ui-walk-in-reservation: done
+
+  # Epic 13: Large Party Reservations (Multi-Table Support)
+  # NOTE: Feature for parties requiring 2+ tables with table suggestions and group management
+  epic-13: in-progress
+  13-1-reservation-groups-large-party-support: in-progress  # Review follow-ups pending (AI code-review)

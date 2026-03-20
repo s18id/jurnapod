@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { apiRequest } from "../lib/api-client";
 import type {
   ReservationGroupCreateRequest,
@@ -44,6 +44,26 @@ export async function getReservationGroup(
   }>(
     `/reservation-groups/${groupId}`,
     {},
+    accessToken
+  );
+  return response.data;
+}
+
+/**
+ * Cancel a reservation group (ungroup reservations and delete group)
+ */
+export async function cancelReservationGroup(
+  groupId: number,
+  accessToken: string
+): Promise<{ deleted: boolean; ungrouped_count: number }> {
+  const response = await apiRequest<{
+    success: true;
+    data: { deleted: boolean; ungrouped_count: number };
+  }>(
+    `/reservation-groups/${groupId}`,
+    {
+      method: "DELETE"
+    },
     accessToken
   );
   return response.data;
@@ -96,6 +116,11 @@ export function useTableSuggestions(
       setLoading(false);
     }
   }, [query, accessToken]);
+
+  // Auto-fetch when query or access token changes
+  useEffect(() => {
+    void fetchSuggestions();
+  }, [fetchSuggestions]);
 
   return { suggestions, loading, error, refetch: fetchSuggestions };
 }
