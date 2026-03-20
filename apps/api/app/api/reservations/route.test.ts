@@ -13,6 +13,7 @@ import {
 } from "../../../tests/integration/integration-harness.mjs";
 import {
   applyDateOnlyRange,
+  isValidTimeZone,
   MissingReservationTimezoneError,
   pickReservationTimezone
 } from "./route";
@@ -33,6 +34,41 @@ test("pickReservationTimezone prefers outlet then company", () => {
   assert.strictEqual(pickReservationTimezone("Asia/Jakarta", "Asia/Tokyo"), "Asia/Jakarta");
   assert.strictEqual(pickReservationTimezone("", "Asia/Tokyo"), "Asia/Tokyo");
   assert.strictEqual(pickReservationTimezone(" ", " "), null);
+});
+
+test("pickReservationTimezone validates outlet timezone before preferring it", () => {
+  const result = pickReservationTimezone("Asia/Jakarta", "Asia/Tokyo");
+  assert.strictEqual(result, "Asia/Jakarta");
+  assert.strictEqual(isValidTimeZone("Asia/Jakarta"), true);
+  assert.strictEqual(isValidTimeZone("Asia/Tokyo"), true);
+});
+
+test("pickReservationTimezone falls back to company when outlet invalid", () => {
+  const result = pickReservationTimezone("Asia/InvalidZone", "Asia/Tokyo");
+  assert.strictEqual(result, "Asia/Tokyo");
+  assert.strictEqual(isValidTimeZone("Asia/InvalidZone"), false);
+  assert.strictEqual(isValidTimeZone("Asia/Tokyo"), true);
+});
+
+test("pickReservationTimezone ignores invalid company when outlet valid", () => {
+  const result = pickReservationTimezone("Asia/Jakarta", "InvalidZone");
+  assert.strictEqual(result, "Asia/Jakarta");
+  assert.strictEqual(isValidTimeZone("Asia/Jakarta"), true);
+  assert.strictEqual(isValidTimeZone("InvalidZone"), false);
+});
+
+test("pickReservationTimezone returns null when both invalid", () => {
+  const result = pickReservationTimezone("Bad/Zone", "Also/Bad");
+  assert.strictEqual(result, null);
+  assert.strictEqual(isValidTimeZone("Bad/Zone"), false);
+  assert.strictEqual(isValidTimeZone("Also/Bad"), false);
+});
+
+test("pickReservationTimezone treats whitespace as invalid", () => {
+  const result = pickReservationTimezone("   ", "  ");
+  assert.strictEqual(result, null);
+  assert.strictEqual(isValidTimeZone("   "), false);
+  assert.strictEqual(isValidTimeZone("  "), false);
 });
 
 test("applyDateOnlyRange rejects missing timezone for date-only filters", () => {

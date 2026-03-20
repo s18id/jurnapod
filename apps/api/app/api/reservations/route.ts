@@ -47,15 +47,27 @@ export class MissingReservationTimezoneError extends Error {
   }
 }
 
+export function isValidTimeZone(timezone?: string | null): timezone is string {
+  if (!timezone || !timezone.trim()) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone.trim() });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function pickReservationTimezone(
   outletTimezone?: string | null,
   companyTimezone?: string | null
 ): string | null {
-  if (outletTimezone && outletTimezone.trim()) {
-    return outletTimezone;
+  if (isValidTimeZone(outletTimezone)) {
+    return outletTimezone.trim();
   }
-  if (companyTimezone && companyTimezone.trim()) {
-    return companyTimezone;
+  if (isValidTimeZone(companyTimezone)) {
+    return companyTimezone.trim();
   }
   return null;
 }
@@ -88,25 +100,24 @@ export function applyDateOnlyRange(
 }
 
 async function resolveReservationTimezone(companyId: number, outletId: number): Promise<string | null> {
+  let outletTimezone: string | null = null;
+  let companyTimezone: string | null = null;
+
   try {
     const outlet = await getOutlet(companyId, outletId);
-    if (outlet.timezone && outlet.timezone.trim()) {
-      return outlet.timezone;
-    }
+    outletTimezone = outlet.timezone ?? null;
   } catch {
     // fallback to company timezone below
   }
 
   try {
     const company = await getCompany(companyId);
-    if (company.timezone && company.timezone.trim()) {
-      return company.timezone;
-    }
+    companyTimezone = company.timezone ?? null;
   } catch {
-    // fall through to null return
+    // fall through
   }
 
-  return null;
+  return pickReservationTimezone(outletTimezone, companyTimezone);
 }
 
 export const GET = withAuth(
