@@ -1,6 +1,6 @@
 # Story 12.10: Reservation Canonical Start/End Unix Timestamps
 
-Status: review
+Status: done
 
 ## Story
 

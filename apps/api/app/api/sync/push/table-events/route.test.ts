@@ -592,6 +592,68 @@ test(
         assert.strictEqual(sessionRows[0].status_id, ServiceSessionStatus.ACTIVE);
       });
 
+      await test("should persist reservation_id in table_events for TABLE_OPENED when provided", async () => {
+        const tableId = await createTestTable(`T-${runId}-SEAT-RES`);
+        const clientTxId = `test-seat-res-${runId}`;
+
+        const reservationAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+        const reservationCreate = await requestJson("/api/reservations", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            outlet_id: outletId,
+            table_id: tableId,
+            customer_name: `Seat Reservation ${runId}`,
+            customer_phone: null,
+            guest_count: 2,
+            reservation_at: reservationAt,
+            duration_minutes: 90,
+            notes: null,
+          }),
+        });
+
+        assert.strictEqual(
+          reservationCreate.response.status,
+          201,
+          `Reservation creation failed: ${JSON.stringify(reservationCreate.payload)}`
+        );
+
+        const reservationId = Number(reservationCreate.payload?.data?.reservation_id);
+        assert.ok(Number.isFinite(reservationId), "reservation_id should be created");
+        createdReservationIds.push(reservationId);
+
+        const { response, payload } = await pushTableEvents(outletUuid, [
+          {
+            client_tx_id: clientTxId,
+            table_id: tableId.toString(),
+            expected_table_version: 1,
+            event_type: TableEventType.TABLE_OPENED,
+            payload: { guest_count: 2, reservation_id: reservationId.toString() },
+            recorded_at: new Date().toISOString(),
+          },
+        ]);
+
+        assert.strictEqual(response.status, 200, "Should return 200 for table open");
+        assert.strictEqual(payload.data.results[0].status, "OK", "Status should be OK");
+
+        const [eventRows] = await getDb().execute<RowDataPacket[]>(
+          `SELECT reservation_id
+           FROM table_events
+           WHERE client_tx_id = ?
+             AND company_id = ?
+             AND outlet_id = ?
+           LIMIT 1`,
+          [clientTxId, companyId, outletId]
+        );
+
+        assert.strictEqual(eventRows.length, 1, "table_events row should exist");
+        assert.strictEqual(
+          Number(eventRows[0].reservation_id),
+          reservationId,
+          "table_events reservation_id should match provided reservation"
+        );
+      });
+
       await test("should process TABLE_CLOSED (RELEASE) event", async () => {
         const tableId = await createTestTable(`T-${runId}-REL`);
 
@@ -651,12 +713,13 @@ test(
 
       await test("should process RESERVATION_CREATED (HOLD) event", async () => {
         const tableId = await createTestTable(`T-${runId}-HOLD`);
+        const clientTxId = `test-hold-${runId}`;
 
         const reservedUntil = new Date(Date.now() + 3600000).toISOString(); // 1 hour from now
 
         const { response, payload } = await pushTableEvents(outletUuid, [
           {
-            client_tx_id: `test-hold-${runId}`,
+            client_tx_id: clientTxId,
             table_id: tableId.toString(),
             expected_table_version: 1,
             event_type: TableEventType.RESERVATION_CREATED,
@@ -707,6 +770,34 @@ test(
         assert.ok(
           reservationEndTs > reservationStartTs,
           "reservation_end_ts should be greater than reservation_start_ts"
+        );
+
+        const [eventRows] = await getDb().execute<RowDataPacket[]>(
+          `SELECT event_type_id, reservation_id, event_data
+           FROM table_events
+           WHERE client_tx_id = ?
+             AND company_id = ?
+             AND outlet_id = ?
+           LIMIT 1`,
+          [clientTxId, companyId, outletId]
+        );
+        assert.strictEqual(eventRows.length, 1, "table_events row should exist for hold event");
+        assert.strictEqual(
+          Number(eventRows[0].event_type_id),
+          TableEventType.RESERVATION_CREATED,
+          "table_events event_type should be RESERVATION_CREATED"
+        );
+        assert.strictEqual(
+          Number(eventRows[0].reservation_id),
+          reservationId,
+          "table_events reservation_id should match occupancy reservation_id"
+        );
+
+        const eventData = JSON.parse(String(eventRows[0].event_data)) as { reservation_id?: string };
+        assert.strictEqual(
+          Number(eventData.reservation_id),
+          reservationId,
+          "table_events event_data reservation_id should match occupancy reservation_id"
         );
       });
 
@@ -941,6 +1032,97 @@ test(
         assert.ok(payload.data.results[0].errorMessage, "Should have error message");
       });
 
+      await test("should return ERROR for RESERVATION_CREATED with non-existent reservation_id", async () => {
+        const tableId = await createTestTable(`T-${runId}-HOLD-NOTFOUND`);
+
+        const { response, payload } = await pushTableEvents(outletUuid, [
+          {
+            client_tx_id: `test-hold-notfound-${runId}`,
+            table_id: tableId.toString(),
+            expected_table_version: 1,
+            event_type: TableEventType.RESERVATION_CREATED,
+            payload: {
+              reservation_id: "999999999",
+              reserved_until: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+              guest_name: "Missing Reservation",
+              guest_count: 2,
+            },
+            recorded_at: new Date().toISOString(),
+          },
+        ]);
+
+        assert.strictEqual(response.status, 200, "Should return 200 with per-event ERROR status");
+        assert.strictEqual(payload.data.results[0].status, "ERROR", "Status should be ERROR");
+        assert.match(
+          String(payload.data.results[0].errorMessage ?? ""),
+          /not found/i,
+          "Error should indicate reservation was not found"
+        );
+      });
+
+      await test("should return ERROR for RESERVATION_CREATED when reservation table mismatches", async () => {
+        const sourceTableId = await createTestTable(`T-${runId}-HOLD-SRC`);
+        const targetTableId = await createTestTable(`T-${runId}-HOLD-TGT`);
+
+        const setupReservedUntil = new Date(Date.now() + 45 * 60 * 1000).toISOString();
+        const { response: setupResponse, payload: setupPayload } = await pushTableEvents(outletUuid, [
+          {
+            client_tx_id: `test-hold-mismatch-setup-${runId}`,
+            table_id: sourceTableId.toString(),
+            expected_table_version: 1,
+            event_type: TableEventType.RESERVATION_CREATED,
+            payload: {
+              reservation_id: null,
+              reserved_until: setupReservedUntil,
+              guest_name: "Mismatch Setup",
+              guest_count: 2,
+            },
+            recorded_at: new Date().toISOString(),
+          },
+        ]);
+
+        assert.strictEqual(setupResponse.status, 200, "Setup reservation should succeed");
+        assert.strictEqual(setupPayload.data.results[0].status, "OK", "Setup reservation should be OK");
+
+        const [sourceOccupancyRows] = await getDb().execute<RowDataPacket[]>(
+          `SELECT reservation_id
+           FROM table_occupancy
+           WHERE table_id = ?
+             AND company_id = ?
+             AND outlet_id = ?
+           LIMIT 1`,
+          [sourceTableId, companyId, outletId]
+        );
+
+        const reservationId = Number(sourceOccupancyRows[0]?.reservation_id);
+        assert.ok(Number.isFinite(reservationId), "Setup should create reservation_id");
+        createdReservationIds.push(reservationId);
+
+        const { response, payload } = await pushTableEvents(outletUuid, [
+          {
+            client_tx_id: `test-hold-mismatch-${runId}`,
+            table_id: targetTableId.toString(),
+            expected_table_version: 1,
+            event_type: TableEventType.RESERVATION_CREATED,
+            payload: {
+              reservation_id: reservationId.toString(),
+              reserved_until: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+              guest_name: "Mismatch Attempt",
+              guest_count: 2,
+            },
+            recorded_at: new Date().toISOString(),
+          },
+        ]);
+
+        assert.strictEqual(response.status, 200, "Should return 200 with per-event ERROR status");
+        assert.strictEqual(payload.data.results[0].status, "ERROR", "Status should be ERROR");
+        assert.match(
+          String(payload.data.results[0].errorMessage ?? ""),
+          /table mismatch/i,
+          "Error should indicate reservation table mismatch"
+        );
+      });
+
       await test("should return ERROR status for invalid event type", async () => {
         const tableId = await createTestTable(`T-${runId}-INVALID-EVT`);
 
@@ -995,6 +1177,76 @@ test(
         );
       });
 
+      await test("should return ERROR for TABLE_TRANSFERRED when target table is out of outlet scope", async () => {
+        const sourceTableId = await createTestTable(`T-${runId}-TRANSFER-SRC`);
+
+        await pushTableEvents(outletUuid, [
+          {
+            client_tx_id: `test-transfer-setup-${runId}`,
+            table_id: sourceTableId.toString(),
+            expected_table_version: 1,
+            event_type: TableEventType.TABLE_OPENED,
+            payload: { guest_count: 2 },
+            recorded_at: new Date().toISOString(),
+          },
+        ]);
+
+        const [sourceRows] = await getDb().execute<RowDataPacket[]>(
+          `SELECT version
+           FROM table_occupancy
+           WHERE table_id = ? AND company_id = ? AND outlet_id = ?
+           LIMIT 1`,
+          [sourceTableId, companyId, outletId]
+        );
+        const sourceVersion = Number(sourceRows[0]?.version);
+
+        const [otherOutletResult] = await getDb().execute<ResultSetHeader>(
+          `INSERT INTO outlets (company_id, code, name)
+           VALUES (?, ?, ?)`,
+          [companyId, `XFER-${runId}`, `Transfer Outlet ${runId}`]
+        );
+        const otherOutletId = Number(otherOutletResult.insertId);
+
+        const [otherTableResult] = await getDb().execute<ResultSetHeader>(
+          `INSERT INTO outlet_tables (company_id, outlet_id, code, name, capacity, status)
+           VALUES (?, ?, ?, ?, ?, 'AVAILABLE')`,
+          [companyId, otherOutletId, `XFER-T-${runId}`.slice(0, 32), `Transfer Table ${runId}`, 4]
+        );
+        const outOfScopeTargetTableId = Number(otherTableResult.insertId);
+
+        try {
+          const { response, payload } = await pushTableEvents(outletUuid, [
+            {
+              client_tx_id: `test-transfer-oos-${runId}`,
+              table_id: sourceTableId.toString(),
+              expected_table_version: sourceVersion,
+              event_type: TableEventType.TABLE_TRANSFERRED,
+              payload: {
+                target_table_id: outOfScopeTargetTableId.toString(),
+              },
+              recorded_at: new Date().toISOString(),
+            },
+          ]);
+
+          assert.strictEqual(response.status, 200, "Should return 200 with per-event ERROR status");
+          assert.strictEqual(payload.data.results[0].status, "ERROR", "Status should be ERROR");
+          assert.match(
+            String(payload.data.results[0].errorMessage ?? ""),
+            /not found in outlet scope/i,
+            "Error should indicate target table outlet scope mismatch"
+          );
+        } finally {
+          await getDb().execute(`DELETE FROM outlet_tables WHERE id = ? AND company_id = ?`, [
+            outOfScopeTargetTableId,
+            companyId,
+          ]);
+          await getDb().execute(`DELETE FROM outlets WHERE id = ? AND company_id = ?`, [
+            otherOutletId,
+            companyId,
+          ]);
+        }
+      });
+
       // ========================================================================
       // Test: STATUS_CHANGED event
       // ========================================================================
@@ -1026,6 +1278,82 @@ test(
           occupancyRows[0].status_id,
           TableOccupancyStatus.CLEANING,
           "Table should be CLEANING"
+        );
+      });
+
+      await test("should preserve reserved_until on STATUS_CHANGED from RESERVED table", async () => {
+        const tableId = await createTestTable(`T-${runId}-STATUS-RES`);
+
+        const { response: holdResponse, payload: holdPayload } = await pushTableEvents(outletUuid, [
+          {
+            client_tx_id: `test-status-res-hold-${runId}`,
+            table_id: tableId.toString(),
+            expected_table_version: 1,
+            event_type: TableEventType.RESERVATION_CREATED,
+            payload: {
+              reservation_id: null,
+              reserved_until: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
+              guest_name: "Reserved For Status Change",
+              guest_count: 2,
+            },
+            recorded_at: new Date().toISOString(),
+          },
+        ]);
+
+        assert.strictEqual(holdResponse.status, 200, "Hold setup should succeed");
+        assert.strictEqual(holdPayload.data.results[0].status, "OK", "Hold setup should be OK");
+
+        const [reservedBeforeRows] = await getDb().execute<RowDataPacket[]>(
+          `SELECT version, reserved_until, reservation_id
+           FROM table_occupancy
+           WHERE table_id = ? AND company_id = ? AND outlet_id = ?
+           LIMIT 1`,
+          [tableId, companyId, outletId]
+        );
+
+        const expectedVersion = Number(reservedBeforeRows[0].version);
+        const reservedUntilBefore = new Date(reservedBeforeRows[0].reserved_until as string | Date).toISOString();
+        const reservationId = Number(reservedBeforeRows[0].reservation_id);
+        assert.ok(Number.isFinite(reservationId), "Hold setup should create reservation_id");
+        createdReservationIds.push(reservationId);
+
+        const { response: statusResponse, payload: statusPayload } = await pushTableEvents(outletUuid, [
+          {
+            client_tx_id: `test-status-res-change-${runId}`,
+            table_id: tableId.toString(),
+            expected_table_version: expectedVersion,
+            event_type: TableEventType.STATUS_CHANGED,
+            payload: { status_id: TableOccupancyStatus.CLEANING },
+            recorded_at: new Date().toISOString(),
+          },
+        ]);
+
+        assert.strictEqual(statusResponse.status, 200, "Status change should succeed");
+        assert.strictEqual(statusPayload.data.results[0].status, "OK", "Status change should be OK");
+
+        const [reservedAfterRows] = await getDb().execute<RowDataPacket[]>(
+          `SELECT status_id, reserved_until, reservation_id
+           FROM table_occupancy
+           WHERE table_id = ? AND company_id = ? AND outlet_id = ?
+           LIMIT 1`,
+          [tableId, companyId, outletId]
+        );
+
+        const reservedUntilAfter = new Date(reservedAfterRows[0].reserved_until as string | Date).toISOString();
+        assert.strictEqual(
+          reservedAfterRows[0].status_id,
+          TableOccupancyStatus.CLEANING,
+          "Table should transition to CLEANING"
+        );
+        assert.strictEqual(
+          reservedUntilAfter,
+          reservedUntilBefore,
+          "reserved_until should be preserved across status-only updates"
+        );
+        assert.strictEqual(
+          Number(reservedAfterRows[0].reservation_id),
+          reservationId,
+          "reservation_id should remain unchanged"
         );
       });
     } finally {

@@ -106,6 +106,43 @@ test("getTableBoard computes availableNow and nextReservationStartAt", async () 
   assert.equal(tables[0].nextReservationStartAt?.toISOString(), "2026-03-20T10:00:00.000Z");
 });
 
+test("getTableBoard query includes canonical and legacy reservation status filters", async () => {
+  let capturedSql = "";
+  const fakePool = {
+    async execute(sql: string) {
+      capturedSql = sql;
+      return [[]];
+    },
+    async end() {},
+  };
+
+  (globalThis as typeof globalThis & { __jurnapodApiDbPool?: unknown }).__jurnapodApiDbPool = fakePool;
+
+  await getTableBoard(1n, 1n);
+
+  assert.ok(capturedSql.includes("r.status_id IN (1, 2)"));
+  assert.ok(capturedSql.includes("(r.status_id IS NULL AND r.status IN ('BOOKED', 'CONFIRMED'))"));
+});
+
+test("getTableBoard query scopes table_occupancy join by company and outlet", async () => {
+  let capturedSql = "";
+  const fakePool = {
+    async execute(sql: string) {
+      capturedSql = sql;
+      return [[]];
+    },
+    async end() {},
+  };
+
+  (globalThis as typeof globalThis & { __jurnapodApiDbPool?: unknown }).__jurnapodApiDbPool = fakePool;
+
+  await getTableBoard(1n, 1n);
+
+  assert.ok(capturedSql.includes("LEFT JOIN table_occupancy to2 ON ot.id = to2.table_id"));
+  assert.ok(capturedSql.includes("ot.company_id = to2.company_id"));
+  assert.ok(capturedSql.includes("ot.outlet_id = to2.outlet_id"));
+});
+
 test("holdTable returns conflict on optimistic lock mismatch", async () => {
   const fakeConnection = new FakeConnection();
   const fakePool = {

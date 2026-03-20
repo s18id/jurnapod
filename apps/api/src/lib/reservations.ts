@@ -20,9 +20,8 @@ import {
 } from "@jurnapod/shared";
 import { getSetting } from "./settings";
 import {
-  holdTable,
-  getTableOccupancy,
-  seatTable,
+  holdTableWithConnection,
+  seatTableWithConnection,
   TableOccupancyConflictError,
   TableNotAvailableError
 } from "./table-occupancy";
@@ -185,8 +184,16 @@ interface ReservationDbRow extends RowDataPacket {
 }
 
 interface LegacyOverlapRow extends RowDataPacket {
+  reservation_start_ts: number | string | null;
+  reservation_end_ts: number | string | null;
   reservation_at: string | null;
   duration_minutes: number | null;
+}
+
+interface OccupancySnapshotRow extends RowDataPacket {
+  status_id: number;
+  version: number;
+  reservation_id: number | string | null;
 }
 
 type OutletTableStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
@@ -262,6 +269,34 @@ async function resolveEffectiveDurationMinutes(
   }
 
   return RESERVATION_DEFAULT_DURATION_FALLBACK;
+}
+
+async function getTableOccupancySnapshotWithConnection(
+  connection: PoolConnection,
+  companyId: bigint,
+  outletId: bigint,
+  tableId: bigint
+): Promise<{ statusId: number; version: number; reservationId: bigint | null } | null> {
+  const [rows] = await connection.execute<OccupancySnapshotRow[]>(
+    `SELECT status_id, version, reservation_id
+     FROM table_occupancy
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND table_id = ?
+     FOR UPDATE`,
+    [companyId, outletId, tableId]
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const reservationIdRaw = rows[0].reservation_id;
+  return {
+    statusId: Number(rows[0].status_id),
+    version: Number(rows[0].version),
+    reservationId: reservationIdRaw == null ? null : BigInt(String(reservationIdRaw))
+  };
 }
 
 function mapRow(row: ReservationDbRow): ReservationRow {
@@ -982,7 +1017,7 @@ async function checkReservationOverlap(
   }
 
   const legacySql = `
-    SELECT reservation_at, duration_minutes
+    SELECT reservation_start_ts, reservation_end_ts, reservation_at, duration_minutes
     FROM reservations
     WHERE company_id = ?
       AND outlet_id = ?
@@ -1004,13 +1039,23 @@ async function checkReservationOverlap(
 
   const defaultDurationMinutes = await resolveEffectiveDurationMinutes(Number(companyId), null);
   for (const row of legacyRows) {
-    if (!row.reservation_at) {
+    const existingDuration = row.duration_minutes ?? defaultDurationMinutes;
+    let existingStartTs = fromUnixMs(row.reservation_start_ts);
+    let existingEndTs = fromUnixMs(row.reservation_end_ts);
+
+    if (existingStartTs === null && row.reservation_at) {
+      existingStartTs = toUnixMs(row.reservation_at);
+    }
+    if (existingEndTs === null && existingStartTs !== null) {
+      existingEndTs = existingStartTs + existingDuration * 60000;
+    }
+    if (existingStartTs === null && existingEndTs !== null) {
+      existingStartTs = existingEndTs - existingDuration * 60000;
+    }
+    if (existingStartTs === null || existingEndTs === null) {
       continue;
     }
 
-    const existingStartTs = toUnixMs(row.reservation_at);
-    const existingDuration = row.duration_minutes ?? defaultDurationMinutes;
-    const existingEndTs = existingStartTs + existingDuration * 60000;
     if (existingStartTs < newEndTs && existingEndTs > newStartTs) {
       return true;
     }
@@ -1388,11 +1433,15 @@ export async function updateReservationStatus(
         const heldUntil = new Date(currentReservation.reservationTime);
         heldUntil.setMinutes(heldUntil.getMinutes() + currentReservation.durationMinutes);
 
-        // Get current table occupancy to check version
-        const occupancy = await getTableOccupancy(companyId, outletId, tableId);
+        const occupancy = await getTableOccupancySnapshotWithConnection(
+          connection,
+          companyId,
+          outletId,
+          tableId
+        );
         const expectedVersion = occupancy?.version ?? 1;
 
-        await holdTable({
+        await holdTableWithConnection(connection, {
           companyId,
           outletId,
           tableId,
@@ -1406,27 +1455,41 @@ export async function updateReservationStatus(
     } else if (input.statusId === ReservationStatusV2.CANCELLED) {
       // CANCELLED: Release held table if exists
       if (tableId) {
-        const occupancy = await getTableOccupancy(companyId, outletId, tableId);
+        const occupancy = await getTableOccupancySnapshotWithConnection(
+          connection,
+          companyId,
+          outletId,
+          tableId
+        );
         if (occupancy && occupancy.reservationId === id) {
           // Table is held for this reservation, release it
-          await connection.execute(
+          const [releaseResult] = await connection.execute<ResultSetHeader>(
             `UPDATE table_occupancy 
              SET status_id = ?, 
-                 reservation_id = NULL, 
-                 reserved_until = NULL,
-                 version = version + 1,
-                 updated_at = NOW(),
-                 updated_by = ?
-             WHERE company_id = ? AND outlet_id = ? AND table_id = ?`,
-            [TableOccupancyStatus.AVAILABLE, input.updatedBy, companyId, outletId, tableId]
+                  reservation_id = NULL, 
+                  reserved_until = NULL,
+                  version = version + 1,
+                  updated_at = NOW(),
+                  updated_by = ?
+             WHERE company_id = ? AND outlet_id = ? AND table_id = ? AND version = ?`,
+            [TableOccupancyStatus.AVAILABLE, input.updatedBy, companyId, outletId, tableId, occupancy.version]
           );
+
+          if (releaseResult.affectedRows === 0) {
+            throw new ReservationConflictError("Table state has changed, please retry");
+          }
         }
       }
     } else if (input.statusId === ReservationStatusV2.CHECKED_IN) {
       // CHECKED_IN: Seat the table and create a service session
       if (tableId) {
         // Verify table is reserved for this reservation
-        const occupancy = await getTableOccupancy(companyId, outletId, tableId);
+        const occupancy = await getTableOccupancySnapshotWithConnection(
+          connection,
+          companyId,
+          outletId,
+          tableId
+        );
         if (!occupancy || occupancy.reservationId !== id) {
           throw new ReservationValidationError(
             'Table is not reserved for this reservation'
@@ -1435,7 +1498,7 @@ export async function updateReservationStatus(
 
         // Seat the table - creates service session and updates occupancy
         try {
-          await seatTable({
+          await seatTableWithConnection(connection, {
             companyId,
             outletId,
             tableId,
@@ -1474,20 +1537,29 @@ export async function updateReservationStatus(
 
       // Release held table if exists (similar to CANCELLED handling)
       if (tableId) {
-        const occupancy = await getTableOccupancy(companyId, outletId, tableId);
+        const occupancy = await getTableOccupancySnapshotWithConnection(
+          connection,
+          companyId,
+          outletId,
+          tableId
+        );
         if (occupancy && occupancy.reservationId === id) {
           // Table is held for this reservation, release it
-          await connection.execute(
+          const [releaseResult] = await connection.execute<ResultSetHeader>(
             `UPDATE table_occupancy 
              SET status_id = ?, 
-                 reservation_id = NULL, 
-                 reserved_until = NULL,
-                 version = version + 1,
-                 updated_at = NOW(),
-                 updated_by = ?
-             WHERE company_id = ? AND outlet_id = ? AND table_id = ?`,
-            [TableOccupancyStatus.AVAILABLE, input.updatedBy, companyId, outletId, tableId]
+                  reservation_id = NULL, 
+                  reserved_until = NULL,
+                  version = version + 1,
+                  updated_at = NOW(),
+                  updated_by = ?
+             WHERE company_id = ? AND outlet_id = ? AND table_id = ? AND version = ?`,
+            [TableOccupancyStatus.AVAILABLE, input.updatedBy, companyId, outletId, tableId, occupancy.version]
           );
+
+          if (releaseResult.affectedRows === 0) {
+            throw new ReservationConflictError("Table state has changed, please retry");
+          }
         }
       }
     }

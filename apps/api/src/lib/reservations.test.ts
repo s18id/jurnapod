@@ -9,6 +9,7 @@ import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-h
 import { closeDbPool, getDbPool } from "./db";
 import {
   ReservationValidationError,
+  ReservationConflictError,
   ReservationNotFoundError,
   InvalidStatusTransitionError,
   createReservation,
@@ -394,6 +395,174 @@ test(
         secondStartTs,
         "adjacent reservations should be allowed when first end equals second start"
       );
+    } finally {
+      if (createdReservationIds.length > 0) {
+        const placeholders = createdReservationIds.map(() => "?").join(", ");
+        await pool.execute(
+          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
+          [companyId, outletId, ...createdReservationIds]
+        );
+      }
+
+      if (createdTableIds.length > 0) {
+        const placeholders = createdTableIds.map(() => "?").join(", ");
+        await pool.execute(
+          `DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
+          [companyId, outletId, ...createdTableIds]
+        );
+      }
+    }
+  }
+);
+
+test(
+  "reservations overlap detection handles mixed canonical and legacy interval rows",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId } = await resolveFixtureContext();
+    const createdTableIds: number[] = [];
+    const createdReservationIds: bigint[] = [];
+
+    try {
+      const [tableInsert] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        [companyId, outletId, `T-MIX-${runId}`.slice(0, 32), `Mixed Table ${runId}`, "Main", 4]
+      );
+      const tableId = Number(tableInsert.insertId);
+      createdTableIds.push(tableId);
+
+      const baseStartA = new Date(Date.now() + 8 * 60 * 60 * 1000);
+      baseStartA.setSeconds(0, 0);
+      const staleReservationAtA = new Date(baseStartA.getTime() - 5 * 60 * 60 * 1000);
+
+      const [insertA] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO reservations (
+           company_id, outlet_id, table_id,
+           customer_name, customer_phone, guest_count,
+           reservation_at, reservation_start_ts, reservation_end_ts,
+           duration_minutes, status, notes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`,
+        [
+          companyId,
+          outletId,
+          tableId,
+          `Mixed A ${runId}`,
+          null,
+          2,
+          staleReservationAtA,
+          baseStartA.getTime(),
+          null,
+          60,
+          "start_ts present, end_ts null"
+        ]
+      );
+      createdReservationIds.push(BigInt(insertA.insertId));
+
+      await assert.rejects(
+        async () => {
+          await createReservationV2({
+            companyId: BigInt(companyId),
+            outletId: BigInt(outletId),
+            tableId: BigInt(tableId),
+            partySize: 2,
+            customerName: `Overlap A ${runId}`,
+            reservationTime: new Date(baseStartA.getTime() + 30 * 60000),
+            durationMinutes: 30,
+            createdBy: "test-user"
+          });
+        },
+        (error: unknown) => {
+          assert.ok(error instanceof ReservationConflictError);
+          return true;
+        }
+      );
+
+      const baseStartB = new Date(baseStartA.getTime() + 4 * 60 * 60 * 1000);
+      const staleReservationAtB = new Date(baseStartB.getTime() - 5 * 60 * 60 * 1000);
+
+      const [insertB] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO reservations (
+           company_id, outlet_id, table_id,
+           customer_name, customer_phone, guest_count,
+           reservation_at, reservation_start_ts, reservation_end_ts,
+           duration_minutes, status, notes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`,
+        [
+          companyId,
+          outletId,
+          tableId,
+          `Mixed B ${runId}`,
+          null,
+          2,
+          staleReservationAtB,
+          null,
+          baseStartB.getTime() + 60 * 60000,
+          60,
+          "start_ts null, end_ts present"
+        ]
+      );
+      createdReservationIds.push(BigInt(insertB.insertId));
+
+      await assert.rejects(
+        async () => {
+          await createReservationV2({
+            companyId: BigInt(companyId),
+            outletId: BigInt(outletId),
+            tableId: BigInt(tableId),
+            partySize: 2,
+            customerName: `Overlap B ${runId}`,
+            reservationTime: new Date(baseStartB.getTime() + 30 * 60000),
+            durationMinutes: 30,
+            createdBy: "test-user"
+          });
+        },
+        (error: unknown) => {
+          assert.ok(error instanceof ReservationConflictError);
+          return true;
+        }
+      );
+
+      const baseStartC = new Date(baseStartB.getTime() + 4 * 60 * 60 * 1000);
+      const staleReservationAtC = new Date(baseStartC.getTime() - 6 * 60 * 60 * 1000);
+
+      const [insertC] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO reservations (
+           company_id, outlet_id, table_id,
+           customer_name, customer_phone, guest_count,
+           reservation_at, reservation_start_ts, reservation_end_ts,
+           duration_minutes, status, notes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`,
+        [
+          companyId,
+          outletId,
+          tableId,
+          `Mixed C ${runId}`,
+          null,
+          2,
+          staleReservationAtC,
+          baseStartC.getTime(),
+          null,
+          60,
+          "adjacent boundary mixed row"
+        ]
+      );
+      createdReservationIds.push(BigInt(insertC.insertId));
+
+      const adjacentReservation = await createReservationV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        tableId: BigInt(tableId),
+        partySize: 2,
+        customerName: `Adjacent Mixed ${runId}`,
+        reservationTime: new Date(baseStartC.getTime() + 60 * 60000),
+        durationMinutes: 30,
+        createdBy: "test-user"
+      });
+      createdReservationIds.push(adjacentReservation.id);
+      assert.ok(adjacentReservation.id > 0n, "adjacent mixed-state reservation should be created");
     } finally {
       if (createdReservationIds.length > 0) {
         const placeholders = createdReservationIds.map(() => "?").join(", ");

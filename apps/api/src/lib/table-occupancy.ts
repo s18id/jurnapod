@@ -159,7 +159,10 @@ export async function getTableBoard(
         WHERE r.company_id = ot.company_id
           AND r.outlet_id = ot.outlet_id
           AND r.table_id = ot.id
-          AND r.status_id IN (1, 2)
+          AND (
+            r.status_id IN (1, 2)
+            OR (r.status_id IS NULL AND r.status IN ('BOOKED', 'CONFIRMED'))
+          )
           AND (
             (r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts >= (UNIX_TIMESTAMP(NOW()) * 1000))
             OR (r.reservation_start_ts IS NULL AND r.reservation_at >= NOW())
@@ -168,6 +171,8 @@ export async function getTableBoard(
       COALESCE(to2.updated_at, ot.updated_at) as updated_at
     FROM outlet_tables ot
     LEFT JOIN table_occupancy to2 ON ot.id = to2.table_id
+      AND ot.company_id = to2.company_id
+      AND ot.outlet_id = to2.outlet_id
     WHERE ot.company_id = ?
       AND ot.outlet_id = ?
     ORDER BY ot.zone, ot.code`,
@@ -273,101 +278,108 @@ export async function holdTable(
   try {
     await connection.beginTransaction();
 
-    // 1. Get current occupancy state
-    const currentState = await getTableOccupancyWithConnection(
-      connection,
-      input.companyId,
-      input.outletId,
-      input.tableId
-    );
-
-    if (!currentState) {
-      throw new TableOccupancyNotFoundError(input.tableId);
-    }
-
-    // 2. Check optimistic locking version
-    if (currentState.version !== input.expectedVersion) {
-      throw new TableOccupancyConflictError(
-        "Table state has changed",
-        currentState
-      );
-    }
-
-    // 3. Check table is available
-    if (currentState.statusId !== TableOccupancyStatus.AVAILABLE) {
-      throw new TableNotAvailableError(input.tableId, currentState.statusId);
-    }
-
-    // 4. Update occupancy to RESERVED
-    await connection.execute(
-      `UPDATE table_occupancy
-       SET status_id = ?,
-           reserved_until = ?,
-           reservation_id = ?,
-           notes = ?,
-           version = version + 1,
-           updated_at = NOW(),
-           updated_by = ?
-       WHERE company_id = ?
-         AND outlet_id = ?
-         AND table_id = ?
-         AND version = ?`,
-      [
-        TableOccupancyStatus.RESERVED,
-        input.heldUntil,
-        input.reservationId ?? null,
-        input.notes ?? null,
-        input.createdBy,
-        input.companyId,
-        input.outletId,
-        input.tableId,
-        input.expectedVersion
-      ]
-    );
-
-    // 5. Log the event
-    await logTableEvent(connection, {
-      companyId: input.companyId,
-      outletId: input.outletId,
-      tableId: input.tableId,
-      eventTypeId: TableEventType.RESERVATION_CREATED,
-      clientTxId: randomUUID(),
-      occupancyVersionBefore: currentState.version,
-      occupancyVersionAfter: currentState.version + 1,
-      eventData: { reason: "Table held for reservation", heldUntil: input.heldUntil.toISOString() },
-      statusIdBefore: currentState.statusId,
-      statusIdAfter: TableOccupancyStatus.RESERVED,
-      serviceSessionId: null,
-      reservationId: input.reservationId ?? null,
-      posOrderId: null,
-      occurredAt: new Date(),
-      createdBy: input.createdBy
-    });
+    const result = await holdTableWithConnection(connection, input);
 
     await connection.commit();
-
-    // 6. Return updated state
-    const updatedState = await getTableOccupancyWithConnection(
-      connection,
-      input.companyId,
-      input.outletId,
-      input.tableId
-    );
-
-    if (!updatedState) {
-      throw new Error("Failed to retrieve updated occupancy state");
-    }
-
-    return {
-      occupancy: updatedState,
-      newVersion: updatedState.version
-    };
+    return result;
   } catch (error) {
     await connection.rollback();
     throw error;
   } finally {
     connection.release();
   }
+}
+
+export async function holdTableWithConnection(
+  connection: PoolConnection,
+  input: HoldTableInput
+): Promise<{ occupancy: TableOccupancyState; newVersion: number }> {
+  // 1. Get current occupancy state
+  const currentState = await getTableOccupancyWithConnection(
+    connection,
+    input.companyId,
+    input.outletId,
+    input.tableId
+  );
+
+  if (!currentState) {
+    throw new TableOccupancyNotFoundError(input.tableId);
+  }
+
+  // 2. Check optimistic locking version
+  if (currentState.version !== input.expectedVersion) {
+    throw new TableOccupancyConflictError(
+      "Table state has changed",
+      currentState
+    );
+  }
+
+  // 3. Check table is available
+  if (currentState.statusId !== TableOccupancyStatus.AVAILABLE) {
+    throw new TableNotAvailableError(input.tableId, currentState.statusId);
+  }
+
+  // 4. Update occupancy to RESERVED
+  await connection.execute(
+    `UPDATE table_occupancy
+     SET status_id = ?,
+         reserved_until = ?,
+         reservation_id = ?,
+         notes = ?,
+         version = version + 1,
+         updated_at = NOW(),
+         updated_by = ?
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND table_id = ?
+       AND version = ?`,
+    [
+      TableOccupancyStatus.RESERVED,
+      input.heldUntil,
+      input.reservationId ?? null,
+      input.notes ?? null,
+      input.createdBy,
+      input.companyId,
+      input.outletId,
+      input.tableId,
+      input.expectedVersion
+    ]
+  );
+
+  // 5. Log the event
+  await logTableEvent(connection, {
+    companyId: input.companyId,
+    outletId: input.outletId,
+    tableId: input.tableId,
+    eventTypeId: TableEventType.RESERVATION_CREATED,
+    clientTxId: randomUUID(),
+    occupancyVersionBefore: currentState.version,
+    occupancyVersionAfter: currentState.version + 1,
+    eventData: { reason: "Table held for reservation", heldUntil: input.heldUntil.toISOString() },
+    statusIdBefore: currentState.statusId,
+    statusIdAfter: TableOccupancyStatus.RESERVED,
+    serviceSessionId: null,
+    reservationId: input.reservationId ?? null,
+    posOrderId: null,
+    occurredAt: new Date(),
+    createdBy: input.createdBy
+  });
+
+  const updatedState = await getTableOccupancyWithConnection(
+    connection,
+    input.companyId,
+    input.outletId,
+    input.tableId
+  );
+
+  if (!updatedState) {
+    throw new Error("Failed to retrieve updated occupancy state");
+  }
+
+  return {
+    occupancy: updatedState,
+    newVersion: updatedState.version
+  };
 }
 
 /**
@@ -383,125 +395,132 @@ export async function seatTable(
   try {
     await connection.beginTransaction();
 
-    // 1. Get current occupancy state
-    const currentState = await getTableOccupancyWithConnection(
-      connection,
-      input.companyId,
-      input.outletId,
-      input.tableId
-    );
-
-    if (!currentState) {
-      throw new TableOccupancyNotFoundError(input.tableId);
-    }
-
-    // 2. Check optimistic locking version
-    if (currentState.version !== input.expectedVersion) {
-      throw new TableOccupancyConflictError(
-        "Table state has changed",
-        currentState
-      );
-    }
-
-    // 3. Check table is available or reserved (not occupied)
-    if (currentState.statusId === TableOccupancyStatus.OCCUPIED) {
-      throw new TableNotAvailableError(input.tableId, currentState.statusId);
-    }
-
-    // 4. Create service session
-    const [sessionResult] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO table_service_sessions
-       (company_id, outlet_id, table_id, status_id, started_at, guest_count, guest_name, notes, created_at, updated_at, created_by)
-       VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW(), ?)`,
-      [
-        input.companyId,
-        input.outletId,
-        input.tableId,
-        1, // ACTIVE status
-        input.guestCount,
-        input.guestName ?? null,
-        input.notes ?? null,
-        input.createdBy
-      ]
-    );
-
-    const sessionId = BigInt(sessionResult.insertId);
-
-    // 5. Update occupancy to OCCUPIED
-    await connection.execute(
-      `UPDATE table_occupancy
-       SET status_id = ?,
-           service_session_id = ?,
-           occupied_at = NOW(),
-           guest_count = ?,
-           reservation_id = ?,
-           version = version + 1,
-           updated_at = NOW(),
-           updated_by = ?
-       WHERE company_id = ?
-         AND outlet_id = ?
-         AND table_id = ?
-         AND version = ?`,
-      [
-        TableOccupancyStatus.OCCUPIED,
-        sessionId,
-        input.guestCount,
-        input.reservationId ?? null,
-        input.createdBy,
-        input.companyId,
-        input.outletId,
-        input.tableId,
-        input.expectedVersion
-      ]
-    );
-
-    // 6. Log the event
-    await logTableEvent(connection, {
-      companyId: input.companyId,
-      outletId: input.outletId,
-      tableId: input.tableId,
-      eventTypeId: TableEventType.TABLE_OPENED,
-      clientTxId: randomUUID(),
-      occupancyVersionBefore: currentState.version,
-      occupancyVersionAfter: currentState.version + 1,
-      eventData: { 
-        reason: "Guests seated", 
-        guestCount: input.guestCount,
-        guestName: input.guestName 
-      },
-      statusIdBefore: currentState.statusId,
-      statusIdAfter: TableOccupancyStatus.OCCUPIED,
-      serviceSessionId: sessionId,
-      reservationId: input.reservationId ?? null,
-      posOrderId: null,
-      occurredAt: new Date(),
-      createdBy: input.createdBy
-    });
+    const result = await seatTableWithConnection(connection, input);
 
     await connection.commit();
-
-    // 7. Return updated state
-    const updatedState = await getTableOccupancyWithConnection(
-      connection,
-      input.companyId,
-      input.outletId,
-      input.tableId
-    );
-
-    if (!updatedState) {
-      throw new Error("Failed to retrieve updated occupancy state");
-    }
-
-    return {
-      sessionId,
-      occupancy: updatedState
-    };
+    return result;
   } catch (error) {
     await connection.rollback();
     throw error;
   } finally {
     connection.release();
   }
+}
+
+export async function seatTableWithConnection(
+  connection: PoolConnection,
+  input: SeatTableInput
+): Promise<{ sessionId: bigint; occupancy: TableOccupancyState }> {
+  // 1. Get current occupancy state
+  const currentState = await getTableOccupancyWithConnection(
+    connection,
+    input.companyId,
+    input.outletId,
+    input.tableId
+  );
+
+  if (!currentState) {
+    throw new TableOccupancyNotFoundError(input.tableId);
+  }
+
+  // 2. Check optimistic locking version
+  if (currentState.version !== input.expectedVersion) {
+    throw new TableOccupancyConflictError(
+      "Table state has changed",
+      currentState
+    );
+  }
+
+  // 3. Check table is available or reserved (not occupied)
+  if (currentState.statusId === TableOccupancyStatus.OCCUPIED) {
+    throw new TableNotAvailableError(input.tableId, currentState.statusId);
+  }
+
+  // 4. Create service session
+  const [sessionResult] = await connection.execute<ResultSetHeader>(
+    `INSERT INTO table_service_sessions
+     (company_id, outlet_id, table_id, status_id, started_at, guest_count, guest_name, notes, created_at, updated_at, created_by)
+     VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW(), ?)`,
+    [
+      input.companyId,
+      input.outletId,
+      input.tableId,
+      1, // ACTIVE status
+      input.guestCount,
+      input.guestName ?? null,
+      input.notes ?? null,
+      input.createdBy
+    ]
+  );
+
+  const sessionId = BigInt(sessionResult.insertId);
+
+  // 5. Update occupancy to OCCUPIED
+  await connection.execute(
+    `UPDATE table_occupancy
+     SET status_id = ?,
+         service_session_id = ?,
+         occupied_at = NOW(),
+         guest_count = ?,
+         reservation_id = ?,
+         version = version + 1,
+         updated_at = NOW(),
+         updated_by = ?
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND table_id = ?
+       AND version = ?`,
+    [
+      TableOccupancyStatus.OCCUPIED,
+      sessionId,
+      input.guestCount,
+      input.reservationId ?? null,
+      input.createdBy,
+      input.companyId,
+      input.outletId,
+      input.tableId,
+      input.expectedVersion
+    ]
+  );
+
+  // 6. Log the event
+  await logTableEvent(connection, {
+    companyId: input.companyId,
+    outletId: input.outletId,
+    tableId: input.tableId,
+    eventTypeId: TableEventType.TABLE_OPENED,
+    clientTxId: randomUUID(),
+    occupancyVersionBefore: currentState.version,
+    occupancyVersionAfter: currentState.version + 1,
+    eventData: {
+      reason: "Guests seated",
+      guestCount: input.guestCount,
+      guestName: input.guestName
+    },
+    statusIdBefore: currentState.statusId,
+    statusIdAfter: TableOccupancyStatus.OCCUPIED,
+    serviceSessionId: sessionId,
+    reservationId: input.reservationId ?? null,
+    posOrderId: null,
+    occurredAt: new Date(),
+    createdBy: input.createdBy
+  });
+
+  const updatedState = await getTableOccupancyWithConnection(
+    connection,
+    input.companyId,
+    input.outletId,
+    input.tableId
+  );
+
+  if (!updatedState) {
+    throw new Error("Failed to retrieve updated occupancy state");
+  }
+
+  return {
+    sessionId,
+    occupancy: updatedState
+  };
 }
 
 /**

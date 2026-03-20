@@ -1,6 +1,6 @@
 # Story 12.10: Reservation Canonical Start/End Unix Timestamps
 
-Status: review
+Status: done
 
 ## Story
 
@@ -109,6 +109,8 @@ openai/gpt-5.3-codex
 - Validation run from repo root: API unit tests, typecheck, lint.
 - Dry-run evidence captured: `npm run db:backfill:reservation-ts -- --dry-run --limit=200`.
 - Follow-up hardening: overlap fallback now includes partially populated legacy/canonical rows (`reservation_start_ts` xor `reservation_end_ts` null) to avoid gap-based double booking before full data convergence.
+- Code review remediation scopes delegated and implemented: mixed overlap derivation hardening, sync hold event reservation linkage, legacy status fallback for board next-window, reservation_id scope/table validation, and occupancy join scoping.
+- Follow-up review transactional/scoping findings fully remediated and revalidated.
 
 ### Completion Notes List
 
@@ -120,6 +122,25 @@ openai/gpt-5.3-codex
 - Added regression tests validating canonical timestamp persistence, strict boundary overlap semantics (`end == next start`), and sync placeholder reservation timestamp population.
 - Validation passed: API unit tests (`407` tests, `406` pass, `0` fail, `1` skip), API typecheck, and API lint.
 - Post-review hardening rerun passed with same API gates after overlap fallback adjustment.
+- Additional validation after review-remediation scopes passed: API unit tests (`410` tests, `409` pass, `0` fail, `1` skip), API typecheck, and API lint.
+
+### Senior Developer Review (AI)
+
+- Outcome: Approve (no remaining HIGH/MEDIUM findings)
+- Resolved findings:
+  - Mixed canonical/legacy overlap fallback gap in reservation overlap checks.
+  - `table_events.reservation_id` linkage for `RESERVATION_CREATED` sync events.
+  - Legacy `status` fallback for next-reservation board query when `status_id` is null.
+  - Scope/table validation for client-supplied `reservation_id` in sync HOLD path.
+  - `reserved_until` preservation on status-only occupancy updates.
+  - Tenant/outlet-scoped join for `table_occupancy` in table board query.
+  - `TABLE_TRANSFERRED` now enforces target-table scope validation (`company_id`, `outlet_id`, active table).
+  - Reservation status side effects now execute with connection-aware occupancy helpers in the same transaction boundary.
+  - `TABLE_OPENED` event audit now persists provided `reservation_id` consistently in `table_events`.
+
+### Review Follow-ups (AI)
+
+- [x] [AI-Review][HIGH] Reservation status side effects are now transactionally aligned with reservation update flow using connection-aware occupancy helpers.
 
 ### File List
 
@@ -132,6 +153,7 @@ openai/gpt-5.3-codex
 - apps/api/src/lib/reservations.test.ts
 - apps/api/src/lib/reservations.ts
 - apps/api/src/lib/table-occupancy.ts
+- apps/api/src/lib/table-occupancy.test.ts
 - apps/api/src/lib/table-sync.ts
 - package.json
 - packages/db/migrations/0110_reservations_start_end_ts.sql
@@ -143,3 +165,7 @@ openai/gpt-5.3-codex
 
 - 2026-03-20: Implemented Story 12.10 canonical reservation start/end timestamp migration, dual-write paths, canonical read/filter/overlap logic, dependent query updates, backfill tooling, and regression tests; all API validation gates passed.
 - 2026-03-20: Hardened overlap fallback to include partially populated timestamp rows and reran API validation gates.
+- 2026-03-20: Closed first review round findings with delegated narrow scopes (overlap mixed-state correctness, sync reservation linkage, board fallback, and sync reservation scope validation) and reran API validation gates.
+- 2026-03-20: Additional review surfaced broader follow-ups (transactional side effects and transfer target scoping); story set to in-progress pending remediation.
+- 2026-03-20: Closed transfer-target scoping follow-up and added regression coverage; one HIGH transactional side-effect follow-up remains open.
+- 2026-03-20: Closed remaining transactional and event-audit follow-ups, reran API gates, and moved story to DONE.

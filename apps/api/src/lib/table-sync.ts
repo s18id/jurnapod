@@ -425,7 +425,8 @@ async function applyTableEventWithTransaction(params: {
          version,
          service_session_id,
          reservation_id,
-         guest_count
+         guest_count,
+         reserved_until
        FROM table_occupancy
        WHERE company_id = ?
          AND outlet_id = ?
@@ -488,6 +489,7 @@ async function applyTableEventWithTransaction(params: {
     const newVersion = currentVersion + 1;
     let statusIdAfter = currentStatus;
     let serviceSessionId: bigint | null = currentOccupancy?.service_session_id ?? null;
+    let eventReservationId: bigint | null = currentOccupancy?.reservation_id ?? null;
     let eventData: Record<string, unknown> = { ...event.payload };
 
     // Process event based on type
@@ -524,6 +526,7 @@ async function applyTableEventWithTransaction(params: {
 
         serviceSessionId = BigInt(sessionResult.insertId);
         statusIdAfter = TableOccupancyStatus.OCCUPIED;
+        eventReservationId = reservationId;
 
         // Update occupancy
         await updateOccupancyWithConnection(connection, {
@@ -604,6 +607,27 @@ async function applyTableEventWithTransaction(params: {
         let reservationId: bigint;
         if (event.payload.reservation_id) {
           reservationId = BigInt(event.payload.reservation_id as string);
+
+          const [reservationRows] = await connection.execute<RowDataPacket[]>(
+            `SELECT id, table_id
+             FROM reservations
+             WHERE id = ?
+               AND company_id = ?
+               AND outlet_id = ?
+             LIMIT 1`,
+            [reservationId, companyId, outletId]
+          );
+
+          if (reservationRows.length === 0) {
+            throw new Error(`Reservation ${reservationId} not found for company/outlet scope`);
+          }
+
+          const reservationTableId = reservationRows[0].table_id;
+          if (reservationTableId !== null && BigInt(String(reservationTableId)) !== tableId) {
+            throw new Error(
+              `Reservation ${reservationId} table mismatch: expected table ${tableId}, got ${reservationTableId}`
+            );
+          }
         } else {
           // Create a placeholder reservation for hold operations without existing reservation
           const guestName = (event.payload.customer_name ?? event.payload.guest_name) as string | null ?? 'Walk-in';
@@ -650,6 +674,7 @@ async function applyTableEventWithTransaction(params: {
         }
 
         statusIdAfter = TableOccupancyStatus.RESERVED;
+        eventReservationId = reservationId;
 
         // Use upsert helper to handle both INSERT and UPDATE cases
         await updateOccupancyWithConnection(connection, {
@@ -764,6 +789,21 @@ async function applyTableEventWithTransaction(params: {
           throw new Error('Cannot transfer - table is not occupied');
         }
 
+        const [targetTableRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT id
+           FROM outlet_tables
+           WHERE id = ?
+             AND company_id = ?
+             AND outlet_id = ?
+             AND is_active = 1
+           LIMIT 1`,
+          [targetTableId, companyId, outletId]
+        );
+
+        if (targetTableRows.length === 0) {
+          throw new Error(`Target table ${targetTableId} not found in outlet scope`);
+        }
+
         // Update service session to point to new table
         if (serviceSessionId) {
           await connection.execute(
@@ -853,7 +893,7 @@ async function applyTableEventWithTransaction(params: {
         currentStatus,
         statusIdAfter,
         serviceSessionId,
-        currentOccupancy?.reservation_id ?? null,
+        eventReservationId,
         new Date(event.recorded_at),
         actorId
       ]
