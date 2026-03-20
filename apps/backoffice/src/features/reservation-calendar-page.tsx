@@ -31,6 +31,12 @@ import type {
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
 import { apiRequest } from "../lib/api-client";
+import {
+  getCheckInTargetStatus as getCheckInTargetStatusShared,
+  getReservationStatusLabel,
+  RESERVATION_STATUS_META,
+  RESERVATION_STATUS_OPTIONS
+} from "../lib/reservation-status";
 import { getStoredCompanyTimezone, refreshSessionUser, type SessionUser } from "../lib/session";
 import { useOutletsFull } from "../hooks/use-outlets";
 import { useOutletTables } from "../hooks/use-outlet-tables";
@@ -75,31 +81,6 @@ type ReservationStatusExecutionResult = {
   successMessage?: string;
   errorMessage?: string;
 };
-
-const STATUS_BADGE_COLORS: Record<ReservationStatus, string> = {
-  BOOKED: "blue",
-  CONFIRMED: "cyan",
-  ARRIVED: "yellow",
-  SEATED: "green",
-  COMPLETED: "gray",
-  CANCELLED: "red",
-  NO_SHOW: "orange"
-};
-
-const STATUS_LABELS: Record<ReservationStatus, string> = {
-  BOOKED: "Booked",
-  CONFIRMED: "Confirmed",
-  ARRIVED: "Arrived",
-  SEATED: "Seated",
-  COMPLETED: "Completed",
-  CANCELLED: "Cancelled",
-  NO_SHOW: "No Show"
-};
-
-const STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([value, label]) => ({
-  value,
-  label
-}));
 
 const emptyFormState: ReservationFormState = {
   tableId: null,
@@ -208,13 +189,7 @@ export async function executeReservationFormAction(input: {
 }
 
 export function getCheckInTargetStatus(status: ReservationStatus): ReservationStatus | null {
-  if (status === "BOOKED" || status === "CONFIRMED") {
-    return "ARRIVED";
-  }
-  if (status === "ARRIVED") {
-    return "SEATED";
-  }
-  return null;
+  return getCheckInTargetStatusShared(status);
 }
 
 export async function executeReservationStatusAction(input: {
@@ -232,7 +207,7 @@ export async function executeReservationStatusAction(input: {
     return {
       ok: true,
       status: input.status,
-      successMessage: `Reservation ${input.row.customer_name} set to ${STATUS_LABELS[input.status]}.`
+      successMessage: `Reservation ${input.row.customer_name} set to ${getReservationStatusLabel(input.status)}.`
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to update reservation status";
@@ -746,7 +721,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
             <Select
               label="Status"
               placeholder="All statuses"
-              data={STATUS_OPTIONS}
+              data={RESERVATION_STATUS_OPTIONS}
               value={statusFilter}
               onChange={(value) => setStatusFilter((value as ReservationStatus | null) ?? null)}
               clearable
@@ -903,8 +878,8 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
                                     <Text size="sm" fw={600} lineClamp={1}>
                                       {row.customer_name}
                                     </Text>
-                                    <Badge color={STATUS_BADGE_COLORS[row.status]} variant="light" size="xs">
-                                      {STATUS_LABELS[row.status]}
+                                    <Badge color={RESERVATION_STATUS_META[row.status].badgeColor} variant="light" size="xs">
+                                      {getReservationStatusLabel(row.status)}
                                     </Badge>
                                   </Group>
                                   <Text size="xs" c="dimmed">
@@ -1031,8 +1006,8 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
                                       <Text size="sm" fw={600} lineClamp={1}>
                                         {row.customer_name}
                                       </Text>
-                                      <Badge color={STATUS_BADGE_COLORS[row.status]} variant="light" size="xs">
-                                        {STATUS_LABELS[row.status]}
+                                      <Badge color={RESERVATION_STATUS_META[row.status].badgeColor} variant="light" size="xs">
+                                        {getReservationStatusLabel(row.status)}
                                       </Badge>
                                     </Group>
                                     <Text size="xs" c="dimmed">
@@ -1158,8 +1133,8 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
           <Stack gap="sm">
             <Group justify="space-between">
               <Text fw={600}>{detailReservation.customer_name}</Text>
-              <Badge color={STATUS_BADGE_COLORS[detailReservation.status]}>
-                {STATUS_LABELS[detailReservation.status]}
+              <Badge color={RESERVATION_STATUS_META[detailReservation.status].badgeColor}>
+                {getReservationStatusLabel(detailReservation.status)}
               </Badge>
             </Group>
             <Text size="sm">Time: {formatTimeRange(detailReservation, defaultDurationMinutes, selectedOutletTimezone)}</Text>

@@ -3,6 +3,7 @@
 
 import { useMemo } from "react";
 import type { ReservationListQuery, ReservationRow, ReservationStatus } from "@jurnapod/shared";
+import { isReservationFinalStatus as isReservationFinalStatusShared } from "../lib/reservation-status";
 import { useReservations } from "./use-reservations";
 
 export type ReservationCalendarViewMode = "day" | "week";
@@ -210,7 +211,7 @@ export function groupReservationsByDay(
 }
 
 export function isReservationFinalStatus(status: ReservationStatus): boolean {
-  return status === "CANCELLED" || status === "NO_SHOW" || status === "COMPLETED";
+  return isReservationFinalStatusShared(status);
 }
 
 export function getReservationEndAt(row: ReservationRow, defaultDurationMinutes?: number | null): Date {

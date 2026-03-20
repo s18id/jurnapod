@@ -64,8 +64,80 @@ describe("Table Board page helpers", () => {
     assert.strictEqual(pageModule.getBoardStatusMeta(2).color, "red");
     assert.strictEqual(pageModule.getBoardStatusMeta(3).color, "yellow");
     assert.strictEqual(pageModule.getBoardStatusMeta("1" as unknown as number).label, "Available");
+    assert.strictEqual(pageModule.getBoardStatusMeta(4).key, "CLEANING");
     assert.strictEqual(pageModule.getBoardStatusMeta(4).label, "Cleaning");
+    assert.strictEqual(pageModule.getBoardStatusMeta(5).key, "OUT_OF_SERVICE");
     assert.strictEqual(pageModule.getBoardStatusMeta(5).label, "Out of Service");
+  });
+
+  test("filters include explicit CLEANING and OUT_OF_SERVICE statuses", async () => {
+    const pageModule = await import("./table-board-page");
+    const rows = [
+      {
+        tableId: "1",
+        zone: "Main",
+        occupancyStatusId: 4,
+        capacity: 4,
+        tableCode: "A1",
+        tableName: "Alpha",
+        availableNow: false,
+        currentSessionId: null,
+        currentReservationId: null,
+        nextReservationStartAt: null,
+        guestCount: 0,
+        version: 2,
+        updatedAt: "2026-03-19T10:00:00.000Z"
+      },
+      {
+        tableId: "2",
+        zone: "Main",
+        occupancyStatusId: 5,
+        capacity: 4,
+        tableCode: "A2",
+        tableName: "Alpha 2",
+        availableNow: false,
+        currentSessionId: null,
+        currentReservationId: null,
+        nextReservationStartAt: null,
+        guestCount: 0,
+        version: 2,
+        updatedAt: "2026-03-19T10:00:00.000Z"
+      }
+    ];
+
+    const cleaning = pageModule.filterBoardTables(rows, {
+      status: "CLEANING",
+      zone: "ALL",
+      minCapacity: null,
+      maxCapacity: null,
+      search: ""
+    });
+    const outOfService = pageModule.filterBoardTables(rows, {
+      status: "OUT_OF_SERVICE",
+      zone: "ALL",
+      minCapacity: null,
+      maxCapacity: null,
+      search: ""
+    });
+
+    assert.strictEqual(cleaning.length, 1);
+    assert.strictEqual(cleaning[0]?.tableCode, "A1");
+    assert.strictEqual(outOfService.length, 1);
+    assert.strictEqual(outOfService[0]?.tableCode, "A2");
+  });
+
+  test("computes reserved-soon window from next reservation time", async () => {
+    const pageModule = await import("./table-board-page");
+    const nowMs = Date.parse("2026-03-20T10:00:00.000Z");
+
+    assert.strictEqual(pageModule.getReservedSoonInfo(null, 30, nowMs), null);
+    assert.strictEqual(pageModule.getReservedSoonInfo("2026-03-20T09:59:00.000Z", 30, nowMs), null);
+
+    const withinThreshold = pageModule.getReservedSoonInfo("2026-03-20T10:20:00.000Z", 30, nowMs);
+    assert.ok(withinThreshold);
+    assert.strictEqual(withinThreshold.startsInMinutes, 20);
+
+    assert.strictEqual(pageModule.getReservedSoonInfo("2026-03-20T10:45:00.000Z", 30, nowMs), null);
   });
 
   test("filters by status, zone, search, and minimum capacity", async () => {
@@ -118,8 +190,33 @@ describe("Table Board page helpers", () => {
     const pageModule = await import("./table-board-page");
     const available = pageModule.getAvailableActionsForTable({ occupancyStatusId: 1, currentSessionId: null });
     const occupied = pageModule.getAvailableActionsForTable({ occupancyStatusId: 2, currentSessionId: "9" });
-    assert.deepStrictEqual(available, ["HOLD", "SEAT"]);
-    assert.deepStrictEqual(occupied, ["RELEASE", "VIEW_SESSION"]);
+    assert.deepStrictEqual(available, ["NEW_RESERVATION", "HOLD", "SEAT"]);
+    assert.deepStrictEqual(occupied, ["NEW_RESERVATION", "RELEASE", "VIEW_SESSION"]);
+  });
+
+  test("does not expose unsafe actions for CLEANING and OUT_OF_SERVICE", async () => {
+    const pageModule = await import("./table-board-page");
+
+    const cleaning = pageModule.getAvailableActionsForTable({
+      occupancyStatusId: 4,
+      currentSessionId: null,
+      availableNow: false
+    });
+    const outOfService = pageModule.getAvailableActionsForTable({
+      occupancyStatusId: 5,
+      currentSessionId: null,
+      availableNow: false
+    });
+
+    assert.deepStrictEqual(cleaning, []);
+    assert.deepStrictEqual(outOfService, []);
+  });
+
+  test("parses board table id for reservation prefill", async () => {
+    const pageModule = await import("./table-board-page");
+    assert.strictEqual(pageModule.parseBoardTableId("12"), 12);
+    assert.strictEqual(pageModule.parseBoardTableId("0"), null);
+    assert.strictEqual(pageModule.parseBoardTableId("table-uuid"), null);
   });
 
   test("creates expected version header", async () => {
@@ -169,6 +266,7 @@ describe("Table Board page helpers", () => {
       row: sampleRow,
       action: "HOLD",
       selectedOutletId: 17,
+      busyTableId: null,
       accessToken: "token-1",
       request,
       refetchBoard: async () => {
@@ -208,6 +306,7 @@ describe("Table Board page helpers", () => {
       row: seatRow,
       action: "SEAT",
       selectedOutletId: 9,
+      busyTableId: null,
       accessToken: "token-2",
       request: async (path: string, init?: RequestInit) => {
         calls.push({ path, init });
@@ -244,6 +343,7 @@ describe("Table Board page helpers", () => {
       row: { ...sampleRow, occupancyStatusId: 2 },
       action: "RELEASE",
       selectedOutletId: 5,
+      busyTableId: null,
       accessToken: "token-3",
       request: async (path: string, init?: RequestInit) => {
         calls.push({ path, init });
@@ -280,6 +380,7 @@ describe("Table Board page helpers", () => {
       row: sampleRow,
       action: "HOLD",
       selectedOutletId: 11,
+      busyTableId: null,
       accessToken: "token-4",
       request: async () => {
         throw new Error("Version conflict detected");
@@ -301,5 +402,36 @@ describe("Table Board page helpers", () => {
     assert.strictEqual(actionError, "Version conflict detected. Board refreshed.");
     assert.strictEqual(refetchCount, 1);
     assert.deepStrictEqual(busyStates, ["tb-1", null]);
+  });
+
+  test("skips action execution while any action is already in-flight", async () => {
+    const pageModule = await import("./table-board-page");
+    let called = false;
+
+    await pageModule.executeTableBoardAction({
+      row: sampleRow,
+      action: "HOLD",
+      selectedOutletId: 11,
+      busyTableId: "another-table",
+      accessToken: "token-4",
+      request: async () => {
+        called = true;
+        return { success: true };
+      },
+      refetchBoard: async () => {
+        return;
+      },
+      setBusyTableId: () => {
+        return;
+      },
+      setActionError: () => {
+        return;
+      },
+      setActionSuccess: () => {
+        return;
+      }
+    });
+
+    assert.strictEqual(called, false);
   });
 });

@@ -21,6 +21,12 @@ import { DataTable } from "../components/DataTable";
 import { PageCard } from "../components/PageCard";
 import { FilterBar } from "../components/FilterBar";
 import type { SessionUser } from "../lib/session";
+import {
+  isReservationFinalStatus,
+  RESERVATION_STATUS_META,
+  RESERVATION_STATUS_OPTIONS,
+  RESERVATION_STATUS_TRANSITIONS
+} from "../lib/reservation-status";
 import { useOutletsFull } from "../hooks/use-outlets";
 import { useOutletTables } from "../hooks/use-outlet-tables";
 import {
@@ -58,28 +64,6 @@ const emptyForm: FormData = {
   duration_minutes: 120,
   notes: null
 };
-
-const STATUS_OPTIONS: Array<{ value: ReservationStatus; label: string; color: string }> = [
-  { value: "BOOKED", label: "Booked", color: "blue" },
-  { value: "CONFIRMED", label: "Confirmed", color: "cyan" },
-  { value: "ARRIVED", label: "Arrived", color: "yellow" },
-  { value: "SEATED", label: "Seated", color: "green" },
-  { value: "COMPLETED", label: "Completed", color: "gray" },
-  { value: "CANCELLED", label: "Cancelled", color: "red" },
-  { value: "NO_SHOW", label: "No Show", color: "orange" }
-];
-
-const STATUS_TRANSITIONS: Record<ReservationStatus, ReservationStatus[]> = {
-  BOOKED: ["CONFIRMED", "ARRIVED", "CANCELLED", "NO_SHOW"],
-  CONFIRMED: ["ARRIVED", "CANCELLED", "NO_SHOW"],
-  ARRIVED: ["SEATED", "CANCELLED", "NO_SHOW"],
-  SEATED: ["COMPLETED"],
-  COMPLETED: [],
-  CANCELLED: [],
-  NO_SHOW: []
-};
-
-const FINAL_STATUSES: ReservationStatus[] = ["COMPLETED", "CANCELLED", "NO_SHOW"];
 
 function formatDateTimeLocalInput(date: Date): string {
   const year = date.getFullYear();
@@ -459,7 +443,7 @@ export function ReservationsPage(props: ReservationsPageProps) {
         cell: (info) => {
           const reservation = info.row.original;
           const table = reservation.table_id ? tableById.get(reservation.table_id) : null;
-          const isFinal = FINAL_STATUSES.includes(reservation.status);
+          const isFinal = isReservationFinalStatus(reservation.status);
           const options = reservation.table_id
             ? (() => {
                 const hasCurrent = assignableTableOptions.some(
@@ -503,10 +487,10 @@ export function ReservationsPage(props: ReservationsPageProps) {
         id: "status",
         header: "Status",
         cell: (info) => {
-          const statusConfig = STATUS_OPTIONS.find((s) => s.value === info.row.original.status);
+          const statusConfig = RESERVATION_STATUS_META[info.row.original.status];
           return (
-            <Badge color={statusConfig?.color || "gray"} variant="light">
-              {statusConfig?.label || info.row.original.status}
+            <Badge color={statusConfig.badgeColor} variant="light">
+              {statusConfig.label}
             </Badge>
           );
         }
@@ -520,13 +504,13 @@ export function ReservationsPage(props: ReservationsPageProps) {
               size="xs"
               variant="light"
               onClick={() => openEditDialog(info.row.original)}
-              disabled={FINAL_STATUSES.includes(info.row.original.status)}
+              disabled={isReservationFinalStatus(info.row.original.status)}
             >
               Edit
             </Button>
 
-            {!FINAL_STATUSES.includes(info.row.original.status) &&
-              STATUS_TRANSITIONS[info.row.original.status]
+            {!isReservationFinalStatus(info.row.original.status) &&
+              RESERVATION_STATUS_TRANSITIONS[info.row.original.status]
                 .filter((nextStatus) => nextStatus !== "CANCELLED")
                 .map((nextStatus) => (
                 <Button
@@ -541,7 +525,7 @@ export function ReservationsPage(props: ReservationsPageProps) {
                 </Button>
                 ))}
 
-            {!FINAL_STATUSES.includes(info.row.original.status) && (
+            {!isReservationFinalStatus(info.row.original.status) && (
               <Button
                 size="xs"
                 color="red"
@@ -610,7 +594,7 @@ export function ReservationsPage(props: ReservationsPageProps) {
             <Select
               label="Status"
               placeholder="All statuses"
-              data={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+              data={RESERVATION_STATUS_OPTIONS}
               value={statusFilter}
               onChange={(value) => setStatusFilter(value as ReservationStatus | null)}
               clearable

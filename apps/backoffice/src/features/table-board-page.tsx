@@ -16,6 +16,7 @@ import {
   SimpleGrid,
   Stack,
   Table,
+  Textarea,
   Text,
   TextInput,
   Title
@@ -24,12 +25,19 @@ import { TableOccupancyStatus } from "@jurnapod/shared";
 import { PageCard } from "../components/PageCard";
 import { FilterBar } from "../components/FilterBar";
 import { useOutletsFull } from "../hooks/use-outlets";
+import { createReservation } from "../hooks/use-reservations";
 import { apiRequest } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 import { type TableBoardRow, useTableBoard } from "../hooks/use-table-board";
 
-export type BoardStatusFilter = "ALL" | "AVAILABLE" | "OCCUPIED" | "RESERVED";
-export type TableBoardAction = "HOLD" | "SEAT" | "RELEASE" | "VIEW_SESSION";
+export type BoardStatusFilter =
+  | "ALL"
+  | "AVAILABLE"
+  | "OCCUPIED"
+  | "RESERVED"
+  | "CLEANING"
+  | "OUT_OF_SERVICE";
+export type TableBoardAction = "HOLD" | "SEAT" | "RELEASE" | "VIEW_SESSION" | "NEW_RESERVATION";
 
 type BoardStatusMeta = {
   key: Exclude<BoardStatusFilter, "ALL">;
@@ -50,12 +58,110 @@ export function getBoardStatusMeta(occupancyStatusId: number): BoardStatusMeta {
     return { key: "RESERVED", label: "Reserved", color: "yellow" };
   }
   if (normalizedStatusId === TableOccupancyStatus.CLEANING) {
-    return { key: "OCCUPIED", label: "Cleaning", color: "orange" };
+    return { key: "CLEANING", label: "Cleaning", color: "orange" };
   }
   if (normalizedStatusId === TableOccupancyStatus.OUT_OF_SERVICE) {
-    return { key: "OCCUPIED", label: "Out of Service", color: "gray" };
+    return { key: "OUT_OF_SERVICE", label: "Out of Service", color: "gray" };
   }
   return { key: "OCCUPIED", label: "Unknown", color: "gray" };
+}
+
+export type ReservedSoonInfo = {
+  startsInMinutes: number;
+  startsAt: Date;
+};
+
+function normalizeTimeZone(timeZone?: string | null): string | undefined {
+  if (!timeZone || timeZone.trim().length === 0) {
+    return undefined;
+  }
+  return timeZone;
+}
+
+export function formatReservedSoonTime(startsAt: Date, timeZone?: string | null): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: normalizeTimeZone(timeZone)
+  }).format(startsAt);
+}
+
+export function getReservedSoonInfo(
+  nextReservationStartAt: string | null,
+  thresholdMinutes = 30,
+  nowMs = Date.now()
+): ReservedSoonInfo | null {
+  if (!nextReservationStartAt) {
+    return null;
+  }
+
+  const startsAtMs = Date.parse(nextReservationStartAt);
+  if (!Number.isFinite(startsAtMs)) {
+    return null;
+  }
+
+  const deltaMs = startsAtMs - nowMs;
+  if (deltaMs <= 0) {
+    return null;
+  }
+
+  const startsInMinutes = Math.ceil(deltaMs / 60000);
+  if (startsInMinutes > thresholdMinutes) {
+    return null;
+  }
+
+  return {
+    startsInMinutes,
+    startsAt: new Date(startsAtMs)
+  };
+}
+
+export function formatDateTimeLocalInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  const hours = `${date.getHours()}`.padStart(2, "0");
+  const minutes = `${date.getMinutes()}`.padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+export function parseDateTimeLocalInput(value: string): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const [datePart, timePart] = value.split("T");
+  if (!datePart || !timePart) {
+    return null;
+  }
+
+  const [yearRaw, monthRaw, dayRaw] = datePart.split("-");
+  const [hourRaw, minuteRaw] = timePart.split(":");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute)
+  ) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day, hour, minute, 0, 0);
+}
+
+export function parseBoardTableId(tableId: string): number | null {
+  const parsed = Number(tableId);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
 }
 
 export function buildExpectedVersionHeaders(version: number): Record<string, string> {
@@ -76,8 +182,9 @@ export type TableBoardApiRequest = (
 
 type ExecuteTableBoardActionInput = {
   row: TableBoardRow;
-  action: Exclude<TableBoardAction, "VIEW_SESSION">;
+  action: "HOLD" | "SEAT" | "RELEASE";
   selectedOutletId: number | null;
+  busyTableId: string | null;
   accessToken: string;
   request: TableBoardApiRequest;
   refetchBoard: () => Promise<void>;
@@ -91,6 +198,7 @@ export async function executeTableBoardAction(input: ExecuteTableBoardActionInpu
     row,
     action,
     selectedOutletId,
+    busyTableId,
     accessToken,
     request,
     refetchBoard,
@@ -101,6 +209,10 @@ export async function executeTableBoardAction(input: ExecuteTableBoardActionInpu
 
   if (!selectedOutletId) {
     setActionError("Select an outlet first.");
+    return;
+  }
+
+  if (busyTableId !== null) {
     return;
   }
 
@@ -218,13 +330,20 @@ export function getAvailableActionsForTable(row: {
   availableNow?: boolean;
 }): TableBoardAction[] {
   const actions: TableBoardAction[] = [];
+  const statusId = Number(row.occupancyStatusId);
+  const allowReservationAction =
+    statusId !== TableOccupancyStatus.CLEANING && statusId !== TableOccupancyStatus.OUT_OF_SERVICE;
 
-  const availableNow = row.availableNow ?? row.occupancyStatusId === TableOccupancyStatus.AVAILABLE;
+  if (allowReservationAction) {
+    actions.push("NEW_RESERVATION");
+  }
+
+  const availableNow = row.availableNow ?? statusId === TableOccupancyStatus.AVAILABLE;
   if (availableNow) {
     actions.push("HOLD", "SEAT");
-  } else if (row.occupancyStatusId === TableOccupancyStatus.OCCUPIED) {
+  } else if (statusId === TableOccupancyStatus.OCCUPIED) {
     actions.push("RELEASE");
-  } else if (row.occupancyStatusId === TableOccupancyStatus.RESERVED) {
+  } else if (statusId === TableOccupancyStatus.RESERVED) {
     actions.push("SEAT", "RELEASE");
   }
 
@@ -253,6 +372,26 @@ type SessionDetail = {
 
 type ViewMode = "grid" | "list";
 
+type ReservationFormData = {
+  tableId: number | null;
+  customerName: string;
+  customerPhone: string;
+  guestCount: number;
+  reservationAt: Date | null;
+  durationMinutes: number;
+  notes: string;
+};
+
+const reservationDefaultForm: ReservationFormData = {
+  tableId: null,
+  customerName: "",
+  customerPhone: "",
+  guestCount: 2,
+  reservationAt: null,
+  durationMinutes: 120,
+  notes: ""
+};
+
 export function resolveSessionModalTitle(sessionDetail: SessionDetail | null): string {
   return sessionDetail ? `Session ${sessionDetail.id}` : "Session Detail";
 }
@@ -272,6 +411,10 @@ export function TableBoardPage(props: TableBoardPageProps) {
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [sessionDetailOpen, setSessionDetailOpen] = useState(false);
   const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
+  const [reservationModalOpen, setReservationModalOpen] = useState(false);
+  const [reservationForm, setReservationForm] = useState<ReservationFormData>(reservationDefaultForm);
+  const [reservationFormError, setReservationFormError] = useState<string | null>(null);
+  const [reservationSubmitting, setReservationSubmitting] = useState(false);
 
   const outlets = useOutletsFull(user.company_id, accessToken);
   const board = useTableBoard(selectedOutletId, accessToken, 8000);
@@ -284,6 +427,14 @@ export function TableBoardPage(props: TableBoardPageProps) {
       })),
     [outlets.data]
   );
+
+  const selectedOutletTimezone = useMemo(() => {
+    if (!selectedOutletId) {
+      return null;
+    }
+    const selectedOutlet = outlets.data.find((outlet) => outlet.id === selectedOutletId);
+    return selectedOutlet?.timezone ?? null;
+  }, [outlets.data, selectedOutletId]);
 
   const filteredRows = useMemo(
     () =>
@@ -309,11 +460,12 @@ export function TableBoardPage(props: TableBoardPageProps) {
     ];
   }, [board.data]);
 
-  const doAction = async (row: TableBoardRow, action: Exclude<TableBoardAction, "VIEW_SESSION">) => {
+  const doAction = async (row: TableBoardRow, action: "HOLD" | "SEAT" | "RELEASE") => {
     await executeTableBoardAction({
       row,
       action,
       selectedOutletId,
+      busyTableId,
       accessToken,
       request: apiRequest,
       refetchBoard: board.refetch,
@@ -321,6 +473,90 @@ export function TableBoardPage(props: TableBoardPageProps) {
       setActionError,
       setActionSuccess
     });
+  };
+
+  const openNewReservationModal = (row: TableBoardRow) => {
+    if (!selectedOutletId) {
+      setActionError("Select an outlet first.");
+      return;
+    }
+
+    const tableId = parseBoardTableId(row.tableId);
+
+    const reservationSoon = getReservedSoonInfo(row.nextReservationStartAt, 30);
+    const reservationAt = reservationSoon?.startsAt ?? new Date(Date.now() + 30 * 60 * 1000);
+
+    setReservationForm({
+      tableId,
+      customerName: "",
+      customerPhone: "",
+      guestCount: Math.max(1, row.guestCount ?? 2),
+      reservationAt,
+      durationMinutes: 120,
+      notes: ""
+    });
+    setReservationFormError(null);
+    setActionError(null);
+    setReservationModalOpen(true);
+  };
+
+  const closeReservationModal = () => {
+    setReservationModalOpen(false);
+    setReservationForm(reservationDefaultForm);
+    setReservationFormError(null);
+  };
+
+  const submitNewReservation = async () => {
+    if (reservationSubmitting) {
+      return;
+    }
+    if (!selectedOutletId) {
+      setReservationFormError("Select an outlet first.");
+      return;
+    }
+    if (!reservationForm.customerName.trim()) {
+      setReservationFormError("Customer name is required.");
+      return;
+    }
+    if (!reservationForm.reservationAt) {
+      setReservationFormError("Reservation date/time is required.");
+      return;
+    }
+    if (reservationForm.guestCount < 1) {
+      setReservationFormError("Guest count must be at least 1.");
+      return;
+    }
+
+    setReservationSubmitting(true);
+    setReservationFormError(null);
+    setActionError(null);
+    setActionSuccess(null);
+    setBusyTableId("__reservation__");
+    try {
+      await createReservation(
+        {
+          outlet_id: selectedOutletId,
+          table_id: reservationForm.tableId ?? undefined,
+          customer_name: reservationForm.customerName.trim(),
+          customer_phone: reservationForm.customerPhone.trim() || null,
+          guest_count: reservationForm.guestCount,
+          reservation_at: reservationForm.reservationAt.toISOString(),
+          duration_minutes: reservationForm.durationMinutes || undefined,
+          notes: reservationForm.notes.trim() || null
+        },
+        accessToken
+      );
+      setActionSuccess("Reservation created successfully.");
+      closeReservationModal();
+      await board.refetch();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to create reservation";
+      setReservationFormError(`${message}. Check table availability and reservation time, then retry.`);
+      await board.refetch();
+    } finally {
+      setBusyTableId(null);
+      setReservationSubmitting(false);
+    }
   };
 
   const loadSession = async (row: TableBoardRow) => {
@@ -356,20 +592,23 @@ export function TableBoardPage(props: TableBoardPageProps) {
     return (
       <Menu withinPortal>
         <Menu.Target>
-          <Button size="xs" variant="light" loading={busyTableId === row.tableId}>Actions</Button>
+          <Button size="xs" variant="light" loading={busyTableId === row.tableId} disabled={busyTableId !== null}>Actions</Button>
         </Menu.Target>
         <Menu.Dropdown>
+          {actions.includes("NEW_RESERVATION") && (
+            <Menu.Item disabled={busyTableId !== null} onClick={() => openNewReservationModal(row)}>New Reservation</Menu.Item>
+          )}
           {actions.includes("HOLD") && (
-            <Menu.Item onClick={() => void doAction(row, "HOLD")}>Hold</Menu.Item>
+            <Menu.Item disabled={busyTableId !== null} onClick={() => void doAction(row, "HOLD")}>Hold</Menu.Item>
           )}
           {actions.includes("SEAT") && (
-            <Menu.Item onClick={() => void doAction(row, "SEAT")}>Seat</Menu.Item>
+            <Menu.Item disabled={busyTableId !== null} onClick={() => void doAction(row, "SEAT")}>Seat</Menu.Item>
           )}
           {actions.includes("RELEASE") && (
-            <Menu.Item onClick={() => void doAction(row, "RELEASE")}>Release</Menu.Item>
+            <Menu.Item disabled={busyTableId !== null} onClick={() => void doAction(row, "RELEASE")}>Release</Menu.Item>
           )}
           {actions.includes("VIEW_SESSION") && (
-            <Menu.Item onClick={() => void loadSession(row)}>View Session</Menu.Item>
+            <Menu.Item disabled={busyTableId !== null} onClick={() => void loadSession(row)}>View Session</Menu.Item>
           )}
         </Menu.Dropdown>
       </Menu>
@@ -414,7 +653,9 @@ export function TableBoardPage(props: TableBoardPageProps) {
                 { value: "ALL", label: "All statuses" },
                 { value: "AVAILABLE", label: "Available" },
                 { value: "OCCUPIED", label: "Occupied" },
-                { value: "RESERVED", label: "Reserved" }
+                { value: "RESERVED", label: "Reserved" },
+                { value: "CLEANING", label: "Cleaning" },
+                { value: "OUT_OF_SERVICE", label: "Out of Service" }
               ]}
               onChange={(value) => setStatus((value as BoardStatusFilter) || "ALL")}
             />
@@ -471,6 +712,7 @@ export function TableBoardPage(props: TableBoardPageProps) {
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
             {group.rows.map((row) => {
               const statusMeta = getBoardStatusMeta(row.occupancyStatusId);
+              const reservedSoon = getReservedSoonInfo(row.nextReservationStartAt, 30);
               return (
                 <Card key={row.tableId} withBorder radius="md" padding="md">
                   <Stack gap="xs">
@@ -483,6 +725,11 @@ export function TableBoardPage(props: TableBoardPageProps) {
                       Capacity {row.capacity ?? "-"} | Guests {row.guestCount ?? 0}
                     </Text>
                     <Text size="xs" c="dimmed">Session {row.currentSessionId ?? "-"}</Text>
+                    {reservedSoon && (
+                      <Alert color="yellow" title="Reserved soon" variant="light">
+                        Starts in {reservedSoon.startsInMinutes} min ({formatReservedSoonTime(reservedSoon.startsAt, selectedOutletTimezone)})
+                      </Alert>
+                    )}
                     {board.recentChangeIds.has(row.tableId) && (
                       <Badge size="xs" color="teal" variant="dot">Recently changed</Badge>
                     )}
@@ -512,6 +759,7 @@ export function TableBoardPage(props: TableBoardPageProps) {
             <Table.Tbody>
               {filteredRows.map((row) => {
                 const statusMeta = getBoardStatusMeta(row.occupancyStatusId);
+                const reservedSoon = getReservedSoonInfo(row.nextReservationStartAt, 30);
                 return (
                   <Table.Tr key={row.tableId}>
                     <Table.Td>
@@ -519,6 +767,11 @@ export function TableBoardPage(props: TableBoardPageProps) {
                         <Text fw={600}>{row.tableCode}</Text>
                         {board.recentChangeIds.has(row.tableId) && (
                           <Badge size="xs" color="teal" variant="dot">Updated</Badge>
+                        )}
+                        {reservedSoon && (
+                          <Badge size="xs" color="yellow" variant="light">
+                            Reserved in {reservedSoon.startsInMinutes}m
+                          </Badge>
                         )}
                       </Group>
                     </Table.Td>
@@ -535,6 +788,89 @@ export function TableBoardPage(props: TableBoardPageProps) {
           </Table>
         </PageCard>
       )}
+
+      <Modal
+        opened={reservationModalOpen}
+        onClose={() => {
+          if (reservationSubmitting) {
+            return;
+          }
+          closeReservationModal();
+        }}
+        title={<Title order={4}>New Reservation</Title>}
+        centered
+        size="md"
+      >
+        <Stack gap="sm">
+          {reservationFormError && <Alert color="red" title="Reservation failed">{reservationFormError}</Alert>}
+          <Text size="sm" c="dimmed">
+            Table: {reservationForm.tableId ? `#${reservationForm.tableId}` : "No preselected table"}
+          </Text>
+          <TextInput
+            label="Customer Name"
+            value={reservationForm.customerName}
+            onChange={(event) => {
+              setReservationForm((prev) => ({ ...prev, customerName: event.currentTarget.value }));
+            }}
+            required
+          />
+          <NumberInput
+            label="Guest Count"
+            value={reservationForm.guestCount}
+            min={1}
+            max={100}
+            onChange={(value) => {
+              setReservationForm((prev) => ({
+                ...prev,
+                guestCount: typeof value === "number" ? Math.max(1, value) : 1
+              }));
+            }}
+          />
+          <TextInput
+            label="Reservation Date & Time"
+            type="datetime-local"
+            value={reservationForm.reservationAt ? formatDateTimeLocalInput(reservationForm.reservationAt) : ""}
+            onChange={(event) => {
+              setReservationForm((prev) => ({
+                ...prev,
+                reservationAt: parseDateTimeLocalInput(event.currentTarget.value)
+              }));
+            }}
+            required
+          />
+          <NumberInput
+            label="Duration (minutes)"
+            value={reservationForm.durationMinutes}
+            min={15}
+            max={480}
+            onChange={(value) => {
+              setReservationForm((prev) => ({
+                ...prev,
+                durationMinutes: typeof value === "number" ? Math.max(15, value) : 120
+              }));
+            }}
+          />
+          <TextInput
+            label="Phone"
+            value={reservationForm.customerPhone}
+            onChange={(event) => {
+              setReservationForm((prev) => ({ ...prev, customerPhone: event.currentTarget.value }));
+            }}
+          />
+          <Textarea
+            label="Notes"
+            value={reservationForm.notes}
+            onChange={(event) => {
+              setReservationForm((prev) => ({ ...prev, notes: event.currentTarget.value }));
+            }}
+            minRows={2}
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeReservationModal} disabled={reservationSubmitting}>Cancel</Button>
+            <Button onClick={() => void submitNewReservation()} loading={reservationSubmitting}>Create Reservation</Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal
         opened={sessionDetailOpen}
