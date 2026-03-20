@@ -9,6 +9,8 @@ import {
   OutletTableStatusId,
   ReservationStatusV2,
   TableOccupancyStatus,
+  SETTINGS_REGISTRY,
+  parseSettingValue,
   type ReservationStatusV2Type,
   type ReservationCreateRequest,
   type ReservationUpdateRequest,
@@ -16,6 +18,7 @@ import {
   type ReservationRow,
   type ReservationStatus
 } from "@jurnapod/shared";
+import { getSetting } from "./settings";
 import {
   holdTable,
   getTableOccupancy,
@@ -133,6 +136,10 @@ const VALID_TRANSITIONS: Record<number, number[]> = {
 };
 
 const MAX_CODE_GENERATION_RETRIES = 3;
+const RESERVATION_DEFAULT_DURATION_KEY = "feature.reservation.default_duration_minutes" as const;
+const RESERVATION_DEFAULT_DURATION_FALLBACK = Number(
+  SETTINGS_REGISTRY[RESERVATION_DEFAULT_DURATION_KEY].defaultValue
+);
 
 // Legacy status transition map (for backward compatibility)
 const finalStatuses: ReservationStatus[] = ["COMPLETED", "CANCELLED", "NO_SHOW"];
@@ -162,6 +169,8 @@ interface ReservationDbRow extends RowDataPacket {
   customer_email: string | null;
   reservation_time: string | null;
   reservation_at: string;
+  reservation_start_ts: number | string | null;
+  reservation_end_ts: number | string | null;
   duration_minutes: number | null;
   notes: string | null;
   cancellation_reason: string | null;
@@ -173,6 +182,11 @@ interface ReservationDbRow extends RowDataPacket {
   seated_at: string | null;
   cancelled_at: string | null;
   linked_order_id: string | null;
+}
+
+interface LegacyOverlapRow extends RowDataPacket {
+  reservation_at: string | null;
+  duration_minutes: number | null;
 }
 
 type OutletTableStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
@@ -202,8 +216,57 @@ function toDbDateTime(value: Date | string): string {
   return parsed.toISOString().slice(0, 19).replace("T", " ");
 }
 
+function toUnixMs(value: Date | string): number {
+  const parsed = value instanceof Date ? value : new Date(value);
+  const ts = parsed.getTime();
+  if (Number.isNaN(ts)) {
+    throw new ReservationValidationError("Invalid reservation datetime value");
+  }
+  return ts;
+}
+
+function fromUnixMs(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function resolveEffectiveDurationMinutes(
+  companyId: number,
+  durationMinutes: number | null | undefined
+): Promise<number> {
+  if (durationMinutes !== null && durationMinutes !== undefined) {
+    return durationMinutes;
+  }
+
+  const setting = await getSetting({
+    companyId,
+    key: RESERVATION_DEFAULT_DURATION_KEY,
+    outletId: null
+  });
+
+  if (setting?.value !== null && setting?.value !== undefined) {
+    try {
+      const parsed = parseSettingValue(RESERVATION_DEFAULT_DURATION_KEY, setting.value);
+      if (typeof parsed === "number" && Number.isFinite(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Fallback to shared registry default.
+    }
+  }
+
+  return RESERVATION_DEFAULT_DURATION_FALLBACK;
+}
+
 function mapRow(row: ReservationDbRow): ReservationRow {
-  const reservationAt = toIso(row.reservation_at);
+  const reservationStartTs = fromUnixMs(row.reservation_start_ts);
+  const reservationAt = reservationStartTs !== null ? toIso(new Date(reservationStartTs)) : toIso(row.reservation_at);
   const createdAt = toIso(row.created_at);
   const updatedAt = toIso(row.updated_at);
   if (!reservationAt || !createdAt || !updatedAt) {
@@ -267,8 +330,11 @@ function mapDbRowToReservation(row: ReservationDbRow): Reservation {
     statusId = ReservationStatusV2.PENDING;
   }
 
-  // Determine reservation time: prefer reservation_time column, fall back to reservation_at
-  const reservationTimeStr = row.reservation_time ?? row.reservation_at;
+  const reservationStartTs = fromUnixMs(row.reservation_start_ts);
+  const reservationTimeStr =
+    reservationStartTs !== null
+      ? new Date(reservationStartTs).toISOString()
+      : (row.reservation_time ?? row.reservation_at);
   
   return {
     id: BigInt(row.id),
@@ -323,7 +389,8 @@ async function readReservationForUpdate(
 ): Promise<ReservationDbRow> {
   const [rows] = await connection.execute<ReservationDbRow[]>(
     `SELECT id, company_id, outlet_id, table_id, customer_name, customer_phone, guest_count,
-            reservation_at, duration_minutes, status, notes, linked_order_id,
+            reservation_at, reservation_start_ts, reservation_end_ts,
+            duration_minutes, status, notes, linked_order_id,
             created_at, updated_at, arrived_at, seated_at, cancelled_at, status_id
      FROM reservations
      WHERE company_id = ? AND id = ?
@@ -494,22 +561,23 @@ export async function listReservations(
     params.push(query.status);
   }
   if (query.from) {
-    where.push("reservation_at >= ?");
-    params.push(toDbDateTime(query.from));
+    where.push("((reservation_start_ts IS NOT NULL AND reservation_start_ts >= ?) OR (reservation_start_ts IS NULL AND reservation_at >= ?))");
+    params.push(toUnixMs(query.from), toDbDateTime(query.from));
   }
   if (query.to) {
-    where.push("reservation_at <= ?");
-    params.push(toDbDateTime(query.to));
+    where.push("((reservation_start_ts IS NOT NULL AND reservation_start_ts <= ?) OR (reservation_start_ts IS NULL AND reservation_at <= ?))");
+    params.push(toUnixMs(query.to), toDbDateTime(query.to));
   }
 
   params.push(query.limit, query.offset);
   const [rows] = await pool.execute<ReservationDbRow[]>(
     `SELECT id, company_id, outlet_id, table_id, customer_name, customer_phone, guest_count,
-            reservation_at, duration_minutes, status, notes, linked_order_id,
+            reservation_at, reservation_start_ts, reservation_end_ts,
+            duration_minutes, status, notes, linked_order_id,
             created_at, updated_at, arrived_at, seated_at, cancelled_at, status_id
      FROM reservations
      WHERE ${where.join(" AND ")}
-     ORDER BY reservation_at ASC, id ASC
+     ORDER BY reservation_start_ts IS NULL ASC, reservation_start_ts ASC, reservation_at ASC, id ASC
      LIMIT ? OFFSET ?`,
     params
   );
@@ -562,6 +630,9 @@ export async function createReservation(
     }
 
     const reservationAtDb = toDbDateTime(input.reservation_at);
+    const reservationStartTs = toUnixMs(input.reservation_at);
+    const effectiveDurationMinutes = await resolveEffectiveDurationMinutes(companyId, input.duration_minutes);
+    const reservationEndTs = reservationStartTs + effectiveDurationMinutes * 60000;
 
     // Generate a reservation code for the new reservation
     const reservationCode = await generateReservationCodeWithConnection(
@@ -573,12 +644,38 @@ export async function createReservation(
     const hasReservationCodeCol = await columnExists(connection, 'reservations', 'reservation_code');
     const hasStatusIdCol = await columnExists(connection, 'reservations', 'status_id');
     const hasCreatedByCol = await columnExists(connection, 'reservations', 'created_by');
+    const hasReservationStartTsCol = await columnExists(connection, 'reservations', 'reservation_start_ts');
+    const hasReservationEndTsCol = await columnExists(connection, 'reservations', 'reservation_end_ts');
+    const hasCanonicalTsCols = hasReservationStartTsCol && hasReservationEndTsCol;
     
     let insertSql: string;
     let insertValues: (string | number | null)[];
     
-    if (hasReservationCodeCol && hasStatusIdCol && hasCreatedByCol) {
+    if (hasReservationCodeCol && hasStatusIdCol && hasCreatedByCol && hasCanonicalTsCols) {
       // All new columns exist
+      insertSql = `INSERT INTO reservations (
+         company_id, outlet_id, table_id, customer_name, customer_phone,
+         guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
+         duration_minutes, status, notes,
+         reservation_code, status_id, created_by
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?, ?, ?)`;
+      insertValues = [
+        companyId,
+        input.outlet_id,
+        input.table_id ?? null,
+        input.customer_name,
+        input.customer_phone ?? null,
+        input.guest_count,
+        reservationAtDb,
+        reservationStartTs,
+        reservationEndTs,
+        input.duration_minutes ?? null,
+        input.notes ?? null,
+        reservationCode,
+        ReservationStatusV2.PENDING,
+        'system'
+      ];
+    } else if (hasReservationCodeCol && hasStatusIdCol && hasCreatedByCol) {
       insertSql = `INSERT INTO reservations (
          company_id, outlet_id, table_id, customer_name, customer_phone,
          guest_count, reservation_at, duration_minutes, status, notes,
@@ -597,6 +694,25 @@ export async function createReservation(
         reservationCode,
         ReservationStatusV2.PENDING,
         'system'
+      ];
+    } else if (hasCanonicalTsCols) {
+      insertSql = `INSERT INTO reservations (
+         company_id, outlet_id, table_id, customer_name, customer_phone,
+         guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
+         duration_minutes, status, notes
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`;
+      insertValues = [
+        companyId,
+        input.outlet_id,
+        input.table_id ?? null,
+        input.customer_name,
+        input.customer_phone ?? null,
+        input.guest_count,
+        reservationAtDb,
+        reservationStartTs,
+        reservationEndTs,
+        input.duration_minutes ?? null,
+        input.notes ?? null
       ];
     } else {
       // Use legacy columns only
@@ -642,6 +758,12 @@ export async function updateReservation(
   try {
     await connection.beginTransaction();
     const current = await readReservationForUpdate(connection, companyId, reservationId);
+    const nextReservationAt = patch.reservation_at === undefined ? current.reservation_at : patch.reservation_at;
+    const nextDurationMinutes = patch.duration_minutes === undefined ? current.duration_minutes : patch.duration_minutes;
+    const nextReservationAtDb = toDbDateTime(nextReservationAt);
+    const reservationStartTs = toUnixMs(nextReservationAt);
+    const effectiveDurationMinutes = await resolveEffectiveDurationMinutes(companyId, nextDurationMinutes);
+    const reservationEndTs = reservationStartTs + effectiveDurationMinutes * 60000;
 
     const nextStatus = patch.status ?? current.status;
     if (!canTransition(current.status as ReservationStatus, nextStatus as ReservationStatus)) {
@@ -685,38 +807,50 @@ export async function updateReservation(
       }
     }
 
+    const hasReservationStartTsCol = await columnExists(connection, 'reservations', 'reservation_start_ts');
+    const hasReservationEndTsCol = await columnExists(connection, 'reservations', 'reservation_end_ts');
+
+    const updateAssignments = [
+      'table_id = ?',
+      'customer_name = ?',
+      'customer_phone = ?',
+      'guest_count = ?',
+      'reservation_at = ?',
+      'duration_minutes = ?',
+      'status = ?',
+      'notes = ?',
+      "arrived_at = CASE WHEN ? = 'ARRIVED' THEN CURRENT_TIMESTAMP ELSE arrived_at END",
+      "seated_at = CASE WHEN ? = 'SEATED' THEN CURRENT_TIMESTAMP ELSE seated_at END",
+      "cancelled_at = CASE WHEN ? IN ('CANCELLED', 'NO_SHOW') THEN CURRENT_TIMESTAMP ELSE cancelled_at END",
+      'updated_at = CURRENT_TIMESTAMP'
+    ];
+
+    const updateValues: Array<string | number | null> = [
+      nextTableId,
+      patch.customer_name ?? current.customer_name,
+      patch.customer_phone === undefined ? current.customer_phone : patch.customer_phone,
+      patch.guest_count ?? current.guest_count,
+      nextReservationAtDb,
+      nextDurationMinutes,
+      nextStatus,
+      patch.notes === undefined ? current.notes : patch.notes,
+      nextStatus,
+      nextStatus,
+      nextStatus
+    ];
+
+    if (hasReservationStartTsCol && hasReservationEndTsCol) {
+      updateAssignments.splice(6, 0, 'reservation_start_ts = ?', 'reservation_end_ts = ?');
+      updateValues.splice(6, 0, reservationStartTs, reservationEndTs);
+    }
+
+    updateValues.push(companyId, reservationId);
+
     await connection.execute(
       `UPDATE reservations
-       SET table_id = ?,
-           customer_name = ?,
-           customer_phone = ?,
-           guest_count = ?,
-           reservation_at = ?,
-           duration_minutes = ?,
-           status = ?,
-           notes = ?,
-           arrived_at = CASE WHEN ? = 'ARRIVED' THEN CURRENT_TIMESTAMP ELSE arrived_at END,
-           seated_at = CASE WHEN ? = 'SEATED' THEN CURRENT_TIMESTAMP ELSE seated_at END,
-           cancelled_at = CASE WHEN ? IN ('CANCELLED', 'NO_SHOW') THEN CURRENT_TIMESTAMP ELSE cancelled_at END,
-           updated_at = CURRENT_TIMESTAMP
+       SET ${updateAssignments.join(',\n           ')}
        WHERE company_id = ? AND id = ?`,
-      [
-        nextTableId,
-        patch.customer_name ?? current.customer_name,
-        patch.customer_phone === undefined ? current.customer_phone : patch.customer_phone,
-        patch.guest_count ?? current.guest_count,
-        patch.reservation_at === undefined
-          ? toDbDateTime(current.reservation_at)
-          : toDbDateTime(patch.reservation_at),
-        patch.duration_minutes === undefined ? current.duration_minutes : patch.duration_minutes,
-        nextStatus,
-        patch.notes === undefined ? current.notes : patch.notes,
-        nextStatus,
-        nextStatus,
-        nextStatus,
-        companyId,
-        reservationId
-       ]
+      updateValues
     );
 
     const impactedTableIds = new Set<number>();
@@ -820,40 +954,69 @@ async function checkReservationOverlap(
     return false;
   }
 
-  const newStart = new Date(reservationTime);
-  const newEnd = new Date(newStart.getTime() + durationMinutes * 60000);
+  const newStartTs = toUnixMs(reservationTime);
+  const newEndTs = newStartTs + durationMinutes * 60000;
 
-  const newStartStr = toDbDateTime(newStart);
-  const newEndStr = toDbDateTime(newEnd);
-
-  const sql = `
+  const canonicalSql = `
     SELECT COUNT(*) as count
     FROM reservations
     WHERE company_id = ?
       AND outlet_id = ?
       AND table_id = ?
       AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
-      AND (
-        reservation_at < ?
-        AND DATE_ADD(reservation_at, INTERVAL duration_minutes MINUTE) > ?
-      )
+      AND reservation_start_ts IS NOT NULL
+      AND reservation_end_ts IS NOT NULL
+      AND reservation_start_ts < ?
+      AND reservation_end_ts > ?
       ${excludeReservationId ? 'AND id != ?' : ''}
   `;
 
-  const params: (bigint | string | number)[] = [
-    companyId,
-    outletId,
-    tableId,
-    newEndStr,
-    newStartStr
-  ];
-
+  const canonicalParams: (bigint | number)[] = [companyId, outletId, tableId, newEndTs, newStartTs];
   if (excludeReservationId) {
-    params.push(excludeReservationId);
+    canonicalParams.push(excludeReservationId);
   }
 
-  const [rows] = await connection.execute<RowDataPacket[]>(sql, params);
-  return rows[0].count > 0;
+  const [canonicalRows] = await connection.execute<Array<RowDataPacket & { count: number }>>(canonicalSql, canonicalParams);
+  if (Number(canonicalRows[0]?.count ?? 0) > 0) {
+    return true;
+  }
+
+  const legacySql = `
+    SELECT reservation_at, duration_minutes
+    FROM reservations
+    WHERE company_id = ?
+      AND outlet_id = ?
+      AND table_id = ?
+      AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
+      AND (reservation_start_ts IS NULL OR reservation_end_ts IS NULL)
+      ${excludeReservationId ? 'AND id != ?' : ''}
+  `;
+
+  const legacyParams: (bigint | number)[] = [companyId, outletId, tableId];
+  if (excludeReservationId) {
+    legacyParams.push(excludeReservationId);
+  }
+
+  const [legacyRows] = await connection.execute<LegacyOverlapRow[]>(legacySql, legacyParams);
+  if (legacyRows.length === 0) {
+    return false;
+  }
+
+  const defaultDurationMinutes = await resolveEffectiveDurationMinutes(Number(companyId), null);
+  for (const row of legacyRows) {
+    if (!row.reservation_at) {
+      continue;
+    }
+
+    const existingStartTs = toUnixMs(row.reservation_at);
+    const existingDuration = row.duration_minutes ?? defaultDurationMinutes;
+    const existingEndTs = existingStartTs + existingDuration * 60000;
+    if (existingStartTs < newEndTs && existingEndTs > newStartTs) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -896,6 +1059,12 @@ export async function createReservationV2(
 
     // Prepare values with fallbacks for columns that may not exist yet
     const reservationAt = toDbDateTime(input.reservationTime);
+    const reservationStartTs = toUnixMs(input.reservationTime);
+    const effectiveDurationMinutes = await resolveEffectiveDurationMinutes(
+      Number(input.companyId),
+      input.durationMinutes
+    );
+    const reservationEndTs = reservationStartTs + effectiveDurationMinutes * 60000;
 
     // Insert reservation
     // Check which columns exist to build the appropriate INSERT
@@ -903,12 +1072,41 @@ export async function createReservationV2(
     const hasCustomerEmail = await columnExists(connection, 'reservations', 'customer_email');
     const hasCreatedBy = await columnExists(connection, 'reservations', 'created_by');
     const hasStatusId = await columnExists(connection, 'reservations', 'status_id');
+    const hasReservationStartTs = await columnExists(connection, 'reservations', 'reservation_start_ts');
+    const hasReservationEndTs = await columnExists(connection, 'reservations', 'reservation_end_ts');
+    const hasCanonicalTsCols = hasReservationStartTs && hasReservationEndTs;
     
     let insertSql: string;
     let insertValues: (string | number | bigint | null)[];
     
-    if (hasReservationCode && hasCustomerEmail && hasCreatedBy && hasStatusId) {
+    if (hasReservationCode && hasCustomerEmail && hasCreatedBy && hasStatusId && hasCanonicalTsCols) {
       // All new columns exist
+      insertSql = `INSERT INTO reservations (
+        company_id, outlet_id, table_id, 
+        customer_name, customer_phone,
+        guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
+        duration_minutes, 
+        status, notes, reservation_code, customer_email,
+        created_by, status_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?, ?, ?, ?)`;
+      insertValues = [
+        input.companyId,
+        input.outletId,
+        tableId,
+        input.customerName,
+        input.customerPhone ?? null,
+        input.partySize,
+        reservationAt,
+        reservationStartTs,
+        reservationEndTs,
+        durationMinutes,
+        input.notes ?? null,
+        reservationCode,
+        input.customerEmail ?? null,
+        input.createdBy,
+        ReservationStatusV2.PENDING
+      ];
+    } else if (hasReservationCode && hasCustomerEmail && hasCreatedBy && hasStatusId) {
       insertSql = `INSERT INTO reservations (
         company_id, outlet_id, table_id, 
         customer_name, customer_phone,
@@ -930,6 +1128,26 @@ export async function createReservationV2(
         input.customerEmail ?? null,
         input.createdBy,
         ReservationStatusV2.PENDING
+      ];
+    } else if (hasCanonicalTsCols) {
+      insertSql = `INSERT INTO reservations (
+        company_id, outlet_id, table_id, 
+        customer_name, customer_phone,
+        guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
+        duration_minutes, status, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`;
+      insertValues = [
+        input.companyId,
+        input.outletId,
+        tableId,
+        input.customerName,
+        input.customerPhone ?? null,
+        input.partySize,
+        reservationAt,
+        reservationStartTs,
+        reservationEndTs,
+        durationMinutes,
+        input.notes ?? null
       ];
     } else {
       // Use legacy columns only
@@ -1004,7 +1222,7 @@ async function getReservationV2WithConnection(
       status_id, status,
       guest_count,
       customer_name, customer_phone,
-      reservation_at,
+      reservation_at, reservation_start_ts, reservation_end_ts,
       duration_minutes, notes,
       created_at, updated_at
     FROM reservations
@@ -1062,13 +1280,13 @@ export async function listReservationsV2(
   }
 
   if (params.fromDate) {
-    whereConditions.push('(r.reservation_time >= ? OR r.reservation_at >= ?)');
-    queryParams.push(params.fromDate, params.fromDate);
+    whereConditions.push('((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts >= ?) OR (r.reservation_start_ts IS NULL AND r.reservation_at >= ?))');
+    queryParams.push(toUnixMs(params.fromDate), toDbDateTime(params.fromDate));
   }
 
   if (params.toDate) {
-    whereConditions.push('(r.reservation_time <= ? OR r.reservation_at <= ?)');
-    queryParams.push(params.toDate, params.toDate);
+    whereConditions.push('((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts <= ?) OR (r.reservation_start_ts IS NULL AND r.reservation_at <= ?))');
+    queryParams.push(toUnixMs(params.toDate), toDbDateTime(params.toDate));
   }
 
   // Get total count
@@ -1085,7 +1303,7 @@ export async function listReservationsV2(
       r.status_id, r.status,
       r.guest_count,
       r.customer_name, r.customer_phone,
-      r.reservation_at,
+      r.reservation_at, r.reservation_start_ts, r.reservation_end_ts,
       r.duration_minutes, r.notes,
       r.created_at, r.updated_at,
       ot.code as table_code, ot.name as table_name
@@ -1094,7 +1312,7 @@ export async function listReservationsV2(
       AND r.company_id = ot.company_id 
       AND r.outlet_id = ot.outlet_id
     WHERE ${whereConditions.join(' AND ')}
-    ORDER BY r.reservation_at ASC, r.id ASC
+    ORDER BY r.reservation_start_ts IS NULL ASC, r.reservation_start_ts ASC, r.reservation_at ASC, r.id ASC
     LIMIT ? OFFSET ?`,
     dataParams
   );

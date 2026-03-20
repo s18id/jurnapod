@@ -78,6 +78,7 @@ test(
     const createdTableIds: number[] = [];
     const createdEventIds: number[] = [];
     const createdSessionIds: number[] = [];
+    const createdReservationIds: number[] = [];
 
     try {
       // Get company and user fixtures
@@ -674,9 +675,9 @@ test(
 
         // Verify table is now reserved
         const [occupancyRows] = await getDb().execute<RowDataPacket[]>(
-          `SELECT status_id, reserved_until 
-           FROM table_occupancy 
-           WHERE table_id = ? AND company_id = ? AND outlet_id = ?`,
+          `SELECT status_id, reserved_until, reservation_id
+            FROM table_occupancy 
+            WHERE table_id = ? AND company_id = ? AND outlet_id = ?`,
           [tableId, companyId, outletId]
         );
         assert.strictEqual(
@@ -685,6 +686,28 @@ test(
           "Table should be RESERVED"
         );
         assert.ok(occupancyRows[0].reserved_until, "Should have reserved_until");
+
+        const reservationId = Number(occupancyRows[0].reservation_id);
+        assert.ok(Number.isFinite(reservationId), "reserved table should reference a reservation_id");
+        createdReservationIds.push(reservationId);
+
+        const [reservationRows] = await getDb().execute<RowDataPacket[]>(
+          `SELECT reservation_start_ts, reservation_end_ts
+           FROM reservations
+           WHERE id = ? AND company_id = ? AND outlet_id = ?
+           LIMIT 1`,
+          [reservationId, companyId, outletId]
+        );
+        assert.strictEqual(reservationRows.length, 1, "reservation placeholder row should exist");
+
+        const reservationStartTs = Number(reservationRows[0].reservation_start_ts);
+        const reservationEndTs = Number(reservationRows[0].reservation_end_ts);
+        assert.ok(Number.isFinite(reservationStartTs), "reservation_start_ts should be populated");
+        assert.ok(Number.isFinite(reservationEndTs), "reservation_end_ts should be populated");
+        assert.ok(
+          reservationEndTs > reservationStartTs,
+          "reservation_end_ts should be greater than reservation_start_ts"
+        );
       });
 
       await test("should process GUEST_COUNT_CHANGED event", async () => {
@@ -1026,6 +1049,19 @@ test(
             `DELETE FROM table_service_sessions 
              WHERE id = ? AND company_id = ? AND outlet_id = ?`,
             [sessionId, companyId, outletId]
+          );
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+
+      // Cleanup: Remove created reservations
+      for (const reservationId of createdReservationIds) {
+        try {
+          await getDb().execute(
+            `DELETE FROM reservations
+             WHERE id = ? AND company_id = ? AND outlet_id = ?`,
+            [reservationId, companyId, outletId]
           );
         } catch {
           // Ignore cleanup errors

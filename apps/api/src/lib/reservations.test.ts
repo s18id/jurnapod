@@ -316,6 +316,104 @@ test(
   }
 );
 
+test(
+  "reservations allow adjacent windows when first end equals second start",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId } = await resolveFixtureContext();
+    const createdTableIds: number[] = [];
+    const createdReservationIds: bigint[] = [];
+
+    try {
+      const [tableInsert] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        [companyId, outletId, `T-BDRY-${runId}`.slice(0, 32), `Boundary Table ${runId}`, "Main", 4]
+      );
+      const tableId = Number(tableInsert.insertId);
+      createdTableIds.push(tableId);
+
+      const firstStart = new Date(Date.now() + 6 * 60 * 60 * 1000);
+      const firstDurationMinutes = 60;
+      const secondStart = new Date(firstStart.getTime() + firstDurationMinutes * 60000);
+
+      const firstReservation = await createReservationV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        tableId: BigInt(tableId),
+        partySize: 2,
+        customerName: `Boundary First ${runId}`,
+        reservationTime: firstStart,
+        durationMinutes: firstDurationMinutes,
+        createdBy: "test-user"
+      });
+      createdReservationIds.push(firstReservation.id);
+
+      const secondReservation = await createReservationV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        tableId: BigInt(tableId),
+        partySize: 2,
+        customerName: `Boundary Second ${runId}`,
+        reservationTime: secondStart,
+        durationMinutes: 45,
+        createdBy: "test-user"
+      });
+      createdReservationIds.push(secondReservation.id);
+
+      const [rows] = await pool.execute<RowDataPacket[]>(
+        `SELECT id, reservation_start_ts, reservation_end_ts
+         FROM reservations
+         WHERE company_id = ? AND outlet_id = ? AND id IN (?, ?)
+         ORDER BY id ASC`,
+        [companyId, outletId, firstReservation.id, secondReservation.id]
+      );
+
+      assert.strictEqual(rows.length, 2, "both adjacent reservations should be persisted");
+
+      const firstRow = rows.find((row) => BigInt(row.id) === firstReservation.id);
+      const secondRow = rows.find((row) => BigInt(row.id) === secondReservation.id);
+      assert.ok(firstRow, "first reservation row should exist");
+      assert.ok(secondRow, "second reservation row should exist");
+
+      const firstStartTs = Number(firstRow!.reservation_start_ts);
+      const firstEndTs = Number(firstRow!.reservation_end_ts);
+      const secondStartTs = Number(secondRow!.reservation_start_ts);
+      const secondEndTs = Number(secondRow!.reservation_end_ts);
+
+      assert.ok(Number.isFinite(firstStartTs), "first reservation_start_ts should be populated");
+      assert.ok(Number.isFinite(firstEndTs), "first reservation_end_ts should be populated");
+      assert.ok(Number.isFinite(secondStartTs), "second reservation_start_ts should be populated");
+      assert.ok(Number.isFinite(secondEndTs), "second reservation_end_ts should be populated");
+      assert.ok(firstEndTs > firstStartTs, "first reservation end should be greater than start");
+      assert.ok(secondEndTs > secondStartTs, "second reservation end should be greater than start");
+      assert.strictEqual(
+        firstEndTs,
+        secondStartTs,
+        "adjacent reservations should be allowed when first end equals second start"
+      );
+    } finally {
+      if (createdReservationIds.length > 0) {
+        const placeholders = createdReservationIds.map(() => "?").join(", ");
+        await pool.execute(
+          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
+          [companyId, outletId, ...createdReservationIds]
+        );
+      }
+
+      if (createdTableIds.length > 0) {
+        const placeholders = createdTableIds.map(() => "?").join(", ");
+        await pool.execute(
+          `DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
+          [companyId, outletId, ...createdTableIds]
+        );
+      }
+    }
+  }
+);
+
 // ============================================================================
 // STORY 12.4 - V2 CONTRACT TESTS
 // ============================================================================

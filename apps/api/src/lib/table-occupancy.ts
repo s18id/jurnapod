@@ -149,13 +149,21 @@ export async function getTableBoard(
       to2.guest_count,
       COALESCE(to2.version, 1) as version,
       (
-        SELECT MIN(r.reservation_at)
+        SELECT MIN(
+          CASE
+            WHEN r.reservation_start_ts IS NOT NULL THEN r.reservation_start_ts
+            ELSE UNIX_TIMESTAMP(r.reservation_at) * 1000
+          END
+        )
         FROM reservations r
         WHERE r.company_id = ot.company_id
           AND r.outlet_id = ot.outlet_id
           AND r.table_id = ot.id
           AND r.status_id IN (1, 2)
-          AND r.reservation_at >= NOW()
+          AND (
+            (r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts >= (UNIX_TIMESTAMP(NOW()) * 1000))
+            OR (r.reservation_start_ts IS NULL AND r.reservation_at >= NOW())
+          )
       ) as next_reservation_start_at,
       COALESCE(to2.updated_at, ot.updated_at) as updated_at
     FROM outlet_tables ot
@@ -178,7 +186,12 @@ export async function getTableBoard(
     currentReservationId: row.current_reservation_id ? BigInt(row.current_reservation_id) : null,
     guestCount: row.guest_count,
     version: row.version,
-    nextReservationStartAt: row.next_reservation_start_at ? new Date(row.next_reservation_start_at) : null,
+    nextReservationStartAt:
+      row.next_reservation_start_at == null
+        ? null
+        : Number.isFinite(Number(row.next_reservation_start_at))
+          ? new Date(Number(row.next_reservation_start_at))
+          : new Date(row.next_reservation_start_at),
     updatedAt: new Date(row.updated_at)
   }));
 }

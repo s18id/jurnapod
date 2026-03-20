@@ -46,6 +46,7 @@
     "db:seed:test-accounts": "npm run db:seed:test-accounts -w @jurnapod/db",
     "db:smoke": "npm run db:smoke -w @jurnapod/db",
     "db:backfill:pos-journals": "npm run db:backfill:pos-journals -w @jurnapod/db --",
+    "db:backfill:reservation-ts": "npm run db:backfill:reservation-ts -w @jurnapod/db --",
     "db:reconcile:pos-journals": "npm run db:reconcile:pos-journals -w @jurnapod/db --",
     "db:audit:system-roles": "npm run db:audit:system-roles -w @jurnapod/db",
     "db:consolidate:system-roles": "npm run db:consolidate:system-roles -w @jurnapod/db",

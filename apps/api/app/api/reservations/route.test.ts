@@ -159,6 +159,26 @@ test(
       assert.strictEqual(secondCreate.status, 201, JSON.stringify(secondPayload));
       createdReservationIds.push(Number(secondPayload.data.reservation_id));
 
+      const [createdRows] = await db.execute<RowDataPacket[]>(
+        `SELECT id, reservation_start_ts, reservation_end_ts
+         FROM reservations
+         WHERE company_id = ? AND outlet_id = ? AND id IN (?, ?)
+         ORDER BY id ASC`,
+        [companyId, outletId, createdReservationIds[0], createdReservationIds[1]]
+      );
+
+      assert.strictEqual(createdRows.length, 2, "both created reservations should be persisted");
+      for (const row of createdRows) {
+        const reservationStartTs = row.reservation_start_ts == null ? null : Number(row.reservation_start_ts);
+        const reservationEndTs = row.reservation_end_ts == null ? null : Number(row.reservation_end_ts);
+        assert.ok(Number.isFinite(reservationStartTs), "reservation_start_ts should be populated");
+        assert.ok(Number.isFinite(reservationEndTs), "reservation_end_ts should be populated");
+        assert.ok(
+          Number(reservationEndTs) > Number(reservationStartTs),
+          "reservation_end_ts should be greater than reservation_start_ts"
+        );
+      }
+
       const listResponse = await fetch(
         `${baseUrl}/api/reservations?outlet_id=${outletId}&date_from=${firstDateKey}&date_to=${firstDateKey}&limit=200&offset=0`,
         { method: "GET", headers }

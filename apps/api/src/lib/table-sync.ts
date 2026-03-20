@@ -12,8 +12,11 @@ import {
   TableOccupancyStatus,
   TableEventType,
   ServiceSessionStatus,
+  SETTINGS_REGISTRY,
+  parseSettingValue,
   type TableOccupancyStatusType,
 } from '@jurnapod/shared';
+import { getSetting } from '@/lib/settings';
 
 // ============================================================================
 // TYPES
@@ -96,6 +99,10 @@ export interface PullTableStateResult {
 
 const MAX_SYNC_RETRIES = 5;
 const BASE_RETRY_DELAY_MS = 100;
+const RESERVATION_DEFAULT_DURATION_KEY = "feature.reservation.default_duration_minutes" as const;
+const RESERVATION_DEFAULT_DURATION_FALLBACK = Number(
+  SETTINGS_REGISTRY[RESERVATION_DEFAULT_DURATION_KEY].defaultValue
+);
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -104,6 +111,43 @@ function sleep(ms: number): Promise<void> {
 function isRetryableDbError(error: unknown): boolean {
   const code = (error as { code?: string })?.code;
   return code === "ER_LOCK_DEADLOCK" || code === "ER_LOCK_WAIT_TIMEOUT";
+}
+
+async function columnExists(
+  connection: PoolConnection,
+  tableName: string,
+  columnName: string
+): Promise<boolean> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT 1 FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND COLUMN_NAME = ?
+     LIMIT 1`,
+    [tableName, columnName]
+  );
+  return rows.length > 0;
+}
+
+async function resolveReservationDefaultDurationMinutes(companyId: number): Promise<number> {
+  const setting = await getSetting({
+    companyId,
+    key: RESERVATION_DEFAULT_DURATION_KEY,
+    outletId: null
+  });
+
+  if (setting?.value !== null && setting?.value !== undefined) {
+    try {
+      const parsed = parseSettingValue(RESERVATION_DEFAULT_DURATION_KEY, setting.value);
+      if (typeof parsed === 'number' && Number.isFinite(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Fallback to shared registry default.
+    }
+  }
+
+  return RESERVATION_DEFAULT_DURATION_FALLBACK;
 }
 
 // ============================================================================
@@ -564,21 +608,44 @@ async function applyTableEventWithTransaction(params: {
           // Create a placeholder reservation for hold operations without existing reservation
           const guestName = (event.payload.customer_name ?? event.payload.guest_name) as string | null ?? 'Walk-in';
           const guestCount = (event.payload.guest_count ?? event.payload.party_size) as number ?? 1;
+          const reservationStartTs = reservedUntil.getTime();
+          const effectiveDurationMinutes = await resolveReservationDefaultDurationMinutes(Number(companyId));
+          const reservationEndTs = reservationStartTs + effectiveDurationMinutes * 60000;
+          const hasReservationStartTs = await columnExists(connection, 'reservations', 'reservation_start_ts');
+          const hasReservationEndTs = await columnExists(connection, 'reservations', 'reservation_end_ts');
           
-          const [resResult] = await connection.execute<ResultSetHeader>(
-            `INSERT INTO reservations
-             (company_id, outlet_id, table_id, customer_name, guest_count, 
+          let resInsertSql = `INSERT INTO reservations
+             (company_id, outlet_id, table_id, customer_name, guest_count,
               reservation_at, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'BOOKED', NOW(), NOW())`,
-            [
+             VALUES (?, ?, ?, ?, ?, ?, 'BOOKED', NOW(), NOW())`;
+          let resInsertParams: Array<string | number | bigint | Date | null> = [
+            companyId,
+            outletId,
+            tableId,
+            guestName,
+            guestCount,
+            reservedUntil
+          ];
+
+          if (hasReservationStartTs && hasReservationEndTs) {
+            resInsertSql = `INSERT INTO reservations
+               (company_id, outlet_id, table_id, customer_name, guest_count,
+                reservation_at, reservation_start_ts, reservation_end_ts,
+                status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', NOW(), NOW())`;
+            resInsertParams = [
               companyId,
               outletId,
               tableId,
               guestName,
               guestCount,
-              reservedUntil
-            ]
-          );
+              reservedUntil,
+              reservationStartTs,
+              reservationEndTs
+            ];
+          }
+
+          const [resResult] = await connection.execute<ResultSetHeader>(resInsertSql, resInsertParams);
           reservationId = BigInt(resResult.insertId);
         }
 

@@ -20,6 +20,16 @@ Important:
 - Avoid MySQL/MariaDB syntax drift in migrations (for example, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` is not portable across engines/versions).
 - For additive rerunnable DDL, prefer `information_schema` existence checks plus guarded dynamic `ALTER TABLE` statements.
 
+## Reservation time schema (canonical)
+- Canonical reservation time uses unix milliseconds in `BIGINT` columns:
+  - `reservation_start_ts` (source of truth for reporting and date-range filtering)
+  - `reservation_end_ts` (source of truth for calendar windows and overlap checks)
+- Keep API compatibility field `reservation_at`, but derive it from `reservation_start_ts` (do not treat legacy DATETIME parsing as canonical).
+- Overlap rule must remain `a_start < b_end && b_start < a_end`; `end == next start` is non-overlap.
+- Date-only filtering must resolve timezone in order `outlet -> company`; no UTC fallback for missing timezone.
+- Query/index rule: never wrap indexed timestamp columns in SQL functions; apply functions only on constants (or pass numeric boundaries from app layer).
+- For legacy rows with `duration_minutes IS NULL`, backfill `reservation_end_ts` using effective company default duration at migration time and freeze historical values.
+
 ## Import path conventions
 - Use `@/` alias for imports from `apps/api/src/`
   - `@/lib/db` → `apps/api/src/lib/db`
