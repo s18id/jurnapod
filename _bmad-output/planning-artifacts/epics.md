@@ -1948,3 +1948,144 @@ So that I can manage bookings and identify busy periods.
 **When** calendar is viewed
 **Then** responsive layout adapts to screen size
 **And** touch gestures support swiping between days
+
+---
+
+## Epic 13: Large Party Reservations (Multi-Table Support)
+
+Enable backoffice operators to create and manage reservations for large parties that span multiple tables with automatic table suggestions, unified group management, and conflict detection. Also includes performance improvements to the reservations list page.
+
+**Goal:** Support parties larger than single-table capacity with intelligent table combinations, group-based editing and cancellation, and a performant reservations list with pagination and filtering.
+
+**Success Criteria:**
+- Staff can create reservations for parties requiring 2+ tables with automatic table suggestions
+- Reservation groups display as unified entities with purple "Group" badge
+- Group editing updates all linked reservations atomically
+- Group cancellation cancels all linked reservations with one action
+- Reservations list supports pagination with configurable page sizes
+- Date filtering defaults to current month with local timezone handling
+
+### Story 13.1: Large Party Reservation Groups (Multi-Table Support)
+
+As a backoffice operator,
+I want to create reservations for large parties that span multiple tables,
+So that I can accommodate groups larger than single-table capacity with automatic table suggestions and unified group management.
+
+**Acceptance Criteria:**
+
+**Given** a party of guests larger than single-table capacity
+**When** creating a new reservation
+**Then** I can enable "Large party (multiple tables)" mode
+**And** the system suggests optimal table combinations based on guest count and availability
+
+**Given** large party mode is enabled
+**When** I select a table combination or manually choose tables
+**Then** the system validates total capacity meets guest count
+**And** conflict detection ensures no overlapping reservations
+
+**Given** a reservation group is created
+**When** viewing the reservation calendar
+**Then** grouped reservations show a purple "Group" badge
+**And** the detail view shows all linked tables
+
+**Given** a reservation group exists
+**When** I need to cancel the entire group
+**Then** I can cancel all linked reservations with one action
+
+### Story 13.2: Reservation Group Editing
+
+As a backoffice operator,
+I want to edit existing reservation groups,
+So that I can modify customer details, guest count, time, or table assignments while maintaining group integrity and conflict detection.
+
+**Acceptance Criteria:**
+
+**Given** an existing reservation group
+**When** editing the group
+**Then** I can modify customer details (name, phone, email)
+**And** I can adjust guest count with automatic table suggestion updates
+**And** I can change time/duration with conflict re-checking
+
+**Given** an existing reservation group
+**When** adding or removing tables
+**Then** the system validates total capacity meets guest count
+**And** conflict detection runs on all affected time slots
+**And** all changes are atomic (all-or-nothing)
+
+**Given** an existing reservation group
+**When** editing is saved
+**Then** all linked reservations update together
+**And** audit trail captures the group edit operation
+
+### Story 13.2.1: Reservation Group Editing - Critical Fixes
+
+As a developer,
+I want critical bugs in the reservation group editing flow fixed,
+So that the feature works correctly in production without data corruption or tenant isolation issues.
+
+**Acceptance Criteria:**
+
+**Given** customer name pre-population
+**When** opening edit modal
+**Then** customer_name field is populated correctly
+**And** not table_name or other incorrect fields
+
+**Given** multi-tenant operation
+**When** editing a reservation group
+**Then** outlet_id tenant isolation is verified
+**And** users cannot access groups from other outlets
+
+**Given** empty reservation group edge case
+**When** processing group with no linked reservations
+**Then** system handles gracefully without silent failures
+**And** appropriate error message is shown
+
+### Story 13.2.2: Reservation Group Editing - Test Coverage
+
+As a QA engineer,
+I want comprehensive test coverage for reservation group editing,
+So that the feature is validated across all paths including edge cases, error conditions, and tenant isolation.
+
+**Acceptance Criteria:**
+
+**Given** unit tests for updateReservationGroup()
+**When** running test suite
+**Then** happy path is fully covered
+**And** error paths are covered including insufficient capacity, conflicts, and not found
+**And** tenant isolation verification is tested
+**And** transaction rollback is tested
+
+**Given** frontend tests for group edit modal
+**When** running test suite
+**Then** form pre-population is tested
+**And** form validation is tested
+**And** error display is tested
+
+### Story 13.3: Reservations List Page Improvements
+
+As a backoffice operator,
+I want a performant reservations list with pagination and date filtering,
+So that I can efficiently manage reservations across the entire month without slow page loads or confusing date defaults.
+
+**Acceptance Criteria:**
+
+**Given** the reservations list page
+**When** loaded
+**Then** pagination controls are visible with configurable page sizes (10/25/50/100/200)
+**And** date filter defaults to current month
+**And** first outlet is auto-selected
+
+**Given** the reservations list page
+**When** switching between pages
+**Then** API returns only the current page of results
+**And** total count is displayed for navigation context
+
+**Given** the reservations list page
+**When** filtering by date
+**Then** local timezone is used for date boundary calculation
+**And** "Clear Dates" option resets to current month default
+
+**Given** the reservations list page
+**When** using tab switching (browser tab returns)
+**Then** focus handler is debounced (1 second)
+**And** no rapid-fire API calls occur
