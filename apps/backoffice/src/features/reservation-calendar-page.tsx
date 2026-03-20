@@ -30,12 +30,16 @@ import type {
 } from "@jurnapod/shared";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
-import type { SessionUser } from "../lib/session";
+import { apiRequest } from "../lib/api-client";
+import { getStoredCompanyTimezone, refreshSessionUser, type SessionUser } from "../lib/session";
 import { useOutletsFull } from "../hooks/use-outlets";
 import { useOutletTables } from "../hooks/use-outlet-tables";
 import { createReservation, updateReservation } from "../hooks/use-reservations";
 import {
+  DEFAULT_RESERVATION_DURATION_MINUTES,
   buildDailyUtilization,
+  buildReservationTimelineByDay,
+  getReservationDurationMinutes,
   getReservationEndAt,
   isReservationFinalStatus,
   type ReservationCalendarViewMode,
@@ -106,6 +110,8 @@ const emptyFormState: ReservationFormState = {
   durationMinutes: 120,
   notes: ""
 };
+
+const COMPANY_SETTING_RESERVATION_DURATION_KEY = "feature.reservation.default_duration_minutes";
 
 function toDatetimeLocalValue(date: Date): string {
   const year = date.getFullYear();
@@ -247,6 +253,7 @@ export function getSuggestedTableOptions(input: {
   guestCount: number;
   reservationAt: Date | null;
   durationMinutes: number;
+  defaultDurationMinutes?: number | null;
   editingReservationId?: number | null;
 }): Array<{ value: string; label: string }> {
   const requestedStartAt = input.reservationAt?.getTime();
@@ -275,7 +282,7 @@ export function getSuggestedTableOptions(input: {
         }
 
         const existingStart = new Date(reservation.reservation_at).getTime();
-        const existingEnd = getReservationEndAt(reservation).getTime();
+        const existingEnd = getReservationEndAt(reservation, input.defaultDurationMinutes).getTime();
         return requestedStartAt < existingEnd && existingStart < requestedEndAt;
       });
 
@@ -287,25 +294,103 @@ export function getSuggestedTableOptions(input: {
     }));
 }
 
-function createFormFromReservation(row: ReservationRow): ReservationFormState {
+function createFormFromReservation(row: ReservationRow, defaultDurationMinutes?: number | null): ReservationFormState {
   return {
     tableId: row.table_id,
     customerName: row.customer_name,
     customerPhone: row.customer_phone ?? "",
     guestCount: row.guest_count,
     reservationAt: new Date(row.reservation_at),
-    durationMinutes: row.duration_minutes ?? 120,
+    durationMinutes: getReservationDurationMinutes(row, defaultDurationMinutes),
     notes: row.notes ?? ""
   };
 }
 
-function formatTimeRange(row: ReservationRow): string {
+function formatTimeRange(
+  row: ReservationRow,
+  defaultDurationMinutes?: number | null,
+  timeZone?: string | null
+): string {
   const start = new Date(row.reservation_at);
-  const end = getReservationEndAt(row);
-  return `${start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${end.toLocaleTimeString([], {
+  const end = getReservationEndAt(row, defaultDurationMinutes);
+  const formatOptions: Intl.DateTimeFormatOptions = {
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
+    timeZone: timeZone ?? undefined
+  };
+  return `${start.toLocaleTimeString([], formatOptions)} - ${end.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: timeZone ?? undefined
   })}`;
+}
+
+function formatMinuteLabel(minute: number): string {
+  const hours = Math.floor(minute / 60)
+    .toString()
+    .padStart(2, "0");
+  const minutes = (minute % 60).toString().padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+export function buildTimelineBlockStyle(startMinute: number, endMinute: number): { left: string; width: string } {
+  const dayMinutes = 24 * 60;
+  const boundedStart = Math.min(dayMinutes, Math.max(0, startMinute));
+  const boundedEnd = Math.min(dayMinutes, Math.max(boundedStart + 1, endMinute));
+  const leftPercent = (boundedStart / dayMinutes) * 100;
+  const widthPercent = ((boundedEnd - boundedStart) / dayMinutes) * 100;
+
+  return {
+    left: `${leftPercent}%`,
+    width: `${Math.max(widthPercent, 2)}%`
+  };
+}
+
+export function buildTimelineLaneTableIds(
+  masterTableIds: number[],
+  dayTimeline: Record<number, unknown> | undefined
+): number[] {
+  const usedTableIds = new Set<number>();
+  for (const tableIdRaw of Object.keys(dayTimeline ?? {})) {
+    const tableId = Number(tableIdRaw);
+    const blocks = (dayTimeline?.[tableId] as unknown[] | undefined) ?? [];
+    if (blocks.length > 0) {
+      usedTableIds.add(tableId);
+    }
+  }
+
+  if (usedTableIds.size === 0) {
+    return [];
+  }
+
+  const masterSet = new Set(masterTableIds);
+  const sorted = [...usedTableIds].sort((a, b) => a - b);
+  const known = sorted.filter((id) => masterSet.has(id));
+  const unlisted = sorted.filter((id) => !masterSet.has(id));
+  return [...known, ...unlisted];
+}
+
+export function resolveCalendarTimezone(outletTimezone?: string | null, companyTimezone?: string | null): string | null {
+  if (outletTimezone && outletTimezone.trim()) {
+    return outletTimezone;
+  }
+  if (companyTimezone && companyTimezone.trim()) {
+    return companyTimezone;
+  }
+  return null;
+}
+
+export function resolveCalendarTimezoneInfo(
+  outletTimezone?: string | null,
+  companyTimezone?: string | null
+): { timezone: string | null; source: "outlet" | "company" | "missing" } {
+  if (outletTimezone && outletTimezone.trim()) {
+    return { timezone: outletTimezone, source: "outlet" };
+  }
+  if (companyTimezone && companyTimezone.trim()) {
+    return { timezone: companyTimezone, source: "company" };
+  }
+  return { timezone: null, source: "missing" };
 }
 
 export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
@@ -328,15 +413,89 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [updatingStatusId, setUpdatingStatusId] = useState<number | null>(null);
+  const [defaultDurationMinutes, setDefaultDurationMinutes] = useState<number>(DEFAULT_RESERVATION_DURATION_MINUTES);
+  const [sessionCompanyTimezone, setSessionCompanyTimezone] = useState<string | null>(
+    user.company_timezone ?? getStoredCompanyTimezone()
+  );
+  const [timezoneRefreshAttempted, setTimezoneRefreshAttempted] = useState(false);
 
   const touchStartX = useRef<number | null>(null);
 
   const outlets = useOutletsFull(user.company_id, accessToken);
+  const selectedOutlet = useMemo(
+    () => outlets.data.find((outlet) => Number(outlet.id) === selectedOutletId) ?? null,
+    [outlets.data, selectedOutletId]
+  );
+
+  useEffect(() => {
+    if (user.company_timezone && user.company_timezone.trim()) {
+      setSessionCompanyTimezone(user.company_timezone);
+      return;
+    }
+
+    const stored = getStoredCompanyTimezone();
+    if (stored) {
+      setSessionCompanyTimezone(stored);
+    }
+  }, [user.company_timezone]);
+
+  useEffect(() => {
+    if (timezoneRefreshAttempted || selectedOutlet?.timezone || sessionCompanyTimezone || !selectedOutletId) {
+      return;
+    }
+
+    setTimezoneRefreshAttempted(true);
+    refreshSessionUser(accessToken)
+      .then((nextUser) => {
+        if (nextUser.company_timezone && nextUser.company_timezone.trim()) {
+          setSessionCompanyTimezone(nextUser.company_timezone);
+        }
+      })
+      .catch(() => undefined);
+  }, [timezoneRefreshAttempted, selectedOutlet?.timezone, sessionCompanyTimezone, selectedOutletId, accessToken]);
+
+  const calendarTimezoneInfo = useMemo(
+    () => resolveCalendarTimezoneInfo(selectedOutlet?.timezone, sessionCompanyTimezone),
+    [selectedOutlet?.timezone, sessionCompanyTimezone]
+  );
+  const selectedOutletTimezone = calendarTimezoneInfo.timezone;
   const outletTables = useOutletTables(selectedOutletId, accessToken);
+
+  useEffect(() => {
+    async function loadCompanyReservationDefaults() {
+      try {
+        const response = await apiRequest<{
+          success: true;
+          data: { settings: Array<{ key: string; value: number | boolean | string; value_type: string }> };
+        }>(
+          `/settings/company-config?keys=${encodeURIComponent(COMPANY_SETTING_RESERVATION_DURATION_KEY)}`,
+          {},
+          accessToken
+        );
+        const row = response.data.settings.find((setting) => setting.key === COMPANY_SETTING_RESERVATION_DURATION_KEY);
+        const parsed = Number(row?.value ?? DEFAULT_RESERVATION_DURATION_MINUTES);
+        if (Number.isFinite(parsed)) {
+          setDefaultDurationMinutes(Math.min(480, Math.max(15, Math.round(parsed))));
+          return;
+        }
+      } catch {
+        // fall through to default below
+      }
+
+      setDefaultDurationMinutes(DEFAULT_RESERVATION_DURATION_MINUTES);
+    }
+
+    loadCompanyReservationDefaults().catch(() => {
+      setDefaultDurationMinutes(DEFAULT_RESERVATION_DURATION_MINUTES);
+    });
+  }, [accessToken]);
+
   const calendar = useReservationCalendar({
-    outletId: selectedOutletId,
+    outletId: selectedOutletTimezone ? selectedOutletId : null,
     anchorDate,
     viewMode,
+    timeZone: selectedOutletTimezone ?? undefined,
+    defaultDurationMinutes,
     status: statusFilter,
     accessToken
   });
@@ -378,6 +537,35 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     [calendar.days, filteredReservationsByDay, availableTables]
   );
 
+  const filteredReservations = useMemo(
+    () => Object.values(filteredReservationsByDay).flat(),
+    [filteredReservationsByDay]
+  );
+
+  const timelineByDay = useMemo(
+    () =>
+      buildReservationTimelineByDay(
+        calendar.days,
+        filteredReservations,
+        selectedOutletTimezone,
+        defaultDurationMinutes
+      ),
+    [calendar.days, filteredReservations, selectedOutletTimezone, defaultDurationMinutes]
+  );
+
+  const tableLabelById = useMemo(
+    () =>
+      Object.fromEntries(
+        outletTables.data.map((table) => [table.id, `${table.code} - ${table.name}`])
+      ) as Record<number, string>,
+    [outletTables.data]
+  );
+
+  const timelineTableIds = useMemo(
+    () => outletTables.data.map((table) => table.id).sort((a, b) => a - b),
+    [outletTables.data]
+  );
+
   const suggestedTableOptions = useMemo(
     () =>
       getSuggestedTableOptions({
@@ -386,6 +574,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
         guestCount: formState.guestCount,
         reservationAt: formState.reservationAt,
         durationMinutes: formState.durationMinutes,
+        defaultDurationMinutes,
         editingReservationId
       }),
     [
@@ -394,6 +583,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       formState.guestCount,
       formState.reservationAt,
       formState.durationMinutes,
+      defaultDurationMinutes,
       editingReservationId
     ]
   );
@@ -413,19 +603,20 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     setEditingReservationId(null);
     setFormState({
       ...emptyFormState,
+      durationMinutes: defaultDurationMinutes,
       reservationAt: new Date(anchorDate)
     });
     setFormError(null);
     setFormOpen(true);
-  }, [anchorDate]);
+  }, [anchorDate, defaultDurationMinutes]);
 
   const openEditModal = useCallback((row: ReservationRow) => {
     setFormMode("edit");
     setEditingReservationId(row.reservation_id);
-    setFormState(createFormFromReservation(row));
+    setFormState(createFormFromReservation(row, defaultDurationMinutes));
     setFormError(null);
     setFormOpen(true);
-  }, []);
+  }, [defaultDurationMinutes]);
 
   const closeFormModal = useCallback(() => {
     setFormOpen(false);
@@ -569,6 +760,23 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
             />
           </FilterBar>
 
+          <Text size="xs" c="dimmed">
+            Timezone: {selectedOutletTimezone ?? "Not configured"} (
+            {calendarTimezoneInfo.source === "outlet"
+              ? "from outlet"
+              : calendarTimezoneInfo.source === "company"
+                ? "from company"
+                : "missing"}
+            )
+          </Text>
+
+          {!selectedOutletTimezone ? (
+            <Alert color="red" title="Timezone required">
+              Company timezone is required for reservation calendar boundaries. Set outlet timezone or company timezone
+              first.
+            </Alert>
+          ) : null}
+
           <Group>
             <Button variant="default" onClick={() => changePeriod(-1)}>
               Prev
@@ -656,55 +864,185 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
                       </Text>
                       <Progress value={percent} color={percent >= 80 ? "red" : percent >= 50 ? "yellow" : "green"} size="sm" />
 
-                      {rows.length === 0 ? (
-                        <Text c="dimmed" size="sm">
-                          No reservations
-                        </Text>
-                      ) : (
-                        rows.map((row) => {
-                          const isOverlap = calendar.overlappingReservationIds.has(row.reservation_id);
-                          const tableLabel = row.table_id ? `Table #${row.table_id}` : "No table";
+                      {viewMode === "week" ? (
+                        rows.length === 0 ? (
+                          <Text c="dimmed" size="sm">
+                            No reservations
+                          </Text>
+                        ) : (
+                          rows.map((row) => {
+                            const isOverlap = calendar.overlappingReservationIds.has(row.reservation_id);
+                            const tableLabel = row.table_id ? `Table #${row.table_id}` : "No table";
 
-                          return (
-                            <Button
-                              key={row.reservation_id}
-                              variant="light"
-                              color={isOverlap ? "orange" : "blue"}
-                              styles={{
-                                root: {
-                                  justifyContent: "space-between",
-                                  height: "auto",
-                                  paddingTop: 8,
-                                  paddingBottom: 8,
-                                  borderWidth: isOverlap ? 1 : 0,
-                                  borderStyle: "solid",
-                                  borderColor: isOverlap ? "var(--mantine-color-orange-5)" : undefined
-                                },
-                                label: {
-                                  width: "100%"
-                                }
-                              }}
-                              onClick={() => {
-                                setDetailReservation(row);
-                                setReminderNotice(null);
-                              }}
-                            >
-                              <Stack gap={2} style={{ width: "100%" }}>
-                                <Group justify="space-between" wrap="nowrap" gap="xs">
-                                  <Text size="sm" fw={600} lineClamp={1}>
-                                    {row.customer_name}
+                            return (
+                              <Button
+                                key={row.reservation_id}
+                                variant="light"
+                                color={isOverlap ? "orange" : "blue"}
+                                styles={{
+                                  root: {
+                                    justifyContent: "space-between",
+                                    height: "auto",
+                                    paddingTop: 8,
+                                    paddingBottom: 8,
+                                    borderWidth: isOverlap ? 1 : 0,
+                                    borderStyle: "solid",
+                                    borderColor: isOverlap ? "var(--mantine-color-orange-5)" : undefined
+                                  },
+                                  label: {
+                                    width: "100%"
+                                  }
+                                }}
+                                onClick={() => {
+                                  setDetailReservation(row);
+                                  setReminderNotice(null);
+                                }}
+                              >
+                                <Stack gap={2} style={{ width: "100%" }}>
+                                  <Group justify="space-between" wrap="nowrap" gap="xs">
+                                    <Text size="sm" fw={600} lineClamp={1}>
+                                      {row.customer_name}
+                                    </Text>
+                                    <Badge color={STATUS_BADGE_COLORS[row.status]} variant="light" size="xs">
+                                      {STATUS_LABELS[row.status]}
+                                    </Badge>
+                                  </Group>
+                                  <Text size="xs" c="dimmed">
+                                    {formatTimeRange(row, defaultDurationMinutes, selectedOutletTimezone)} · {row.guest_count} guests · {tableLabel}
                                   </Text>
-                                  <Badge color={STATUS_BADGE_COLORS[row.status]} variant="light" size="xs">
-                                    {STATUS_LABELS[row.status]}
-                                  </Badge>
+                                </Stack>
+                              </Button>
+                            );
+                          })
+                        )
+                      ) : (
+                        <Stack gap="sm">
+                          {buildTimelineLaneTableIds(timelineTableIds, timelineByDay[day.key]).map((tableId) => {
+                            const blocks = timelineByDay[day.key]?.[tableId] ?? [];
+                            const tableLabel = tableLabelById[tableId] ?? `Table #${tableId} (unlisted)`;
+
+                            return (
+                              <Stack key={tableId} gap={4}>
+                                <Group justify="space-between" wrap="nowrap" gap="xs">
+                                  <Text size="xs" fw={600}>
+                                    {tableLabel}
+                                  </Text>
+                                  <Text size="xs" c="dimmed">
+                                    {blocks.length} booking{blocks.length === 1 ? "" : "s"}
+                                  </Text>
                                 </Group>
+
+                                <div
+                                  style={{
+                                    position: "relative",
+                                    height: 44,
+                                    border: "1px solid var(--mantine-color-gray-3)",
+                                    borderRadius: 8,
+                                    background:
+                                      "linear-gradient(to right, transparent 0%, transparent 24.9%, var(--mantine-color-gray-1) 25%, transparent 25.1%, transparent 49.9%, var(--mantine-color-gray-1) 50%, transparent 50.1%, transparent 74.9%, var(--mantine-color-gray-1) 75%, transparent 75.1%)"
+                                  }}
+                                >
+                                  {blocks.map((block) => {
+                                    const isOverlap = calendar.overlappingReservationIds.has(block.reservationId);
+                                    const style = buildTimelineBlockStyle(block.startMinute, block.endMinute);
+
+                                    return (
+                                      <Button
+                                        key={block.reservationId}
+                                        variant="filled"
+                                        color={isOverlap ? "orange" : "blue"}
+                                        size="compact-xs"
+                                        styles={{
+                                          root: {
+                                            position: "absolute",
+                                            top: 4,
+                                            bottom: 4,
+                                            ...style,
+                                            minWidth: 16,
+                                            paddingLeft: 6,
+                                            paddingRight: 6,
+                                            borderWidth: isOverlap ? 1 : 0,
+                                            borderStyle: "solid",
+                                            borderColor: isOverlap ? "var(--mantine-color-orange-3)" : undefined
+                                          },
+                                          label: {
+                                            justifyContent: "flex-start",
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                            whiteSpace: "nowrap"
+                                          }
+                                        }}
+                                        onClick={() => {
+                                          setDetailReservation(block.row);
+                                          setReminderNotice(null);
+                                        }}
+                                      >
+                                        {block.customerName}
+                                      </Button>
+                                    );
+                                  })}
+                                </div>
+
+                                <Group justify="space-between" gap={4} wrap="nowrap">
+                                  <Text size="10px" c="dimmed">
+                                    00:00
+                                  </Text>
+                                  <Text size="10px" c="dimmed">
+                                    06:00
+                                  </Text>
+                                  <Text size="10px" c="dimmed">
+                                    12:00
+                                  </Text>
+                                  <Text size="10px" c="dimmed">
+                                    18:00
+                                  </Text>
+                                  <Text size="10px" c="dimmed">
+                                    24:00
+                                  </Text>
+                                </Group>
+
                                 <Text size="xs" c="dimmed">
-                                  {formatTimeRange(row)} · {row.guest_count} guests · {tableLabel}
+                                  {blocks.length === 0
+                                    ? "Available all day"
+                                    : blocks
+                                        .map((block) => `${formatMinuteLabel(block.startMinute)}-${formatMinuteLabel(block.endMinute)}`)
+                                        .join(" | ")}
                                 </Text>
                               </Stack>
-                            </Button>
-                          );
-                        })
+                            );
+                          })}
+
+                          {rows
+                            .filter((row) => !row.table_id || isReservationFinalStatus(row.status))
+                            .map((row) => {
+                              const tableLabel = row.table_id ? `Table #${row.table_id}` : "No table";
+                              return (
+                                <Button
+                                  key={`list-${row.reservation_id}`}
+                                  variant="light"
+                                  color="gray"
+                                  onClick={() => {
+                                    setDetailReservation(row);
+                                    setReminderNotice(null);
+                                  }}
+                                >
+                                  <Stack gap={2} style={{ width: "100%" }}>
+                                    <Group justify="space-between" wrap="nowrap" gap="xs">
+                                      <Text size="sm" fw={600} lineClamp={1}>
+                                        {row.customer_name}
+                                      </Text>
+                                      <Badge color={STATUS_BADGE_COLORS[row.status]} variant="light" size="xs">
+                                        {STATUS_LABELS[row.status]}
+                                      </Badge>
+                                    </Group>
+                                    <Text size="xs" c="dimmed">
+                                      {formatTimeRange(row, defaultDurationMinutes, selectedOutletTimezone)} · {row.guest_count} guests · {tableLabel}
+                                    </Text>
+                                  </Stack>
+                                </Button>
+                              );
+                            })}
+                        </Stack>
                       )}
                     </Stack>
                   </Card>
@@ -824,7 +1162,11 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
                 {STATUS_LABELS[detailReservation.status]}
               </Badge>
             </Group>
-            <Text size="sm">Time: {formatTimeRange(detailReservation)}</Text>
+            <Text size="sm">Time: {formatTimeRange(detailReservation, defaultDurationMinutes, selectedOutletTimezone)}</Text>
+            <Text size="sm">
+              Duration: {getReservationDurationMinutes(detailReservation, defaultDurationMinutes)} min
+              {detailReservation.duration_minutes == null ? " (default)" : ""}
+            </Text>
             <Text size="sm">Guests: {detailReservation.guest_count}</Text>
             <Text size="sm">Table: {detailReservation.table_id ? `#${detailReservation.table_id}` : "Not assigned"}</Text>
             {detailReservation.notes && <Text size="sm">Notes: {detailReservation.notes}</Text>}

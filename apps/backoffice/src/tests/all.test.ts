@@ -7,6 +7,7 @@ import "../lib/outbox-guards.test";
 import "../hooks/use-item-groups.test";
 import "../hooks/use-items.test";
 import "../hooks/use-table-board.test";
+import "../hooks/use-reservations.test";
 import "../hooks/use-reservation-calendar.test";
 import "../components/import-wizard.test";
 import "../features/prices-page.test";

@@ -64,6 +64,7 @@ type UserProfileRow = RowDataPacket & {
   id: number;
   company_id: number;
   email: string;
+  company_timezone: string | null;
   is_active: number;
 };
 
@@ -81,6 +82,7 @@ export type AuthenticatedUser = {
   id: number;
   company_id: number;
   email: string;
+  company_timezone: string | null;
   roles: RoleCode[];
   global_roles: RoleCode[];
   outlet_role_assignments: {
@@ -411,7 +413,7 @@ export async function findActiveUserById(
 ): Promise<AuthenticatedUser | null> {
   const pool = getDbPool();
   const [rows] = await pool.execute<UserProfileRow[]>(
-    `SELECT u.id, u.company_id, u.email, u.is_active
+    `SELECT u.id, u.company_id, u.email, c.timezone AS company_timezone, u.is_active
      FROM users u
      INNER JOIN companies c ON c.id = u.company_id
      WHERE u.id = ?
@@ -440,6 +442,7 @@ export async function findActiveUserById(
     id: user.id,
     company_id: user.company_id,
     email: user.email,
+    company_timezone: user.company_timezone,
     roles,
     global_roles: globalRoles,
     outlet_role_assignments: outletRoleAssignments,

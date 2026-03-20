@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-20T01:19:57+0700
+last_updated: 2026-03-20T12:46:41+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -147,3 +147,4 @@ development_status:
   12-6-pos-sync-table-operations: done
   12-7-table-board-ui: done  # Session detail UX updated to modal with immediate-open loading state; backoffice validation rerun passing
   12-8-reservation-calendar-ui: done
+  12-9-reservation-calendar-hourly-granularity: done

@@ -51,6 +51,7 @@ import { ApiError } from "../lib/api-client";
 import { DataTable } from "../components/DataTable";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
+import { TIMEZONE_OPTIONS } from "../constants/timezones";
 import type { OutletFullResponse } from "@jurnapod/shared";
 
 type OutletsPageProps = {
@@ -87,17 +88,6 @@ const emptyForm: OutletFormData = {
   timezone: "",
   is_active: true
 };
-
-const TIMEZONE_OPTIONS = [
-  { value: "Asia/Jakarta", label: "Asia/Jakarta (WIB)" },
-  { value: "Asia/Makassar", label: "Asia/Makassar (WITA)" },
-  { value: "Asia/Jayapura", label: "Asia/Jayapura (WIT)" },
-  { value: "Asia/Shanghai", label: "Asia/Shanghai (CST)" },
-  { value: "Asia/Singapore", label: "Asia/Singapore (SGT)" },
-  { value: "Asia/Bangkok", label: "Asia/Bangkok (ICT)" },
-  { value: "Asia/Kuala_Lumpur", label: "Asia/Kuala Lumpur (MYT)" },
-  { value: "UTC", label: "UTC" }
-];
 
 export function OutletsPage(props: OutletsPageProps) {
   const { user, accessToken } = props;

@@ -13,6 +13,60 @@ describe("Reservation Calendar page helpers", () => {
     assert.strictEqual(pageModule.getCheckInTargetStatus("SEATED"), null);
   });
 
+  test("builds timeline style with minimum visible width", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    const style = pageModule.buildTimelineBlockStyle(600, 605);
+    assert.strictEqual(style.left, `${(600 / 1440) * 100}%`);
+    assert.strictEqual(style.width, "2%");
+  });
+
+  test("buildTimelineLaneTableIds includes unlisted reservation tables", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    const tableIds = pageModule.buildTimelineLaneTableIds(
+      [1, 2],
+      {
+        2: [{ reservationId: 10 }],
+        3396: [{ reservationId: 11 }]
+      } as Record<number, unknown>
+    );
+    assert.deepStrictEqual(tableIds, [2, 3396]);
+  });
+
+  test("buildTimelineLaneTableIds hides tables without reservations", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    const tableIds = pageModule.buildTimelineLaneTableIds(
+      [1, 2, 3],
+      {
+        2: [{ reservationId: 10 }],
+        3: []
+      } as Record<number, unknown>
+    );
+    assert.deepStrictEqual(tableIds, [2]);
+  });
+
+  test("resolveCalendarTimezone prefers outlet, then company, then missing", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    assert.strictEqual(pageModule.resolveCalendarTimezone("Asia/Jakarta", "Asia/Tokyo"), "Asia/Jakarta");
+    assert.strictEqual(pageModule.resolveCalendarTimezone(null, "Asia/Tokyo"), "Asia/Tokyo");
+    assert.strictEqual(pageModule.resolveCalendarTimezone("   ", " "), null);
+  });
+
+  test("resolveCalendarTimezoneInfo exposes timezone source", async () => {
+    const pageModule = await import("./reservation-calendar-page");
+    assert.deepStrictEqual(pageModule.resolveCalendarTimezoneInfo("Asia/Jakarta", "Asia/Tokyo"), {
+      timezone: "Asia/Jakarta",
+      source: "outlet"
+    });
+    assert.deepStrictEqual(pageModule.resolveCalendarTimezoneInfo(null, "Asia/Tokyo"), {
+      timezone: "Asia/Tokyo",
+      source: "company"
+    });
+    assert.deepStrictEqual(pageModule.resolveCalendarTimezoneInfo(undefined, " "), {
+      timezone: null,
+      source: "missing"
+    });
+  });
+
   test("suggests table options by capacity and overlap conflict", async () => {
     const pageModule = await import("./reservation-calendar-page");
     const options = pageModule.getSuggestedTableOptions({

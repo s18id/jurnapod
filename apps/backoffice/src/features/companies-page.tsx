@@ -21,7 +21,7 @@ import {
 import { useMediaQuery } from "@mantine/hooks";
 import { IconEye } from "@tabler/icons-react";
 import type { ColumnDef } from "@tanstack/react-table";
-import type { SessionUser } from "../lib/session";
+import { storeCompanyTimezone, type SessionUser } from "../lib/session";
 import {
   useCompanies,
   createCompany,
@@ -33,6 +33,7 @@ import { ApiError } from "../lib/api-client";
 import { DataTable } from "../components/DataTable";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
+import { TIMEZONE_OPTIONS } from "../constants/timezones";
 import type { CompanyResponse } from "@jurnapod/shared";
 
 type CompaniesPageProps = {
@@ -50,6 +51,7 @@ type CompanyFormData = {
   tax_id: string;
   email: string;
   phone: string;
+  timezone: string;
   address_line1: string;
   address_line2: string;
   city: string;
@@ -63,6 +65,7 @@ const emptyForm: CompanyFormData = {
   tax_id: "",
   email: "",
   phone: "",
+  timezone: "",
   address_line1: "",
   address_line2: "",
   city: "",
@@ -145,6 +148,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
       tax_id: company.tax_id ?? "",
       email: company.email ?? "",
       phone: company.phone ?? "",
+      timezone: company.timezone ?? "",
       address_line1: company.address_line1 ?? "",
       address_line2: company.address_line2 ?? "",
       city: company.city ?? "",
@@ -164,6 +168,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
       tax_id: company.tax_id ?? "",
       email: company.email ?? "",
       phone: company.phone ?? "",
+      timezone: company.timezone ?? "",
       address_line1: company.address_line1 ?? "",
       address_line2: company.address_line2 ?? "",
       city: company.city ?? "",
@@ -205,6 +210,10 @@ export function CompaniesPage(props: CompaniesPageProps) {
     if (!formData.name.trim()) {
       errors.name = "Company name is required";
     }
+
+    if (!formData.timezone.trim()) {
+      errors.timezone = "Timezone is required";
+    }
     
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -227,6 +236,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
             tax_id: formData.tax_id.trim() || undefined,
             email: formData.email.trim() || undefined,
             phone: formData.phone.trim() || undefined,
+            timezone: formData.timezone.trim(),
             address_line1: formData.address_line1.trim() || undefined,
             address_line2: formData.address_line2.trim() || undefined,
             city: formData.city.trim() || undefined,
@@ -255,6 +265,9 @@ export function CompaniesPage(props: CompaniesPageProps) {
         if (formData.phone.trim() !== (editingCompany.phone ?? "")) {
           updates.phone = formData.phone.trim() || null;
         }
+        if (formData.timezone.trim() !== (editingCompany.timezone ?? "")) {
+          updates.timezone = formData.timezone.trim();
+        }
         if (formData.address_line1.trim() !== (editingCompany.address_line1 ?? "")) {
           updates.address_line1 = formData.address_line1.trim() || null;
         }
@@ -270,6 +283,9 @@ export function CompaniesPage(props: CompaniesPageProps) {
 
         if (Object.keys(updates).length > 0) {
           await updateCompany(editingCompany.id, updates, accessToken);
+          if (editingCompany.id === user.company_id && updates.timezone !== undefined) {
+            storeCompanyTimezone(updates.timezone);
+          }
           setSuccessMessage("Company updated successfully");
           await companiesQuery.refetch();
         }
@@ -542,6 +558,17 @@ export function CompaniesPage(props: CompaniesPageProps) {
             maxLength={32}
           />
 
+          <Select
+            label="Timezone"
+            placeholder="Select timezone"
+            data={TIMEZONE_OPTIONS}
+            value={formData.timezone || null}
+            onChange={(value) => setFormData({ ...formData, timezone: value ?? "" })}
+            error={formErrors.timezone}
+            searchable
+            allowDeselect={false}
+          />
+
           <Divider label="Address" my="sm" />
 
           <TextInput
@@ -659,6 +686,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
 
             <TextInput label="Email" value={editingCompany.email ?? "—"} disabled />
             <TextInput label="Phone" value={editingCompany.phone ?? "—"} disabled />
+            <TextInput label="Timezone" value={editingCompany.timezone ?? "—"} disabled />
 
             <Divider label="Address" my="sm" />
 

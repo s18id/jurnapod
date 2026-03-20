@@ -153,6 +153,82 @@ test(
 );
 
 test(
+  "deleteOutletTable rejects tables with reservation history",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId, userId } = await resolveFixtureContext();
+    let tableId: number | null = null;
+    let reservationId: number | null = null;
+
+    try {
+      const [tableInsert] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        [companyId, outletId, `TR-${runId}`.slice(0, 32), `History Guard ${runId}`, "Main", 4]
+      );
+      tableId = Number(tableInsert.insertId);
+
+      const [reservationInsert] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO reservations (
+           company_id,
+           outlet_id,
+           table_id,
+           customer_name,
+           customer_phone,
+           guest_count,
+           reservation_at,
+           duration_minutes,
+           status,
+           notes
+         ) VALUES (?, ?, ?, ?, NULL, 2, NOW(), 90, 'COMPLETED', NULL)`,
+        [companyId, outletId, tableId, `History ${runId}`]
+      );
+      reservationId = Number(reservationInsert.insertId);
+
+      await assert.rejects(
+        async () => {
+          await deleteOutletTable({
+            companyId,
+            outletId,
+            tableId: tableId!,
+            actor: {
+              userId,
+              outletId,
+              ipAddress: "127.0.0.1"
+            }
+          });
+        },
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(error.message, /reservations are linked to this table/i);
+          return true;
+        }
+      );
+
+      assert.equal(await readTableStatus(companyId, outletId, tableId), "AVAILABLE");
+    } finally {
+      if (reservationId !== null) {
+        await pool.execute(`DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id = ?`, [
+          companyId,
+          outletId,
+          reservationId
+        ]);
+      }
+
+      if (tableId !== null) {
+        await pool.execute(`DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id = ?`, [
+          companyId,
+          outletId,
+          tableId
+        ]);
+      }
+    }
+  }
+);
+
+test(
   "bulk create rejects derived statuses at validation boundary",
   { concurrency: false, timeout: 30000 },
   async () => {

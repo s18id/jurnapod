@@ -63,6 +63,8 @@ export const ReservationRowSchema = z.object({
 export const ReservationListQuerySchema = z.object({
   outlet_id: NumericIdSchema,
   status: ReservationStatusSchema.optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),

@@ -3,10 +3,14 @@
 
 import {
   ReservationCreateRequestSchema,
-  ReservationListQuerySchema
+  ReservationListQuerySchema,
+  type ReservationListQuery
 } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
+import { getCompany } from "../../../src/lib/companies";
+import { toDateTimeRangeWithTimezone } from "../../../src/lib/date-helpers";
+import { getOutlet } from "../../../src/lib/outlets";
 import { createReservation, listReservations, ReservationValidationError } from "../../../src/lib/reservations";
 import { errorResponse, successResponse } from "../../../src/lib/response";
 
@@ -36,6 +40,75 @@ const invalidJsonGuardError = new ZodError([
   }
 ]);
 
+export class MissingReservationTimezoneError extends Error {
+  constructor() {
+    super("Timezone is required for date-only reservation filtering");
+    this.name = "MissingReservationTimezoneError";
+  }
+}
+
+export function pickReservationTimezone(
+  outletTimezone?: string | null,
+  companyTimezone?: string | null
+): string | null {
+  if (outletTimezone && outletTimezone.trim()) {
+    return outletTimezone;
+  }
+  if (companyTimezone && companyTimezone.trim()) {
+    return companyTimezone;
+  }
+  return null;
+}
+
+export function applyDateOnlyRange(
+  query: ReservationListQuery,
+  timezone: string | null
+): ReservationListQuery {
+  const hasDateOnlyRange = Boolean(query.date_from || query.date_to);
+  if (!hasDateOnlyRange) {
+    return query;
+  }
+
+  if (!timezone) {
+    throw new MissingReservationTimezoneError();
+  }
+
+  const dateFrom = query.date_from ?? query.date_to;
+  const dateTo = query.date_to ?? query.date_from;
+  if (!dateFrom || !dateTo) {
+    return query;
+  }
+
+  const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, timezone);
+  return {
+    ...query,
+    from: range.fromStartUTC,
+    to: range.toEndUTC
+  };
+}
+
+async function resolveReservationTimezone(companyId: number, outletId: number): Promise<string | null> {
+  try {
+    const outlet = await getOutlet(companyId, outletId);
+    if (outlet.timezone && outlet.timezone.trim()) {
+      return outlet.timezone;
+    }
+  } catch {
+    // fallback to company timezone below
+  }
+
+  try {
+    const company = await getCompany(companyId);
+    if (company.timezone && company.timezone.trim()) {
+      return company.timezone;
+    }
+  } catch {
+    // fall through to null return
+  }
+
+  return null;
+}
+
 export const GET = withAuth(
   async (request, auth) => {
     try {
@@ -43,15 +116,26 @@ export const GET = withAuth(
       const query = ReservationListQuerySchema.parse({
         outlet_id: url.searchParams.get("outlet_id"),
         status: url.searchParams.get("status") ?? undefined,
+        date_from: url.searchParams.get("date_from") ?? undefined,
+        date_to: url.searchParams.get("date_to") ?? undefined,
         from: url.searchParams.get("from") ?? undefined,
         to: url.searchParams.get("to") ?? undefined,
         limit: url.searchParams.get("limit") ?? undefined,
         offset: url.searchParams.get("offset") ?? undefined
       });
 
-      const rows = await listReservations(auth.companyId, query);
+      const timezone = Boolean(query.date_from || query.date_to)
+        ? await resolveReservationTimezone(auth.companyId, query.outlet_id)
+        : null;
+      const normalizedQuery = applyDateOnlyRange(query, timezone);
+
+      const rows = await listReservations(auth.companyId, normalizedQuery);
       return successResponse(rows);
     } catch (error) {
+      if (error instanceof MissingReservationTimezoneError) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
+      }
+
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }

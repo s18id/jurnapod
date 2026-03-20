@@ -249,6 +249,73 @@ test(
   }
 );
 
+test(
+  "reservations reject missing table assignment on create and update",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId } = await resolveFixtureContext();
+    const missingTableId = 987654321;
+    const createdReservationIds: number[] = [];
+
+    try {
+      await assert.rejects(
+        async () => {
+          await createReservation(companyId, {
+            outlet_id: outletId,
+            table_id: missingTableId,
+            customer_name: `Missing Table ${runId}`,
+            customer_phone: null,
+            guest_count: 2,
+            reservation_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+            duration_minutes: 90,
+            notes: null
+          });
+        },
+        (error: unknown) => {
+          assert.ok(error instanceof ReservationValidationError);
+          assert.match((error as ReservationValidationError).message, /table .* not found in outlet/i);
+          return true;
+        }
+      );
+
+      const baseReservation = await createReservation(companyId, {
+        outlet_id: outletId,
+        table_id: null,
+        customer_name: `Update Missing ${runId}`,
+        customer_phone: null,
+        guest_count: 2,
+        reservation_at: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+        duration_minutes: 90,
+        notes: null
+      });
+      createdReservationIds.push(baseReservation.reservation_id);
+
+      await assert.rejects(
+        async () => {
+          await updateReservation(companyId, baseReservation.reservation_id, {
+            table_id: missingTableId
+          });
+        },
+        (error: unknown) => {
+          assert.ok(error instanceof ReservationValidationError);
+          assert.match((error as ReservationValidationError).message, /table .* not found in outlet/i);
+          return true;
+        }
+      );
+    } finally {
+      if (createdReservationIds.length > 0) {
+        const placeholders = createdReservationIds.map(() => "?").join(", ");
+        await pool.execute(
+          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
+          [companyId, outletId, ...createdReservationIds]
+        );
+      }
+    }
+  }
+);
+
 // ============================================================================
 // STORY 12.4 - V2 CONTRACT TESTS
 // ============================================================================

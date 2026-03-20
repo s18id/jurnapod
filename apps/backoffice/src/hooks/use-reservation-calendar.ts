@@ -7,12 +7,106 @@ import { useReservations } from "./use-reservations";
 
 export type ReservationCalendarViewMode = "day" | "week";
 
+export const DEFAULT_RESERVATION_DURATION_MINUTES = 120;
+
+export function normalizeReservationDurationMinutes(input?: number | null): number {
+  const value = Math.round(Number(input ?? DEFAULT_RESERVATION_DURATION_MINUTES));
+  if (!Number.isFinite(value)) {
+    return DEFAULT_RESERVATION_DURATION_MINUTES;
+  }
+  return Math.min(480, Math.max(15, value));
+}
+
 export type ReservationCalendarDay = {
   key: string;
   startAt: Date;
   endAt: Date;
   label: string;
 };
+
+type TimeZoneDateParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+};
+
+function parseDateKey(dateKey: string): { year: number; month: number; day: number } {
+  const [yearRaw, monthRaw, dayRaw] = dateKey.split("-");
+  return {
+    year: Number(yearRaw),
+    month: Number(monthRaw),
+    day: Number(dayRaw)
+  };
+}
+
+function addDaysToDateKey(dateKey: string, days: number): string {
+  const parts = parseDateKey(dateKey);
+  const value = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+  const year = value.getUTCFullYear();
+  const month = `${value.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getUTCDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function weekdayIndexInTimeZone(date: Date, timeZone?: string | null): number {
+  const zone = normalizeTimeZone(timeZone);
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: zone, weekday: "short" }).format(date);
+  const map: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6
+  };
+  return map[weekday] ?? 0;
+}
+
+function dateKeyToDisplayDate(dateKey: string): Date {
+  const parts = parseDateKey(dateKey);
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0));
+}
+
+function normalizeTimeZone(timeZone?: string | null): string {
+  return timeZone && timeZone.trim() ? timeZone : "UTC";
+}
+
+function getDatePartsInTimeZone(date: Date, timeZone?: string | null): TimeZoneDateParts {
+  const zone = normalizeTimeZone(timeZone);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+  const parts = formatter.formatToParts(date);
+  const lookup = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((part) => part.type === type)?.value ?? "0");
+
+  return {
+    year: lookup("year"),
+    month: lookup("month"),
+    day: lookup("day"),
+    hour: lookup("hour"),
+    minute: lookup("minute")
+  };
+}
+
+export function toDateKeyInTimeZone(date: Date, timeZone?: string | null): string {
+  const parts = getDatePartsInTimeZone(date, timeZone);
+  return `${parts.year}-${`${parts.month}`.padStart(2, "0")}-${`${parts.day}`.padStart(2, "0")}`;
+}
+
+export function minuteOfDayInTimeZone(date: Date, timeZone?: string | null): number {
+  const parts = getDatePartsInTimeZone(date, timeZone);
+  return parts.hour * 60 + parts.minute;
+}
 
 export function toLocalDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -46,20 +140,21 @@ export function buildReservationCalendarQuery(input: {
   outletId: number | null;
   viewMode: ReservationCalendarViewMode;
   anchorDate: Date;
+  timeZone?: string | null;
   status?: ReservationStatus | null;
 }): Partial<ReservationListQuery> | null {
   if (!input.outletId) {
     return null;
   }
 
-  const anchor = startOfDay(input.anchorDate);
-  const fromDate = input.viewMode === "week" ? getWeekStart(anchor) : anchor;
-  const toDate = input.viewMode === "week" ? endOfDay(addDays(fromDate, 6)) : endOfDay(anchor);
+  const days = createCalendarDaysInTimeZone(input.anchorDate, input.viewMode, input.timeZone);
+  const dateFrom = days[0]?.key;
+  const dateTo = days[days.length - 1]?.key;
 
   return {
     outlet_id: input.outletId,
-    from: fromDate.toISOString(),
-    to: toDate.toISOString(),
+    date_from: dateFrom,
+    date_to: dateTo,
     status: input.status ?? undefined,
     limit: 200,
     offset: 0
@@ -67,23 +162,41 @@ export function buildReservationCalendarQuery(input: {
 }
 
 export function createCalendarDays(anchorDate: Date, viewMode: ReservationCalendarViewMode): ReservationCalendarDay[] {
-  const start = viewMode === "week" ? getWeekStart(anchorDate) : startOfDay(anchorDate);
+  return createCalendarDaysInTimeZone(anchorDate, viewMode, null);
+}
+
+export function createCalendarDaysInTimeZone(
+  anchorDate: Date,
+  viewMode: ReservationCalendarViewMode,
+  timeZone?: string | null
+): ReservationCalendarDay[] {
+  const zone = normalizeTimeZone(timeZone);
+  const anchorKey = toDateKeyInTimeZone(anchorDate, zone);
+  const weekday = weekdayIndexInTimeZone(anchorDate, zone);
+  const weekOffset = weekday === 0 ? -6 : 1 - weekday;
+  const startKey = viewMode === "week" ? addDaysToDateKey(anchorKey, weekOffset) : anchorKey;
   const dayCount = viewMode === "week" ? 7 : 1;
   return Array.from({ length: dayCount }, (_, index) => {
-    const current = addDays(start, index);
+    const dayKey = addDaysToDateKey(startKey, index);
+    const displayDate = dateKeyToDisplayDate(dayKey);
+    const localDate = new Date(`${dayKey}T00:00:00`);
     return {
-      key: toLocalDateKey(current),
-      startAt: startOfDay(current),
-      endAt: endOfDay(current),
-      label: current.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" })
+      key: dayKey,
+      startAt: startOfDay(localDate),
+      endAt: endOfDay(localDate),
+      label: displayDate.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", timeZone: zone })
     };
   });
 }
 
-export function groupReservationsByDay(days: ReservationCalendarDay[], reservations: ReservationRow[]): Record<string, ReservationRow[]> {
+export function groupReservationsByDay(
+  days: ReservationCalendarDay[],
+  reservations: ReservationRow[],
+  timeZone?: string | null
+): Record<string, ReservationRow[]> {
   const grouped: Record<string, ReservationRow[]> = Object.fromEntries(days.map((day) => [day.key, [] as ReservationRow[]]));
   for (const reservation of reservations) {
-    const key = toLocalDateKey(new Date(reservation.reservation_at));
+    const key = toDateKeyInTimeZone(new Date(reservation.reservation_at), timeZone);
     if (grouped[key]) {
       grouped[key].push(reservation);
     }
@@ -100,13 +213,25 @@ export function isReservationFinalStatus(status: ReservationStatus): boolean {
   return status === "CANCELLED" || status === "NO_SHOW" || status === "COMPLETED";
 }
 
-export function getReservationEndAt(row: ReservationRow): Date {
+export function getReservationEndAt(row: ReservationRow, defaultDurationMinutes?: number | null): Date {
   const startAt = new Date(row.reservation_at);
-  const duration = row.duration_minutes ?? 120;
+  const duration = getReservationDurationMinutes(row, defaultDurationMinutes);
   return new Date(startAt.getTime() + duration * 60 * 1000);
 }
 
-export function isOverlappingReservation(a: ReservationRow, b: ReservationRow): boolean {
+export function getReservationDurationMinutes(
+  row: Pick<ReservationRow, "duration_minutes">,
+  defaultDurationMinutes?: number | null
+): number {
+  const fallback = normalizeReservationDurationMinutes(defaultDurationMinutes);
+  return normalizeReservationDurationMinutes(row.duration_minutes ?? fallback);
+}
+
+export function isOverlappingReservation(
+  a: ReservationRow,
+  b: ReservationRow,
+  defaultDurationMinutes?: number | null
+): boolean {
   if (!a.table_id || !b.table_id || a.table_id !== b.table_id) {
     return false;
   }
@@ -115,17 +240,20 @@ export function isOverlappingReservation(a: ReservationRow, b: ReservationRow): 
   }
 
   const aStart = new Date(a.reservation_at).getTime();
-  const aEnd = getReservationEndAt(a).getTime();
+  const aEnd = getReservationEndAt(a, defaultDurationMinutes).getTime();
   const bStart = new Date(b.reservation_at).getTime();
-  const bEnd = getReservationEndAt(b).getTime();
+  const bEnd = getReservationEndAt(b, defaultDurationMinutes).getTime();
   return aStart < bEnd && bStart < aEnd;
 }
 
-export function getOverlappingReservationIds(reservations: ReservationRow[]): Set<number> {
+export function getOverlappingReservationIds(
+  reservations: ReservationRow[],
+  defaultDurationMinutes?: number | null
+): Set<number> {
   const overlapping = new Set<number>();
   for (let i = 0; i < reservations.length; i += 1) {
     for (let j = i + 1; j < reservations.length; j += 1) {
-      if (isOverlappingReservation(reservations[i]!, reservations[j]!)) {
+      if (isOverlappingReservation(reservations[i]!, reservations[j]!, defaultDurationMinutes)) {
         overlapping.add(reservations[i]!.reservation_id);
         overlapping.add(reservations[j]!.reservation_id);
       }
@@ -139,6 +267,103 @@ export type DailyUtilization = {
   bookedTables: number;
   availableTables: number;
 };
+
+export type ReservationTimelineBlock = {
+  reservationId: number;
+  tableId: number;
+  customerName: string;
+  status: ReservationStatus;
+  startAt: Date;
+  endAt: Date;
+  startMinute: number;
+  endMinute: number;
+  row: ReservationRow;
+};
+
+function clampToDayMinutes(value: number): number {
+  return Math.min(24 * 60, Math.max(0, value));
+}
+
+export function buildReservationTimelineByDay(
+  days: ReservationCalendarDay[],
+  reservations: ReservationRow[],
+  timeZone?: string | null,
+  defaultDurationMinutes?: number | null
+): Record<string, Record<number, ReservationTimelineBlock[]>> {
+  const zone = normalizeTimeZone(timeZone);
+  const timeline: Record<string, Record<number, ReservationTimelineBlock[]>> = Object.fromEntries(
+    days.map((day) => [day.key, {} as Record<number, ReservationTimelineBlock[]>])
+  );
+
+  const dayIndexes = Object.fromEntries(days.map((day, index) => [day.key, index])) as Record<string, number>;
+
+  for (const reservation of reservations) {
+    if (!reservation.table_id) {
+      continue;
+    }
+
+    const reservationStart = new Date(reservation.reservation_at);
+    const reservationEnd = getReservationEndAt(reservation, defaultDurationMinutes);
+
+    const startKey = toDateKeyInTimeZone(reservationStart, zone);
+    const endKey = toDateKeyInTimeZone(new Date(reservationEnd.getTime() - 1), zone);
+    const startDayIndex = dayIndexes[startKey];
+    const endDayIndex = dayIndexes[endKey];
+
+    if (startDayIndex === undefined && endDayIndex === undefined) {
+      continue;
+    }
+
+    for (let index = 0; index < days.length; index += 1) {
+      const day = days[index]!;
+      if (startDayIndex !== undefined && index < startDayIndex) {
+        continue;
+      }
+      if (endDayIndex !== undefined && index > endDayIndex) {
+        continue;
+      }
+
+      const startMinute =
+        startDayIndex !== undefined && index === startDayIndex
+          ? clampToDayMinutes(minuteOfDayInTimeZone(reservationStart, zone))
+          : 0;
+      const endMinute =
+        endDayIndex !== undefined && index === endDayIndex
+          ? clampToDayMinutes(minuteOfDayInTimeZone(reservationEnd, zone))
+          : 24 * 60;
+
+      if (startMinute >= endMinute) {
+        continue;
+      }
+
+      if (!timeline[day.key]![reservation.table_id]) {
+        timeline[day.key]![reservation.table_id] = [];
+      }
+
+      timeline[day.key]![reservation.table_id]!.push({
+        reservationId: reservation.reservation_id,
+        tableId: reservation.table_id,
+        customerName: reservation.customer_name,
+        status: reservation.status,
+        startAt: reservationStart,
+        endAt: reservationEnd,
+        startMinute,
+        endMinute,
+        row: reservation
+      });
+    }
+  }
+
+  for (const dayKey of Object.keys(timeline)) {
+    const tableMap = timeline[dayKey]!;
+    for (const tableIdRaw of Object.keys(tableMap)) {
+      const tableId = Number(tableIdRaw);
+      tableMap[tableId]!.sort((a, b) => a.startMinute - b.startMinute || a.reservationId - b.reservationId);
+    }
+  }
+
+  return timeline;
+}
 
 export function buildDailyUtilization(days: ReservationCalendarDay[], reservationsByDay: Record<string, ReservationRow[]>, availableTables: number): DailyUtilization[] {
   return days.map((day) => {
@@ -157,10 +382,35 @@ export function buildDailyUtilization(days: ReservationCalendarDay[], reservatio
   });
 }
 
+export function mapReservationsToCalendarDays(input: {
+  viewMode: ReservationCalendarViewMode;
+  days: ReservationCalendarDay[];
+  reservations: ReservationRow[];
+  timeZone?: string | null;
+}): Record<string, ReservationRow[]> {
+  if (input.viewMode === "day") {
+    const dayKey = input.days[0]?.key;
+    if (!dayKey) {
+      return {};
+    }
+
+    const sorted = [...input.reservations].sort(
+      (a, b) => new Date(a.reservation_at).getTime() - new Date(b.reservation_at).getTime()
+    );
+    return {
+      [dayKey]: sorted
+    };
+  }
+
+  return groupReservationsByDay(input.days, input.reservations, input.timeZone);
+}
+
 export function useReservationCalendar(input: {
   outletId: number | null;
   anchorDate: Date;
   viewMode: ReservationCalendarViewMode;
+  timeZone?: string | null;
+  defaultDurationMinutes?: number | null;
   status?: ReservationStatus | null;
   accessToken: string;
 }) {
@@ -170,26 +420,33 @@ export function useReservationCalendar(input: {
         outletId: input.outletId,
         viewMode: input.viewMode,
         anchorDate: input.anchorDate,
+        timeZone: input.timeZone,
         status: input.status
       }),
-    [input.outletId, input.viewMode, input.anchorDate, input.status]
+    [input.outletId, input.viewMode, input.anchorDate, input.timeZone, input.status]
   );
 
   const reservations = useReservations(query, input.accessToken);
 
   const days = useMemo(
-    () => createCalendarDays(input.anchorDate, input.viewMode),
-    [input.anchorDate, input.viewMode]
+    () => createCalendarDaysInTimeZone(input.anchorDate, input.viewMode, input.timeZone),
+    [input.anchorDate, input.viewMode, input.timeZone]
   );
 
   const reservationsByDay = useMemo(
-    () => groupReservationsByDay(days, reservations.data),
-    [days, reservations.data]
+    () =>
+      mapReservationsToCalendarDays({
+        viewMode: input.viewMode,
+        days,
+        reservations: reservations.data,
+        timeZone: input.timeZone
+      }),
+    [input.viewMode, days, reservations.data, input.timeZone]
   );
 
   const overlappingReservationIds = useMemo(
-    () => getOverlappingReservationIds(reservations.data),
-    [reservations.data]
+    () => getOverlappingReservationIds(reservations.data, input.defaultDurationMinutes),
+    [reservations.data, input.defaultDurationMinutes]
   );
 
   return {

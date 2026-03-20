@@ -788,15 +788,14 @@ export async function deleteOutletTable(params: {
     }
 
     const [reservations] = await connection.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM reservations 
-       WHERE company_id = ? AND outlet_id = ? AND table_id = ? 
-       AND status IN ('BOOKED', 'CONFIRMED', 'ARRIVED', 'SEATED')`,
+      `SELECT COUNT(*) as count FROM reservations
+       WHERE company_id = ? AND outlet_id = ? AND table_id = ?`,
       [params.companyId, params.outletId, params.tableId]
     );
 
     if (reservations[0].count > 0) {
       throw new Error(
-        `Cannot delete table: ${reservations[0].count} active reservations are linked to this table`
+        `Cannot delete table: ${reservations[0].count} reservations are linked to this table`
       );
     }
 

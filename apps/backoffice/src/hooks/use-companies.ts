@@ -129,6 +129,7 @@ export async function createCompany(
     tax_id?: string;
     email?: string;
     phone?: string;
+    timezone: string;
     address_line1?: string;
     address_line2?: string;
     city?: string;
@@ -159,6 +160,7 @@ export async function updateCompany(
     tax_id?: string | null;
     email?: string | null;
     phone?: string | null;
+    timezone?: string;
     address_line1?: string | null;
     address_line2?: string | null;
     city?: string | null;

@@ -41,6 +41,7 @@
     "qa:pos:lhci": "npm run qa:lhci -w @jurnapod/pos",
     "qa:pos:full": "npm run qa:pos:e2e && npm run qa:pos:lhci",
     "db:migrate": "npm run db:migrate -w @jurnapod/db",
+    "db:script": "npm run db:script -w @jurnapod/db --",
     "db:seed": "npm run db:seed -w @jurnapod/db",
     "db:seed:test-accounts": "npm run db:seed:test-accounts -w @jurnapod/db",
     "db:smoke": "npm run db:smoke -w @jurnapod/db",
