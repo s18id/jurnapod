@@ -10,6 +10,7 @@ import "../hooks/use-table-board.test";
 import "../hooks/use-reservations.test";
 import "../hooks/use-reservation-calendar.test";
 import "../components/import-wizard.test";
+import "../components/OutletRoleMatrix.test";
 import "../features/prices-page.test";
 import "../features/table-board-page.test";
 import "../features/reservation-calendar-page.test";

@@ -444,42 +444,112 @@ export function UsersPage(props: UsersPageProps) {
           return;
         }
         
-        // Update global roles
-        if (accessFormData.global_role_codes) {
-          await updateUserRoles(editingUser.id, {
-            role_codes: accessFormData.global_role_codes as Role[]
-          }, accessToken);
+        const accessStartTime = Date.now();
+        const actorRole = user.global_roles[0] ?? "UNKNOWN";
+        
+        // Calculate delta for audit
+        const existingRoles = new Set<string>(editingUser.global_roles);
+        const desiredRoles = new Set<string>(accessFormData.global_role_codes);
+        const globalRoleAdditions = [...desiredRoles].filter(r => !existingRoles.has(r)).length;
+        const globalRoleRemovals = [...existingRoles].filter(r => !desiredRoles.has(r)).length;
+        
+        const existingOutletAssignments = new Map(
+          editingUser.outlet_role_assignments.map(a => [a.outlet_id, new Set(a.role_codes)])
+        );
+        const desiredOutletAssignments = new Map(
+          accessFormData.outlet_role_assignments.map(a => [a.outlet_id, new Set(a.role_codes)])
+        );
+        
+        let outletRoleAdditions = 0;
+        let outletRoleRemovals = 0;
+        
+        // Count additions and modifications
+        for (const [outletId, roles] of desiredOutletAssignments) {
+          const existing = existingOutletAssignments.get(outletId) ?? new Set<string>();
+          for (const role of roles) {
+            if (!existing.has(role)) outletRoleAdditions++;
+          }
         }
         
-        // Update outlet roles in parallel
-        const existingOutletIds = new Set(
-          editingUser.outlet_role_assignments.map((assignment) => assignment.outlet_id)
-        );
-        const desiredOutletIds = new Set(
-          accessFormData.outlet_role_assignments.map((assignment) => assignment.outlet_id)
-        );
+        // Count removals
+        for (const [outletId, roles] of existingOutletAssignments) {
+          const desired = desiredOutletAssignments.get(outletId) ?? new Set<string>();
+          for (const role of roles) {
+            if (!desired.has(role)) outletRoleRemovals++;
+          }
+        }
+        
+        // Count outlet assignment removals (outlets removed entirely)
+        for (const outletId of existingOutletAssignments.keys()) {
+          if (!desiredOutletAssignments.has(outletId)) {
+            outletRoleRemovals += existingOutletAssignments.get(outletId)!.size;
+          }
+        }
+        
+        const deltaSize = globalRoleAdditions + globalRoleRemovals + outletRoleAdditions + outletRoleRemovals;
+        
+        try {
+          // Update global roles
+          if (accessFormData.global_role_codes) {
+            await updateUserRoles(editingUser.id, {
+              role_codes: accessFormData.global_role_codes as Role[]
+            }, accessToken);
+          }
+          
+          // Update outlet roles in parallel
+          const existingOutletIds = new Set(
+            editingUser.outlet_role_assignments.map((assignment) => assignment.outlet_id)
+          );
+          const desiredOutletIds = new Set(
+            accessFormData.outlet_role_assignments.map((assignment) => assignment.outlet_id)
+          );
 
-        const updatePromises = accessFormData.outlet_role_assignments.map((assignment) =>
-          updateUserRoles(editingUser.id, {
-            outlet_id: assignment.outlet_id,
-            role_codes: assignment.role_codes as Role[]
-          }, accessToken)
-        );
-
-        const deletePromises = [...existingOutletIds]
-          .filter(outletId => !desiredOutletIds.has(outletId))
-          .map(outletId =>
+          const updatePromises = accessFormData.outlet_role_assignments.map((assignment) =>
             updateUserRoles(editingUser.id, {
-              outlet_id: outletId,
-              role_codes: []
+              outlet_id: assignment.outlet_id,
+              role_codes: assignment.role_codes as Role[]
             }, accessToken)
           );
 
-        await Promise.all([...updatePromises, ...deletePromises]);
+          const deletePromises = [...existingOutletIds]
+            .filter(outletId => !desiredOutletIds.has(outletId))
+            .map(outletId =>
+              updateUserRoles(editingUser.id, {
+                outlet_id: outletId,
+                role_codes: []
+              }, accessToken)
+            );
 
-        setSuccessMessage("User access updated successfully");
-        await usersQuery.refetch({ force: true });
-        closeDialog();
+          await Promise.all([...updatePromises, ...deletePromises]);
+
+          const latencyMs = Date.now() - accessStartTime;
+          trackActionSelect("users", actorRole, "update-access", "success");
+          
+          // Audit log with delta and latency  
+          console.log(JSON.stringify({
+            event: "access-update",
+            page: "users",
+            actorRole,
+            targetUserId: editingUser.id,
+            targetUserEmail: editingUser.email,
+            deltaSize,
+            latencyMs,
+            globalRoleAdditions,
+            globalRoleRemovals,
+            outletRoleAdditions,
+            outletRoleRemovals,
+            outcome: "success",
+            timestamp: Date.now()
+          }));
+
+          setSuccessMessage("User access updated successfully");
+          await usersQuery.refetch({ force: true });
+          closeDialog();
+        } catch (accessError) {
+          const errorMsg = accessError instanceof ApiError ? accessError.message : "Failed to update access";
+          setError(errorMsg);
+          trackActionError("users", actorRole, "update-access", errorMsg);
+        }
       } else if (dialogMode === "password" && editingUser) {
         await updateUserPassword(editingUser.id, {
           password: formData.password

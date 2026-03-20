@@ -165,6 +165,6 @@ development_status:
   # NOTE: UX improvements for user management - separate account editing, matrix-based role assignment, consolidated actions, standard filters
   epic-9: in-progress
   9-1-separate-account-editing-from-role-assignment: done  # COMPLETE - Account/access separation with integration tests
-  9-2-matrix-based-outlet-role-assignment: review  # COMPLETE - Matrix grid, sticky headers, bulk operations
+  9-2-matrix-based-outlet-role-assignment: done  # COMPLETE - Matrix grid with audit telemetry and tests
   9-3-consolidated-row-action-menus: done  # COMPLETE - Consolidated row action menus with telemetry module
   9-4-standard-filters-and-modal-ux-behavior: review  # COMPLETE - Standard filters and modal UX

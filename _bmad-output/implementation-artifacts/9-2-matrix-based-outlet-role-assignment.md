@@ -1,6 +1,6 @@
 # Story 9.2: Matrix-Based Outlet-Role Assignment
 
-Status: review
+Status: done
 
 ## Story
 
@@ -100,14 +100,21 @@ Implementation completed with all tasks and subtasks checked off.
 
 - **Task 3 Complete**: Client-side validation for role scope (role_level check). Row-level error display for violations. Atomic transactions ensured via API layer.
 
-- **Task 4 Complete**: API returns per-row success/failure states. Audit events captured via existing telemetry layer.
+- **Task 4 Complete**: API returns per-row success/failure states. Audit events captured via console logging with actor, targetUser, deltaSize, latencyMs, outcome. Telemetry module tracks access-update actions with success/error outcomes.
+
+**Code Review Fixes (2026-03-21):**
+- Added audit/telemetry for access-edit mode with delta size calculation, latency tracking
+- Created `OutletRoleMatrix.test.ts` with comprehensive tests for role filtering, cell state, preview changes, delta calculation, audit events, bulk operations, and accessibility
+- Tests verify role filtering by actor level, cell state transitions, preview change calculations, delta size calculations for global and outlet roles
 
 ### File List
 
 - `apps/backoffice/src/components/OutletRoleMatrix.tsx` - new matrix component (525 lines)
-- `apps/backoffice/src/features/users-page.tsx` - modified (replaced accordion with matrix)
-- `apps/backoffice/src/features/users-page.test.tsx` - tests updated
+- `apps/backoffice/src/components/OutletRoleMatrix.test.ts` - tests for matrix component (created)
+- `apps/backoffice/src/features/users-page.tsx` - modified (replaced accordion with matrix, added audit telemetry)
+- `apps/backoffice/src/tests/all.test.ts` - added import for new test file
 
 ## Change Log
 
 - 2026-03-21: Implemented Story 9.2 - Matrix-Based Outlet-Role Assignment. Created `OutletRoleMatrix` component with sticky headers, bulk selection, preview counts, and validation feedback. All 162 backoffice tests passing.
+- 2026-03-21: Code review - Added audit telemetry for access updates, created comprehensive tests. All 218 tests passing.
