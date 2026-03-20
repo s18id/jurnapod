@@ -157,6 +157,7 @@ export function buildReservationCalendarQuery(input: {
     date_from: dateFrom,
     date_to: dateTo,
     status: input.status ?? undefined,
+    overlap_filter: true, // Calendar uses interval overlap to show cross-midnight reservations on all affected days
     limit: 200,
     offset: 0
   };
@@ -226,6 +227,48 @@ export function getReservationDurationMinutes(
 ): number {
   const fallback = normalizeReservationDurationMinutes(defaultDurationMinutes);
   return normalizeReservationDurationMinutes(row.duration_minutes ?? fallback);
+}
+
+function calculateDayOffset(startKey: string, endKey: string): number {
+  if (startKey === endKey) {
+    return 0;
+  }
+
+  const startParts = parseDateKey(startKey);
+  const endParts = parseDateKey(endKey);
+
+  const startDate = Date.UTC(startParts.year, startParts.month - 1, startParts.day);
+  const endDate = Date.UTC(endParts.year, endParts.month - 1, endParts.day);
+
+  return Math.round((endDate - startDate) / (24 * 60 * 60 * 1000));
+}
+
+export function formatReservationTimeWithDayOffset(
+  row: ReservationRow,
+  defaultDurationMinutes?: number | null,
+  timeZone?: string | null
+): string {
+  const start = new Date(row.reservation_at);
+  const end = getReservationEndAt(row, defaultDurationMinutes);
+  const zone = normalizeTimeZone(timeZone);
+
+  // Calculate day offset using timezone-aware date comparison
+  const startKey = toDateKeyInTimeZone(start, zone);
+  const endKey = toDateKeyInTimeZone(new Date(end.getTime() - 1), zone);
+  const dayOffset = calculateDayOffset(startKey, endKey);
+
+  // Format times
+  const formatOptions: Intl.DateTimeFormatOptions = {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: zone ?? undefined
+  };
+  const startTime = start.toLocaleTimeString([], formatOptions);
+  const endTime = end.toLocaleTimeString([], formatOptions);
+
+  // Add day offset indicator
+  const indicator = dayOffset > 0 ? `+${dayOffset}` : "";
+  return `${startTime} - ${endTime}${indicator}`;
 }
 
 export function isOverlappingReservation(

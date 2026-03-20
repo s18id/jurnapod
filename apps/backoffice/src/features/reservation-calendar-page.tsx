@@ -45,6 +45,7 @@ import {
   DEFAULT_RESERVATION_DURATION_MINUTES,
   buildDailyUtilization,
   buildReservationTimelineByDay,
+  formatReservationTimeWithDayOffset,
   getReservationDurationMinutes,
   getReservationEndAt,
   isReservationFinalStatus,
@@ -882,9 +883,9 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
                                       {getReservationStatusLabel(row.status)}
                                     </Badge>
                                   </Group>
-                                  <Text size="xs" c="dimmed">
-                                    {formatTimeRange(row, defaultDurationMinutes, selectedOutletTimezone)} · {row.guest_count} guests · {tableLabel}
-                                  </Text>
+                                   <Text size="xs" c="dimmed">
+                                     {formatReservationTimeWithDayOffset(row, defaultDurationMinutes, selectedOutletTimezone)} · {row.guest_count} guests · {tableLabel}
+                                   </Text>
                                 </Stack>
                               </Button>
                             );
@@ -1010,9 +1011,9 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
                                         {getReservationStatusLabel(row.status)}
                                       </Badge>
                                     </Group>
-                                    <Text size="xs" c="dimmed">
-                                      {formatTimeRange(row, defaultDurationMinutes, selectedOutletTimezone)} · {row.guest_count} guests · {tableLabel}
-                                    </Text>
+                                     <Text size="xs" c="dimmed">
+                                       {formatReservationTimeWithDayOffset(row, defaultDurationMinutes, selectedOutletTimezone)} · {row.guest_count} guests · {tableLabel}
+                                     </Text>
                                   </Stack>
                                 </Button>
                               );
@@ -1137,7 +1138,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
                 {getReservationStatusLabel(detailReservation.status)}
               </Badge>
             </Group>
-            <Text size="sm">Time: {formatTimeRange(detailReservation, defaultDurationMinutes, selectedOutletTimezone)}</Text>
+            <Text size="sm">Time: {formatReservationTimeWithDayOffset(detailReservation, defaultDurationMinutes, selectedOutletTimezone)}</Text>
             <Text size="sm">
               Duration: {getReservationDurationMinutes(detailReservation, defaultDurationMinutes)} min
               {detailReservation.duration_minutes == null ? " (default)" : ""}

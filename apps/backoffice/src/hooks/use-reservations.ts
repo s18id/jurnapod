@@ -49,6 +49,7 @@ export function useReservations(
   const status = query?.status;
   const dateFrom = query?.date_from;
   const dateTo = query?.date_to;
+  const overlapFilter = query?.overlap_filter;
   const from = query?.from;
   const to = query?.to;
   const limit = query?.limit;
@@ -71,6 +72,7 @@ export function useReservations(
       if (status) params.set("status", status);
       if (dateFrom) params.set("date_from", dateFrom);
       if (dateTo) params.set("date_to", dateTo);
+      if (overlapFilter !== undefined) params.set("overlap_filter", String(overlapFilter));
       if (from) params.set("from", from);
       if (to) params.set("to", to);
       if (limit) params.set("limit", limit.toString());
@@ -88,7 +90,7 @@ export function useReservations(
     } finally {
       setLoading(false);
     }
-  }, [accessToken, outletId, status, dateFrom, dateTo, from, to, limit, offset]);
+  }, [accessToken, outletId, status, dateFrom, dateTo, overlapFilter, from, to, limit, offset]);
 
   useEffect(() => {
     refetch();
