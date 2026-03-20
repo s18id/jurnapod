@@ -77,7 +77,7 @@ So that **users have appropriate access levels**.
 - **Permission Model**: module_roles table with permission_mask (bitmask: 1=read, 2=write, 4=delete, 8=admin)
 - **API Security**: TLS 1.2+ in transit
 - **Tenant Isolation**: company_id checks at API middleware level
-- **API Style**: REST (Next.js API routes) at `/api/roles/*` and `/api/permissions/*`
+- **API Style**: REST (Hono.js API routes) at `/api/roles/*` and `/api/permissions/*`
 - **Existing Pattern**: See `apps/api/src/lib/users.ts` line 1366+ for permission_mask usage
 - **Default Modules**: companies, users, roles, outlets, accounts, journals, cash_bank, sales, inventory, purchasing, reports, settings, pos
 

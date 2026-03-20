@@ -72,7 +72,7 @@ So that **I can manage my team access**.
 - **Auth Method**: JWT (jose library)
 - **Authorization**: RBAC with roles (ADMIN can manage users)
 - **Tenant Isolation**: company_id enforced on all user operations
-- **API Style**: REST (Next.js API routes) at `/api/users/*`
+- **API Style**: REST (Hono.js API routes) at `/api/users/*`
 - **User Status**: pending, active, inactive
 
 ### Source Tree Components
