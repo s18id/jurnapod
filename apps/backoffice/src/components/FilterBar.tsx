@@ -2,16 +2,25 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { ReactNode } from "react";
-import { Group } from "@mantine/core";
+import { Button, Group } from "@mantine/core";
 
 type FilterBarProps = {
   children: ReactNode;
+  onClearAll?: () => void;
+  showClearAll?: boolean;
 };
 
-export function FilterBar({ children }: FilterBarProps) {
+export function FilterBar({ children, onClearAll, showClearAll = false }: FilterBarProps) {
   return (
-    <Group gap="sm" align="flex-end" wrap="wrap">
-      {children}
+    <Group gap="sm" align="flex-end" wrap="wrap" justify="space-between" style={{ width: "100%" }}>
+      <Group gap="sm" align="flex-end" wrap="wrap">
+        {children}
+      </Group>
+      {showClearAll && onClearAll && (
+        <Button variant="subtle" size="xs" onClick={onClearAll}>
+          Clear All
+        </Button>
+      )}
     </Group>
   );
 }

@@ -166,5 +166,5 @@ development_status:
   epic-9: in-progress
   9-1-separate-account-editing-from-role-assignment: review  # COMPLETE - Split dialogs, unsaved-changes, WCAG AA
   9-2-matrix-based-outlet-role-assignment: review  # COMPLETE - Matrix grid, sticky headers, bulk operations
-  9-3-consolidated-row-action-menus: ready-for-dev  # Story 9.3 from epics.md
-  9-4-standard-filters-and-modal-ux-behavior: ready-for-dev  # Story 9.4 from epics.md
+  9-3-consolidated-row-action-menus: review  # COMPLETE - Consolidated row action menus with telemetry
+  9-4-standard-filters-and-modal-ux-behavior: review  # COMPLETE - Standard filters and modal UX

@@ -14,3 +14,5 @@ import "../features/prices-page.test";
 import "../features/table-board-page.test";
 import "../features/reservation-calendar-page.test";
 import "../app/routes.test";
+import "../features/users-page-telemetry.test";
+import "../features/users-page-filters.test";

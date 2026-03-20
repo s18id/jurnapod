@@ -8,12 +8,14 @@ import {
   Button,
   Checkbox,
   Group,
+  Menu,
   Modal,
   Select,
   Stack,
   Text,
   TextInput,
-  Title
+  Title,
+  ActionIcon
 } from "@mantine/core";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
@@ -31,10 +33,20 @@ import {
 import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
 import { DataTable } from "../components/DataTable";
+import { DirtyConfirmDialog } from "../components/dirty-confirm-dialog";
 import { FilterBar } from "../components/FilterBar";
 import { OutletRoleMatrix } from "../components/OutletRoleMatrix";
 import { PageCard } from "../components/PageCard";
 import type { OutletResponse, Role, RoleResponse, UserResponse } from "@jurnapod/shared";
+import {
+  IconDots,
+  IconEdit,
+  IconShield,
+  IconBuildingStore,
+  IconLock,
+  IconBan,
+  IconCheck
+} from "@tabler/icons-react";
 
 type UsersPageProps = {
   user: SessionUser;
@@ -99,6 +111,18 @@ export function UsersPage(props: UsersPageProps) {
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [outletFilter, setOutletFilter] = useState<string>("all");
   const [selectedCompanyId, setSelectedCompanyId] = useState<number>(user.company_id);
+
+  // Clear all filters function
+  const clearAllFilters = () => {
+    setSearchTerm("");
+    setSearchQuery("");
+    setStatusFilter("active");
+    setRoleFilter("all");
+    setOutletFilter("all");
+  };
+
+  // Check if any filters are active (for showing Clear All button)
+  const hasActiveFilters = searchTerm !== "" || statusFilter !== "active" || roleFilter !== "all" || outletFilter !== "all";
   
   // Dialog state
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
@@ -120,6 +144,8 @@ export function UsersPage(props: UsersPageProps) {
     outlet_role_assignments: []
   });
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showDirtyConfirm, setShowDirtyConfirm] = useState(false);
+  const [pendingCloseAction, setPendingCloseAction] = useState<(() => void) | null>(null);
   
   // UI state
   const [submitting, setSubmitting] = useState(false);
@@ -289,11 +315,36 @@ export function UsersPage(props: UsersPageProps) {
   };
   
   const closeDialog = () => {
-    setDialogMode(null);
-    setEditingUser(null);
-    setFormData(emptyForm);
-    setFormErrors({});
-    setHasUnsavedChanges(false);
+    if (hasUnsavedChanges) {
+      // Show confirmation dialog instead of closing immediately
+      setShowDirtyConfirm(true);
+      setPendingCloseAction(() => () => {
+        setDialogMode(null);
+        setEditingUser(null);
+        setFormData(emptyForm);
+        setFormErrors({});
+        setHasUnsavedChanges(false);
+      });
+    } else {
+      setDialogMode(null);
+      setEditingUser(null);
+      setFormData(emptyForm);
+      setFormErrors({});
+      setHasUnsavedChanges(false);
+    }
+  };
+
+  const handleDirtyConfirm = () => {
+    setShowDirtyConfirm(false);
+    if (pendingCloseAction) {
+      pendingCloseAction();
+    }
+    setPendingCloseAction(null);
+  };
+
+  const handleDirtyCancel = () => {
+    setShowDirtyConfirm(false);
+    setPendingCloseAction(null);
   };
   
   const validateForm = (): boolean => {
@@ -790,61 +841,113 @@ export function UsersPage(props: UsersPageProps) {
           const targetUser = info.row.original;
           const isSelf = targetUser.id === user.id;
           const isSuperAdminUser = targetUser.global_roles.includes("SUPER_ADMIN");
-          const disableSelfAction = isSelf;
           const disableRoleAction = isSelf || isSuperAdminUser;
           const disableDeactivateAction = isSelf || isSuperAdminUser;
           const selfTooltip = isSelf ? "You cannot modify your own access." : undefined;
           const superAdminTooltip = isSuperAdminUser ? "Cannot modify SUPER_ADMIN user." : undefined;
           const roleTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
           const deactivateTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
+
+          // Telemetry helpers
+          const currentActorRole = user.global_roles[0] ?? "UNKNOWN";
+          const emitMenuOpen = () => {
+            console.log(JSON.stringify({
+              event: "action-menu-open",
+              page: "users",
+              actorRole: currentActorRole,
+              outcome: "success",
+              timestamp: Date.now(),
+            }));
+          };
+          const emitActionSelect = (actionName: string, outcome: "success" | "error", errorMessage?: string) => {
+            console.log(JSON.stringify({
+              event: outcome === "success" ? "action-select" : "action-error",
+              page: "users",
+              actorRole: currentActorRole,
+              actionName,
+              outcome,
+              errorMessage,
+              timestamp: Date.now(),
+            }));
+          };
+
           return (
-            <Group gap="xs" justify="flex-end" wrap="wrap">
-              <Button
-                size="xs"
-                variant="light"
-                onClick={() => openAccountDialog(targetUser)}
-              >
-                Edit Account
-              </Button>
-              <Button
-                size="xs"
-                variant="light"
-                onClick={() => openAccessDialog(targetUser)}
-                disabled={disableRoleAction}
-                title={roleTooltip}
-              >
-                Manage Access
-              </Button>
-              <Button
-                size="xs"
-                variant="light"
-                onClick={() => openPasswordDialog(targetUser)}
-              >
-                Password
-              </Button>
-              {targetUser.is_active ? (
-                <Button
-                  size="xs"
-                  color="red"
-                  variant="light"
-                  onClick={() => setConfirmState({ action: "deactivate", user: targetUser })}
-                  disabled={disableDeactivateAction}
-                  title={deactivateTooltip}
+            <Menu>
+              <Menu.Target>
+                <ActionIcon variant="subtle" onClick={emitMenuOpen}>
+                  <IconDots size={16} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item
+                  leftSection={<IconEdit size={14} />}
+                  onClick={() => {
+                    emitActionSelect("edit-user", "success");
+                    openAccountDialog(targetUser);
+                  }}
                 >
-                  Deactivate
-                </Button>
-              ) : (
-                <Button
-                  size="xs"
-                  variant="light"
-                  onClick={() => setConfirmState({ action: "reactivate", user: targetUser })}
-                  disabled={disableSelfAction}
-                  title={selfTooltip}
+                  Edit User
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<IconShield size={14} />}
+                  onClick={() => {
+                    emitActionSelect("manage-roles", "success");
+                    openAccessDialog(targetUser);
+                  }}
+                  disabled={disableRoleAction}
+                  title={roleTooltip}
                 >
-                  Reactivate
-                </Button>
-              )}
-            </Group>
+                  Manage Roles
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<IconBuildingStore size={14} />}
+                  onClick={() => {
+                    emitActionSelect("assign-outlets", "success");
+                    openAccessDialog(targetUser);
+                  }}
+                  disabled={disableRoleAction}
+                  title={roleTooltip}
+                >
+                  Assign Outlets
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<IconLock size={14} />}
+                  onClick={() => {
+                    emitActionSelect("change-password", "success");
+                    openPasswordDialog(targetUser);
+                  }}
+                >
+                  Change Password
+                </Menu.Item>
+                {targetUser.is_active ? (
+                  <Menu.Item
+                    leftSection={<IconBan size={14} />}
+                    color="red"
+                    onClick={() => {
+                      emitActionSelect("deactivate", "success");
+                      setConfirmState({ action: "deactivate", user: targetUser });
+                    }}
+                    disabled={disableDeactivateAction}
+                    title={deactivateTooltip}
+                  >
+                    Deactivate
+                  </Menu.Item>
+                ) : (
+                  <Menu.Item
+                    leftSection={<IconCheck size={14} />}
+                    color="green"
+                    onClick={() => {
+                      emitActionSelect("reactivate", "success");
+                      setConfirmState({ action: "reactivate", user: targetUser });
+                    }}
+                    disabled={isSelf}
+                    title={selfTooltip}
+                  >
+                    Reactivate
+                  </Menu.Item>
+                )}
+              </Menu.Dropdown>
+            </Menu>
           );
         }
       }
@@ -891,7 +994,7 @@ export function UsersPage(props: UsersPageProps) {
         </PageCard>
 
         <PageCard title="Filters">
-          <FilterBar>
+          <FilterBar onClearAll={clearAllFilters} showClearAll={hasActiveFilters}>
             {isSuperAdmin ? (
               <Select
                 label="Company"
@@ -970,6 +1073,8 @@ export function UsersPage(props: UsersPageProps) {
         }
         centered
         size="lg"
+        closeOnClickOutside={!hasUnsavedChanges}
+        closeOnEscape={!hasUnsavedChanges}
       >
         <Stack gap="md">
           {(dialogMode === "account-create" || dialogMode === "account-edit") && (
@@ -1125,6 +1230,37 @@ export function UsersPage(props: UsersPageProps) {
           </Group>
         </Stack>
       </Modal>
+
+      {/* Dirty confirmation dialog for unsaved changes */}
+      <DirtyConfirmDialog
+        opened={showDirtyConfirm}
+        onConfirm={handleDirtyConfirm}
+        onCancel={handleDirtyCancel}
+        title="Unsaved Changes"
+        message="You have unsaved changes. Are you sure you want to discard them?"
+        confirmText="Discard"
+        cancelText="Keep Editing"
+      />
+
+      {/* Accessibility: aria-live region for status announcements */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: "absolute",
+          width: "1px",
+          height: "1px",
+          padding: "0",
+          margin: "-1px",
+          overflow: "hidden",
+          clip: "rect(0, 0, 0, 0)",
+          whiteSpace: "nowrap",
+          border: "0"
+        }}
+      >
+        {successMessage}
+      </div>
     </>
   );
 }
