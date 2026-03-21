@@ -19,3 +19,5 @@ import "../app/routes.test";
 import "../features/users-page-telemetry.test";
 import "../features/users-page-filters.test";
 import "../features/users-page-account.test";
+import "../components/ui/FilterBar/FilterBar.test";
+import "../hooks/use-filters.test";

@@ -98,3 +98,145 @@ export function trackActionError(
     errorMessage,
   });
 }
+
+// ============================================================================
+// Filter Telemetry
+// ============================================================================
+
+export interface FilterTelemetryEvent {
+  page: string;
+  filterType: string;
+  action: "apply" | "clear" | "change";
+  latencyMs: number;
+  outcome: "success" | "error";
+  errorMessage?: string;
+  resultCount?: number;
+}
+
+/**
+ * Track filter apply action.
+ */
+export function trackFilterApply(
+  page: string,
+  filterType: string,
+  latencyMs: number,
+  resultCount?: number
+): void {
+  trackEvent({
+    event: "filter-apply",
+    page,
+    actorRole: "",
+    outcome: "success",
+    actionName: `${filterType}:apply`,
+  });
+  
+  // Also log to console for development tracking
+  console.log(
+    `[FilterTelemetry] apply | page=${page} | type=${filterType} | latency=${latencyMs}ms | results=${resultCount ?? "N/A"}`
+  );
+}
+
+/**
+ * Track filter clear action.
+ */
+export function trackFilterClear(
+  page: string,
+  latencyMs: number
+): void {
+  trackEvent({
+    event: "filter-clear",
+    page,
+    actorRole: "",
+    outcome: "success",
+    actionName: "filters:clear",
+  });
+  
+  console.log(
+    `[FilterTelemetry] clear | page=${page} | latency=${latencyMs}ms`
+  );
+}
+
+/**
+ * Track filter change action.
+ */
+export function trackFilterChange(
+  page: string,
+  filterType: string,
+  latencyMs: number
+): void {
+  console.log(
+    `[FilterTelemetry] change | page=${page} | type=${filterType} | latency=${latencyMs}ms`
+  );
+}
+
+/**
+ * Track filter error.
+ */
+export function trackFilterError(
+  page: string,
+  filterType: string,
+  errorMessage: string
+): void {
+  trackEvent({
+    event: "filter-error",
+    page,
+    actorRole: "",
+    outcome: "error",
+    actionName: `${filterType}:error`,
+    errorMessage,
+  });
+  
+  console.error(
+    `[FilterTelemetry] error | page=${page} | type=${filterType} | message=${errorMessage}`
+  );
+}
+
+/**
+ * Create a filter timing tracker.
+ * Use in a filter operation to measure latency.
+ * 
+ * @example
+ * ```tsx
+ * const trackFilter = createFilterTracker("users-page", "search");
+ * 
+ * // Start tracking
+ * trackFilter.start();
+ * 
+ * // ... perform filter operation ...
+ * 
+ * // End tracking with result count
+ * trackFilter.end(resultCount);
+ * ```
+ */
+export function createFilterTracker(
+  page: string,
+  filterType: string
+): {
+  start: () => void;
+  end: (resultCount?: number) => void;
+  error: (errorMessage: string) => void;
+} {
+  let startTime: number | null = null;
+  
+  return {
+    start: () => {
+      startTime = Date.now();
+    },
+    end: (resultCount?: number) => {
+      if (startTime !== null) {
+        const latencyMs = Date.now() - startTime;
+        trackFilterApply(page, filterType, latencyMs, resultCount);
+        startTime = null;
+      }
+    },
+    error: (errorMessage: string) => {
+      if (startTime !== null) {
+        const latencyMs = Date.now() - startTime;
+        console.log(
+          `[FilterTelemetry] error-after-apply | page=${page} | type=${filterType} | latency=${latencyMs}ms | message=${errorMessage}`
+        );
+        startTime = null;
+      }
+    },
+  };
+}
