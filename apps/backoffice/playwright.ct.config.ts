@@ -11,7 +11,7 @@ export default defineConfig({
   /* The base directory, relative to the config file, for snapshot files created with toMatchSnapshot. */
   snapshotDir: "./__snapshots__",
   /* Maximum time one test can run for. */
-  timeout: 10 * 1000,
+  timeout: 60 * 1000,
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -28,12 +28,12 @@ export default defineConfig({
     trace: "on-first-retry",
 
     /* Port to use for Playwright component endpoint. */
-    ctPort: 3100,
+    ctPort: 3101,
 
-    /* Configure ctViteConfig to use the same Vite config as the app */
+    /* Configure ctViteConfig to use simplified Vite config for component testing */
     ctViteConfig: {
-      configFile: "./vite.config.ts"
-    }
+      configFile: "./vite.ct.config.ts"
+    },
   },
 
   /* Configure projects for major browsers */

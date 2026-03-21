@@ -15,6 +15,9 @@
     "qa:e2e:headed": "playwright test --headed",
     "qa:e2e:install": "playwright install chromium",
     "qa:e2e:axe": "playwright test --grep \"accessibility\"",
+    "qa:e2e:ui": "playwright test --ui",
+    "qa:e2e:debug": "playwright test --debug",
+    "qa:e2e:single": "playwright test",
     "qa:ct": "playwright test -c playwright.ct.config.ts",
     "qa:ct:headed": "playwright test -c playwright.ct.config.ts --headed"
   },

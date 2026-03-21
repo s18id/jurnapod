@@ -11,6 +11,7 @@ pnpm-lock.yaml
 .env.e2e
 .opencode
 .next
+.cache
 apps/pos/.lighthouseci/
 apps/pos/test-results/
 e2e-tests/screenshots/

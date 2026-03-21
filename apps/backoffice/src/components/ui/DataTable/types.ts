@@ -107,7 +107,7 @@ export function getPaginationRangeText(
   if (totalCount === 0) return "0 items";
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, totalCount);
-  return `${start}-${end} of ${totalCount}`;
+  return `${start}–${end} of ${totalCount}`;
 }
 
 // ============================================================================

@@ -13,8 +13,8 @@ test("backoffice app loads", async ({ page }) => {
     });
   });
 
-  // Mock login endpoint to avoid redirect
-  await page.route("**/api/auth/login", async (route) => {
+  // Mock user endpoint - return 401 to show login page
+  await page.route("**/api/users/me", async (route) => {
     await route.fulfill({
       status: 401,
       contentType: "application/json",
@@ -25,14 +25,15 @@ test("backoffice app loads", async ({ page }) => {
   // Go to the backoffice app
   await page.goto("/");
   
-  // Check that the page contains something indicative of the app
-  // This could be a login form, title, or specific text
-  await expect(page).toHaveTitle(/Jurnapod|Backoffice/i);
+  // Wait for the page to settle
+  await page.waitForLoadState("domcontentloaded");
   
-  // Check for presence of login elements or app container
+  // Check that the page title contains Jurnapod or Backoffice
+  await expect(page).toHaveTitle(/Jurnapod|Backoffice/i, { timeout: 10000 });
+  
+  // Check for presence of login form elements
   const hasLoginForm = await page.getByLabel("Company Code").isVisible().catch(() => false);
-  const hasAppContainer = await page.locator("#root").isVisible().catch(() => false);
   
-  // At least one should be visible
-  expect(hasLoginForm || hasAppContainer).toBeTruthy();
+  // The login form should be visible since we're not authenticated
+  await expect(page.locator('[data-testid="login-company-code"]')).toBeVisible({ timeout: 5000 });
 });

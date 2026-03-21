@@ -23,16 +23,18 @@ export const E2E_SELECTORS = {
     liveRegion: "[data-testid='data-table-live-region']",
     skipLink: "[data-testid='data-table-skip-link']"
   },
-  // PageHeader component selectors
-  pageHeader: {
-    container: "[data-testid='page-header']",
-    title: "[data-testid='page-header-title']",
-    description: "[data-testid='page-header-description']",
-    actionButton: "[data-testid='page-header-action-button']"
+  // PageCard component selectors
+  pageCard: {
+    container: "[data-testid='page-card']",
+    title: "[data-testid='page-card-title']",
+    description: "[data-testid='page-card-description']",
+    actions: "[data-testid='page-card-actions']"
   },
   // FilterBar component selectors
   filterBar: {
     container: "[data-testid='filter-bar']",
+    children: "[data-testid='filter-bar-children']",
+    clearAll: "[data-testid='filter-bar-clear-all']",
     searchInput: "[data-testid='filter-bar-search-input']",
     filterButton: "[data-testid='filter-bar-filter-button']",
     clearButton: "[data-testid='filter-bar-clear-button']"

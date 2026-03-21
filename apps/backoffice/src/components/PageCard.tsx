@@ -13,19 +13,19 @@ type PageCardProps = {
 
 export function PageCard({ title, description, actions, children }: PageCardProps) {
   return (
-    <Card>
+    <Card data-testid="page-card">
       <Stack gap="sm">
         {title || description || actions ? (
           <Group justify="space-between" align="flex-start" wrap="wrap">
             <div>
-              {title ? <Title order={4}>{title}</Title> : null}
+              {title ? <Title order={4} data-testid="page-card-title">{title}</Title> : null}
               {description ? (
-                <Text c="dimmed" size="sm">
+                <Text c="dimmed" size="sm" data-testid="page-card-description">
                   {description}
                 </Text>
               ) : null}
             </div>
-            {actions ? <Group gap="sm">{actions}</Group> : null}
+            {actions ? <Group gap="sm" data-testid="page-card-actions">{actions}</Group> : null}
           </Group>
         ) : null}
         {children}

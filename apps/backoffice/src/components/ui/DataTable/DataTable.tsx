@@ -275,6 +275,7 @@ function SortHeaderCell({
                 handleSortClick();
               }
             }}
+            data-testid={testId ? `${testId}-sort-button` : undefined}
           >
             {sortIcon}
           </ActionIcon>
@@ -331,7 +332,7 @@ function SkeletonLoader({
   testId,
 }: SkeletonLoaderProps) {
   return (
-    <Table.Tbody>
+    <Table.Tbody data-testid={testId ? `${testId}-skeleton` : undefined}>
       {Array.from({ length: rowCount }).map((_, index) => (
         <SkeletonRow
           key={index}
@@ -355,7 +356,7 @@ interface EmptyStateProps {
 
 function EmptyState({ message, testId }: EmptyStateProps) {
   return (
-    <Table.Tr>
+    <Table.Tr data-testid={testId ? `${testId}-empty-state` : undefined}>
       <Table.Td colSpan={100}>
         <Stack align="center" gap="md" py="xl">
           <IconDatabaseOff size={48} stroke={1.5} color="var(--mantine-color-gray-5)" />
@@ -380,7 +381,7 @@ interface ErrorStateProps {
 
 function ErrorState({ error, onRetry, testId }: ErrorStateProps) {
   return (
-    <Table.Tr>
+    <Table.Tr data-testid={testId ? `${testId}-error-state` : undefined}>
       <Table.Td colSpan={100}>
         <Stack align="center" gap="md" py="xl">
           <IconAlertCircle size={48} stroke={1.5} color="var(--mantine-color-red-5)" />
@@ -946,12 +947,7 @@ export function DataTable<TData>({
       );
     }
 
-    // Empty state
-    if (data.length === 0) {
-      return <EmptyState message={emptyState} testId={testId} />;
-    }
-
-    // Loading skeleton
+    // Loading skeleton (must come before empty state check — data is empty during initial load)
     if (loading === "loading") {
       return (
         <SkeletonLoader
@@ -961,6 +957,11 @@ export function DataTable<TData>({
           testId={testId}
         />
       );
+    }
+
+    // Empty state
+    if (data.length === 0) {
+      return <EmptyState message={emptyState} testId={testId} />;
     }
 
     // Normal data rows

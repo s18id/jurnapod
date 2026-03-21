@@ -66,6 +66,10 @@ export type GoogleLoginInput = {
 };
 
 export function getStoredAccessToken(): string | null {
+  // Check for E2E test token first
+  if (typeof window !== "undefined" && (window as any).__E2E_ACCESS_TOKEN__) {
+    return (window as any).__E2E_ACCESS_TOKEN__;
+  }
   return inMemoryAccessToken;
 }
 

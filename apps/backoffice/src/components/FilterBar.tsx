@@ -12,12 +12,12 @@ type FilterBarProps = {
 
 export function FilterBar({ children, onClearAll, showClearAll = false }: FilterBarProps) {
   return (
-    <Group gap="sm" align="flex-end" wrap="wrap" justify="space-between" style={{ width: "100%" }}>
-      <Group gap="sm" align="flex-end" wrap="wrap">
+    <Group gap="sm" align="flex-end" wrap="wrap" justify="space-between" style={{ width: "100%" }} data-testid="filter-bar">
+      <Group gap="sm" align="flex-end" wrap="wrap" data-testid="filter-bar-children">
         {children}
       </Group>
       {showClearAll && onClearAll && (
-        <Button variant="subtle" size="xs" onClick={onClearAll}>
+        <Button variant="subtle" size="xs" onClick={onClearAll} data-testid="filter-bar-clear-all">
           Clear All
         </Button>
       )}

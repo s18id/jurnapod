@@ -523,10 +523,10 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
       )}
 
       {/* Header */}
-      <Group justify="space-between" align="center">
+      <Group justify="space-between" align="center" data-testid="items-page-header">
         <div>
-          <Title order={2}>Items</Title>
-          <Text size="sm" c="dimmed">
+          <Title order={2} data-testid="items-page-title">Items</Title>
+          <Text size="sm" c="dimmed" data-testid="items-page-description">
             Manage your product catalog
           </Text>
         </div>

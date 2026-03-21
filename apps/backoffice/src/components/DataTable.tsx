@@ -33,9 +33,9 @@ export function DataTable<TData>({
   const rows = table.getRowModel().rows;
 
   return (
-    <ScrollArea type="auto" scrollbarSize={8} offsetScrollbars>
+    <ScrollArea type="auto" scrollbarSize={8} offsetScrollbars data-testid="data-table">
       <Table stickyHeader={stickyHeader} style={minWidth ? { minWidth } : undefined}>
-        <Table.Thead>
+        <Table.Thead data-testid="data-table-header">
           {table.getHeaderGroups().map((headerGroup) => (
             <Table.Tr key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
@@ -59,9 +59,9 @@ export function DataTable<TData>({
             </Table.Tr>
           ) : (
             rows.map((row) => (
-              <Table.Tr key={row.id}>
+              <Table.Tr key={row.id} data-testid="data-table-row">
                 {row.getVisibleCells().map((cell) => (
-                  <Table.Td key={cell.id}>
+                  <Table.Td key={cell.id} data-testid="data-table-cell">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </Table.Td>
                 ))}
