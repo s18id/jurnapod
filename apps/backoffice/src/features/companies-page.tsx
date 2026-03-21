@@ -334,7 +334,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
           return (
             <Group gap="xs" justify="flex-end" wrap="wrap">
               <Tooltip label="View details">
-                <ActionIcon variant="light" onClick={() => openDetailDrawer(company)}>
+                <ActionIcon variant="light" onClick={() => openDetailDrawer(company)} aria-label="View company details">
                   <IconEye size={16} />
                 </ActionIcon>
               </Tooltip>

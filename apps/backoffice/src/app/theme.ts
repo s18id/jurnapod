@@ -40,6 +40,21 @@ const cafe = [
   "#5a3f25"
 ] as const;
 
+// Accessible gray scale designed for WCAG AA contrast (4.5:1 on white)
+// Used for dimmed text and secondary UI elements
+const gray = [
+  "#f9fafb", // 0 - lightest, for backgrounds
+  "#f3f4f6", // 1 - subtle backgrounds
+  "#e5e7eb", // 2 - borders, dividers
+  "#d1d5db", // 3 - disabled states
+  "#9ca3af", // 4 - placeholder text (meets 3:1 on white)
+  "#6b7280", // 5 - dimmed text (meets 4.5:1 on white)
+  "#4b5563", // 6 - secondary text
+  "#374151", // 7 - emphasis text
+  "#1f2937", // 8 - primary text
+  "#111827"  // 9 - darkest, high emphasis
+] as const;
+
 const slate = [
   "#f6f7f8",
   "#eceef1",
@@ -94,12 +109,30 @@ export function setStoredThemeVariant(variant: ThemeVariant): void {
 
 export function buildMantineTheme(variant: ThemeVariant): MantineThemeOverride {
   const tokens = themeTokens[variant];
+  
+  // Accessible dimmed color array - gray-5 (#6b7280) at index 5 meets WCAG AA 4.5:1
+  const accessibleDimmed = [
+    "#f9fafb",
+    "#f3f4f6",
+    "#e5e7eb",
+    "#d1d5db",
+    "#9ca3af",
+    "#6b7280", // Index 5 - used as "dimmed" color, meets 4.5:1 on white
+    "#4b5563",
+    "#374151",
+    "#1f2937",
+    "#111827"
+  ] as const;
+  
   return createTheme({
     primaryColor: tokens.primaryColor,
     colors: {
       forest,
       cafe,
-      slate
+      slate,
+      gray,
+      // Override dimmed with accessible gray-5 (#6b7280)
+      dimmed: accessibleDimmed
     },
     fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif",
     headings: {

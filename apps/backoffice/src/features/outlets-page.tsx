@@ -513,6 +513,7 @@ export function OutletsPage(props: OutletsPageProps) {
               variant="light"
               onClick={() => openDetailDrawer(info.row.original)}
               disabled={submitting || deleting}
+              aria-label="View outlet details"
             >
               <IconEye size={16} />
             </ActionIcon>
@@ -523,6 +524,7 @@ export function OutletsPage(props: OutletsPageProps) {
               color="red"
               onClick={() => setConfirmState(info.row.original)}
               disabled={submitting || deleting}
+              aria-label="Delete outlet"
             >
               <IconTrash size={16} />
             </ActionIcon>
