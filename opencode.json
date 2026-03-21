@@ -1,13 +1,169 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "autoupdate": false,
-  "provider": {
-    "opencode-go": {
-      "options": {
-        "timeout": 600000,
-        "chunkTimeout": 120000,
-        "textVerbosity": "low"
-      }
+  
+  "model": "opencode-go/minimax-m2.7",
+  "small_model": "opencode-go/minimax-m2.7",
+  
+  "default_agent": "plan",
+  
+  "agent": {
+    "plan": {
+      "path": ".opencode/agents/plan.md"
+    },
+    "build": {
+      "path": ".opencode/agents/build.md"
+    },
+    
+    "bmad-analyst": {
+      "path": ".opencode/agents/bmad-analyst.md"
+    },
+    "bmad-pm": {
+      "path": ".opencode/agents/bmad-pm.md"
+    },
+    "bmad-architect": {
+      "path": ".opencode/agents/bmad-architect.md"
+    },
+    "bmad-ux-designer": {
+      "path": ".opencode/agents/bmad-ux-designer.md"
+    },
+    "bmad-dev": {
+      "path": ".opencode/agents/bmad-dev.md"
+    },
+    "bmad-dev-story": {
+      "path": ".opencode/agents/bmad-dev-story.md"
+    },
+    "bmad-sm": {
+      "path": ".opencode/agents/bmad-sm.md"
+    },
+    "bmad-master": {
+      "path": ".opencode/agents/bmad-master.md"
+    },
+    "bmad-code-review": {
+      "path": ".opencode/agents/bmad-code-review.md"
+    },
+    "bmad-qa": {
+      "path": ".opencode/agents/bmad-qa.md"
+    },
+    "bmad-qa-generate-e2e-tests": {
+      "path": ".opencode/agents/bmad-qa-generate-e2e-tests.md"
+    },
+    "bmad-testarch-test-design": {
+      "path": ".opencode/agents/bmad-testarch-test-design.md"
+    },
+    "bmad-testarch-framework": {
+      "path": ".opencode/agents/bmad-testarch-framework.md"
+    },
+    "bmad-testarch-atdd": {
+      "path": ".opencode/agents/bmad-testarch-atdd.md"
+    },
+    "bmad-testarch-trace": {
+      "path": ".opencode/agents/bmad-testarch-trace.md"
+    },
+    "bmad-testarch-nfr": {
+      "path": ".opencode/agents/bmad-testarch-nfr.md"
+    },
+    "bmad-testarch-ci": {
+      "path": ".opencode/agents/bmad-testarch-ci.md"
+    },
+    "bmad-testarch-automate": {
+      "path": ".opencode/agents/bmad-testarch-automate.md"
+    },
+    "bmad-testarch-test-review": {
+      "path": ".opencode/agents/bmad-testarch-test-review.md"
+    },
+    "bmad-brainstorming": {
+      "path": ".opencode/agents/bmad-brainstorming.md"
+    },
+    "bmad-create-epics-and-stories": {
+      "path": ".opencode/agents/bmad-create-epics-and-stories.md"
+    },
+    "bmad-create-story": {
+      "path": ".opencode/agents/bmad-create-story.md"
+    },
+    "bmad-create-prd": {
+      "path": ".opencode/agents/bmad-create-prd.md"
+    },
+    "bmad-validate-prd": {
+      "path": ".opencode/agents/bmad-validate-prd.md"
+    },
+    "bmad-create-architecture": {
+      "path": ".opencode/agents/bmad-create-architecture.md"
+    },
+    "bmad-quick-spec": {
+      "path": ".opencode/agents/bmad-quick-spec.md"
+    },
+    "bmad-quick-dev": {
+      "path": ".opencode/agents/bmad-quick-dev.md"
+    },
+    "bmad-quick-flow-solo-dev": {
+      "path": ".opencode/agents/bmad-quick-flow-solo-dev.md"
+    },
+    "bmad-review-adversarial-general": {
+      "path": ".opencode/agents/bmad-review-adversarial-general.md"
+    },
+    "bmad-review-edge-case-hunter": {
+      "path": ".opencode/agents/bmad-review-edge-case-hunter.md"
+    },
+    "bmad-sprint-planning": {
+      "path": ".opencode/agents/bmad-sprint-planning.md"
+    },
+    "bmad-sprint-status": {
+      "path": ".opencode/agents/bmad-sprint-status.md"
+    },
+    "bmad-retrospective": {
+      "path": ".opencode/agents/bmad-retrospective.md"
+    },
+    "bmad-correct-course": {
+      "path": ".opencode/agents/bmad-correct-course.md"
+    },
+    "bmad-market-research": {
+      "path": ".opencode/agents/bmad-market-research.md"
+    },
+    "bmad-technical-research": {
+      "path": ".opencode/agents/bmad-technical-research.md"
+    },
+    "bmad-document-project": {
+      "path": ".opencode/agents/bmad-document-project.md"
+    },
+    "bmad-generate-project-context": {
+      "path": ".opencode/agents/bmad-generate-project-context.md"
+    },
+    "bmad-shard-doc": {
+      "path": ".opencode/agents/bmad-shard-doc.md"
+    },
+    "bmad-tech-writer": {
+      "path": ".opencode/agents/bmad-tech-writer.md"
+    },
+    "bmad-teach-me-testing": {
+      "path": ".opencode/agents/bmad-teach-me-testing.md"
+    },
+    "bmad-advanced-elicitation": {
+      "path": ".opencode/agents/bmad-advanced-elicitation.md"
+    },
+    "bmad-party-mode": {
+      "path": ".opencode/agents/bmad-party-mode.md"
+    },
+    "bmad-help": {
+      "path": ".opencode/agents/bmad-help.md"
+    },
+    
+    "bmad-claude-architect": {
+      "path": ".opencode/agents/bmad-claude-architect.md"
+    },
+    "bmad-claude-analyst": {
+      "path": ".opencode/agents/bmad-claude-analyst.md"
+    },
+    "bmad-claude-brainstorming": {
+      "path": ".opencode/agents/bmad-claude-brainstorming.md"
+    },
+    "bmad-claude-pm": {
+      "path": ".opencode/agents/bmad-claude-pm.md"
+    },
+    "bmad-claude-review": {
+      "path": ".opencode/agents/bmad-claude-review.md"
+    },
+    "bmad-claude-party-mode": {
+      "path": ".opencode/agents/bmad-claude-party-mode.md"
     }
-  }
+  },
 }
