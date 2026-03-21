@@ -9,6 +9,10 @@ export default defineConfig({
   plugins: [
     react(),
   ],
+  server: {
+    port: 3101,
+    strictPort: true,
+  },
   build: {
     outDir: "dist-ct",
     sourcemap: true

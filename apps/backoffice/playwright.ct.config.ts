@@ -30,7 +30,7 @@ export default defineConfig({
     /* Port to use for Playwright component endpoint. */
     ctPort: 3101,
 
-    /* Configure ctViteConfig to use simplified Vite config for component testing */
+    /* Use separate Vite config for component testing (avoids PWA plugin) */
     ctViteConfig: {
       configFile: "./vite.ct.config.ts"
     },
