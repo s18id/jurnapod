@@ -205,3 +205,174 @@ describe("Users Page - clearAllFilters Logic", () => {
     assert.strictEqual(state.companyId, null);
   });
 });
+
+// Tests for URL query parameter serialization
+describe("Users Page - URL Query Params", () => {
+  // Simulate URLSearchParams parsing
+  function parseFromUrl(params: URLSearchParams): Partial<FilterState> {
+    const parsed: Partial<FilterState> = {};
+
+    const search = params.get("search");
+    if (search !== null) {
+      parsed.search = search;
+    }
+
+    const status = params.get("status");
+    if (status !== null && ["all", "active", "inactive"].includes(status)) {
+      parsed.status = status as FilterState["status"];
+    }
+
+    const role = params.get("role");
+    if (role !== null) {
+      parsed.role = role;
+    }
+
+    const outlet = params.get("outlet");
+    if (outlet !== null) {
+      parsed.outlet = outlet;
+    }
+
+    const companyIdStr = params.get("companyId");
+    if (companyIdStr !== null) {
+      const companyId = parseInt(companyIdStr, 10);
+      if (!isNaN(companyId)) {
+        parsed.companyId = companyId;
+      }
+    }
+
+    return parsed;
+  }
+
+  function serializeToUrl(state: FilterState): URLSearchParams {
+    const params = new URLSearchParams();
+
+    if (state.search) {
+      params.set("search", state.search);
+    }
+    if (state.status !== "active") {
+      params.set("status", state.status);
+    }
+    if (state.role !== "all") {
+      params.set("role", state.role);
+    }
+    if (state.outlet !== "all") {
+      params.set("outlet", state.outlet);
+    }
+    if (state.companyId !== null) {
+      params.set("companyId", String(state.companyId));
+    }
+
+    return params;
+  }
+
+  it("parses search from URL params", () => {
+    const params = new URLSearchParams("search=john@example.com");
+    const result = parseFromUrl(params);
+    assert.strictEqual(result.search, "john@example.com");
+  });
+
+  it("parses status from URL params", () => {
+    const params = new URLSearchParams("status=inactive");
+    const result = parseFromUrl(params);
+    assert.strictEqual(result.status, "inactive");
+  });
+
+  it("parses role from URL params", () => {
+    const params = new URLSearchParams("role=ADMIN");
+    const result = parseFromUrl(params);
+    assert.strictEqual(result.role, "ADMIN");
+  });
+
+  it("parses outlet from URL params", () => {
+    const params = new URLSearchParams("outlet=123");
+    const result = parseFromUrl(params);
+    assert.strictEqual(result.outlet, "123");
+  });
+
+  it("parses companyId from URL params", () => {
+    const params = new URLSearchParams("companyId=5");
+    const result = parseFromUrl(params);
+    assert.strictEqual(result.companyId, 5);
+  });
+
+  it("ignores invalid status value", () => {
+    const params = new URLSearchParams("status=invalid");
+    const result = parseFromUrl(params);
+    assert.strictEqual(result.status, undefined);
+  });
+
+  it("ignores invalid companyId value", () => {
+    const params = new URLSearchParams("companyId=notanumber");
+    const result = parseFromUrl(params);
+    assert.strictEqual(result.companyId, undefined);
+  });
+
+  it("parses all filters together", () => {
+    const params = new URLSearchParams("search=test&status=all&role=OWNER&outlet=456&companyId=10");
+    const result = parseFromUrl(params);
+    assert.strictEqual(result.search, "test");
+    assert.strictEqual(result.status, "all");
+    assert.strictEqual(result.role, "OWNER");
+    assert.strictEqual(result.outlet, "456");
+    assert.strictEqual(result.companyId, 10);
+  });
+
+  it("serializes search to URL params", () => {
+    const state: FilterState = { ...DEFAULT_FILTER_STATE, search: "test@example.com" };
+    const params = serializeToUrl(state);
+    assert.strictEqual(params.get("search"), "test@example.com");
+  });
+
+  it("serializes status to URL params when not default", () => {
+    const state: FilterState = { ...DEFAULT_FILTER_STATE, status: "inactive" };
+    const params = serializeToUrl(state);
+    assert.strictEqual(params.get("status"), "inactive");
+  });
+
+  it("does not serialize status when default (active)", () => {
+    const state: FilterState = { ...DEFAULT_FILTER_STATE, status: "active" };
+    const params = serializeToUrl(state);
+    assert.strictEqual(params.get("status"), null);
+  });
+
+  it("serializes role to URL params when not all", () => {
+    const state: FilterState = { ...DEFAULT_FILTER_STATE, role: "ADMIN" };
+    const params = serializeToUrl(state);
+    assert.strictEqual(params.get("role"), "ADMIN");
+  });
+
+  it("serializes outlet to URL params when not all", () => {
+    const state: FilterState = { ...DEFAULT_FILTER_STATE, outlet: "123" };
+    const params = serializeToUrl(state);
+    assert.strictEqual(params.get("outlet"), "123");
+  });
+
+  it("serializes companyId to URL params when set", () => {
+    const state: FilterState = { ...DEFAULT_FILTER_STATE, companyId: 5 };
+    const params = serializeToUrl(state);
+    assert.strictEqual(params.get("companyId"), "5");
+  });
+
+  it("round-trips filter state through URL params", () => {
+    const original: FilterState = {
+      search: "john@test.com",
+      status: "inactive",
+      role: "OWNER",
+      outlet: "789",
+      companyId: 42,
+    };
+    
+    // Serialize
+    const params = serializeToUrl(original);
+    
+    // Parse
+    const parsed = parseFromUrl(params);
+    
+    // Verify
+    assert.strictEqual(parsed.search, original.search);
+    assert.strictEqual(parsed.status, original.status);
+    assert.strictEqual(parsed.role, original.role);
+    assert.strictEqual(parsed.outlet, original.outlet);
+    assert.strictEqual(parsed.companyId, original.companyId);
+  });
+});

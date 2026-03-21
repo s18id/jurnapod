@@ -1,6 +1,6 @@
 # Story 9.4: Standard Filters and Modal UX Behavior
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -133,18 +133,25 @@ minimax-m2.7 (opencode-go/minimax-m2.7)
 
 **Summary:**
 - Added "Clear All" button to FilterBar that resets all filters (search, status, role, outlet)
-- Created `useUrlFilterState` hook for sessionStorage-based filter state persistence
+- Created `useUrlFilterState` hook for URL query parameter persistence (enables shareable URLs)
 - Created `useDirtyState` hook for unsaved changes tracking
 - Created `DirtyConfirmDialog` component for unsaved changes confirmation
 - Updated Modal close handling to prevent accidental dismissal with unsaved changes
 - Added aria-live region for accessible success/error announcements
-- All 185 backoffice tests pass
+- All 233 backoffice tests pass
+
+**Code Review Fixes (2026-03-21):**
+- Fixed AC-2 "URL Query State Persistence" to actually use URL params instead of sessionStorage
+- Added `useSearchParams` from React Router for URL sync
+- Filter state persists to URL params (shareable URLs) with sessionStorage as fallback
+- Added URL query parameter serialization tests (parseFromUrl, serializeToUrl)
+- Priority: URL params > sessionStorage > defaults
 
 **Files Created:**
-- `apps/backoffice/src/hooks/use-url-filter-state.ts` - URL/sessionStorage filter state hook
+- `apps/backoffice/src/hooks/use-url-filter-state.ts` - URL query filter state hook (updated for URL params)
 - `apps/backoffice/src/hooks/use-dirty-state.ts` - Unsaved changes tracking hook
 - `apps/backoffice/src/components/dirty-confirm-dialog.tsx` - Unsaved changes confirmation modal
-- `apps/backoffice/src/features/users-page-filters.test.ts` - Unit tests for filter logic (14 tests)
+- `apps/backoffice/src/features/users-page-filters.test.ts` - Unit tests for filter logic (20 tests)
 
 **Files Modified:**
 - `apps/backoffice/src/features/users-page.tsx` - Added dirty confirm dialog, clearAllFilters, hasActiveFilters, updated modal close handling
@@ -153,10 +160,10 @@ minimax-m2.7 (opencode-go/minimax-m2.7)
 
 ### File List
 
-- `apps/backoffice/src/hooks/use-url-filter-state.ts` - New hook for filter state persistence
-- `apps/backoffice/src/hooks/use-dirty-state.ts` - New hook for dirty state tracking
-- `apps/backoffice/src/components/dirty-confirm-dialog.tsx` - New confirmation dialog component
-- `apps/backoffice/src/features/users-page.tsx` - Modified for Clear All, dirty confirm, modal close handling
-- `apps/backoffice/src/components/FilterBar.tsx` - Modified to support Clear All button
-- `apps/backoffice/src/features/users-page-filters.test.ts` - New test file
-- `apps/backoffice/src/tests/all.test.ts` - Added test imports
+- `apps/backoffice/src/hooks/use-url-filter-state.ts` - URL query filter state hook with useSearchParams
+- `apps/backoffice/src/hooks/use-dirty-state.ts` - Dirty state tracking hook
+- `apps/backoffice/src/components/dirty-confirm-dialog.tsx` - Confirmation dialog component
+- `apps/backoffice/src/features/users-page.tsx` - Main implementation file
+- `apps/backoffice/src/components/FilterBar.tsx` - FilterBar with Clear All support
+- `apps/backoffice/src/features/users-page-filters.test.ts` - Test file for filter logic
+- `apps/backoffice/src/tests/all.test.ts` - Test aggregator

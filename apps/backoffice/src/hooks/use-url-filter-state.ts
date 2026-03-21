@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 export type FilterState = {
   search: string;
@@ -21,48 +22,160 @@ const DEFAULT_FILTER_STATE: FilterState = {
 
 const STORAGE_KEY = "users-page-filters";
 
+const VALID_STATUSES = ["all", "active", "inactive"] as const;
+
 /**
- * Hook to manage filter state with sessionStorage persistence.
- * Serializes/deserializes filter state to URL-compatible format.
+ * Parse filter state from URL search params.
+ */
+function parseFromUrl(searchParams: URLSearchParams): Partial<FilterState> {
+  const parsed: Partial<FilterState> = {};
+
+  const search = searchParams.get("search");
+  if (search !== null) {
+    parsed.search = search;
+  }
+
+  const status = searchParams.get("status");
+  if (status !== null && VALID_STATUSES.includes(status as FilterState["status"])) {
+    parsed.status = status as FilterState["status"];
+  }
+
+  const role = searchParams.get("role");
+  if (role !== null) {
+    parsed.role = role;
+  }
+
+  const outlet = searchParams.get("outlet");
+  if (outlet !== null) {
+    parsed.outlet = outlet;
+  }
+
+  const companyIdStr = searchParams.get("companyId");
+  if (companyIdStr !== null) {
+    const companyId = parseInt(companyIdStr, 10);
+    if (!isNaN(companyId)) {
+      parsed.companyId = companyId;
+    }
+  }
+
+  return parsed;
+}
+
+/**
+ * Serialize filter state to URL search params.
+ */
+function serializeToUrl(state: FilterState): URLSearchParams {
+  const params = new URLSearchParams();
+
+  if (state.search) {
+    params.set("search", state.search);
+  }
+  if (state.status !== "active") {
+    params.set("status", state.status);
+  }
+  if (state.role !== "all") {
+    params.set("role", state.role);
+  }
+  if (state.outlet !== "all") {
+    params.set("outlet", state.outlet);
+  }
+  if (state.companyId !== null) {
+    params.set("companyId", String(state.companyId));
+  }
+
+  return params;
+}
+
+/**
+ * Parse filter state from sessionStorage.
+ */
+function parseFromStorage(): Partial<FilterState> | null {
+  try {
+    const stored = sessionStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return null;
+}
+
+/**
+ * Merge partial state with defaults.
+ */
+function mergeWithDefaults(partial: Partial<FilterState> | null): FilterState {
+  if (!partial) {
+    return { ...DEFAULT_FILTER_STATE };
+  }
+  return {
+    search: typeof partial.search === "string" ? partial.search : DEFAULT_FILTER_STATE.search,
+    status: VALID_STATUSES.includes(partial.status as FilterState["status"])
+      ? (partial.status as FilterState["status"])
+      : DEFAULT_FILTER_STATE.status,
+    role: typeof partial.role === "string" ? partial.role : DEFAULT_FILTER_STATE.role,
+    outlet: typeof partial.outlet === "string" ? partial.outlet : DEFAULT_FILTER_STATE.outlet,
+    companyId: typeof partial.companyId === "number" ? partial.companyId : DEFAULT_FILTER_STATE.companyId,
+  };
+}
+
+/**
+ * Hook to manage filter state with URL query parameter persistence.
+ * 
+ * Priority for initial state:
+ * 1. URL query params (enables shareable URLs)
+ * 2. sessionStorage (survives page refresh)
+ * 3. Default state
+ * 
+ * On change:
+ * - Updates URL query params (for shareable URLs)
+ * - Updates sessionStorage (for page refresh fallback)
  */
 export function useUrlFilterState(initialState: FilterState = DEFAULT_FILTER_STATE) {
-  // Load initial state from sessionStorage
-  const loadFromStorage = useCallback((): FilterState => {
-    try {
-      const stored = sessionStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Validate and merge with defaults
-        return {
-          search: typeof parsed.search === "string" ? parsed.search : initialState.search,
-          status: ["all", "active", "inactive"].includes(parsed.status) 
-            ? parsed.status as FilterState["status"] 
-            : initialState.status,
-          role: typeof parsed.role === "string" ? parsed.role : initialState.role,
-          outlet: typeof parsed.outlet === "string" ? parsed.outlet : initialState.outlet,
-          companyId: typeof parsed.companyId === "number" ? parsed.companyId : initialState.companyId,
-        };
-      }
-    } catch {
-      // Ignore parse errors, use default
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Initialize state from URL -> sessionStorage -> defaults
+  const getInitialState = useCallback((): FilterState => {
+    // Priority 1: URL params (for shared URLs)
+    const fromUrl = parseFromUrl(searchParams);
+    if (Object.keys(fromUrl).length > 0) {
+      return mergeWithDefaults(fromUrl);
     }
-    return initialState;
-  }, [initialState]);
 
-  const [filterState, setFilterState] = useState<FilterState>(loadFromStorage);
+    // Priority 2: sessionStorage (for page refresh)
+    const fromStorage = parseFromStorage();
+    if (fromStorage) {
+      return mergeWithDefaults(fromStorage);
+    }
 
-  // Serialize filter state to sessionStorage on change
+    // Priority 3: Default/initial state
+    return { ...initialState };
+  }, [searchParams, initialState]);
+
+  const [filterState, setFilterState] = useState<FilterState>(getInitialState);
+
+  // Sync to URL and sessionStorage on change
   useEffect(() => {
+    // Update URL params
+    const newParams = serializeToUrl(filterState);
+    const currentParams = searchParams.toString();
+    const newParamsStr = newParams.toString();
+    
+    if (currentParams !== newParamsStr) {
+      setSearchParams(newParams, { replace: true });
+    }
+
+    // Update sessionStorage
     try {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(filterState));
     } catch {
       // Ignore storage errors
     }
-  }, [filterState]);
+  }, [filterState, searchParams, setSearchParams]);
 
   // Clear all filters
   const clearAllFilters = useCallback(() => {
-    setFilterState(DEFAULT_FILTER_STATE);
+    setFilterState({ ...DEFAULT_FILTER_STATE });
   }, []);
 
   // Check if any filter is active
