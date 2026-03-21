@@ -20,7 +20,6 @@ import {
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { IconEye } from "@tabler/icons-react";
-import type { ColumnDef } from "@tanstack/react-table";
 import { storeCompanyTimezone, type SessionUser } from "../lib/session";
 import {
   useCompanies,
@@ -30,7 +29,13 @@ import {
   reactivateCompany
 } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
-import { DataTable } from "../components/DataTable";
+import {
+  DataTable,
+  type DataTableColumnDef,
+  type PaginationState,
+  type SortState,
+  type RowSelectionState,
+} from "../components/ui/DataTable";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
 import { TIMEZONE_OPTIONS } from "../constants/timezones";
@@ -100,12 +105,33 @@ export function CompaniesPage(props: CompaniesPageProps) {
     { action: "deactivate" | "reactivate"; company: CompanyResponse } | null
   >(null);
 
+  // Pagination, sort, and selection state for complex DataTable
+  const [pagination, setPagination] = useState<PaginationState>({
+    page: 1,
+    pageSize: 25
+  });
+  const [sort, setSort] = useState<SortState | null>(null);
+  const [selection, setSelection] = useState<RowSelectionState>({});
+
   const isMobile = useMediaQuery("(max-width: 48em)");
 
   // API hooks
   const companiesQuery = useCompanies(accessToken, {
-    includeDeleted: isSuperAdmin && statusFilter !== "active"
+    includeDeleted: isSuperAdmin && statusFilter !== "active",
+    pagination,
+    sort: sort ? { id: sort.id, direction: sort.direction } : undefined
   });
+
+  // Reset pagination when filters change
+  const handleStatusFilterChange = (value: string | null) => {
+    setStatusFilter((value as CompanyStatusFilter) || "active");
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.currentTarget.value);
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
 
   const filteredCompanies = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -302,16 +328,18 @@ export function CompaniesPage(props: CompaniesPageProps) {
     }
   };
 
-  const columns = useMemo<ColumnDef<CompanyResponse>[]>(
+  const columns = useMemo<DataTableColumnDef<CompanyResponse>[]>(
     () => [
       {
         id: "code",
         header: "Code",
+        sortable: true,
         cell: (info) => <Text fw={600}>{info.row.original.code}</Text>
       },
       {
         id: "name",
         header: "Name",
+        sortable: true,
         cell: (info) => <Text>{info.row.original.name}</Text>
       },
       {
@@ -424,7 +452,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
                 label="Search"
                 placeholder="Search by code or name"
                 value={searchTerm}
-                onChange={(event) => setSearchTerm(event.currentTarget.value)}
+                onChange={handleSearchChange}
                 style={{ minWidth: 220 }}
               />
               {isSuperAdmin ? (
@@ -432,7 +460,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
                   label="Status"
                   data={statusOptions}
                   value={statusFilter}
-                  onChange={(value) => setStatusFilter((value as CompanyStatusFilter) || "active")}
+                  onChange={handleStatusFilterChange}
                   style={{ minWidth: 160 }}
                 />
               ) : null}
@@ -464,10 +492,18 @@ export function CompaniesPage(props: CompaniesPageProps) {
           </Stack>
         </PageCard>
 
-        <PageCard title={`Companies (${filteredCompanies.length})`}>
+        <PageCard title={`Companies (${companiesQuery.totalCount})`}>
           <DataTable
             columns={columns}
             data={filteredCompanies}
+            getRowId={(company) => company.id.toString()}
+            pagination={pagination}
+            sort={sort}
+            selection={selection}
+            totalCount={companiesQuery.totalCount}
+            onPaginationChange={setPagination}
+            onSortChange={setSort}
+            onSelectionChange={setSelection}
             emptyState={
               searchTerm.trim().length > 0
                 ? "No companies match your search."

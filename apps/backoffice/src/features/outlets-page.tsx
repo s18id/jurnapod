@@ -36,7 +36,6 @@ import {
   type ImportPlanRow,
   type ImportSummary
 } from "./outlets-import-export-utils";
-import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
 import {
   useOutletsFull,
@@ -48,7 +47,13 @@ import {
 } from "../hooks/use-outlets";
 import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
-import { DataTable } from "../components/DataTable";
+import {
+  DataTable,
+  type DataTableColumnDef,
+  type PaginationState,
+  type SortState,
+  type RowSelectionState
+} from "../components/ui/DataTable";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
 import { TIMEZONE_OPTIONS } from "../constants/timezones";
@@ -457,26 +462,39 @@ export function OutletsPage(props: OutletsPageProps) {
   const inactiveCount = outlets.filter((o) => !o.is_active).length;
   const filteredCount = filteredOutlets.length;
 
-  const columns = useMemo<ColumnDef<OutletFullResponse>[]>(() => {
-    const baseColumns: ColumnDef<OutletFullResponse>[] = [
+  // Pagination, sort, and selection state for DataTable
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 25 });
+  const [sort, setSort] = useState<SortState | null>(null);
+  const [selection, setSelection] = useState<RowSelectionState>({});
+
+  const columns = useMemo<DataTableColumnDef<OutletFullResponse>[]>(() => {
+    const baseColumns: DataTableColumnDef<OutletFullResponse>[] = [
       {
         id: "code",
         header: "Code",
+        accessorKey: "code",
+        sortable: true,
         cell: (info) => <Text fw={600}>{info.row.original.code}</Text>
       },
       {
         id: "name",
         header: "Name",
+        accessorKey: "name",
+        sortable: true,
         cell: (info) => <Text>{info.row.original.name}</Text>
       },
       {
         id: "city",
         header: "City",
+        accessorKey: "city",
+        sortable: true,
         cell: (info) => <Text c="dimmed">{info.row.original.city ?? "—"}</Text>
       },
       {
         id: "is_active",
         header: "Status",
+        accessorKey: "is_active",
+        sortable: true,
         cell: (info) => (
           <Badge color={info.row.original.is_active ? "green" : "gray"} variant="light">
             {info.row.original.is_active ? "Active" : "Inactive"}
@@ -499,6 +517,8 @@ export function OutletsPage(props: OutletsPageProps) {
       {
         id: "timezone",
         header: "Timezone",
+        accessorKey: "timezone",
+        sortable: true,
         cell: (info) => <Text size="xs" c="dimmed">{info.row.original.timezone ?? "—"}</Text>
       }
     ];
@@ -804,6 +824,15 @@ export function OutletsPage(props: OutletsPageProps) {
             <DataTable
               columns={columns}
               data={filteredOutlets}
+              getRowId={(row) => String(row.id)}
+              pagination={pagination}
+              sort={sort}
+              selection={selection}
+              onPaginationChange={setPagination}
+              onSortChange={setSort}
+              onSelectionChange={setSelection}
+              totalCount={filteredCount}
+              loading={outletsQuery.loading ? "loading" : "idle"}
               emptyState={
                 searchTerm.trim().length > 0 || statusFilter !== "ALL" || cityFilter
                   ? "No branches match your filters."

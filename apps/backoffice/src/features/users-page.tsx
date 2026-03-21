@@ -17,7 +17,6 @@ import {
   Title,
   ActionIcon
 } from "@mantine/core";
-import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
 import {
   useUsers,
@@ -32,7 +31,13 @@ import {
 } from "../hooks/use-users";
 import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
-import { DataTable } from "../components/DataTable";
+import {
+  DataTable,
+  type DataTableColumnDef,
+  type PaginationState,
+  type SortState,
+  type RowSelectionState,
+} from "../components/ui/DataTable";
 import { DirtyConfirmDialog } from "../components/dirty-confirm-dialog";
 import { FilterBar } from "../components/FilterBar";
 import { OutletRoleMatrix } from "../components/OutletRoleMatrix";
@@ -113,6 +118,37 @@ export function UsersPage(props: UsersPageProps) {
   const [outletFilter, setOutletFilter] = useState<string>("all");
   const [selectedCompanyId, setSelectedCompanyId] = useState<number>(user.company_id);
 
+  // Table state
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 25 });
+  const [sort, setSort] = useState<SortState | null>(null);
+  const [selection, setSelection] = useState<RowSelectionState>({});
+
+  // Reset pagination helper
+  const resetPagination = () => {
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
+
+  // Filter change handlers that reset pagination
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.currentTarget.value);
+    resetPagination();
+  };
+
+  const handleStatusFilterChange = (value: string | null) => {
+    setStatusFilter((value as "all" | "active" | "inactive") || "active");
+    resetPagination();
+  };
+
+  const handleRoleFilterChange = (value: string | null) => {
+    setRoleFilter(value || "all");
+    resetPagination();
+  };
+
+  const handleOutletFilterChange = (value: string | null) => {
+    setOutletFilter(value || "all");
+    resetPagination();
+  };
+
   // Clear all filters function
   const clearAllFilters = () => {
     setSearchTerm("");
@@ -120,6 +156,7 @@ export function UsersPage(props: UsersPageProps) {
     setStatusFilter("active");
     setRoleFilter("all");
     setOutletFilter("all");
+    resetPagination();
   };
 
   // Check if any filters are active (for showing Clear All button)
@@ -157,8 +194,12 @@ export function UsersPage(props: UsersPageProps) {
   const activeCompanyId = isSuperAdmin ? selectedCompanyId : user.company_id;
 
   const usersQuery = useUsers(activeCompanyId, accessToken, {
-    is_active: statusFilter === "all" ? undefined : statusFilter === "active",
-    search: searchQuery || undefined
+    filters: {
+      is_active: statusFilter === "all" ? undefined : statusFilter === "active",
+      search: searchQuery || undefined
+    },
+    pagination,
+    sort: sort ? { id: sort.id, direction: sort.direction } : undefined
   });
 
   const rolesQuery = useRoles(accessToken, activeCompanyId);
@@ -795,6 +836,7 @@ export function UsersPage(props: UsersPageProps) {
   useEffect(() => {
     const handle = window.setTimeout(() => {
       setSearchQuery(searchTerm.trim());
+      resetPagination();
     }, 300);
 
     return () => {
@@ -814,16 +856,18 @@ export function UsersPage(props: UsersPageProps) {
     setOutletFilter("all");
   }, [selectedCompanyId]);
 
-  const columns = useMemo<ColumnDef<UserResponse>[]>(() => {
+  const columns = useMemo<DataTableColumnDef<UserResponse>[]>(() => {
     return [
       {
         id: "email",
         header: "Email",
+        sortable: true,
         cell: (info) => <Text>{info.row.original.email}</Text>
       },
       {
         id: "roles",
         header: "Roles",
+        sortable: true,
         cell: (info) => {
           const globalRoles = info.row.original.global_roles;
           const outletRoleSet = new Set<string>();
@@ -859,6 +903,7 @@ export function UsersPage(props: UsersPageProps) {
       {
         id: "outlets",
         header: "Outlets",
+        sortable: true,
         cell: (info) => {
           const outlets = info.row.original.outlet_role_assignments;
           if (outlets.length === 0) {
@@ -899,6 +944,7 @@ export function UsersPage(props: UsersPageProps) {
       {
         id: "status",
         header: "Status",
+        sortable: true,
         cell: (info) => (
           <Badge variant="light" color={info.row.original.is_active ? "green" : "red"}>
             {info.row.original.is_active ? "Active" : "Inactive"}
@@ -1060,7 +1106,7 @@ export function UsersPage(props: UsersPageProps) {
               label="Search"
               placeholder="Search by email"
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.currentTarget.value)}
+              onChange={handleSearchChange}
               style={{ minWidth: 220 }}
             />
 
@@ -1072,7 +1118,7 @@ export function UsersPage(props: UsersPageProps) {
                 { value: "inactive", label: "Inactive Only" }
               ]}
               value={statusFilter}
-              onChange={(value) => setStatusFilter((value as "all" | "active" | "inactive") || "active")}
+              onChange={handleStatusFilterChange}
               style={{ minWidth: 170 }}
             />
 
@@ -1080,7 +1126,7 @@ export function UsersPage(props: UsersPageProps) {
               label="Role"
               data={roleOptions}
               value={roleFilter}
-              onChange={(value) => setRoleFilter(value || "all")}
+              onChange={handleRoleFilterChange}
               style={{ minWidth: 170 }}
             />
 
@@ -1088,7 +1134,7 @@ export function UsersPage(props: UsersPageProps) {
               label="Outlet"
               data={outletOptions}
               value={outletFilter}
-              onChange={(value) => setOutletFilter(value || "all")}
+              onChange={handleOutletFilterChange}
               style={{ minWidth: 170 }}
             />
           </FilterBar>
@@ -1098,6 +1144,14 @@ export function UsersPage(props: UsersPageProps) {
           <DataTable
             columns={columns}
             data={filteredUsers}
+            getRowId={(row) => String(row.id)}
+            pagination={pagination}
+            sort={sort}
+            selection={selection}
+            totalCount={usersQuery.totalCount}
+            onPaginationChange={setPagination}
+            onSortChange={setSort}
+            onSelectionChange={setSelection}
             minWidth={900}
             emptyState={
               searchTerm.trim().length > 0

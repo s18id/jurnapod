@@ -20,7 +20,47 @@ import type {
 type UsersListResponse = {
   success: true;
   data: UserResponse[];
+  total?: number;
 };
+
+/**
+ * Pagination options
+ */
+interface PaginationOptions {
+  page: number;
+  pageSize: number;
+}
+
+/**
+ * Sort options
+ */
+interface SortOptions {
+  id: string;
+  direction: "asc" | "desc" | null;
+}
+
+/**
+ * Builds query string from pagination and sort options
+ */
+function buildQueryString(
+  pagination?: PaginationOptions,
+  sort?: SortOptions
+): string {
+  const params = new URLSearchParams();
+
+  if (pagination) {
+    params.set("page", String(pagination.page));
+    params.set("page_size", String(pagination.pageSize));
+  }
+
+  if (sort?.id && sort.direction) {
+    params.set("sort_by", sort.id);
+    params.set("sort_order", sort.direction);
+  }
+
+  const queryString = params.toString();
+  return queryString ? `?${queryString}` : "";
+}
 
 type UserSingleResponse = {
   success: true;
@@ -38,49 +78,53 @@ type OutletsListResponse = {
 };
 
 type UsersListFilters = {
-  company_id: number;
   is_active?: boolean;
   search?: string;
 };
 
 /**
+ * Hook options for useUsers
+ */
+interface UseUsersOptions {
+  filters?: UsersListFilters;
+  pagination?: PaginationOptions;
+  sort?: SortOptions;
+}
+
+/**
  * Hook: useUsers
- * Fetches list of users with optional filters
+ * Fetches list of users with optional filters, server-side pagination and sorting
  */
 export function useUsers(
   companyId: number,
   accessToken: string,
-  filters?: Omit<UsersListFilters, "company_id">
+  options?: UseUsersOptions
 ) {
+  const filters = options?.filters;
+  const pagination = options?.pagination;
+  const sort = options?.sort;
   const [data, setData] = useState<UserResponse[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inFlightRef = useRef(false);
-  const lastFetchRef = useRef<{ key: string; at: number } | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const refetch = useCallback(
-    async (options?: { force?: boolean }) => {
-      const force = options?.force ?? false;
-      const paramsKey = JSON.stringify({ companyId, filters });
-      const lastFetch = lastFetchRef.current;
-      
-      if (!force) {
-        if (inFlightRef.current && lastFetch?.key === paramsKey) {
-          return;
-        }
-        if (lastFetch && lastFetch.key === paramsKey && Date.now() - lastFetch.at < 2000) {
-          return;
-        }
+    async (fetchOptions?: { force?: boolean }) => {
+      // Cancel any in-flight request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
 
-      inFlightRef.current = true;
-      lastFetchRef.current = { key: paramsKey, at: Date.now() };
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       setLoading(true);
       setError(null);
-      
+
       try {
         const params = new URLSearchParams({ company_id: String(companyId) });
-        
+
         if (filters?.is_active !== undefined) {
           params.set("is_active", String(filters.is_active));
         }
@@ -88,32 +132,52 @@ export function useUsers(
           params.set("search", filters.search);
         }
 
+        // Build query string with pagination and sort
+        const paginationSortParams = buildQueryString(pagination, sort);
+        const baseParams = params.toString();
+        const queryString = paginationSortParams
+          ? `${paginationSortParams}&${baseParams}`
+          : `?${baseParams}`;
+
         const response = await apiRequest<UsersListResponse>(
-          `/users?${params.toString()}`,
-          {},
+          `/users${queryString}`,
+          { signal: controller.signal },
           accessToken
         );
         setData(response.data);
+        setTotalCount(response.total ?? response.data.length);
       } catch (fetchError) {
+        // Ignore abort errors
+        if (fetchError instanceof Error && fetchError.name === "AbortError") {
+          return;
+        }
         if (fetchError instanceof ApiError) {
           setError(fetchError.message);
         } else {
           setError("Failed to load users");
         }
         setData([]);
+        setTotalCount(0);
       } finally {
-        setLoading(false);
-        inFlightRef.current = false;
+        if (abortControllerRef.current === controller) {
+          setLoading(false);
+        }
       }
     },
-    [companyId, accessToken, filters]
+    [companyId, accessToken, filters, pagination, sort]
   );
 
   useEffect(() => {
     refetch();
+
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [refetch]);
 
-  return { data, loading, error, refetch };
+  return { data, totalCount, loading, error, refetch };
 }
 
 /**
