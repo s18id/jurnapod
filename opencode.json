@@ -41,8 +41,11 @@
     "bmad-code-review": {
       "path": ".opencode/agents/bmad-code-review.md"
     },
-    "bmad-qa": {
-      "path": ".opencode/agents/bmad-qa.md"
+    "bmad-qa-validate": {
+      "path": ".opencode/agents/bmad-qa-validate.md"
+    },
+    "bmad-qa-generate-tests": {
+      "path": ".opencode/agents/bmad-qa-generate-tests.md"
     },
     "bmad-qa-generate-e2e-tests": {
       "path": ".opencode/agents/bmad-qa-generate-e2e-tests.md"
