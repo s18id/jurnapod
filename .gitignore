@@ -14,6 +14,9 @@ pnpm-lock.yaml
 .cache
 apps/pos/.lighthouseci/
 apps/pos/test-results/
+apps/backoffice/test-results/
+apps/backoffice/playwright-report/
+apps/backoffice/playwright/
 e2e-tests/screenshots/
 
 # Capacitor native projects
