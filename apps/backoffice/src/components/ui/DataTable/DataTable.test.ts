@@ -102,22 +102,22 @@ describe("DataTable - Pagination Calculations", () => {
 
   it("should generate correct pagination range text", () => {
     const result = getPaginationRangeText(1, 25, 100);
-    assert.strictEqual(result, "1-25 of 100");
+    assert.strictEqual(result, "1\u201325 of 100"); // en-dash
   });
 
   it("should handle first page range correctly", () => {
     const result = getPaginationRangeText(1, 25, 100);
-    assert.ok(result.startsWith("1-"));
+    assert.ok(result.startsWith("1\u2013"));
   });
 
   it("should handle middle page range correctly", () => {
     const result = getPaginationRangeText(2, 25, 100);
-    assert.ok(result.startsWith("26-"));
+    assert.ok(result.startsWith("26\u2013"));
   });
 
   it("should handle last page range correctly", () => {
     const result = getPaginationRangeText(4, 25, 100);
-    assert.ok(result.startsWith("76-"));
+    assert.ok(result.startsWith("76\u2013"));
   });
 
   it("should handle empty results", () => {
@@ -371,17 +371,17 @@ describe("DataTable - Edge Cases", () => {
 
   it("should handle single item", () => {
     assert.strictEqual(calculateTotalPages(1, 25), 1);
-    assert.strictEqual(getPaginationRangeText(1, 25, 1), "1-1 of 1");
+    assert.strictEqual(getPaginationRangeText(1, 25, 1), "1\u20131 of 1"); // en-dash
   });
 
   it("should handle exact page boundary", () => {
     assert.strictEqual(calculateTotalPages(50, 25), 2);
-    assert.strictEqual(getPaginationRangeText(2, 25, 50), "26-50 of 50");
+    assert.strictEqual(getPaginationRangeText(2, 25, 50), "26\u201350 of 50"); // en-dash
   });
 
   it("should handle large dataset", () => {
     assert.strictEqual(calculateTotalPages(10000, 100), 100);
-    assert.strictEqual(getPaginationRangeText(50, 100, 10000), "4901-5000 of 10000");
+    assert.strictEqual(getPaginationRangeText(50, 100, 10000), "4901\u20135000 of 10000"); // en-dash
   });
 
 });
@@ -852,20 +852,20 @@ describe("DataTable - Pagination State Transitions", () => {
 
   it("should calculate correct page boundaries for various scenarios", () => {
     // Page 1 with 25 items
-    assert.strictEqual(getPaginationRangeText(1, 25, 100), "1-25 of 100");
+    assert.strictEqual(getPaginationRangeText(1, 25, 100), "1\u201325 of 100"); // en-dash
 
     // Page 2 with 25 items
-    assert.strictEqual(getPaginationRangeText(2, 25, 100), "26-50 of 100");
+    assert.strictEqual(getPaginationRangeText(2, 25, 100), "26\u201350 of 100"); // en-dash
 
     // Last page
-    assert.strictEqual(getPaginationRangeText(4, 25, 100), "76-100 of 100");
+    assert.strictEqual(getPaginationRangeText(4, 25, 100), "76\u2013100 of 100"); // en-dash
 
     // Partial last page
-    assert.strictEqual(getPaginationRangeText(5, 25, 110), "101-110 of 110");
+    assert.strictEqual(getPaginationRangeText(5, 25, 110), "101\u2013110 of 110"); // en-dash
   });
 
   it("should handle single page correctly", () => {
-    assert.strictEqual(getPaginationRangeText(1, 25, 10), "1-10 of 10");
+    assert.strictEqual(getPaginationRangeText(1, 25, 10), "1\u201310 of 10"); // en-dash
   });
 
   it("should handle page size changes correctly", () => {
