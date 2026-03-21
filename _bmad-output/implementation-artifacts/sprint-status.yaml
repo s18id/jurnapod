@@ -174,7 +174,7 @@ development_status:
   # NOTE: UI consistency - PageHeader, FilterBar, DataTable, breadcrumbs
   # SPRINT PLAN: 3 sprints (foundation → components → documentation)
   # Dependencies: 10.1 → 10.2,10.3 → 10.4
-  epic-10: in-progress
+  epic-10: done
   10-1-reusable-pageheader-component: done  # COMPLETE - Component with 331 tests; follow-ups tracked as debt
   10-2-reusable-filterbar-component: done  # COMPLETE - FilterBar with types, hooks, 77 tests + CR fixes
   10-3-standardized-table-interaction-patterns: done  # COMPLETE - DataTable with sort, pagination, selection, skeleton, accessibility
@@ -183,8 +183,8 @@ development_status:
 
   # Epic 11: Operational Trust and Scale Readiness
   # NOTE: Reliability hardening - SLO instrumentation, performance, idempotency, reconciliation
-  epic-11: backlog
-  11-1-reliability-baseline-and-slo-instrumentation: backlog
+  epic-11: in-progress
+  11-1-reliability-baseline-and-slo-instrumentation: done
   11-2-pos-payment-and-offline-performance-hardening: backlog
   11-3-sync-idempotency-and-retry-resilience-hardening: backlog
   11-4-posting-correctness-and-reconciliation-guardrails: backlog

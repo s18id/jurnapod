@@ -264,7 +264,7 @@ Story completion notes MUST include:
 BMAD uses the following model strategy:
 - **Primary**: `opencode-go/minimax-m2.5` (your OpenCode Go subscription) - 75% of agents
 - **Context-critical**: `opencode-go/kimi-k2.5` (integration, orchestration, review) - 25% of agents  
-- **Complex reasoning**: `anthropic/claude-3-5-sonnet-20241022` (architecture decisions) - 5% of agents
+- **Complex reasoning**: `anthropic/claude-4-sonnet-20241022` (architecture decisions) - 5% of agents
 - **Code tasks**: `openai/gpt-5.1-codex-mini` (when available - currently exhausted)
 
 **Current Week Status**: Codex tokens exhausted. All code tasks using kimi-k2.5 with decomposition pattern.
