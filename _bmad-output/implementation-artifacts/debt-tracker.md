@@ -1,7 +1,7 @@
 # Technical Debt Tracker
 
 **Project:** Jurnapod  
-**Last Updated:** 2026-03-22  
+**Last Updated:** 2026-03-22 18:00+0700  
 **Tracking System:** File-based
 
 ---
@@ -38,11 +38,11 @@ These items were identified in the Epic 10 retrospective but not added to sprint
 
 | ID | Action Item | Owner | Priority | Status | Notes |
 |----|-------------|-------|----------|--------|-------|
-| E10-ACT-001 | Audit Epic 10 components in existing pages | Dana | HIGH | OPEN | PageHeader, FilterBar, DataTable need adoption audit |
+| E10-ACT-001 | Audit Epic 10 components in existing pages | Dana | HIGH | DONE | Audit complete: 40+ pages need PageHeader, 10 need FilterBar migration, 5 need DataTable migration. Report: docs/audits/epic-10-component-adoption-audit.md |
 | E10-ACT-002 | Set up React Testing Library | Charlie | HIGH | OPEN | Required for component testing |
-| E10-ACT-003 | Define lint rule requirements for adoption | Charlie | MEDIUM | OPEN | Enforce Epic 10 component usage |
-| E10-ACT-004 | Create ADR for backoffice UI patterns | Charlie | MEDIUM | OPEN | Document PageHeader, FilterBar, DataTable patterns |
-| E10-ACT-005 | Document Epic 9/10 patterns centrally | Elena | MEDIUM | OPEN | Centralize documentation in /docs/ |
+| E10-ACT-003 | Define lint rule requirements for adoption | Charlie | MEDIUM | DONE | Draft ESLint config created; requires ESLint infrastructure |
+| E10-ACT-004 | Create ADR for backoffice UI patterns | Charlie | MEDIUM | DONE | ADR-001 created in /docs/adr/ |
+| E10-ACT-005 | Document Epic 9/10 patterns centrally | Elena | MEDIUM | DONE | /docs/patterns/README.md created |
 
 **Action Item Details:**
 

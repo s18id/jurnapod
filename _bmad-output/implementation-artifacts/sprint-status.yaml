@@ -192,12 +192,12 @@ development_status:
 
   # Epic 10 Follow-up Actions (from retrospective)
   # Tracked in: debt-tracker.md
-  e10-action-001-component-audit: backlog  # Audit Epic 10 components in existing pages (Dana)
-  e10-action-002-react-testing-library: backlog  # Set up RTL for component testing (Charlie)
-  e10-action-003-lint-rules-adoption: backlog  # Define lint rule requirements (Charlie)
-  e10-action-004-adr-backoffice-ui: backlog  # Create ADR for UI patterns (Charlie)
-  e10-action-005-centralize-docs: backlog  # Document Epic 9/10 patterns centrally (Elena)
+  e10-action-001-component-audit: done  # COMPLETE - Audit report at docs/audits/epic-10-component-adoption-audit.md
+  e10-action-002-react-testing-library: backlog  # Set up RTL for component testing (Charlie) - BLOCKED by infrastructure setup
+  e10-action-003-lint-rules-adoption: done  # COMPLETE - ESLint config created, requires infrastructure
+  e10-action-004-adr-backoffice-ui: done  # COMPLETE - ADR-001 at docs/adr/adr-001-backoffice-ui-component-architecture.md
+  e10-action-005-centralize-docs: done  # COMPLETE - Patterns guide at docs/patterns/README.md
 
   # Epic 9 Carry-over Debt
   # Tracked in: debt-tracker.md
-  debt-001-architecture-decision-log: backlog  # Create ADR for key architectural decisions
+  debt-001-architecture-decision-log: done  # COMPLETE - 4 ADRs created at docs/adr/
