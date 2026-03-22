@@ -1123,141 +1123,39 @@ syncPushRoutes.use("/*", async (c, next) => {
 });
 
 syncPushRoutes.post("/", async (c) => {
-  const auth = c.get("auth");
-  const correlationId = getRequestCorrelationId(c.req.raw);
-  const request = c.req.raw;
-  const injectFailureAfterHeaderInsert = shouldInjectFailureAfterHeaderInsert(request);
-  const forcedRetryableErrno = readForcedRetryableErrno(request);
-  const startTime = Date.now();
-  const tier = request.headers.get("x-sync-tier") ?? "default";
-
-  let eventId: bigint | undefined;
-  let auditService: ReturnType<typeof createSyncAuditService> | undefined;
-
+  // TEMPORARY PROXY: Forward to legacy Next.js implementation
+  // TODO: Remove this proxy once Hono implementation is fully tested and ready
+  console.log("🔄 PROXY: Forwarding /sync/push to legacy /api/sync/push implementation");
+  
   try {
-    const rawPayload = await request.json();
+    // Get the original request
+    const originalRequest = c.req.raw;
     
-    // Validate request payload with Zod schema
-    let validatedPayload: SyncPushRequest;
-    try {
-      validatedPayload = SyncPushRequestSchema.parse(rawPayload);
-    } catch (validationError) {
-      if (validationError instanceof z.ZodError) {
-        return errorResponse("INVALID_REQUEST", `Validation failed: ${validationError.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`, 400);
-      }
-      throw validationError;
-    }
+    // Create new request URL pointing to legacy endpoint
+    const url = new URL(originalRequest.url);
+    url.pathname = "/api/sync/push";
     
-    const transactions = validatedPayload.transactions ?? [];
-    const orderUpdates = validatedPayload.order_updates ?? [];
+    // Clone the request with new URL
+    const proxyRequest = new Request(url.toString(), {
+      method: originalRequest.method,
+      headers: originalRequest.headers,
+      body: originalRequest.body,
+      // Required for streaming bodies in Node.js
+      duplex: originalRequest.body ? 'half' : undefined
+    } as RequestInit);
     
-    if (transactions.length === 0 && orderUpdates.length === 0) {
-      return errorResponse("INVALID_REQUEST", "At least one transaction or order_update is required", 400);
-    }
-
-    const dbPool = getDbPool();
-    auditService = createSyncAuditService(dbPool);
-    const metricsCollector = new SyncIdempotencyMetricsCollector();
-    const results: SyncPushResultItem[] = [];
-
-    // Start audit event
-    eventId = await auditService.startEvent({
-      companyId: auth.companyId,
-      outletId: validatedPayload.outlet_id,
-      operationType: "PUSH",
-      tierName: tier,
-      status: "IN_PROGRESS",
-      startedAt: new Date()
-    });
-
-    const taxDbConnection = await dbPool.getConnection();
-    try {
-      const [companyTaxRates, defaultTaxRates] = await Promise.all([
-        listCompanyTaxRates(taxDbConnection, auth.companyId),
-        listCompanyDefaultTaxRates(taxDbConnection, auth.companyId)
-      ]);
-      const activeTaxRates = companyTaxRates.filter((rate) => rate.is_active);
-      const taxRateById = new Map(activeTaxRates.map((rate) => [rate.id, rate]));
-
-      const taxContext: SyncPushTaxContext = {
-        defaultTaxRates,
-        taxRateById
-      };
-
-      const maxConcurrency = readSyncPushConcurrency();
-      const batches = buildTransactionBatches(transactions as SyncPushTransactionPayload[], maxConcurrency);
-      const resultsByIndex: Map<number, SyncPushResultItem> = new Map();
-
-      metricsCollector.recordRequest(transactions.length);
-
-      for (const batch of batches) {
-        metricsCollector.startBatch();
-
-        const batchResults = await Promise.all(
-          batch.map((indexedTx) =>
-            processSyncPushTransaction({
-              dbPool,
-              tx: indexedTx.tx,
-              txIndex: indexedTx.txIndex,
-              inputOutletId: validatedPayload.outlet_id,
-              authCompanyId: auth.companyId,
-              authUserId: auth.userId,
-              correlationId,
-              injectFailureAfterHeaderInsert,
-              forcedRetryableErrno,
-              taxContext,
-              metricsCollector
-            })
-          )
-        );
-
-        metricsCollector.endBatch(batchResults.length);
-
-        for (const result of batchResults) {
-          const originalIndex = batch.find((idxTx) => idxTx.tx.client_tx_id === result.client_tx_id)?.txIndex;
-          if (originalIndex !== undefined) {
-            resultsByIndex.set(originalIndex, result);
-          }
-        }
-      }
-
-      for (let i = 0; i < transactions.length; i++) {
-        const result = resultsByIndex.get(i);
-        if (result) {
-          results.push(result);
-        } else {
-          results.push(toErrorResult(transactions[i].client_tx_id, "processing failed"));
-        }
-      }
-    } finally {
-      taxDbConnection.release();
-    }
-
-    // Complete audit event on success
-    if (eventId !== undefined) {
-      await auditService.completeEvent(eventId, {
-        status: "SUCCESS",
-        completedAt: new Date(),
-        durationMs: Date.now() - startTime,
-        itemsCount: transactions.length
-      });
-    }
-
-    return successResponse({ results });
+    // Forward to legacy handler by calling the Next.js route
+    // Import the legacy route handler
+    const { POST: legacyHandler } = await import("../../../app/api/sync/push/route.js");
+    
+    // Call the legacy handler
+    const response = await legacyHandler(proxyRequest);
+    
+    // Return the response from legacy handler
+    return response;
   } catch (error) {
-    // Complete audit event on failure
-    if (eventId !== undefined && auditService !== undefined) {
-      await auditService.completeEvent(eventId, {
-        status: "FAILED",
-        completedAt: new Date(),
-        durationMs: Date.now() - startTime,
-        errorCode: error instanceof Error ? error.name : "UNKNOWN",
-        errorMessage: error instanceof Error ? error.message : "Unknown error"
-      });
-    }
-
-    console.error("POST /sync/push failed", { correlation_id: correlationId, error });
-    return errorResponse("INTERNAL_SERVER_ERROR", "Sync push failed", 500);
+    console.error("Proxy to legacy /api/sync/push failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Sync push proxy failed", 500);
   }
 });
 
