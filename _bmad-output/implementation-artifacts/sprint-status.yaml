@@ -189,3 +189,15 @@ development_status:
   11-3-sync-idempotency-and-retry-resilience-hardening: done  # COMPLETE - Idempotency service, error classification, metrics collector, migration 0113, 50 tests, sync route integration
   11-4-posting-correctness-and-reconciliation-guardrails: done  # COMPLETE - ReconciliationService, API route, metrics, docs, 12 tests, migration 0114 with triggers
   11-5-reporting-reliability-performance-and-accessibility-hardening: done  # COMPLETE - Report telemetry, timeout handling, TB/GL accessibility tests, runbook, WCAG checklist
+
+  # Epic 10 Follow-up Actions (from retrospective)
+  # Tracked in: debt-tracker.md
+  e10-action-001-component-audit: backlog  # Audit Epic 10 components in existing pages (Dana)
+  e10-action-002-react-testing-library: backlog  # Set up RTL for component testing (Charlie)
+  e10-action-003-lint-rules-adoption: backlog  # Define lint rule requirements (Charlie)
+  e10-action-004-adr-backoffice-ui: backlog  # Create ADR for UI patterns (Charlie)
+  e10-action-005-centralize-docs: backlog  # Document Epic 9/10 patterns centrally (Elena)
+
+  # Epic 9 Carry-over Debt
+  # Tracked in: debt-tracker.md
+  debt-001-architecture-decision-log: backlog  # Create ADR for key architectural decisions
