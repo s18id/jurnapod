@@ -3,6 +3,7 @@
 
 import { type PosOfflineDb, posDb } from "@jurnapod/offline-db/dexie";
 import { enqueueOutboxJobInTransaction } from "./outbox.js";
+import { getRecoveryService } from "../services/recovery-service.js";
 import {
   type CompleteSaleInput,
   type CompleteSaleResult,
@@ -374,6 +375,20 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
       await db.payments.bulkAdd(paymentRows);
 
       const outboxJob = await enqueueOutboxJobInTransaction({ sale_id: currentSale.sale_id }, db, completedAt);
+
+      // Enhanced durability: Verify transaction state after commit
+      // This addresses AC2 requirement for durable local commit with client_tx_id
+      try {
+        const recoveryService = getRecoveryService();
+        const transactionState = await recoveryService.getTransactionState(currentSale.sale_id);
+        if (!transactionState || transactionState.state !== "COMPLETED") {
+          // Log integrity issue but don't fail the transaction (it's already committed)
+          console.warn(`Unexpected transaction state for ${currentSale.sale_id}:`, transactionState?.state || "NOT_FOUND");
+        }
+      } catch (verificationError) {
+        // Don't fail the transaction for verification errors
+        console.warn(`Transaction state verification error for ${currentSale.sale_id}:`, verificationError);
+      }
 
       return {
         sale_id: currentSale.sale_id,

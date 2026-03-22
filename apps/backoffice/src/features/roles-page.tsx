@@ -15,7 +15,6 @@ import {
   Title,
   Select
 } from "@mantine/core";
-import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
 import {
   useRoles,
@@ -25,7 +24,13 @@ import {
 } from "../hooks/use-users";
 import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
-import { DataTable } from "../components/DataTable";
+import {
+  DataTable,
+  type DataTableColumnDef,
+  type PaginationState,
+  type SortState,
+  type RowSelectionState,
+} from "../components/ui/DataTable";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
 import type { RoleResponse } from "@jurnapod/shared";
@@ -77,6 +82,14 @@ export function RolesPage(props: RolesPageProps) {
 
   const [confirmState, setConfirmState] = useState<RoleResponse | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  
+  // Pagination, sort, and selection state (placeholder for complex DataTable)
+  const [pagination, setPagination] = useState<PaginationState>({
+    page: 1,
+    pageSize: 25
+  });
+  const [sort, setSort] = useState<SortState | null>(null);
+  const [selection, setSelection] = useState<RowSelectionState>({});
   
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -187,21 +200,24 @@ export function RolesPage(props: RolesPageProps) {
     }
   };
   
-  const columns = useMemo<ColumnDef<RoleResponse>[]>(() => {
+  const columns = useMemo<DataTableColumnDef<RoleResponse>[]>(() => {
     return [
       {
         id: "code",
         header: "Code",
+        sortable: true,
         cell: (info) => <Text fw={600}>{info.row.original.code}</Text>
       },
       {
         id: "name",
         header: "Name",
+        sortable: true,
         cell: (info) => <Text>{info.row.original.name}</Text>
       },
       {
         id: "scope",
         header: "Scope",
+        sortable: false,
         cell: (info) => {
           const { company_id, is_global } = info.row.original;
           if (company_id === null) {
@@ -228,6 +244,7 @@ export function RolesPage(props: RolesPageProps) {
       {
         id: "level",
         header: "Level",
+        sortable: true,
         cell: (info) => (
           <Badge variant="light" size="sm" color="gray">
             {info.row.original.role_level}
@@ -237,6 +254,8 @@ export function RolesPage(props: RolesPageProps) {
       {
         id: "actions",
         header: "Actions",
+        sortable: false,
+        isRowAction: true,
         cell: (info) => {
           const role = info.row.original;
           const isSystem = SYSTEM_ROLE_CODES.has(role.code);
@@ -363,6 +382,13 @@ export function RolesPage(props: RolesPageProps) {
           <DataTable
             columns={columns}
             data={filteredRoles}
+            getRowId={(role) => role.id.toString()}
+            pagination={pagination}
+            sort={sort}
+            selection={selection}
+            onPaginationChange={setPagination}
+            onSortChange={setSort}
+            onSelectionChange={setSelection}
             emptyState={
               searchTerm.trim().length > 0
                 ? "No roles match your search."

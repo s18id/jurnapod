@@ -367,3 +367,83 @@ test(
     }
   }
 );
+
+test(
+  "companies integration: default outlet inherits company timezone",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async () => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let childProcess;
+    let serverLogs = [];
+
+    const companyCodeForLogin = readEnv("JP_COMPANY_CODE", "JP");
+    const superAdminEmail = readEnv("JP_SUPER_ADMIN_EMAIL").toLowerCase();
+    const superAdminPassword = readEnv("JP_SUPER_ADMIN_PASSWORD");
+
+    const runId = Date.now().toString(36);
+    const companyCode = `TZ${runId}`.slice(0, 32).toUpperCase();
+    const companyName = `Test Timezone Company ${runId}`;
+
+    try {
+      const baseUrl = testContext.baseUrl;
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode: companyCodeForLogin,
+          email: superAdminEmail,
+          password: superAdminPassword
+        })
+      });
+
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await loginResponse.json();
+      assert.equal(loginBody.success, true);
+      assert.ok(loginBody.data.access_token);
+
+      const authHeader = {
+        authorization: `Bearer ${loginBody.data.access_token}`,
+        "content-type": "application/json"
+      };
+
+      const createResponse = await fetch(`${baseUrl}/api/companies`, {
+        method: "POST",
+        headers: authHeader,
+        body: JSON.stringify({
+          code: companyCode,
+          name: companyName,
+          timezone: "America/New_York"
+        })
+      });
+
+      assert.equal(createResponse.status, 201);
+      const createBody = await createResponse.json();
+      assert.equal(createBody.success, true);
+      const companyId = Number(createBody.data.id);
+      assert.ok(companyId > 0);
+      assert.equal(createBody.data.timezone, "America/New_York");
+
+      // Verify default outlet inherited company timezone
+      const [outletRows] = await db.execute(
+        `SELECT timezone FROM outlets WHERE company_id = ? AND code = ?`,
+        [companyId, "MAIN"]
+      );
+
+      assert.equal(outletRows.length, 1, "Default outlet should exist");
+      assert.equal(
+        outletRows[0].timezone,
+        "America/New_York",
+        "Default outlet should inherit company timezone"
+      );
+    } finally {
+      
+    }
+  }
+);

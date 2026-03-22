@@ -5,3 +5,4 @@
 
 export { useItems, type Item, type ItemType, type UseItemsProps, type UseItemsReturn } from "./use-items";
 export { useItemGroups, type ItemGroup, type UseItemGroupsProps, type UseItemGroupsReturn } from "./use-item-groups";
+export { useBreadcrumbs, type UseBreadcrumbsOptions, type UseBreadcrumbsReturn } from "./use-breadcrumbs";

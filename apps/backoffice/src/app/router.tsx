@@ -70,6 +70,8 @@ import { SyncHistoryPage } from "../features/sync-history-page";
 import { PWASettingsPage } from "../features/pwa-settings-page";
 import { OutletTablesPage } from "../features/outlet-tables-page";
 import { ReservationsPage } from "../features/reservations-page";
+import { ReservationCalendarPage } from "../features/reservation-calendar-page";
+import { TableBoardPage } from "../features/table-board-page";
 import { ResetPasswordPage } from "../features/reset-password-page";
 import { InvitePage } from "../features/invite-page";
 import { VerifyEmailPage } from "../features/verify-email-page";
@@ -190,6 +192,12 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/reservations") {
     return <ReservationsPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/reservation-calendar") {
+    return <ReservationCalendarPage user={props.user} accessToken={props.accessToken} />;
+  }
+  if (props.path === "/table-board") {
+    return <TableBoardPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/daily-sales") {
     return <DailySalesPage user={props.user} accessToken={props.accessToken} />;

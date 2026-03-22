@@ -117,6 +117,7 @@ export class PosDataService {
         customer_phone,
         guest_count,
         reservation_at,
+        reservation_start_ts,
         duration_minutes,
         status,
         notes,
@@ -126,10 +127,20 @@ export class PosDataService {
       WHERE company_id = ? 
         AND outlet_id = ?
         AND status IN ('BOOKED', 'CONFIRMED', 'ARRIVED', 'SEATED')
-        AND reservation_at >= CURDATE()
-        AND reservation_at < DATE_ADD(CURDATE(), INTERVAL 2 DAY)
+        AND (
+          (
+            reservation_start_ts IS NOT NULL
+            AND reservation_start_ts >= (UNIX_TIMESTAMP(CURDATE()) * 1000)
+            AND reservation_start_ts < (UNIX_TIMESTAMP(DATE_ADD(CURDATE(), INTERVAL 2 DAY)) * 1000)
+          )
+          OR (
+            reservation_start_ts IS NULL
+            AND reservation_at >= CURDATE()
+            AND reservation_at < DATE_ADD(CURDATE(), INTERVAL 2 DAY)
+          )
+        )
         ${sinceVersion ? 'AND updated_at >= (SELECT last_updated_at FROM sync_tier_versions WHERE company_id = ? AND tier = "OPERATIONAL")' : ''}
-      ORDER BY reservation_at ASC
+      ORDER BY reservation_start_ts IS NULL ASC, reservation_start_ts ASC, reservation_at ASC
     `, sinceVersion ? [company_id, outlet_id, company_id] : [company_id, outlet_id]);
 
     return {
@@ -148,7 +159,10 @@ export class PosDataService {
         customer_name: reservation.customer_name,
         customer_phone: reservation.customer_phone,
         guest_count: reservation.guest_count,
-        reservation_at: reservation.reservation_at,
+        reservation_at:
+          reservation.reservation_start_ts != null
+            ? new Date(Number(reservation.reservation_start_ts)).toISOString()
+            : reservation.reservation_at,
         duration_minutes: reservation.duration_minutes,
         status: reservation.status,
         notes: reservation.notes,

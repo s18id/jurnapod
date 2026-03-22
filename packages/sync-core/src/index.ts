@@ -20,6 +20,35 @@ export type {
   TransportResponse 
 } from "./transport/retry-transport.js";
 
+// Export sync idempotency services (Epic 11.3)
+export {
+  SyncIdempotencyService,
+  syncIdempotencyService,
+  ERROR_CLASSIFICATION,
+  DEFAULT_RETRY_DELAYS,
+  MYSQL_ERROR_CODES,
+  SYNC_RESULT_CODES,
+  PAYLOAD_HASH_VERSIONS,
+} from "./idempotency/index.js";
+export type {
+  ErrorClassification,
+  RetryGuidance,
+  IdempotencyRecord,
+  IdempotencyCheckResult,
+  SyncResultCode,
+} from "./idempotency/index.js";
+
+export {
+  SyncIdempotencyMetricsCollector,
+  syncIdempotencyMetricsCollector,
+  DEFAULT_SYNC_IDEMPOTENCY_METRICS,
+} from "./idempotency/index.js";
+export type {
+  SyncIdempotencyMetrics,
+  SyncOperationResult,
+  SyncBatchMetrics,
+} from "./idempotency/index.js";
+
 // Export WebSocket types and utilities
 export type * from "./websocket/types.js";
 export { createEventPayload, isWebSocketEventType } from "./websocket/publisher.js";

@@ -160,6 +160,29 @@ DRAFT → POSTED → VOID
 8. Update local record with server ID
 ```
 
+### Dine-in Session Checkpoint Flow
+
+```
+1. Cashier adds session lines (ACTIVE session)
+   ↓
+2. POST /api/dinein/sessions/:id/finalize-batch
+   ↓
+3. Server assigns batch_no and syncs finalized lines to pos_order_snapshot_lines
+   ↓
+4. Server appends table_events and increments session_version
+   ↓
+5. Other cashiers pull/receive newer version and refresh
+   ↓
+6. Repeat for additional orders/adjustments until payment
+   ↓
+7. lock-payment -> close (final settlement + table release)
+```
+
+Design intent:
+- `table_service_session_lines` is canonical during service.
+- POS snapshot lines are synchronized at explicit finalize checkpoints and close.
+- This avoids fragile real-time dual-write behavior on every line mutation.
+
 ### Sales Invoice Flow
 
 ```
@@ -238,6 +261,8 @@ All critical operations logged to `audit_logs`:
 2. **Immutable posting**: POSTED records cannot be edited
 3. **Tenant isolation**: No cross-company data access
 4. **Idempotent sync**: Duplicate `client_tx_id` returns `DUPLICATE`
+5. **Dine-in consistency**: Finalize checkpoints and close must produce deterministic snapshot state across terminals
+6. **Session auditability**: Line adjustments (cancel/reduce) require reason and must remain append-auditable
 
 ---
 
@@ -324,4 +349,3 @@ Critical indexes for performance:
 - [API Reference](API.md)
 - [AGENTS.md](../AGENTS.md) - Development guidelines
 - [ADRs](adr/) - Architecture Decision Records
-

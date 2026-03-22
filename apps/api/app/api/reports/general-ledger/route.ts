@@ -8,6 +8,18 @@ import { resolveDefaultFiscalYearDateRange, FiscalYearSelectionError } from "../
 import { getGeneralLedgerDetail } from "../../../../src/lib/reports";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import { getCompany } from "../../../../src/lib/companies";
+import {
+  withQueryTimeout,
+  QueryTimeoutError,
+  getDatasetSizeBucket,
+  classifyReportError,
+  emitReportMetrics,
+  QUERY_TIMEOUT_MS,
+  type ReportType,
+} from "../../../../src/lib/report-telemetry";
+import type { Context } from "hono";
+
+const REPORT_TYPE: ReportType = "general_ledger";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive().optional(),
@@ -48,8 +60,63 @@ function roundTo(value: number, decimals: number): number {
   return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
+/**
+ * Count total lines in general ledger result
+ */
+function countTotalLines(rows: Awaited<ReturnType<typeof getGeneralLedgerDetail>>): number {
+  return rows.reduce((sum, row) => sum + row.lines.length, 0);
+}
+
+/**
+ * Handle report error with proper telemetry
+ */
+function handleReportError(c: Context | null, error: unknown, startTime: number, companyId: number) {
+  const errorClass = classifyReportError(error);
+  const latencyMs = Date.now() - startTime;
+
+  // Emit telemetry for error
+  const bucket = getDatasetSizeBucket(0); // Unknown at error time
+  emitReportMetrics(c, {
+    reportType: REPORT_TYPE,
+    companyId,
+    datasetSizeBucket: bucket,
+    latencyMs,
+    errorClass,
+  });
+
+  if (error instanceof QueryTimeoutError) {
+    return errorResponse(
+      "TIMEOUT",
+      "Report generation timed out. Please try a smaller date range.",
+      504
+    );
+  }
+
+  if (error instanceof z.ZodError) {
+    return errorResponse(
+      "VALIDATION_ERROR",
+      "Invalid request parameters: " + error.errors.map(e => e.message).join(", "),
+      400
+    );
+  }
+
+  if (error instanceof FiscalYearSelectionError) {
+    return errorResponse("FISCAL_YEAR_REQUIRED", error.message, 400);
+  }
+
+  if (error instanceof Error && error.message === "Forbidden") {
+    return errorResponse("FORBIDDEN", "Forbidden", 403);
+  }
+
+  // Log internal error without leaking details
+  console.error("GET /reports/general-ledger failed:", error);
+  return errorResponse("INTERNAL_SERVER_ERROR", "General ledger report failed", 500);
+}
+
 export const GET = withAuth(
   async (request, auth) => {
+    const startTime = Date.now();
+
     try {
       const url = new URL(request.url);
       const parsed = querySchema.parse({
@@ -80,16 +147,34 @@ export const GET = withAuth(
       const company = await getCompany(auth.companyId);
       const timezone = company.timezone ?? 'UTC';
 
-      const rows = await getGeneralLedgerDetail({
+      // Execute with timeout
+      const rows = await withQueryTimeout(
+        getGeneralLedgerDetail({
+          companyId: auth.companyId,
+          outletIds,
+          dateFrom,
+          dateTo,
+          includeUnassignedOutlet: typeof parsed.outlet_id !== "number",
+          accountId: parsed.account_id,
+          lineLimit: parsed.account_id ? (parsed.line_limit ?? 200) : undefined,
+          lineOffset: parsed.account_id ? parsed.line_offset ?? 0 : undefined,
+          timezone
+        }),
+        QUERY_TIMEOUT_MS
+      );
+
+      // Count total lines for dataset size bucket
+      const totalLines = countTotalLines(rows);
+      const latencyMs = Date.now() - startTime;
+      const bucket = getDatasetSizeBucket(totalLines);
+
+      // Emit success telemetry
+      emitReportMetrics(null, {
+        reportType: REPORT_TYPE,
         companyId: auth.companyId,
-        outletIds,
-        dateFrom,
-        dateTo,
-        includeUnassignedOutlet: typeof parsed.outlet_id !== "number",
-        accountId: parsed.account_id,
-        lineLimit: parsed.account_id ? (parsed.line_limit ?? 200) : undefined,
-        lineOffset: parsed.account_id ? parsed.line_offset ?? 0 : undefined,
-        timezone
+        datasetSizeBucket: bucket,
+        latencyMs,
+        rowCount: rows.length,
       });
 
       const roundedRows = rows.map((row) => ({
@@ -121,16 +206,7 @@ export const GET = withAuth(
         rows: roundedRows
       });
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
-      }
-
-      if (error instanceof FiscalYearSelectionError) {
-        return errorResponse("FISCAL_YEAR_REQUIRED", error.message, 400);
-      }
-
-      console.error("GET /reports/general-ledger failed", error);
-      return errorResponse("INTERNAL_SERVER_ERROR", "General ledger report failed", 500);
+      return handleReportError(null, error, startTime, auth.companyId);
     }
   },
   [

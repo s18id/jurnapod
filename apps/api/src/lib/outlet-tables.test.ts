@@ -153,6 +153,82 @@ test(
 );
 
 test(
+  "deleteOutletTable rejects tables with reservation history",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId, userId } = await resolveFixtureContext();
+    let tableId: number | null = null;
+    let reservationId: number | null = null;
+
+    try {
+      const [tableInsert] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        [companyId, outletId, `TR-${runId}`.slice(0, 32), `History Guard ${runId}`, "Main", 4]
+      );
+      tableId = Number(tableInsert.insertId);
+
+      const [reservationInsert] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO reservations (
+           company_id,
+           outlet_id,
+           table_id,
+           customer_name,
+           customer_phone,
+           guest_count,
+           reservation_at,
+           duration_minutes,
+           status,
+           notes
+         ) VALUES (?, ?, ?, ?, NULL, 2, NOW(), 90, 'COMPLETED', NULL)`,
+        [companyId, outletId, tableId, `History ${runId}`]
+      );
+      reservationId = Number(reservationInsert.insertId);
+
+      await assert.rejects(
+        async () => {
+          await deleteOutletTable({
+            companyId,
+            outletId,
+            tableId: tableId!,
+            actor: {
+              userId,
+              outletId,
+              ipAddress: "127.0.0.1"
+            }
+          });
+        },
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(error.message, /reservations are linked to this table/i);
+          return true;
+        }
+      );
+
+      assert.equal(await readTableStatus(companyId, outletId, tableId), "AVAILABLE");
+    } finally {
+      if (reservationId !== null) {
+        await pool.execute(`DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id = ?`, [
+          companyId,
+          outletId,
+          reservationId
+        ]);
+      }
+
+      if (tableId !== null) {
+        await pool.execute(`DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id = ?`, [
+          companyId,
+          outletId,
+          tableId
+        ]);
+      }
+    }
+  }
+);
+
+test(
   "bulk create rejects derived statuses at validation boundary",
   { concurrency: false, timeout: 30000 },
   async () => {
@@ -163,6 +239,14 @@ test(
     const payloadOccupied = buildValidBulkPayload({ status: "OCCUPIED" });
     const result2 = OutletTableBulkCreateRequestSchema.safeParse(payloadOccupied);
     assert.equal(result2.success, false, "Should reject derived status OCCUPIED");
+
+    const payloadReservedInt = buildValidBulkPayload({ status_id: 2 });
+    const result3 = OutletTableBulkCreateRequestSchema.safeParse(payloadReservedInt);
+    assert.equal(result3.success, false, "Should reject derived status_id=2");
+
+    const payloadAvailableInt = buildValidBulkPayload({ status_id: 1 });
+    const result4 = OutletTableBulkCreateRequestSchema.safeParse(payloadAvailableInt);
+    assert.equal(result4.success, true, "Should accept operational status_id=1");
   }
 );
 
@@ -255,8 +339,10 @@ test(
 
       for (const table of tables) {
         assert.equal(table.status, "AVAILABLE", "All tables should have AVAILABLE status");
+        assert.equal(table.status_id, 1, "All tables should include status_id=1");
         assert.match(table.code, new RegExp(`^BK-${runId.toUpperCase()}-`), "Code should match template");
       }
+
     } finally {
       if (createdTableIds.length > 0) {
         const placeholders = createdTableIds.map(() => "?").join(", ");

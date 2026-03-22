@@ -108,7 +108,7 @@ jurnapod/
 
 ### Current Architecture
 
-> **Note:** API framework successfully migrated from Next.js to Hono 4.0.0
+> **Note:** API framework successfully migrated from Hono.js to Hono 4.0.0
 
 | Component | Technology | Version |
 |-----------|------------|---------|
@@ -252,7 +252,7 @@ jurnapod/
 ```
 jurnapod/
 ├── apps/
-│   ├── api/                 # Next.js API server (port 3001)
+│   ├── api/                 # Hono.js API server (port 3001)
 │   ├── backoffice/          # React admin dashboard (port 3002)
 │   └── pos/                 # Vite React PWA (port 5173)
 ├── packages/

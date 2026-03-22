@@ -25,10 +25,16 @@ import {
   createOutletTable,
   createOutletTablesBulk,
   updateOutletTable,
-  deleteOutletTable
+  deactivateOutletTable
 } from "../hooks/use-outlet-tables";
 import type { ColumnDef } from "@tanstack/react-table";
-import type { OutletTableResponse, OutletTableStatus } from "@jurnapod/shared";
+import {
+  OutletTableStatusId,
+  outletTableStatusToId,
+  type OutletTableResponse,
+  type OutletTableStatus,
+  type OutletTableStatusIdType
+} from "@jurnapod/shared";
 
 type OutletTablesPageProps = {
   user: SessionUser;
@@ -42,7 +48,7 @@ interface FormData {
   name: string;
   zone: string | null;
   capacity: number | null;
-  status: OutletTableStatus;
+  status_id: 1 | 7;
 }
 
 interface BulkFormData {
@@ -52,7 +58,7 @@ interface BulkFormData {
   count: number;
   zone: string | null;
   capacity: number | null;
-  status: "AVAILABLE" | "UNAVAILABLE";
+  status_id: 1 | 7;
 }
 
 const emptyForm: FormData = {
@@ -60,7 +66,7 @@ const emptyForm: FormData = {
   name: "",
   zone: null,
   capacity: null,
-  status: "AVAILABLE"
+  status_id: OutletTableStatusId.AVAILABLE
 };
 
 const emptyBulkForm: BulkFormData = {
@@ -70,23 +76,27 @@ const emptyBulkForm: BulkFormData = {
   count: 10,
   zone: null,
   capacity: null,
-  status: "AVAILABLE"
+  status_id: OutletTableStatusId.AVAILABLE
 };
 
-const STATUS_OPTIONS: Array<{ value: OutletTableStatus; label: string; color: string }> = [
-  { value: "AVAILABLE", label: "Available", color: "green" },
-  { value: "RESERVED", label: "Reserved", color: "blue" },
-  { value: "OCCUPIED", label: "Occupied", color: "orange" },
-  { value: "UNAVAILABLE", label: "Unavailable", color: "gray" }
+const STATUS_OPTIONS: Array<{ value: OutletTableStatusIdType; label: string; color: string }> = [
+  { value: OutletTableStatusId.AVAILABLE, label: "Available", color: "green" },
+  { value: OutletTableStatusId.RESERVED, label: "Reserved", color: "blue" },
+  { value: OutletTableStatusId.OCCUPIED, label: "Occupied", color: "orange" },
+  { value: OutletTableStatusId.UNAVAILABLE, label: "Unavailable", color: "gray" }
 ];
 
-const OPERATIONAL_STATUS_OPTIONS: Array<{ value: OutletTableStatus; label: string }> = [
-  { value: "AVAILABLE", label: "Available" },
-  { value: "UNAVAILABLE", label: "Unavailable" }
+const OPERATIONAL_STATUS_OPTIONS: Array<{ value: 1 | 7; label: string }> = [
+  { value: OutletTableStatusId.AVAILABLE, label: "Available" },
+  { value: OutletTableStatusId.UNAVAILABLE, label: "Unavailable" }
 ];
 
 function isDerivedStatus(status: OutletTableStatus): boolean {
   return status === "RESERVED" || status === "OCCUPIED";
+}
+
+function getEffectiveStatusId(table: OutletTableResponse): OutletTableStatusIdType {
+  return table.status_id ?? outletTableStatusToId(table.status);
 }
 
 export function OutletTablesPage(props: OutletTablesPageProps) {
@@ -223,7 +233,9 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
       name: table.name,
       zone: table.zone,
       capacity: table.capacity,
-      status: table.status
+      status_id: getEffectiveStatusId(table) === OutletTableStatusId.UNAVAILABLE
+        ? OutletTableStatusId.UNAVAILABLE
+        : OutletTableStatusId.AVAILABLE
     });
     setFormErrors({});
     setDialogMode("edit");
@@ -297,7 +309,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
             name: formData.name.trim(),
             zone: formData.zone?.trim() || null,
             capacity: formData.capacity,
-            status: formData.status
+            status_id: formData.status_id
           },
           accessToken
         );
@@ -312,7 +324,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
             name: formData.name.trim(),
             zone: formData.zone?.trim() || null,
             capacity: formData.capacity,
-            ...(isCurrentlyDerived ? {} : { status: formData.status })
+            ...(isCurrentlyDerived ? {} : { status_id: formData.status_id })
           },
           accessToken
         );
@@ -328,7 +340,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
             count: bulkFormData.count,
             zone: bulkFormData.zone?.trim() || null,
             capacity: bulkFormData.capacity,
-            status: bulkFormData.status
+            status_id: bulkFormData.status_id
           },
           accessToken
         );
@@ -360,16 +372,28 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
   const handleDelete = useCallback(async () => {
     if (!deleteConfirm || !selectedOutletId) return;
 
+    const isReactivation = getEffectiveStatusId(deleteConfirm) === OutletTableStatusId.UNAVAILABLE;
+
     setDeleting(true);
     setError(null);
 
     try {
-      await deleteOutletTable(selectedOutletId, deleteConfirm.id, accessToken);
-      setSuccessMessage("Table deactivated successfully");
+      if (isReactivation) {
+        await updateOutletTable(
+          selectedOutletId,
+          deleteConfirm.id,
+          { status_id: OutletTableStatusId.AVAILABLE },
+          accessToken
+        );
+        setSuccessMessage("Table reactivated successfully");
+      } else {
+        await deactivateOutletTable(selectedOutletId, deleteConfirm.id, accessToken);
+        setSuccessMessage("Table deactivated successfully");
+      }
       await tables.refetch();
       setDeleteConfirm(null);
     } catch (e: any) {
-      setError(e.message || "Failed to deactivate table");
+      setError(e.message || (isReactivation ? "Failed to reactivate table" : "Failed to deactivate table"));
     } finally {
       setDeleting(false);
     }
@@ -410,7 +434,8 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
         id: "status",
         header: "Status",
         cell: (info) => {
-          const statusConfig = STATUS_OPTIONS.find((s) => s.value === info.row.original.status);
+          const statusId = getEffectiveStatusId(info.row.original);
+          const statusConfig = STATUS_OPTIONS.find((s) => s.value === statusId);
           return (
             <Badge color={statusConfig?.color || "gray"} variant="light">
               {statusConfig?.label || info.row.original.status}
@@ -426,15 +451,25 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
             <Button size="xs" onClick={() => openEditDialog(info.row.original)}>
               Edit
             </Button>
+            {getEffectiveStatusId(info.row.original) === OutletTableStatusId.UNAVAILABLE ? (
+              <Button
+                size="xs"
+                color="green"
+                variant="light"
+                onClick={() => setDeleteConfirm(info.row.original)}
+              >
+                Reactivate
+              </Button>
+            ) : (
             <Button
               size="xs"
               color="red"
               variant="light"
-              disabled={info.row.original.status === "UNAVAILABLE"}
               onClick={() => setDeleteConfirm(info.row.original)}
             >
               Deactivate
             </Button>
+            )}
           </Group>
         )
       }
@@ -573,10 +608,15 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
           ) : (
             <Select
               label="Status"
-              data={OPERATIONAL_STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
-              value={formData.status}
+              data={OPERATIONAL_STATUS_OPTIONS.map((s) => ({ value: String(s.value), label: s.label }))}
+              value={String(formData.status_id)}
               onChange={(value) =>
-                setFormData({ ...formData, status: (value as OutletTableStatus) || "AVAILABLE" })
+                setFormData({
+                  ...formData,
+                  status_id: value === String(OutletTableStatusId.UNAVAILABLE)
+                    ? OutletTableStatusId.UNAVAILABLE
+                    : OutletTableStatusId.AVAILABLE
+                })
               }
               required
             />
@@ -679,10 +719,15 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
 
           <Select
             label="Status"
-            data={OPERATIONAL_STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
-            value={bulkFormData.status}
+            data={OPERATIONAL_STATUS_OPTIONS.map((s) => ({ value: String(s.value), label: s.label }))}
+            value={String(bulkFormData.status_id)}
             onChange={(value) =>
-              setBulkFormData({ ...bulkFormData, status: (value as "AVAILABLE" | "UNAVAILABLE") || "AVAILABLE" })
+              setBulkFormData({
+                ...bulkFormData,
+                status_id: value === String(OutletTableStatusId.UNAVAILABLE)
+                  ? OutletTableStatusId.UNAVAILABLE
+                  : OutletTableStatusId.AVAILABLE
+              })
             }
             required
           />
@@ -713,20 +758,39 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
       <Modal
         opened={deleteConfirm !== null}
         onClose={() => setDeleteConfirm(null)}
-        title={<Title order={4}>Confirm Deactivate</Title>}
+        title={
+          <Title order={4}>
+            {deleteConfirm && getEffectiveStatusId(deleteConfirm) === OutletTableStatusId.UNAVAILABLE
+              ? "Confirm Reactivate"
+              : "Confirm Deactivate"}
+          </Title>
+        }
         centered
       >
         <Stack gap="md">
-          <Text>
-            Deactivate table <strong>{deleteConfirm?.code}</strong> ({deleteConfirm?.name})? The
-            table will be marked as unavailable.
-          </Text>
+          {deleteConfirm && getEffectiveStatusId(deleteConfirm) === OutletTableStatusId.UNAVAILABLE ? (
+            <Text>
+              Reactivate table <strong>{deleteConfirm.code}</strong> ({deleteConfirm.name})? The
+              table will be marked as available.
+            </Text>
+          ) : (
+            <Text>
+              Deactivate table <strong>{deleteConfirm?.code}</strong> ({deleteConfirm?.name})? The
+              table will be marked as unavailable.
+            </Text>
+          )}
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setDeleteConfirm(null)}>
               Cancel
             </Button>
-            <Button color="red" onClick={handleDelete} loading={deleting}>
-              Deactivate
+            <Button
+              color={deleteConfirm && getEffectiveStatusId(deleteConfirm) === OutletTableStatusId.UNAVAILABLE ? "green" : "red"}
+              onClick={handleDelete}
+              loading={deleting}
+            >
+              {deleteConfirm && getEffectiveStatusId(deleteConfirm) === OutletTableStatusId.UNAVAILABLE
+                ? "Reactivate"
+                : "Deactivate"}
             </Button>
           </Group>
         </Stack>

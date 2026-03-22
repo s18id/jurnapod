@@ -8,6 +8,18 @@ import { resolveDefaultFiscalYearDateRange, FiscalYearSelectionError } from "../
 import { getTrialBalance } from "../../../../src/lib/reports";
 import { errorResponse, successResponse } from "../../../../src/lib/response";
 import { getCompany } from "../../../../src/lib/companies";
+import {
+  withQueryTimeout,
+  QueryTimeoutError,
+  getDatasetSizeBucket,
+  classifyReportError,
+  emitReportMetrics,
+  QUERY_TIMEOUT_MS,
+  type ReportType,
+} from "../../../../src/lib/report-telemetry";
+import type { Context } from "hono";
+
+const REPORT_TYPE: ReportType = "trial_balance";
 
 const querySchema = z.object({
   outlet_id: z.coerce.number().int().positive().optional(),
@@ -40,8 +52,56 @@ async function resolveDateRange(
   return resolveDefaultFiscalYearDateRange(companyId);
 }
 
+/**
+ * Handle report error with proper telemetry
+ */
+function handleReportError(c: Context | null, error: unknown, startTime: number, companyId: number) {
+  const errorClass = classifyReportError(error);
+  const latencyMs = Date.now() - startTime;
+
+  // Emit telemetry for error
+  const bucket = getDatasetSizeBucket(0); // Unknown at error time
+  emitReportMetrics(c, {
+    reportType: REPORT_TYPE,
+    companyId,
+    datasetSizeBucket: bucket,
+    latencyMs,
+    errorClass,
+  });
+
+  if (error instanceof QueryTimeoutError) {
+    return errorResponse(
+      "TIMEOUT",
+      "Report generation timed out. Please try a smaller date range.",
+      504
+    );
+  }
+
+  if (error instanceof z.ZodError) {
+    return errorResponse(
+      "VALIDATION_ERROR",
+      "Invalid request parameters: " + error.errors.map(e => e.message).join(", "),
+      400
+    );
+  }
+
+  if (error instanceof FiscalYearSelectionError) {
+    return errorResponse("FISCAL_YEAR_REQUIRED", error.message, 400);
+  }
+
+  if (error instanceof Error && error.message === "Forbidden") {
+    return errorResponse("FORBIDDEN", "Forbidden", 403);
+  }
+
+  // Log internal error without leaking details
+  console.error("GET /reports/trial-balance failed:", error);
+  return errorResponse("INTERNAL_SERVER_ERROR", "Trial balance report failed", 500);
+}
+
 export const GET = withAuth(
   async (request, auth) => {
+    const startTime = Date.now();
+
     try {
       const url = new URL(request.url);
       const parsed = querySchema.parse({
@@ -68,16 +128,21 @@ export const GET = withAuth(
       const company = await getCompany(auth.companyId);
       const timezone = company.timezone ?? 'UTC';
 
-      const rows = await getTrialBalance({
-        companyId: auth.companyId,
-        outletIds,
-        dateFrom,
-        dateTo,
-        asOf: parsed.as_of,
-        includeUnassignedOutlet: typeof parsed.outlet_id !== "number",
-        timezone
-      });
+      // Execute with timeout
+      const rows = await withQueryTimeout(
+        getTrialBalance({
+          companyId: auth.companyId,
+          outletIds,
+          dateFrom,
+          dateTo,
+          asOf: parsed.as_of,
+          includeUnassignedOutlet: typeof parsed.outlet_id !== "number",
+          timezone
+        }),
+        QUERY_TIMEOUT_MS
+      );
 
+      // Calculate totals
       const totals = rows.reduce(
         (acc, row) => ({
           total_debit: acc.total_debit + row.total_debit,
@@ -91,6 +156,17 @@ export const GET = withAuth(
         }
       );
 
+      // Emit success telemetry
+      const latencyMs = Date.now() - startTime;
+      const bucket = getDatasetSizeBucket(rows.length);
+      emitReportMetrics(null, {
+        reportType: REPORT_TYPE,
+        companyId: auth.companyId,
+        datasetSizeBucket: bucket,
+        latencyMs,
+        rowCount: rows.length,
+      });
+
       return successResponse({
         filters: {
           outlet_ids: outletIds,
@@ -102,16 +178,7 @@ export const GET = withAuth(
         rows
       });
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
-      }
-
-      if (error instanceof FiscalYearSelectionError) {
-        return errorResponse("FISCAL_YEAR_REQUIRED", error.message, 400);
-      }
-
-      console.error("GET /reports/trial-balance failed", error);
-      return errorResponse("INTERNAL_SERVER_ERROR", "Trial balance report failed", 500);
+      return handleReportError(null, error, startTime, auth.companyId);
     }
   },
   [

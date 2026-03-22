@@ -422,12 +422,21 @@ async function ensureDefaultOutlet(
   connection: PoolConnection,
   companyId: number
 ): Promise<number> {
+  // Get company timezone to inherit
+  const [companyRows] = await connection.execute<CompanyRow[]>(
+    `SELECT timezone FROM companies WHERE id = ?`,
+    [companyId]
+  );
+  
+  const companyTimezone = companyRows[0]?.timezone ?? 'UTC';
+  
   const [result] = await connection.execute<ResultSetHeader>(
-    `INSERT INTO outlets (company_id, code, name)
-     VALUES (?, ?, ?)
+    `INSERT INTO outlets (company_id, code, name, timezone)
+     VALUES (?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
-       id = LAST_INSERT_ID(id)`,
-    [companyId, DEFAULT_OUTLET_CODE, DEFAULT_OUTLET_NAME]
+       id = LAST_INSERT_ID(id),
+       timezone = COALESCE(timezone, VALUES(timezone))`,
+    [companyId, DEFAULT_OUTLET_CODE, DEFAULT_OUTLET_NAME, companyTimezone]
   );
 
   return Number(result.insertId);

@@ -51,6 +51,8 @@ const SETTINGS_KEYS = [
   "feature.purchasing.require_approval"
 ] as const;
 
+const COMPANY_SETTINGS_KEYS = ["feature.reservation.default_duration_minutes"] as const;
+
 const DEFAULT_SETTINGS: Record<(typeof SETTINGS_KEYS)[number], number | boolean | string> = {
   "feature.pos.auto_sync_enabled": true,
   "feature.pos.sync_interval_seconds": 60,
@@ -58,6 +60,10 @@ const DEFAULT_SETTINGS: Record<(typeof SETTINGS_KEYS)[number], number | boolean 
   "accounting.allow_multiple_open_fiscal_years": false,
   "feature.inventory.allow_backorder": false,
   "feature.purchasing.require_approval": true
+};
+
+const DEFAULT_COMPANY_SETTINGS: Record<(typeof COMPANY_SETTINGS_KEYS)[number], number> = {
+  "feature.reservation.default_duration_minutes": 120
 };
 
 function buildOutletOptions(outlets: SessionUser["outlets"]) {
@@ -72,7 +78,8 @@ export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPagePr
   const outletOptions = useMemo(() => buildOutletOptions(user.outlets), [user.outlets]);
   const [outletId, setOutletId] = useState<number>(user.outlets[0]?.id ?? 0);
   const [formState, setFormState] = useState<Record<string, number | boolean | string>>({
-    ...DEFAULT_SETTINGS
+    ...DEFAULT_SETTINGS,
+    ...DEFAULT_COMPANY_SETTINGS
   });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -90,14 +97,28 @@ export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPagePr
       setError(null);
       setSaveSuccess(false);
       try {
-        const keysParam = SETTINGS_KEYS.join(",");
-        const response = await apiRequest<SettingsResponse>(
-          `/settings/config?outlet_id=${outletId}&keys=${encodeURIComponent(keysParam)}`,
-          {},
-          accessToken
-        );
-        const nextState: Record<string, number | boolean | string> = { ...DEFAULT_SETTINGS };
-        response.data.settings.forEach((setting) => {
+        const outletKeysParam = SETTINGS_KEYS.join(",");
+        const companyKeysParam = COMPANY_SETTINGS_KEYS.join(",");
+        const [outletResponse, companyResponse] = await Promise.all([
+          apiRequest<SettingsResponse>(
+            `/settings/config?outlet_id=${outletId}&keys=${encodeURIComponent(outletKeysParam)}`,
+            {},
+            accessToken
+          ),
+          apiRequest<{ success: true; data: { settings: SettingsResponse["data"]["settings"] } }>(
+            `/settings/company-config?keys=${encodeURIComponent(companyKeysParam)}`,
+            {},
+            accessToken
+          )
+        ]);
+        const nextState: Record<string, number | boolean | string> = {
+          ...DEFAULT_SETTINGS,
+          ...DEFAULT_COMPANY_SETTINGS
+        };
+        outletResponse.data.settings.forEach((setting) => {
+          nextState[setting.key] = setting.value;
+        });
+        companyResponse.data.settings.forEach((setting) => {
           nextState[setting.key] = setting.value;
         });
         setFormState(nextState);
@@ -143,6 +164,19 @@ export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPagePr
             settings: SETTINGS_KEYS.map((key) => ({
               key,
               value: formState[key]
+            }))
+          })
+        },
+        accessToken
+      );
+      await apiRequest<SettingsSaveResponse>(
+        "/settings/company-config",
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            settings: COMPANY_SETTINGS_KEYS.map((key) => ({
+              key,
+              value: Number(formState[key] ?? DEFAULT_COMPANY_SETTINGS[key])
             }))
           })
         },
@@ -219,6 +253,30 @@ export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPagePr
                 setFormState((prev) => ({
                   ...prev,
                   "feature.pos.sync_interval_seconds": Number(value) || 5
+                }))
+              }
+            />
+          </Stack>
+        </Card>
+
+        <Card>
+          <Stack gap="md">
+            <div>
+              <Title order={4}>Reservation</Title>
+              <Text c="dimmed" size="sm">
+                Company-wide defaults for reservation scheduling.
+              </Text>
+            </div>
+            <NumberInput
+              label="Default reservation duration (minutes)"
+              description="Used when reservation duration is empty in calendar and form defaults."
+              min={15}
+              max={480}
+              value={Number(formState["feature.reservation.default_duration_minutes"] ?? 120)}
+              onChange={(value) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  "feature.reservation.default_duration_minutes": Number(value) || 120
                 }))
               }
             />

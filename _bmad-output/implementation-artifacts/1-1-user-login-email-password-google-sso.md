@@ -65,7 +65,7 @@ So that **I can access the backoffice securely**.
 - **Authorization**: RBAC with roles (SUPER_ADMIN, OWNER, ADMIN, ACCOUNTANT, CASHIER)
 - **API Security**: TLS 1.2+ in transit
 - **Tenant Isolation**: company_id checks at API middleware level
-- **API Style**: REST (Next.js API routes) at `/api/auth/*`
+- **API Style**: REST (Hono.js API routes) at `/api/auth/*`
 
 ### Source Tree Components
 

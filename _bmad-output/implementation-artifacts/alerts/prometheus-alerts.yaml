@@ -1,0 +1,190 @@
+# Prometheus Alert Rules for Jurnapod SLOs
+# Epic 11: Operational Trust and Scale Readiness
+# Generated: 2026-03-22
+
+groups:
+  - name: jurnapod slo alerts
+    rules:
+      # SLO Burn Rate Alerts
+
+      - alert: JurnapodSLOBurnRateCritical
+        expr: |
+          (
+            sum(rate(http_request_duration_seconds_bucket{flow_name!=""}[1h])) by (flow_name)
+            /
+            sum(rate(http_request_duration_seconds_count{flow_name!=""}[1h])) by (flow_name)
+          ) > 0.144
+        for: 1m
+        labels:
+          severity: P1
+          slo: multi-flow
+          team: platform
+        annotations:
+          summary: "Critical SLO burn rate detected"
+          description: "Flow {{ $labels.flow_name }} burn rate exceeds 14.4% over 1h window"
+          runbook: "/runbooks/slo-burn-rate.md"
+
+      - alert: JurnapodSLOBurnRateWarning
+        expr: |
+          (
+            sum(rate(http_request_duration_seconds_bucket{flow_name!=""}[6h])) by (flow_name)
+            /
+            sum(rate(http_request_duration_seconds_count{flow_name!=""}[6h])) by (flow_name)
+          ) > 0.144
+        for: 5m
+        labels:
+          severity: P2
+          slo: multi-flow
+          team: platform
+        annotations:
+          summary: "Warning SLO burn rate detected"
+          description: "Flow {{ $labels.flow_name }} burn rate exceeds 14.4% over 6h window"
+          runbook: "/runbooks/slo-burn-rate.md"
+
+      - alert: JurnapodErrorBudgetCritical
+        expr: |
+          (
+            sum(increase(http_request_errors_total[1d])) by (flow_name)
+            /
+            sum(increase(http_request_total[1d])) by (flow_name)
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: P1
+          slo: error-budget
+          team: platform
+        annotations:
+          summary: "Error budget below 10% for {{ $labels.flow_name }}"
+          description: "Flow {{ $labels.flow_name }} has exhausted more than 90% of its error budget"
+          runbook: "/runbooks/error-budget-exhaustion.md"
+
+  - name: jurnapod latency slo
+    rules:
+      - alert: JurnapodLatencySLOBreach
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(payment_capture_latency_seconds_bucket[5m])) by (le, flow_name)
+          ) > 1
+        for: 5m
+        labels:
+          severity: P2
+          slo: latency
+          team: pos
+        annotations:
+          summary: "Latency SLO breach for {{ $labels.flow_name }}"
+          description: "p95 latency exceeds 1s target for 5 minutes"
+          runbook: "/runbooks/latency-slo-breach.md"
+
+      - alert: JurnapodSyncLatencySLOBreach
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(sync_replay_idempotency_latency_seconds_bucket[5m])) by (le, flow_name)
+          ) > 30
+        for: 5m
+        labels:
+          severity: P2
+          slo: latency
+          team: sync
+        annotations:
+          summary: "Sync latency SLO breach"
+          description: "Sync completion p95 latency exceeds 30s target"
+          runbook: "/runbooks/sync-latency-slo-breach.md"
+
+      - alert: JurnapodReportLatencySLOBreach
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(trial_balance_latency_seconds_bucket[5m])) by (le)
+          ) > 5
+          or
+          histogram_quantile(0.95, 
+            sum(rate(general_ledger_latency_seconds_bucket[5m])) by (le)
+          ) > 5
+        for: 5m
+        labels:
+          severity: P2
+          slo: latency
+          team: reports
+        annotations:
+          summary: "Report latency SLO breach"
+          description: "Report p95 latency exceeds 5s target"
+          runbook: "/runbooks/report-latency-slo-breach.md"
+
+  - name: jurnapod availability slo
+    rules:
+      - alert: JurnapodAvailabilitySLOBreach
+        expr: |
+          (
+            sum(rate(http_request_total{status="success"}[1h])) by (flow_name)
+            /
+            sum(rate(http_request_total[1h])) by (flow_name)
+          ) < 0.999
+        for: 5m
+        labels:
+          severity: P1
+          slo: availability
+          team: platform
+        annotations:
+          summary: "Availability SLO breach for {{ $labels.flow_name }}"
+          description: "Availability dropped below 99.9% target"
+          runbook: "/runbooks/availability-slo-breach.md"
+
+  - name: jurnapod sync health
+    rules:
+      - alert: JurnapodSyncDuplicateRateHigh
+        expr: |
+          (
+            sum(rate(sync_replay_duplicates_total[5m]))
+            /
+            sum(rate(sync_replay_idempotency_total[5m]))
+          ) > 0.0001
+        for: 5m
+        labels:
+          severity: P2
+          slo: correctness
+          team: sync
+        annotations:
+          summary: "High sync duplicate rate"
+          description: "Sync duplicate rate exceeds 0.01% threshold"
+          runbook: "/runbooks/sync-duplicate-rate.md"
+
+  - name: jurnapod posting accuracy
+    rules:
+      - alert: JurnapodGLPostingDrift
+        expr: |
+          pos_to_gl_posting_accuracy_ratio < 1.0
+        for: 5m
+        labels:
+          severity: P1
+          slo: accuracy
+          team: gl
+        annotations:
+          summary: "GL posting accuracy drift detected"
+          description: "POS to GL posting accuracy has dropped below 100%"
+          runbook: "/runbooks/gl-accuracy-drift.md"
+
+# Alert routing and deduplication
+# These would typically be configured in AlertManager config
+alertmanager:
+  config:
+    route:
+      group_by: ['alertname', 'flow_name']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: platform-on-call
+      routes:
+        - match:
+            severity: P1
+          receiver: platform-on-call-urgent
+          group_wait: 5m
+          repeat_interval: 5m
+        - match:
+            severity: P2
+          receiver: platform-on-call
+          group_wait: 30m
+          repeat_interval: 1h
+        - match:
+            severity: P3
+          receiver: platform-notifications
+          group_wait: 1h
+          repeat_interval: 4h

@@ -5,6 +5,7 @@ import { apiRequest, getApiBaseUrl } from "./api-client";
 
 // Memory-only token storage (no localStorage)
 let inMemoryAccessToken: string | null = null;
+let inMemoryCompanyTimezone: string | null = null;
 
 export type RoleCode =
   | "SUPER_ADMIN"
@@ -30,6 +31,7 @@ export type UserOutletRoleAssignment = {
 export type SessionUser = {
   id: number;
   company_id: number;
+  company_timezone?: string | null;
   email: string;
   roles: RoleCode[];
   global_roles: RoleCode[];
@@ -64,6 +66,10 @@ export type GoogleLoginInput = {
 };
 
 export function getStoredAccessToken(): string | null {
+  // Check for E2E test token first
+  if (typeof window !== "undefined" && (window as any).__E2E_ACCESS_TOKEN__) {
+    return (window as any).__E2E_ACCESS_TOKEN__;
+  }
   return inMemoryAccessToken;
 }
 
@@ -73,6 +79,15 @@ export function storeAccessToken(token: string): void {
 
 export function clearAccessToken(): void {
   inMemoryAccessToken = null;
+  inMemoryCompanyTimezone = null;
+}
+
+export function getStoredCompanyTimezone(): string | null {
+  return inMemoryCompanyTimezone;
+}
+
+export function storeCompanyTimezone(timezone: string | null | undefined): void {
+  inMemoryCompanyTimezone = timezone && timezone.trim() ? timezone : null;
 }
 
 export async function login(input: LoginInput): Promise<{ token: string; user: SessionUser }> {
@@ -117,7 +132,12 @@ export async function loginWithGoogle(
 
 export async function fetchCurrentUser(accessToken: string): Promise<SessionUser> {
   const response = await apiRequest<MeResponse>("/users/me", {}, accessToken);
+  storeCompanyTimezone(response.data.company_timezone ?? null);
   return response.data;
+}
+
+export async function refreshSessionUser(accessToken: string): Promise<SessionUser> {
+  return fetchCurrentUser(accessToken);
 }
 
 /**

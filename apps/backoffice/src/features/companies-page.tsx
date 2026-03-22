@@ -20,8 +20,7 @@ import {
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { IconEye } from "@tabler/icons-react";
-import type { ColumnDef } from "@tanstack/react-table";
-import type { SessionUser } from "../lib/session";
+import { storeCompanyTimezone, type SessionUser } from "../lib/session";
 import {
   useCompanies,
   createCompany,
@@ -30,9 +29,16 @@ import {
   reactivateCompany
 } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
-import { DataTable } from "../components/DataTable";
+import {
+  DataTable,
+  type DataTableColumnDef,
+  type PaginationState,
+  type SortState,
+  type RowSelectionState,
+} from "../components/ui/DataTable";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
+import { TIMEZONE_OPTIONS } from "../constants/timezones";
 import type { CompanyResponse } from "@jurnapod/shared";
 
 type CompaniesPageProps = {
@@ -50,6 +56,7 @@ type CompanyFormData = {
   tax_id: string;
   email: string;
   phone: string;
+  timezone: string;
   address_line1: string;
   address_line2: string;
   city: string;
@@ -63,6 +70,7 @@ const emptyForm: CompanyFormData = {
   tax_id: "",
   email: "",
   phone: "",
+  timezone: "",
   address_line1: "",
   address_line2: "",
   city: "",
@@ -97,12 +105,33 @@ export function CompaniesPage(props: CompaniesPageProps) {
     { action: "deactivate" | "reactivate"; company: CompanyResponse } | null
   >(null);
 
+  // Pagination, sort, and selection state for complex DataTable
+  const [pagination, setPagination] = useState<PaginationState>({
+    page: 1,
+    pageSize: 25
+  });
+  const [sort, setSort] = useState<SortState | null>(null);
+  const [selection, setSelection] = useState<RowSelectionState>({});
+
   const isMobile = useMediaQuery("(max-width: 48em)");
 
   // API hooks
   const companiesQuery = useCompanies(accessToken, {
-    includeDeleted: isSuperAdmin && statusFilter !== "active"
+    includeDeleted: isSuperAdmin && statusFilter !== "active",
+    pagination,
+    sort: sort ? { id: sort.id, direction: sort.direction } : undefined
   });
+
+  // Reset pagination when filters change
+  const handleStatusFilterChange = (value: string | null) => {
+    setStatusFilter((value as CompanyStatusFilter) || "active");
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.currentTarget.value);
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
 
   const filteredCompanies = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -145,6 +174,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
       tax_id: company.tax_id ?? "",
       email: company.email ?? "",
       phone: company.phone ?? "",
+      timezone: company.timezone ?? "",
       address_line1: company.address_line1 ?? "",
       address_line2: company.address_line2 ?? "",
       city: company.city ?? "",
@@ -164,6 +194,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
       tax_id: company.tax_id ?? "",
       email: company.email ?? "",
       phone: company.phone ?? "",
+      timezone: company.timezone ?? "",
       address_line1: company.address_line1 ?? "",
       address_line2: company.address_line2 ?? "",
       city: company.city ?? "",
@@ -205,6 +236,10 @@ export function CompaniesPage(props: CompaniesPageProps) {
     if (!formData.name.trim()) {
       errors.name = "Company name is required";
     }
+
+    if (!formData.timezone.trim()) {
+      errors.timezone = "Timezone is required";
+    }
     
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -227,6 +262,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
             tax_id: formData.tax_id.trim() || undefined,
             email: formData.email.trim() || undefined,
             phone: formData.phone.trim() || undefined,
+            timezone: formData.timezone.trim(),
             address_line1: formData.address_line1.trim() || undefined,
             address_line2: formData.address_line2.trim() || undefined,
             city: formData.city.trim() || undefined,
@@ -255,6 +291,9 @@ export function CompaniesPage(props: CompaniesPageProps) {
         if (formData.phone.trim() !== (editingCompany.phone ?? "")) {
           updates.phone = formData.phone.trim() || null;
         }
+        if (formData.timezone.trim() !== (editingCompany.timezone ?? "")) {
+          updates.timezone = formData.timezone.trim();
+        }
         if (formData.address_line1.trim() !== (editingCompany.address_line1 ?? "")) {
           updates.address_line1 = formData.address_line1.trim() || null;
         }
@@ -270,6 +309,9 @@ export function CompaniesPage(props: CompaniesPageProps) {
 
         if (Object.keys(updates).length > 0) {
           await updateCompany(editingCompany.id, updates, accessToken);
+          if (editingCompany.id === user.company_id && updates.timezone !== undefined) {
+            storeCompanyTimezone(updates.timezone);
+          }
           setSuccessMessage("Company updated successfully");
           await companiesQuery.refetch();
         }
@@ -286,16 +328,18 @@ export function CompaniesPage(props: CompaniesPageProps) {
     }
   };
 
-  const columns = useMemo<ColumnDef<CompanyResponse>[]>(
+  const columns = useMemo<DataTableColumnDef<CompanyResponse>[]>(
     () => [
       {
         id: "code",
         header: "Code",
+        sortable: true,
         cell: (info) => <Text fw={600}>{info.row.original.code}</Text>
       },
       {
         id: "name",
         header: "Name",
+        sortable: true,
         cell: (info) => <Text>{info.row.original.name}</Text>
       },
       {
@@ -318,7 +362,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
           return (
             <Group gap="xs" justify="flex-end" wrap="wrap">
               <Tooltip label="View details">
-                <ActionIcon variant="light" onClick={() => openDetailDrawer(company)}>
+                <ActionIcon variant="light" onClick={() => openDetailDrawer(company)} aria-label="View company details">
                   <IconEye size={16} />
                 </ActionIcon>
               </Tooltip>
@@ -408,7 +452,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
                 label="Search"
                 placeholder="Search by code or name"
                 value={searchTerm}
-                onChange={(event) => setSearchTerm(event.currentTarget.value)}
+                onChange={handleSearchChange}
                 style={{ minWidth: 220 }}
               />
               {isSuperAdmin ? (
@@ -416,7 +460,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
                   label="Status"
                   data={statusOptions}
                   value={statusFilter}
-                  onChange={(value) => setStatusFilter((value as CompanyStatusFilter) || "active")}
+                  onChange={handleStatusFilterChange}
                   style={{ minWidth: 160 }}
                 />
               ) : null}
@@ -448,10 +492,18 @@ export function CompaniesPage(props: CompaniesPageProps) {
           </Stack>
         </PageCard>
 
-        <PageCard title={`Companies (${filteredCompanies.length})`}>
+        <PageCard title={`Companies (${companiesQuery.totalCount})`}>
           <DataTable
             columns={columns}
             data={filteredCompanies}
+            getRowId={(company) => company.id.toString()}
+            pagination={pagination}
+            sort={sort}
+            selection={selection}
+            totalCount={companiesQuery.totalCount}
+            onPaginationChange={setPagination}
+            onSortChange={setSort}
+            onSelectionChange={setSelection}
             emptyState={
               searchTerm.trim().length > 0
                 ? "No companies match your search."
@@ -540,6 +592,17 @@ export function CompaniesPage(props: CompaniesPageProps) {
             value={formData.phone}
             onChange={(event) => setFormData({ ...formData, phone: event.currentTarget.value })}
             maxLength={32}
+          />
+
+          <Select
+            label="Timezone"
+            placeholder="Select timezone"
+            data={TIMEZONE_OPTIONS}
+            value={formData.timezone || null}
+            onChange={(value) => setFormData({ ...formData, timezone: value ?? "" })}
+            error={formErrors.timezone}
+            searchable
+            allowDeselect={false}
           />
 
           <Divider label="Address" my="sm" />
@@ -659,6 +722,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
 
             <TextInput label="Email" value={editingCompany.email ?? "—"} disabled />
             <TextInput label="Phone" value={editingCompany.phone ?? "—"} disabled />
+            <TextInput label="Timezone" value={editingCompany.timezone ?? "—"} disabled />
 
             <Divider label="Address" my="sm" />
 

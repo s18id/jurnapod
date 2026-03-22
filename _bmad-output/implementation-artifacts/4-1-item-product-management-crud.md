@@ -81,7 +81,7 @@ So that **products are available for sale at POS**.
 
 ### Architecture Patterns
 
-- **API Framework**: Next.js API routes at `/api/inventory/items`
+- **API Framework**: Hono.js API routes at `/api/inventory/items`
 - **Validation**: Zod schemas in `packages/shared/src/schemas/master-data.ts`
 - **Item Types**: SERVICE, PRODUCT, INGREDIENT, RECIPE (per ADR-0002)
 - **Auth**: JWT with RBAC - roles: OWNER, COMPANY_ADMIN, ADMIN, ACCOUNTANT

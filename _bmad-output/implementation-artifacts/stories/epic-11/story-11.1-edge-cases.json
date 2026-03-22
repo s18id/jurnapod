@@ -1,0 +1,32 @@
+[
+  {
+    "location": "story-11.1.md:58",
+    "trigger_condition": "Business hours undefined for availability SLO",
+    "guard_snippet": "Define business hours per company/outlet with timezone",
+    "potential_consequence": "Availability measurement ambiguous, SLO unenforceable"
+  },
+  {
+    "location": "story-11.1.md:44",
+    "trigger_condition": "SLO targets may misalign with NFRs",
+    "guard_snippet": "Add validation step comparing targets to NFRs",
+    "potential_consequence": "SLOs not reflecting product requirements"
+  },
+  {
+    "location": "story-11.1.md:71-73",
+    "trigger_condition": "Missing correlation IDs in logs/traces",
+    "guard_snippet": "Define fallback behavior when IDs missing",
+    "potential_consequence": "Observability gaps, tracing broken"
+  },
+  {
+    "location": "story-11.1.md:92-104",
+    "trigger_condition": "High cardinality or PII labels in metrics",
+    "guard_snippet": "Add validation in CI to forbid high-cardinality labels",
+    "potential_consequence": "Monitoring cost spike, PII leakage"
+  },
+  {
+    "location": "story-11.1.md:192-228",
+    "trigger_condition": "Missing negative test scenarios",
+    "guard_snippet": "Add tests for missing telemetry, PII leakage, alert false positives",
+    "potential_consequence": "Edge cases undetected in production"
+  }
+]

@@ -3,21 +3,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  Accordion,
   Alert,
   Badge,
   Button,
   Checkbox,
   Group,
+  Menu,
   Modal,
-  ScrollArea,
   Select,
   Stack,
   Text,
   TextInput,
-  Title
+  Title,
+  ActionIcon
 } from "@mantine/core";
-import type { ColumnDef } from "@tanstack/react-table";
 import type { SessionUser } from "../lib/session";
 import {
   useUsers,
@@ -32,17 +31,54 @@ import {
 } from "../hooks/use-users";
 import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
-import { DataTable } from "../components/DataTable";
+import {
+  DataTable,
+  type DataTableColumnDef,
+  type PaginationState,
+  type SortState,
+  type RowSelectionState,
+} from "../components/ui/DataTable";
+import { DirtyConfirmDialog } from "../components/dirty-confirm-dialog";
 import { FilterBar } from "../components/FilterBar";
+import { OutletRoleMatrix } from "../components/OutletRoleMatrix";
 import { PageCard } from "../components/PageCard";
+import { trackActionMenuOpen, trackActionSelect, trackActionError } from "../lib/telemetry";
 import type { OutletResponse, Role, RoleResponse, UserResponse } from "@jurnapod/shared";
+import {
+  IconDots,
+  IconEdit,
+  IconShield,
+  IconBuildingStore,
+  IconLock,
+  IconBan,
+  IconCheck
+} from "@tabler/icons-react";
 
 type UsersPageProps = {
   user: SessionUser;
   accessToken: string;
 };
 
-type DialogMode = "create" | "edit" | "roles" | "outlets" | "password" | null;
+// Dialog modes split into Account-focused and Access-focused flows
+type AccountDialogMode = "account-create" | "account-edit" | null;
+type AccessDialogMode = "access-create" | "access-edit" | null;
+type LegacyDialogMode = "password" | null; // Keep password as legacy for now
+
+type DialogMode = AccountDialogMode | AccessDialogMode | LegacyDialogMode;
+
+// Account form - profile-only fields
+type AccountFormData = {
+  company_id?: number | null;
+  email: string;
+  password: string;
+  is_active: boolean;
+};
+
+// Access form - roles and outlet assignments
+type AccessFormData = {
+  global_role_codes: string[];
+  outlet_role_assignments: Array<{ outlet_id: number; role_codes: string[] }>;
+};
 
 type UserFormData = {
   company_id?: number | null;
@@ -70,199 +106,6 @@ const ROLE_HELP_TEXT: Record<string, string> = {
   ACCOUNTANT: "Reviews journals and financial records."
 };
 
-type OutletRoleAssignmentsFieldProps = {
-  title: string;
-  outlets: OutletResponse[];
-  roles: RoleResponse[];
-  actorMaxRoleLevel: number;
-  maxHeight: number;
-  outletRoleCodesFor: (outletId: number) => string[];
-  onUpdateRoleCode: (outletId: number, roleCode: string, checked: boolean) => void;
-  onSetRoleForOutlets: (outletIds: number[], roleCode: string, checked: boolean) => void;
-  onSetAllAssignableRolesForOutlets: (outletIds: number[]) => void;
-  onClearRolesForOutlets: (outletIds: number[]) => void;
-};
-
-function OutletRoleAssignmentsField(props: OutletRoleAssignmentsFieldProps) {
-  const {
-    title,
-    outlets,
-    roles,
-    actorMaxRoleLevel,
-    maxHeight,
-    outletRoleCodesFor,
-    onUpdateRoleCode,
-    onSetRoleForOutlets,
-    onSetAllAssignableRolesForOutlets,
-    onClearRolesForOutlets
-  } = props;
-  const [searchValue, setSearchValue] = useState("");
-
-  const normalizedSearch = searchValue.trim().toLowerCase();
-  const filteredOutlets = useMemo(
-    () =>
-      outlets.filter((outlet) => {
-        if (!normalizedSearch) {
-          return true;
-        }
-        const haystack = `${outlet.name} ${outlet.code}`.toLowerCase();
-        return haystack.includes(normalizedSearch);
-      }),
-    [normalizedSearch, outlets]
-  );
-
-  const assignableRoles = useMemo(
-    () => roles.filter((role) => role.role_level < actorMaxRoleLevel),
-    [roles, actorMaxRoleLevel]
-  );
-
-  const filteredOutletIds = useMemo(() => filteredOutlets.map((outlet) => outlet.id), [filteredOutlets]);
-  const totalSelectedRoleCount = useMemo(
-    () =>
-      outlets.reduce((count, outlet) => {
-        const selected = outletRoleCodesFor(outlet.id);
-        return count + selected.length;
-      }, 0),
-    [outletRoleCodesFor, outlets]
-  );
-  const selectedOutletCount = useMemo(
-    () => outlets.filter((outlet) => outletRoleCodesFor(outlet.id).length > 0).length,
-    [outletRoleCodesFor, outlets]
-  );
-  const hasSelectionInFilteredOutlets = useMemo(
-    () => filteredOutlets.some((outlet) => outletRoleCodesFor(outlet.id).length > 0),
-    [filteredOutlets, outletRoleCodesFor]
-  );
-
-  return (
-    <div>
-      <Text fw={600} size="sm" mb={4}>
-        {title}
-      </Text>
-      <Text size="xs" c="dimmed" mb="xs" role="status" aria-live="polite">
-        {selectedOutletCount} outlets assigned, {totalSelectedRoleCount} role selections total.
-      </Text>
-
-      <Stack gap="xs" mb="sm">
-        <TextInput
-          label="Search outlets"
-          placeholder="Search by outlet name or code"
-          value={searchValue}
-          onChange={(event) => setSearchValue(event.currentTarget.value)}
-        />
-        <Group gap="xs" wrap="wrap">
-          <Button
-            size="xs"
-            variant="default"
-            onClick={() => onClearRolesForOutlets(filteredOutletIds)}
-            disabled={filteredOutletIds.length === 0 || !hasSelectionInFilteredOutlets}
-          >
-            Clear filtered outlets
-          </Button>
-          {assignableRoles.map((role) => (
-            <Button
-              key={`bulk-add-${role.code}`}
-              size="xs"
-              variant="light"
-              onClick={() => onSetRoleForOutlets(filteredOutletIds, role.code, true)}
-              disabled={filteredOutletIds.length === 0}
-            >
-              Add {role.name} to filtered
-            </Button>
-          ))}
-        </Group>
-      </Stack>
-
-      <ScrollArea h={maxHeight} type="auto">
-        <Stack gap="sm">
-          {outlets.length === 0 ? (
-            <Text size="sm" c="dimmed">
-              No outlets available.
-            </Text>
-          ) : roles.length === 0 ? (
-            <Text size="sm" c="dimmed">
-              No outlet-scoped roles available.
-            </Text>
-          ) : filteredOutlets.length === 0 ? (
-            <Text size="sm" c="dimmed">
-              No outlets match your search.
-            </Text>
-          ) : (
-            <Accordion variant="separated" multiple>
-              {filteredOutlets.map((outlet) => {
-                const selectedRoleCodes = outletRoleCodesFor(outlet.id);
-                return (
-                  <Accordion.Item key={outlet.id} value={String(outlet.id)}>
-                    <Accordion.Control>
-                      <Group justify="space-between" wrap="nowrap">
-                        <div>
-                          <Text size="sm" fw={600}>
-                            {outlet.name}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {outlet.code}
-                          </Text>
-                        </div>
-                        <Badge variant="light" color={selectedRoleCodes.length > 0 ? "teal" : "gray"}>
-                          {selectedRoleCodes.length} selected
-                        </Badge>
-                      </Group>
-                    </Accordion.Control>
-                    <Accordion.Panel>
-                      <Stack gap="xs">
-                        <Group gap="xs" wrap="wrap">
-                          <Button
-                            size="xs"
-                            variant="subtle"
-                            onClick={() => onSetAllAssignableRolesForOutlets([outlet.id])}
-                            disabled={assignableRoles.length === 0}
-                          >
-                            Select all assignable
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="subtle"
-                            color="red"
-                            onClick={() => onClearRolesForOutlets([outlet.id])}
-                            disabled={selectedRoleCodes.length === 0}
-                          >
-                            Clear outlet
-                          </Button>
-                        </Group>
-
-                        {roles.map((role) => {
-                          const checked = selectedRoleCodes.includes(role.code);
-                          const disabled = role.role_level >= actorMaxRoleLevel;
-                          return (
-                            <Checkbox
-                              key={`${outlet.id}-${role.code}`}
-                              label={role.name}
-                              description={
-                                disabled
-                                  ? `Requires higher privilege. ${ROLE_HELP_TEXT[role.code] ?? ""}`.trim()
-                                  : ROLE_HELP_TEXT[role.code] ?? "Outlet-scoped operational role."
-                              }
-                              checked={checked}
-                              disabled={disabled}
-                              onChange={(event) =>
-                                onUpdateRoleCode(outlet.id, role.code, event.currentTarget.checked)
-                              }
-                            />
-                          );
-                        })}
-                      </Stack>
-                    </Accordion.Panel>
-                  </Accordion.Item>
-                );
-              })}
-            </Accordion>
-          )}
-        </Stack>
-      </ScrollArea>
-    </div>
-  );
-}
-
 export function UsersPage(props: UsersPageProps) {
   const { user, accessToken } = props;
   const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
@@ -274,6 +117,50 @@ export function UsersPage(props: UsersPageProps) {
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [outletFilter, setOutletFilter] = useState<string>("all");
   const [selectedCompanyId, setSelectedCompanyId] = useState<number>(user.company_id);
+
+  // Table state
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 25 });
+  const [sort, setSort] = useState<SortState | null>(null);
+  const [selection, setSelection] = useState<RowSelectionState>({});
+
+  // Reset pagination helper
+  const resetPagination = () => {
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
+
+  // Filter change handlers that reset pagination
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.currentTarget.value);
+    resetPagination();
+  };
+
+  const handleStatusFilterChange = (value: string | null) => {
+    setStatusFilter((value as "all" | "active" | "inactive") || "active");
+    resetPagination();
+  };
+
+  const handleRoleFilterChange = (value: string | null) => {
+    setRoleFilter(value || "all");
+    resetPagination();
+  };
+
+  const handleOutletFilterChange = (value: string | null) => {
+    setOutletFilter(value || "all");
+    resetPagination();
+  };
+
+  // Clear all filters function
+  const clearAllFilters = () => {
+    setSearchTerm("");
+    setSearchQuery("");
+    setStatusFilter("active");
+    setRoleFilter("all");
+    setOutletFilter("all");
+    resetPagination();
+  };
+
+  // Check if any filters are active (for showing Clear All button)
+  const hasActiveFilters = searchTerm !== "" || statusFilter !== "active" || roleFilter !== "all" || outletFilter !== "all";
   
   // Dialog state
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
@@ -284,6 +171,20 @@ export function UsersPage(props: UsersPageProps) {
     { action: "deactivate" | "reactivate"; user: UserResponse } | null
   >(null);
   
+  // Separate form state for account and access dialogs
+  const [accountFormData, setAccountFormData] = useState<AccountFormData>({
+    email: "",
+    password: "",
+    is_active: true
+  });
+  const [accessFormData, setAccessFormData] = useState<AccessFormData>({
+    global_role_codes: [],
+    outlet_role_assignments: []
+  });
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showDirtyConfirm, setShowDirtyConfirm] = useState(false);
+  const [pendingCloseAction, setPendingCloseAction] = useState<(() => void) | null>(null);
+  
   // UI state
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -293,14 +194,18 @@ export function UsersPage(props: UsersPageProps) {
   const activeCompanyId = isSuperAdmin ? selectedCompanyId : user.company_id;
 
   const usersQuery = useUsers(activeCompanyId, accessToken, {
-    is_active: statusFilter === "all" ? undefined : statusFilter === "active",
-    search: searchQuery || undefined
+    filters: {
+      is_active: statusFilter === "all" ? undefined : statusFilter === "active",
+      search: searchQuery || undefined
+    },
+    pagination,
+    sort: sort ? { id: sort.id, direction: sort.direction } : undefined
   });
 
   const rolesQuery = useRoles(accessToken, activeCompanyId);
   const companiesQuery = useCompanies(accessToken, { enabled: isSuperAdmin });
   const outletCompanyId =
-    isSuperAdmin && dialogMode === "create"
+    isSuperAdmin && dialogMode === "account-create"
       ? (formData.company_id ?? activeCompanyId)
       : activeCompanyId;
   const outletsQuery = useOutlets(outletCompanyId, accessToken);
@@ -394,46 +299,40 @@ export function UsersPage(props: UsersPageProps) {
       ...emptyForm,
       company_id: isSuperAdmin ? activeCompanyId : null
     });
+    setAccountFormData({
+      email: "",
+      password: "",
+      is_active: true
+    });
+    setAccessFormData({
+      global_role_codes: [],
+      outlet_role_assignments: []
+    });
     setFormErrors({});
     setEditingUser(null);
-    setDialogMode("create");
+    setDialogMode("account-create");
     setError(null);
     setSuccessMessage(null);
+    setHasUnsavedChanges(false);
   };
   
-  const openEditDialog = (targetUser: UserResponse) => {
-    setFormData({
+  const openAccountDialog = (targetUser: UserResponse) => {
+    setAccountFormData({
       email: targetUser.email,
       password: "",
-      global_role_codes: targetUser.global_roles,
-      outlet_role_assignments: targetUser.outlet_role_assignments.map((assignment) => ({
-        outlet_id: assignment.outlet_id,
-        role_codes: assignment.role_codes
-      })),
       is_active: targetUser.is_active
     });
     setFormErrors({});
     setEditingUser(targetUser);
-    setDialogMode("edit");
+    setDialogMode("account-edit");
     setError(null);
     setSuccessMessage(null);
+    setHasUnsavedChanges(false);
   };
   
-  const openRolesDialog = (targetUser: UserResponse) => {
-    setFormData({
-      ...emptyForm,
-      global_role_codes: targetUser.global_roles
-    });
-    setFormErrors({});
-    setEditingUser(targetUser);
-    setDialogMode("roles");
-    setError(null);
-    setSuccessMessage(null);
-  };
-  
-  const openOutletsDialog = (targetUser: UserResponse) => {
-    setFormData({
-      ...emptyForm,
+  const openAccessDialog = (targetUser: UserResponse) => {
+    setAccessFormData({
+      global_role_codes: targetUser.global_roles,
       outlet_role_assignments: targetUser.outlet_role_assignments.map((assignment) => ({
         outlet_id: assignment.outlet_id,
         role_codes: assignment.role_codes
@@ -441,9 +340,10 @@ export function UsersPage(props: UsersPageProps) {
     });
     setFormErrors({});
     setEditingUser(targetUser);
-    setDialogMode("outlets");
+    setDialogMode("access-edit");
     setError(null);
     setSuccessMessage(null);
+    setHasUnsavedChanges(false);
   };
   
   const openPasswordDialog = (targetUser: UserResponse) => {
@@ -453,34 +353,67 @@ export function UsersPage(props: UsersPageProps) {
     setDialogMode("password");
     setError(null);
     setSuccessMessage(null);
+    setHasUnsavedChanges(false);
   };
   
   const closeDialog = () => {
-    setDialogMode(null);
-    setEditingUser(null);
-    setFormData(emptyForm);
-    setFormErrors({});
+    if (hasUnsavedChanges) {
+      // Show confirmation dialog instead of closing immediately
+      setShowDirtyConfirm(true);
+      setPendingCloseAction(() => () => {
+        setDialogMode(null);
+        setEditingUser(null);
+        setFormData(emptyForm);
+        setFormErrors({});
+        setHasUnsavedChanges(false);
+      });
+    } else {
+      setDialogMode(null);
+      setEditingUser(null);
+      setFormData(emptyForm);
+      setFormErrors({});
+      setHasUnsavedChanges(false);
+    }
+  };
+
+  const handleDirtyConfirm = () => {
+    setShowDirtyConfirm(false);
+    if (pendingCloseAction) {
+      pendingCloseAction();
+    }
+    setPendingCloseAction(null);
+  };
+
+  const handleDirtyCancel = () => {
+    setShowDirtyConfirm(false);
+    setPendingCloseAction(null);
   };
   
   const validateForm = (): boolean => {
     const errors: Partial<Record<keyof UserFormData, string>> = {};
     
-    if (dialogMode === "create" || dialogMode === "edit") {
-      if (dialogMode === "create" && isSuperAdmin && !formData.company_id) {
+    if (dialogMode === "account-create") {
+      if (isSuperAdmin && !formData.company_id) {
         errors.company_id = "Company is required";
       }
-      if (!formData.email.trim()) {
+      if (!accountFormData.email.trim()) {
         errors.email = "Email is required";
-      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountFormData.email)) {
         errors.email = "Invalid email format";
       }
       
-      if (dialogMode === "create" && !formData.password) {
+      if (!accountFormData.password) {
         errors.password = "Password is required";
-      }
-      
-      if (formData.password && formData.password.length < 8) {
+      } else if (accountFormData.password.length < 8) {
         errors.password = "Password must be at least 8 characters";
+      }
+    }
+    
+    if (dialogMode === "account-edit") {
+      if (!accountFormData.email.trim()) {
+        errors.email = "Email is required";
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountFormData.email)) {
+        errors.email = "Invalid email format";
       }
     }
     
@@ -496,6 +429,10 @@ export function UsersPage(props: UsersPageProps) {
     return Object.keys(errors).length === 0;
   };
   
+  const validateAccessForm = (): boolean => {
+    return true;
+  };
+  
   const handleSubmit = async () => {
     if (!validateForm()) return;
     
@@ -504,84 +441,156 @@ export function UsersPage(props: UsersPageProps) {
     setSuccessMessage(null);
     
     try {
-      if (dialogMode === "create") {
+      if (dialogMode === "account-create") {
         const targetCompanyId = isSuperAdmin
           ? (formData.company_id ?? activeCompanyId)
           : activeCompanyId;
         await createUser({
           company_id: targetCompanyId,
-          email: formData.email,
-          password: formData.password,
+          email: accountFormData.email,
+          password: accountFormData.password,
           role_codes:
-            formData.global_role_codes.length > 0
-              ? (formData.global_role_codes as Role[])
+            accessFormData.global_role_codes.length > 0
+              ? (accessFormData.global_role_codes as Role[])
               : undefined,
           outlet_role_assignments:
-            formData.outlet_role_assignments.length > 0
-              ? formData.outlet_role_assignments.map((assignment) => ({
+            accessFormData.outlet_role_assignments.length > 0
+              ? accessFormData.outlet_role_assignments.map((assignment) => ({
                   outlet_id: assignment.outlet_id,
                   role_codes: assignment.role_codes as Role[]
                 }))
               : undefined,
-          is_active: formData.is_active
+          is_active: accountFormData.is_active
         }, accessToken);
         setSuccessMessage("User created successfully");
         await usersQuery.refetch({ force: true });
         closeDialog();
-      } else if (dialogMode === "edit" && editingUser) {
+      } else if (dialogMode === "account-edit" && editingUser) {
         await updateUser(editingUser.id, {
-          email: formData.email !== editingUser.email ? formData.email : undefined
+          email: accountFormData.email !== editingUser.email ? accountFormData.email : undefined
         }, accessToken);
-        setSuccessMessage("User updated successfully");
+        if (accountFormData.is_active !== editingUser.is_active) {
+          if (accountFormData.is_active) {
+            await reactivateUser(editingUser.id, accessToken);
+          } else {
+            await deactivateUser(editingUser.id, accessToken);
+          }
+        }
+        setSuccessMessage("User account updated successfully");
         await usersQuery.refetch({ force: true });
         closeDialog();
-      } else if (dialogMode === "roles" && editingUser) {
+      } else if (dialogMode === "access-edit" && editingUser) {
         if (editingUser.id === user.id) {
-          setError("You cannot update your own roles.");
+          setError("You cannot update your own access.");
           return;
         }
-        await updateUserRoles(editingUser.id, {
-          role_codes: formData.global_role_codes as Role[]
-        }, accessToken);
-        setSuccessMessage("User roles updated successfully");
-        await usersQuery.refetch({ force: true });
-        closeDialog();
-      } else if (dialogMode === "outlets" && editingUser) {
-        if (editingUser.id === user.id) {
-          setError("You cannot update your own outlet roles.");
-          return;
+        
+        const accessStartTime = Date.now();
+        const actorRole = user.global_roles[0] ?? "UNKNOWN";
+        
+        // Calculate delta for audit
+        const existingRoles = new Set<string>(editingUser.global_roles);
+        const desiredRoles = new Set<string>(accessFormData.global_role_codes);
+        const globalRoleAdditions = [...desiredRoles].filter(r => !existingRoles.has(r)).length;
+        const globalRoleRemovals = [...existingRoles].filter(r => !desiredRoles.has(r)).length;
+        
+        const existingOutletAssignments = new Map(
+          editingUser.outlet_role_assignments.map(a => [a.outlet_id, new Set(a.role_codes)])
+        );
+        const desiredOutletAssignments = new Map(
+          accessFormData.outlet_role_assignments.map(a => [a.outlet_id, new Set(a.role_codes)])
+        );
+        
+        let outletRoleAdditions = 0;
+        let outletRoleRemovals = 0;
+        
+        // Count additions and modifications
+        for (const [outletId, roles] of desiredOutletAssignments) {
+          const existing = existingOutletAssignments.get(outletId) ?? new Set<string>();
+          for (const role of roles) {
+            if (!existing.has(role)) outletRoleAdditions++;
+          }
         }
-        const existingOutletIds = new Set(
-          editingUser.outlet_role_assignments.map((assignment) => assignment.outlet_id)
-        );
-        const desiredOutletIds = new Set(
-          formData.outlet_role_assignments.map((assignment) => assignment.outlet_id)
-        );
+        
+        // Count removals
+        for (const [outletId, roles] of existingOutletAssignments) {
+          const desired = desiredOutletAssignments.get(outletId) ?? new Set<string>();
+          for (const role of roles) {
+            if (!desired.has(role)) outletRoleRemovals++;
+          }
+        }
+        
+        // Count outlet assignment removals (outlets removed entirely)
+        for (const outletId of existingOutletAssignments.keys()) {
+          if (!desiredOutletAssignments.has(outletId)) {
+            outletRoleRemovals += existingOutletAssignments.get(outletId)!.size;
+          }
+        }
+        
+        const deltaSize = globalRoleAdditions + globalRoleRemovals + outletRoleAdditions + outletRoleRemovals;
+        
+        try {
+          // Update global roles
+          if (accessFormData.global_role_codes) {
+            await updateUserRoles(editingUser.id, {
+              role_codes: accessFormData.global_role_codes as Role[]
+            }, accessToken);
+          }
+          
+          // Update outlet roles in parallel
+          const existingOutletIds = new Set(
+            editingUser.outlet_role_assignments.map((assignment) => assignment.outlet_id)
+          );
+          const desiredOutletIds = new Set(
+            accessFormData.outlet_role_assignments.map((assignment) => assignment.outlet_id)
+          );
 
-        // Update outlet roles in parallel (much faster for users with many outlets)
-        const updatePromises = formData.outlet_role_assignments.map((assignment) =>
-          updateUserRoles(editingUser.id, {
-            outlet_id: assignment.outlet_id,
-            role_codes: assignment.role_codes as Role[]
-          }, accessToken)
-        );
-
-        // Remove roles from outlets that are no longer assigned (also in parallel)
-        const deletePromises = [...existingOutletIds]
-          .filter(outletId => !desiredOutletIds.has(outletId))
-          .map(outletId =>
+          const updatePromises = accessFormData.outlet_role_assignments.map((assignment) =>
             updateUserRoles(editingUser.id, {
-              outlet_id: outletId,
-              role_codes: []
+              outlet_id: assignment.outlet_id,
+              role_codes: assignment.role_codes as Role[]
             }, accessToken)
           );
 
-        // Wait for all updates and deletes to complete
-        await Promise.all([...updatePromises, ...deletePromises]);
+          const deletePromises = [...existingOutletIds]
+            .filter(outletId => !desiredOutletIds.has(outletId))
+            .map(outletId =>
+              updateUserRoles(editingUser.id, {
+                outlet_id: outletId,
+                role_codes: []
+              }, accessToken)
+            );
 
-        setSuccessMessage("User outlet roles updated successfully");
-        await usersQuery.refetch({ force: true });
-        closeDialog();
+          await Promise.all([...updatePromises, ...deletePromises]);
+
+          const latencyMs = Date.now() - accessStartTime;
+          trackActionSelect("users", actorRole, "update-access", "success");
+          
+          // Audit log with delta and latency  
+          console.log(JSON.stringify({
+            event: "access-update",
+            page: "users",
+            actorRole,
+            targetUserId: editingUser.id,
+            targetUserEmail: editingUser.email,
+            deltaSize,
+            latencyMs,
+            globalRoleAdditions,
+            globalRoleRemovals,
+            outletRoleAdditions,
+            outletRoleRemovals,
+            outcome: "success",
+            timestamp: Date.now()
+          }));
+
+          setSuccessMessage("User access updated successfully");
+          await usersQuery.refetch({ force: true });
+          closeDialog();
+        } catch (accessError) {
+          const errorMsg = accessError instanceof ApiError ? accessError.message : "Failed to update access";
+          setError(errorMsg);
+          trackActionError("users", actorRole, "update-access", errorMsg);
+        }
       } else if (dialogMode === "password" && editingUser) {
         await updateUserPassword(editingUser.id, {
           password: formData.password
@@ -681,6 +690,89 @@ export function UsersPage(props: UsersPageProps) {
     });
   };
   
+  // Access form outlet role functions
+  const accessOutletRoleCodesFor = (outletId: number) =>
+    accessFormData.outlet_role_assignments.find((assignment) => assignment.outlet_id === outletId)
+      ?.role_codes ?? [];
+
+  const mutateAccessOutletRoleAssignments = (
+    mutate: (roleMap: Map<number, Set<string>>) => void
+  ) => {
+    setAccessFormData((prev) => {
+      const roleMap = new Map<number, Set<string>>(
+        prev.outlet_role_assignments.map((assignment) => [assignment.outlet_id, new Set(assignment.role_codes)])
+      );
+      mutate(roleMap);
+      const nextAssignments = [...roleMap.entries()]
+        .filter(([, roleCodes]) => roleCodes.size > 0)
+        .map(([outlet_id, roleCodes]) => ({ outlet_id, role_codes: [...roleCodes] }));
+      return { ...prev, outlet_role_assignments: nextAssignments };
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  const updateAccessOutletRoleCode = (outletId: number, roleCode: string, checked: boolean) => {
+    mutateAccessOutletRoleAssignments((roleMap) => {
+      const roleSet = roleMap.get(outletId) ?? new Set<string>();
+      if (checked) {
+        roleSet.add(roleCode);
+      } else {
+        roleSet.delete(roleCode);
+      }
+      if (roleSet.size === 0) {
+        roleMap.delete(outletId);
+      } else {
+        roleMap.set(outletId, roleSet);
+      }
+    });
+  };
+
+  const setAccessOutletRoleCodeForOutlets = (outletIds: number[], roleCode: string, checked: boolean) => {
+    if (outletIds.length === 0) {
+      return;
+    }
+    mutateAccessOutletRoleAssignments((roleMap) => {
+      outletIds.forEach((outletId) => {
+        const roleSet = roleMap.get(outletId) ?? new Set<string>();
+        if (checked) {
+          roleSet.add(roleCode);
+        } else {
+          roleSet.delete(roleCode);
+        }
+        if (roleSet.size === 0) {
+          roleMap.delete(outletId);
+        } else {
+          roleMap.set(outletId, roleSet);
+        }
+      });
+    });
+  };
+
+  const setAllAssignableAccessRoleCodesForOutlets = (outletIds: number[]) => {
+    if (outletIds.length === 0) {
+      return;
+    }
+    const assignableRoleCodes = outletRoleOptions
+      .filter((role) => role.role_level < actorMaxRoleLevel)
+      .map((role) => role.code);
+    mutateAccessOutletRoleAssignments((roleMap) => {
+      outletIds.forEach((outletId) => {
+        roleMap.set(outletId, new Set(assignableRoleCodes));
+      });
+    });
+  };
+
+  const clearAccessOutletRolesForOutlets = (outletIds: number[]) => {
+    if (outletIds.length === 0) {
+      return;
+    }
+    mutateAccessOutletRoleAssignments((roleMap) => {
+      outletIds.forEach((outletId) => {
+        roleMap.delete(outletId);
+      });
+    });
+  };
+  
   const handleDeactivate = async (targetUser: UserResponse) => {
     if (targetUser.id === user.id) {
       setError("You cannot deactivate your own account.");
@@ -695,11 +787,11 @@ export function UsersPage(props: UsersPageProps) {
       setSuccessMessage("User deactivated successfully");
       await usersQuery.refetch({ force: true });
     } catch (deactivateError) {
-      if (deactivateError instanceof ApiError) {
-        setError(deactivateError.message);
-      } else {
-        setError("Failed to deactivate user");
-      }
+      const errorMsg = deactivateError instanceof ApiError 
+        ? deactivateError.message 
+        : "Failed to deactivate user";
+      setError(errorMsg);
+      trackActionError("users", user.global_roles[0] ?? "UNKNOWN", "deactivate", errorMsg);
     }
   };
   
@@ -717,11 +809,11 @@ export function UsersPage(props: UsersPageProps) {
       setSuccessMessage("User reactivated successfully");
       await usersQuery.refetch({ force: true });
     } catch (reactivateError) {
-      if (reactivateError instanceof ApiError) {
-        setError(reactivateError.message);
-      } else {
-        setError("Failed to reactivate user");
-      }
+      const errorMsg = reactivateError instanceof ApiError 
+        ? reactivateError.message 
+        : "Failed to reactivate user";
+      setError(errorMsg);
+      trackActionError("users", user.global_roles[0] ?? "UNKNOWN", "reactivate", errorMsg);
     }
   };
 
@@ -744,6 +836,7 @@ export function UsersPage(props: UsersPageProps) {
   useEffect(() => {
     const handle = window.setTimeout(() => {
       setSearchQuery(searchTerm.trim());
+      resetPagination();
     }, 300);
 
     return () => {
@@ -763,16 +856,18 @@ export function UsersPage(props: UsersPageProps) {
     setOutletFilter("all");
   }, [selectedCompanyId]);
 
-  const columns = useMemo<ColumnDef<UserResponse>[]>(() => {
+  const columns = useMemo<DataTableColumnDef<UserResponse>[]>(() => {
     return [
       {
         id: "email",
         header: "Email",
+        sortable: true,
         cell: (info) => <Text>{info.row.original.email}</Text>
       },
       {
         id: "roles",
         header: "Roles",
+        sortable: true,
         cell: (info) => {
           const globalRoles = info.row.original.global_roles;
           const outletRoleSet = new Set<string>();
@@ -808,6 +903,7 @@ export function UsersPage(props: UsersPageProps) {
       {
         id: "outlets",
         header: "Outlets",
+        sortable: true,
         cell: (info) => {
           const outlets = info.row.original.outlet_role_assignments;
           if (outlets.length === 0) {
@@ -848,6 +944,7 @@ export function UsersPage(props: UsersPageProps) {
       {
         id: "status",
         header: "Status",
+        sortable: true,
         cell: (info) => (
           <Badge variant="light" color={info.row.original.is_active ? "green" : "red"}>
             {info.row.original.is_active ? "Active" : "Inactive"}
@@ -861,75 +958,96 @@ export function UsersPage(props: UsersPageProps) {
           const targetUser = info.row.original;
           const isSelf = targetUser.id === user.id;
           const isSuperAdminUser = targetUser.global_roles.includes("SUPER_ADMIN");
-          const disableSelfAction = isSelf;
           const disableRoleAction = isSelf || isSuperAdminUser;
           const disableDeactivateAction = isSelf || isSuperAdminUser;
           const selfTooltip = isSelf ? "You cannot modify your own access." : undefined;
           const superAdminTooltip = isSuperAdminUser ? "Cannot modify SUPER_ADMIN user." : undefined;
           const roleTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
           const deactivateTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
+
+          const actorRole = user.global_roles[0] ?? "UNKNOWN";
+
           return (
-            <Group gap="xs" justify="flex-end" wrap="wrap">
-              <Button
-                size="xs"
-                variant="light"
-                onClick={() => openEditDialog(targetUser)}
-              >
-                Edit
-              </Button>
-              <Button
-                size="xs"
-                variant="light"
-                onClick={() => openRolesDialog(targetUser)}
-                disabled={disableRoleAction}
-                title={roleTooltip}
-              >
-                Roles
-              </Button>
-              <Button
-                size="xs"
-                variant="light"
-                onClick={() => openOutletsDialog(targetUser)}
-                disabled={disableRoleAction}
-                title={roleTooltip}
-              >
-                Outlet Roles
-              </Button>
-              <Button
-                size="xs"
-                variant="light"
-                onClick={() => openPasswordDialog(targetUser)}
-              >
-                Password
-              </Button>
-              {targetUser.is_active ? (
-                <Button
-                  size="xs"
-                  color="red"
-                  variant="light"
-                  onClick={() => setConfirmState({ action: "deactivate", user: targetUser })}
-                  disabled={disableDeactivateAction}
-                  title={deactivateTooltip}
+            <Menu>
+              <Menu.Target>
+                <ActionIcon variant="subtle" onClick={() => trackActionMenuOpen("users", actorRole)}>
+                  <IconDots size={16} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item
+                  leftSection={<IconEdit size={14} />}
+                  onClick={() => {
+                    trackActionSelect("users", actorRole, "edit-user", "success");
+                    openAccountDialog(targetUser);
+                  }}
                 >
-                  Deactivate
-                </Button>
-              ) : (
-                <Button
-                  size="xs"
-                  variant="light"
-                  onClick={() => setConfirmState({ action: "reactivate", user: targetUser })}
-                  disabled={disableSelfAction}
-                  title={selfTooltip}
+                  Edit User
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<IconShield size={14} />}
+                  onClick={() => {
+                    trackActionSelect("users", actorRole, "manage-roles", "success");
+                    openAccessDialog(targetUser);
+                  }}
+                  disabled={disableRoleAction}
+                  title={roleTooltip}
                 >
-                  Reactivate
-                </Button>
-              )}
-            </Group>
+                  Manage Roles
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<IconBuildingStore size={14} />}
+                  onClick={() => {
+                    trackActionSelect("users", actorRole, "assign-outlets", "success");
+                    openAccessDialog(targetUser);
+                  }}
+                  disabled={disableRoleAction}
+                  title={roleTooltip}
+                >
+                  Assign Outlets
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<IconLock size={14} />}
+                  onClick={() => {
+                    trackActionSelect("users", actorRole, "change-password", "success");
+                    openPasswordDialog(targetUser);
+                  }}
+                >
+                  Change Password
+                </Menu.Item>
+                {targetUser.is_active ? (
+                  <Menu.Item
+                    leftSection={<IconBan size={14} />}
+                    color="red"
+                    onClick={() => {
+                      trackActionSelect("users", actorRole, "deactivate", "success");
+                      setConfirmState({ action: "deactivate", user: targetUser });}}
+                    disabled={disableDeactivateAction}
+                    title={deactivateTooltip}
+                  >
+                    Deactivate
+                  </Menu.Item>
+                ) : (
+                  <Menu.Item
+                    leftSection={<IconCheck size={14} />}
+                    color="green"
+                    onClick={() => {
+                      trackActionSelect("users", actorRole, "reactivate", "success");
+                      setConfirmState({ action: "reactivate", user: targetUser });
+                    }}
+                    disabled={isSelf}
+                    title={selfTooltip}
+                  >
+                    Reactivate
+                  </Menu.Item>
+                )}
+              </Menu.Dropdown>
+            </Menu>
           );
         }
       }
     ];
-  }, [openEditDialog, openOutletsDialog, openPasswordDialog, openRolesDialog, user.id]);
+  }, [openAccountDialog, openAccessDialog, openPasswordDialog, user.id]);
   
   return (
     <>
@@ -971,7 +1089,7 @@ export function UsersPage(props: UsersPageProps) {
         </PageCard>
 
         <PageCard title="Filters">
-          <FilterBar>
+          <FilterBar onClearAll={clearAllFilters} showClearAll={hasActiveFilters}>
             {isSuperAdmin ? (
               <Select
                 label="Company"
@@ -988,7 +1106,7 @@ export function UsersPage(props: UsersPageProps) {
               label="Search"
               placeholder="Search by email"
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.currentTarget.value)}
+              onChange={handleSearchChange}
               style={{ minWidth: 220 }}
             />
 
@@ -1000,7 +1118,7 @@ export function UsersPage(props: UsersPageProps) {
                 { value: "inactive", label: "Inactive Only" }
               ]}
               value={statusFilter}
-              onChange={(value) => setStatusFilter((value as "all" | "active" | "inactive") || "active")}
+              onChange={handleStatusFilterChange}
               style={{ minWidth: 170 }}
             />
 
@@ -1008,7 +1126,7 @@ export function UsersPage(props: UsersPageProps) {
               label="Role"
               data={roleOptions}
               value={roleFilter}
-              onChange={(value) => setRoleFilter(value || "all")}
+              onChange={handleRoleFilterChange}
               style={{ minWidth: 170 }}
             />
 
@@ -1016,7 +1134,7 @@ export function UsersPage(props: UsersPageProps) {
               label="Outlet"
               data={outletOptions}
               value={outletFilter}
-              onChange={(value) => setOutletFilter(value || "all")}
+              onChange={handleOutletFilterChange}
               style={{ minWidth: 170 }}
             />
           </FilterBar>
@@ -1026,6 +1144,14 @@ export function UsersPage(props: UsersPageProps) {
           <DataTable
             columns={columns}
             data={filteredUsers}
+            getRowId={(row) => String(row.id)}
+            pagination={pagination}
+            sort={sort}
+            selection={selection}
+            totalCount={usersQuery.totalCount}
+            onPaginationChange={setPagination}
+            onSortChange={setSort}
+            onSelectionChange={setSelection}
             minWidth={900}
             emptyState={
               searchTerm.trim().length > 0
@@ -1041,123 +1167,116 @@ export function UsersPage(props: UsersPageProps) {
         onClose={closeDialog}
         title={
           <Title order={4}>
-            {dialogMode === "create" && "Create New User"}
-            {dialogMode === "edit" && "Edit User"}
-            {dialogMode === "roles" && "Manage User Roles"}
-            {dialogMode === "outlets" && "Manage Outlet Roles"}
+            {dialogMode === "account-create" && "Create New User"}
+            {dialogMode === "account-edit" && "Edit Account"}
+            {dialogMode === "access-create" && "Grant Access"}
+            {dialogMode === "access-edit" && "Manage Access"}
             {dialogMode === "password" && "Change Password"}
           </Title>
         }
         centered
         size="lg"
+        closeOnClickOutside={!hasUnsavedChanges}
+        closeOnEscape={!hasUnsavedChanges}
       >
         <Stack gap="md">
-          {(dialogMode === "create" || dialogMode === "edit") && (
-            <TextInput
-              label="Email"
-              placeholder="user@example.com"
-              value={formData.email}
-              onChange={(event) => setFormData({ ...formData, email: event.currentTarget.value })}
-              error={formErrors.email}
-              withAsterisk
-            />
+          {(dialogMode === "account-create" || dialogMode === "account-edit") && (
+            <>
+              <TextInput
+                label="Email"
+                placeholder="user@example.com"
+                value={accountFormData.email}
+                onChange={(event) => {
+                  setAccountFormData({ ...accountFormData, email: event.currentTarget.value });
+                  setHasUnsavedChanges(true);
+                }}
+                error={formErrors.email}
+                withAsterisk
+                aria-label="Email address"
+              />
+
+              {dialogMode === "account-create" && isSuperAdmin ? (
+                <Select
+                  label="Company"
+                  placeholder="Select company"
+                  data={companyOptions}
+                  value={formData.company_id ? String(formData.company_id) : ""}
+                  onChange={(value) => {
+                    const nextValue = value ? Number(value) : null;
+                    setFormData({
+                      ...formData,
+                      company_id: nextValue,
+                      outlet_role_assignments: []
+                    });
+                    setHasUnsavedChanges(true);
+                  }}
+                  error={formErrors.company_id}
+                  disabled={companyOptions.length === 0}
+                  withAsterisk
+                  aria-label="Company selection"
+                />
+              ) : null}
+
+              {dialogMode === "account-create" ? (
+                <TextInput
+                  label="Password"
+                  placeholder="Minimum 8 characters"
+                  type="password"
+                  value={accountFormData.password}
+                  onChange={(event) => {
+                    setAccountFormData({ ...accountFormData, password: event.currentTarget.value });
+                    setHasUnsavedChanges(true);
+                  }}
+                  error={formErrors.password}
+                  withAsterisk
+                  aria-label="Password"
+                />
+              ) : null}
+
+              <Checkbox
+                label="Active"
+                checked={accountFormData.is_active}
+                onChange={(event) => {
+                  setAccountFormData({ ...accountFormData, is_active: event.currentTarget.checked });
+                  setHasUnsavedChanges(true);
+                }}
+                aria-label="User active status"
+              />
+            </>
           )}
 
-          {dialogMode === "create" && isSuperAdmin ? (
-            <Select
-              label="Company"
-              placeholder="Select company"
-              data={companyOptions}
-              value={formData.company_id ? String(formData.company_id) : ""}
-              onChange={(value) => {
-                const nextValue = value ? Number(value) : null;
-                setFormData({
-                  ...formData,
-                  company_id: nextValue,
-                  outlet_role_assignments: []
-                });
-              }}
-              error={formErrors.company_id}
-              disabled={companyOptions.length === 0}
-              withAsterisk
-            />
-          ) : null}
-
-          {dialogMode === "create" ? (
-            <TextInput
-              label="Password"
-              placeholder="Minimum 8 characters"
-              type="password"
-              value={formData.password}
-              onChange={(event) => setFormData({ ...formData, password: event.currentTarget.value })}
-              error={formErrors.password}
-              withAsterisk
-            />
-          ) : null}
-
-          {dialogMode === "create" ? (
-            <Stack gap="sm">
+          {(dialogMode === "access-create" || dialogMode === "access-edit") && (
+            <>
               <Select
                 label="Global Role"
                 description="A user can have only one global role"
                 placeholder="Select a global role (optional)"
-                value={formData.global_role_codes[0] ?? ""}
-                onChange={(value) => setFormData({ ...formData, global_role_codes: value ? [value] : [] })}
+                value={accessFormData.global_role_codes[0] ?? ""}
+                onChange={(value) => {
+                  setAccessFormData({ ...accessFormData, global_role_codes: value ? [value] : [] });
+                  setHasUnsavedChanges(true);
+                }}
                 data={globalRoleOptions
                   .filter((role) => role.role_level < actorMaxRoleLevel)
                   .map((role) => ({ value: role.code, label: role.name }))}
                 allowDeselect
+                aria-label="Global role selection"
               />
 
-              <OutletRoleAssignmentsField
+              <OutletRoleMatrix
                 title="Outlet Roles"
                 outlets={outletsQuery.data || []}
                 roles={outletRoleOptions}
                 actorMaxRoleLevel={actorMaxRoleLevel}
                 maxHeight={300}
-                outletRoleCodesFor={outletRoleCodesFor}
-                onUpdateRoleCode={updateOutletRoleCode}
-                onSetRoleForOutlets={setOutletRoleCodeForOutlets}
-                onSetAllAssignableRolesForOutlets={setAllAssignableRoleCodesForOutlets}
-                onClearRolesForOutlets={clearOutletRolesForOutlets}
+                outletRoleCodesFor={accessOutletRoleCodesFor}
+                onUpdateRoleCode={updateAccessOutletRoleCode}
+                onSetRoleForOutlets={setAccessOutletRoleCodeForOutlets}
+                onSetAllAssignableRolesForOutlets={setAllAssignableAccessRoleCodesForOutlets}
+                onClearRolesForOutlets={clearAccessOutletRolesForOutlets}
               />
-
-              <Checkbox
-                label="Active"
-                checked={formData.is_active}
-                onChange={(event) => setFormData({ ...formData, is_active: event.currentTarget.checked })}
-              />
-            </Stack>
-          ) : null}
-
-          {dialogMode === "roles" ? (
-            <Select
-              label="Global Role"
-              description="A user can have only one global role"
-              placeholder="Select a global role (optional)"
-              value={formData.global_role_codes[0] ?? ""}
-              onChange={(value) => setFormData({ ...formData, global_role_codes: value ? [value] : [] })}
-              data={globalRoleOptions
-                .filter((role) => role.role_level < actorMaxRoleLevel)
-                .map((role) => ({ value: role.code, label: role.name }))}
-              allowDeselect
-            />
-          ) : null}
-
-          {dialogMode === "outlets" ? (
-            <OutletRoleAssignmentsField
-              title="Select Outlet Roles"
-              outlets={outletsQuery.data || []}
-              roles={outletRoleOptions}
-              actorMaxRoleLevel={actorMaxRoleLevel}
-              maxHeight={320}
-              outletRoleCodesFor={outletRoleCodesFor}
-              onUpdateRoleCode={updateOutletRoleCode}
-              onSetRoleForOutlets={setOutletRoleCodeForOutlets}
-              onSetAllAssignableRolesForOutlets={setAllAssignableRoleCodesForOutlets}
-              onClearRolesForOutlets={clearOutletRolesForOutlets}
-            />
-          ) : null}
+            </>
+          )}
 
           {dialogMode === "password" ? (
             <TextInput
@@ -1168,11 +1287,12 @@ export function UsersPage(props: UsersPageProps) {
               onChange={(event) => setFormData({ ...formData, password: event.currentTarget.value })}
               error={formErrors.password}
               withAsterisk
+              aria-label="New password"
             />
           ) : null}
 
           {error ? (
-            <Alert color="red" title="Unable to save">
+            <Alert color="red" title="Unable to save" role="alert" aria-live="polite">
               {error}
             </Alert>
           ) : null}
@@ -1213,6 +1333,37 @@ export function UsersPage(props: UsersPageProps) {
           </Group>
         </Stack>
       </Modal>
+
+      {/* Dirty confirmation dialog for unsaved changes */}
+      <DirtyConfirmDialog
+        opened={showDirtyConfirm}
+        onConfirm={handleDirtyConfirm}
+        onCancel={handleDirtyCancel}
+        title="Unsaved Changes"
+        message="You have unsaved changes. Are you sure you want to discard them?"
+        confirmText="Discard"
+        cancelText="Keep Editing"
+      />
+
+      {/* Accessibility: aria-live region for status announcements */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: "absolute",
+          width: "1px",
+          height: "1px",
+          padding: "0",
+          margin: "-1px",
+          overflow: "hidden",
+          clip: "rect(0, 0, 0, 0)",
+          whiteSpace: "nowrap",
+          border: "0"
+        }}
+      >
+        {successMessage}
+      </div>
     </>
   );
 }

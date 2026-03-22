@@ -120,6 +120,18 @@ export const APP_ROUTES: readonly AppRoute[] = [
     requiredModule: "pos"
   },
   {
+    path: "/reservation-calendar",
+    label: "Reservation Calendar",
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "pos"
+  },
+  {
+    path: "/table-board",
+    label: "Table Board",
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"],
+    requiredModule: "pos"
+  },
+  {
     path: "/sync-queue",
     label: "Sync Queue",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],

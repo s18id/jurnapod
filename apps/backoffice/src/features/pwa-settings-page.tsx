@@ -45,9 +45,9 @@ export function PWASettingsPage() {
   return (
     <Container size="lg" py="xl">
       <Stack gap="md">
-        <div>
-          <Title order={2}>PWA Settings</Title>
-          <Text c="dimmed" size="sm">
+        <div data-testid="pwa-settings-header">
+          <Title order={2} data-testid="pwa-settings-title">PWA Settings</Title>
+          <Text c="dimmed" size="sm" data-testid="pwa-settings-description">
             Manage offline cache and queued transactions.
           </Text>
         </div>
@@ -55,7 +55,7 @@ export function PWASettingsPage() {
         <Card>
           <Stack gap="sm">
             <div>
-              <Title order={4}>Appearance</Title>
+              <Title order={4} data-testid="pwa-settings-appearance-title">Appearance</Title>
               <Text c="dimmed" size="sm">
                 Choose a theme for the backoffice experience.
               </Text>

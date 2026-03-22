@@ -8,7 +8,8 @@ Complete index of all planning and specification documents for the jurnapod proj
 |----------|-------------|--------|--------------|
 | [prd.md](./prd.md) | Product Requirements Document - Core system features and requirements | Complete | 2026-03-15 |
 | [architecture.md](./architecture.md) | Technical Architecture - System design, patterns, and decisions | Complete | 2026-03-17 |
-| [epics.md](./epics.md) | Core Feature Epics (1-7) - Original system implementation stories | Complete | 2026-03-15 |
+| [epics.md](./epics.md) | Consolidated Epic Breakdown (Epics 1-11) with full story and AC coverage | Complete | 2026-03-18 |
+| [epics-split/index.md](./epics-split/index.md) | Sharded epic files (one file per epic) for easier review and handoff | Complete | 2026-03-18 |
 | [epics-backoffice-ux.md](./epics-backoffice-ux.md) | Backoffice UX Refactoring Epics (8-11) - UX improvement stories | Ready | 2026-03-17 |
 
 ## Document Relationships
@@ -47,6 +48,7 @@ epics-backoffice-ux.md (UX Improvements - Epics 8-11)
 ## Quick Links
 
 ### For Implementation
+- [Epics Split Index](./epics-split/index.md) - One file per epic (1-11)
 - [Epic 8 Stories](./stories/epic-08/) - COMPLETE (P0) - 8 story files
 - [Epic 9 Stories](./stories/epic-09/) - Ready (P1) - 5 story files
 - [Epic 10 Stories](./epics-backoffice-ux.md#epic-10-backoffice-consistency-standards) - Not started (P2)

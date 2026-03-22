@@ -8,13 +8,26 @@ export const OutletTableStatusSchema = z.enum(["AVAILABLE", "RESERVED", "OCCUPIE
 
 export const OutletTableOperationalStatusSchema = z.enum(["AVAILABLE", "UNAVAILABLE"]);
 
+export const OutletTableStatusIdSchema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(5),
+  z.literal(7)
+]);
+
+export const OutletTableOperationalStatusIdSchema = z.union([
+  z.literal(1),
+  z.literal(7)
+]);
+
 export const OutletTableCreateRequestSchema = z.object({
   outlet_id: NumericIdSchema,
   code: z.string().trim().min(1).max(32),
   name: z.string().trim().min(1).max(191),
   zone: z.string().trim().max(64).nullable().optional(),
   capacity: z.number().int().positive().nullable().optional(),
-  status: OutletTableOperationalStatusSchema.optional().default("AVAILABLE")
+  status: OutletTableOperationalStatusSchema.optional(),
+  status_id: OutletTableOperationalStatusIdSchema.optional()
 });
 
 export const OutletTableBulkCreateRequestSchema = z.object({
@@ -39,7 +52,8 @@ export const OutletTableBulkCreateRequestSchema = z.object({
   count: z.number().int().min(1).max(200),
   zone: z.string().trim().max(64).nullable().optional(),
   capacity: z.number().int().positive().nullable().optional(),
-  status: OutletTableOperationalStatusSchema.optional().default("AVAILABLE")
+  status: OutletTableOperationalStatusSchema.optional(),
+  status_id: OutletTableOperationalStatusIdSchema.optional()
 });
 
 export const OutletTableUpdateRequestSchema = z.object({
@@ -47,7 +61,8 @@ export const OutletTableUpdateRequestSchema = z.object({
   name: z.string().trim().min(1).max(191).optional(),
   zone: z.string().trim().max(64).nullable().optional(),
   capacity: z.number().int().positive().nullable().optional(),
-  status: OutletTableOperationalStatusSchema.optional()
+  status: OutletTableOperationalStatusSchema.optional(),
+  status_id: OutletTableOperationalStatusIdSchema.optional()
 });
 
 export const OutletTableResponseSchema = z.object({
@@ -59,6 +74,7 @@ export const OutletTableResponseSchema = z.object({
   zone: z.string().nullable(),
   capacity: z.number().int().positive().nullable(),
   status: OutletTableStatusSchema,
+  status_id: OutletTableStatusIdSchema,
   created_at: z.string(),
   updated_at: z.string()
 });

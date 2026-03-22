@@ -55,7 +55,7 @@ So that **I can operate multiple store locations**.
 - **Data Model**: outlets table with company_id foreign key
 - **Outlet Code**: unique per company, used for identification
 - **Tenant Isolation**: company_id enforced on all operations
-- **API Style**: REST (Next.js API routes) at `/api/outlets/*`
+- **API Style**: REST (Hono.js API routes) at `/api/outlets/*`
 
 ### Source Tree Components
 

@@ -8,6 +8,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "node ./scripts/migrate.mjs",
     "db:seed": "node ./scripts/seed.mjs",
+    "db:script": "node ./scripts/run-sql-script.mjs",
     "db:seed:test-items": "node ./scripts/seed-random-items.mjs",
     "db:seed:test-accounts": "node ./scripts/seed-random-accounts.mjs",
     "db:seed:test-data": "node ./scripts/seed-test-data.mjs",
@@ -16,6 +17,7 @@
     "db:seed:settings": "node ./scripts/seed-settings-from-env.mjs",
     "db:smoke": "node ./scripts/smoke.mjs",
     "db:backfill:pos-journals": "node ./scripts/backfill-pos-journals.mjs",
+    "db:backfill:reservation-ts": "node ./scripts/backfill-reservation-start-end-ts.mjs",
     "db:reconcile:pos-journals": "node ./scripts/reconcile-pos-journals.mjs",
     "db:audit:system-roles": "node ./scripts/audit-system-roles.mjs",
     "db:consolidate:system-roles": "node ./scripts/consolidate-system-role-duplicates.mjs"

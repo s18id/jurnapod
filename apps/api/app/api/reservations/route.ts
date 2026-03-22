@@ -3,12 +3,45 @@
 
 import {
   ReservationCreateRequestSchema,
-  ReservationListQuerySchema
+  ReservationListQuerySchema,
+  type ReservationListQuery
 } from "@jurnapod/shared";
 import { ZodError, z } from "zod";
 import { requireAccess, withAuth } from "../../../src/lib/auth-guard";
-import { createReservation, listReservations, ReservationValidationError } from "../../../src/lib/reservations";
+import { getCompany } from "../../../src/lib/companies";
+import { toDateTimeRangeWithTimezone } from "../../../src/lib/date-helpers";
+import { getOutlet } from "../../../src/lib/outlets";
+import { createReservation, listReservationsV2, ReservationValidationError } from "../../../src/lib/reservations";
 import { errorResponse, successResponse } from "../../../src/lib/response";
+import { buildPaginationMeta } from "../../../src/lib/pagination";
+
+// Map status string to status ID
+const STATUS_TO_ID: Record<string, number> = {
+  BOOKED: 1,
+  CONFIRMED: 2,
+  ARRIVED: 3,
+  COMPLETED: 4,
+  NO_SHOW: 5,
+  CANCELLED: 6
+};
+
+const ID_TO_STATUS: Record<number, string> = {
+  1: "BOOKED",
+  2: "CONFIRMED",
+  3: "ARRIVED",
+  4: "COMPLETED",
+  5: "NO_SHOW",
+  6: "CANCELLED"
+};
+
+function mapStatusToStatusId(status?: string): number | undefined {
+  if (!status) return undefined;
+  return STATUS_TO_ID[status];
+}
+
+function getStatusString(statusId: number): string {
+  return ID_TO_STATUS[statusId] ?? "BOOKED";
+}
 
 function parseOutletIdForListGuard(request: Request): number {
   const outletIdRaw = new URL(request.url).searchParams.get("outlet_id");
@@ -36,6 +69,107 @@ const invalidJsonGuardError = new ZodError([
   }
 ]);
 
+export class MissingReservationTimezoneError extends Error {
+  constructor() {
+    super("Timezone is required for date-only reservation filtering");
+    this.name = "MissingReservationTimezoneError";
+  }
+}
+
+export function isValidTimeZone(timezone?: string | null): timezone is string {
+  if (!timezone || !timezone.trim()) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone.trim() });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function pickReservationTimezone(
+  outletTimezone?: string | null,
+  companyTimezone?: string | null
+): string | null {
+  if (isValidTimeZone(outletTimezone)) {
+    return outletTimezone.trim();
+  }
+  if (isValidTimeZone(companyTimezone)) {
+    return companyTimezone.trim();
+  }
+  return null;
+}
+
+export function applyDateOnlyRange(
+  query: ReservationListQuery,
+  timezone: string | null
+): ReservationListQuery {
+  const hasDateOnlyRange = Boolean(query.date_from || query.date_to);
+  if (!hasDateOnlyRange) {
+    return query;
+  }
+
+  if (!timezone) {
+    throw new MissingReservationTimezoneError();
+  }
+
+  const dateFrom = query.date_from ?? query.date_to;
+  const dateTo = query.date_to ?? query.date_from;
+  if (!dateFrom || !dateTo) {
+    return query;
+  }
+
+  const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, timezone);
+  return {
+    ...query,
+    from: range.fromStartUTC,
+    to: range.toEndUTC
+  };
+}
+
+async function resolveReservationTimezone(companyId: number, outletId: number): Promise<string | null> {
+  let outletTimezone: string | null = null;
+  let companyTimezone: string | null = null;
+
+  try {
+    const outlet = await getOutlet(companyId, outletId);
+    outletTimezone = outlet.timezone ?? null;
+  } catch {
+    // fallback to company timezone below
+  }
+
+  try {
+    const company = await getCompany(companyId);
+    companyTimezone = company.timezone ?? null;
+  } catch {
+    // fall through
+  }
+
+  return pickReservationTimezone(outletTimezone, companyTimezone);
+}
+
+/**
+ * GET /api/reservations
+ * 
+ * List reservations with flexible filtering
+ * 
+ * Query Parameters:
+ * - outlet_id (required): Outlet ID
+ * - date_from, date_to (optional): Date range in YYYY-MM-DD format
+ * - overlap_filter (optional, boolean): Enable calendar mode
+ *   - true: Returns reservations that overlap with the date range (calendar view)
+ *   - false (default): Returns reservations that start within the date range (reports)
+ * - status, from, to (optional): Additional filters
+ * - limit, offset (optional): Pagination
+ * 
+ * @example
+ * // Calendar view: show cross-midnight reservations
+ * GET /api/reservations?outlet_id=1&date_from=2025-12-31&date_to=2025-12-31&overlap_filter=true
+ * 
+ * // Report view: count each reservation once
+ * GET /api/reservations?outlet_id=1&date_from=2025-12-31&date_to=2025-12-31
+ */
 export const GET = withAuth(
   async (request, auth) => {
     try {
@@ -43,15 +177,66 @@ export const GET = withAuth(
       const query = ReservationListQuerySchema.parse({
         outlet_id: url.searchParams.get("outlet_id"),
         status: url.searchParams.get("status") ?? undefined,
+        date_from: url.searchParams.get("date_from") ?? undefined,
+        date_to: url.searchParams.get("date_to") ?? undefined,
+        overlap_filter: url.searchParams.get("overlap_filter") ?? undefined,
         from: url.searchParams.get("from") ?? undefined,
         to: url.searchParams.get("to") ?? undefined,
         limit: url.searchParams.get("limit") ?? undefined,
         offset: url.searchParams.get("offset") ?? undefined
       });
 
-      const rows = await listReservations(auth.companyId, query);
-      return successResponse(rows);
+      const timezone = Boolean(query.date_from || query.date_to)
+        ? await resolveReservationTimezone(auth.companyId, query.outlet_id)
+        : null;
+      const normalizedQuery = applyDateOnlyRange(query, timezone);
+
+      const limit = Number(normalizedQuery.limit) || 50;
+      const offset = Number(normalizedQuery.offset) || 0;
+
+      // Use listReservationsV2 which returns total count
+      const result = await listReservationsV2({
+        companyId: BigInt(auth.companyId),
+        outletId: BigInt(normalizedQuery.outlet_id),
+        limit,
+        offset,
+        statusId: normalizedQuery.status ? mapStatusToStatusId(normalizedQuery.status) : undefined,
+        fromDate: normalizedQuery.from ? new Date(normalizedQuery.from) : undefined,
+        toDate: normalizedQuery.to ? new Date(normalizedQuery.to) : undefined,
+        useOverlapFilter: normalizedQuery.overlap_filter
+      });
+
+      const meta = buildPaginationMeta(result.total, limit, offset);
+
+      // Convert bigints to strings for JSON serialization
+      // Match ReservationRowSchema format
+      const serializedReservations = result.reservations.map((r) => ({
+        reservation_id: r.id.toString(),
+        company_id: r.companyId.toString(),
+        outlet_id: r.outletId.toString(),
+        reservation_group_id: null,
+        table_id: r.tableId?.toString() ?? null,
+        customer_name: r.customerName,
+        customer_phone: r.customerPhone,
+        guest_count: r.partySize,
+        reservation_at: r.reservationTime.toISOString(),
+        duration_minutes: r.durationMinutes,
+        status: getStatusString(r.statusId),
+        notes: r.notes,
+        linked_order_id: null,
+        created_at: r.createdAt.toISOString(),
+        updated_at: r.updatedAt.toISOString(),
+        arrived_at: null,
+        seated_at: null,
+        cancelled_at: null
+      }));
+
+      return successResponse({ data: serializedReservations, meta });
     } catch (error) {
+      if (error instanceof MissingReservationTimezoneError) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
+      }
+
       if (error instanceof ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
       }

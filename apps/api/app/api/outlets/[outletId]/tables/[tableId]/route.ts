@@ -11,6 +11,7 @@ import {
   getOutletTable,
   updateOutletTable,
   deleteOutletTable,
+  OutletTableStatusConflictError,
   OutletTableCodeExistsError,
   OutletTableNotFoundError
 } from "../../../../../../src/lib/outlet-tables";
@@ -94,6 +95,7 @@ export const PUT = withAuth(
         zone: input.zone,
         capacity: input.capacity,
         status: input.status,
+        status_id: input.status_id,
         actor: {
           userId: auth.userId,
           outletId: outletId,
@@ -115,6 +117,10 @@ export const PUT = withAuth(
         return errorResponse("DUPLICATE_TABLE", error.message, 409);
       }
 
+      if (error instanceof OutletTableStatusConflictError) {
+        return errorResponse("TABLE_STATUS_CONFLICT", error.message, 409);
+      }
+
       console.error("PUT /api/outlets/:outletId/tables/:tableId failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Table update failed", 500);
     }
@@ -128,46 +134,65 @@ export const PUT = withAuth(
   ]
 );
 
+async function deactivateTableHandler(request: Request, auth: { companyId: number; userId: number }) {
+  try {
+    const url = new URL(request.url);
+    const pathSegments = url.pathname.split("/");
+    const outletIdIndex = pathSegments.indexOf("outlets") + 1;
+    const tableIdIndex = pathSegments.indexOf("tables") + 1;
+    const outletIdRaw = pathSegments[outletIdIndex];
+    const tableIdRaw = pathSegments[tableIdIndex];
+    const outletId = NumericIdSchema.parse(outletIdRaw);
+    const tableId = NumericIdSchema.parse(tableIdRaw);
+
+    await deleteOutletTable({
+      companyId: auth.companyId,
+      outletId: outletId,
+      tableId: tableId,
+      actor: {
+        userId: auth.userId,
+        outletId: outletId,
+        ipAddress: readClientIp(request)
+      }
+    });
+
+    return successResponse({ success: true });
+  } catch (error) {
+    if (error instanceof ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    if (error instanceof OutletTableNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+
+    if (error instanceof Error && error.message.includes("Cannot delete table")) {
+      return errorResponse("TABLE_IN_USE", error.message, 400);
+    }
+
+    if (error instanceof OutletTableStatusConflictError) {
+      return errorResponse("TABLE_STATUS_CONFLICT", error.message, 409);
+    }
+
+    console.error("PATCH /api/outlets/:outletId/tables/:tableId/deactivate failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Table deactivate failed", 500);
+  }
+}
+
+export const PATCH = withAuth(
+  async (request, auth) => deactivateTableHandler(request, auth),
+  [
+    requireAccess({
+      roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN"],
+      module: "pos",
+      permission: "update"
+    })
+  ]
+);
+
 export const DELETE = withAuth(
   async (request, auth) => {
-    try {
-      const url = new URL(request.url);
-      const pathSegments = url.pathname.split("/");
-      const outletIdIndex = pathSegments.indexOf("outlets") + 1;
-      const tableIdIndex = pathSegments.indexOf("tables") + 1;
-      const outletIdRaw = pathSegments[outletIdIndex];
-      const tableIdRaw = pathSegments[tableIdIndex];
-      const outletId = NumericIdSchema.parse(outletIdRaw);
-      const tableId = NumericIdSchema.parse(tableIdRaw);
-
-      await deleteOutletTable({
-        companyId: auth.companyId,
-        outletId: outletId,
-        tableId: tableId,
-        actor: {
-          userId: auth.userId,
-          outletId: outletId,
-          ipAddress: readClientIp(request)
-        }
-      });
-
-      return successResponse({ success: true });
-    } catch (error) {
-      if (error instanceof ZodError) {
-        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
-      }
-
-      if (error instanceof OutletTableNotFoundError) {
-        return errorResponse("NOT_FOUND", error.message, 404);
-      }
-
-      if (error instanceof Error && error.message.includes("Cannot delete table")) {
-        return errorResponse("TABLE_IN_USE", error.message, 400);
-      }
-
-      console.error("DELETE /api/outlets/:outletId/tables/:tableId failed", error);
-      return errorResponse("INTERNAL_SERVER_ERROR", "Table delete failed", 500);
-    }
+    return deactivateTableHandler(request, auth);
   },
   [
     requireAccess({

@@ -31,6 +31,7 @@ export const SettingValueTypeSchema = z.enum(["int", "boolean", "enum"]);
 export const SETTINGS_KEYS = [
   "feature.pos.auto_sync_enabled",
   "feature.pos.sync_interval_seconds",
+  "feature.reservation.default_duration_minutes",
   "feature.sales.tax_included_default",
   "feature.inventory.allow_backorder",
   "feature.purchasing.require_approval",
@@ -65,6 +66,11 @@ export const SETTINGS_REGISTRY: Record<SettingKey, SettingsRegistryEntry> = {
     valueType: "int",
     defaultValue: 60,
     schema: z.coerce.number().int().min(5)
+  },
+  "feature.reservation.default_duration_minutes": {
+    valueType: "int",
+    defaultValue: 120,
+    schema: z.coerce.number().int().min(15).max(480)
   },
   "feature.sales.tax_included_default": {
     valueType: "boolean",

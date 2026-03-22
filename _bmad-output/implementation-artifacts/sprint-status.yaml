@@ -1,5 +1,5 @@
 # generated: 2026-03-15T09:32:00.000Z
-# last_updated: 2026-03-17T20:42:22+07:00
+# last_updated: 2026-03-22T09:40:00+0700
 # project: jurnapod
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-18T17:04:25+0700
+last_updated: 2026-03-22T17:30:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -85,7 +85,7 @@ development_status:
   # Epic 4: Items & Catalog - Product Management
   # NOTE: Core stories DISCOVERED already implemented (not built by us)
   # Debt stories SPECS CREATED (not yet implemented)
-  epic-4: in-progress
+  epic-4: done
   4-1-item-product-management-crud: done  # DISCOVERED - already existed
   4-2-outlet-specific-pricing: done  # DISCOVERED - already existed
   4-3-multiple-item-types: done  # DISCOVERED - already existed
@@ -135,3 +135,69 @@ development_status:
   8-7-visual-pricing-hierarchy: done  # COMPLETE - Visual price indicators
   8-8-update-routing-navigation: done  # COMPLETE - Routes and navigation
   epic-8-retrospective: done
+
+  # Epic 12: Table Reservation and POS Multi-Cashier Sync
+  # NOTE: New epic for table state management, reservations, and multi-cashier sync
+  epic-12: done
+  epic-12-retrospective: done  # COMPLETE - Retrospective saved to epic-12-retro-2026-03-21.md
+  12-1-database-schema-table-state-management: done  # Follow-ups closed; re-review clean (no HIGH/MEDIUM)
+  12-2-shared-constants-zod-schemas: done  # Re-review clean; medium issues fixed and validation artifact executable
+  12-3-table-occupancy-api-endpoints: done  # Code complete; fixture-policy exception accepted and tracked
+  12-4-reservation-management-api: done  # All CRITICAL/HIGH issues resolved. Implementation complete with 382 tests (381 pass, 1 skip). Code review clean.
+  12-5-service-session-management: done  # Code review follow-ups resolved; deterministic replay, fixture policy alignment, and traceability updates complete.
+  12-6-pos-sync-table-operations: done
+  12-7-table-board-ui: done  # Session detail UX updated to modal with immediate-open loading state; backoffice validation rerun passing
+  12-8-reservation-calendar-ui: done
+  12-9-reservation-calendar-hourly-granularity: done
+  12-10-reservation-canonical-start-end-unix-timestamps: done
+  12-11-unified-dine-in-table-journey-ui-walk-in-reservation: done
+
+  # Epic 13: Large Party Reservations (Multi-Table Support)
+  # NOTE: Feature for parties requiring 2+ tables with table suggestions and group management
+  epic-13: done
+  13-1-reservation-groups-large-party-support: done  # COMPLETE - Round 1 + Round 2 review fixes resolved (race-condition, tenant isolation, timezone policy, deterministic tests, docs) | FINAL REVIEW 2026-03-20
+  13-2-reservation-group-editing: done  # COMPLETE - 13.2.1 fixes approved and tests added
+  13-2-1-reservation-group-editing-critical-fixes: done  # APPROVED - Code review clean; all CRITICAL + MEDIUM issues resolved
+  13-2-2-reservation-group-editing-test-coverage: done  # COMPLETE - 13 backend tests + 4 frontend tests passing (422 API tests, 162 backoffice tests)
+  13-3-reservation-list-improvements: done  # COMPLETE - Pagination, date defaults, auto-select outlet, shared modal, performance fixes
+
+  # Epic 9: Backoffice User Management UX Simplification
+  # NOTE: UX improvements for user management - separate account editing, matrix-based role assignment, consolidated actions, standard filters
+  epic-9: done
+  epic-9-retrospective: done  # COMPLETE - Retrospective saved to epic-9-retro-2026-03-21.md
+  9-1-separate-account-editing-from-role-assignment: done  # COMPLETE - Account/access separation with integration tests
+  9-2-matrix-based-outlet-role-assignment: done  # COMPLETE - Matrix grid with audit telemetry and tests
+  9-3-consolidated-row-action-menus: done  # COMPLETE - Consolidated row action menus with telemetry module
+  9-4-standard-filters-and-modal-ux-behavior: done  # COMPLETE - URL params persistence, Clear All, modal UX
+
+  # Epic 10: Backoffice Consistency and Navigation Standards
+  # NOTE: UI consistency - PageHeader, FilterBar, DataTable, breadcrumbs
+  # SPRINT PLAN: 3 sprints (foundation → components → documentation)
+  # Dependencies: 10.1 → 10.2,10.3 → 10.4
+  epic-10: done
+  10-1-reusable-pageheader-component: done  # COMPLETE - Component with 331 tests; follow-ups tracked as debt
+  10-2-reusable-filterbar-component: done  # COMPLETE - FilterBar with types, hooks, 77 tests + CR fixes
+  10-3-standardized-table-interaction-patterns: done  # COMPLETE - DataTable with sort, pagination, selection, skeleton, accessibility
+  10-4-breadcrumb-navigation-and-ui-standards-documentation: done  # COMPLETE - Breadcrumb hook + 600 tests + UI standards docs + review fixes
+  epic-10-retrospective: done  # COMPLETE - Retrospective saved to epic-10-retro-2026-03-22.md
+
+  # Epic 11: Operational Trust and Scale Readiness
+  # NOTE: Reliability hardening - SLO instrumentation, performance, idempotency, reconciliation
+  epic-11: done  # ALL STORIES COMPLETE
+  11-1-reliability-baseline-and-slo-instrumentation: done
+  11-2-pos-payment-and-offline-performance-hardening: done  # COMPLETE - POS telemetry, performance monitoring, backpressure management, recovery service, load testing framework, network chaos tools
+  11-3-sync-idempotency-and-retry-resilience-hardening: done  # COMPLETE - Idempotency service, error classification, metrics collector, migration 0113, 50 tests, sync route integration
+  11-4-posting-correctness-and-reconciliation-guardrails: done  # COMPLETE - ReconciliationService, API route, metrics, docs, 12 tests, migration 0114 with triggers
+  11-5-reporting-reliability-performance-and-accessibility-hardening: done  # COMPLETE - Report telemetry, timeout handling, TB/GL accessibility tests, runbook, WCAG checklist
+
+  # Epic 10 Follow-up Actions (from retrospective)
+  # Tracked in: debt-tracker.md
+  e10-action-001-component-audit: done  # COMPLETE - Audit report at docs/audits/epic-10-component-adoption-audit.md
+  e10-action-002-react-testing-library: done  # CLOSED - Project uses Playwright CT; infrastructure already exists
+  e10-action-003-lint-rules-adoption: done  # COMPLETE - ESLint config created, requires infrastructure
+  e10-action-004-adr-backoffice-ui: done  # COMPLETE - ADR-001 at docs/adr/adr-001-backoffice-ui-component-architecture.md
+  e10-action-005-centralize-docs: done  # COMPLETE - Patterns guide at docs/patterns/README.md
+
+  # Epic 9 Carry-over Debt
+  # Tracked in: debt-tracker.md
+  debt-001-architecture-decision-log: done  # COMPLETE - 4 ADRs created at docs/adr/

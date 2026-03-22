@@ -44,6 +44,7 @@ export const ReservationRowSchema = z.object({
   reservation_id: NumericIdSchema,
   company_id: NumericIdSchema,
   outlet_id: NumericIdSchema,
+  reservation_group_id: NumericIdSchema.nullable().optional(), // Links to group for multi-table reservations
   table_id: NumericIdSchema.nullable(),
   customer_name: z.string().min(1),
   customer_phone: z.string().nullable(),
@@ -57,12 +58,18 @@ export const ReservationRowSchema = z.object({
   updated_at: z.string().datetime({ offset: true }),
   arrived_at: z.string().datetime({ offset: true }).nullable(),
   seated_at: z.string().datetime({ offset: true }).nullable(),
-  cancelled_at: z.string().datetime({ offset: true }).nullable()
+  cancelled_at: z.string().datetime({ offset: true }).nullable(),
+  // Group display fields (populated via JOIN)
+  group_name: z.string().nullable().optional(),
+  group_table_count: z.number().int().nullable().optional()
 });
 
 export const ReservationListQuerySchema = z.object({
   outlet_id: NumericIdSchema,
   status: ReservationStatusSchema.optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  overlap_filter: z.coerce.boolean().optional(),
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),

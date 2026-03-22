@@ -1116,6 +1116,67 @@ Notes:
 | gross_total | decimal(65,6) | NO | | 0.000000 |
 | paid_total | decimal(62,2) | NO | | 0.00 |
 
+## Dine-in Session Notes (Epic 12)
+
+The following tables/columns are part of table reservation and multi-cashier sync flows.
+
+### table_service_sessions (lifecycle fields)
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| status_id | int unsigned | Session lifecycle: ACTIVE(1), LOCKED_FOR_PAYMENT(2), CLOSED(3) |
+| locked_at | datetime null | Timestamp when payment lock starts |
+| closed_at | datetime null | Timestamp when session is closed |
+| pos_order_snapshot_id | char(36) null | Linked POS snapshot order id for settlement |
+| session_version | int unsigned | Version for multi-cashier conflict-safe refresh |
+| last_finalized_batch_no | int unsigned | Last finalized checkpoint number |
+
+### table_service_session_lines (checkpoint-aware fields)
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| session_id | bigint unsigned | Parent service session |
+| product_id | bigint unsigned | Item reference (tenant scoped) |
+| quantity | int unsigned | Ordered quantity |
+| unit_price | decimal(15,4) | Working precision during session |
+| line_total | decimal(15,4) | Working line total |
+| batch_no | int unsigned null | Finalize checkpoint batch number |
+| line_state | int unsigned | OPEN/FINALIZED/VOIDED style lifecycle |
+| adjustment_parent_line_id | bigint unsigned null | Audit link for reductions/cancellations |
+
+### table_service_session_checkpoints
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| id | bigint unsigned | Primary key |
+| session_id | bigint unsigned | Session foreign key |
+| batch_no | int unsigned | Finalized checkpoint sequence |
+| snapshot_id | char(36) | POS snapshot order id |
+| finalized_at | datetime | Checkpoint timestamp |
+| finalized_by | varchar(255) | Actor identifier |
+| client_tx_id | varchar(255) | Idempotency key |
+
+### table_events (sync/audit fields)
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| client_tx_id | varchar(255) | Idempotency key per company/outlet |
+| occupancy_version_before | int unsigned null | Optimistic version before applying event |
+| occupancy_version_after | int unsigned null | Optimistic version after applying event |
+| occurred_at | datetime | Client-recorded event timestamp |
+| is_conflict | tinyint unsigned | Conflict-attempt flag (0/1) |
+| conflict_reason | varchar(500) null | Human-readable conflict reason for audit traceability |
+
+Indexes:
+- `uq_table_events_client_tx` on `(company_id, outlet_id, client_tx_id)` for idempotent replay.
+- `idx_table_events_conflict` on `(is_conflict, occurred_at)` for conflict audit queries.
+
+### POS snapshot precision note
+
+- `table_service_session_lines.unit_price` uses `DECIMAL(15,4)` for in-session precision.
+- `pos_order_snapshot_lines.unit_price_snapshot` uses `DECIMAL(18,2)`.
+- Finalize/close sync paths must apply explicit and deterministic 2dp rounding policy.
+
 ## Table Summary
 
 | Category | Tables |
@@ -1127,6 +1188,7 @@ Notes:
 | Settings | company_settings, platform_settings, feature_flags |
 | POS | pos_transactions, pos_transaction_items, pos_transaction_payments, pos_transaction_taxes |
 | POS Order Management | pos_order_snapshots, pos_order_snapshot_lines, pos_order_updates, pos_item_cancellations |
+| Dine-in Operations | table_occupancy, table_service_sessions, table_service_session_lines, table_events, table_service_session_checkpoints |
 | Sales | sales_invoices, sales_invoice_lines, sales_invoice_taxes, sales_orders, sales_order_lines, sales_payments, sales_payment_splits, sales_credit_notes, sales_credit_note_lines |
 | Fixed Assets | fixed_assets, fixed_asset_categories, fixed_asset_books, fixed_asset_events, fixed_asset_disposals, asset_depreciation_plans, asset_depreciation_runs |
 | Items | items, item_prices, item_groups |

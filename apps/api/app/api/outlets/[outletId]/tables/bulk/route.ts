@@ -7,7 +7,11 @@ import { requireAccess, withAuth } from "../../../../../../src/lib/auth-guard";
 import { checkUserAccess } from "../../../../../../src/lib/auth";
 import { readClientIp } from "../../../../../../src/lib/request-meta";
 import { errorResponse, successResponse } from "../../../../../../src/lib/response";
-import { createOutletTablesBulk, OutletTableBulkConflictError } from "../../../../../../src/lib/outlet-tables";
+import {
+  createOutletTablesBulk,
+  OutletTableBulkConflictError,
+  OutletTableStatusConflictError
+} from "../../../../../../src/lib/outlet-tables";
 
 const CODE_EDIT_ALLOWED_ROLES = ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN"] as const;
 
@@ -52,6 +56,7 @@ export const POST = withAuth(
         zone: input.zone ?? null,
         capacity: input.capacity ?? null,
         status: input.status ?? "AVAILABLE",
+        status_id: input.status_id,
         actor: {
           userId: auth.userId,
           outletId: outletId,
@@ -67,6 +72,10 @@ export const POST = withAuth(
 
       if (error instanceof OutletTableBulkConflictError) {
         return errorResponse("DUPLICATE_TABLE", error.message, 409);
+      }
+
+      if (error instanceof OutletTableStatusConflictError) {
+        return errorResponse("TABLE_STATUS_CONFLICT", error.message, 409);
       }
 
       if (error instanceof Error && error.message.startsWith("Generated table")) {
