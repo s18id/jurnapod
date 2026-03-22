@@ -24,6 +24,15 @@ import {
 import { SyncAuditService, type AuditDbClient } from "@jurnapod/modules-platform/sync";
 import { deductStockWithCost, type StockDeductResult } from "../../../../src/services/stock";
 import { postCogsForSale, type CogsPostingResult } from "../../../../src/lib/cogs-posting";
+import { 
+  syncIdempotencyService, 
+  SyncIdempotencyMetricsCollector,
+  syncIdempotencyMetricsCollector,
+  type IdempotencyCheckResult,
+  type SyncOperationResult,
+  type ErrorClassification,
+  SYNC_RESULT_CODES
+} from "@jurnapod/sync-core";
 
 // Helper to create audit service with proper DB client adapter
 function createSyncAuditService(dbPool: ReturnType<typeof getDbPool>): SyncAuditService {
@@ -108,6 +117,7 @@ type ProcessTransactionParams = {
   injectFailureAfterHeaderInsert: boolean;
   forcedRetryableErrno: number | null;
   taxContext: SyncPushTaxContext;
+  metricsCollector: SyncIdempotencyMetricsCollector;
 };
 
 type AcceptedSyncPushContext = {
@@ -895,7 +905,7 @@ function buildTransactionBatches(
 }
 
 async function processSyncPushTransaction(params: ProcessTransactionParams): Promise<SyncPushResultItem> {
-  const { dbPool, tx, txIndex, inputOutletId, authCompanyId, authUserId, correlationId, injectFailureAfterHeaderInsert, forcedRetryableErrno, taxContext } = params;
+  const { dbPool, tx, txIndex, inputOutletId, authCompanyId, authUserId, correlationId, injectFailureAfterHeaderInsert, forcedRetryableErrno, taxContext, metricsCollector } = params;
   const { defaultTaxRates, taxRateById } = taxContext;
 
   const orderDbConnection = await dbPool.getConnection();
@@ -914,18 +924,48 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
 
   try {
     if (tx.company_id !== authCompanyId) {
+      // Record validation error for company_id mismatch
+      const operationResult: SyncOperationResult = {
+        client_tx_id: tx.client_tx_id,
+        result: "ERROR",
+        latency_ms: Math.max(0, Date.now() - startedAtMs),
+        error_classification: "VALIDATION",
+        is_retry: false
+      };
+      metricsCollector.recordResults([operationResult]);
+      
       const result = toErrorResult(tx.client_tx_id, "company_id mismatch");
       logTransactionResult("ERROR");
       return result;
     }
 
     if (tx.outlet_id !== inputOutletId) {
+      // Record validation error for outlet_id mismatch
+      const operationResult: SyncOperationResult = {
+        client_tx_id: tx.client_tx_id,
+        result: "ERROR",
+        latency_ms: Math.max(0, Date.now() - startedAtMs),
+        error_classification: "VALIDATION",
+        is_retry: false
+      };
+      metricsCollector.recordResults([operationResult]);
+      
       const result = toErrorResult(tx.client_tx_id, "outlet_id mismatch");
       logTransactionResult("ERROR");
       return result;
     }
 
     if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && !tx.table_id) {
+      // Record validation error for missing table_id
+      const operationResult: SyncOperationResult = {
+        client_tx_id: tx.client_tx_id,
+        result: "ERROR",
+        latency_ms: Math.max(0, Date.now() - startedAtMs),
+        error_classification: "VALIDATION",
+        is_retry: false
+      };
+      metricsCollector.recordResults([operationResult]);
+      
       const result = toErrorResult(tx.client_tx_id, "DINE_IN requires table_id");
       logTransactionResult("ERROR");
       return result;
@@ -938,27 +978,71 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
     const payloadSha256Legacy = computePayloadSha256(canonicalizeTransactionForLegacyHash(tx));
     let acceptedContextForFailureAudit: AcceptedSyncPushContext | null = null;
 
-    const existingRecord = await readExistingIdempotencyRecordByClientTxId(orderDbConnection, tx.company_id, tx.client_tx_id);
+    // Use new idempotency service for duplicate detection
+    const existingRecord = await readExistingIdempotencyRecordByClientTxId(orderDbConnection, tx.company_id, tx.outlet_id, tx.client_tx_id);
     if (existingRecord) {
-      const outcome = await resolveIdempotencyReplayOutcome(
-        orderDbConnection,
-        existingRecord,
-        tx,
+      const idempotencyResult = syncIdempotencyService.determineReplayOutcome(
+        {
+          pos_transaction_id: existingRecord.posTransactionId,
+          payload_sha256: existingRecord.payloadSha256,
+          payload_hash_version: existingRecord.payloadHashVersion,
+          status: tx.status,
+          trx_at: tx.trx_at
+        },
         payloadSha256,
-        payloadSha256Legacy,
-        authUserId,
-        correlationId
+        existingRecord.payloadSha256,
+        existingRecord.payloadHashVersion
       );
-      if (outcome.result === "DUPLICATE") {
+
+      if (idempotencyResult.outcome === "RETURN_CACHED") {
+        // Record metrics for successful deduplication
+        const operationResult: SyncOperationResult = {
+          client_tx_id: tx.client_tx_id,
+          result: "DUPLICATE",
+          latency_ms: Math.max(0, Date.now() - startedAtMs),
+          error_classification: idempotencyResult.classification,
+          is_retry: false
+        };
+        metricsCollector.recordResults([operationResult]);
+
+        await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
+          authUserId,
+          correlationId,
+          companyId: tx.company_id,
+          outletId: tx.outlet_id,
+          clientTxId: tx.client_tx_id,
+          posTransactionId: existingRecord.posTransactionId
+        });
         logTransactionResult("DUPLICATE");
+        return { client_tx_id: tx.client_tx_id, result: "DUPLICATE" };
       } else {
+        // CONFLICT case - record as error
+        const operationResult: SyncOperationResult = {
+          client_tx_id: tx.client_tx_id,
+          result: "ERROR",
+          latency_ms: Math.max(0, Date.now() - startedAtMs),
+          error_classification: idempotencyResult.classification ?? "CONFLICT",
+          is_retry: false
+        };
+        metricsCollector.recordResults([operationResult]);
+
         logTransactionResult("ERROR");
+        return { client_tx_id: tx.client_tx_id, result: "ERROR", message: "IDEMPOTENCY_CONFLICT" };
       }
-      return outcome;
     }
 
     const cashierInCompany = await isCashierInCompany(orderDbConnection, tx.company_id, tx.cashier_user_id);
     if (!cashierInCompany) {
+      // Record validation error for cashier not in company
+      const operationResult: SyncOperationResult = {
+        client_tx_id: tx.client_tx_id,
+        result: "ERROR",
+        latency_ms: Math.max(0, Date.now() - startedAtMs),
+        error_classification: "VALIDATION",
+        is_retry: false
+      };
+      metricsCollector.recordResults([operationResult]);
+      
       const result = toErrorResult(tx.client_tx_id, CASHIER_USER_ID_MISMATCH_MESSAGE);
       logTransactionResult("ERROR");
       return result;
@@ -1193,6 +1277,15 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
 
       await orderDbConnection.commit();
 
+      // Record successful operation
+      const operationResult: SyncOperationResult = {
+        client_tx_id: tx.client_tx_id,
+        result: "OK",
+        latency_ms: Math.max(0, Date.now() - startedAtMs),
+        is_retry: false
+      };
+      metricsCollector.recordResults([operationResult]);
+
       logTransactionResult("OK");
       return {
         client_tx_id: tx.client_tx_id,
@@ -1202,32 +1295,78 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       if (isClientTxIdDuplicateError(error)) {
         await rollbackQuietly(orderDbConnection);
 
-        const existingRecord = await readExistingIdempotencyRecordByClientTxId(orderDbConnection, tx.company_id, tx.client_tx_id);
+        const existingRecord = await readExistingIdempotencyRecordByClientTxId(orderDbConnection, tx.company_id, tx.outlet_id, tx.client_tx_id);
         if (!existingRecord) {
           const result = toErrorResult(tx.client_tx_id, RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE);
           logTransactionResult("ERROR");
           return result;
         }
 
-        const outcome = await resolveIdempotencyReplayOutcome(
-          orderDbConnection,
-          existingRecord,
-          tx,
+        // Use new idempotency service for duplicate error handling
+        const idempotencyResult = syncIdempotencyService.determineReplayOutcome(
+          {
+            pos_transaction_id: existingRecord.posTransactionId,
+            payload_sha256: existingRecord.payloadSha256,
+            payload_hash_version: existingRecord.payloadHashVersion,
+            status: tx.status,
+            trx_at: tx.trx_at
+          },
           payloadSha256,
-          payloadSha256Legacy,
-          authUserId,
-          correlationId
+          existingRecord.payloadSha256,
+          existingRecord.payloadHashVersion
         );
-        if (outcome.result === "DUPLICATE") {
+
+        if (idempotencyResult.outcome === "RETURN_CACHED") {
+          // Record metrics for successful deduplication
+          const operationResult: SyncOperationResult = {
+            client_tx_id: tx.client_tx_id,
+            result: "DUPLICATE",
+            latency_ms: Math.max(0, Date.now() - startedAtMs),
+            error_classification: idempotencyResult.classification,
+            is_retry: false
+          };
+          metricsCollector.recordResults([operationResult]);
+
+          await recordSyncPushDuplicateReplayAudit(orderDbConnection, {
+            authUserId,
+            correlationId,
+            companyId: tx.company_id,
+            outletId: tx.outlet_id,
+            clientTxId: tx.client_tx_id,
+            posTransactionId: existingRecord.posTransactionId
+          });
           logTransactionResult("DUPLICATE");
+          return { client_tx_id: tx.client_tx_id, result: "DUPLICATE" };
         } else {
+          // CONFLICT case - record as error
+          const operationResult: SyncOperationResult = {
+            client_tx_id: tx.client_tx_id,
+            result: "ERROR",
+            latency_ms: Math.max(0, Date.now() - startedAtMs),
+            error_classification: idempotencyResult.classification ?? "CONFLICT",
+            is_retry: false
+          };
+          metricsCollector.recordResults([operationResult]);
+
           logTransactionResult("ERROR");
+          return { client_tx_id: tx.client_tx_id, result: "ERROR", message: "IDEMPOTENCY_CONFLICT" };
         }
-        return outcome;
       }
 
       if (isRetryableMysqlError(error)) {
         await rollbackQuietly(orderDbConnection);
+        
+        // Classify and record retryable error
+        const retryGuidance = syncIdempotencyService.classifyError(error);
+        const operationResult: SyncOperationResult = {
+          client_tx_id: tx.client_tx_id,
+          result: "ERROR",
+          latency_ms: Math.max(0, Date.now() - startedAtMs),
+          error_classification: retryGuidance.classification,
+          is_retry: false
+        };
+        metricsCollector.recordResults([operationResult]);
+        
         const result = toErrorResult(tx.client_tx_id, toRetryableDbErrorMessage(error));
         logTransactionResult("ERROR");
         return result;
@@ -1237,6 +1376,17 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
         const sqlMessage = error.sqlMessage ?? "";
         if (sqlMessage.includes("fk_pos_transactions_cashier_user") || sqlMessage.includes("cashier_user_id")) {
           await rollbackQuietly(orderDbConnection);
+          
+          // Record validation error for cashier mismatch
+          const operationResult: SyncOperationResult = {
+            client_tx_id: tx.client_tx_id,
+            result: "ERROR",
+            latency_ms: Math.max(0, Date.now() - startedAtMs),
+            error_classification: "VALIDATION",
+            is_retry: false
+          };
+          metricsCollector.recordResults([operationResult]);
+          
           const result = toErrorResult(tx.client_tx_id, CASHIER_USER_ID_MISMATCH_MESSAGE);
           logTransactionResult("ERROR");
           return result;
@@ -1252,6 +1402,17 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       ) {
         await recordSyncPushPostingHookFailure(dbPool, acceptedContextForFailureAudit, error);
       }
+
+      // Classify and record general error
+      const errorGuidance = syncIdempotencyService.classifyError(error);
+      const operationResult: SyncOperationResult = {
+        client_tx_id: tx.client_tx_id,
+        result: "ERROR",
+        latency_ms: Math.max(0, Date.now() - startedAtMs),
+        error_classification: errorGuidance.classification,
+        is_retry: false
+      };
+      metricsCollector.recordResults([operationResult]);
 
       console.error("POST /sync/push transaction insert failed", {
         correlation_id: correlationId,
@@ -1278,14 +1439,15 @@ async function rollbackQuietly(orderDbConnection: PoolConnection): Promise<void>
 async function readExistingIdempotencyRecordByClientTxId(
   orderDbConnection: PoolConnection,
   companyId: number,
+  outletId: number,
   clientTxId: string
 ): Promise<ExistingIdempotencyRecord | null> {
   const [rows] = await orderDbConnection.execute(
     `SELECT id, payload_sha256, payload_hash_version
      FROM pos_transactions
-     WHERE company_id = ? AND client_tx_id = ?
+     WHERE company_id = ? AND outlet_id = ? AND client_tx_id = ?
      LIMIT 1`,
-    [companyId, clientTxId]
+    [companyId, outletId, clientTxId]
   );
 
   const row = (rows as Array<{ id?: number; payload_sha256?: string | null; payload_hash_version?: number | null }>)[0];
@@ -1697,6 +1859,7 @@ export const POST = withAuth(
       const input = syncPushRequestSchemaWithOffset.parse(payload);
       const dbPool = getDbPool();
       auditService = createSyncAuditService(dbPool);
+      const metricsCollector = new SyncIdempotencyMetricsCollector();
       const results: SyncPushResultItem[] = [];
       const orderUpdateResults: Array<{
         update_id: string;
@@ -1738,7 +1901,13 @@ export const POST = withAuth(
 
         const resultsByIndex: Map<number, SyncPushResultItem> = new Map();
 
+        // Initialize metrics collection
+        metricsCollector.recordRequest(input.transactions.length);
+
         for (const batch of batches) {
+          // Start batch processing timer
+          metricsCollector.startBatch();
+
           const batchResults = await Promise.all(
             batch.map((indexedTx) =>
               processSyncPushTransaction({
@@ -1751,10 +1920,14 @@ export const POST = withAuth(
                 correlationId,
                 injectFailureAfterHeaderInsert,
                 forcedRetryableErrno,
-                taxContext
+                taxContext,
+                metricsCollector
               })
             )
           );
+
+          // End batch processing timer
+          metricsCollector.endBatch(batchResults.length);
 
           for (const result of batchResults) {
             const originalIndex = batch.find((idxTx) => idxTx.tx.client_tx_id === result.client_tx_id)?.txIndex;
