@@ -93,7 +93,6 @@ so that I can apply correct tax calculations and enforce access control.
 - `apps/api/src/routes/roles.ts` - Roles route (118 lines)
 - `apps/api/src/server.ts` - Fixed import name (roleRoutes → rolesRoutes)
 - `apps/api/src/routes/tax-rates.test.ts` - Combined tests (17 tests)
-  - Note: Test file is untracked in git (not committed). Run tests individually for validation.
 
 ## Change Log
 

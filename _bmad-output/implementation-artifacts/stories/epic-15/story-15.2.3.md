@@ -138,7 +138,6 @@ so that I can apply updates to my local database and maintain data consistency.
 
 - `apps/api/src/routes/sync/pull.ts` - Complete Hono implementation (217 lines)
 - `apps/api/src/routes/sync/pull.test.ts` - Comprehensive tests (339 lines)
-  - Note: Test file is untracked in git (not committed). Run tests individually for validation.
 
 ## Change Log
 

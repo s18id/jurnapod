@@ -95,7 +95,6 @@ so that I can select accounts for journal entries and view account balances.
 
 - `apps/api/src/routes/accounts.ts` - Full implementation (250 lines)
 - `apps/api/src/routes/accounts.test.ts` - Comprehensive tests (19 tests)
-  - Note: Test file is untracked in git (not committed). Run tests individually for validation.
 
 ## Change Log
 

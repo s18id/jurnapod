@@ -174,7 +174,6 @@ so that the transactions are persisted, deduplicated by client_tx_id, and availa
 
 - `apps/api/src/routes/sync/push.ts` - Complete implementation of batch sync push route
 - `apps/api/src/routes/sync/push.test.ts` - Comprehensive test suite (22 tests)
-  - Note: Test file is untracked in git (not committed). Run tests individually for validation.
 
 ## Follow-up Work
 

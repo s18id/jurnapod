@@ -92,7 +92,6 @@ so that I can select items for sales transactions and view current pricing.
 
 - `apps/api/src/routes/inventory.ts` - Full implementation (266 lines)
 - `apps/api/src/routes/inventory.test.ts` - Comprehensive tests (16 tests)
-  - Note: Test file is untracked in git (not committed). Run tests individually for validation.
 
 ## Change Log
 
