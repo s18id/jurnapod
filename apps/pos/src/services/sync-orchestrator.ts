@@ -520,7 +520,7 @@ export class SyncOrchestrator {
             return sendOutboxJobToSyncPush(
               {
                 job,
-                endpoint: `${this.config.apiOrigin}/api/sync/push`,
+                endpoint: `${this.config.apiOrigin}/sync/push`,
                 access_token: this.config.accessToken
               },
               db

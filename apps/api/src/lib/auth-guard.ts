@@ -5,6 +5,7 @@ import { jwtVerify } from "jose";
 import { z } from "zod";
 import { ROLE_CODES, checkUserAccess, type RoleCode, type ModulePermission } from "./auth";
 import { getAppEnv } from "./env";
+import type { TelemetryContext } from "../middleware/telemetry.js";
 
 const BEARER_TOKEN_PATTERN = /^Bearer\s+(\S+)$/i;
 
@@ -42,6 +43,7 @@ export type AuthContext = {
   userId: number;
   companyId: number;
   email: string | null;
+  role: RoleCode | null;
 };
 
 type AuthSuccess = {
@@ -122,7 +124,8 @@ async function verifyAccessToken(accessToken: string): Promise<AuthContext> {
   return {
     userId,
     companyId: claims.company_id,
-    email: claims.email ?? null
+    email: claims.email ?? null,
+    role: null // Role will be null for JWT-based auth; fetch separately if needed
   };
 }
 

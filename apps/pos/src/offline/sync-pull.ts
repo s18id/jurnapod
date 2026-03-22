@@ -16,7 +16,7 @@ import type {
 } from "@jurnapod/offline-db/dexie";
 import { batchUpdateStockFromSync } from "../services/stock.js";
 
-const DEFAULT_SYNC_PULL_ENDPOINT = "/api/sync/pull";
+const DEFAULT_SYNC_PULL_ENDPOINT = "/sync/pull";
 const inFlightPullsByScope = new Map<string, Promise<SyncPullIngestResult>>();
 
 const SyncPullItemSchema = z.object({

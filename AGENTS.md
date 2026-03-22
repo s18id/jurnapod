@@ -3,6 +3,19 @@
 Important:
 - Never commit unless explicitly asked.
 
+## Standardized Document Paths
+
+| Artifact | Path |
+|----------|------|
+| Sprint tracking | `_bmad-output/implementation-artifacts/sprint-status.yaml` |
+| Stories | `_bmad-output/implementation-artifacts/stories/epic-{N}/story-{N}.{M}.md` |
+| Story completion notes | `_bmad-output/implementation-artifacts/stories/epic-{N}/story-{N}.{M}.completion.md` |
+| Tech specs | `docs/tech-specs/{name}.md` |
+| Epics | `docs/tech-specs/` (included in tech specs) |
+| ADRs | `docs/adr/adr-{NNN}-{slug}.md` |
+| Sprint planning artifacts | `_bmad-output/planning-artifacts/` |
+| BMAD output | `_bmad-output/` |
+
 ## Product
 - Product: Jurnapod
 - Tagline: From cashier to ledger.
@@ -288,7 +301,7 @@ BMAD agents are distributed across three AI models for optimal cost-effectivenes
 
 **minimax-m2.5** (Narrow Scope - 30 agents):
 - Quick dev: `bmad-quick-dev`, `bmad-quick-flow-solo-dev`
-- Testing: All `bmad-testarch-*`, `bmad-qa`, `bmad-qa-generate-e2e-tests`
+- Testing: All `bmad-testarch-*`, `bmad-qa-generate-tests`, `bmad-qa-generate-e2e-tests`, `bmad-qa-validate`
 - Research: `bmad-market-research`, `bmad-domain-research`, `bmad-technical-research`
 - Utility: `bmad-shard-doc`, `bmad-index-docs`, `bmad-tech-writer`
 - Analysis: `bmad-analyst`, `bmad-create-product-brief`, `bmad-brainstorming`
@@ -319,7 +332,7 @@ BMAD agents are distributed across three AI models for optimal cost-effectivenes
 - Delegate to `bmad-quick-dev`: "Create template system" (1.5h)
 - Delegate to `bmad-quick-flow-solo-dev`: "Add retry logic" (1h)
 - Delegate to `bmad-dev`: "Create email templates" (1h)
-- Delegate to `bmad-qa`: "Write tests" (1h)
+- Delegate to `bmad-qa-generate-tests`: "Write tests" (1h)
 - **Review with** `bmad-code-review`: Integration check (30min)
 
 **Maximizes throughput**: 75% of work on cheapest model, quality assured by review.
@@ -356,7 +369,7 @@ Use the `skill` tool to load the appropriate agent based on the model allocation
 | When you need... | Use this agent |
 |------------------|----------------|
 | Implement a story (from spec) | `bmad-dev-story` |
-| Quick code change / bug fix | `bmad-quick-dev` or `bmad-quick-dev-new-preview` |
+| Quick code change / bug fix | `bmad-quick-dev` |
 | Solo dev on a task | `bmad-quick-flow-solo-dev` |
 | Code review | `bmad-code-review` |
 | Edge case review | `bmad-review-edge-case-hunter` |
@@ -387,7 +400,8 @@ Use the `skill` tool to load the appropriate agent based on the model allocation
 | NFR assessment | `bmad-testarch-nfr` |
 | Setup CI pipeline | `bmad-testarch-ci` |
 | Generate e2e tests | `bmad-qa-generate-e2e-tests` |
-| QA assistance | `bmad-qa` |
+| Generate unit/integration tests | `bmad-qa-generate-tests` |
+| Validate against acceptance criteria | `bmad-qa-validate` |
 
 ### Research & Analysis
 

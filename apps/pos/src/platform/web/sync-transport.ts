@@ -21,7 +21,7 @@ export class WebSyncTransportAdapter implements SyncTransport {
     options?: { baseUrl?: string; accessToken?: string }
   ): Promise<SyncPullResponse> {
     const origin = options?.baseUrl ?? window.location.origin;
-    const url = new URL(`${origin}/api/sync/pull`);
+    const url = new URL(`${origin}/sync/pull`);
 
     url.searchParams.set("outlet_id", String(request.outlet_id));
     if (request.since_version !== undefined) {
@@ -67,7 +67,7 @@ export class WebSyncTransportAdapter implements SyncTransport {
     options?: { baseUrl?: string; accessToken?: string }
   ): Promise<SyncPushResponse> {
     const origin = options?.baseUrl ?? window.location.origin;
-    const url = `${origin}/api/sync/push`;
+    const url = `${origin}/sync/push`;
 
     const headers: HeadersInit = {
       "content-type": "application/json",

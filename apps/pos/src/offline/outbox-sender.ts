@@ -14,7 +14,7 @@ import type {
   SaleRow
 } from "@jurnapod/offline-db/dexie";
 
-const DEFAULT_SYNC_PUSH_ENDPOINT = "/api/sync/push";
+const DEFAULT_SYNC_PUSH_ENDPOINT = "/sync/push";
 const DEFAULT_SYNC_PUSH_TIMEOUT_MS = 10_000;
 const RETRYABLE_SYNC_RESULT_MESSAGES = new Set([
   "RETRYABLE_DB_LOCK_TIMEOUT",

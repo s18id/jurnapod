@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod";
+import type { Context } from "hono";
 import { checkAvailability, getStockConflicts, type StockItem } from "../services/stock.js";
 
 // Schema for stock validation in request body
@@ -21,11 +22,11 @@ export const StockValidationBodySchema = z.object({
 
 export interface StockValidationConfig {
   /** Extract company_id from request context */
-  getCompanyId: (ctx: any) => number;
+  getCompanyId: (ctx: Context) => number;
   /** Extract outlet_id from request context */
-  getOutletId: (ctx: any) => number;
+  getOutletId: (ctx: Context) => number;
   /** Extract items from request (default: body.items) */
-  getItems?: (ctx: any) => StockItem[];
+  getItems?: (ctx: Context) => StockItem[];
   /** Allow the request to proceed even if stock check fails (just attach conflicts to context) */
   allowInsufficient?: boolean;
   /** Custom error message */
@@ -71,7 +72,7 @@ declare module "hono" {
  * ```
  */
 export function validateStockAvailability(config: StockValidationConfig) {
-  return async (ctx: any, next: any): Promise<Response | void> => {
+  return async (ctx: Context, next: () => Promise<void>): Promise<Response | void> => {
     try {
       // Extract values from context
       const companyId = config.getCompanyId(ctx);

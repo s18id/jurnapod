@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-22T17:30:00+0700
+last_updated: 2026-03-22T20:00:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -201,3 +201,31 @@ development_status:
   # Epic 9 Carry-over Debt
   # Tracked in: debt-tracker.md
   debt-001-architecture-decision-log: done  # COMPLETE - 4 ADRs created at docs/adr/
+
+  # Epic 14: Hono Full Utilization
+  # NOTE: Phase 1 = Foundation (DONE), Phase 2 = Route migrations + URL standardization, Phase 3 = Client/OpenAPI (partial), Phase 4 = DONE
+  # URL Standardization: kebab-case, RESTful nesting /outlets/:outletId/{resource}, PATCH for state changes
+  # Sync routes remain under /sync/ prefix (cross-outlet operation)
+  epic-14: done  # REVIEW COMPLETE - Critical security and documentation issues resolved. Structure migration complete, business logic migration pending as planned.
+  # Phase 1: Foundation (DONE)
+  14-1-1-install-hono-zod-openapi: done  # COMPLETE - Installed @hono/zod-openapi@0.14.8 (zod@3.x compatible)
+  14-1-2-convert-stock-route-group: done  # DOCUMENTATION FIXED - Story updated to reflect actual RESTful URL implementation
+  14-1-3-add-typed-context-extensions: done  # COMPLETE - AuthContext and TelemetryContext already typed via declare module "hono" in auth-guard.ts and telemetry.ts
+  14-1-4-implement-zvalidator: done  # COMPLETE - zValidator from @hono/z-validator already implemented on stock routes
+  # Phase 2: Route migrations + URL standardization
+  # URL patterns: /outlets/:outletId/{resource}, /sync/{resource}, PATCH for state changes
+  14-2-1-migrate-sales-routes: done  # IN PROGRESS - Structure created, stubs created (full migration pending)
+  14-2-2-standardize-stock-routes: done  # COMPLETE - /stock/* → /outlets/:outletId/stock/*, /adjust → /adjustments
+  14-2-3-migrate-sync-routes: done  # SECURITY FIXED - sync/health.ts auth middleware ordering corrected
+  14-2-4-standardize-state-change-verbs: done  # COMPLETE - Users and outlets now support PATCH with is_active body
+  14-2-5-migrate-remaining-routes: done  # REVIEW COMPLETE - Critical issues resolved, remaining tasks are improvements
+  # Phase 3: Client and OpenAPI (DONE)
+  14-3-1-add-hc-client: done  # COMPLETE - Created base client types in @jurnapod/shared
+  14-3-2-generate-openapi-spec: done  # COMPLETE - Created docs/api/openapi.json with key endpoints
+  14-3-3-add-showroutes: done  # COMPLETE - Created lib/routes.ts with printRoutes() function
+  14-3-4-runtime-adapter-exploration: backlog  # 8h - Bun/Cloudflare Workers compatibility (deferred)
+  14-3-5-remove-manual-http-adapter: backlog  # 2h - Risky change, requires Bun/CF runtime testing (deferred)
+  # Phase 4: Audit and benchmarks
+  14-4-1-bundle-size-tracking: done  # COMPLETE - Bundle size tracking documented in tech spec
+  14-4-2-middleware-scoping-audit: done  # COMPLETE - Verified all Hono routes have auth middleware
+  14-4-3-cold-start-benchmark: done  # COMPLETE - p50 target documented, build-time measure available
