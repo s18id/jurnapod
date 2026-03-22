@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-22T22:00:00+0700
+last_updated: 2026-03-23T10:00:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -246,9 +246,9 @@ development_status:
   15-3-1-accounts-routes: done  # COMPLETE - Accounts (report_group filter, no pagination per schema), 19 tests
   15-3-2-items-routes: done  # COMPLETE - Inventory routes (items, item-groups, prices) with 16 tests
   15-3-3-tax-rates-roles-routes: done  # COMPLETE - Tax rates and roles routes with 17 tests
-  15-4-1-invoice-routes: backlog  # P0 - Core revenue flow | 12h | CRITICAL - GL posting
-  15-4-2-order-routes: backlog  # P0 - POS integration | 10h
-  15-4-3-payment-routes: backlog  # P0 - Financial completion | 10h
-  15-5-1-dine-in-routes: backlog  # P2 - Restaurant operations | 12h
-  15-5-2-report-routes: backlog  # P2 - Analytics and compliance | 10h
-  15-5-3-journal-routes: backlog  # P1 - GL operations | 8h
+  15-4-1-invoice-routes: done  # COMPLETE - Hono invoice routes with GL posting, 17 tests passing, code review clean
+  15-4-2-order-routes: done  # COMPLETE - Hono order routes with outlet access validation, 11 tests passing, code review clean
+  15-4-3-payment-routes: done  # COMPLETE - Hono payment routes with outlet access validation, 8 tests passing, code review clean
+  15-5-1-dine-in-routes: done  # COMPLETE - Hono dine-in routes with outlet access validation, 6 tests passing, code review clean
+  15-5-2-report-routes: done  # COMPLETE - Report routes with 24 tests passing, code review clean
+  15-5-3-journal-routes: done  # COMPLETE - Journal routes with 15 tests passing, code review clean
