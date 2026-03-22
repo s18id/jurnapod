@@ -23,7 +23,8 @@ import {
   type StockAdjustmentInput
 } from "../services/stock.js";
 import { getDbPool } from "../lib/db.js";
-import { authenticateRequest, type AuthContext } from "../lib/auth-guard.js";
+import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
+import { type RoleCode } from "../lib/auth.js";
 import { successResponse, errorResponse } from "../lib/response.js";
 import { telemetryMiddleware, type TelemetryContext } from "../middleware/telemetry.js";
 import { NumericIdSchema } from "@jurnapod/shared";
@@ -94,9 +95,7 @@ function requireStockAccess(roles: readonly string[]) {
       );
     }
 
-    // For stock routes, we need to check outlet access
-    // Note: We use c.req.query() and c.req.json() because validation
-    // happens after middleware in Hono's pipeline
+    // Extract outlet ID for outlet access validation
     let outletId: number | undefined;
     const method = c.req.method;
 
@@ -109,20 +108,30 @@ function requireStockAccess(roles: readonly string[]) {
         }
       }
     } else if (method === "POST") {
-      // Use c.req.json() for POST requests - the handler will validate
+      // Extract outlet_id from POST body for validation
       try {
         const body = await c.req.json().catch(() => ({}));
         if (body.outlet_id && typeof body.outlet_id === "number") {
           outletId = body.outlet_id;
         }
       } catch {
-        // Ignore JSON parse errors - handler will deal with it
+        // Ignore JSON parse errors - handler will validate
       }
     }
 
-    // For now, allow access if user has required role
-    // The actual outlet access check happens in the service layer
-    // TODO: Integrate with full RBAC system when outlet access control is needed
+    // Use proper auth guard with role and outlet access checks
+    const authGuard = requireAccess({
+      roles: roles as RoleCode[],
+      module: "inventory",
+      permission: "read",
+      outletId: outletId
+    });
+
+    const authResult = await authGuard(c.req.raw, auth);
+    if (authResult) {
+      return authResult;
+    }
+
     await next();
   };
 }
