@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-22T00:00:00+0700
+last_updated: 2026-03-22T15:57:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -187,5 +187,5 @@ development_status:
   11-1-reliability-baseline-and-slo-instrumentation: done
   11-2-pos-payment-and-offline-performance-hardening: done  # COMPLETE - POS telemetry, performance monitoring, backpressure management, recovery service, load testing framework, network chaos tools
   11-3-sync-idempotency-and-retry-resilience-hardening: done  # COMPLETE - Idempotency service, error classification, metrics collector, migration 0113, 50 tests, sync route integration
-  11-4-posting-correctness-and-reconciliation-guardrails: backlog
+  11-4-posting-correctness-and-reconciliation-guardrails: done  # COMPLETE - ReconciliationService, API route, metrics, docs, 12 tests, migration 0114 with triggers
   11-5-reporting-reliability-performance-and-accessibility-hardening: backlog
