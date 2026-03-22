@@ -16,7 +16,7 @@
  */
 
 import { Hono } from "hono";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import { createHash } from "node:crypto";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
@@ -1123,39 +1123,125 @@ syncPushRoutes.use("/*", async (c, next) => {
 });
 
 syncPushRoutes.post("/", async (c) => {
-  // TEMPORARY PROXY: Forward to legacy Next.js implementation
-  // TODO: Remove this proxy once Hono implementation is fully tested and ready
-  console.log("🔄 PROXY: Forwarding /sync/push to legacy /api/sync/push implementation");
-  
+  const auth = c.get("auth");
+  const correlationId = getRequestCorrelationId(c.req.raw);
+  const dbPool = getDbPool();
+  let metricsCollector = new SyncIdempotencyMetricsCollector();
+
+  console.info("POST /sync/push started", {
+    correlation_id: correlationId,
+    company_id: auth.companyId,
+    user_id: auth.userId
+  });
+
   try {
-    // Get the original request
-    const originalRequest = c.req.raw;
+    // Parse and validate request body
+    const body = await c.req.json();
+    const validationResult = SyncPushRequestSchema.safeParse(body);
     
-    // Create new request URL pointing to legacy endpoint
-    const url = new URL(originalRequest.url);
-    url.pathname = "/api/sync/push";
+    if (!validationResult.success) {
+      console.warn("POST /sync/push validation failed", {
+        correlation_id: correlationId,
+        company_id: auth.companyId,
+        errors: validationResult.error.errors
+      });
+      return errorResponse("VALIDATION_ERROR", "Invalid request payload", 400);
+    }
+
+    const { outlet_id, transactions } = validationResult.data;
     
-    // Clone the request with new URL
-    const proxyRequest = new Request(url.toString(), {
-      method: originalRequest.method,
-      headers: originalRequest.headers,
-      body: originalRequest.body,
-      // Required for streaming bodies in Node.js
-      duplex: originalRequest.body ? 'half' : undefined
-    } as RequestInit);
-    
-    // Forward to legacy handler by calling the Next.js route
-    // Import the legacy route handler
-    const { POST: legacyHandler } = await import("../../../app/api/sync/push/route.js");
-    
-    // Call the legacy handler
-    const response = await legacyHandler(proxyRequest);
-    
-    // Return the response from legacy handler
-    return response;
+    // Verify outlet access - sync push creates transactions, requires create permission
+    const outletAccessGuard = requireAccess({
+      roles: ["OWNER", "ADMIN", "CASHIER"], // ACCOUNTANT excluded - only has read permission
+      module: "pos",
+      permission: "create",
+      outletId: outlet_id
+    });
+
+    const outletAccessResult = await outletAccessGuard(c.req.raw, auth);
+    if (outletAccessResult) {
+      return outletAccessResult;
+    }
+
+    if (transactions.length === 0) {
+      return successResponse({ results: [] });
+    }
+
+    // Load tax context
+    const connection = await dbPool.getConnection();
+    try {
+      const [defaultTaxRates, allTaxRates] = await Promise.all([
+        listCompanyDefaultTaxRates(connection, auth.companyId),
+        listCompanyTaxRates(connection, auth.companyId)
+      ]);
+
+      const taxRateById = new Map(allTaxRates.map((rate) => [rate.id, rate]));
+      const taxContext: SyncPushTaxContext = { defaultTaxRates, taxRateById };
+
+      // Process transactions in batches
+      const maxConcurrency = readSyncPushConcurrency();
+      const batches = buildTransactionBatches(transactions, maxConcurrency);
+      const results: SyncPushResultItem[] = [];
+
+      const injectFailureAfterHeaderInsert = shouldInjectFailureAfterHeaderInsert(c.req.raw);
+      const forcedRetryableErrno = readForcedRetryableErrno(c.req.raw);
+
+      for (const batch of batches) {
+        const batchPromises = batch.map((indexedTx) =>
+          processSyncPushTransaction({
+            dbPool,
+            tx: indexedTx.tx,
+            txIndex: indexedTx.txIndex,
+            inputOutletId: outlet_id,
+            authCompanyId: auth.companyId,
+            authUserId: auth.userId,
+            correlationId,
+            injectFailureAfterHeaderInsert,
+            forcedRetryableErrno,
+            taxContext,
+            metricsCollector
+          })
+        );
+
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+      }
+
+      // Log summary
+      const okCount = results.filter((r) => r.result === "OK").length;
+      const duplicateCount = results.filter((r) => r.result === "DUPLICATE").length;
+      const errorCount = results.filter((r) => r.result === "ERROR").length;
+
+      console.info("POST /sync/push completed", {
+        correlation_id: correlationId,
+        company_id: auth.companyId,
+        outlet_id,
+        total_transactions: transactions.length,
+        ok_count: okCount,
+        duplicate_count: duplicateCount,
+        error_count: errorCount
+      });
+
+      return successResponse({ results });
+    } finally {
+      connection.release();
+    }
   } catch (error) {
-    console.error("Proxy to legacy /api/sync/push failed", error);
-    return errorResponse("INTERNAL_SERVER_ERROR", "Sync push proxy failed", 500);
+    console.error("POST /sync/push failed", {
+      correlation_id: correlationId,
+      company_id: auth.companyId,
+      error
+    });
+
+    if (error instanceof ZodError) {
+      return errorResponse("VALIDATION_ERROR", "Invalid request payload", 400);
+    }
+
+    return errorResponse(
+      "INTERNAL_SERVER_ERROR",
+      error instanceof Error ? error.message : "Sync push failed",
+      500
+    );
   }
 });
 

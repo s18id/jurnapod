@@ -77,7 +77,7 @@ async function authMiddleware(c: Context, next: () => Promise<void>): Promise<vo
  * Role-based access control middleware for stock routes
  * Note: outlet_id now comes from path parameter (:outletId)
  */
-function requireStockAccess(roles: readonly string[]) {
+function requireStockAccess(roles: readonly string[], permission: "read" | "create" = "read") {
   return async (c: Context, next: () => Promise<void>): Promise<void | Response> => {
     const auth = c.get("auth");
     if (!auth) {
@@ -102,7 +102,7 @@ function requireStockAccess(roles: readonly string[]) {
     const authGuard = requireAccess({
       roles: roles as RoleCode[],
       module: "inventory",
-      permission: "read",
+      permission: permission,
       outletId: outletId
     });
 
@@ -337,7 +337,7 @@ stockRoutes.get(
 stockRoutes.post(
   "/adjustments",
   zValidator('json', StockAdjustmentBodySchema),
-  requireStockAccess(["OWNER", "ADMIN", "ACCOUNTANT"]),
+  requireStockAccess(["OWNER", "ADMIN", "ACCOUNTANT"], "create"),
   async (c) => {
     const auth = c.get("auth");
     const dbPool = getDbPool();
