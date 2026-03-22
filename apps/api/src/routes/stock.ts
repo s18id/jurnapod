@@ -30,20 +30,18 @@ import { telemetryMiddleware, type TelemetryContext } from "../middleware/teleme
 import { NumericIdSchema } from "@jurnapod/shared";
 
 // Zod schemas for request validation
+// Note: outlet_id comes from path parameter (:outletId), not body/query
 const StockAdjustmentBodySchema = z.object({
-  outlet_id: NumericIdSchema,
   product_id: NumericIdSchema,
   adjustment_quantity: z.number().int(),
   reason: z.string().min(1).max(500)
 });
 
 const StockQuerySchema = z.object({
-  outlet_id: NumericIdSchema,
   product_id: NumericIdSchema.optional()
 });
 
 const StockTransactionsQuerySchema = z.object({
-  outlet_id: NumericIdSchema.nullable().optional(),
   product_id: NumericIdSchema.optional(),
   transaction_type: z.coerce.number().int().optional(),
   limit: z.coerce.number().int().positive().max(500).default(100),
@@ -58,12 +56,7 @@ declare module "hono" {
   }
 }
 
-// Route params schema
-function parseOutletIdFromQuery(request: Request): number | null {
-  const outletIdRaw = new URL(request.url).searchParams.get("outlet_id");
-  if (!outletIdRaw) return null;
-  return NumericIdSchema.parse(outletIdRaw);
-}
+// Route params schema - outlet_id now comes from path parameter (:outletId)
 
 /**
  * Auth middleware for stock routes
@@ -82,8 +75,7 @@ async function authMiddleware(c: Context, next: () => Promise<void>): Promise<vo
 
 /**
  * Role-based access control middleware for stock routes
- * Note: c.req.valid() is not used here because validation happens
- * after middleware in Hono's pipeline. Use c.req.query() and c.req.json() instead.
+ * Note: outlet_id now comes from path parameter (:outletId)
  */
 function requireStockAccess(roles: readonly string[]) {
   return async (c: Context, next: () => Promise<void>): Promise<void | Response> => {
@@ -95,27 +87,14 @@ function requireStockAccess(roles: readonly string[]) {
       );
     }
 
-    // Extract outlet ID for outlet access validation
+    // Extract outlet ID from path parameter
+    const outletIdParam = c.req.param("outletId");
     let outletId: number | undefined;
-    const method = c.req.method;
-
-    if (method === "GET") {
-      const outletIdRaw = c.req.query("outlet_id");
-      if (outletIdRaw) {
-        const parsed = parseInt(outletIdRaw, 10);
-        if (Number.isSafeInteger(parsed) && parsed > 0) {
-          outletId = parsed;
-        }
-      }
-    } else if (method === "POST") {
-      // Extract outlet_id from POST body for validation
-      try {
-        const body = await c.req.json().catch(() => ({}));
-        if (body.outlet_id && typeof body.outlet_id === "number") {
-          outletId = body.outlet_id;
-        }
-      } catch {
-        // Ignore JSON parse errors - handler will validate
+    
+    if (outletIdParam) {
+      const parsed = parseInt(outletIdParam, 10);
+      if (Number.isSafeInteger(parsed) && parsed > 0) {
+        outletId = parsed;
       }
     }
 
@@ -180,8 +159,9 @@ stockRoutes.use(requireOutletAccess);
  * GET /stock
  * Get stock levels for a company/outlet
  *
+ * Path params:
+ * - outletId (required): The outlet to get stock for (from URL path)
  * Query params:
- * - outlet_id (required): The outlet to get stock for
  * - product_id (optional): Get stock for a specific product
  */
 stockRoutes.get(
@@ -230,8 +210,9 @@ stockRoutes.get(
  * GET /stock/transactions
  * Get stock transaction history
  *
+ * Path params:
+ * - outletId (required): The outlet to get transactions for (from URL path)
  * Query params:
- * - outlet_id (optional): Filter by outlet
  * - product_id (optional): Filter by product
  * - transaction_type (optional): Filter by type (DEDUCTION, RESTORATION, ADJUSTMENT, RESERVATION, RELEASE)
  * - limit (optional): Max results (default: 100, max: 500)
@@ -298,8 +279,8 @@ stockRoutes.get(
  * GET /stock/low
  * Get low stock alerts
  *
- * Query params:
- * - outlet_id (required): The outlet to check
+ * Path params:
+ * - outletId (required): The outlet to check (from URL path)
  */
 stockRoutes.get(
   "/low",
@@ -343,11 +324,12 @@ stockRoutes.get(
 );
 
 /**
- * POST /stock/adjust
+ * POST /stock/adjustments
  * Manual stock adjustment
  *
+ * Path params:
+ * - outletId (required): The outlet to adjust stock for (from URL path)
  * Body:
- * - outlet_id (required): The outlet
  * - product_id (required): The product to adjust
  * - adjustment_quantity (required): Amount to adjust (positive or negative)
  * - reason (required): Reason for adjustment
