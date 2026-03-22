@@ -1,0 +1,435 @@
+// Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
+// Ownership: Ahmad Faruk (Signal18 ID)
+
+/**
+ * Reports Routes
+ *
+ * Routes for report generation:
+ * GET /reports/trial-balance - Trial balance report
+ * GET /reports/profit-loss - Profit & Loss report
+ * GET /reports/pos-transactions - POS transaction history
+ * GET /reports/journals - Journal entries
+ */
+
+import { Hono } from "hono";
+import { z } from "zod";
+import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
+import { getCompany } from "@/lib/companies";
+import { errorResponse, successResponse } from "@/lib/response";
+import {
+  getTrialBalance,
+  getProfitLoss,
+  listPosTransactions,
+  listJournalBatches,
+} from "@/lib/reports";
+import {
+  withQueryTimeout,
+  QueryTimeoutError,
+  getDatasetSizeBucket,
+  classifyReportError,
+  emitReportMetrics,
+  QUERY_TIMEOUT_MS,
+} from "@/lib/report-telemetry";
+import { resolveDefaultFiscalYearDateRange, FiscalYearSelectionError } from "@/lib/fiscal-years";
+import type { AuthContext } from "@/lib/auth-guard";
+
+const reportRoutes = new Hono();
+
+// ============================================================================
+// Shared Query Schema and Helpers
+// ============================================================================
+
+const querySchema = z.object({
+  outlet_id: z.coerce.number().int().positive().optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+const paginationSchema = z.object({
+  outlet_id: z.coerce.number().int().positive().optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  limit: z.coerce.number().int().positive().max(100).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
+
+function getDefaultDateRange(): { dateFrom: string; dateTo: string } {
+  const now = new Date();
+  const to = now.toISOString().slice(0, 10);
+  const fromDate = new Date(now);
+  fromDate.setDate(now.getDate() - 30);
+  const from = fromDate.toISOString().slice(0, 10);
+  return { dateFrom: from, dateTo: to };
+}
+
+async function resolveDateRange(
+  companyId: number,
+  parsed: { date_from?: string; date_to?: string }
+): Promise<{ dateFrom: string; dateTo: string }> {
+  if (parsed.date_from || parsed.date_to) {
+    const defaults = getDefaultDateRange();
+    return {
+      dateFrom: parsed.date_from ?? defaults.dateFrom,
+      dateTo: parsed.date_to ?? defaults.dateTo
+    };
+  }
+  return resolveDefaultFiscalYearDateRange(companyId);
+}
+
+function handleReportError(error: unknown, startTime: number, companyId: number, reportType: string) {
+  const errorClass = classifyReportError(error);
+  const latencyMs = Date.now() - startTime;
+
+  const bucket = getDatasetSizeBucket(0);
+  emitReportMetrics(null, {
+    reportType: reportType as any,
+    companyId,
+    datasetSizeBucket: bucket,
+    latencyMs,
+    errorClass,
+  });
+
+  if (error instanceof QueryTimeoutError) {
+    return errorResponse(
+      "TIMEOUT",
+      "Report generation timed out. Please try a smaller date range.",
+      504
+    );
+  }
+
+  if (error instanceof z.ZodError) {
+    return errorResponse(
+      "VALIDATION_ERROR",
+      "Invalid request parameters: " + error.errors.map(e => e.message).join(", "),
+      400
+    );
+  }
+
+  if (error instanceof FiscalYearSelectionError) {
+    return errorResponse("FISCAL_YEAR_REQUIRED", error.message, 400);
+  }
+
+  if (error instanceof Error && error.message === "Forbidden") {
+    return errorResponse("FORBIDDEN", "Forbidden", 403);
+  }
+
+  console.error(`GET /reports/${reportType} failed:`, error);
+  return errorResponse("INTERNAL_SERVER_ERROR", `${reportType} report failed`, 500);
+}
+
+// ============================================================================
+// GET /reports/trial-balance - Trial balance report
+// ============================================================================
+
+reportRoutes.get("/trial-balance", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+  const startTime = Date.now();
+  const REPORT_TYPE = "trial_balance";
+
+  try {
+    const url = new URL(c.req.raw.url);
+    const parsed = querySchema.extend({
+      as_of: z.string().datetime({ offset: true }).optional()
+    }).parse({
+      outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+      date_from: url.searchParams.get("date_from") ?? undefined,
+      date_to: url.searchParams.get("date_to") ?? undefined,
+      as_of: url.searchParams.get("as_of") ?? undefined,
+    });
+
+    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
+
+    let outletIds: number[];
+    if (parsed.outlet_id) {
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
+      if (!hasAccess) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+      outletIds = [parsed.outlet_id];
+    } else {
+      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
+    }
+
+    const company = await getCompany(auth.companyId);
+    const timezone = company.timezone ?? 'UTC';
+
+    const rows = await withQueryTimeout(
+      getTrialBalance({
+        companyId: auth.companyId,
+        outletIds,
+        dateFrom,
+        dateTo,
+        asOf: parsed.as_of,
+        includeUnassignedOutlet: !parsed.outlet_id,
+        timezone
+      }),
+      QUERY_TIMEOUT_MS
+    );
+
+    const totals = rows.reduce(
+      (acc, row) => ({
+        total_debit: acc.total_debit + row.total_debit,
+        total_credit: acc.total_credit + row.total_credit,
+        balance: acc.balance + row.balance
+      }),
+      { total_debit: 0, total_credit: 0, balance: 0 }
+    );
+
+    const latencyMs = Date.now() - startTime;
+    const bucket = getDatasetSizeBucket(rows.length);
+    emitReportMetrics(null, {
+      reportType: REPORT_TYPE as any,
+      companyId: auth.companyId,
+      datasetSizeBucket: bucket,
+      latencyMs,
+      rowCount: rows.length,
+    });
+
+    return successResponse({
+      filters: {
+        outlet_ids: outletIds,
+        date_from: dateFrom,
+        date_to: dateTo,
+        as_of: parsed.as_of ?? null
+      },
+      totals,
+      rows
+    });
+  } catch (error) {
+    return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
+  }
+});
+
+// ============================================================================
+// GET /reports/profit-loss - Profit & Loss report
+// ============================================================================
+
+reportRoutes.get("/profit-loss", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+  const startTime = Date.now();
+  const REPORT_TYPE = "profit_loss";
+
+  try {
+    const url = new URL(c.req.raw.url);
+    const parsed = querySchema.parse({
+      outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+      date_from: url.searchParams.get("date_from") ?? undefined,
+      date_to: url.searchParams.get("date_to") ?? undefined,
+    });
+
+    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
+
+    let outletIds: number[];
+    if (parsed.outlet_id) {
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
+      if (!hasAccess) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+      outletIds = [parsed.outlet_id];
+    } else {
+      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
+    }
+
+    const company = await getCompany(auth.companyId);
+    const timezone = company.timezone ?? 'UTC';
+
+    const result = await withQueryTimeout(
+      getProfitLoss({
+        companyId: auth.companyId,
+        outletIds,
+        dateFrom,
+        dateTo,
+        timezone
+      }),
+      QUERY_TIMEOUT_MS
+    );
+
+    const latencyMs = Date.now() - startTime;
+    const bucket = getDatasetSizeBucket(result.rows.length);
+    emitReportMetrics(null, {
+      reportType: REPORT_TYPE as any,
+      companyId: auth.companyId,
+      datasetSizeBucket: bucket,
+      latencyMs,
+      rowCount: result.rows.length,
+    });
+
+    return successResponse({
+      filters: {
+        outlet_ids: outletIds,
+        date_from: dateFrom,
+        date_to: dateTo,
+      },
+      ...result
+    });
+  } catch (error) {
+    return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
+  }
+});
+
+// ============================================================================
+// GET /reports/pos-transactions - POS transaction history
+// ============================================================================
+
+reportRoutes.get("/pos-transactions", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+  const startTime = Date.now();
+  const REPORT_TYPE = "pos_transactions";
+
+  try {
+    const url = new URL(c.req.raw.url);
+    const parsed = paginationSchema.extend({
+      status: z.enum(["COMPLETED", "VOID", "REFUND"]).optional(),
+    }).parse({
+      outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+      date_from: url.searchParams.get("date_from") ?? undefined,
+      date_to: url.searchParams.get("date_to") ?? undefined,
+      limit: url.searchParams.get("limit") ?? undefined,
+      offset: url.searchParams.get("offset") ?? undefined,
+      status: url.searchParams.get("status") ?? undefined,
+    });
+
+    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
+
+    let outletIds: number[];
+    if (parsed.outlet_id) {
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
+      if (!hasAccess) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+      outletIds = [parsed.outlet_id];
+    } else {
+      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
+    }
+
+    const company = await getCompany(auth.companyId);
+    const timezone = company.timezone ?? 'UTC';
+
+    const limit = Math.min(parsed.limit ?? 50, 100);
+    const offset = parsed.offset ?? 0;
+
+    const result = await withQueryTimeout(
+      listPosTransactions({
+        companyId: auth.companyId,
+        outletIds,
+        dateFrom,
+        dateTo,
+        timezone,
+        status: parsed.status,
+        limit,
+        offset,
+      }),
+      QUERY_TIMEOUT_MS
+    );
+
+    const latencyMs = Date.now() - startTime;
+    const bucket = getDatasetSizeBucket(result.transactions.length);
+    emitReportMetrics(null, {
+      reportType: REPORT_TYPE as any,
+      companyId: auth.companyId,
+      datasetSizeBucket: bucket,
+      latencyMs,
+      rowCount: result.transactions.length,
+    });
+
+    return successResponse({
+      filters: {
+        outlet_ids: outletIds,
+        date_from: dateFrom,
+        date_to: dateTo,
+        status: parsed.status ?? null,
+      },
+      pagination: {
+        limit,
+        offset,
+        total: result.total,
+        hasMore: result.total > offset + result.transactions.length,
+      },
+      transactions: result.transactions
+    });
+  } catch (error) {
+    return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
+  }
+});
+
+// ============================================================================
+// GET /reports/journals - Journal batch history
+// ============================================================================
+
+reportRoutes.get("/journals", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+  const startTime = Date.now();
+  const REPORT_TYPE = "journals";
+
+  try {
+    const url = new URL(c.req.raw.url);
+    const parsed = paginationSchema.parse({
+      outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+      date_from: url.searchParams.get("date_from") ?? undefined,
+      date_to: url.searchParams.get("date_to") ?? undefined,
+      limit: url.searchParams.get("limit") ?? undefined,
+      offset: url.searchParams.get("offset") ?? undefined,
+    });
+
+    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
+
+    let outletIds: number[];
+    if (parsed.outlet_id) {
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
+      if (!hasAccess) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+      outletIds = [parsed.outlet_id];
+    } else {
+      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
+    }
+
+    const company = await getCompany(auth.companyId);
+    const timezone = company.timezone ?? 'UTC';
+
+    const limit = Math.min(parsed.limit ?? 50, 100);
+    const offset = parsed.offset ?? 0;
+
+    const result = await withQueryTimeout(
+      listJournalBatches({
+        companyId: auth.companyId,
+        outletIds,
+        dateFrom,
+        dateTo,
+        timezone,
+        limit,
+        offset,
+      }),
+      QUERY_TIMEOUT_MS
+    );
+
+    const latencyMs = Date.now() - startTime;
+    const bucket = getDatasetSizeBucket(result.journals.length);
+    emitReportMetrics(null, {
+      reportType: REPORT_TYPE as any,
+      companyId: auth.companyId,
+      datasetSizeBucket: bucket,
+      latencyMs,
+      rowCount: result.journals.length,
+    });
+
+    return successResponse({
+      filters: {
+        outlet_ids: outletIds,
+        date_from: dateFrom,
+        date_to: dateTo,
+      },
+      pagination: {
+        limit,
+        offset,
+        total: result.total,
+        hasMore: result.total > offset + result.journals.length,
+      },
+      journals: result.journals
+    });
+  } catch (error) {
+    return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
+  }
+});
+
+export { reportRoutes };

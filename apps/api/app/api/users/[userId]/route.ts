@@ -10,15 +10,20 @@ import {
   findUserById,
   SuperAdminProtectionError,
   updateUserEmail,
+  setUserActiveState,
   UserEmailExistsError,
   UserNotFoundError
 } from "../../../../src/lib/users";
 
 const updateUserSchema = z
   .object({
-    email: z.string().trim().email().max(191)
+    email: z.string().trim().email().max(191).optional(),
+    is_active: z.boolean().optional()
   })
-  .strict();
+  .strict()
+  .refine((data) => data.email !== undefined || data.is_active !== undefined, {
+    message: "At least one field (email or is_active) must be provided"
+  });
 
 function parseUserId(request: Request): number {
   const pathname = new URL(request.url).pathname;
@@ -60,15 +65,34 @@ export const PATCH = withAuth(
       const userId = parseUserId(request);
       const payload = await request.json();
       const input = updateUserSchema.parse(payload);
-      const user = await updateUserEmail({
-        companyId: auth.companyId,
-        userId,
-        email: input.email,
-        actor: {
-          userId: auth.userId,
-          ipAddress: readClientIp(request)
-        }
-      });
+
+      let user;
+
+      if (input.is_active !== undefined) {
+        // Handle state change
+        user = await setUserActiveState({
+          companyId: auth.companyId,
+          userId,
+          isActive: input.is_active,
+          actor: {
+            userId: auth.userId,
+            ipAddress: readClientIp(request)
+          }
+        });
+      } else if (input.email !== undefined) {
+        // Handle email update
+        user = await updateUserEmail({
+          companyId: auth.companyId,
+          userId,
+          email: input.email,
+          actor: {
+            userId: auth.userId,
+            ipAddress: readClientIp(request)
+          }
+        });
+      } else {
+        return errorResponse("INVALID_REQUEST", "No valid fields provided", 400);
+      }
 
       return successResponse(user);
     } catch (error) {

@@ -135,6 +135,28 @@ FR25: Epic 4 - Item/product lifecycle management; Epic 8 improves backoffice UX 
 FR26: Epic 4 - Outlet-level pricing operations; Epic 8 improves price-management UX clarity.
 FR27: Epic 4 - Support for multiple item types across catalog model.
 
+### Epic 12 FR Coverage
+- Table reservation and occupancy management: Epic 12 infrastructure
+
+### Epic 13 FR Coverage
+- Large party multi-table reservations: Epic 13 feature work
+
+### Epic 14 FR Coverage
+- Hono migration foundation: Infrastructure enabler for all routes
+
+### Epic 15 FR Coverage
+- FR12: Epic 15 - Auth routes implementation (login, logout, refresh)
+- FR5: Epic 15 - Sync routes (push, pull, health)
+- FR6: Epic 15 - Sync idempotency via client_tx_id
+- FR7: Epic 15 - Invoice routes with GL posting
+- FR8: Epic 15 - Manual journal entry routes
+- FR9: Epic 15 - Journal batch history routes
+- FR10: Epic 15 - Trial balance report routes
+- FR11: Epic 15 - General ledger report routes
+- FR22: Epic 15 - Sales report routes
+- FR23: Epic 15 - Report export routes
+- FR24: Epic 15 - POS transaction history routes
+
 ## Epic List
 
 ### Epic 1: Authentication and Access Foundation
@@ -180,6 +202,22 @@ Users experience consistent page structure, filtering, table behavior, and navig
 ### Epic 11: Operational Trust and Scale Readiness
 Users and operators gain confidence from measurable reliability, accessibility, and performance hardening of critical flows.
 **FRs covered:** FR3, FR4, FR5, FR6, FR7, FR10, FR11 (NFR-driven hardening)
+
+### Epic 12: Table Reservation and POS Multi-Cashier Sync
+Enable table reservation management and support concurrent cashier operations on shared tables with optimistic locking and offline-first sync.
+**FRs covered:** (Infrastructure epic - see Epic 12 details)
+
+### Epic 13: Large Party Reservations (Multi-Table Support)
+Enable backoffice operators to create and manage reservations for large parties that span multiple tables with automatic table suggestions, unified group management, and conflict detection.
+**FRs covered:** (Feature epic - see Epic 13 details)
+
+### Epic 14: Hono Migration Foundation
+Migrate API framework from Next.js App Router to Hono for improved performance, type safety, and developer experience.
+**FRs covered:** (Infrastructure epic - enables future FRs)
+
+### Epic 15: Stub Route Implementation
+Implement business logic for all stub routes created in Epic 14's Hono migration, completing the API surface for auth, sync, entities, sales, dine-in, reports, and journals.
+**FRs covered:** FR12, FR5, FR6, FR7, FR8, FR9, FR10, FR11, FR22, FR23, FR24 (route implementation)
 
 ## Epic 1: Authentication and Access Foundation
 
@@ -2089,3 +2127,422 @@ So that I can efficiently manage reservations across the entire month without sl
 **When** using tab switching (browser tab returns)
 **Then** focus handler is debounced (1 second)
 **And** no rapid-fire API calls occur
+
+---
+
+## Epic 14: Hono Migration Foundation
+
+**Status:** COMPLETED ✓
+
+Migrate API framework from Next.js App Router to Hono for improved performance, type safety, and developer experience.
+
+**Goal:** Replace all stub route handlers created during Hono migration with full business logic implementations, achieving 100% backward compatibility and full test coverage.
+
+**Duration:** 6 weeks (5 sprints)
+**Risk Level:** HIGH (financial systems involved)
+**Dependencies:** None (greenfield within API)
+
+**Success Criteria:**
+- All 25+ stub routes fully implemented
+- 100% backward compatibility with legacy behavior
+- Test coverage ≥80% for all routes (≥90% for auth/sync)
+- Zero production incidents during migration
+- Financial integrity preserved
+
+> **Note:** The stub routes created in Epic 14 will be implemented with full business logic in **Epic 15: Stub Route Implementation**. Epic 14 focused on establishing the Hono infrastructure, route structure, middleware, and testing patterns. Epic 15 will build upon this foundation to complete all route implementations.
+
+### Story 14.1: Hono Infrastructure Setup
+
+As a developer,
+I want the Hono framework properly configured with middleware and TypeScript support,
+So that I can implement routes with full type safety and standard middleware.
+
+**Acceptance Criteria:**
+
+**Given** the API application
+**When** Hono is configured
+**Then** the app uses Hono as the HTTP framework
+**And** Zod validation middleware is configured
+**And** auth middleware is integrated
+**And** error handling follows consistent patterns
+
+**Given** route files are organized
+**When** the app starts
+**Then** all route groups are mounted correctly
+**And** routes respond within performance targets
+
+### Story 14.2: Route Structure and Stub Routes
+
+As a developer,
+I want all API routes organized in Hono's route structure,
+So that the migration has a complete route map ready for implementation.
+
+**Acceptance Criteria:**
+
+**Given** the Hono route structure
+**When** routes are organized
+**Then** auth routes are under /auth
+**And** sync routes are under /sync
+**And** sales routes are under /sales
+**And** entity routes follow REST conventions
+
+**Given** stub handlers exist
+**When** requests are made
+**Then** stubs return proper HTTP responses (not 501)
+**And** request validation is in place
+**And** error responses follow consistent format
+
+### Story 14.3: Auth Guard and Middleware Migration
+
+As a developer,
+I want auth guard and validation middleware working in Hono,
+So that protected routes enforce authentication and authorization.
+
+**Acceptance Criteria:**
+
+**Given** auth middleware is implemented in Hono
+**When** protected routes are accessed
+**Then** JWT validation works correctly
+**And** RBAC checks enforce permissions
+**And** tenant scoping is applied
+
+**Given** auth is configured
+**When** unauthorized requests are made
+**Then** 401 is returned with consistent error format
+**And** forbidden requests return 403
+
+### Story 14.4: Database Connection and Transaction Management
+
+As a developer,
+I want database connections managed properly in Hono context,
+So that routes can access data with proper pooling and transaction support.
+
+**Acceptance Criteria:**
+
+**Given** database middleware is configured
+**When** routes access the database
+**Then** connection pooling works correctly
+**And** transactions can be created
+**And** pool cleanup happens on app shutdown
+
+**Given** existing database utilities
+**When** they are used in Hono routes
+**Then** they work without modification
+**And** TypeScript types are preserved
+
+### Story 14.5: Testing Infrastructure for Hono Routes
+
+As a developer,
+I want test infrastructure set up for Hono routes,
+So that I can write unit and integration tests for all route implementations.
+
+**Acceptance Criteria:**
+
+**Given** test infrastructure is configured
+**When** tests are written
+**Then** Hono's test client can be used
+**And** database mocks work correctly
+**And** closeDbPool cleanup hooks are present
+
+**Given** tests are executed
+**When** coverage is measured
+**Then** ≥80% coverage is achievable
+**And** integration tests can hit real endpoints
+
+### Epic 14 Retrospective
+
+**Retrospective:** Completed - see `_bmad-output/implementation-artifacts/epic-14-retro-2026-03-22.md`
+
+**Key findings:**
+- ✅ Migration pattern established with stock routes as pilot
+- ✅ Security caught critical vulnerability in auth middleware
+- ✅ URL standardization achieved (`/outlets/:outletId/{resource}`)
+- ⚠️ Documentation drift between stories and implementation
+- ⚠️ Stub vs implementation confusion
+- ⚠️ Middleware ordering inconsistencies
+
+**Epic 15 Recommendations:**
+1. Ensure story docs match implementation before marking done
+2. Clearly distinguish stubs from full implementations
+3. Standardize middleware ordering patterns
+4. Full business logic implementation for 25+ stub routes
+
+---
+
+## Epic 15: Stub Route Implementation
+
+Implement business logic for all stub routes created in Epic 14's Hono migration, completing the API surface for auth, sync, entities, sales, dine-in, reports, and journals.
+
+**Goal:** Migrate all 25+ stub routes from Epic 14 to full implementations with comprehensive tests and backward compatibility.
+
+**Duration:** 6 weeks (5 sprints)
+**Risk Level:** HIGH (financial systems involved)
+**Dependencies:** Epic 14 (Hono migration) completed
+
+> **Epic 14 Lesson Applied:** Stories explicitly distinguish stub vs full implementation. Documentation updated before marking done. See `epic-14-retro-2026-03-22.md` for details.
+
+**Success Criteria:**
+- All 25+ routes fully implemented and tested
+- 100% backward compatibility with legacy API
+- Test coverage ≥80% for all routes (≥90% for auth/sync)
+- Shadow mode validation for financial routes (Sprint 4)
+- No production incidents
+- Database pool cleanup hooks present in all test files
+
+### Sprint 1: Auth Routes Migration ⚠️ MEDIUM RISK
+
+**Duration:** 2 days | **Risk:** MEDIUM - Affects all authenticated routes
+**Dependency:** None (Foundation sprint)
+
+| Story | Route | Effort | Priority | Risk |
+|-------|-------|--------|----------|------|
+| 15.1.1 | POST /auth/login | 4h | P0 | HIGH - Throttling, token issuance |
+| 15.1.2 | POST /auth/logout | 2h | P0 | LOW - Token clearing |
+| 15.1.3 | POST /auth/refresh | 3h | P0 | MEDIUM - Token rotation |
+
+**Exit Criteria:** All auth routes tested with ≥90% coverage. Legacy behavior matched.
+
+### Sprint 2: Sync Infrastructure ⚠️ MEDIUM RISK
+
+**Duration:** 3 days | **Risk:** MEDIUM - Critical for POS functionality
+**Dependency:** Sprint 1 complete (auth required for sync)
+
+| Story | Route | Effort | Priority | Risk |
+|-------|-------|--------|----------|------|
+| 15.2.1 | GET /sync/health, POST /sync/check-duplicate | 2h | P1 | LOW - Health checks |
+| 15.2.2 | POST /sync/push | 8h | P0 | HIGH - Batch processing, idempotency |
+| 15.2.3 | POST /sync/pull | 6h | P1 | MEDIUM - Incremental sync |
+
+**Special Requirements (15.2.2):**
+- Idempotency testing: Same payload 10x → 1 transaction created
+- Load test: 1000+ transactions/batch
+- Concurrency test: Multiple POS devices pushing simultaneously
+
+**Exit Criteria:** POS sync operations work end-to-end. Idempotency verified.
+
+### Sprint 3: Core Entity Read Operations 🟢 LOW RISK
+
+**Duration:** 3 days | **Risk:** LOW - Read-only operations, safe to test
+**Dependency:** Sprint 1 complete (auth for entity reads)
+
+| Story | Route | Effort | Priority | Risk |
+|-------|-------|--------|----------|------|
+| 15.3.1 | GET /accounts, GET /accounts/:id | 3h | P1 | LOW |
+| 15.3.2 | GET /items, GET /items/:id | 3h | P1 | LOW |
+| 15.3.3 | GET /tax-rates, GET /roles | 4h | P2 | LOW |
+
+**Exit Criteria:** All entity reads functional with company scoping verified.
+
+### Sprint 4: Sales Transaction Layer 🔴 CRITICAL
+
+**Duration:** 5 days | **Risk:** HIGH - Financial impact, audit requirements
+**Dependency:** Sprint 2+3 complete (sync + entities required for sales)
+
+| Story | Route | Effort | Priority | Risk |
+|-------|-------|--------|----------|------|
+| 15.4.1 | GET/POST /sales/invoices | 12h | P0 | CRITICAL - GL posting |
+| 15.4.2 | GET/POST /sales/orders | 10h | P0 | HIGH |
+| 15.4.3 | GET/POST /sales/payments | 10h | P0 | HIGH |
+
+> ⚠️ **Sprint 4 Special Protocols:**
+> - **Shadow Mode:** Run Hono alongside legacy for 1 week
+> - **Financial Audit:** All operations tagged with migration marker
+> - **Rollback Plan:** Immediate fallback capability + data consistency check
+> - **Stakeholder Communication:** Business approval for extended timeline
+
+**Critical Requirements:**
+- Invoice + Journal Lines atomic transaction
+- GL Posting: Verify debits = credits
+- Audit Trail: All operations logged
+- Load test: 100 invoices/minute sustained
+
+**Exit Criteria:** All sales routes functional with GL posting. Shadow mode validation complete.
+
+### Sprint 5: Complex Flows & Reporting 🟢 LOW RISK
+
+**Duration:** 4 days | **Risk:** LOW - Non-critical operations
+**Dependency:** Sprint 4 complete (sales required for complex flows)
+
+| Story | Route | Effort | Priority | Risk |
+|-------|-------|--------|----------|------|
+| 15.5.1 | /dine-in/* routes | 12h | P2 | LOW |
+| 15.5.2 | /reports/* routes | 10h | P2 | LOW |
+| 15.5.3 | GET/POST /journals | 8h | P1 | MEDIUM |
+
+**Exit Criteria:** All remaining routes functional. Epic 15 complete.
+
+**Duration:** 4 days
+**Goal:** Migrate remaining route groups
+**Risk:** LOW - Non-critical operations
+
+#### Story 15.5.1: Dine-In Routes
+
+As a restaurant POS user,
+I want to manage tables and sessions via dine-in endpoints,
+So that I can track table occupancy, orders, and payments for restaurant operations.
+
+**Acceptance Criteria:**
+
+**Given** table management operations
+**When** states are updated
+**Then** correct transitions are enforced
+
+**Given** session lifecycle
+**When** states change
+**Then** sales orders are linked correctly
+
+#### Story 15.5.2: Report Routes
+
+As a backoffice user,
+I want to generate financial and sales reports via /reports endpoints,
+So that I can analyze business performance and ensure compliance.
+
+**Acceptance Criteria:**
+
+**Given** valid date range
+**When** trial balance is requested
+**Then** debits equal credits
+
+**Given** report generation
+**When** CSV export is requested
+**Then** valid CSV is returned
+
+#### Story 15.5.3: Journal Routes
+
+As a backoffice user or accountant,
+I want to view and create journal entries via /journals endpoints,
+So that I can record manual adjustments and review GL activity.
+
+**Acceptance Criteria:**
+
+**Given** balanced journal entry
+**When** POST /journals is called
+**Then** entry is created atomically
+
+**Given** unbalanced entry
+**When** POST /journals is called
+**Then** 400 is returned
+
+**Given** void request
+**When** void is called
+**Then** reversal entry is created
+**And** original is marked voided
+
+---
+
+## Epic 15: Implementation Standards
+
+### Standard Hono Route Template
+
+```typescript
+// apps/api/src/routes/{resource}.ts
+import { Hono } from "hono";
+import { z } from "zod";
+import { zValidator } from "@hono/zod-validator";
+
+const route = new Hono();
+
+// Validation schema
+const RequestSchema = z.object({
+  // ... fields
+});
+
+route.post(
+  "/",
+  zValidator("json", RequestSchema),
+  async (c) => {
+    const data = c.req.valid("json");
+    // ... handler logic
+    return c.json({ success: true, data: result });
+  }
+);
+
+export default route;
+```
+
+### Key Migration Replacements
+
+| Legacy (Next.js) | Hono |
+|------------------|------|
+| `request.json()` | `c.req.json()` or `c.req.valid("json")` |
+| `request.headers.get()` | `c.req.header()` |
+| `Response.json()` | `c.json()` |
+| Cookie setting | `c.header('Set-Cookie', value)` |
+| `export async function POST(request: Request)` | `route.post("/", async (c) => {...})` |
+
+### Error Handling Pattern
+
+```typescript
+import { HTTPException } from "hono/http-exception";
+
+// Always return consistent error format
+throw new HTTPException(400, { message: "Validation failed", code: "VALIDATION_ERROR" });
+```
+
+### Testing Standards
+
+| Sprint | Coverage Target | Test Types |
+|--------|----------------|------------|
+| Sprint 1 (Auth) | ≥90% | Unit + Integration |
+| Sprint 2 (Sync) | ≥90% | Unit + Integration + Load |
+| Sprint 3 (Core) | ≥80% | Unit |
+| Sprint 4 (Sales) | ≥90% | Unit + Integration + Shadow |
+| Sprint 5 (Complex) | ≥80% | Unit |
+
+### Test File Template
+
+```typescript
+import { test } from "node:test";
+import { closeDbPool } from "@/lib/db";
+
+test.describe('Route Handler', () => {
+  test('success case', async () => {
+    // Setup, Execute, Assert
+  });
+
+  test('error cases', async () => {
+    // Test error paths
+  });
+});
+
+// MANDATORY: Close pool after tests
+test.after(async () => {
+  await closeDbPool();
+});
+```
+
+### Risk Mitigation
+
+#### Sprint 4 (Sales) - Special Handling
+- **Shadow Mode:** Run Hono alongside legacy for 1 week
+- **Output Comparison:** Same inputs → identical GL entries
+- **Financial Audit Trail:** Migration markers on all operations
+- **Rollback Plan:** Environment toggle + data consistency check
+
+#### General Rollback Strategy
+- **Environment Variables:** `USE_HONO_ROUTES=true/false`
+- **Feature Flags:** Per route group if needed
+- **Monitoring:** Immediate alerts on errors/performance degradation
+- **Fallback:** Automatic or manual switch to legacy routes
+
+### Epic 15 Story Files
+
+All story files are located in: `_bmad-output/implementation-artifacts/stories/epic-15/`
+
+| File | Story | Status |
+|------|-------|--------|
+| story-15.1.1.md | Login Route Migration | ready-for-dev |
+| story-15.1.2.md | Logout Route Migration | ready-for-dev |
+| story-15.1.3.md | Refresh Route Migration | ready-for-dev |
+| story-15.2.1.md | Sync Health & Check-Duplicate | ready-for-dev |
+| story-15.2.2.md | Sync Push Route | ready-for-dev |
+| story-15.2.3.md | Sync Pull Route | ready-for-dev |
+| story-15.3.1.md | Accounts Routes | ready-for-dev |
+| story-15.3.2.md | Items Routes | ready-for-dev |
+| story-15.3.3.md | Tax Rates & Roles Routes | ready-for-dev |
+| story-15.4.1.md | Invoice Routes | ready-for-dev |
+| story-15.4.2.md | Order Routes | ready-for-dev |
+| story-15.4.3.md | Payment Routes | ready-for-dev |
+| story-15.5.1.md | Dine-In Routes | ready-for-dev |
+| story-15.5.2.md | Report Routes | ready-for-dev |
+| story-15.5.3.md | Journal Routes | ready-for-dev |

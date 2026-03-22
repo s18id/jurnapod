@@ -13,6 +13,18 @@ import { createServer } from "node:http";
 import { assertAppEnvReady } from "./lib/env.js";
 import { initializeSyncModules, cleanupSyncModules } from "./lib/sync-modules.js";
 import { initWebSocketManager } from "./lib/websocket/index.js";
+import { stockRoutes } from "./routes/stock.js";
+import { syncRoutes } from "./routes/sync.js";
+import { salesRoutes } from "./routes/sales.js";
+import { healthRoutes } from "./routes/health.js";
+import { rolesRoutes } from "./routes/roles.js";
+import { authRoutes } from "./routes/auth.js";
+import { journalRoutes } from "./routes/journals.js";
+import { reportRoutes } from "./routes/reports.js";
+import { accountRoutes } from "./routes/accounts.js";
+import { companyRoutes } from "./routes/companies.js";
+import { dineinRoutes } from "./routes/dinein.js";
+import { printRoutes } from "./lib/routes.js";
 
 // Validate environment configuration before starting server
 assertAppEnvReady();
@@ -229,6 +241,31 @@ app.use("/api/*", async (c: any, next: () => Promise<void>) => {
   }
 });
 
+// Register stock routes using Hono's app.route() pattern
+// URL standardization: /outlets/:outletId/stock/* (RESTful nesting)
+app.route("/outlets/:outletId/stock", stockRoutes);
+
+// Register sync routes using Hono's app.route() pattern
+// URL standardization: /sync/* (cross-outlet operation)
+app.route("/sync", syncRoutes);
+
+// Register sales routes using Hono's app.route() pattern
+app.route("/sales", salesRoutes);
+
+// Register health routes (no auth required)
+app.route("/health", healthRoutes);
+
+// Register auth routes (special handling - no auth for login)
+app.route("/auth", authRoutes);
+
+// Register remaining route groups
+app.route("/roles", rolesRoutes);
+app.route("/journals", journalRoutes);
+app.route("/reports", reportRoutes);
+app.route("/accounts", accountRoutes);
+app.route("/companies", companyRoutes);
+app.route("/dinein", dineinRoutes);
+
 await registerRoutes(app);
 
 // Initialize sync modules after routes are registered
@@ -360,6 +397,11 @@ wsManager.start();
 server.listen(PORT, HOST, () => {
   console.log(`API server running on http://${HOST}:${PORT}`);
   console.log(`WebSocket server running on ws://${HOST}:${PORT}/ws`);
+  
+  // Print registered routes in development
+  if (process.env.NODE_ENV !== "production") {
+    printRoutes(app);
+  }
 });
 
 // Handle graceful shutdown

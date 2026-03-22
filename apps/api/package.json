@@ -21,6 +21,7 @@
     "test:phase3": "node --test --test-concurrency=1 --import tsx src/lib/phase3-batch.test.ts"
   },
   "dependencies": {
+    "@hono/zod-openapi": "^0.14.8",
     "@jurnapod/backoffice-sync": "0.1.0",
     "@jurnapod/modules-accounting": "0.1.0",
     "@jurnapod/modules-platform": "0.1.0",

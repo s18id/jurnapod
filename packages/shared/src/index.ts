@@ -30,3 +30,6 @@ export * from "./schemas/users";
 export * from "./constants/account-mapping-types";
 export * from "./constants/table-states";
 export * from "./schemas/table-reservation";
+
+// Client types and utilities
+export * from "./client";
