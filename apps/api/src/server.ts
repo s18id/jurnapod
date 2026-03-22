@@ -17,7 +17,7 @@ import { stockRoutes } from "./routes/stock.js";
 import { syncRoutes } from "./routes/sync.js";
 import { salesRoutes } from "./routes/sales.js";
 import { healthRoutes } from "./routes/health.js";
-import { roleRoutes } from "./routes/roles.js";
+import { rolesRoutes } from "./routes/roles.js";
 import { authRoutes } from "./routes/auth.js";
 import { journalRoutes } from "./routes/journals.js";
 import { reportRoutes } from "./routes/reports.js";
@@ -259,7 +259,7 @@ app.route("/health", healthRoutes);
 app.route("/auth", authRoutes);
 
 // Register remaining route groups
-app.route("/roles", roleRoutes);
+app.route("/roles", rolesRoutes);
 app.route("/journals", journalRoutes);
 app.route("/reports", reportRoutes);
 app.route("/accounts", accountRoutes);

@@ -6,17 +6,99 @@
  *
  * GET /sync/pull - Pull master data from server
  *
- * NOTE: This is a stub. Full migration from app/api/sync/pull/route.ts pending.
+ * Handles POS synchronization with central server:
+ * - Items and item groups
+ * - Prices (outlet-specific)
+ * - Tables
+ * - Reservations
+ * - Open orders and order updates
+ * - Variants
  */
 
 import { Hono } from "hono";
-import { authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
+import { z } from "zod";
+import { type RowDataPacket } from "mysql2";
+import { NumericIdSchema, SyncPullPayloadSchema, type SyncPullPayload } from "@jurnapod/shared";
+import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
+import { buildSyncPullPayload } from "../../lib/master-data.js";
+import { errorResponse, successResponse } from "../../lib/response.js";
+import { getRequestCorrelationId } from "../../lib/correlation-id.js";
+import { getDbPool } from "../../lib/db.js";
+import { SyncAuditService, type AuditDbClient } from "@jurnapod/modules-platform/sync";
 
 declare module "hono" {
   interface ContextVariableMap {
     auth: AuthContext;
   }
 }
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const SYNC_PULL_AUDIT_ACTION = "SYNC_PULL";
+
+const syncPullRequestSchema = z.object({
+  outlet_id: NumericIdSchema,
+  since_version: z.coerce.number().int().min(0).default(0),
+  orders_cursor: z.coerce.number().int().min(0).optional()
+});
+
+type SyncPullRequest = z.infer<typeof syncPullRequestSchema>;
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+function createSyncAuditService(dbPool: ReturnType<typeof getDbPool>): SyncAuditService {
+  const client: AuditDbClient = {
+    query: async <T = unknown>(sql: string, params?: unknown[]): Promise<T[]> => {
+      const [rows] = await dbPool.query(sql, params as (string | number | Date | null)[]);
+      return rows as T[];
+    },
+    execute: async (sql: string, params?: unknown[]) => {
+      const [result] = await dbPool.execute(sql, params as (string | number | Date | null)[]);
+      return {
+        affectedRows: (result as { affectedRows: number }).affectedRows,
+        insertId: (result as { insertId?: number }).insertId,
+      };
+    },
+    getConnection: async () => {
+      const conn = await dbPool.getConnection();
+      return {
+        beginTransaction: () => conn.beginTransaction(),
+        commit: () => conn.commit(),
+        rollback: () => conn.rollback(),
+        execute: async (sql: string, params?: unknown[]) => {
+          const [result] = await conn.execute(sql, params as (string | number | Date | null)[]);
+          return {
+            affectedRows: (result as { affectedRows: number }).affectedRows,
+            insertId: (result as { insertId?: number }).insertId,
+          };
+        },
+        release: () => conn.release(),
+      };
+    },
+  };
+  return new SyncAuditService(client);
+}
+
+function getTierFromRequest(request: Request): string {
+  const tier = request.headers.get("x-sync-tier");
+  return tier ?? "default";
+}
+
+function parseOutletIdQueryParam(url: URL): number {
+  const outletIdRaw = url.searchParams.get("outlet_id");
+  if (!outletIdRaw) {
+    throw new Error("outlet_id is required");
+  }
+  return NumericIdSchema.parse(outletIdRaw);
+}
+
+// =============================================================================
+// Sync Pull Routes
+// =============================================================================
 
 const syncPullRoutes = new Hono();
 
@@ -31,9 +113,106 @@ syncPullRoutes.use("/*", async (c, next) => {
   await next();
 });
 
-// TODO: Migrate full pull logic from app/api/sync/pull/route.ts
+// GET /sync/pull - Pull master data
 syncPullRoutes.get("/", async (c) => {
-  return c.json({ success: false, error: { code: "NOT_IMPLEMENTED", message: "Sync pull under migration" } }, 501);
+  const auth = c.get("auth");
+  const correlationId = getRequestCorrelationId(c.req.raw);
+  const request = c.req.raw;
+  const startTime = Date.now();
+  const tier = getTierFromRequest(request);
+
+  let eventId: bigint | undefined;
+  let auditService: ReturnType<typeof createSyncAuditService> | undefined;
+
+  try {
+    // Parse query parameters
+    const url = new URL(request.url);
+    const input = syncPullRequestSchema.parse({
+      outlet_id: url.searchParams.get("outlet_id"),
+      since_version: url.searchParams.get("since_version") ?? 0,
+      orders_cursor: url.searchParams.get("orders_cursor") ?? undefined
+    });
+
+    // Verify user has access to this outlet
+    const dbPool = getDbPool();
+    
+    // Check outlet access for CASHIER role (owners/admins have global access)
+    if (auth.role !== "OWNER" && auth.role !== "ADMIN" && auth.role !== "ACCOUNTANT") {
+      const [accessRows] = await dbPool.execute<RowDataPacket[]>(
+        `SELECT 1 FROM user_outlets WHERE user_id = ? AND outlet_id = ? LIMIT 1`,
+        [auth.userId, input.outlet_id]
+      );
+      if (accessRows.length === 0) {
+        c.status(403);
+        return errorResponse("FORBIDDEN", "Access denied to this outlet", 403);
+      }
+    }
+
+    auditService = createSyncAuditService(dbPool);
+
+    // Start audit event
+    eventId = await auditService.startEvent({
+      companyId: auth.companyId,
+      outletId: input.outlet_id,
+      operationType: "PULL",
+      tierName: tier,
+      status: "IN_PROGRESS",
+      startedAt: new Date()
+    });
+
+    // Build sync payload
+    const payload = await buildSyncPullPayload(
+      auth.companyId,
+      input.outlet_id,
+      input.since_version,
+      input.orders_cursor ?? 0
+    );
+
+    // Validate response
+    const response = SyncPullPayloadSchema.parse(payload);
+
+    // Calculate items count from response
+    const itemsCount =
+      (response.items?.length ?? 0) +
+      (response.tables?.length ?? 0) +
+      (response.reservations?.length ?? 0);
+
+    // Complete audit event on success
+    await auditService.completeEvent(eventId, {
+      status: "SUCCESS",
+      completedAt: new Date(),
+      durationMs: Date.now() - startTime,
+      itemsCount
+    });
+
+    return successResponse(response);
+  } catch (error) {
+    // Complete audit event on failure
+    if (eventId !== undefined && auditService !== undefined) {
+      await auditService.completeEvent(eventId, {
+        status: "FAILED",
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime,
+        errorCode: error instanceof Error ? error.name : "UNKNOWN",
+        errorMessage: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
+    }
+
+    if (error instanceof Error && error.message === "outlet_id is required") {
+      return errorResponse("INVALID_REQUEST", "outlet_id query parameter is required", 400);
+    }
+
+    console.error("GET /sync/pull failed", {
+      correlation_id: correlationId,
+      error
+    });
+    return errorResponse("INTERNAL_SERVER_ERROR", "Sync pull failed", 500);
+  }
 });
 
 export { syncPullRoutes };
+export { createSyncAuditService };

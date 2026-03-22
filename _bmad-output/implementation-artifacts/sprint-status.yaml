@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-22T20:00:00+0700
+last_updated: 2026-03-22T22:00:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -207,6 +207,7 @@ development_status:
   # URL Standardization: kebab-case, RESTful nesting /outlets/:outletId/{resource}, PATCH for state changes
   # Sync routes remain under /sync/ prefix (cross-outlet operation)
   epic-14: done  # REVIEW COMPLETE - Critical security and documentation issues resolved. Structure migration complete, business logic migration pending as planned.
+  epic-14-retrospective: done  # COMPLETE - Retrospective saved to epic-14-retro-2026-03-22.md
   # Phase 1: Foundation (DONE)
   14-1-1-install-hono-zod-openapi: done  # COMPLETE - Installed @hono/zod-openapi@0.14.8 (zod@3.x compatible)
   14-1-2-convert-stock-route-group: done  # DOCUMENTATION FIXED - Story updated to reflect actual RESTful URL implementation
@@ -229,3 +230,25 @@ development_status:
   14-4-1-bundle-size-tracking: done  # COMPLETE - Bundle size tracking documented in tech spec
   14-4-2-middleware-scoping-audit: done  # COMPLETE - Verified all Hono routes have auth middleware
   14-4-3-cold-start-benchmark: done  # COMPLETE - p50 target documented, build-time measure available
+
+  # Epic 15: Stub Route Implementation Plan
+  # NOTE: Implement business logic for all 25+ stub routes from Epic 14 Hono migration
+  # Dependencies: Epic 14 (Hono migration) completed
+  epic-15: in-progress
+  # Sprint 1: Auth Routes
+  15-1-1-login-route-migration: done  # COMPLETE - Hono login route with Zod validation, throttling, audit logging, refresh tokens
+  15-1-2-logout-route-migration: done  # COMPLETE - Hono logout with token revocation and cookie clearing
+  15-1-3-refresh-route-migration: done  # COMPLETE - Hono refresh with token rotation and cookie handling
+  # Sprint 2: Sync Infrastructure
+  15-2-1-sync-health-check-duplicate-completion: done  # COMPLETE - Health (DB check, no cache), check-duplicate (company-scoped), 8 unit tests
+  15-2-2-sync-push-route-implementation: done  # COMPLETE - Batch sync push with Zod validation, 31 tests, AC-6/7/8 deferred (load test infra)
+  15-2-3-sync-pull-route-implementation: done  # COMPLETE - Master data pull with 23 tests passing
+  15-3-1-accounts-routes: done  # COMPLETE - Accounts (report_group filter, no pagination per schema), 19 tests
+  15-3-2-items-routes: done  # COMPLETE - Inventory routes (items, item-groups, prices) with 16 tests
+  15-3-3-tax-rates-roles-routes: done  # COMPLETE - Tax rates and roles routes with 17 tests
+  15-4-1-invoice-routes: backlog  # P0 - Core revenue flow | 12h | CRITICAL - GL posting
+  15-4-2-order-routes: backlog  # P0 - POS integration | 10h
+  15-4-3-payment-routes: backlog  # P0 - Financial completion | 10h
+  15-5-1-dine-in-routes: backlog  # P2 - Restaurant operations | 12h
+  15-5-2-report-routes: backlog  # P2 - Analytics and compliance | 10h
+  15-5-3-journal-routes: backlog  # P1 - GL operations | 8h

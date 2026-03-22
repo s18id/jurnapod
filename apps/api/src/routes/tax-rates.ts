@@ -2,13 +2,12 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 /**
- * Roles Routes
+ * Tax Rates Routes
  *
- * Routes for role management:
- * - GET /roles - List roles for company
- * - GET /roles/:id - Get single role
+ * Routes for tax rate management:
+ * - GET /tax-rates - List tax rates for company
  *
- * Required role: OWNER, ADMIN (read operations)
+ * Required role: OWNER, ADMIN, ACCOUNTANT, or CASHIER (read operations)
  */
 
 import { Hono } from "hono";
@@ -20,7 +19,8 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import { listRoles, getRole } from "../lib/users.js";
+import { listCompanyTaxRates, listCompanyDefaultTaxRates } from "../lib/taxes.js";
+import { getDbPool } from "../lib/db.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -32,16 +32,16 @@ declare module "hono" {
 // Constants
 // =============================================================================
 
-const ROLES_ROLES_READ = ["OWNER", "COMPANY_ADMIN", "ADMIN"] as const;
+const TAX_RATES_ROLES = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"] as const;
 
 // =============================================================================
-// Roles Routes
+// Tax Rates Routes
 // =============================================================================
 
-const rolesRoutes = new Hono();
+const taxRatesRoutes = new Hono();
 
 // Auth middleware
-rolesRoutes.use("/*", async (c, next) => {
+taxRatesRoutes.use("/*", async (c, next) => {
   const authResult = await authenticateRequest(c.req.raw);
   if (!authResult.success) {
     c.status(401);
@@ -51,14 +51,14 @@ rolesRoutes.use("/*", async (c, next) => {
   await next();
 });
 
-// GET /roles - List roles for company
-rolesRoutes.get("/", async (c) => {
+// GET /tax-rates - List tax rates for company
+taxRatesRoutes.get("/", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...ROLES_ROLES_READ],
-    module: "roles",
+    roles: [...TAX_RATES_ROLES],
+    module: "tax_rates",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -67,23 +67,24 @@ rolesRoutes.get("/", async (c) => {
   }
 
   try {
-    const roles = await listRoles(auth.companyId);
+    const dbPool = getDbPool();
+    const taxRates = await listCompanyTaxRates(dbPool, auth.companyId);
 
-    return successResponse(roles);
+    return successResponse(taxRates);
   } catch (error) {
-    console.error("GET /roles failed", error);
-    return errorResponse("INTERNAL_ERROR", "Roles request failed", 500);
+    console.error("GET /tax-rates failed", error);
+    return errorResponse("INTERNAL_ERROR", "Tax rates request failed", 500);
   }
 });
 
-// GET /roles/:id - Get single role by ID
-rolesRoutes.get("/:id", async (c) => {
+// GET /tax-rates/default - List default tax rates for company
+taxRatesRoutes.get("/default", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...ROLES_ROLES_READ],
-    module: "roles",
+    roles: [...TAX_RATES_ROLES],
+    module: "tax_rates",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -92,25 +93,14 @@ rolesRoutes.get("/:id", async (c) => {
   }
 
   try {
-    const roleId = NumericIdSchema.parse(c.req.param("id"));
+    const dbPool = getDbPool();
+    const defaultTaxRates = await listCompanyDefaultTaxRates(dbPool, auth.companyId);
 
-    const role = await getRole(roleId);
-
-    // getRole throws RoleNotFoundError if not found
-    return successResponse(role);
+    return successResponse(defaultTaxRates);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return errorResponse("INVALID_REQUEST", "Invalid role ID", 400);
-    }
-
-    // Check if role not found
-    if (error instanceof Error && error.message.includes("not found")) {
-      return errorResponse("NOT_FOUND", "Role not found", 404);
-    }
-
-    console.error("GET /roles/:id failed", error);
-    return errorResponse("INTERNAL_ERROR", "Role request failed", 500);
+    console.error("GET /tax-rates/default failed", error);
+    return errorResponse("INTERNAL_ERROR", "Default tax rates request failed", 500);
   }
 });
 
-export { rolesRoutes };
+export { taxRatesRoutes };
