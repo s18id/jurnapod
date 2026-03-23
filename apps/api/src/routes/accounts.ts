@@ -18,7 +18,12 @@ import {
   AccountCreateRequestSchema,
   AccountUpdateRequestSchema,
   AccountListQuerySchema,
-  NumericIdSchema
+  NumericIdSchema,
+  FixedAssetCategoryCreateRequestSchema,
+  FixedAssetCategoryUpdateRequestSchema,
+  FixedAssetCreateRequestSchema,
+  FixedAssetUpdateRequestSchema,
+  DepreciationPlanCreateRequestSchema
 } from "@jurnapod/shared";
 import {
   authenticateRequest,
@@ -26,6 +31,7 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
+import { listUserOutletIds } from "../lib/auth.js";
 import {
   createAccount,
   updateAccount,
@@ -46,6 +52,23 @@ import {
   FiscalYearOverlapError,
   FiscalYearOpenConflictError
 } from "../lib/fiscal-years.js";
+import {
+  listFixedAssetCategories,
+  createFixedAssetCategory,
+  updateFixedAssetCategory,
+  deleteFixedAssetCategory,
+  findFixedAssetCategoryById,
+  listFixedAssets,
+  createFixedAsset,
+  updateFixedAsset,
+  deleteFixedAsset,
+  findFixedAssetById
+} from "../lib/master-data.js";
+import {
+  createDepreciationPlan,
+  DepreciationPlanValidationError,
+  DatabaseReferenceError
+} from "../lib/depreciation.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -166,6 +189,413 @@ accountRoutes.get("/tree", async (c) => {
     return successResponse(tree);
   } catch (error) {
     console.error("GET /accounts/tree failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// =============================================================================
+// Fixed Asset Categories Routes
+// =============================================================================
+
+// GET /accounts/fixed-asset-categories - List fixed asset categories
+accountRoutes.get("/fixed-asset-categories", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "read"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const url = new URL(c.req.raw.url);
+    const isActiveParam = url.searchParams.get("is_active");
+
+    const categories = await listFixedAssetCategories(auth.companyId, {
+      isActive: isActiveParam === "true" ? true : isActiveParam === "false" ? false : undefined
+    });
+
+    return successResponse(categories);
+  } catch (error) {
+    console.error("GET /accounts/fixed-asset-categories failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// POST /accounts/fixed-asset-categories - Create fixed asset category
+accountRoutes.post("/fixed-asset-categories", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "create"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const payload = await c.req.json();
+    const input = FixedAssetCategoryCreateRequestSchema.parse(payload);
+
+    const category = await createFixedAssetCategory(auth.companyId, input, {
+      userId: auth.userId
+    });
+
+    return successResponse(category, 201);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    console.error("POST /accounts/fixed-asset-categories failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// GET /accounts/fixed-asset-categories/:id - Get single fixed asset category
+accountRoutes.get("/fixed-asset-categories/:id", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "read"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const categoryId = NumericIdSchema.parse(c.req.param("id"));
+    const category = await findFixedAssetCategoryById(auth.companyId, categoryId);
+
+    if (!category) {
+      return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
+    }
+
+    return successResponse(category);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid category ID", 400);
+    }
+
+    console.error("GET /accounts/fixed-asset-categories/:id failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// PATCH /accounts/fixed-asset-categories/:id - Update fixed asset category
+accountRoutes.patch("/fixed-asset-categories/:id", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const categoryId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = FixedAssetCategoryUpdateRequestSchema.parse(payload);
+
+    const category = await updateFixedAssetCategory(auth.companyId, categoryId, input, {
+      userId: auth.userId
+    });
+
+    if (!category) {
+      return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
+    }
+
+    return successResponse(category);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    console.error("PATCH /accounts/fixed-asset-categories/:id failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// DELETE /accounts/fixed-asset-categories/:id - Delete fixed asset category
+accountRoutes.delete("/fixed-asset-categories/:id", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "delete"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const categoryId = NumericIdSchema.parse(c.req.param("id"));
+    const deleted = await deleteFixedAssetCategory(auth.companyId, categoryId, {
+      userId: auth.userId
+    });
+
+    if (!deleted) {
+      return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
+    }
+
+    return successResponse({ deleted: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid category ID", 400);
+    }
+
+    console.error("DELETE /accounts/fixed-asset-categories/:id failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// =============================================================================
+// Fixed Assets Routes
+// =============================================================================
+
+// GET /accounts/fixed-assets - List fixed assets
+accountRoutes.get("/fixed-assets", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "read"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const url = new URL(c.req.raw.url);
+    const outletIdParam = url.searchParams.get("outlet_id");
+    const isActiveParam = url.searchParams.get("is_active");
+
+    // Get allowed outlet IDs from user's role assignments for outlet scoping
+    const allowedOutletIds = await listUserOutletIds(auth.userId, auth.companyId);
+
+    const assets = await listFixedAssets(auth.companyId, {
+      outletId: outletIdParam ? NumericIdSchema.parse(outletIdParam) : undefined,
+      isActive: isActiveParam === "true" ? true : isActiveParam === "false" ? false : undefined,
+      allowedOutletIds
+    });
+
+    return successResponse(assets);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid query parameters", 400);
+    }
+
+    console.error("GET /accounts/fixed-assets failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// POST /accounts/fixed-assets - Create fixed asset
+accountRoutes.post("/fixed-assets", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "create"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const payload = await c.req.json();
+    const input = FixedAssetCreateRequestSchema.parse(payload);
+
+    const asset = await createFixedAsset(auth.companyId, input, {
+      userId: auth.userId
+    });
+
+    return successResponse(asset, 201);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    console.error("POST /accounts/fixed-assets failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// GET /accounts/fixed-assets/:id - Get single fixed asset
+accountRoutes.get("/fixed-assets/:id", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "read"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+    const asset = await findFixedAssetById(auth.companyId, assetId);
+
+    if (!asset) {
+      return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
+    }
+
+    // Check outlet access - unassigned assets (outlet_id = NULL) are visible to all
+    // but assigned assets must be in user's allowed outlets
+    if (asset.outlet_id !== null) {
+      const allowedOutletIds = await listUserOutletIds(auth.userId, auth.companyId);
+      if (allowedOutletIds !== undefined && !allowedOutletIds.includes(asset.outlet_id)) {
+        return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
+      }
+    }
+
+    return successResponse(asset);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid asset ID", 400);
+    }
+
+    console.error("GET /accounts/fixed-assets/:id failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// PATCH /accounts/fixed-assets/:id - Update fixed asset
+accountRoutes.patch("/fixed-assets/:id", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = FixedAssetUpdateRequestSchema.parse(payload);
+
+    const asset = await updateFixedAsset(auth.companyId, assetId, input, {
+      userId: auth.userId
+    });
+
+    if (!asset) {
+      return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
+    }
+
+    return successResponse(asset);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    console.error("PATCH /accounts/fixed-assets/:id failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// DELETE /accounts/fixed-assets/:id - Delete fixed asset
+accountRoutes.delete("/fixed-assets/:id", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "delete"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+    const deleted = await deleteFixedAsset(auth.companyId, assetId, {
+      userId: auth.userId
+    });
+
+    if (!deleted) {
+      return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
+    }
+
+    return successResponse({ deleted: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid asset ID", 400);
+    }
+
+    console.error("DELETE /accounts/fixed-assets/:id failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// POST /accounts/fixed-assets/:id/depreciation-plan - Create depreciation plan for fixed asset
+accountRoutes.post("/fixed-assets/:id/depreciation-plan", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "create"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = DepreciationPlanCreateRequestSchema.parse(payload);
+
+    const plan = await createDepreciationPlan(
+      auth.companyId,
+      {
+        asset_id: assetId,
+        outlet_id: input.outlet_id,
+        method: input.method,
+        start_date: input.start_date,
+        useful_life_months: input.useful_life_months,
+        salvage_value: input.salvage_value,
+        purchase_cost_snapshot: input.purchase_cost_snapshot,
+        expense_account_id: input.expense_account_id,
+        accum_depr_account_id: input.accum_depr_account_id,
+        status: input.status
+      },
+      { userId: auth.userId }
+    );
+
+    return successResponse(plan, 201);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("INVALID_REFERENCE", error.message, 400);
+    }
+
+    if (error instanceof DepreciationPlanValidationError) {
+      return errorResponse("VALIDATION_ERROR", error.message, 400);
+    }
+
+    console.error("POST /accounts/fixed-assets/:id/depreciation-plan failed", error);
     return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
   }
 });
