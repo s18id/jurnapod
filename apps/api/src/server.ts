@@ -253,9 +253,6 @@ app.route("/sync", syncRoutes);
 // Register sales routes using Hono's app.route() pattern
 app.route("/sales", salesRoutes);
 
-// Register inventory routes using Hono's app.route() pattern
-app.route("/inventory", inventoryRoutes);
-
 // Register health routes (no auth required)
 app.route("/health", healthRoutes);
 
@@ -271,6 +268,9 @@ app.route("/companies", companyRoutes);
 app.route("/dinein", dineinRoutes);
 
 await registerRoutes(app);
+
+// Register inventory routes AFTER Next.js-style routes to override them
+app.route("/inventory", inventoryRoutes);
 
 // Initialize sync modules after routes are registered
 try {

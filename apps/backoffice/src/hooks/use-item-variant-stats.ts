@@ -61,7 +61,7 @@ export function useItemVariantStats({
       // Fetch variant stats for all items in a single bulk request
       const itemIdsParam = itemIds.join(',');
       const response = await apiRequest<{ success: boolean; data: ItemVariantStats[] }>(
-        `/inventory/item-variant-stats?item_ids=${itemIdsParam}`,
+        `/inventory/variant-stats?item_ids=${itemIdsParam}`,
         {
           headers: { Authorization: `Bearer ${accessToken}` },
         }

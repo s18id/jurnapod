@@ -120,6 +120,55 @@ inventoryRoutes.get("/items", async (c) => {
   }
 });
 
+// GET /inventory/variant-stats - Get variant statistics for multiple items
+inventoryRoutes.get("/variant-stats", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+    // Check access permission
+    const accessResult = await requireAccess({
+      roles: [...INVENTORY_ROLES_READ],
+      module: "inventory",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const url = new URL(c.req.raw.url);
+    const itemIdsParam = url.searchParams.get("item_ids");
+
+    if (!itemIdsParam) {
+      return errorResponse("INVALID_REQUEST", "item_ids parameter is required", 400);
+    }
+
+    // Parse comma-separated item IDs
+    const itemIds = itemIdsParam.split(",").map(id => {
+      const parsed = parseInt(id.trim(), 10);
+      if (isNaN(parsed) || parsed <= 0) {
+        throw new Error(`Invalid item ID: ${id}`);
+      }
+      return parsed;
+    });
+
+    if (itemIds.length === 0) {
+      return successResponse([]);
+    }
+
+    // Limit to prevent abuse
+    if (itemIds.length > 100) {
+      return errorResponse("INVALID_REQUEST", "Too many item IDs (max 100)", 400);
+    }
+
+    const stats = await getItemVariantStats(auth.companyId, itemIds);
+    return successResponse(stats);
+  } catch (error) {
+    console.error("GET /inventory/variant-stats failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to fetch variant stats", 500);
+  }
+});
+
 // GET /inventory/items/:id - Get single item
 inventoryRoutes.get("/items/:id", async (c) => {
   const auth = c.get("auth");
@@ -269,59 +318,6 @@ inventoryRoutes.get("/item-prices/active", async (c) => {
 
     console.error("GET /inventory/item-prices/active failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Prices request failed", 500);
-  }
-});
-
-// GET /inventory/item-variant-stats - Get variant statistics for multiple items
-inventoryRoutes.get("/item-variant-stats", async (c) => {
-  const auth = c.get("auth");
-
-  // Check access permission
-  const accessResult = await requireAccess({
-    roles: [...INVENTORY_ROLES_READ],
-    module: "inventory",
-    permission: "read"
-  })(c.req.raw, auth);
-
-  if (accessResult !== null) {
-    return accessResult;
-  }
-
-  try {
-    const url = new URL(c.req.raw.url);
-    const itemIdsParam = url.searchParams.get("item_ids");
-
-    if (!itemIdsParam) {
-      return errorResponse("INVALID_REQUEST", "item_ids parameter is required", 400);
-    }
-
-    // Parse comma-separated item IDs
-    const itemIds = itemIdsParam.split(",").map(id => {
-      const parsed = parseInt(id.trim(), 10);
-      if (isNaN(parsed) || parsed <= 0) {
-        throw new Error(`Invalid item ID: ${id}`);
-      }
-      return parsed;
-    });
-
-    if (itemIds.length === 0) {
-      return successResponse([]);
-    }
-
-    // Limit to prevent abuse
-    if (itemIds.length > 100) {
-      return errorResponse("INVALID_REQUEST", "Too many item IDs (max 100)", 400);
-    }
-
-    const stats = await getItemVariantStats(auth.companyId, itemIds);
-    return successResponse(stats);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
-    }
-
-    console.error("GET /inventory/item-variant-stats failed", error);
-    return errorResponse("INTERNAL_SERVER_ERROR", "Variant stats request failed", 500);
   }
 });
 
