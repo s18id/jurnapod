@@ -16,6 +16,7 @@ import { initWebSocketManager } from "./lib/websocket/index.js";
 import { stockRoutes } from "./routes/stock.js";
 import { syncRoutes } from "./routes/sync.js";
 import { salesRoutes } from "./routes/sales.js";
+import { inventoryRoutes } from "./routes/inventory.js";
 import { healthRoutes } from "./routes/health.js";
 import { rolesRoutes } from "./routes/roles.js";
 import { authRoutes } from "./routes/auth.js";
@@ -251,6 +252,9 @@ app.route("/sync", syncRoutes);
 
 // Register sales routes using Hono's app.route() pattern
 app.route("/sales", salesRoutes);
+
+// Register inventory routes using Hono's app.route() pattern
+app.route("/inventory", inventoryRoutes);
 
 // Register health routes (no auth required)
 app.route("/health", healthRoutes);
