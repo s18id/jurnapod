@@ -332,30 +332,7 @@ async function ensureOutletIdsExist(
   }
 }
 
-async function syncUserOutletsFromRoles(
-  connection: PoolConnection | ReturnType<typeof getDbPool>,
-  userId: number
-): Promise<void> {
-  await connection.execute<ResultSetHeader>(
-    `DELETE uo
-     FROM user_outlets uo
-     LEFT JOIN user_role_assignments ura
-       ON ura.user_id = uo.user_id
-      AND ura.outlet_id = uo.outlet_id
-     WHERE uo.user_id = ?
-       AND ura.user_id IS NULL`,
-    [userId]
-  );
 
-  await connection.execute<ResultSetHeader>(
-    `INSERT IGNORE INTO user_outlets (user_id, outlet_id)
-     SELECT DISTINCT user_id, outlet_id
-     FROM user_role_assignments
-     WHERE user_id = ?
-       AND outlet_id IS NOT NULL`,
-    [userId]
-  );
-}
 
 async function hydrateUserGlobalRoles(
   connection: PoolConnection | ReturnType<typeof getDbPool>,
@@ -629,7 +606,7 @@ export async function createUser(params: {
       }
     }
 
-    await syncUserOutletsFromRoles(connection, userId);
+
 
     await auditService.logCreate(auditContext, "user", userId, {
       email,
@@ -817,7 +794,7 @@ export async function setUserRoles(params: {
         );
       }
 
-      await syncUserOutletsFromRoles(connection, params.userId);
+
 
       await auditService.logUpdate(
         auditContext,
@@ -928,7 +905,7 @@ export async function setUserOutlets(params: {
       );
     }
 
-    await syncUserOutletsFromRoles(connection, params.userId);
+
 
     await auditService.logUpdate(
       auditContext,
