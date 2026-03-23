@@ -7,9 +7,9 @@
  * Routes for account management:
  * - GET /accounts - List accounts with filtering
  * - GET /accounts/:id - Get single account
- * - POST /accounts - Create new account (stub)
+ * - POST /accounts - Create new account
  *
- * Required role: OWNER, ADMIN, or ACCOUNTANT
+ * Access control: Uses permission bitmask from module_roles
  */
 
 import { Hono } from "hono";
@@ -37,6 +37,15 @@ import {
   ParentAccountCompanyMismatchError,
   AccountTypeCompanyMismatchError
 } from "../lib/accounts.js";
+import {
+  listFiscalYears,
+  createFiscalYear,
+  FiscalYearNotFoundError,
+  FiscalYearCodeExistsError,
+  FiscalYearDateRangeError,
+  FiscalYearOverlapError,
+  FiscalYearOpenConflictError
+} from "../lib/fiscal-years.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -48,7 +57,8 @@ declare module "hono" {
 // Constants
 // =============================================================================
 
-const ACCOUNT_ROLES = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"] as const;
+// Note: We use module permissions (bitmask) for access control
+// Permission bitmask: create=1, read=2, update=4, delete=8
 
 const accountListQuerySchema = z.object({
   company_id: NumericIdSchema,
@@ -94,9 +104,8 @@ accountRoutes.use("/*", async (c, next) => {
 accountRoutes.get("/", async (c) => {
   const auth = c.get("auth");
 
-  // Check access permission
+    // Check access permission
   const accessResult = await requireAccess({
-    roles: [...ACCOUNT_ROLES],
     module: "accounts",
     permission: "read"
   })(c.req.raw, auth);
@@ -141,7 +150,6 @@ accountRoutes.get("/tree", async (c) => {
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...ACCOUNT_ROLES],
     module: "accounts",
     permission: "read"
   })(c.req.raw, auth);
@@ -168,7 +176,6 @@ accountRoutes.get("/:id", async (c) => {
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...ACCOUNT_ROLES],
     module: "accounts",
     permission: "read"
   })(c.req.raw, auth);
@@ -205,7 +212,6 @@ accountRoutes.post("/", async (c) => {
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...ACCOUNT_ROLES],
     module: "accounts",
     permission: "create"
   })(c.req.raw, auth);
@@ -258,7 +264,6 @@ accountRoutes.put("/:id", async (c) => {
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...ACCOUNT_ROLES],
     module: "accounts",
     permission: "update"
   })(c.req.raw, auth);
@@ -301,13 +306,118 @@ accountRoutes.put("/:id", async (c) => {
   }
 });
 
+// =============================================================================
+// Fiscal Years Routes
+// =============================================================================
+
+// POST /accounts/fiscal-years - Create fiscal year
+accountRoutes.post("/fiscal-years", async (c) => {
+  try {
+    const auth = c.get("auth");
+
+    // Check access permission using bitmask
+    const accessResult = await requireAccess({
+      module: "accounts",
+      permission: "create"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const payload = await c.req.json();
+    const input = z.object({
+      company_id: NumericIdSchema,
+      code: z.string().min(1).max(32),
+      name: z.string().min(1).max(100),
+      start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      status: z.enum(["OPEN", "CLOSED"]).optional().default("OPEN")
+    }).parse(payload);
+
+    const fiscalYear = await createFiscalYear({
+      company_id: input.company_id,
+      code: input.code,
+      name: input.name,
+      start_date: input.start_date,
+      end_date: input.end_date,
+      status: input.status
+    }, auth.userId);
+
+    return successResponse(fiscalYear, 201);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof FiscalYearOpenConflictError) {
+      return errorResponse("OPEN_YEAR_CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof FiscalYearOverlapError) {
+      return errorResponse("OPEN_YEAR_OVERLAP", error.message, 409);
+    }
+
+    if (error instanceof FiscalYearDateRangeError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+
+    if (error instanceof FiscalYearCodeExistsError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    console.error("POST /accounts/fiscal-years failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to create fiscal year", 500);
+  }
+});
+
+// GET /accounts/fiscal-years - List fiscal years
+accountRoutes.get("/fiscal-years", async (c) => {
+  try {
+    const auth = c.get("auth");
+
+    // Check access permission using bitmask
+    const accessResult = await requireAccess({
+      module: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const url = new URL(c.req.raw.url);
+    const companyIdParam = url.searchParams.get("company_id");
+    const statusParam = url.searchParams.get("status");
+    const includeClosedParam = url.searchParams.get("include_closed");
+
+    const companyId = companyIdParam ? NumericIdSchema.parse(companyIdParam) : auth.companyId;
+    const status = statusParam as "OPEN" | "CLOSED" | undefined;
+    const includeClosed = includeClosedParam === "true";
+
+    const fiscalYears = await listFiscalYears({
+      company_id: companyId,
+      status: status,
+      include_closed: includeClosed
+    });
+
+    return successResponse(fiscalYears);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid query parameters", 400);
+    }
+
+    console.error("GET /accounts/fiscal-years failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to list fiscal years", 500);
+  }
+});
+
 // GET /accounts/types - Get account types
 accountRoutes.get("/types", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...ACCOUNT_ROLES],
     module: "accounts",
     permission: "read"
   })(c.req.raw, auth);

@@ -17,7 +17,8 @@ import {
   UserNotFoundError,
   RoleNotFoundError,
   RoleLevelViolationError,
-  SuperAdminProtectionError
+  SuperAdminProtectionError,
+  CrossCompanyAccessError
 } from "./users";
 import type { RowDataPacket } from "mysql2";
 
@@ -100,7 +101,7 @@ test(
       createdUserIds.push(created.id);
       testUserId = created.id;
 
-      const listed = await listUsers(companyId, { isActive: true });
+      const listed = await listUsers(companyId, { userId: ownerUserId, companyId }, { isActive: true });
       assert.ok(listed.some((u) => u.email === testEmail.toLowerCase()), "User should appear in list");
 
       const updated = await updateUserEmail({
@@ -176,10 +177,12 @@ test(
       if (otherCompanyRows.length > 0) {
         otherCompanyId = Number(otherCompanyRows[0].id);
 
-        const usersInOtherCompany = await listUsers(otherCompanyId, {});
-        for (const user of usersInOtherCompany) {
-          assert.notStrictEqual(user.company_id, companyId, "Should not see other company users");
-        }
+        // Non-super-admin should not be able to list users from another company
+        await assert.rejects(
+          async () => listUsers(otherCompanyId, { userId: ownerUserId, companyId }),
+          CrossCompanyAccessError,
+          "Non-super-admin should not access other company users"
+        );
       }
 
       console.log("✅ tenant isolation test passed");

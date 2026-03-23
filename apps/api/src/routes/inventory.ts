@@ -39,6 +39,9 @@ import {
   findItemPriceById,
   findItemById,
   listItemPrices,
+  createItemGroup,
+  updateItemGroup,
+  deleteItemGroup,
   DatabaseConflictError,
   DatabaseReferenceError,
   DatabaseForbiddenError
@@ -55,8 +58,8 @@ declare module "hono" {
 // Constants
 // =============================================================================
 
-const INVENTORY_ROLES_READ = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"] as const;
-const INVENTORY_ROLES_WRITE = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"] as const;
+// Note: We use module permissions (bitmask) for access control
+// Permission bitmask: create=1, read=2, update=4, delete=8
 
 type AccessCheckRow = RowDataPacket & {
   id: number;
@@ -159,7 +162,6 @@ inventoryRoutes.get("/items", async (c) => {
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...INVENTORY_ROLES_READ],
     module: "inventory",
     permission: "read"
   })(c.req.raw, auth);
@@ -248,7 +250,6 @@ inventoryRoutes.get("/items/:id", async (c) => {
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...INVENTORY_ROLES_READ],
     module: "inventory",
     permission: "read"
   })(c.req.raw, auth);
@@ -430,7 +431,6 @@ inventoryRoutes.get("/item-groups", async (c) => {
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...INVENTORY_ROLES_READ],
     module: "inventory",
     permission: "read"
   })(c.req.raw, auth);
@@ -449,13 +449,191 @@ inventoryRoutes.get("/item-groups", async (c) => {
   }
 });
 
+// GET /inventory/item-groups/:id - Get single item group
+inventoryRoutes.get("/item-groups/:id", async (c) => {
+  const auth = c.get("auth");
+
+  // Check access permission using bitmask
+  const accessResult = await requireAccess({
+    module: "inventory",
+    permission: "read"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const groupId = NumericIdSchema.parse(c.req.param("id"));
+    const { findItemGroupById } = await import("../lib/master-data.js");
+    const group = await findItemGroupById(auth.companyId, groupId);
+
+    if (!group) {
+      return errorResponse("NOT_FOUND", "Item group not found", 404);
+    }
+
+    return successResponse(group);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid item group ID", 400);
+    }
+
+    console.error("GET /inventory/item-groups/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item group not found", 500);
+  }
+});
+
+// POST /inventory/item-groups - Create item group
+inventoryRoutes.post("/item-groups", async (c) => {
+  const auth = c.get("auth");
+
+  // Check access permission using bitmask
+  const accessResult = await requireAccess({
+    module: "inventory",
+    permission: "create"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const payload = await c.req.json();
+    const input = z.object({
+      code: z.string().max(32).optional(),
+      name: z.string().min(1).max(100),
+      parent_id: NumericIdSchema.optional().nullable(),
+      is_active: z.boolean().optional().default(true)
+    }).parse(payload);
+
+    const group = await createItemGroup(auth.companyId, {
+      code: input.code,
+      name: input.name,
+      parent_id: input.parent_id,
+      is_active: input.is_active
+    });
+
+    return successResponse(group, 201);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Parent item group not found", 404);
+    }
+
+    console.error("POST /inventory/item-groups failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item group creation failed", 500);
+  }
+});
+
+// PATCH /inventory/item-groups/:id - Update item group
+inventoryRoutes.patch("/item-groups/:id", async (c) => {
+  const auth = c.get("auth");
+
+  // Check access permission using bitmask
+  const accessResult = await requireAccess({
+    module: "inventory",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const groupId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = z.object({
+      code: z.string().max(32).optional().nullable(),
+      name: z.string().min(1).max(100).optional(),
+      parent_id: NumericIdSchema.optional().nullable(),
+      is_active: z.boolean().optional()
+    }).parse(payload);
+
+    const group = await updateItemGroup(auth.companyId, groupId, {
+      code: input.code,
+      name: input.name,
+      parent_id: input.parent_id,
+      is_active: input.is_active
+    });
+
+    if (!group) {
+      return errorResponse("NOT_FOUND", "Item group not found", 404);
+    }
+
+    return successResponse(group);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Parent item group not found", 404);
+    }
+
+    console.error("PATCH /inventory/item-groups/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item group update failed", 500);
+  }
+});
+
+// DELETE /inventory/item-groups/:id - Delete item group
+inventoryRoutes.delete("/item-groups/:id", async (c) => {
+  const auth = c.get("auth");
+
+  // Check access permission using bitmask
+  const accessResult = await requireAccess({
+    module: "inventory",
+    permission: "delete"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const groupId = NumericIdSchema.parse(c.req.param("id"));
+
+    const deleted = await deleteItemGroup(auth.companyId, groupId);
+
+    if (!deleted) {
+      return errorResponse("NOT_FOUND", "Item group not found", 404);
+    }
+
+    return successResponse({ success: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid item group ID", 400);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Item group not found", 404);
+    }
+
+    console.error("DELETE /inventory/item-groups/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item group deletion failed", 500);
+  }
+});
+
 // GET /inventory/item-prices/active - Get active prices for outlet
 inventoryRoutes.get("/item-prices/active", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
   const accessResult = await requireAccess({
-    roles: [...INVENTORY_ROLES_READ],
     module: "inventory",
     permission: "read"
   })(c.req.raw, auth);
