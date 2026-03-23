@@ -177,13 +177,15 @@ async function readCompanyOutlets(connection, companyId) {
 
 async function readRoles(connection) {
   const [rows] = await connection.execute(
-    `SELECT id, code, name FROM roles WHERE company_id IS NULL ORDER BY role_level DESC`
+    `SELECT id, code, name, is_global, role_level FROM roles WHERE company_id IS NULL ORDER BY role_level DESC`
   );
 
   return rows.map(row => ({
     id: Number(row.id),
     code: row.code,
-    name: row.name
+    name: row.name,
+    is_global: Boolean(row.is_global),
+    role_level: Number(row.role_level)
   }));
 }
 
@@ -232,9 +234,12 @@ async function readCompanyItems(connection, companyId) {
 // Seeding functions
 async function seedUsers(connection, companyId, outlets, roles, count) {
   const created = [];
-  const userRoles = roles.filter(r => ['ADMIN', 'ACCOUNTANT', 'CASHIER'].includes(r.code));
   
-  if (userRoles.length === 0) {
+  // Separate global and outlet-specific roles
+  const globalRoles = roles.filter(r => r.is_global && ['OWNER', 'COMPANY_ADMIN'].includes(r.code));
+  const outletRoles = roles.filter(r => !r.is_global && ['ADMIN', 'ACCOUNTANT', 'CASHIER'].includes(r.code));
+  
+  if (globalRoles.length === 0 && outletRoles.length === 0) {
     console.warn("No suitable roles found for test users");
     return created;
   }
@@ -242,8 +247,6 @@ async function seedUsers(connection, companyId, outlets, roles, count) {
   for (let i = 0; i < count; i++) {
     const email = `testuser${i + 1}@${randomSuffix(4).toLowerCase()}.test`;
     const passwordHash = await hashPassword(`TestPass123!`);
-    const role = randomPick(userRoles);
-    const outlet = randomPick(outlets);
 
     // Create user
     const [userResult] = await connection.execute(
@@ -253,21 +256,83 @@ async function seedUsers(connection, companyId, outlets, roles, count) {
     );
     const userId = Number(userResult.insertId);
 
-    // Assign role
-    await connection.execute(
-      `INSERT INTO user_role_assignments (user_id, role_id)
-       VALUES (?, ?)`,
-      [userId, role.id]
-    );
+    // Decide user type: 20% chance of global role (OWNER/COMPANY_ADMIN), 80% outlet-specific
+    const isGlobalUser = Math.random() < 0.2 && globalRoles.length > 0;
+    const assignedRoles = [];
 
-    // Assign to outlet
-    await connection.execute(
-      `INSERT INTO user_outlets (user_id, outlet_id)
-       VALUES (?, ?)`,
-      [userId, outlet.id]
-    );
+    if (isGlobalUser) {
+      // Assign global role (OWNER or COMPANY_ADMIN)
+      const globalRole = randomPick(globalRoles);
+      await connection.execute(
+        `INSERT INTO user_role_assignments (user_id, role_id, outlet_id)
+         VALUES (?, ?, NULL)`,
+        [userId, globalRole.id]
+      );
+      assignedRoles.push({ role: globalRole.code, scope: 'global' });
 
-    created.push({ id: userId, email, role: role.code, outlet: outlet.code });
+      // Global users get access to all outlets
+      for (const outlet of outlets) {
+        try {
+          await connection.execute(
+            `INSERT IGNORE INTO user_outlets (user_id, outlet_id)
+             VALUES (?, ?)`,
+            [userId, outlet.id]
+          );
+        } catch (error) {
+          // Ignore duplicate key errors
+          if (!error.message.includes('Duplicate entry')) {
+            throw error;
+          }
+        }
+      }
+    } else if (outletRoles.length > 0) {
+      // Assign outlet-specific role(s)
+      const primaryRole = randomPick(outletRoles);
+      const assignedOutlets = [];
+      
+      // Assign to 1-3 random outlets
+      const outletCount = Math.min(randomInt(1, 3), outlets.length);
+      const selectedOutlets = [];
+      
+      // Select random outlets without duplicates
+      while (selectedOutlets.length < outletCount) {
+        const outlet = randomPick(outlets);
+        if (!selectedOutlets.find(o => o.id === outlet.id)) {
+          selectedOutlets.push(outlet);
+        }
+      }
+      
+      for (const outlet of selectedOutlets) {
+        // Assign role to this outlet
+        await connection.execute(
+          `INSERT IGNORE INTO user_role_assignments (user_id, role_id, outlet_id)
+           VALUES (?, ?, ?)`,
+          [userId, primaryRole.id, outlet.id]
+        );
+        
+        // Give user access to this outlet
+        await connection.execute(
+          `INSERT IGNORE INTO user_outlets (user_id, outlet_id)
+           VALUES (?, ?)`,
+          [userId, outlet.id]
+        );
+        
+        assignedOutlets.push(outlet.code);
+      }
+      
+      assignedRoles.push({ 
+        role: primaryRole.code, 
+        scope: 'outlet', 
+        outlets: assignedOutlets 
+      });
+    }
+
+    created.push({ 
+      id: userId, 
+      email, 
+      roles: assignedRoles,
+      type: isGlobalUser ? 'global' : 'outlet-specific'
+    });
   }
 
   return created;
@@ -784,7 +849,12 @@ async function main() {
     // Seed users
     console.log(`\n👥 Creating ${seedConfig.usersCount} test users...`);
     const users = await seedUsers(connection, company.id, allOutlets, roles, seedConfig.usersCount);
-    console.log(`✅ Created ${users.length} users`);
+    
+    // Count user types
+    const globalUsers = users.filter(u => u.type === 'global').length;
+    const outletUsers = users.filter(u => u.type === 'outlet-specific').length;
+    
+    console.log(`✅ Created ${users.length} users (${globalUsers} global, ${outletUsers} outlet-specific)`);
 
     // Seed accounts if needed
     console.log(`\n💰 Ensuring chart of accounts exists...`);
@@ -839,8 +909,15 @@ async function main() {
     console.log(`  • Audit logs: ${auditLogs.length}`);
 
     console.log("\n🔑 Sample test credentials:");
-    for (const user of users.slice(0, 3)) {
-      console.log(`  • ${user.email} / TestPass123! (${user.role})`);
+    for (const user of users.slice(0, 5)) {
+      const roleInfo = user.roles.map(r => {
+        if (r.scope === 'global') {
+          return `${r.role} (Global)`;
+        } else {
+          return `${r.role} (${r.outlets.join(', ')})`;
+        }
+      }).join(', ');
+      console.log(`  • ${user.email} / TestPass123! - ${roleInfo}`);
     }
 
   } catch (error) {

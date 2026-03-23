@@ -14,6 +14,8 @@
     "db:seed:test-data": "node ./scripts/seed-test-data.mjs",
     "db:seed:test-data:simple": "node ./scripts/test-seed-simple.mjs",
     "db:verify:test-data": "node ./scripts/verify-test-data.mjs",
+    "db:verify:user-roles": "node ./scripts/verify-user-roles.mjs",
+    "db:fix:user-outlets": "node ./scripts/fix-user-outlets.mjs",
     "db:seed:settings": "node ./scripts/seed-settings-from-env.mjs",
     "db:smoke": "node ./scripts/smoke.mjs",
     "db:backfill:pos-journals": "node ./scripts/backfill-pos-journals.mjs",
