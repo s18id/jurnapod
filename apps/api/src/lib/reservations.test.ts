@@ -23,31 +23,37 @@ import {
   type CreateReservationInput,
   type ListReservationsParams
 } from "./reservations";
+import { createOutletTable } from "./outlet-tables";
 
 loadEnvIfPresent();
 
 type FixtureContext = {
   companyId: number;
   outletId: number;
+  userId: number;
 };
 
 async function resolveFixtureContext(): Promise<FixtureContext> {
   const pool = getDbPool();
   const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
   const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
+  const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT c.id AS company_id, o.id AS outlet_id
+    `SELECT c.id AS company_id, o.id AS outlet_id, u.id AS user_id
      FROM companies c
      INNER JOIN outlets o ON o.company_id = c.id
-     WHERE c.code = ? AND o.code = ?
+     INNER JOIN users u ON u.company_id = c.id
+     INNER JOIN user_outlets uo ON uo.user_id = u.id AND uo.outlet_id = o.id
+     WHERE c.code = ? AND o.code = ? AND u.email = ?
      LIMIT 1`,
-    [companyCode, outletCode]
+    [companyCode, outletCode, ownerEmail]
   );
 
-  assert.ok(rows.length > 0, "Fixture company/outlet not found; run seed first");
+  assert.ok(rows.length > 0, "Fixture company/outlet/user not found; run seed first");
   return {
     companyId: Number(rows[0].company_id),
-    outletId: Number(rows[0].outlet_id)
+    outletId: Number(rows[0].outlet_id),
+    userId: Number(rows[0].user_id)
   };
 }
 
@@ -74,30 +80,38 @@ test(
     const pool = getDbPool();
     const runId = Date.now().toString(36);
     const openOrderId = `ord-${runId}-open`;
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdTableIds: number[] = [];
     const createdReservationIds: number[] = [];
 
     try {
-      const [table1Insert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
-        [companyId, outletId, `T1-${runId}`.slice(0, 32), `Table One ${runId}`, "Main", 4]
-      );
-      const table1Id = Number(table1Insert.insertId);
-      createdTableIds.push(table1Id);
+      const table1 = await createOutletTable({
+        company_id: companyId,
+        outlet_id: outletId,
+        code: `T1-${runId}`.slice(0, 32),
+        name: `Table One ${runId}`,
+        zone: "Main",
+        capacity: 4,
+        status: "AVAILABLE",
+        actor: { userId, outletId, ipAddress: "127.0.0.1" }
+      });
+      createdTableIds.push(table1.id);
 
-      const [table2Insert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
-        [companyId, outletId, `T2-${runId}`.slice(0, 32), `Table Two ${runId}`, "Main", 4]
-      );
-      const table2Id = Number(table2Insert.insertId);
-      createdTableIds.push(table2Id);
+      const table2 = await createOutletTable({
+        company_id: companyId,
+        outlet_id: outletId,
+        code: `T2-${runId}`.slice(0, 32),
+        name: `Table Two ${runId}`,
+        zone: "Main",
+        capacity: 4,
+        status: "AVAILABLE",
+        actor: { userId, outletId, ipAddress: "127.0.0.1" }
+      });
+      createdTableIds.push(table2.id);
 
       const reservation = await createReservation(companyId, {
         outlet_id: outletId,
-        table_id: table1Id,
+        table_id: table1.id,
         customer_name: `Reservation ${runId}`,
         customer_phone: "08123456789",
         guest_count: 2,
@@ -107,28 +121,28 @@ test(
       });
       createdReservationIds.push(reservation.reservation_id);
 
-      assert.equal(await readTableStatus(companyId, outletId, table1Id), "RESERVED");
+      assert.equal(await readTableStatus(companyId, outletId, table1.id), "RESERVED");
 
       await updateReservation(companyId, reservation.reservation_id, {
-        table_id: table2Id
+        table_id: table2.id
       });
-      assert.equal(await readTableStatus(companyId, outletId, table1Id), "AVAILABLE");
-      assert.equal(await readTableStatus(companyId, outletId, table2Id), "RESERVED");
+      assert.equal(await readTableStatus(companyId, outletId, table1.id), "AVAILABLE");
+      assert.equal(await readTableStatus(companyId, outletId, table2.id), "RESERVED");
 
       await updateReservation(companyId, reservation.reservation_id, {
         status: "ARRIVED"
       });
-      assert.equal(await readTableStatus(companyId, outletId, table2Id), "RESERVED");
+      assert.equal(await readTableStatus(companyId, outletId, table2.id), "RESERVED");
 
       await updateReservation(companyId, reservation.reservation_id, {
         status: "SEATED"
       });
-      assert.equal(await readTableStatus(companyId, outletId, table2Id), "OCCUPIED");
+      assert.equal(await readTableStatus(companyId, outletId, table2.id), "OCCUPIED");
 
       await updateReservation(companyId, reservation.reservation_id, {
         status: "COMPLETED"
       });
-      assert.equal(await readTableStatus(companyId, outletId, table2Id), "AVAILABLE");
+      assert.equal(await readTableStatus(companyId, outletId, table2.id), "AVAILABLE");
 
       const cancelled = await createReservation(companyId, {
         outlet_id: outletId,
@@ -158,17 +172,21 @@ test(
         }
       );
 
-      const [table3Insert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
-        [companyId, outletId, `T3-${runId}`.slice(0, 32), `Table Three ${runId}`, "Main", 4]
-      );
-      const table3Id = Number(table3Insert.insertId);
-      createdTableIds.push(table3Id);
+      const table3 = await createOutletTable({
+        company_id: companyId,
+        outlet_id: outletId,
+        code: `T3-${runId}`.slice(0, 32),
+        name: `Table Three ${runId}`,
+        zone: "Main",
+        capacity: 4,
+        status: "AVAILABLE",
+        actor: { userId, outletId, ipAddress: "127.0.0.1" }
+      });
+      createdTableIds.push(table3.id);
 
       const reservationWithOpenOrder = await createReservation(companyId, {
         outlet_id: outletId,
-        table_id: table3Id,
+        table_id: table3.id,
         customer_name: `Reservation Open Order ${runId}`,
         customer_phone: "08123456789",
         guest_count: 2,
@@ -202,7 +220,7 @@ test(
           openOrderId,
           companyId,
           outletId,
-          table3Id,
+          table3.id,
           reservationWithOpenOrder.reservation_id,
           reservationWithOpenOrder.guest_count
         ]
@@ -214,13 +232,13 @@ test(
       await updateReservation(companyId, reservationWithOpenOrder.reservation_id, {
         status: "SEATED"
       });
-      assert.equal(await readTableStatus(companyId, outletId, table3Id), "OCCUPIED");
+      assert.equal(await readTableStatus(companyId, outletId, table3.id), "OCCUPIED");
 
       await updateReservation(companyId, reservationWithOpenOrder.reservation_id, {
         status: "COMPLETED"
       });
       assert.equal(
-        await readTableStatus(companyId, outletId, table3Id),
+        await readTableStatus(companyId, outletId, table3.id),
         "OCCUPIED",
         "table should remain OCCUPIED while open dine-in order exists"
       );
@@ -256,7 +274,7 @@ test(
   async () => {
     const pool = getDbPool();
     const runId = Date.now().toString(36);
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const missingTableId = 987654321;
     const createdReservationIds: number[] = [];
 
@@ -323,18 +341,22 @@ test(
   async () => {
     const pool = getDbPool();
     const runId = Date.now().toString(36);
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdTableIds: number[] = [];
     const createdReservationIds: bigint[] = [];
 
     try {
-      const [tableInsert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
-        [companyId, outletId, `T-BDRY-${runId}`.slice(0, 32), `Boundary Table ${runId}`, "Main", 4]
-      );
-      const tableId = Number(tableInsert.insertId);
-      createdTableIds.push(tableId);
+      const table = await createOutletTable({
+        company_id: companyId,
+        outlet_id: outletId,
+        code: `T-BDRY-${runId}`.slice(0, 32),
+        name: `Boundary Table ${runId}`,
+        zone: "Main",
+        capacity: 4,
+        status: "AVAILABLE",
+        actor: { userId, outletId, ipAddress: "127.0.0.1" }
+      });
+      createdTableIds.push(table.id);
 
       const firstStart = new Date(Date.now() + 6 * 60 * 60 * 1000);
       const firstDurationMinutes = 60;
@@ -343,7 +365,7 @@ test(
       const firstReservation = await createReservationV2({
         companyId: BigInt(companyId),
         outletId: BigInt(outletId),
-        tableId: BigInt(tableId),
+        tableId: BigInt(table.id),
         partySize: 2,
         customerName: `Boundary First ${runId}`,
         reservationTime: firstStart,
@@ -355,7 +377,7 @@ test(
       const secondReservation = await createReservationV2({
         companyId: BigInt(companyId),
         outletId: BigInt(outletId),
-        tableId: BigInt(tableId),
+        tableId: BigInt(table.id),
         partySize: 2,
         customerName: `Boundary Second ${runId}`,
         reservationTime: secondStart,
@@ -421,18 +443,22 @@ test(
   async () => {
     const pool = getDbPool();
     const runId = Date.now().toString(36);
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdTableIds: number[] = [];
     const createdReservationIds: bigint[] = [];
 
     try {
-      const [tableInsert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
-        [companyId, outletId, `T-MIX-${runId}`.slice(0, 32), `Mixed Table ${runId}`, "Main", 4]
-      );
-      const tableId = Number(tableInsert.insertId);
-      createdTableIds.push(tableId);
+      const table = await createOutletTable({
+        company_id: companyId,
+        outlet_id: outletId,
+        code: `T-MIX-${runId}`.slice(0, 32),
+        name: `Mixed Table ${runId}`,
+        zone: "Main",
+        capacity: 4,
+        status: "AVAILABLE",
+        actor: { userId, outletId, ipAddress: "127.0.0.1" }
+      });
+      createdTableIds.push(table.id);
 
       const baseStartA = new Date(Date.now() + 8 * 60 * 60 * 1000);
       baseStartA.setSeconds(0, 0);
@@ -448,7 +474,7 @@ test(
         [
           companyId,
           outletId,
-          tableId,
+           Number(table.id),
           `Mixed A ${runId}`,
           null,
           2,
@@ -466,7 +492,7 @@ test(
           await createReservationV2({
             companyId: BigInt(companyId),
             outletId: BigInt(outletId),
-            tableId: BigInt(tableId),
+            tableId: BigInt(table.id),
             partySize: 2,
             customerName: `Overlap A ${runId}`,
             reservationTime: new Date(baseStartA.getTime() + 30 * 60000),
@@ -493,7 +519,7 @@ test(
         [
           companyId,
           outletId,
-          tableId,
+           Number(table.id),
           `Mixed B ${runId}`,
           null,
           2,
@@ -511,7 +537,7 @@ test(
           await createReservationV2({
             companyId: BigInt(companyId),
             outletId: BigInt(outletId),
-            tableId: BigInt(tableId),
+            tableId: BigInt(table.id),
             partySize: 2,
             customerName: `Overlap B ${runId}`,
             reservationTime: new Date(baseStartB.getTime() + 30 * 60000),
@@ -538,7 +564,7 @@ test(
         [
           companyId,
           outletId,
-          tableId,
+           Number(table.id),
           `Mixed C ${runId}`,
           null,
           2,
@@ -554,7 +580,7 @@ test(
       const adjacentReservation = await createReservationV2({
         companyId: BigInt(companyId),
         outletId: BigInt(outletId),
-        tableId: BigInt(tableId),
+        tableId: BigInt(table.id),
         partySize: 2,
         customerName: `Adjacent Mixed ${runId}`,
         reservationTime: new Date(baseStartC.getTime() + 60 * 60000),
@@ -593,7 +619,7 @@ test(
   async () => {
     const pool = getDbPool();
     const runId = Date.now().toString(36);
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
 
     try {
@@ -645,7 +671,7 @@ test(
   async () => {
     const pool = getDbPool();
     const runId = Date.now().toString(36);
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
     const codes: string[] = [];
 
@@ -696,7 +722,7 @@ test(
   async () => {
     const pool = getDbPool();
     const runId = Date.now().toString(36);
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
 
     try {
@@ -740,7 +766,7 @@ test(
   async () => {
     const pool = getDbPool();
     const runId = Date.now().toString(36);
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
 
     try {
@@ -838,19 +864,23 @@ test(
   async () => {
     const pool = getDbPool();
     const runId = Date.now().toString(36);
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
     const createdTableIds: number[] = [];
 
     try {
       // Create a table for testing
-      const [tableResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
-        [companyId, outletId, `V2T-${runId}`.slice(0, 32), `V2 Test Table ${runId}`, "Main", 4]
-      );
-      const tableId = Number(tableResult.insertId);
-      createdTableIds.push(tableId);
+      const table = await createOutletTable({
+        company_id: companyId,
+        outlet_id: outletId,
+        code: `V2T-${runId}`.slice(0, 32),
+        name: `V2 Test Table ${runId}`,
+        zone: "Main",
+        capacity: 4,
+        status: "AVAILABLE",
+        actor: { userId, outletId, ipAddress: "127.0.0.1" }
+      });
+      createdTableIds.push(table.id);
 
       // Create a reservation
       const reservationTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
@@ -973,7 +1003,7 @@ test(
   { concurrency: false, timeout: 60000 },
   async () => {
     const pool = getDbPool();
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const generatedCodes: string[] = [];
 
     try {
@@ -1032,7 +1062,7 @@ test(
   async () => {
     const pool = getDbPool();
     const runId = Date.now().toString(36);
-    const { companyId, outletId } = await resolveFixtureContext();
+    const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
 
     try {
