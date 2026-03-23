@@ -357,3 +357,37 @@ export function setupIntegrationTests(testInstance, options = {}) {
   });
   return context;
 }
+
+/**
+ * Helper to cleanup journal entries that are protected by immutability triggers.
+ * Since migration 0114 added BEFORE DELETE triggers on journal_lines and journal_batches
+ * to enforce immutability, direct DELETE operations will fail. This helper catches and
+ * ignores those specific errors, allowing test cleanup to continue.
+ * 
+ * Note: Journal entries created by tests will remain in the database but this is
+ * acceptable for test isolation since each test uses unique identifiers.
+ */
+export async function cleanupJournalEntriesSafe(
+  db,
+  companyId,
+  docTypePattern,
+  docIds
+) {
+  if (!docIds.length) return;
+  
+  const placeholders = docIds.map(() => "?").join(", ");
+  
+  // These deletes will fail due to immutability triggers, so we wrap in try/catch
+  // The error message contains "records are immutable" for these trigger violations
+  try {
+    await db.execute(
+      `DELETE FROM cash_bank_transactions WHERE company_id = ? AND id IN (${placeholders})`,
+      [companyId, ...docIds]
+    );
+  } catch (e) {
+    // Ignore immutability errors - journal records can't be deleted
+    if (!e?.message?.includes("immutable")) {
+      throw e;
+    }
+  }
+}
