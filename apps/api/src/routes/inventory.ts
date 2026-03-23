@@ -120,11 +120,6 @@ inventoryRoutes.get("/items", async (c) => {
   }
 });
 
-// GET /inventory/test - Simple test route
-inventoryRoutes.get("/test", (c) => {
-  return c.json({ success: true, data: { message: "Hono inventory routes work!" } });
-});
-
 // GET /inventory/variant-stats - Get variant statistics for multiple items
 inventoryRoutes.get("/variant-stats", async (c) => {
   try {

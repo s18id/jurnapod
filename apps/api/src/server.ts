@@ -1,9 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { readdir } from "node:fs/promises";
-import { dirname, join, relative, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { compress } from "hono/compress";
@@ -81,129 +80,7 @@ function getAllowedOrigins(): string[] {
     .filter((origin) => origin.length > 0);
 }
 
-function toApiRoutePath(routesRoot: string, routeFilePath: string): string {
-  const routeDir = dirname(routeFilePath);
-  const routeRelativeDir = relative(routesRoot, routeDir);
-  const routeSegments = routeRelativeDir === "." ? "" : routeRelativeDir.split(sep).join("/");
-  const nextStylePath = routeSegments.length > 0 ? `/api/${routeSegments}` : "/api";
-  return nextStylePath.replace(/\[([^\]]+)\]/g, ":$1");
-}
-
-async function listRouteFiles(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const files: string[] = [];
-  const dynamics: string[] = [];
-
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name.startsWith("[")) {
-        dynamics.push(...(await listRouteFiles(fullPath)))
-      } else {
-        files.push(...(await listRouteFiles(fullPath)));
-      }
-      continue;
-    }
-
-    if (entry.isFile() && entry.name === "route.ts") {
-      files.push(fullPath);
-    }
-  }
-
-  if (dynamics.length > 0) {
-    for (const dynamic of dynamics) {
-      if (dynamic.length > 0){
-          files.push(dynamic)
-      }
-    }
-  }
-
-  return files;
-}
-
-function cloneRequestForHandler(request: Request): Request {
-  const isBodylessMethod = request.method === "GET" || request.method === "HEAD";
-  const init: RequestInit = {
-    method: request.method,
-    headers: request.headers,
-    body: isBodylessMethod ? undefined : request.body
-  };
-  // Required for streaming bodies in Node.js fetch
-  if (!isBodylessMethod && request.body) {
-    (init as any).duplex = 'half';
-  }
-  return new Request(request.url, init);
-}
-
-function registerRoute(app: Hono, routePath: string, method: HttpMethod, handler: (request: Request) => Promise<Response> | Response): void {
-  const wrappedHandler = async (c: Context) => {
-    const startTime = Date.now();
-    const origin = c.req.header("origin") ?? null;
-    const requestForHandler = cloneRequestForHandler(c.req.raw);
-
-    try {
-      const response = await handler(requestForHandler);
-      if (shouldLog(c.req.path)) {
-        logRequest(c.req.method, c.req.path, response.status, Date.now() - startTime, origin);
-      }
-      
-      // Return response and let Hono handle it
-      return response;
-    } catch (error) {
-      console.error(`Route handler failed for ${method} ${routePath}`, error);
-      
-      if (shouldLog(c.req.path)) {
-        logRequest(c.req.method, c.req.path, 500, Date.now() - startTime, origin);
-      }
-      
-      return c.json(
-        {
-          success: false,
-          error: {
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Internal Server Error"
-          }
-        },
-        500
-      );
-    }
-  };
-
-  switch (method) {
-    case "GET":
-      app.get(routePath, wrappedHandler);
-      break;
-    case "POST":
-      app.post(routePath, wrappedHandler);
-      break;
-    case "PUT":
-      app.put(routePath, wrappedHandler);
-      break;
-    case "PATCH":
-      app.patch(routePath, wrappedHandler);
-      break;
-    case "DELETE":
-      app.delete(routePath, wrappedHandler);
-      break;
-  }
-}
-
-async function registerRoutes(app: Hono): Promise<void> {
-  const routesRoot = join(__dirname, "..", "app", "api");
-  const routeFiles = await listRouteFiles(routesRoot);
-
-  for (const routeFilePath of routeFiles) {
-    const routePath = toApiRoutePath(routesRoot, routeFilePath);
-    const routeModule = (await import(pathToFileURL(routeFilePath).href)) as RouteModule;
-
-    for (const method of HTTP_METHODS) {
-      const handler = routeModule[method];
-      if (typeof handler === "function") {
-        registerRoute(app, routePath, method, handler);
-      }
-    }
-  }
-}
+// Clean Hono-only server - no messy subfolder routing
 
 const app = new Hono();
 const allowedOrigins = getAllowedOrigins();
