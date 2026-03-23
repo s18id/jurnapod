@@ -2783,3 +2783,39 @@ async function readOpenOrderSyncPayload(
     throw error;
   }
 }
+
+export type ItemVariantStats = {
+  item_id: number;
+  variant_count: number;
+  total_stock: number;
+  has_variants: boolean;
+};
+
+export async function getItemVariantStats(companyId: number, itemIds: number[]): Promise<ItemVariantStats[]> {
+  if (itemIds.length === 0) {
+    return [];
+  }
+
+  const pool = getDbPool();
+  const placeholders = itemIds.map(() => '?').join(',');
+  
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT 
+       i.id as item_id,
+       COALESCE(COUNT(iv.id), 0) as variant_count,
+       COALESCE(SUM(iv.stock_quantity), 0) as total_stock
+     FROM items i
+     LEFT JOIN item_variants iv ON iv.item_id = i.id
+     WHERE i.company_id = ? AND i.id IN (${placeholders})
+     GROUP BY i.id
+     ORDER BY i.id ASC`,
+    [companyId, ...itemIds]
+  );
+
+  return rows.map(row => ({
+    item_id: Number(row.item_id),
+    variant_count: Number(row.variant_count),
+    total_stock: Number(row.total_stock),
+    has_variants: Number(row.variant_count) > 0
+  }));
+}

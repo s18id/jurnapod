@@ -58,38 +58,27 @@ export function useItemVariantStats({
     setError(null);
 
     try {
-      // Fetch variant stats for all items in parallel
-      const promises = itemIds.map(async (itemId) => {
-        const response = await apiRequest(`/inventory/items/${itemId}/variants`, {
+      // Fetch variant stats for all items in a single bulk request
+      const itemIdsParam = itemIds.join(',');
+      const response = await apiRequest<{ success: boolean; data: ItemVariantStats[] }>(
+        `/inventory/item-variant-stats?item_ids=${itemIdsParam}`,
+        {
           headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+
+      if (response.success && Array.isArray(response.data)) {
+        const statsMap = new Map<number, ItemVariantStats>();
+        response.data.forEach((stat) => {
+          statsMap.set(stat.item_id, stat);
         });
 
-        const res = response as { success: boolean; data?: unknown };
-        if (res.success && Array.isArray(res.data)) {
-          const variants = res.data;
-          const totalStock = variants.reduce((sum: number, v: { stock_quantity: number }) => sum + (v.stock_quantity || 0), 0);
-          return {
-            item_id: itemId,
-            variant_count: variants.length,
-            total_stock: totalStock,
-            has_variants: variants.length > 0,
-          };
+        if (isMounted.current) {
+          setStats(statsMap);
+          setLoading(false);
         }
-        return null;
-      });
-
-      const results = await Promise.all(promises);
-      const statsMap = new Map<number, ItemVariantStats>();
-
-      results.forEach((result) => {
-        if (result) {
-          statsMap.set(result.item_id, result);
-        }
-      });
-
-      if (isMounted.current) {
-        setStats(statsMap);
-        setLoading(false);
+      } else {
+        throw new Error("Invalid response from variant stats API");
       }
     } catch (err) {
       if (isMounted.current) {
