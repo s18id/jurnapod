@@ -7,7 +7,8 @@ import {
   createIntegrationTestContext,
   loginOwner,
   readEnv,
-  TEST_TIMEOUT_MS
+  TEST_TIMEOUT_MS,
+  createCleanupHelper
 } from "./integration-harness.mjs";
 
 const testContext = createIntegrationTestContext();
@@ -324,48 +325,52 @@ test(
       assert.ok(totalDebit > 0);
       assert.ok(lineRows.every((row) => String(row.line_date).slice(0, 10) === invoiceDate));
     } finally {
-      if (createdInvoiceIds.length > 0) {
-        await db.execute(
-          `DELETE FROM sales_invoice_lines WHERE invoice_id IN (${createdInvoiceIds.map(() => "?").join(",")})`,
-          createdInvoiceIds
-        );
-        await db.execute(
-          `DELETE FROM sales_invoices WHERE id IN (${createdInvoiceIds.map(() => "?").join(",")})`,
-          createdInvoiceIds
-        );
-      }
+      // Note: journal_lines cannot be deleted due to immutability triggers (migration 0114)
+      // Also, items may be referenced by sales_invoice_lines FK constraint
+      
+      try {
+        if (createdInvoiceIds.length > 0) {
+          await db.execute(
+            `DELETE FROM sales_invoice_lines WHERE invoice_id IN (${createdInvoiceIds.map(() => "?").join(",")})`,
+            createdInvoiceIds
+          );
+          await db.execute(
+            `DELETE FROM sales_invoices WHERE id IN (${createdInvoiceIds.map(() => "?").join(",")})`,
+            createdInvoiceIds
+          );
+        }
 
-      if (createdPriceItemIds.length > 0) {
-        await db.execute(
-          `DELETE FROM item_prices WHERE item_id IN (${createdPriceItemIds.map(() => "?").join(",")})`,
-          createdPriceItemIds
-        );
-      }
+        if (createdPriceItemIds.length > 0) {
+          await db.execute(
+            `DELETE FROM item_prices WHERE item_id IN (${createdPriceItemIds.map(() => "?").join(",")})`,
+            createdPriceItemIds
+          );
+        }
 
-      if (createdItemIds.length > 0) {
-        await db.execute(
-          `DELETE FROM items WHERE id IN (${createdItemIds.map(() => "?").join(",")})`,
-          createdItemIds
-        );
-      }
+        if (createdItemIds.length > 0) {
+          await db.execute(
+            `DELETE FROM items WHERE id IN (${createdItemIds.map(() => "?").join(",")})`,
+            createdItemIds
+          );
+        }
 
-      if (createdAccountIds.length > 0 && companyId != null) {
-        await db.execute(
-          `DELETE FROM journal_lines WHERE account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
-          createdAccountIds
-        );
-        await db.execute(
-          `DELETE FROM company_account_mappings WHERE company_id = ? AND account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
-          [companyId, ...createdAccountIds]
-        );
-        await db.execute(
-          `DELETE FROM outlet_account_mappings WHERE company_id = ? AND account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
-          [companyId, ...createdAccountIds]
-        );
-        await db.execute(
-          `DELETE FROM accounts WHERE company_id = ? AND id IN (${createdAccountIds.map(() => "?").join(",")})`,
-          [companyId, ...createdAccountIds]
-        );
+        if (createdAccountIds.length > 0 && companyId != null) {
+          // journal_lines cannot be deleted - immutability triggers
+          await db.execute(
+            `DELETE FROM company_account_mappings WHERE company_id = ? AND account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
+            [companyId, ...createdAccountIds]
+          );
+          await db.execute(
+            `DELETE FROM outlet_account_mappings WHERE company_id = ? AND account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
+            [companyId, ...createdAccountIds]
+          );
+          await db.execute(
+            `DELETE FROM accounts WHERE company_id = ? AND id IN (${createdAccountIds.map(() => "?").join(",")})`,
+            [companyId, ...createdAccountIds]
+          );
+        }
+      } catch (e) {
+        // Ignore cleanup errors - FK constraints or immutability may prevent deletion
       }
 
       if (companyId != null && createdInvoiceIds.length > 0) {
