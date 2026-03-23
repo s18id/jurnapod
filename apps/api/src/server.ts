@@ -29,6 +29,7 @@ import { taxRatesRoutes } from "./routes/tax-rates.js";
 import { modulesRoutes } from "./routes/settings-modules.js";
 import { moduleRolesRoutes } from "./routes/settings-module-roles.js";
 import { adminPagesRoutes, publicPagesRoutes } from "./routes/settings-pages.js";
+import { settingsConfigRoutes } from "./routes/settings-config.js";
 import { outletsRoutes } from "./routes/outlets.js";
 import { recipesRoutes } from "./routes/recipes.js";
 import { cashBankTransactionsRoutes } from "./routes/cash-bank-transactions.js";
@@ -163,6 +164,7 @@ app.route("/api/users", usersRoutes);
 app.route("/api/settings/tax-rates", taxRatesRoutes);
 app.route("/api/settings/modules", modulesRoutes);
 app.route("/api/settings/module-roles", moduleRolesRoutes);
+app.route("/api/settings/config", settingsConfigRoutes);
 app.route("/api/settings/pages", adminPagesRoutes);
 app.route("/api/pages", publicPagesRoutes);
 

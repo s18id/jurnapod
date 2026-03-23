@@ -61,12 +61,18 @@ declare module "hono" {
 // Request Schemas
 // =============================================================================
 
+const OutletRoleAssignmentSchema = z.object({
+  outlet_id: z.number(),
+  role_codes: z.array(z.string())
+});
+
 const CreateUserSchema = z.object({
   email: z.string().email().max(191),
   password: z.string().min(8).max(255),
   is_active: z.boolean().optional().default(true),
   role_codes: z.array(z.string()).optional().default([]),
-  outlet_ids: z.array(z.number()).optional().default([])
+  outlet_ids: z.array(z.number()).optional().default([]),
+  outlet_role_assignments: z.array(OutletRoleAssignmentSchema).optional().default([])
 });
 
 const SetUserRolesSchema = z.object({
@@ -149,7 +155,7 @@ usersRoutes.post("/", async (c) => {
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
       module: "users",
-      permission: "read"
+      permission: "create"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -166,6 +172,10 @@ usersRoutes.post("/", async (c) => {
       isActive: input.is_active,
       roleCodes: input.role_codes,
       outletIds: input.outlet_ids,
+      outletRoleAssignments: input.outlet_role_assignments.map((a) => ({
+        outletId: a.outlet_id,
+        roleCodes: a.role_codes
+      })),
       actor: {
         userId: auth.userId,
         ipAddress: readClientIp(c.req.raw)
