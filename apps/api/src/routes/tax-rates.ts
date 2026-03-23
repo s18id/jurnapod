@@ -19,7 +19,12 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import { listCompanyTaxRates, listCompanyDefaultTaxRates } from "../lib/taxes.js";
+import { 
+  listCompanyTaxRates, 
+  listCompanyDefaultTaxRates, 
+  setCompanyDefaultTaxRates,
+  listCompanyDefaultTaxRateIds
+} from "../lib/taxes.js";
 import { getDbPool } from "../lib/db.js";
 import {
   createTaxRate,
@@ -57,6 +62,10 @@ const TaxRateUpdateSchema = z.object({
   rate_percent: z.number().min(0).max(100).optional(),
   account_id: z.number().int().positive().optional(),
   is_inclusive: z.boolean().optional()
+});
+
+const TaxDefaultsUpdateSchema = z.object({
+  tax_rate_ids: z.array(z.number().int().positive())
 });
 
 // =============================================================================
@@ -182,6 +191,69 @@ taxRatesRoutes.post("/", async (c) => {
 
     console.error("POST /tax-rates failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to create tax rate", 500);
+  }
+});
+
+// GET /tax-defaults - Get company tax defaults
+taxRatesRoutes.get("/defaults", async (c) => {
+  const auth = c.get("auth");
+
+  // Check access permission
+  const accessResult = await requireAccess({
+    roles: [...TAX_RATES_ROLES],
+    module: "settings",
+    permission: "read"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const dbPool = getDbPool();
+    const defaultTaxRateIds = await listCompanyDefaultTaxRateIds(dbPool, auth.companyId);
+
+    return successResponse(defaultTaxRateIds);
+  } catch (error) {
+    console.error("GET /tax-defaults failed", error);
+    return errorResponse("INTERNAL_ERROR", "Tax defaults request failed", 500);
+  }
+});
+
+// PUT /tax-defaults - Update company tax defaults
+taxRatesRoutes.put("/defaults", async (c) => {
+  const auth = c.get("auth");
+
+  // Check access permission using bitmask system
+  const accessResult = await requireAccess({
+    module: "settings",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const payload = await c.req.json();
+    const input = TaxDefaultsUpdateSchema.parse(payload);
+
+    const dbPool = getDbPool();
+    const defaultTaxRateIds = await setCompanyDefaultTaxRates(
+      dbPool,
+      auth.companyId,
+      input.tax_rate_ids,
+      auth.userId
+    );
+
+    return successResponse(defaultTaxRateIds);
+  } catch (error) {
+    console.error("PUT /tax-defaults failed:", error);
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to update tax defaults", 500);
   }
 });
 

@@ -258,7 +258,7 @@ test(
       const createdRate = listBody.data.find((rate) => rate.code === rateCode);
       assert.ok(createdRate);
 
-      const defaultsResponse = await fetch(`${baseUrl}/api/settings/tax-defaults`, {
+      const defaultsResponse = await fetch(`${baseUrl}/api/settings/tax-rates/defaults`, {
         method: "PUT",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -272,7 +272,7 @@ test(
       const defaultsBody = await defaultsResponse.json();
       assert.equal(defaultsBody.success, true);
 
-      const getDefaultsResponse = await fetch(`${baseUrl}/api/settings/tax-defaults`, {
+      const getDefaultsResponse = await fetch(`${baseUrl}/api/settings/tax-rates/defaults`, {
         headers: {
           authorization: `Bearer ${accessToken}`
         }
