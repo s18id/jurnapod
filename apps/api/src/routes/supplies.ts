@@ -91,6 +91,12 @@ suppliesRoutes.get("/", async (c) => {
 
     const url = new URL(c.req.raw.url);
     const isActive = url.searchParams.get("is_active");
+    const companyId = url.searchParams.get("company_id");
+    
+    // Reject company_id parameter (not allowed)
+    if (companyId !== null) {
+      return errorResponse("INVALID_REQUEST", "company_id parameter not allowed", 400);
+    }
     
     // Parse is_active filter
     let isActiveFilter: boolean | undefined;
@@ -210,6 +216,17 @@ suppliesRoutes.patch("/:id", async (c) => {
     const supplyId = NumericIdSchema.parse(c.req.param("id"));
     const payload = await c.req.json();
     const input = SupplyUpdateSchema.parse(payload);
+
+    // Check if at least one field is provided
+    const hasUpdates = 
+      Object.hasOwn(input, "sku") ||
+      typeof input.name === "string" ||
+      typeof input.unit === "string" ||
+      typeof input.is_active === "boolean";
+    
+    if (!hasUpdates) {
+      return errorResponse("INVALID_REQUEST", "No fields to update", 400);
+    }
 
     const updatedSupply = await updateSupply(auth.companyId, supplyId, {
       sku: input.sku,

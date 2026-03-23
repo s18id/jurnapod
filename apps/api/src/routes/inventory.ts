@@ -14,6 +14,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import {
   ItemCreateRequestSchema,
   NumericIdSchema
@@ -23,19 +24,26 @@ import {
   requireAccess,
   type AuthContext
 } from "../lib/auth-guard.js";
+import { userHasOutletAccess, MODULE_PERMISSION_BITS } from "../lib/auth.js";
 import { errorResponse, successResponse } from "../lib/response.js";
+import { getDbPool } from "../lib/db.js";
 import {
   createItem,
+  updateItem,
+  deleteItem,
   listItems,
   getItemVariantStats,
   createItemPrice,
   updateItemPrice,
   deleteItemPrice,
   findItemPriceById,
+  findItemById,
   listItemPrices,
   DatabaseConflictError,
-  DatabaseReferenceError
+  DatabaseReferenceError,
+  DatabaseForbiddenError
 } from "../lib/master-data.js";
+import { checkUserAccess } from "../lib/auth.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -49,6 +57,51 @@ declare module "hono" {
 
 const INVENTORY_ROLES_READ = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"] as const;
 const INVENTORY_ROLES_WRITE = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"] as const;
+
+type AccessCheckRow = RowDataPacket & {
+  id: number;
+};
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/**
+ * Check if user can manage company defaults using bitmask permission system.
+ * Company defaults require:
+ * 1. A global role assignment (outlet_id IS NULL)
+ * 2. The appropriate permission bit set in module_roles.permission_mask
+ * 
+ * @param userId - User ID
+ * @param companyId - Company ID
+ * @param permission - Required permission (create, read, update, delete)
+ * @returns true if user can manage company defaults
+ */
+async function canManageCompanyDefaults(
+  userId: number,
+  companyId: number,
+  permission: "create" | "read" | "update" | "delete" = "create"
+): Promise<boolean> {
+  const pool = getDbPool();
+  const permissionBit = MODULE_PERMISSION_BITS[permission];
+
+  const [rows] = await pool.execute<AccessCheckRow[]>(
+    `SELECT 1
+     FROM user_role_assignments ura
+     INNER JOIN roles r ON r.id = ura.role_id
+     INNER JOIN module_roles mr ON mr.role_id = r.id
+     WHERE ura.user_id = ?
+       AND r.is_global = 1
+       AND ura.outlet_id IS NULL
+       AND mr.module = 'inventory'
+       AND mr.company_id = ?
+       AND (mr.permission_mask & ?) <> 0
+     LIMIT 1`,
+    [userId, companyId, permissionBit]
+  );
+
+  return rows.length > 0;
+}
 
 // =============================================================================
 // Request Schemas
@@ -275,6 +328,102 @@ inventoryRoutes.post("/items", async (c) => {
   }
 });
 
+// PATCH /inventory/items/:id - Update item
+inventoryRoutes.patch("/items/:id", async (c) => {
+  const auth = c.get("auth");
+
+  // Check access permission using bitmask system
+  const accessResult = await requireAccess({
+    module: "inventory",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const itemId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+
+    // Check if item exists
+    const existingItem = await findItemById(auth.companyId, itemId);
+    if (!existingItem) {
+      return errorResponse("NOT_FOUND", "Item not found", 404);
+    }
+
+    const updatedItem = await updateItem(auth.companyId, itemId, payload, {
+      userId: auth.userId
+    });
+
+    return successResponse(updatedItem);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof Error && error.message === "No fields to update") {
+      return errorResponse("INVALID_REQUEST", "No fields to update", 400);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", "Item conflict", 409);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Referenced resource not found", 404);
+    }
+
+    console.error("PATCH /inventory/items/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item update failed", 500);
+  }
+});
+
+// DELETE /inventory/items/:id - Delete item
+inventoryRoutes.delete("/items/:id", async (c) => {
+  const auth = c.get("auth");
+
+  // Check access permission using bitmask system
+  const accessResult = await requireAccess({
+    module: "inventory",
+    permission: "delete"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const itemId = NumericIdSchema.parse(c.req.param("id"));
+
+    // Check if item exists
+    const existingItem = await findItemById(auth.companyId, itemId);
+    if (!existingItem) {
+      return errorResponse("NOT_FOUND", "Item not found", 404);
+    }
+
+    await deleteItem(auth.companyId, itemId, {
+      userId: auth.userId
+    });
+
+    return successResponse({
+      id: itemId,
+      deleted: true
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid item ID", 400);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Item not found", 404);
+    }
+
+    console.error("DELETE /inventory/items/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item deletion failed", 500);
+  }
+});
+
 // GET /inventory/item-groups - List item groups
 inventoryRoutes.get("/item-groups", async (c) => {
   const auth = c.get("auth");
@@ -325,11 +474,24 @@ inventoryRoutes.get("/item-prices/active", async (c) => {
 
     const outletIdNum = NumericIdSchema.parse(outletId);
 
-    // Verify outlet belongs to company
+    // Check if user can access company defaults (requires global role)
+    const userCanSeeCompanyDefaults = await canManageCompanyDefaults(
+      auth.userId,
+      auth.companyId,
+      "read"
+    );
+
+    // List effective prices
     const { listEffectiveItemPricesForOutlet } = await import("../lib/master-data.js");
     const prices = await listEffectiveItemPricesForOutlet(auth.companyId, outletIdNum, { isActive: true });
 
-    return successResponse(prices);
+    // Filter out company defaults if user doesn't have access to them
+    // Company defaults have is_override = false
+    const filteredPrices = userCanSeeCompanyDefaults 
+      ? prices 
+      : prices.filter(price => price.is_override);
+
+    return successResponse(filteredPrices);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
@@ -348,7 +510,7 @@ inventoryRoutes.post("/item-prices", async (c) => {
   // Check access permission using bitmask system
   const accessResult = await requireAccess({
     module: "inventory",
-    permission: "read"
+    permission: "create"
   })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -358,13 +520,26 @@ inventoryRoutes.post("/item-prices", async (c) => {
     const payload = await c.req.json();
     const input = ItemPriceCreateSchema.parse(payload);
 
+    // Check if user can manage company defaults using bitmask permission
+    const userCanManageCompanyDefaults = await canManageCompanyDefaults(
+      auth.userId,
+      auth.companyId,
+      "create"
+    );
+
+    // If creating a company default (outlet_id is null), check permission
+    if (input.outlet_id === null && !userCanManageCompanyDefaults) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
     const price = await createItemPrice(auth.companyId, {
       item_id: input.item_id,
       outlet_id: input.outlet_id,
       price: input.price,
       is_active: input.is_active
     }, {
-      userId: auth.userId
+      userId: auth.userId,
+      canManageCompanyDefaults: userCanManageCompanyDefaults
     });
 
     return successResponse(price, 201);
@@ -379,6 +554,10 @@ inventoryRoutes.post("/item-prices", async (c) => {
 
     if (error instanceof DatabaseReferenceError) {
       return errorResponse("NOT_FOUND", "Item or outlet not found", 404);
+    }
+
+    if (error instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
     console.error("POST /inventory/item-prices failed", error);
@@ -401,9 +580,34 @@ inventoryRoutes.get("/item-prices", async (c) => {
       return accessResult;
     }
 
-    const itemPrices = await listItemPrices(auth.companyId);
+    const url = new URL(c.req.raw.url);
+    const outletIdParam = url.searchParams.get("outlet_id");
+    
+    // Check if user can access company defaults
+    const access = await checkUserAccess({
+      userId: auth.userId,
+      companyId: auth.companyId
+    });
+    const canAccessCompanyDefaults = access?.hasGlobalRole || access?.isSuperAdmin || false;
+
+    let itemPrices;
+    if (outletIdParam) {
+      const outletId = NumericIdSchema.parse(outletIdParam);
+      // When filtering by outlet, only include company defaults if user has access
+      itemPrices = await listItemPrices(auth.companyId, {
+        outletId,
+        includeDefaults: canAccessCompanyDefaults
+      });
+    } else {
+      itemPrices = await listItemPrices(auth.companyId);
+    }
+
     return successResponse(itemPrices);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
+    }
+
     console.error("GET /inventory/item-prices failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
   }
@@ -429,6 +633,25 @@ inventoryRoutes.get("/item-prices/:id", async (c) => {
     const itemPrice = await findItemPriceById(auth.companyId, priceId);
     if (!itemPrice) {
       return errorResponse("NOT_FOUND", "Item price not found", 404);
+    }
+
+    // Check if this is a company default price (outlet_id is null)
+    if (itemPrice.outlet_id === null) {
+      // Check if user has global role to access company defaults
+      const access = await checkUserAccess({
+        userId: auth.userId,
+        companyId: auth.companyId
+      });
+      const canManageCompanyDefaults = access?.hasGlobalRole || access?.isSuperAdmin || false;
+      if (!canManageCompanyDefaults) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+    } else {
+      // For outlet-specific prices, check outlet access
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, itemPrice.outlet_id);
+      if (!hasAccess) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
     }
 
     return successResponse(itemPrice);
@@ -465,11 +688,36 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
     const payload = await c.req.json();
     const input = ItemPriceUpdateSchema.parse(payload);
 
+    // Check if item price exists and validate outlet access
+    const existingPrice = await findItemPriceById(auth.companyId, priceId);
+    if (!existingPrice) {
+      return errorResponse("NOT_FOUND", "Item price not found", 404);
+    }
+
+    // Check if user has global role (for company defaults)
+    const access = await checkUserAccess({
+      userId: auth.userId,
+      companyId: auth.companyId
+    });
+    const canManageCompanyDefaults = access?.hasGlobalRole || access?.isSuperAdmin || false;
+
+    // Validate outlet access if the price is outlet-specific
+    if (existingPrice.outlet_id) {
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, existingPrice.outlet_id);
+      if (!hasAccess) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+    } else if (!canManageCompanyDefaults) {
+      // Company default price requires global role
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
     const updatedItemPrice = await updateItemPrice(auth.companyId, priceId, {
       price: input.price,
       is_active: input.is_active
     }, {
-      userId: auth.userId
+      userId: auth.userId,
+      canManageCompanyDefaults
     });
 
     return successResponse(updatedItemPrice);
@@ -484,6 +732,10 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
 
     if (error instanceof DatabaseConflictError) {
       return errorResponse("CONFLICT", "Item price conflict", 409);
+    }
+
+    if (error instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
     console.error("PATCH /inventory/item-prices/:id failed", error);
@@ -508,8 +760,15 @@ inventoryRoutes.delete("/item-prices/:id", async (c) => {
 
     const priceId = NumericIdSchema.parse(c.req.param("id"));
 
+    // Check if user has global role (for company defaults) before calling delete
+    const access = await checkUserAccess({
+      userId: auth.userId,
+      companyId: auth.companyId
+    });
+
     await deleteItemPrice(auth.companyId, priceId, {
-      userId: auth.userId
+      userId: auth.userId,
+      canManageCompanyDefaults: access?.hasGlobalRole || access?.isSuperAdmin || false
     });
 
     return successResponse({
@@ -523,6 +782,10 @@ inventoryRoutes.delete("/item-prices/:id", async (c) => {
 
     if (error instanceof DatabaseReferenceError) {
       return errorResponse("NOT_FOUND", "Item price not found", 404);
+    }
+
+    if (error instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
     console.error("DELETE /inventory/item-prices/:id failed", error);

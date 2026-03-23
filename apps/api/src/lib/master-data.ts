@@ -1372,6 +1372,14 @@ export async function updateItem(
         throw new Error("Updated item not found");
       }
 
+      // If item is being deactivated, also deactivate associated item_prices
+      if (typeof input.is_active === "boolean" && input.is_active === false) {
+        await connection.execute<ResultSetHeader>(
+          `UPDATE item_prices SET is_active = 0 WHERE item_id = ? AND company_id = ?`,
+          [itemId, companyId]
+        );
+      }
+
       await recordMasterDataAuditLog(connection, {
         companyId,
         outletId: null,
