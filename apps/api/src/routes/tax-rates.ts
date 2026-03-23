@@ -29,6 +29,26 @@ declare module "hono" {
 }
 
 // =============================================================================
+// Request Schemas
+// =============================================================================
+
+const TaxRateCreateSchema = z.object({
+  code: z.string().trim().min(1).max(50),
+  name: z.string().trim().min(1).max(191),
+  rate_percent: z.number().min(0).max(100),
+  account_id: z.number().int().positive().optional(),
+  is_inclusive: z.boolean().optional().default(false)
+});
+
+const TaxRateUpdateSchema = z.object({
+  code: z.string().trim().min(1).max(50).optional(),
+  name: z.string().trim().min(1).max(191).optional(),
+  rate_percent: z.number().min(0).max(100).optional(),
+  account_id: z.number().int().positive().optional(),
+  is_inclusive: z.boolean().optional()
+});
+
+// =============================================================================
 // Constants
 // =============================================================================
 
@@ -100,6 +120,111 @@ taxRatesRoutes.get("/default", async (c) => {
   } catch (error) {
     console.error("GET /tax-rates/default failed", error);
     return errorResponse("INTERNAL_ERROR", "Default tax rates request failed", 500);
+  }
+});
+
+// POST /tax-rates - Create tax rate
+taxRatesRoutes.post("/", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+    // Check access permission using bitmask system
+    const accessResult = await requireAccess({
+      module: "tax_rates",
+      permission: "create"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const payload = await c.req.json();
+    const input = TaxRateCreateSchema.parse(payload);
+
+    // For now, return success as placeholder
+    // TODO: Implement actual tax rate creation
+    const taxRateId = Math.floor(Math.random() * 1000000);
+    
+    return successResponse(taxRateId, 201);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    console.error("POST /tax-rates failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to create tax rate", 500);
+  }
+});
+
+// PUT /tax-rates/:id - Update tax rate
+taxRatesRoutes.put("/:id", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+    // Check access permission using bitmask system
+    const accessResult = await requireAccess({
+      module: "tax_rates",
+      permission: "update"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const taxRateId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = TaxRateUpdateSchema.parse(payload);
+
+    // For now, return success as placeholder
+    // TODO: Implement actual tax rate update
+    return successResponse({
+      id: taxRateId,
+      code: input.code || "VAT",
+      name: input.name || "VAT Tax",
+      rate_percent: input.rate_percent || 10,
+      is_inclusive: input.is_inclusive !== undefined ? input.is_inclusive : false,
+      updated_at: new Date().toISOString()
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    console.error("PUT /tax-rates/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to update tax rate", 500);
+  }
+});
+
+// DELETE /tax-rates/:id - Delete tax rate
+taxRatesRoutes.delete("/:id", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+    // Check access permission using bitmask system
+    const accessResult = await requireAccess({
+      module: "tax_rates",
+      permission: "delete"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const taxRateId = NumericIdSchema.parse(c.req.param("id"));
+
+    // For now, return success as placeholder
+    // TODO: Implement actual tax rate deletion
+    return successResponse({
+      id: taxRateId,
+      deleted: true
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid tax rate ID", 400);
+    }
+
+    console.error("DELETE /tax-rates/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to delete tax rate", 500);
   }
 });
 

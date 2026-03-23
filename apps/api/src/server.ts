@@ -28,6 +28,8 @@ import { usersRoutes } from "./routes/users.js";
 import { taxRatesRoutes } from "./routes/tax-rates.js";
 import { outletsRoutes } from "./routes/outlets.js";
 import { recipesRoutes } from "./routes/recipes.js";
+import { cashBankTransactionsRoutes } from "./routes/cash-bank-transactions.js";
+import { suppliesRoutes } from "./routes/supplies.js";
 import { printRoutes } from "./lib/routes.js";
 
 // Validate environment configuration before starting server
@@ -162,6 +164,12 @@ app.route("/api/outlets", outletsRoutes);
 
 // Register recipe routes under inventory
 app.route("/api/inventory/recipes", recipesRoutes);
+
+// Register cash bank transactions routes
+app.route("/api/cash-bank-transactions", cashBankTransactionsRoutes);
+
+// Register supplies routes under inventory
+app.route("/api/inventory/supplies", suppliesRoutes);
 
 // Initialize sync modules after routes are registered
 try {

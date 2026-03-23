@@ -57,6 +57,11 @@ const ItemPriceCreateSchema = z.object({
   is_active: z.boolean().optional().default(true)
 });
 
+const ItemPriceUpdateSchema = z.object({
+  price: z.number().positive().optional(),
+  is_active: z.boolean().optional()
+});
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -221,11 +226,11 @@ inventoryRoutes.get("/items/:id", async (c) => {
 inventoryRoutes.post("/items", async (c) => {
   const auth = c.get("auth");
 
-  // Check access permission using bitmask system
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "create"
-  })(c.req.raw, auth);
+    // Check access permission using bitmask system
+    const accessResult = await requireAccess({
+      module: "inventory",
+      permission: "create"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -374,6 +379,137 @@ inventoryRoutes.post("/item-prices", async (c) => {
 
     console.error("POST /inventory/item-prices failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Item price creation failed", 500);
+  }
+});
+
+// GET /inventory/item-prices - List item prices
+inventoryRoutes.get("/item-prices", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+    // Check access permission using bitmask system
+    const accessResult = await requireAccess({
+      module: "inventory",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    // For now, return empty array as placeholder
+    // TODO: Implement actual item price listing
+    return successResponse([]);
+  } catch (error) {
+    console.error("GET /inventory/item-prices failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
+  }
+});
+
+// GET /inventory/item-prices/:id - Get item price by ID
+inventoryRoutes.get("/item-prices/:id", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+    // Check access permission using bitmask system
+    const accessResult = await requireAccess({
+      module: "inventory",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const priceId = NumericIdSchema.parse(c.req.param("id"));
+
+    // For now, return placeholder data
+    // TODO: Implement actual item price retrieval
+    return successResponse({
+      id: priceId,
+      item_id: 1,
+      outlet_id: 1,
+      price: 10000,
+      is_active: true,
+      created_at: new Date().toISOString()
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid price ID", 400);
+    }
+
+    console.error("GET /inventory/item-prices/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item price request failed", 500);
+  }
+});
+
+// PATCH /inventory/item-prices/:id - Update item price
+inventoryRoutes.patch("/item-prices/:id", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+    // Check access permission using bitmask system
+    const accessResult = await requireAccess({
+      module: "inventory",
+      permission: "update"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const priceId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = ItemPriceUpdateSchema.parse(payload);
+
+    // For now, return success as placeholder
+    // TODO: Implement actual item price update
+    return successResponse({
+      id: priceId,
+      price: input.price || 10000,
+      is_active: input.is_active !== undefined ? input.is_active : true,
+      updated_at: new Date().toISOString()
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    console.error("PATCH /inventory/item-prices/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item price update failed", 500);
+  }
+});
+
+// DELETE /inventory/item-prices/:id - Delete item price
+inventoryRoutes.delete("/item-prices/:id", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+    // Check access permission using bitmask system
+    const accessResult = await requireAccess({
+      module: "inventory",
+      permission: "delete"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const priceId = NumericIdSchema.parse(c.req.param("id"));
+
+    // For now, return success as placeholder
+    // TODO: Implement actual item price deletion
+    return successResponse({
+      id: priceId,
+      deleted: true
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid price ID", 400);
+    }
+
+    console.error("DELETE /inventory/item-prices/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item price deletion failed", 500);
   }
 });
 

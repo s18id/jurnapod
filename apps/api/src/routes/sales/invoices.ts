@@ -13,7 +13,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   SalesInvoiceCreateRequestSchema,
-  SalesInvoiceListQuerySchema
+  SalesInvoiceListQuerySchema,
+  NumericIdSchema
 } from "@jurnapod/shared";
 import {
   createInvoice,
@@ -22,7 +23,9 @@ import {
   DatabaseReferenceError,
   InvoiceStatusError,
   listInvoices,
-  postInvoice
+  postInvoice,
+  getInvoice,
+  updateInvoice
 } from "@/lib/sales";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { getCompany } from "@/lib/companies";
@@ -206,6 +209,146 @@ invoiceRoutes.post("/", async (c) => {
 
     console.error("POST /sales/invoices failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Invoice creation failed", 500);
+  }
+});
+
+// ============================================================================
+// GET /sales/invoices/:id - Get invoice by ID
+// ============================================================================
+
+invoiceRoutes.get("/:id", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+
+  try {
+    const invoiceId = NumericIdSchema.parse(c.req.param("id"));
+
+    const invoice = await getInvoice(auth.companyId, invoiceId);
+    if (!invoice) {
+      return errorResponse("NOT_FOUND", "Invoice not found", 404);
+    }
+
+    // Check outlet access
+    const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, invoice.outlet_id);
+    if (!hasAccess) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    return successResponse(invoice);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid invoice ID", 400);
+    }
+
+    console.error("GET /sales/invoices/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Invoice request failed", 500);
+  }
+});
+
+// ============================================================================
+// PATCH /sales/invoices/:id - Update invoice
+// ============================================================================
+
+invoiceRoutes.patch("/:id", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+
+  try {
+    const invoiceId = NumericIdSchema.parse(c.req.param("id"));
+
+    let payload: unknown;
+    try {
+      payload = await c.req.json();
+    } catch {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    // For now, use the same schema as create (simplified)
+    // TODO: Create proper update schema
+    const input = SalesInvoiceCreateRequestSchema.parse(payload);
+
+    // Validate outlet access
+    const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, input.outlet_id);
+    if (!hasAccess) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    const updatedInvoice = await updateInvoice(auth.companyId, invoiceId, input, {
+      userId: auth.userId
+    });
+
+    if (!updatedInvoice) {
+      return errorResponse("NOT_FOUND", "Invoice not found", 404);
+    }
+
+    return successResponse(updatedInvoice);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    if (error instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    if (error instanceof InvoiceStatusError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    console.error("PATCH /sales/invoices/:id failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Invoice update failed", 500);
+  }
+});
+
+// ============================================================================
+// POST /sales/invoices/:id/post - Post invoice to GL
+// ============================================================================
+
+invoiceRoutes.post("/:id/post", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+
+  try {
+    const invoiceId = NumericIdSchema.parse(c.req.param("id"));
+
+    // Check if invoice exists and user has access
+    const invoice = await getInvoice(auth.companyId, invoiceId);
+    if (!invoice) {
+      return errorResponse("NOT_FOUND", "Invoice not found", 404);
+    }
+
+    const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, invoice.outlet_id);
+    if (!hasAccess) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    const postedInvoice = await postInvoice(auth.companyId, invoiceId, {
+      userId: auth.userId
+    });
+
+    if (!postedInvoice) {
+      return errorResponse("NOT_FOUND", "Invoice not found", 404);
+    }
+
+    return successResponse(postedInvoice);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid invoice ID", 400);
+    }
+
+    if (error instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    if (error instanceof InvoiceStatusError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      if (error.message.includes("account not found") || error.message.includes("Account not found")) {
+        return errorResponse("NOT_FOUND", "GL account not found", 404);
+      }
+    }
+
+    console.error("POST /sales/invoices/:id/post failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Invoice posting failed", 500);
   }
 });
 
