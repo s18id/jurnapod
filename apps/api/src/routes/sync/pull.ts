@@ -136,13 +136,11 @@ syncPullRoutes.get("/", async (c) => {
     // Verify user has access to this outlet
     const dbPool = getDbPool();
     
-    // Check outlet access for CASHIER role (owners/admins have global access)
+    // Check outlet access using role-based logic
     if (auth.role !== "OWNER" && auth.role !== "ADMIN" && auth.role !== "ACCOUNTANT") {
-      const [accessRows] = await dbPool.execute<RowDataPacket[]>(
-        `SELECT 1 FROM user_outlets WHERE user_id = ? AND outlet_id = ? LIMIT 1`,
-        [auth.userId, input.outlet_id]
-      );
-      if (accessRows.length === 0) {
+      const { userHasOutletAccess } = await import("../../lib/auth.js");
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, input.outlet_id);
+      if (!hasAccess) {
         c.status(403);
         return errorResponse("FORBIDDEN", "Access denied to this outlet", 403);
       }
