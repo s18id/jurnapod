@@ -29,6 +29,10 @@ import {
   listItems,
   getItemVariantStats,
   createItemPrice,
+  updateItemPrice,
+  deleteItemPrice,
+  findItemPriceById,
+  listItemPrices,
   DatabaseConflictError,
   DatabaseReferenceError
 } from "../lib/master-data.js";
@@ -226,11 +230,11 @@ inventoryRoutes.get("/items/:id", async (c) => {
 inventoryRoutes.post("/items", async (c) => {
   const auth = c.get("auth");
 
-    // Check access permission using bitmask system
-    const accessResult = await requireAccess({
-      module: "inventory",
-      permission: "create"
-    })(c.req.raw, auth);
+  // Check access permission using bitmask system
+  const accessResult = await requireAccess({
+    module: "inventory",
+    permission: "create"
+  })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -397,9 +401,8 @@ inventoryRoutes.get("/item-prices", async (c) => {
       return accessResult;
     }
 
-    // For now, return empty array as placeholder
-    // TODO: Implement actual item price listing
-    return successResponse([]);
+    const itemPrices = await listItemPrices(auth.companyId);
+    return successResponse(itemPrices);
   } catch (error) {
     console.error("GET /inventory/item-prices failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
@@ -423,19 +426,19 @@ inventoryRoutes.get("/item-prices/:id", async (c) => {
 
     const priceId = NumericIdSchema.parse(c.req.param("id"));
 
-    // For now, return placeholder data
-    // TODO: Implement actual item price retrieval
-    return successResponse({
-      id: priceId,
-      item_id: 1,
-      outlet_id: 1,
-      price: 10000,
-      is_active: true,
-      created_at: new Date().toISOString()
-    });
+    const itemPrice = await findItemPriceById(auth.companyId, priceId);
+    if (!itemPrice) {
+      return errorResponse("NOT_FOUND", "Item price not found", 404);
+    }
+
+    return successResponse(itemPrice);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid price ID", 400);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Item price not found", 404);
     }
 
     console.error("GET /inventory/item-prices/:id failed", error);
@@ -462,17 +465,25 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
     const payload = await c.req.json();
     const input = ItemPriceUpdateSchema.parse(payload);
 
-    // For now, return success as placeholder
-    // TODO: Implement actual item price update
-    return successResponse({
-      id: priceId,
-      price: input.price || 10000,
-      is_active: input.is_active !== undefined ? input.is_active : true,
-      updated_at: new Date().toISOString()
+    const updatedItemPrice = await updateItemPrice(auth.companyId, priceId, {
+      price: input.price,
+      is_active: input.is_active
+    }, {
+      userId: auth.userId
     });
+
+    return successResponse(updatedItemPrice);
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Item price not found", 404);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", "Item price conflict", 409);
     }
 
     console.error("PATCH /inventory/item-prices/:id failed", error);
@@ -497,8 +508,10 @@ inventoryRoutes.delete("/item-prices/:id", async (c) => {
 
     const priceId = NumericIdSchema.parse(c.req.param("id"));
 
-    // For now, return success as placeholder
-    // TODO: Implement actual item price deletion
+    await deleteItemPrice(auth.companyId, priceId, {
+      userId: auth.userId
+    });
+
     return successResponse({
       id: priceId,
       deleted: true
@@ -506,6 +519,10 @@ inventoryRoutes.delete("/item-prices/:id", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid price ID", 400);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Item price not found", 404);
     }
 
     console.error("DELETE /inventory/item-prices/:id failed", error);

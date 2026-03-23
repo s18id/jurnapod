@@ -21,7 +21,18 @@ import {
   requireAccess,
   type AuthContext
 } from "../lib/auth-guard.js";
+import { userHasOutletAccess } from "../lib/auth.js";
 import { errorResponse, successResponse } from "../lib/response.js";
+import {
+  listCashBankTransactions,
+  createCashBankTransaction,
+  postCashBankTransaction,
+  voidCashBankTransaction,
+  CashBankValidationError,
+  CashBankNotFoundError,
+  CashBankForbiddenError,
+  CashBankStatusError
+} from "../lib/cash-bank.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -34,13 +45,14 @@ declare module "hono" {
 // =============================================================================
 
 const CreateCashBankTransactionSchema = z.object({
-  transaction_type: z.enum(["MUTATION", "CASH_IN", "CASH_OUT", "BANK_IN", "BANK_OUT"]),
+  transaction_type: z.enum(["MUTATION", "TOP_UP", "WITHDRAWAL", "FOREX"]),
   transaction_date: z.string().optional(),
   description: z.string().trim().min(1).max(500),
   source_account_id: z.number().int().positive(),
   destination_account_id: z.number().int().positive(),
   amount: z.number().positive(),
-  reference: z.string().trim().max(191).optional()
+  reference: z.string().trim().max(191).optional(),
+  outlet_id: z.number().int().positive().optional()
 });
 
 // =============================================================================
@@ -76,11 +88,24 @@ cashBankTransactionsRoutes.get("/", async (c) => {
     }
 
     const url = new URL(c.req.raw.url);
-    const outletId = url.searchParams.get("outlet_id");
+    const outletIdParam = url.searchParams.get("outlet_id");
     
-    // For now, return empty array as placeholder
-    // TODO: Implement actual cash bank transaction listing
-    return successResponse([]);
+    let outletId: number | undefined;
+    if (outletIdParam) {
+      outletId = NumericIdSchema.parse(outletIdParam);
+      
+      // Validate outlet access if specific outlet requested
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, outletId);
+      if (!hasAccess) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+    }
+
+    const transactions = await listCashBankTransactions(auth.companyId, {
+      outletId
+    });
+    
+    return successResponse(transactions);
   } catch (error) {
     console.error("GET /cash-bank-transactions failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to fetch transactions", 500);
@@ -105,23 +130,39 @@ cashBankTransactionsRoutes.post("/", async (c) => {
     const payload = await c.req.json();
     const input = CreateCashBankTransactionSchema.parse(payload);
 
-    // For now, return success as placeholder
-    // TODO: Implement actual cash bank transaction creation
-    return successResponse({
-      id: Math.floor(Math.random() * 1000000),
+    // Validate outlet access if outlet_id is specified
+    if (input.outlet_id) {
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, input.outlet_id);
+      if (!hasAccess) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+    }
+
+    const transaction = await createCashBankTransaction(auth.companyId, {
+      outlet_id: input.outlet_id,
       transaction_type: input.transaction_type,
       transaction_date: input.transaction_date || new Date().toISOString().slice(0, 10),
       description: input.description,
       source_account_id: input.source_account_id,
       destination_account_id: input.destination_account_id,
       amount: input.amount,
-      reference: input.reference,
-      status: "DRAFT",
-      created_at: new Date().toISOString()
-    }, 201);
+      reference: input.reference
+    }, {
+      userId: auth.userId
+    });
+
+    return successResponse(transaction, 201);
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof CashBankValidationError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+
+    if (error instanceof CashBankForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
     }
 
     console.error("POST /cash-bank-transactions failed", error);
@@ -134,10 +175,10 @@ cashBankTransactionsRoutes.post("/:id/post", async (c) => {
   try {
     const auth = c.get("auth");
     
-    // Check access permission using bitmask system
+    // Check access permission - posting requires create permission (not update)
     const accessResult = await requireAccess({
       module: "cash_bank",
-      permission: "update"
+      permission: "create"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -146,15 +187,26 @@ cashBankTransactionsRoutes.post("/:id/post", async (c) => {
 
     const transactionId = NumericIdSchema.parse(c.req.param("id"));
 
-    // For now, return success as placeholder
-    // TODO: Implement actual transaction posting
-    return successResponse({
-      id: transactionId,
-      status: "POSTED"
+    const postedTransaction = await postCashBankTransaction(auth.companyId, transactionId, {
+      userId: auth.userId
     });
+
+    return successResponse(postedTransaction);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid transaction ID", 400);
+    }
+
+    if (error instanceof CashBankNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+
+    if (error instanceof CashBankForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
+    if (error instanceof CashBankStatusError) {
+      return errorResponse("CONFLICT", error.message, 409);
     }
 
     console.error("POST /cash-bank-transactions/:id/post failed", error);
@@ -167,10 +219,10 @@ cashBankTransactionsRoutes.post("/:id/void", async (c) => {
   try {
     const auth = c.get("auth");
     
-    // Check access permission using bitmask system
+    // Check access permission - voiding requires create permission (not delete)
     const accessResult = await requireAccess({
       module: "cash_bank",
-      permission: "delete"
+      permission: "create"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -179,15 +231,26 @@ cashBankTransactionsRoutes.post("/:id/void", async (c) => {
 
     const transactionId = NumericIdSchema.parse(c.req.param("id"));
 
-    // For now, return success as placeholder
-    // TODO: Implement actual transaction voiding
-    return successResponse({
-      id: transactionId,
-      status: "VOIDED"
+    const voidedTransaction = await voidCashBankTransaction(auth.companyId, transactionId, {
+      userId: auth.userId
     });
+
+    return successResponse(voidedTransaction);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid transaction ID", 400);
+    }
+
+    if (error instanceof CashBankNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+
+    if (error instanceof CashBankForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
+    if (error instanceof CashBankStatusError) {
+      return errorResponse("CONFLICT", error.message, 409);
     }
 
     console.error("POST /cash-bank-transactions/:id/void failed", error);

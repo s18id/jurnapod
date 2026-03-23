@@ -23,6 +23,15 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
+import {
+  listSupplies,
+  findSupplyById,
+  createSupply,
+  updateSupply,
+  deleteSupply,
+  DatabaseConflictError,
+  DatabaseReferenceError
+} from "../lib/master-data.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -93,9 +102,11 @@ suppliesRoutes.get("/", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid is_active parameter", 400);
     }
 
-    // For now, return empty array as placeholder
-    // TODO: Implement actual supply listing
-    return successResponse([]);
+    const supplies = await listSupplies(auth.companyId, {
+      isActive: isActiveFilter
+    });
+    
+    return successResponse(supplies);
   } catch (error) {
     console.error("GET /supplies failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to fetch supplies", 500);
@@ -120,19 +131,27 @@ suppliesRoutes.post("/", async (c) => {
     const payload = await c.req.json();
     const input = SupplyCreateSchema.parse(payload);
 
-    // For now, return success as placeholder
-    // TODO: Implement actual supply creation
-    return successResponse({
-      id: Math.floor(Math.random() * 1000000),
+    const supply = await createSupply(auth.companyId, {
       sku: input.sku,
       name: input.name,
       unit: input.unit,
-      is_active: input.is_active,
-      created_at: new Date().toISOString()
-    }, 201);
+      is_active: input.is_active
+    }, {
+      userId: auth.userId
+    });
+
+    return successResponse(supply, 201);
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", "Supply conflict", 409);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Referenced resource not found", 404);
     }
 
     console.error("POST /supplies failed", error);
@@ -157,16 +176,12 @@ suppliesRoutes.get("/:id", async (c) => {
 
     const supplyId = NumericIdSchema.parse(c.req.param("id"));
 
-    // For now, return placeholder data
-    // TODO: Implement actual supply retrieval
-    return successResponse({
-      id: supplyId,
-      sku: "SUPPLY001",
-      name: "Test Supply",
-      unit: "pcs",
-      is_active: true,
-      created_at: new Date().toISOString()
-    });
+    const supply = await findSupplyById(auth.companyId, supplyId);
+    if (!supply) {
+      return errorResponse("NOT_FOUND", "Supply not found", 404);
+    }
+
+    return successResponse(supply);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid supply ID", 400);
@@ -196,19 +211,27 @@ suppliesRoutes.patch("/:id", async (c) => {
     const payload = await c.req.json();
     const input = SupplyUpdateSchema.parse(payload);
 
-    // For now, return success as placeholder
-    // TODO: Implement actual supply update
-    return successResponse({
-      id: supplyId,
-      sku: input.sku || "SUPPLY001",
-      name: input.name || "Test Supply",
-      unit: input.unit || "pcs",
-      is_active: input.is_active !== undefined ? input.is_active : true,
-      updated_at: new Date().toISOString()
+    const updatedSupply = await updateSupply(auth.companyId, supplyId, {
+      sku: input.sku,
+      name: input.name,
+      unit: input.unit,
+      is_active: input.is_active
+    }, {
+      userId: auth.userId
     });
+
+    return successResponse(updatedSupply);
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", "Supply conflict", 409);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Supply not found", 404);
     }
 
     console.error("PATCH /supplies/:id failed", error);
@@ -233,8 +256,10 @@ suppliesRoutes.delete("/:id", async (c) => {
 
     const supplyId = NumericIdSchema.parse(c.req.param("id"));
 
-    // For now, return success as placeholder
-    // TODO: Implement actual supply deletion
+    await deleteSupply(auth.companyId, supplyId, {
+      userId: auth.userId
+    });
+
     return successResponse({
       id: supplyId,
       deleted: true
@@ -242,6 +267,10 @@ suppliesRoutes.delete("/:id", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid supply ID", 400);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Supply not found", 404);
     }
 
     console.error("DELETE /supplies/:id failed", error);
