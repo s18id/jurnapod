@@ -24,6 +24,10 @@ import { reportRoutes } from "./routes/reports.js";
 import { accountRoutes } from "./routes/accounts.js";
 import { companyRoutes } from "./routes/companies.js";
 import { dineinRoutes } from "./routes/dinein.js";
+import { usersRoutes } from "./routes/users.js";
+import { taxRatesRoutes } from "./routes/tax-rates.js";
+import { outletsRoutes } from "./routes/outlets.js";
+import { recipesRoutes } from "./routes/recipes.js";
 import { printRoutes } from "./lib/routes.js";
 
 // Validate environment configuration before starting server
@@ -120,32 +124,44 @@ app.use("/api/*", async (c: any, next: () => Promise<void>) => {
 });
 
 // Register stock routes using Hono's app.route() pattern
-// URL standardization: /outlets/:outletId/stock/* (RESTful nesting)
-app.route("/outlets/:outletId/stock", stockRoutes);
+// URL standardization: /api/outlets/:outletId/stock/* (RESTful nesting)
+app.route("/api/outlets/:outletId/stock", stockRoutes);
 
 // Register sync routes using Hono's app.route() pattern
-// URL standardization: /sync/* (cross-outlet operation)
-app.route("/sync", syncRoutes);
+// URL standardization: /api/sync/* (cross-outlet operation)
+app.route("/api/sync", syncRoutes);
 
 // Register sales routes using Hono's app.route() pattern
-app.route("/sales", salesRoutes);
+app.route("/api/sales", salesRoutes);
 
 // Register health routes (no auth required)
-app.route("/health", healthRoutes);
+app.route("/api/health", healthRoutes);
 
 // Register auth routes (special handling - no auth for login)
-app.route("/auth", authRoutes);
+app.route("/api/auth", authRoutes);
 
 // Register remaining route groups
-app.route("/roles", rolesRoutes);
-app.route("/journals", journalRoutes);
-app.route("/reports", reportRoutes);
-app.route("/accounts", accountRoutes);
-app.route("/companies", companyRoutes);
-app.route("/dinein", dineinRoutes);
+app.route("/api/roles", rolesRoutes);
+app.route("/api/journals", journalRoutes);
+app.route("/api/reports", reportRoutes);
+app.route("/api/accounts", accountRoutes);
+app.route("/api/companies", companyRoutes);
+app.route("/api/dinein", dineinRoutes);
 
 // Register inventory routes using clean Hono structure  
-app.route("/inventory", inventoryRoutes);
+app.route("/api/inventory", inventoryRoutes);
+
+// Register users routes
+app.route("/api/users", usersRoutes);
+
+// Register tax rates routes  
+app.route("/api/settings/tax-rates", taxRatesRoutes);
+
+// Register outlets routes
+app.route("/api/outlets", outletsRoutes);
+
+// Register recipe routes under inventory
+app.route("/api/inventory/recipes", recipesRoutes);
 
 // Initialize sync modules after routes are registered
 try {

@@ -28,6 +28,7 @@ import {
   createItem,
   listItems,
   getItemVariantStats,
+  createItemPrice,
   DatabaseConflictError,
   DatabaseReferenceError
 } from "../lib/master-data.js";
@@ -44,6 +45,17 @@ declare module "hono" {
 
 const INVENTORY_ROLES_READ = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"] as const;
 const INVENTORY_ROLES_WRITE = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"] as const;
+
+// =============================================================================
+// Request Schemas
+// =============================================================================
+
+const ItemPriceCreateSchema = z.object({
+  item_id: z.number().int().positive(),
+  outlet_id: z.number().int().positive().nullable(),
+  price: z.number().positive(),
+  is_active: z.boolean().optional().default(true)
+});
 
 // =============================================================================
 // Helper Functions
@@ -125,12 +137,11 @@ inventoryRoutes.get("/variant-stats", async (c) => {
   try {
     const auth = c.get("auth");
     
-    // Check access permission
-    const accessResult = await requireAccess({
-      roles: [...INVENTORY_ROLES_READ],
-      module: "inventory",
-      permission: "read"
-    })(c.req.raw, auth);
+  // Check access permission using bitmask system
+  const accessResult = await requireAccess({
+    module: "inventory",
+    permission: "read"
+  })(c.req.raw, auth);
 
     if (accessResult !== null) {
       return accessResult;
@@ -210,9 +221,8 @@ inventoryRoutes.get("/items/:id", async (c) => {
 inventoryRoutes.post("/items", async (c) => {
   const auth = c.get("auth");
 
-  // Check access permission
+  // Check access permission using bitmask system
   const accessResult = await requireAccess({
-    roles: [...INVENTORY_ROLES_WRITE],
     module: "inventory",
     permission: "create"
   })(c.req.raw, auth);
@@ -318,6 +328,52 @@ inventoryRoutes.get("/item-prices/active", async (c) => {
 
     console.error("GET /inventory/item-prices/active failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Prices request failed", 500);
+  }
+});
+
+// POST /inventory/item-prices - Create new item price
+inventoryRoutes.post("/item-prices", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+  // Check access permission using bitmask system
+  const accessResult = await requireAccess({
+    module: "inventory",
+    permission: "read"
+  })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const payload = await c.req.json();
+    const input = ItemPriceCreateSchema.parse(payload);
+
+    const price = await createItemPrice(auth.companyId, {
+      item_id: input.item_id,
+      outlet_id: input.outlet_id,
+      price: input.price,
+      is_active: input.is_active
+    }, {
+      userId: auth.userId
+    });
+
+    return successResponse(price, 201);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", "Item price conflict", 409);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", "Item or outlet not found", 404);
+    }
+
+    console.error("POST /inventory/item-prices failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item price creation failed", 500);
   }
 });
 
