@@ -60,7 +60,7 @@ export function useItemVariantStats({
     try {
       // Fetch variant stats for all items in parallel
       const promises = itemIds.map(async (itemId) => {
-        const response = await apiRequest(`/api/inventory/items/${itemId}/variants`, {
+        const response = await apiRequest(`/inventory/items/${itemId}/variants`, {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
 
