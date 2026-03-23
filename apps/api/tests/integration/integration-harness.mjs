@@ -359,13 +359,119 @@ export function setupIntegrationTests(testInstance, options = {}) {
 }
 
 /**
- * Helper to cleanup journal entries that are protected by immutability triggers.
- * Since migration 0114 added BEFORE DELETE triggers on journal_lines and journal_batches
- * to enforce immutability, direct DELETE operations will fail. This helper catches and
- * ignores those specific errors, allowing test cleanup to continue.
+ * Comprehensive cleanup helper for integration tests.
+ * Handles proper deletion order and ignores errors from:
+ * 1. Immutability triggers (journal_lines, journal_batches)
+ * 2. FK constraint violations (accounts referenced by journals)
  * 
- * Note: Journal entries created by tests will remain in the database but this is
- * acceptable for test isolation since each test uses unique identifiers.
+ * Usage:
+ *   const cleanup = createCleanupHelper(db);
+ *   cleanup.addCompany(companyId);
+ *   cleanup.addUser(userId);
+ *   cleanup.addOutlet(outletId);
+ *   cleanup.addAccount(accountId);
+ *   cleanup.addTaxRate(taxRateId);
+ *   cleanup.addCashBankTx(txId);
+ *   // In test finally block:
+ *   await cleanup.execute();
+ */
+export function createCleanupHelper(db) {
+  const companyIds = [];
+  const userIds = [];
+  const outletIds = [];
+  const accountIds = [];
+  const taxRateIds = [];
+  const cashBankTxIds = [];
+  
+  return {
+    addCompany: (id) => companyIds.push(id),
+    addUser: (id) => userIds.push(id),
+    addOutlet: (id) => outletIds.push(id),
+    addAccount: (id) => accountIds.push(id),
+    addTaxRate: (id) => taxRateIds.push(id),
+    addCashBankTx: (id) => cashBankTxIds.push(id),
+    
+    async execute() {
+      // Delete in correct order to handle FK constraints
+      // Note: journal_lines and journal_batches cannot be deleted due to immutability triggers
+      
+      // 1. Tax rates (may reference accounts)
+      if (taxRateIds.length > 0) {
+        const placeholders = taxRateIds.map(() => "?").join(", ");
+        try {
+          await db.execute(`DELETE FROM tax_rates WHERE id IN (${placeholders})`, taxRateIds);
+        } catch (e) {
+          // Ignore - may be referenced or already deleted
+        }
+      }
+      
+      // 2. Cash bank transactions (may reference accounts)
+      if (cashBankTxIds.length > 0) {
+        const placeholders = cashBankTxIds.map(() => "?").join(", ");
+        try {
+          await db.execute(`DELETE FROM cash_bank_transactions WHERE id IN (${placeholders})`, cashBankTxIds);
+        } catch (e) {
+          // Ignore - may be referenced or already deleted
+        }
+      }
+      
+      // 3. User role assignments ( FK to users, outlets)
+      for (const userId of userIds) {
+        try {
+          await db.execute(`DELETE FROM user_role_assignments WHERE user_id = ?`, [userId]);
+        } catch (e) {
+          // Ignore
+        }
+        try {
+          await db.execute(`DELETE FROM user_outlets WHERE user_id = ?`, [userId]);
+        } catch (e) {
+          // Ignore
+        }
+      }
+      
+      // 4. Users
+      for (const userId of userIds) {
+        try {
+          await db.execute(`DELETE FROM users WHERE id = ?`, [userId]);
+        } catch (e) {
+          // Ignore
+        }
+      }
+      
+      // 5. Outlets
+      if (outletIds.length > 0) {
+        const placeholders = outletIds.map(() => "?").join(", ");
+        try {
+          await db.execute(`DELETE FROM outlets WHERE id IN (${placeholders})`, outletIds);
+        } catch (e) {
+          // Ignore - may be referenced
+        }
+      }
+      
+      // 6. Accounts (will fail if referenced by journal_lines due to immutability)
+      for (const accountId of accountIds) {
+        try {
+          await db.execute(`DELETE FROM accounts WHERE id = ?`, [accountId]);
+        } catch (e) {
+          // Ignore - likely referenced by immutable journal_lines
+        }
+      }
+      
+      // 7. Companies (will fail if referenced by outlets, users, etc.)
+      for (const companyId of companyIds) {
+        try {
+          await db.execute(`DELETE FROM companies WHERE id = ?`, [companyId]);
+        } catch (e) {
+          // Ignore - likely has related data
+        }
+      }
+    }
+  };
+}
+
+/**
+ * Helper to cleanup journal entries that are protected by immutability triggers.
+ * @deprecated Use createCleanupHelper() instead for comprehensive cleanup.
  */
 export async function cleanupJournalEntriesSafe(
   db,
@@ -377,15 +483,12 @@ export async function cleanupJournalEntriesSafe(
   
   const placeholders = docIds.map(() => "?").join(", ");
   
-  // These deletes will fail due to immutability triggers, so we wrap in try/catch
-  // The error message contains "records are immutable" for these trigger violations
   try {
     await db.execute(
       `DELETE FROM cash_bank_transactions WHERE company_id = ? AND id IN (${placeholders})`,
       [companyId, ...docIds]
     );
   } catch (e) {
-    // Ignore immutability errors - journal records can't be deleted
     if (!e?.message?.includes("immutable")) {
       throw e;
     }
