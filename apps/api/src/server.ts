@@ -267,9 +267,7 @@ app.route("/accounts", accountRoutes);
 app.route("/companies", companyRoutes);
 app.route("/dinein", dineinRoutes);
 
-await registerRoutes(app);
-
-// Register inventory routes AFTER Next.js-style routes to override them
+// Register inventory routes using clean Hono structure  
 app.route("/inventory", inventoryRoutes);
 
 // Initialize sync modules after routes are registered
