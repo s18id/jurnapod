@@ -83,8 +83,8 @@ test(
 
     try {
       const [tableInsert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
         [companyId, outletId, `TD-${runId}`.slice(0, 32), `Delete Guard ${runId}`, "Main", 4]
       );
       tableId = Number(tableInsert.insertId);
@@ -164,8 +164,8 @@ test(
 
     try {
       const [tableInsert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
         [companyId, outletId, `TR-${runId}`.slice(0, 32), `History Guard ${runId}`, "Main", 4]
       );
       tableId = Number(tableInsert.insertId);
@@ -181,8 +181,9 @@ test(
            reservation_at,
            duration_minutes,
            status,
+           status_id,
            notes
-         ) VALUES (?, ?, ?, ?, NULL, 2, NOW(), 90, 'COMPLETED', NULL)`,
+        ) VALUES (?, ?, ?, ?, NULL, 2, NOW(), 90, 'COMPLETED', 6, NULL)`,
         [companyId, outletId, tableId, `History ${runId}`]
       );
       reservationId = Number(reservationInsert.insertId);
@@ -264,8 +265,8 @@ test(
       const collisionCode = `${collisionPrefix}-1`;
 
       const [existingTable] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
         [companyId, outletId, collisionCode, `Existing ${runId}`, "Test", 4]
       );
       createdTableIds.push(Number(existingTable.insertId));

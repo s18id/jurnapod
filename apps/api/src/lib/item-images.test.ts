@@ -161,14 +161,14 @@ describe("Tenant Scoping Security", () => {
     } else {
       // Insert test companies
       const [resultA] = await pool.execute(
-        "INSERT INTO companies (name, email) VALUES (?, ?)",
-        ["Test Company A", "test-a@example.com"]
+        "INSERT INTO companies (code, name, email) VALUES (?, ?, ?)",
+        [`TEST-COMPANY-A-${Date.now()}`, "Test Company A", "test-a@example.com"]
       );
       companyA = (resultA as { insertId: number }).insertId;
 
       const [resultB] = await pool.execute(
-        "INSERT INTO companies (name, email) VALUES (?, ?)",
-        ["Test Company B", "test-b@example.com"]
+        "INSERT INTO companies (code, name, email) VALUES (?, ?, ?)",
+        [`TEST-COMPANY-B-${Date.now()}`, "Test Company B", "test-b@example.com"]
       );
       companyB = (resultB as { insertId: number }).insertId;
     }

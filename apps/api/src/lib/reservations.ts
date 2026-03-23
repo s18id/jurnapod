@@ -777,8 +777,8 @@ export async function createReservation(
       insertSql = `INSERT INTO reservations (
          company_id, outlet_id, table_id, customer_name, customer_phone,
          guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
-         duration_minutes, status, notes
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`;
+         duration_minutes, status, status_id, notes
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1, ?)`;
       insertValues = [
         companyId,
         input.outlet_id,
@@ -796,8 +796,8 @@ export async function createReservation(
       // Use legacy columns only
       insertSql = `INSERT INTO reservations (
          company_id, outlet_id, table_id, customer_name, customer_phone,
-         guest_count, reservation_at, duration_minutes, status, notes
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`;
+         guest_count, reservation_at, duration_minutes, status, status_id, notes
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1, ?)`;
       insertValues = [
         companyId,
         input.outlet_id,
@@ -1222,8 +1222,8 @@ export async function createReservationV2(
         company_id, outlet_id, table_id, 
         customer_name, customer_phone,
         guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
-        duration_minutes, status, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`;
+        duration_minutes, status, status_id, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1, ?)`;
       insertValues = [
         input.companyId,
         input.outletId,
@@ -1243,8 +1243,8 @@ export async function createReservationV2(
         company_id, outlet_id, table_id, 
         customer_name, customer_phone,
         guest_count, reservation_at, duration_minutes, 
-        status, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`;
+        status, status_id, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1, ?)`;
       insertValues = [
         input.companyId,
         input.outletId,

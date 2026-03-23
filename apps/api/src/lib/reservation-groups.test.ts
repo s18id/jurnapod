@@ -68,8 +68,8 @@ async function createTestGroup(
   // Create test tables
   for (let i = 0; i < tableCount; i++) {
     const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+      `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
       [ctx.companyId, ctx.outletId, `TG-${ctx.runId}-${i}`.slice(0, 32), `Test Group Table ${i}`, "TestZone", 4]
     );
     tableIds.push(Number(result.insertId));
@@ -201,8 +201,8 @@ test(
       const pool = getDbPool();
       for (let i = 0; i < 2; i++) {
         const [result] = await pool.execute<ResultSetHeader>(
-          `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-           VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+          `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+           VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
           [ctx.companyId, ctx.outletId, `TAN-${ctx.runId}-${i}`.slice(0, 32), `New Table ${i}`, "TestZone", 4]
         );
         newTableIds.push(Number(result.insertId));
@@ -405,8 +405,8 @@ test(
       const conflictTimeIso = conflictDate.toISOString();
       const conflictTimeDb = toDbDateTime(conflictDate);
       await pool.execute(
-        `INSERT INTO reservations (company_id, outlet_id, table_id, customer_name, guest_count, reservation_at, reservation_start_ts, reservation_end_ts, duration_minutes, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED')`,
+        `INSERT INTO reservations (company_id, outlet_id, table_id, customer_name, guest_count, reservation_at, reservation_start_ts, reservation_end_ts, duration_minutes, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1)`,
         [
           ctx.companyId,
           ctx.outletId,

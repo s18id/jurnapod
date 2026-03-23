@@ -80,16 +80,16 @@ test(
 
     try {
       const [table1Insert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
         [companyId, outletId, `T1-${runId}`.slice(0, 32), `Table One ${runId}`, "Main", 4]
       );
       const table1Id = Number(table1Insert.insertId);
       createdTableIds.push(table1Id);
 
       const [table2Insert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
         [companyId, outletId, `T2-${runId}`.slice(0, 32), `Table Two ${runId}`, "Main", 4]
       );
       const table2Id = Number(table2Insert.insertId);
@@ -159,8 +159,8 @@ test(
       );
 
       const [table3Insert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
         [companyId, outletId, `T3-${runId}`.slice(0, 32), `Table Three ${runId}`, "Main", 4]
       );
       const table3Id = Number(table3Insert.insertId);
@@ -329,8 +329,8 @@ test(
 
     try {
       const [tableInsert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
         [companyId, outletId, `T-BDRY-${runId}`.slice(0, 32), `Boundary Table ${runId}`, "Main", 4]
       );
       const tableId = Number(tableInsert.insertId);
@@ -427,8 +427,8 @@ test(
 
     try {
       const [tableInsert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
         [companyId, outletId, `T-MIX-${runId}`.slice(0, 32), `Mixed Table ${runId}`, "Main", 4]
       );
       const tableId = Number(tableInsert.insertId);
@@ -443,8 +443,8 @@ test(
            company_id, outlet_id, table_id,
            customer_name, customer_phone, guest_count,
            reservation_at, reservation_start_ts, reservation_end_ts,
-           duration_minutes, status, notes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`,
+           duration_minutes, status, status_id, notes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1, ?)`,
         [
           companyId,
           outletId,
@@ -488,8 +488,8 @@ test(
            company_id, outlet_id, table_id,
            customer_name, customer_phone, guest_count,
            reservation_at, reservation_start_ts, reservation_end_ts,
-           duration_minutes, status, notes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`,
+           duration_minutes, status, status_id, notes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1, ?)`,
         [
           companyId,
           outletId,
@@ -533,8 +533,8 @@ test(
            company_id, outlet_id, table_id,
            customer_name, customer_phone, guest_count,
            reservation_at, reservation_start_ts, reservation_end_ts,
-           duration_minutes, status, notes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?)`,
+           duration_minutes, status, status_id, notes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1, ?)`,
         [
           companyId,
           outletId,
@@ -845,8 +845,8 @@ test(
     try {
       // Create a table for testing
       const [tableResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
         [companyId, outletId, `V2T-${runId}`.slice(0, 32), `V2 Test Table ${runId}`, "Main", 4]
       );
       const tableId = Number(tableResult.insertId);

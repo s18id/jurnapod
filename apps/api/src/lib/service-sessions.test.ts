@@ -59,8 +59,8 @@ async function resolveFixtureContext(): Promise<FixtureContext> {
 
 async function createTestTable(pool: ReturnType<typeof getDbPool>, companyId: bigint, outletId: bigint, runId: string): Promise<bigint> {
   const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-     VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+    `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+     VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
     [companyId, outletId, `TST-${runId}`.slice(0, 32), `Test Table ${runId}`, "Test Zone", 4]
   );
   return BigInt(result.insertId);
@@ -159,8 +159,25 @@ test(
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
+    const createdItemIds: bigint[] = [];
 
     try {
+      // Get a real product from the company
+      const [productRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT id FROM items WHERE company_id = ? LIMIT 1`,
+        [companyId]
+      );
+      const productId = productRows.length > 0 ? productRows[0].id : null;
+
+      if (!productId) {
+        // Create a test product if none exists
+        const [itemResult] = await pool.execute<ResultSetHeader>(
+          `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
+          [companyId, `Test Product ${runId}`, `TEST-${runId}`]
+        );
+        createdItemIds.push(BigInt(itemResult.insertId));
+      }
+
       const tableId = await createTestTable(pool, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
@@ -170,8 +187,8 @@ test(
       // Add a line to the session
       await pool.execute(
         `INSERT INTO table_service_session_lines (session_id, line_number, product_id, product_name, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
-         VALUES (?, 1, 1, 'Test Product', 2, 10.00, 0, 0, 20.00, 0, NOW(), NOW())`,
-        [sessionId]
+         VALUES (?, 1, ?, 'Test Product', 2, 10.00, 0, 0, 20.00, 0, NOW(), NOW())`,
+        [sessionId, productId ?? createdItemIds[0]]
       );
 
       const session = await getSession(companyId, outletId, sessionId);
@@ -187,7 +204,7 @@ test(
       assert.equal(session?.lines[0].quantity, 2, "Line quantity should match");
       assert.equal(session?.lines[0].lineTotal, 20.00, "Line total should match");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
     }
   }
 );

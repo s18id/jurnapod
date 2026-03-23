@@ -3,7 +3,7 @@
 
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
-import { getDbPool } from "@/lib/db";
+import { getDbPool } from "./db";
 import {
   ServiceSessionStatus,
   ServiceSessionLineState,
