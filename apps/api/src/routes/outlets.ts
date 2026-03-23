@@ -174,6 +174,43 @@ outletsRoutes.post("/", async (c) => {
   }
 });
 
+// GET /outlets/access - Check outlet access
+outletsRoutes.get("/access", async (c) => {
+  try {
+    const auth = c.get("auth");
+    const url = new URL(c.req.raw.url);
+    const outletIdParam = url.searchParams.get("outlet_id");
+
+    if (!outletIdParam) {
+      return errorResponse("INVALID_REQUEST", "outlet_id parameter is required", 400);
+    }
+
+    const outletId = NumericIdSchema.parse(outletIdParam);
+    
+    // Check if user has access to the outlet using bitmask system
+    const access = await checkUserAccess({
+      userId: auth.userId,
+      companyId: auth.companyId,
+      outletId: outletId,
+      module: "outlets",
+      permission: "read"
+    });
+    
+    if (!access || (!access.hasRole && !access.hasGlobalRole && !access.isSuperAdmin)) {
+      return errorResponse("FORBIDDEN", "Access denied to outlet", 403);
+    }
+
+    return successResponse({ access: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid outlet_id parameter", 400);
+    }
+
+    console.error("GET /outlets/access failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to check outlet access", 500);
+  }
+});
+
 // GET /outlets/:id - Get single outlet
 outletsRoutes.get("/:id", async (c) => {
   try {
@@ -355,43 +392,6 @@ outletsRoutes.delete("/:id", async (c) => {
 
     console.error("DELETE /outlets/:id failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to delete outlet", 500);
-  }
-});
-
-// GET /outlets/access - Check outlet access
-outletsRoutes.get("/access", async (c) => {
-  try {
-    const auth = c.get("auth");
-    const url = new URL(c.req.raw.url);
-    const outletIdParam = url.searchParams.get("outlet_id");
-
-    if (!outletIdParam) {
-      return errorResponse("INVALID_REQUEST", "outlet_id parameter is required", 400);
-    }
-
-    const outletId = NumericIdSchema.parse(outletIdParam);
-    
-    // Check if user has access to the outlet using bitmask system
-    const access = await checkUserAccess({
-      userId: auth.userId,
-      companyId: auth.companyId,
-      outletId: outletId,
-      module: "outlets",
-      permission: "read"
-    });
-    
-    if (!access || (!access.hasRole && !access.hasGlobalRole && !access.isSuperAdmin)) {
-      return errorResponse("FORBIDDEN", "Access denied to outlet", 403);
-    }
-
-    return successResponse({ access: true });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return errorResponse("INVALID_REQUEST", "Invalid outlet_id parameter", 400);
-    }
-
-    console.error("GET /outlets/access failed", error);
-    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to check outlet access", 500);
   }
 });
 

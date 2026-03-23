@@ -222,7 +222,15 @@ test(
       const meBody = await meResponse.json();
       const ownerUserId = meBody.data.id;
       const companyId = meBody.data.company_id;
-      const allowedOutletId = meBody.data.outlets[0]?.id;
+      
+      // Owners have global roles (outlet_id IS NULL), so outlets array is empty
+      // Get an outlet from the company's outlets table instead
+      const [outletRows] = await db.execute(
+        `SELECT id FROM outlets WHERE company_id = ? AND is_active = 1 LIMIT 1`,
+        [companyId]
+      );
+      assert.ok(outletRows.length > 0, "No active outlets found for company");
+      const allowedOutletId = outletRows[0].id;
 
       // Get owner roles for later assertion
       const [ownerRoleRows] = await db.execute(
