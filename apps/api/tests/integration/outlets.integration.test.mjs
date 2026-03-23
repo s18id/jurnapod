@@ -10,6 +10,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
 import { setupIntegrationTests } from "./integration-harness.mjs";
+import { json } from "node:stream/consumers";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -303,7 +304,9 @@ test(
         headers: ownerHeader
       });
 
-      assert.equal(getOtherOutletRes.status, 404);
+      const getOtherOutletResBody = await getOtherOutletRes.json()
+
+      assert.equal(getOtherOutletRes.status, 404, JSON.stringify(getOtherOutletResBody));
 
       const getOtherOutletMismatchRes = await fetch(
         `${baseUrl}/api/outlets/${otherOutletId}?company_id=${otherCompanyId}`,
@@ -594,7 +597,9 @@ test(
         }
       );
 
-      assert.equal(moduleRoleRes.status, 200);
+      const moduleRoleResBody = await moduleRoleRes.json()
+
+      assert.equal(moduleRoleRes.status, 200, JSON.stringify({ url: moduleRoleRes.url, body: moduleRoleResBody}));
 
       const moduleRoleEntityId = `module-role:${moduleRoleId}:inventory`;
       const [moduleRoleAuditRows] = await db.execute(

@@ -14,6 +14,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
+import { requireAccess } from "@/lib/auth-guard";
 import { getCompany } from "@/lib/companies";
 import { errorResponse, successResponse } from "@/lib/response";
 import {
@@ -144,6 +145,16 @@ reportRoutes.get("/trial-balance", async (c) => {
   const REPORT_TYPE = "trial_balance";
 
   try {
+    // Check module permission using bitmask
+    const accessResult = await requireAccess({
+      module: "reports",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const url = new URL(c.req.raw.url);
     const parsed = querySchema.extend({
       as_of: z.string().datetime({ offset: true }).optional()

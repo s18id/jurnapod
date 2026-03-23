@@ -12,7 +12,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { authenticateRequest } from "@/lib/auth-guard";
+import { authenticateRequest, requireAccess } from "@/lib/auth-guard";
 import { errorResponse, successResponse } from "@/lib/response";
 import {
   createManualJournalEntry,
@@ -36,9 +36,6 @@ journalRoutes.use("/*", async (c, next) => {
   c.set("auth", authResult.auth);
   await next();
 });
-
-// Required roles for journal access
-const JOURNAL_ROLES = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"] as const;
 
 // Query schema for list endpoint
 const listQuerySchema = z.object({
@@ -68,6 +65,16 @@ journalRoutes.get("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    // Check module permission using bitmask
+    const accessResult = await requireAccess({
+      module: "journals",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const url = new URL(c.req.raw.url);
 
     const query = listQuerySchema.parse({
@@ -130,9 +137,14 @@ journalRoutes.post("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
-    // Check role permission
-    if (!JOURNAL_ROLES.includes(auth.role as typeof JOURNAL_ROLES[number])) {
-      return errorResponse("FORBIDDEN", "Insufficient permissions for journal entry creation", 403);
+    // Check module permission using bitmask
+    const accessResult = await requireAccess({
+      module: "journals",
+      permission: "create"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
     }
 
     const body = await c.req.json();
@@ -176,9 +188,14 @@ journalRoutes.get("/:id", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
-    // Check role permission
-    if (!JOURNAL_ROLES.includes(auth.role as typeof JOURNAL_ROLES[number])) {
-      return errorResponse("FORBIDDEN", "Insufficient permissions to view journals", 403);
+    // Check module permission using bitmask
+    const accessResult = await requireAccess({
+      module: "journals",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
     }
 
     const idParam = c.req.param("id");

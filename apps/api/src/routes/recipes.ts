@@ -11,7 +11,7 @@
  * - DELETE /recipes/ingredients/:id - Delete recipe ingredient
  * - GET /recipes/:id/cost - Get recipe cost
  *
- * Required role: OWNER, ADMIN, ACCOUNTANT for recipe operations
+ * Uses permission bitmask from user_role_assignments for authorization.
  */
 
 import { Hono } from "hono";
@@ -23,6 +23,16 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
+import {
+  addIngredientToRecipe,
+  getRecipeIngredients,
+  updateRecipeIngredient,
+  removeIngredientFromRecipe,
+  calculateRecipeCost,
+  DatabaseConflictError,
+  DatabaseReferenceError,
+  DatabaseForbiddenError
+} from "../lib/recipe-composition.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -31,23 +41,18 @@ declare module "hono" {
 }
 
 // =============================================================================
-// Constants
-// =============================================================================
-
-const RECIPES_ROLES_READ = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"] as const;
-const RECIPES_ROLES_WRITE = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"] as const;
-
-// =============================================================================
 // Request Schemas
 // =============================================================================
 
 const RecipeIngredientCreateSchema = z.object({
   ingredient_item_id: z.number().int().positive(),
-  quantity: z.number().positive()
+  quantity: z.number().positive(),
+  unit_of_measure: z.string().optional()
 });
 
 const RecipeIngredientUpdateSchema = z.object({
-  quantity: z.number().positive()
+  quantity: z.number().positive(),
+  unit_of_measure: z.string().optional()
 });
 
 // =============================================================================
@@ -71,10 +76,9 @@ recipesRoutes.use("/*", async (c, next) => {
 recipesRoutes.get("/:id/ingredients", async (c) => {
   try {
     const auth = c.get("auth");
-    
-    // Check access permission
+
+    // Check access permission using bitmask
     const accessResult = await requireAccess({
-      roles: [...RECIPES_ROLES_READ],
       module: "inventory",
       permission: "read"
     })(c.req.raw, auth);
@@ -84,13 +88,16 @@ recipesRoutes.get("/:id/ingredients", async (c) => {
     }
 
     const recipeId = NumericIdSchema.parse(c.req.param("id"));
-    
-    // For now, return empty array as placeholder
-    // TODO: Implement actual recipe ingredients listing
-    return successResponse([]);
+
+    const ingredients = await getRecipeIngredients(auth.companyId, recipeId);
+    return successResponse(ingredients);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid recipe ID", 400);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
     }
 
     console.error("GET /recipes/:id/ingredients failed", error);
@@ -102,10 +109,9 @@ recipesRoutes.get("/:id/ingredients", async (c) => {
 recipesRoutes.post("/:id/ingredients", async (c) => {
   try {
     const auth = c.get("auth");
-    
-    // Check access permission
+
+    // Check access permission using bitmask
     const accessResult = await requireAccess({
-      roles: [...RECIPES_ROLES_WRITE],
       module: "inventory",
       permission: "create"
     })(c.req.raw, auth);
@@ -118,17 +124,33 @@ recipesRoutes.post("/:id/ingredients", async (c) => {
     const payload = await c.req.json();
     const input = RecipeIngredientCreateSchema.parse(payload);
 
-    // For now, return success as placeholder
-    // TODO: Implement actual recipe ingredient creation
-    return successResponse({ 
-      id: Math.floor(Math.random() * 1000000),
-      recipe_id: recipeId,
-      ingredient_item_id: input.ingredient_item_id,
-      quantity: input.quantity
-    }, 201);
+    const ingredient = await addIngredientToRecipe(
+      auth.companyId,
+      recipeId,
+      {
+        ingredient_item_id: input.ingredient_item_id,
+        quantity: input.quantity,
+        unit_of_measure: input.unit_of_measure
+      },
+      { userId: auth.userId }
+    );
+
+    return successResponse({ id: ingredient.id }, 201);
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
     }
 
     console.error("POST /recipes/:id/ingredients failed", error);
@@ -136,14 +158,13 @@ recipesRoutes.post("/:id/ingredients", async (c) => {
   }
 });
 
-// PUT /recipes/ingredients/:id - Update recipe ingredient
-recipesRoutes.put("/ingredients/:id", async (c) => {
+// PATCH /recipes/ingredients/:id - Update recipe ingredient
+recipesRoutes.patch("/ingredients/:id", async (c) => {
   try {
     const auth = c.get("auth");
-    
-    // Check access permission
+
+    // Check access permission using bitmask
     const accessResult = await requireAccess({
-      roles: [...RECIPES_ROLES_WRITE],
       module: "inventory",
       permission: "update"
     })(c.req.raw, auth);
@@ -156,15 +177,28 @@ recipesRoutes.put("/ingredients/:id", async (c) => {
     const payload = await c.req.json();
     const input = RecipeIngredientUpdateSchema.parse(payload);
 
-    // For now, return success as placeholder
-    // TODO: Implement actual recipe ingredient update
-    return successResponse({
-      id: ingredientId,
-      quantity: input.quantity
-    });
+    const ingredient = await updateRecipeIngredient(
+      auth.companyId,
+      ingredientId,
+      {
+        quantity: input.quantity,
+        unit_of_measure: input.unit_of_measure
+      },
+      { userId: auth.userId }
+    );
+
+    return successResponse(ingredient);
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
     }
 
     console.error("PUT /recipes/ingredients/:id failed", error);
@@ -176,10 +210,9 @@ recipesRoutes.put("/ingredients/:id", async (c) => {
 recipesRoutes.delete("/ingredients/:id", async (c) => {
   try {
     const auth = c.get("auth");
-    
-    // Check access permission
+
+    // Check access permission using bitmask
     const accessResult = await requireAccess({
-      roles: [...RECIPES_ROLES_WRITE],
       module: "inventory",
       permission: "delete"
     })(c.req.raw, auth);
@@ -190,12 +223,20 @@ recipesRoutes.delete("/ingredients/:id", async (c) => {
 
     const ingredientId = NumericIdSchema.parse(c.req.param("id"));
 
-    // For now, return success as placeholder
-    // TODO: Implement actual recipe ingredient deletion
+    await removeIngredientFromRecipe(
+      auth.companyId,
+      ingredientId,
+      { userId: auth.userId }
+    );
+
     return successResponse({ success: true });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid ingredient ID", 400);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
     }
 
     console.error("DELETE /recipes/ingredients/:id failed", error);
@@ -207,10 +248,9 @@ recipesRoutes.delete("/ingredients/:id", async (c) => {
 recipesRoutes.get("/:id/cost", async (c) => {
   try {
     const auth = c.get("auth");
-    
-    // Check access permission
+
+    // Check access permission using bitmask
     const accessResult = await requireAccess({
-      roles: [...RECIPES_ROLES_READ],
       module: "inventory",
       permission: "read"
     })(c.req.raw, auth);
@@ -221,17 +261,15 @@ recipesRoutes.get("/:id/cost", async (c) => {
 
     const recipeId = NumericIdSchema.parse(c.req.param("id"));
 
-    // For now, return placeholder cost
-    // TODO: Implement actual recipe cost calculation
-    return successResponse({
-      recipe_id: recipeId,
-      total_cost: 0,
-      currency: "IDR",
-      ingredients: []
-    });
+    const cost = await calculateRecipeCost(auth.companyId, recipeId);
+    return successResponse(cost);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid recipe ID", 400);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
     }
 
     console.error("GET /recipes/:id/cost failed", error);

@@ -26,6 +26,9 @@ import { companyRoutes } from "./routes/companies.js";
 import { dineinRoutes } from "./routes/dinein.js";
 import { usersRoutes } from "./routes/users.js";
 import { taxRatesRoutes } from "./routes/tax-rates.js";
+import { modulesRoutes } from "./routes/settings-modules.js";
+import { moduleRolesRoutes } from "./routes/settings-module-roles.js";
+import { adminPagesRoutes, publicPagesRoutes } from "./routes/settings-pages.js";
 import { outletsRoutes } from "./routes/outlets.js";
 import { recipesRoutes } from "./routes/recipes.js";
 import { cashBankTransactionsRoutes } from "./routes/cash-bank-transactions.js";
@@ -158,6 +161,10 @@ app.route("/api/users", usersRoutes);
 
 // Register tax rates routes  
 app.route("/api/settings/tax-rates", taxRatesRoutes);
+app.route("/api/settings/modules", modulesRoutes);
+app.route("/api/settings/module-roles", moduleRolesRoutes);
+app.route("/api/settings/pages", adminPagesRoutes);
+app.route("/api/pages", publicPagesRoutes);
 
 // Register outlets routes
 app.route("/api/outlets", outletsRoutes);

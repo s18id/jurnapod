@@ -23,6 +23,7 @@ import {
 import { errorResponse, successResponse } from "../lib/response.js";
 import { listOutletsByCompany, createOutlet, getOutlet, updateOutlet, deleteOutlet, OutletNotFoundError } from "../lib/outlets.js";
 import { checkUserAccess } from "../lib/auth.js";
+import { readClientIp } from "../lib/request-meta.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -43,7 +44,15 @@ declare module "hono" {
 
 const CreateOutletSchema = z.object({
   code: z.string().trim().min(1).max(32),
-  name: z.string().trim().min(1).max(191)
+  name: z.string().trim().min(1).max(191),
+  company_id: z.number().int().positive().optional(),
+  city: z.string().trim().max(100).optional(),
+  address_line1: z.string().trim().max(191).optional(),
+  address_line2: z.string().trim().max(191).optional(),
+  postal_code: z.string().trim().max(20).optional(),
+  phone: z.string().trim().max(50).optional(),
+  email: z.string().trim().max(191).email().nullable().optional(),
+  timezone: z.string().trim().max(50).optional()
 });
 
 // =============================================================================
@@ -89,6 +98,7 @@ outletsRoutes.get("/", async (c) => {
       }
     }
 
+    // List outlets for the authenticated user's company
     const outlets = await listOutletsByCompany(auth.companyId);
     return successResponse(outlets);
   } catch (error) {
@@ -115,18 +125,47 @@ outletsRoutes.post("/", async (c) => {
     const payload = await c.req.json();
     const input = CreateOutletSchema.parse(payload);
 
+    // Determine target company: use body company_id if SUPER_ADMIN, otherwise use auth.companyId
+    const targetCompanyId = input.company_id ?? auth.companyId;
+
+    // Check if user is SUPER_ADMIN for cross-company operations
+    const accessCheck = await checkUserAccess({
+      userId: auth.userId,
+      companyId: auth.companyId
+    });
+
+    // Non-SUPER_ADMIN can only create outlets in their own company
+    if (targetCompanyId !== auth.companyId && !accessCheck?.isSuperAdmin) {
+      return errorResponse("FORBIDDEN", "Cannot create outlet in another company", 403);
+    }
+
     const outlet = await createOutlet({
-      company_id: auth.companyId,
+      company_id: targetCompanyId,
       code: input.code,
       name: input.name,
+      city: input.city,
+      address_line1: input.address_line1,
+      address_line2: input.address_line2,
+      postal_code: input.postal_code,
+      phone: input.phone,
+      email: input.email,
+      timezone: input.timezone,
       actor: {
-        userId: auth.userId
+        userId: auth.userId,
+        ipAddress: readClientIp(c.req.raw)
       }
     });
 
     return successResponse(outlet, 201);
   } catch (error) {
-    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+    if (error instanceof z.ZodError) {
+      const emailError = error.errors.find(e => e.path.includes("email"));
+      if (emailError) {
+        return errorResponse("INVALID_REQUEST", `Invalid email format: ${emailError.message}`, 400);
+      }
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+    if (error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
@@ -139,6 +178,9 @@ outletsRoutes.post("/", async (c) => {
 outletsRoutes.get("/:id", async (c) => {
   try {
     const auth = c.get("auth");
+    const outletId = NumericIdSchema.parse(c.req.param("id"));
+    const url = new URL(c.req.raw.url);
+    const companyIdParam = url.searchParams.get("company_id");
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
@@ -150,18 +192,15 @@ outletsRoutes.get("/:id", async (c) => {
       return accessResult;
     }
 
-    const outletId = NumericIdSchema.parse(c.req.param("id"));
-    const url = new URL(c.req.raw.url);
-    const companyIdParam = url.searchParams.get("company_id");
-
     // If company_id is specified, it must match the authenticated user's company
     if (companyIdParam !== null) {
       const requestedCompanyId = Number(companyIdParam);
       if (requestedCompanyId !== auth.companyId) {
-        return errorResponse("INVALID_REQUEST", "Cannot access outlet from another company", 400);
+        return errorResponse("INVALID_REQUEST", "Cannot access outlets from another company", 400);
       }
     }
 
+    // Non-SUPER_ADMIN can only access their own company's outlets
     const outlet = await getOutlet(auth.companyId, outletId);
     return successResponse(outlet);
   } catch (error) {
@@ -197,11 +236,11 @@ outletsRoutes.patch("/:id", async (c) => {
     const url = new URL(c.req.raw.url);
     const companyIdParam = url.searchParams.get("company_id");
 
-    // company_id in query must match authenticated user's company
+    // If company_id is specified, it must match the authenticated user's company
     if (companyIdParam !== null) {
       const requestedCompanyId = Number(companyIdParam);
       if (requestedCompanyId !== auth.companyId) {
-        return errorResponse("INVALID_REQUEST", "Cannot update outlet from another company", 400);
+        return errorResponse("INVALID_REQUEST", "Cannot update outlets from another company", 400);
       }
     }
 
@@ -209,19 +248,61 @@ outletsRoutes.patch("/:id", async (c) => {
     const input = z.object({
       code: z.string().trim().min(1).max(32).optional(),
       name: z.string().trim().min(1).max(191).optional(),
+      city: z.string().trim().max(100).nullable().optional(),
+      address_line1: z.string().trim().max(191).nullable().optional(),
+      address_line2: z.string().trim().max(191).nullable().optional(),
+      postal_code: z.string().trim().max(20).nullable().optional(),
+      phone: z.string().trim().max(50).nullable().optional(),
+      email: z.string().trim().max(191).email().nullable().optional(),
+      timezone: z.string().trim().max(50).nullable().optional(),
       is_active: z.boolean().optional()
     }).parse(payload);
 
+    // Validate at least one field is provided
+    const hasAtLeastOneField = 
+      input.code !== undefined ||
+      input.name !== undefined ||
+      input.city !== undefined ||
+      input.address_line1 !== undefined ||
+      input.address_line2 !== undefined ||
+      input.postal_code !== undefined ||
+      input.phone !== undefined ||
+      input.email !== undefined ||
+      input.timezone !== undefined ||
+      input.is_active !== undefined;
+
+    if (!hasAtLeastOneField) {
+      return errorResponse("INVALID_REQUEST", "At least one field must be provided", 400);
+    }
+
+    // Non-SUPER_ADMIN can only update their own company's outlets
     const outlet = await updateOutlet({
       companyId: auth.companyId,
       outletId: outletId,
       name: input.name,
+      city: input.city,
+      address_line1: input.address_line1,
+      address_line2: input.address_line2,
+      postal_code: input.postal_code,
+      phone: input.phone,
+      email: input.email,
+      timezone: input.timezone,
       is_active: input.is_active,
-      actor: { userId: auth.userId }
+      actor: { 
+        userId: auth.userId,
+        ipAddress: readClientIp(c.req.raw)
+      }
     });
     return successResponse(outlet);
   } catch (error) {
-    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+    if (error instanceof z.ZodError) {
+      const emailError = error.errors.find(e => e.path.includes("email"));
+      if (emailError) {
+        return errorResponse("INVALID_REQUEST", `Invalid email format: ${emailError.message}`, 400);
+      }
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+    if (error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
@@ -249,18 +330,22 @@ outletsRoutes.delete("/:id", async (c) => {
     const url = new URL(c.req.raw.url);
     const companyIdParam = url.searchParams.get("company_id");
 
-    // company_id in query must match authenticated user's company
+    // If company_id is specified, it must match the authenticated user's company
     if (companyIdParam !== null) {
       const requestedCompanyId = Number(companyIdParam);
       if (requestedCompanyId !== auth.companyId) {
-        return errorResponse("INVALID_REQUEST", "Cannot delete outlet from another company", 400);
+        return errorResponse("INVALID_REQUEST", "Cannot delete outlets from another company", 400);
       }
     }
 
+    // Non-SUPER_ADMIN can only delete their own company's outlets
     await deleteOutlet({
       companyId: auth.companyId,
       outletId: outletId,
-      actor: { userId: auth.userId }
+      actor: { 
+        userId: auth.userId,
+        ipAddress: readClientIp(c.req.raw)
+      }
     });
     return successResponse({ success: true });
   } catch (error) {

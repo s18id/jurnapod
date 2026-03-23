@@ -28,6 +28,7 @@ import {
   PaymentAllocationError
 } from "@/lib/sales";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
+import { requireAccess } from "@/lib/auth-guard";
 import { getCompany } from "@/lib/companies";
 import { errorResponse, successResponse } from "@/lib/response";
 import type { AuthContext } from "@/lib/auth-guard";
@@ -45,6 +46,16 @@ paymentRoutes.get("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    // Check module permission using bitmask
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const url = new URL(c.req.raw.url);
     const parsed = SalesPaymentListQuerySchema.parse({
       outlet_id: url.searchParams.get("outlet_id") ?? undefined,
@@ -102,6 +113,16 @@ paymentRoutes.get("/:id", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    // Check module permission using bitmask
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const paymentId = NumericIdSchema.parse(c.req.param("id"));
     const payment = await getPayment(auth.companyId, paymentId);
 
@@ -239,6 +260,16 @@ paymentRoutes.post("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    // Check module permission using bitmask
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "create"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     let payload: unknown;
     try {
       payload = await c.req.json();

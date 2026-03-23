@@ -28,6 +28,7 @@ import {
   updateInvoice
 } from "@/lib/sales";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
+import { requireAccess } from "@/lib/auth-guard";
 import { getCompany } from "@/lib/companies";
 import { errorResponse, successResponse } from "@/lib/response";
 import type { AuthContext } from "@/lib/auth-guard";
@@ -58,6 +59,16 @@ invoiceRoutes.get("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    // Check module permission using bitmask
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const url = new URL(c.req.raw.url);
     const parsed = SalesInvoiceListQuerySchema.parse({
       outlet_id: url.searchParams.get("outlet_id") ?? undefined,
@@ -117,6 +128,16 @@ invoiceRoutes.post("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    // Check module permission using bitmask
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "create"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     let payload: unknown;
     try {
       payload = await c.req.json();
