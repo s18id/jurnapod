@@ -15,10 +15,10 @@ import {
   __cogsPostingTestables
 } from "./cogs-posting";
 
-// Test data - use process-unique IDs to avoid conflicts with parallel runs
-const TEST_COMPANY_ID = 999001 + (process.pid % 1000);
-const TEST_OUTLET_ID = 999002 + (process.pid % 1000);
-const TEST_USER_ID = 999003 + (process.pid % 1000);
+// Test data - use timestamp-based IDs to avoid conflicts with parallel/sequential runs
+const TEST_COMPANY_ID = 900000 + (Date.now() % 100000);
+const TEST_OUTLET_ID = TEST_COMPANY_ID + 1;
+const TEST_USER_ID = TEST_COMPANY_ID + 2;
 
 // Shared state
 let pool: ReturnType<typeof getDbPool>;

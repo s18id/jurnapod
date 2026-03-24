@@ -196,6 +196,7 @@ test(
       });
       createdReservationIds.push(reservationWithOpenOrder.reservation_id);
 
+const nowTs = Date.now();
       await pool.execute(
         `INSERT INTO pos_order_snapshots (
            order_id,
@@ -212,17 +213,24 @@ test(
            order_state,
            paid_amount,
            opened_at,
+           opened_at_ts,
            closed_at,
+           closed_at_ts,
            notes,
-           updated_at
-         ) VALUES (?, ?, ?, 'DINE_IN', 'WALK_IN', 'DEFERRED', ?, ?, ?, 0, 'OPEN', 'OPEN', 0, NOW(), NULL, NULL, NOW())`,
+           updated_at,
+           updated_at_ts,
+           created_at_ts
+          ) VALUES (?, ?, ?, 'DINE_IN', 'WALK_IN', 'DEFERRED', ?, ?, ?, 0, 'OPEN', 'OPEN', 0, NOW(), ?, NULL, NULL, NULL, NOW(), ?, ?)`,
         [
           openOrderId,
           companyId,
           outletId,
           table3.id,
           reservationWithOpenOrder.reservation_id,
-          reservationWithOpenOrder.guest_count
+          reservationWithOpenOrder.guest_count,
+          nowTs,
+          nowTs,
+          nowTs
         ]
       );
 

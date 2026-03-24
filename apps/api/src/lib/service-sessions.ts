@@ -1683,10 +1683,11 @@ async function syncSnapshotLinesFromSession(
     queryParams.push(ServiceSessionLineState.FINALIZED);
   }
 
+  const nowTs = Date.now();
   const [insertResult] = await connection.execute<ResultSetHeader>(
     `INSERT INTO pos_order_snapshot_lines
      (order_id, company_id, outlet_id, item_id, sku_snapshot, name_snapshot,
-      item_type_snapshot, unit_price_snapshot, qty, discount_amount, updated_at, created_at)
+      item_type_snapshot, unit_price_snapshot, qty, discount_amount, updated_at, updated_at_ts, created_at, created_at_ts)
      SELECT
        ? AS order_id,
        ? AS company_id,
@@ -1699,13 +1700,15 @@ async function syncSnapshotLinesFromSession(
        SUM(l.quantity) AS qty,
        ROUND(SUM(l.discount_amount), 2) AS discount_amount,
        NOW() AS updated_at,
-       NOW() AS created_at
+       ? AS updated_at_ts,
+       NOW() AS created_at,
+       ? AS created_at_ts
      FROM table_service_session_lines l
      WHERE l.session_id = ?
        AND l.is_voided = 0
        ${finalizedFilter}
      GROUP BY l.product_id`,
-    queryParams
+    [...queryParams, nowTs, nowTs]
   );
 
   return insertResult.affectedRows;

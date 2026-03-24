@@ -205,6 +205,9 @@ test(
       outletId = Number(owner.outlet_id);
       const ownerUserId = Number(owner.id);
 
+      // Do NOT clean up existing COGS journal batches - journal_lines are immutable
+      // The test uses unique identifiers and will not conflict with existing data
+
       await ensureOpenFiscalYear(companyId, ownerUserId);
       await ensureInventoryModuleCogsEnabled(companyId, ownerUserId);
 
@@ -285,7 +288,7 @@ test(
         "content-type": "application/json"
       };
 
-      const createInvoiceRes = await requestJson("/api/sales/invoices", {
+       const createInvoiceRes = await requestJson("/api/sales/invoices", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({
@@ -405,28 +408,38 @@ test(
       }
 
       if (companyId != null && createdInvoiceIds.length > 0) {
-        const placeholders = createdInvoiceIds.map(() => "?").join(",");
+        // Compute possible doc_id values for COGS journal batches
+        // doc_id could be the invoice ID itself or a hash of "INV-${invoiceId}"
+        const possibleDocIds = new Set();
+        
+        for (const invoiceId of createdInvoiceIds) {
+          // Add the invoice ID itself (in case saleId was numeric)
+          possibleDocIds.add(invoiceId);
+          
+          // Compute hash the same way as cogs-posting.ts
+          const saleId = `INV-${invoiceId}`;
+          const saleIdNumeric = Number(saleId) || saleId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          possibleDocIds.add(saleIdNumeric);
+        }
+        
+        const docIdArray = Array.from(possibleDocIds);
+        const placeholders = docIdArray.map(() => "?").join(",");
+        
         const [batchRows] = await db.execute(
           `SELECT id
            FROM journal_batches
            WHERE company_id = ?
              AND doc_type = 'COGS'
              AND doc_id IN (${placeholders})`,
-          [companyId, ...createdInvoiceIds]
+          [companyId, ...docIdArray]
         );
         const batchIds = batchRows.map((row) => Number(row.id));
 
         if (batchIds.length > 0) {
-          await db.execute(
-            `DELETE FROM journal_lines
-             WHERE journal_batch_id IN (${batchIds.map(() => "?").join(",")})`,
-            batchIds
-          );
-          await db.execute(
-            `DELETE FROM journal_batches
-             WHERE id IN (${batchIds.map(() => "?").join(",")})`,
-            batchIds
-          );
+          // journal_lines cannot be deleted due to immutability triggers (migration 0114)
+          // journal_batches cannot be deleted due to foreign key constraint with journal_lines
+          // Test data will remain in the database as immutable records
+          // console.log(`Test created COGS journal batches: ${batchIds.join(', ')}`);
         }
       }
     }

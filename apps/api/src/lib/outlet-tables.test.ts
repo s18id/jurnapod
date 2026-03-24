@@ -90,6 +90,7 @@ test(
       tableId = Number(tableInsert.insertId);
       const createdTableId = tableId;
 
+      const nowTs = Date.now();
       await pool.execute(
         `INSERT INTO pos_order_snapshots (
            order_id,
@@ -106,11 +107,15 @@ test(
            order_state,
            paid_amount,
            opened_at,
+           opened_at_ts,
            closed_at,
+           closed_at_ts,
            notes,
-           updated_at
-        ) VALUES (?, ?, ?, 'DINE_IN', 'WALK_IN', 'DEFERRED', ?, NULL, 2, 0, 'OPEN', 'OPEN', 0, NOW(), NULL, NULL, NOW())`,
-        [orderId, companyId, outletId, createdTableId]
+           updated_at,
+           updated_at_ts,
+           created_at_ts
+        ) VALUES (?, ?, ?, 'DINE_IN', 'WALK_IN', 'DEFERRED', ?, NULL, 2, 0, 'OPEN', 'OPEN', 0, NOW(), ?, NULL, NULL, NULL, NOW(), ?, ?)`,
+        [orderId, companyId, outletId, createdTableId, nowTs, nowTs, nowTs]
       );
 
       await assert.rejects(

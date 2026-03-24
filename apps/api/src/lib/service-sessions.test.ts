@@ -746,11 +746,12 @@ test(
       const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.LOCKED_FOR_PAYMENT);
       createdSessionIds.push(sessionId);
 
+      const nowTs = Date.now();
       await pool.execute(
         `INSERT INTO pos_order_snapshots
-         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, updated_at, created_at)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), NOW(), NOW())`,
-        [snapshotId, companyId, outletId]
+         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts, created_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?, ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs, nowTs]
       );
 
       // Update session to be locked with persisted snapshot link
@@ -831,11 +832,12 @@ test(
       createdSessionIds.push(sessionId);
 
       // Create snapshot for the session (required for closing)
+      const nowTs = Date.now();
       await pool.execute(
         `INSERT INTO pos_order_snapshots
-         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, updated_at, created_at)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), NOW(), NOW())`,
-        [snapshotId, companyId, outletId]
+         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts, created_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?, ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs, nowTs]
       );
 
       // Link snapshot to session (required for close invariant)
@@ -1314,10 +1316,11 @@ test(
 
       // Create snapshot
       const snapshotId = `snap-${runId}`;
+      const nowTs = Date.now();
       await pool.execute(
-        `INSERT INTO pos_order_snapshots (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, opened_at, created_at, updated_at)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, NOW(), NOW(), NOW())`,
-        [snapshotId, companyId, outletId]
+        `INSERT INTO pos_order_snapshots (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, opened_at, opened_at_ts, created_at_ts, updated_at, updated_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, NOW(), ?, ?, NOW(), ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs, nowTs]
       );
       createdSnapshotIds.push(snapshotId);
 
