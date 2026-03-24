@@ -514,6 +514,16 @@ localServerTest(
         [adminUserId, Number(owner.outlet_id), Number(adminRoleId)]
       );
 
+      // Ensure ADMIN role has pos module with create permission (permission_mask = 1)
+      // Sync push requires: roles: ["OWNER", "ADMIN", "CASHIER"], module: "pos", permission: "create"
+      // Use bitwise OR to ensure create bit is set regardless of existing permissions
+      await db.execute(
+        `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+         VALUES (?, ?, 'pos', 1)
+         ON DUPLICATE KEY UPDATE permission_mask = permission_mask | 1`,
+        [Number(owner.company_id), Number(adminRoleId)]
+      );
+
 
       const ownerUserId = Number(owner.id);
       const companyId = Number(owner.company_id);

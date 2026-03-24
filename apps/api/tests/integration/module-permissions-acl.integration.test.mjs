@@ -34,7 +34,7 @@ test(
     let salesReadOnlyToken = null;
     let reportsNoAccessToken = null;
     let journalsNoCreateToken = null;
-    const trackedModules = ["sales", "reports", "journals"];
+    const trackedModules = ["sales", "accounting", "journals"];
     const modulePermissionsOriginal = new Map();
 
     try {
@@ -170,6 +170,7 @@ test(
 
       // ========================================
       // Test 2: Reports read with missing module permission expects 403
+      // Note: The trial-balance route checks 'accounting' module permission, not 'reports'
       // ========================================
       const reportsNoAccessEmail = `${testUserEmailPrefix}-reportsnoaccess@example.com`;
 
@@ -189,13 +190,13 @@ test(
         [reportsUserId, outletId, adminRoleId]
       );
 
-      // Remove reports permission (if exists)
+      // Remove accounting permission (if exists) - trial-balance checks 'accounting' module
       await db.execute(
-        `DELETE FROM module_roles WHERE company_id = ? AND role_id = ? AND module = 'reports'`,
+        `DELETE FROM module_roles WHERE company_id = ? AND role_id = ? AND module = 'accounting'`,
         [companyId, adminRoleId]
       );
 
-      // Login as user without reports permission
+      // Login as user without accounting permission
       reportsNoAccessToken = await loginUser(
         baseUrl,
         companyCode,
@@ -216,7 +217,7 @@ test(
       assert.equal(
         trialBalanceResponse.status,
         403,
-        "Reports read with missing permission should return 403"
+        "Reports read with missing accounting permission should return 403"
       );
 
       const trialBalanceBody = await trialBalanceResponse.json();

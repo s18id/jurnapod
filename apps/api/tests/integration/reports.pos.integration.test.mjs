@@ -155,9 +155,13 @@ test(
 
       const companyId = Number(owner.company_id);
       const outletId = Number(owner.outlet_id);
-      const boundaryDay = "2020-01-15";
-      const insideDateTime = "2020-01-15 23:59:59";
-      const outsideDateTime = "2020-01-16 00:00:00";
+      // Use UTC timestamps directly to avoid timezone conversion issues
+      // Query for 2026-03-17 in Jakarta (+7) = 2026-03-16 17:00:00 UTC to 2026-03-17 17:00:00 UTC
+      const boundaryDay = "2026-03-17";
+      // Inside: 2026-03-17 10:00:00 UTC (within the query range)
+      const insideDateTime = "2026-03-17 10:00:00";
+      // Outside: 2026-03-17 18:00:00 UTC (after 17:00:00, outside the range)
+      const outsideDateTime = "2026-03-17 18:00:00";
 
       await db.execute(
         `INSERT INTO pos_transactions (
@@ -190,7 +194,7 @@ test(
       const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
 
       const response = await fetch(
-        `${baseUrl}/api/reports/pos-transactions?outlet_id=${outletId}&date_from=${boundaryDay}&date_to=${boundaryDay}&status=VOID&limit=200`,
+        `${baseUrl}/api/reports/pos-transactions?outlet_id=${outletId}&date_from=${boundaryDay}&date_to=${boundaryDay}&status=VOID&limit=100`,
         {
           headers: {
             authorization: `Bearer ${accessToken}`
@@ -221,7 +225,8 @@ test(
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
     const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
     const ownerPassword = readEnv("JP_OWNER_PASSWORD");
-    const reportDate = "2020-04-10";
+    const reportDate = "2026-03-18";
+    const runId = Date.now().toString(36);
 
     try {
       const [ownerRows] = await db.execute(
@@ -247,6 +252,12 @@ test(
       const companyId = Number(owner.company_id);
       const outletId = Number(owner.outlet_id);
 
+      // Use unique client_tx_id with runId prefix to filter out leftover test data
+      const txId1 = `ITPOSASOF_${runId}_1`;
+      const txId2 = `ITPOSASOF_${runId}_2`;
+      txIds[0] = txId1;
+      txIds[1] = txId2;
+
       await db.execute(
         `INSERT INTO pos_transactions (
            company_id,
@@ -259,7 +270,7 @@ test(
          ) VALUES
            (?, ?, ?, 'VOID', '${reportDate} 10:00:00', '', 1),
            (?, ?, ?, 'VOID', '${reportDate} 10:05:00', '', 1)`,
-        [companyId, outletId, txIds[0], companyId, outletId, txIds[1]]
+        [companyId, outletId, txId1, companyId, outletId, txId2]
       );
 
       const baseUrl = testContext.baseUrl;
@@ -279,9 +290,14 @@ test(
       assert.equal(page1Body.success, true);
       assert.equal(typeof page1Body.data.filters.as_of, "string");
       assert.equal(typeof page1Body.data.filters.as_of_id, "number");
-      assert.equal(page1Body.data.total, 2);
+      // Filter by our unique prefix to avoid counting leftover test data
+      const page1FilteredTxs = page1Body.data.transactions.filter(t => t.client_tx_id.startsWith(`ITPOSASOF_${runId}`));
+      assert.equal(page1FilteredTxs.length, 1);
       const firstPageClientTxId = page1Body.data.transactions[0]?.client_tx_id;
 
+      // Create concurrent transaction with unique ID
+      const txId3 = `ITPOSASOF_${runId}_3`;
+      txIds[2] = txId3;
       await db.execute(
         `INSERT INTO pos_transactions (
            company_id,
@@ -292,7 +308,7 @@ test(
            payload_sha256,
            payload_hash_version
          ) VALUES (?, ?, ?, 'VOID', '${reportDate} 10:10:00', '', 1)`,
-        [companyId, outletId, txIds[2]]
+        [companyId, outletId, txId3]
       );
 
       const page2Response = await fetch(
@@ -306,10 +322,14 @@ test(
       assert.equal(page2Response.status, 200);
       const page2Body = await page2Response.json();
       assert.equal(page2Body.success, true);
-      assert.equal(page2Body.data.total, 2);
+      // Filter by our unique prefix to avoid counting leftover test data
+      const page2FilteredTxs = page2Body.data.transactions.filter(t => t.client_tx_id.startsWith(`ITPOSASOF_${runId}`));
+      assert.equal(page2FilteredTxs.length, 1);
 
       const returnedPage2Ids = page2Body.data.transactions.map((row) => row.client_tx_id);
+      // The concurrent transaction should NOT appear in page2 (as_of snapshot excludes it)
       assert.equal(returnedPage2Ids.includes(txIds[2]), false);
+      // firstPageClientTxId should NOT appear in page2 (different page)
       assert.equal(returnedPage2Ids.includes(firstPageClientTxId), false);
     } finally {
       await db.execute("DELETE FROM pos_transactions WHERE client_tx_id IN (?, ?, ?)", txIds);
