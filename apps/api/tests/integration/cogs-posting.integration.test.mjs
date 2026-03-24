@@ -258,6 +258,27 @@ test(
       );
       createdPriceItemIds.push(itemId);
 
+      // Create stock inventory for the item (required for COGS posting)
+      await db.execute(
+        `INSERT INTO inventory_stock (company_id, product_id, outlet_id, quantity, available_quantity)
+         VALUES (?, ?, ?, 100, 100)
+         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), available_quantity = VALUES(available_quantity)`,
+        [companyId, itemId, outletId]
+      );
+
+      // Create cost tracking entry for COGS (required for AVGCostingStrategy)
+      await db.execute(
+        `INSERT INTO inventory_item_costs 
+         (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost, updated_at)
+         VALUES (?, ?, 'AVG', 1500, 100, 150000, NOW())
+         ON DUPLICATE KEY UPDATE
+         current_avg_cost = VALUES(current_avg_cost),
+         total_layers_qty = VALUES(total_layers_qty),
+         total_layers_cost = VALUES(total_layers_cost),
+         updated_at = NOW()`,
+        [companyId, itemId]
+      );
+
       const token = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
       const authHeaders = {
         authorization: `Bearer ${token}`,
@@ -348,6 +369,16 @@ test(
         }
 
         if (createdItemIds.length > 0) {
+          // Delete cost tracking before stock (due to potential FK constraints)
+          await db.execute(
+            `DELETE FROM inventory_item_costs WHERE item_id IN (${createdItemIds.map(() => "?").join(",")})`,
+            createdItemIds
+          );
+          // Delete inventory stock before items (FK constraint)
+          await db.execute(
+            `DELETE FROM inventory_stock WHERE product_id IN (${createdItemIds.map(() => "?").join(",")})`,
+            createdItemIds
+          );
           await db.execute(
             `DELETE FROM items WHERE id IN (${createdItemIds.map(() => "?").join(",")})`,
             createdItemIds

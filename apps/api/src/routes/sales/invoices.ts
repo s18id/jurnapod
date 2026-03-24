@@ -128,6 +128,9 @@ invoiceRoutes.get("/", async (c) => {
 invoiceRoutes.post("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
+  // Pre-declare invoice ID for recovery in case posting fails
+  let invoiceIdForRecovery = 0;
+
   try {
     // Check module permission using bitmask
     const accessResult = await requireAccess({
@@ -172,9 +175,13 @@ invoiceRoutes.post("/", async (c) => {
       return successResponse(invoice, 201);
     }
 
+    // Capture invoice ID for potential recovery in case posting fails
+    invoiceIdForRecovery = invoice.id;
+
     // Attempt to post to GL to create journal entries (AC-1, AC-2, AC-3)
+    // Note: If posting fails, we catch errors below and return the DRAFT invoice
     try {
-      const postedInvoice = await postInvoice(auth.companyId, invoice.id, {
+      const postedInvoice = await postInvoice(auth.companyId, invoiceIdForRecovery, {
         userId: auth.userId
       });
 
@@ -191,7 +198,9 @@ invoiceRoutes.post("/", async (c) => {
         if (errorMessage.includes("unbalanced_journal") || 
             errorMessage.includes("account not found") ||
             errorMessage.includes("revenue account") ||
-            errorMessage.includes("receivable account")) {
+            errorMessage.includes("receivable account") ||
+            errorMessage.includes("outlet_account_mapping") ||
+            errorMessage.includes("cogs posting failed")) {
           console.warn("GL posting failed, returning DRAFT invoice:", glError.message);
           return successResponse(invoice, 201);
         }
@@ -231,6 +240,18 @@ invoiceRoutes.post("/", async (c) => {
       if (error.message.includes("debit") && error.message.includes("credit")) {
         console.error("Journal entry unbalanced", error);
         return errorResponse("INTERNAL_SERVER_ERROR", "Journal entry unbalanced", 500);
+      }
+      // Stock posting errors (COGS) - return the DRAFT invoice
+      if (error.message.toLowerCase().includes("stock not found") || 
+          error.message.toLowerCase().includes("cogs posting failed") ||
+          error.message.toLowerCase().includes("outlet_account_mapping") ||
+          error.message.includes("Insufficient inventory")) {
+        console.warn("Stock/COGS posting failed, returning DRAFT invoice:", error.message);
+        // We have the invoice ID from before posting attempts
+        const draftInvoice = await getInvoice(auth.companyId, invoiceIdForRecovery);
+        if (draftInvoice) {
+          return successResponse(draftInvoice, 201);
+        }
       }
     }
 
@@ -373,6 +394,17 @@ invoiceRoutes.post("/:id/post", async (c) => {
     if (error instanceof DatabaseReferenceError) {
       if (error.message.includes("account not found") || error.message.includes("Account not found")) {
         return errorResponse("NOT_FOUND", "GL account not found", 404);
+      }
+    }
+
+    // Handle stock/inventory errors - these are expected when stock is not set up
+    if (error instanceof Error) {
+      if (error.message.toLowerCase().includes("stock not found") ||
+          error.message.toLowerCase().includes("cogs posting failed") ||
+          error.message.toLowerCase().includes("outlet_account_mapping") ||
+          error.message.includes("Insufficient inventory")) {
+        console.warn("Stock/COGS posting failed:", error.message);
+        return errorResponse("CONFLICT", "Cannot post invoice: insufficient stock or missing COGS configuration", 409);
       }
     }
 
