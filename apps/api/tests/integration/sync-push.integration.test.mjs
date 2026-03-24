@@ -2790,8 +2790,8 @@ localServerTest(
 
       const tableCode = `ITBL${Date.now().toString(36)}`.slice(0, 12).toUpperCase();
       const [tableInsert] = await db.execute(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'RESERVED')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'RESERVED', 2)`,
         [companyId, outletId, tableCode, "Integration Table", "Main", 4]
       );
       tableId = Number(tableInsert.insertId);
@@ -2808,8 +2808,9 @@ localServerTest(
            reservation_at,
            duration_minutes,
            status,
+           status_id,
            notes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SEATED', ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SEATED', 4, ?)`,
         [companyId, outletId, tableId, "Integration Guest", "+620000000001", 4, reservationAt, 90, "Window side"]
       );
       reservationId = Number(reservationInsert.insertId);
@@ -2995,6 +2996,8 @@ localServerTest(
     const createdClientTxIds = [];
     const createdItemIds = [];
     let postingFixture = null;
+    let companyId = 0;
+    let outletId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -3023,8 +3026,8 @@ localServerTest(
       }
 
       const ownerUserId = Number(owner.id);
-      const companyId = Number(owner.company_id);
-      const outletId = Number(owner.outlet_id);
+      companyId = Number(owner.company_id);
+      outletId = Number(owner.outlet_id);
 
       // Setup COGS accounts and enable feature
       await setupCogsAccounts(db, companyId);
@@ -3153,6 +3156,8 @@ localServerTest(
     const createdClientTxIds = [];
     const createdItemIds = [];
     let postingFixture = null;
+    let companyId = 0;
+    let outletId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -3181,8 +3186,8 @@ localServerTest(
       }
 
       const ownerUserId = Number(owner.id);
-      const companyId = Number(owner.company_id);
-      const outletId = Number(owner.outlet_id);
+      companyId = Number(owner.company_id);
+      outletId = Number(owner.outlet_id);
 
       // Setup COGS accounts and enable feature
       await setupCogsAccounts(db, companyId);

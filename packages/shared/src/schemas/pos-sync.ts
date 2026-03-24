@@ -54,10 +54,10 @@ export const PosTransactionSchema = z.object({
   reservation_id: NumericIdSchema.nullable().optional(),
   guest_count: z.coerce.number().int().positive().nullable().optional(),
   order_status: PosOrderStatusSchema.default("COMPLETED"),
-  opened_at: z.string().datetime().optional(),
-  closed_at: z.string().datetime().nullable().optional(),
+  opened_at: z.string().datetime({ offset: true }).optional(),
+  closed_at: z.string().datetime({ offset: true }).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
-  trx_at: z.string().datetime(),
+  trx_at: z.string().datetime({ offset: true }),
   items: z.array(PosItemSchema).min(1),
   payments: z.array(PosPaymentSchema).min(1),
   taxes: z.array(PosTaxLineSchema).optional()

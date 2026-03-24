@@ -303,14 +303,10 @@ Story completion notes MUST include:
 
 BMAD uses the following model strategy:
 - **Primary**: `opencode-go/minimax-m2.5` (your OpenCode Go subscription) - 75% of agents
-- **Context-critical**: `opencode-go/kimi-k2.5` (integration, orchestration, review) - 25% of agents  
-- **Complex reasoning**: `anthropic/claude-sonnet-4-20250514` (architecture decisions) - 5% of agents
+- **Context-critical**: `opencode-go/kimi-k2.5` (integration, orchestration, review, architecture) - 25% of agents
 - **Code tasks**: `openai/gpt-5.1-codex-mini` (when available - currently exhausted)
 
 **Current Week Status**: Codex tokens exhausted. All code tasks using kimi-k2.5 with decomposition pattern.
-
-Model mappings are configured in `_bmad/_config/agent-models.yaml`.
-Default model is set in `_bmad/_config/ides/opencode.yaml`.
 
 ## Agent Model Allocation Strategy
 
@@ -321,8 +317,7 @@ BMAD agents are distributed across three AI models for optimal cost-effectivenes
 | Model | Agents | Use Case | Cost |
 |-------|--------|----------|------|
 | **minimax-m2.5** | 30 (75%) | Narrow scope, standardized workflows, external data | Low |
-| **kimi-k2.5** | 10 (25%) | Context-critical, integration, orchestration | Medium |
-| **claude-3.5-sonnet** | 2 (5%) | Complex architectural decisions | High |
+| **kimi-k2.5** | 12 (30%) | Context-critical, integration, orchestration, architecture | Medium |
 
 ### Agent Assignments by Model
 
@@ -334,14 +329,12 @@ BMAD agents are distributed across three AI models for optimal cost-effectivenes
 - Analysis: `bmad-analyst`, `bmad-create-product-brief`, `bmad-brainstorming`
 - UX: `bmad-ux-designer`, `bmad-create-ux-design`
 
-**kimi-k2.5** (Context-Critical - 10 agents):
+**kimi-k2.5** (Context-Critical - 12 agents):
 - Core: `bmad-master`, `bmad-party-mode`, `bmad-help`
 - Dev: `bmad-dev`, `bmad-dev-story`
 - Management: `bmad-pm`, `bmad-sm`, `bmad-retrospective`, `bmad-sprint-planning`, `bmad-sprint-status`, `bmad-correct-course`
 - Documentation: `bmad-document-project`, `bmad-generate-project-context`
 - Review: All `bmad-code-review`, `bmad-review-*`, `bmad-editorial-review-*`
-
-**claude-3.5-sonnet** (Complex Reasoning - 2 agents):
 - Architecture: `bmad-architect`, `bmad-create-architecture`
 
 ### Delegation Pattern for Development Work
@@ -380,12 +373,6 @@ BMAD agents are distributed across three AI models for optimal cost-effectivenes
 - Story/epic creation and planning
 - Code review (catches minimax issues)
 - Critical business logic
-
-**Use claude when:**
-- Complex architectural trade-offs
-- High-stakes design decisions
-- Novel problem spaces
-- Justifies token cost for quality
 
 ## Agent delegation
 

@@ -149,24 +149,5 @@
     "bmad-help": {
       "path": ".opencode/agents/bmad-help.md"
     },
-    
-    "bmad-claude-architect": {
-      "path": ".opencode/agents/bmad-claude-architect.md"
-    },
-    "bmad-claude-analyst": {
-      "path": ".opencode/agents/bmad-claude-analyst.md"
-    },
-    "bmad-claude-brainstorming": {
-      "path": ".opencode/agents/bmad-claude-brainstorming.md"
-    },
-    "bmad-claude-pm": {
-      "path": ".opencode/agents/bmad-claude-pm.md"
-    },
-    "bmad-claude-review": {
-      "path": ".opencode/agents/bmad-claude-review.md"
-    },
-    "bmad-claude-party-mode": {
-      "path": ".opencode/agents/bmad-claude-party-mode.md"
-    }
   },
 }

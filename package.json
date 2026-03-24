@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "clean": "npx rimraf dist \"apps/*/dist\" \"packages/*/dist\" \"packages/modules/*/dist\" \"**/*.tsbuildinfo\"",
-    "prebuild": "npm run build -w @jurnapod/offline-db",
+    "prebuild": "bash scripts/build-packages.sh",
     "build": "npm run build -ws --if-present",
     "build:clean": "npm run clean && npm run build",
     "dev": "npm run dev:check && concurrently -n api,backoffice,pos,offline-db -c blue,green,magenta,yellow --restart-tries 1 --restart-after 5000 \"npm:dev:api\" \"npm run dev:backoffice:wait\" \"npm run dev:pos:wait\" \"npm:dev:offline-db:watch\"",

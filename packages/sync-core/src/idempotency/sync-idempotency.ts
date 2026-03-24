@@ -241,7 +241,7 @@ export class SyncIdempotencyService {
     incomingPayloadHash: string,
     existingPayloadHash: string | null,
     existingHashVersion: number | null,
-    legacyPayloadHash?: string
+    legacyPayloadHashes?: string[]
   ): IdempotencyCheckResult {
     if (!existingRecord) {
       return {
@@ -271,15 +271,19 @@ export class SyncIdempotencyService {
       };
     }
 
-    // Legacy hash version: compare against legacy hash if provided
+    // Legacy hash version: compare against any of the legacy hash variants
     const normalizedExistingHash = existingPayloadHash.trim();
-    if ((existingHashVersion ?? 1) <= 1 && legacyPayloadHash && normalizedExistingHash === legacyPayloadHash.trim()) {
-      return {
-        is_duplicate: true,
-        existing_record: existingRecord,
-        outcome: "RETURN_CACHED",
-        classification: ERROR_CLASSIFICATION.IDEMPOTENCY,
-      };
+    if ((existingHashVersion ?? 1) <= 1 && legacyPayloadHashes && legacyPayloadHashes.length > 0) {
+      for (const legacyHash of legacyPayloadHashes) {
+        if (normalizedExistingHash === legacyHash.trim()) {
+          return {
+            is_duplicate: true,
+            existing_record: existingRecord,
+            outcome: "RETURN_CACHED",
+            classification: ERROR_CLASSIFICATION.IDEMPOTENCY,
+          };
+        }
+      }
     }
 
     // Hash mismatch = conflict
