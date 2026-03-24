@@ -9,6 +9,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
 
+// Re-export normalizeDate for use in integration tests
+// @ts-ignore - TS file in mjs context
+import { normalizeDate } from "../../src/lib/date-helpers.ts";
+export { normalizeDate };
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const apiRoot = path.resolve(__dirname, "../..");

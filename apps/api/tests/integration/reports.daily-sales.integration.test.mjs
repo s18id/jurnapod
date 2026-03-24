@@ -7,11 +7,11 @@ import { test } from "node:test";
 import {
   ensureDailySalesView,
   loginAndGetUserContext,
+  normalizeDate,
   readEnv,
   setupIntegrationTests,
   TEST_TIMEOUT_MS
 } from "./integration-harness.mjs";
-import { normalizeDate } from "../../src/lib/date-helpers.ts";
 
 const testContext = setupIntegrationTests(test);
 
