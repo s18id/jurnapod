@@ -23,7 +23,9 @@ import {
   FixedAssetCategoryUpdateRequestSchema,
   FixedAssetCreateRequestSchema,
   FixedAssetUpdateRequestSchema,
-  DepreciationPlanCreateRequestSchema
+  DepreciationPlanCreateRequestSchema,
+  DepreciationPlanUpdateRequestSchema,
+  DepreciationRunCreateRequestSchema
 } from "@jurnapod/shared";
 import {
   authenticateRequest,
@@ -50,7 +52,8 @@ import {
   FiscalYearCodeExistsError,
   FiscalYearDateRangeError,
   FiscalYearOverlapError,
-  FiscalYearOpenConflictError
+  FiscalYearOpenConflictError,
+  FiscalYearNotOpenError
 } from "../lib/fiscal-years.js";
 import {
   listFixedAssetCategories,
@@ -66,7 +69,11 @@ import {
 } from "../lib/master-data.js";
 import {
   createDepreciationPlan,
+  updateDepreciationPlan,
+  runDepreciationPlan,
+  getLatestDepreciationPlan,
   DepreciationPlanValidationError,
+  DepreciationPlanStatusError,
   DatabaseReferenceError
 } from "../lib/depreciation.js";
 
@@ -597,6 +604,117 @@ accountRoutes.post("/fixed-assets/:id/depreciation-plan", async (c) => {
 
     console.error("POST /accounts/fixed-assets/:id/depreciation-plan failed", error);
     return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// PATCH /accounts/fixed-assets/:id/depreciation-plan - Update depreciation plan for fixed asset
+accountRoutes.patch("/fixed-assets/:id/depreciation-plan", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = DepreciationPlanUpdateRequestSchema.parse(payload);
+
+    // First, find the depreciation plan for this asset
+    const existingPlan = await getLatestDepreciationPlan(auth.companyId, assetId);
+    if (!existingPlan) {
+      return errorResponse("NOT_FOUND", "Depreciation plan not found for this asset", 404);
+    }
+
+    // Update the plan
+    const updatedPlan = await updateDepreciationPlan(auth.companyId, existingPlan.id, input, {
+      userId: auth.userId
+    });
+
+    if (!updatedPlan) {
+      return errorResponse("NOT_FOUND", "Depreciation plan not found", 404);
+    }
+
+    return successResponse(updatedPlan);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("INVALID_REFERENCE", error.message, 400);
+    }
+
+    if (error instanceof DepreciationPlanStatusError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof DepreciationPlanValidationError) {
+      return errorResponse("VALIDATION_ERROR", error.message, 400);
+    }
+
+    console.error("PATCH /accounts/fixed-assets/:id/depreciation-plan failed", error);
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// POST /accounts/depreciation/run - Run depreciation for a period
+accountRoutes.post("/depreciation/run", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const payload = await c.req.json();
+    const input = DepreciationRunCreateRequestSchema.parse(payload);
+
+    const result = await runDepreciationPlan(auth.companyId, input, {
+      userId: auth.userId
+    });
+
+    return successResponse({
+      duplicate: result.duplicate,
+      run: result.run
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    if (error instanceof DepreciationPlanValidationError) {
+      return errorResponse("VALIDATION_ERROR", error.message, 400);
+    }
+
+    if (error instanceof DepreciationPlanStatusError) {
+      return errorResponse("CONFLICT", "Depreciation run conflict", 409);
+    }
+
+    if (error instanceof DatabaseReferenceError) {
+      return errorResponse("INVALID_REFERENCE", "Invalid depreciation reference", 400);
+    }
+
+    if (error instanceof FiscalYearNotOpenError) {
+      return errorResponse(
+        "FISCAL_YEAR_CLOSED",
+        "Depreciation run date is outside any open fiscal year",
+        400
+      );
+    }
+
+    console.error("POST /accounts/depreciation/run failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Depreciation run failed", 500);
   }
 });
 

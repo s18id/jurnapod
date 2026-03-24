@@ -33,6 +33,7 @@ import {
   CashBankForbiddenError,
   CashBankStatusError
 } from "../lib/cash-bank.js";
+import { FiscalYearNotOpenError } from "../lib/fiscal-years.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -52,7 +53,11 @@ const CreateCashBankTransactionSchema = z.object({
   destination_account_id: z.number().int().positive(),
   amount: z.number().positive(),
   reference: z.string().trim().max(191).optional(),
-  outlet_id: z.number().int().positive().optional()
+  outlet_id: z.number().int().positive().optional(),
+  currency_code: z.string().trim().max(3).optional(),
+  exchange_rate: z.number().positive().optional(),
+  base_amount: z.number().positive().optional(),
+  fx_account_id: z.number().int().positive().optional()
 });
 
 // =============================================================================
@@ -146,7 +151,11 @@ cashBankTransactionsRoutes.post("/", async (c) => {
       source_account_id: input.source_account_id,
       destination_account_id: input.destination_account_id,
       amount: input.amount,
-      reference: input.reference
+      reference: input.reference,
+      currency_code: input.currency_code,
+      exchange_rate: input.exchange_rate,
+      base_amount: input.base_amount,
+      fx_account_id: input.fx_account_id
     }, {
       userId: auth.userId
     });
@@ -207,6 +216,10 @@ cashBankTransactionsRoutes.post("/:id/post", async (c) => {
 
     if (error instanceof CashBankStatusError) {
       return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof FiscalYearNotOpenError) {
+      return errorResponse("FISCAL_YEAR_CLOSED", error.message, 400);
     }
 
     console.error("POST /cash-bank-transactions/:id/post failed", error);

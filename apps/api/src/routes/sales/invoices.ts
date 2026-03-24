@@ -13,6 +13,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   SalesInvoiceCreateRequestSchema,
+  SalesInvoiceUpdateRequestSchema,
   SalesInvoiceListQuerySchema,
   NumericIdSchema
 } from "@jurnapod/shared";
@@ -166,6 +167,11 @@ invoiceRoutes.post("/", async (c) => {
       userId: auth.userId
     });
 
+    // If draft=true is specified, return DRAFT without auto-posting
+    if (input.draft === true) {
+      return successResponse(invoice, 201);
+    }
+
     // Attempt to post to GL to create journal entries (AC-1, AC-2, AC-3)
     try {
       const postedInvoice = await postInvoice(auth.companyId, invoice.id, {
@@ -284,12 +290,14 @@ invoiceRoutes.patch("/:id", async (c) => {
 
     // For now, use the same schema as create (simplified)
     // TODO: Create proper update schema
-    const input = SalesInvoiceCreateRequestSchema.parse(payload);
+    const input = SalesInvoiceUpdateRequestSchema.parse(payload);
 
-    // Validate outlet access
-    const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, input.outlet_id);
-    if (!hasAccess) {
-      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    // Validate outlet access if outlet_id is being changed
+    if (input.outlet_id !== undefined) {
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, input.outlet_id);
+      if (!hasAccess) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
     }
 
     const updatedInvoice = await updateInvoice(auth.companyId, invoiceId, input, {

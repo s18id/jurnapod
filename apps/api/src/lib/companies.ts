@@ -488,7 +488,7 @@ async function upsertModule(
   moduleName: string,
   moduleDescription: string | null
 ): Promise<number> {
-  const [result] = await connection.execute<ResultSetHeader>(
+  await connection.execute(
     `INSERT INTO modules (code, name, description)
      VALUES (?, ?, ?)
      ON DUPLICATE KEY UPDATE
@@ -498,7 +498,14 @@ async function upsertModule(
     [moduleCode, moduleName, moduleDescription]
   );
 
-  return Number(result.insertId);
+  // Use SELECT to get the ID since INSERT ... ON DUPLICATE KEY UPDATE
+  // returns insertId=0 when an update occurs (not the existing row's ID)
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT id FROM modules WHERE code = ?`,
+    [moduleCode]
+  );
+
+  return rows[0].id;
 }
 
 async function ensureModules(connection: PoolConnection): Promise<Record<string, number>> {

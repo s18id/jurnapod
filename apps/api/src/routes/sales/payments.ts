@@ -27,6 +27,7 @@ import {
   listPayments,
   PaymentAllocationError
 } from "@/lib/sales";
+import { PaymentVarianceConfigError } from "@/lib/sales-posting";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess } from "@/lib/auth-guard";
 import { getCompany } from "@/lib/companies";
@@ -203,6 +204,10 @@ paymentRoutes.patch("/:id", async (c) => {
       return errorResponse("CONFLICT", error.message, 409);
     }
 
+    if (error instanceof PaymentAllocationError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+
     console.error("PATCH /sales/payments/:id failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Payment update failed", 500);
   }
@@ -212,11 +217,52 @@ paymentRoutes.patch("/:id", async (c) => {
 // POST /sales/payments/:id/post - Post payment
 // ============================================================================
 
+const PostPaymentSchema = z.object({
+  settle_shortfall_as_loss: z.boolean().optional(),
+  shortfall_reason: z.string().trim().max(500).optional()
+});
+
 paymentRoutes.post("/:id/post", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    // Check module permission - posting requires update permission
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "update"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const paymentId = NumericIdSchema.parse(c.req.param("id"));
+
+    // Parse optional body for shortfall settlement options
+    let postOptions: { settle_shortfall_as_loss?: boolean; shortfall_reason?: string } = {};
+    const contentType = c.req.raw.headers.get("content-type") ?? "";
+    
+    // Only try to parse JSON if content-type indicates JSON and body exists
+    if (contentType.includes("application/json")) {
+      const bodyText = await c.req.raw.text();
+      if (bodyText && bodyText.trim()) {
+        try {
+          const body = JSON.parse(bodyText);
+          if (body && typeof body === 'object' && Object.keys(body).length > 0) {
+            const parsed = PostPaymentSchema.safeParse(body);
+            if (parsed.success) {
+              postOptions = {
+                settle_shortfall_as_loss: parsed.data.settle_shortfall_as_loss,
+                shortfall_reason: parsed.data.shortfall_reason
+              };
+            }
+          }
+        } catch (e) {
+          // JSON parse error - invalid JSON body
+          return errorResponse("INVALID_REQUEST", "Invalid JSON body", 400);
+        }
+      }
+    }
 
     // Check payment exists and user has outlet access
     const existingPayment = await getPayment(auth.companyId, paymentId);
@@ -229,9 +275,7 @@ paymentRoutes.post("/:id/post", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
-    const postedPayment = await postPayment(auth.companyId, paymentId, {
-      userId: auth.userId
-    });
+    const postedPayment = await postPayment(auth.companyId, paymentId, { userId: auth.userId }, postOptions);
 
     if (!postedPayment) {
       return errorResponse("NOT_FOUND", "Payment not found", 404);
@@ -240,11 +284,19 @@ paymentRoutes.post("/:id/post", async (c) => {
     return successResponse(postedPayment);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return errorResponse("INVALID_REQUEST", "Invalid payment ID", 400);
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
     if (error instanceof DatabaseForbiddenError) {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    if (error instanceof PaymentAllocationError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+
+    if (error instanceof PaymentVarianceConfigError) {
+      return errorResponse("PAYMENT_VARIANCE_GAIN_MISSING", error.message, 409);
     }
 
     console.error("POST /sales/payments/:id/post failed", error);
