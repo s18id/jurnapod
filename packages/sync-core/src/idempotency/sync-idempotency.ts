@@ -240,7 +240,8 @@ export class SyncIdempotencyService {
     existingRecord: IdempotencyRecord | null,
     incomingPayloadHash: string,
     existingPayloadHash: string | null,
-    existingHashVersion: number | null
+    existingHashVersion: number | null,
+    legacyPayloadHash?: string
   ): IdempotencyCheckResult {
     if (!existingRecord) {
       return {
@@ -270,9 +271,9 @@ export class SyncIdempotencyService {
       };
     }
 
-    // Legacy hash version with matching legacy hash
+    // Legacy hash version: compare against legacy hash if provided
     const normalizedExistingHash = existingPayloadHash.trim();
-    if ((existingHashVersion ?? 1) <= 1 && normalizedExistingHash === incomingPayloadHash) {
+    if ((existingHashVersion ?? 1) <= 1 && legacyPayloadHash && normalizedExistingHash === legacyPayloadHash.trim()) {
       return {
         is_duplicate: true,
         existing_record: existingRecord,

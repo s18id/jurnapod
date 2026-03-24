@@ -22,6 +22,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import {
   NumericIdSchema,
+  OrderUpdateEventTypeSchema,
   PosOrderServiceTypeSchema,
   PosOrderStatusSchema,
   PosSourceFlowSchema,
@@ -197,6 +198,81 @@ type LegacyComparablePayload = {
 
 type QueryExecutor = {
   execute: PoolConnection["execute"];
+};
+
+// ============================================================================
+// Order Sync Types
+// ============================================================================
+
+type OrderUpdateResult = {
+  update_id: string;
+  result: "OK" | "DUPLICATE" | "ERROR";
+  message?: string;
+};
+
+type ItemCancellationResult = {
+  cancellation_id: string;
+  result: "OK" | "DUPLICATE" | "ERROR";
+  message?: string;
+};
+
+type ActiveOrder = {
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  service_type: string;
+  source_flow?: string;
+  settlement_flow?: string;
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  is_finalized: boolean;
+  order_status: string;
+  order_state: string;
+  paid_amount: number;
+  opened_at: string;
+  closed_at?: string | null;
+  notes?: string | null;
+  updated_at: string;
+  lines: Array<{
+    item_id: number;
+    variant_id?: number;
+    sku_snapshot?: string | null;
+    name_snapshot: string;
+    item_type_snapshot: string;
+    unit_price_snapshot: number;
+    qty: number;
+    discount_amount: number;
+    updated_at: string;
+  }>;
+};
+
+type OrderUpdate = {
+  update_id: string;
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  base_order_updated_at?: string | null;
+  event_type: string;
+  delta_json: string;
+  actor_user_id?: number | null;
+  device_id: string;
+  event_at: string;
+  created_at: string;
+};
+
+type ItemCancellation = {
+  cancellation_id: string;
+  update_id?: string;
+  order_id: string;
+  item_id: number;
+  variant_id?: number;
+  company_id: number;
+  outlet_id: number;
+  cancelled_quantity: number;
+  reason: string;
+  cancelled_by_user_id?: number | null;
+  cancelled_at: string;
 };
 
 // ============================================================================
@@ -1106,6 +1182,281 @@ async function runAcceptedSyncPushHook(
 }
 
 // ============================================================================
+// Order Sync Processing Functions
+// ============================================================================
+
+/**
+ * Process active orders - upserts order snapshots and their lines
+ * Uses INSERT ... ON DUPLICATE KEY UPDATE for idempotency
+ */
+async function processActiveOrders(
+  executor: QueryExecutor,
+  orders: ActiveOrder[],
+  correlationId: string
+): Promise<OrderUpdateResult[]> {
+  const results: OrderUpdateResult[] = [];
+
+  for (const order of orders) {
+    try {
+      // Upsert the order snapshot
+      await executor.execute(
+        `INSERT INTO pos_order_snapshots (
+           order_id, company_id, outlet_id, service_type, source_flow, settlement_flow,
+           table_id, reservation_id, guest_count, is_finalized, order_status, order_state,
+           paid_amount, opened_at, opened_at_ts, closed_at, closed_at_ts, notes, updated_at, updated_at_ts,
+           created_at, created_at_ts
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           service_type = VALUES(service_type),
+           source_flow = VALUES(source_flow),
+           settlement_flow = VALUES(settlement_flow),
+           table_id = VALUES(table_id),
+           reservation_id = VALUES(reservation_id),
+           guest_count = VALUES(guest_count),
+           is_finalized = VALUES(is_finalized),
+           order_status = VALUES(order_status),
+           order_state = VALUES(order_state),
+           paid_amount = VALUES(paid_amount),
+           closed_at = VALUES(closed_at),
+           closed_at_ts = VALUES(closed_at_ts),
+           notes = VALUES(notes),
+           updated_at = VALUES(updated_at),
+           updated_at_ts = VALUES(updated_at_ts)`,
+         [
+           order.order_id,
+           order.company_id,
+           order.outlet_id,
+           order.service_type,
+           order.source_flow ?? null,
+           order.settlement_flow ?? null,
+           order.table_id ?? null,
+           order.reservation_id ?? null,
+           order.guest_count ?? null,
+           order.is_finalized ? 1 : 0,
+           order.order_status,
+           order.order_state,
+           order.paid_amount,
+           toMysqlDateTime(order.opened_at),
+           new Date(order.opened_at).getTime(),
+           order.closed_at ? toMysqlDateTime(order.closed_at) : null,
+           order.closed_at ? new Date(order.closed_at).getTime() : null,
+           order.notes ?? null,
+           toMysqlDateTime(order.updated_at),
+           new Date(order.updated_at).getTime(),
+           toMysqlDateTime(order.updated_at),
+           new Date(order.updated_at).getTime()
+         ]
+      );
+
+      // Delete existing lines and re-insert (simpler than diffing)
+      await executor.execute(
+        `DELETE FROM pos_order_snapshot_lines WHERE order_id = ? AND company_id = ?`,
+        [order.order_id, order.company_id]
+      );
+
+      // Insert new lines
+      if (order.lines.length > 0) {
+        const lineValues = order.lines.map((line) => [
+          order.order_id,
+          order.company_id,
+          order.outlet_id,
+          line.item_id,
+          line.variant_id ?? null,
+          line.sku_snapshot ?? null,
+          line.name_snapshot,
+          line.item_type_snapshot,
+          line.unit_price_snapshot,
+          line.qty,
+          line.discount_amount,
+          toMysqlDateTime(line.updated_at),
+          new Date(line.updated_at).getTime(), // updated_at_ts
+          toMysqlDateTime(line.updated_at),
+          new Date(line.updated_at).getTime() // created_at_ts
+        ]);
+
+        const placeholders = lineValues.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+        const flatValues = lineValues.flat();
+
+        await executor.execute(
+          `INSERT INTO pos_order_snapshot_lines (
+             order_id, company_id, outlet_id, item_id, variant_id, sku_snapshot,
+             name_snapshot, item_type_snapshot, unit_price_snapshot, qty,
+             discount_amount, updated_at, updated_at_ts, created_at, created_at_ts
+           ) VALUES ${placeholders}`,
+          flatValues
+        );
+      }
+
+      results.push({
+        update_id: order.order_id, // Use order_id as update_id for snapshot finalize
+        result: "OK"
+      });
+    } catch (error) {
+      console.error("Failed to process active order", {
+        correlation_id: correlationId,
+        order_id: order.order_id,
+        error
+      });
+      results.push({
+        update_id: order.order_id,
+        result: "ERROR",
+        message: error instanceof Error ? error.message : "Failed to process order"
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Process order updates - inserts order update events with idempotency via update_id
+ */
+async function processOrderUpdates(
+  executor: QueryExecutor,
+  updates: OrderUpdate[],
+  correlationId: string
+): Promise<OrderUpdateResult[]> {
+  const results: OrderUpdateResult[] = [];
+
+  for (const update of updates) {
+    console.info("processOrderUpdates: processing update", { correlation_id: correlationId, update_id: update.update_id });
+    try {
+      // Check if update already exists (idempotency)
+      const [existing] = await executor.execute<RowDataPacket[]>(
+        `SELECT update_id FROM pos_order_updates WHERE update_id = ? LIMIT 1`,
+        [update.update_id]
+      );
+
+      console.info("processOrderUpdates: existing check", { correlation_id: correlationId, update_id: update.update_id, existingCount: existing.length });
+
+      if (existing.length > 0) {
+        results.push({
+          update_id: update.update_id,
+          result: "DUPLICATE"
+        });
+        continue;
+      }
+
+      // Insert the order update
+      console.info("processOrderUpdates: inserting", { correlation_id: correlationId, update_id: update.update_id });
+      await executor.execute(
+        `INSERT INTO pos_order_updates (
+           update_id, order_id, company_id, outlet_id, base_order_updated_at, base_order_updated_at_ts,
+           event_type, delta_json, actor_user_id, device_id, event_at, event_at_ts, created_at, created_at_ts
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          update.update_id,
+          update.order_id,
+          update.company_id,
+          update.outlet_id,
+          update.base_order_updated_at ? toMysqlDateTime(update.base_order_updated_at) : null,
+          update.base_order_updated_at ? new Date(update.base_order_updated_at).getTime() : null,
+          update.event_type,
+          update.delta_json,
+          update.actor_user_id ?? null,
+          update.device_id,
+          toMysqlDateTime(update.event_at),
+          new Date(update.event_at).getTime(),
+          toMysqlDateTime(update.created_at),
+          new Date(update.created_at).getTime()
+        ]
+      );
+      console.info("processOrderUpdates: insert complete", { correlation_id: correlationId, update_id: update.update_id });
+
+      results.push({
+        update_id: update.update_id,
+        result: "OK"
+      });
+    } catch (error) {
+      console.error("processOrderUpdates: failed", {
+        correlation_id: correlationId,
+        update_id: update.update_id,
+        error
+      });
+      results.push({
+        update_id: update.update_id,
+        result: "ERROR",
+        message: error instanceof Error ? error.message : "Failed to process order update"
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Process item cancellations - inserts cancellation records with idempotency via cancellation_id
+ */
+async function processItemCancellations(
+  executor: QueryExecutor,
+  cancellations: ItemCancellation[],
+  correlationId: string
+): Promise<ItemCancellationResult[]> {
+  const results: ItemCancellationResult[] = [];
+
+  for (const cancellation of cancellations) {
+    try {
+      // Check if cancellation already exists (idempotency)
+      const [existing] = await executor.execute<RowDataPacket[]>(
+        `SELECT cancellation_id FROM pos_item_cancellations WHERE cancellation_id = ? LIMIT 1`,
+        [cancellation.cancellation_id]
+      );
+
+      if (existing.length > 0) {
+        results.push({
+          cancellation_id: cancellation.cancellation_id,
+          result: "DUPLICATE"
+        });
+        continue;
+      }
+
+      // Insert the cancellation
+      await executor.execute(
+        `INSERT INTO pos_item_cancellations (
+           cancellation_id, update_id, order_id, item_id, variant_id,
+           company_id, outlet_id, cancelled_quantity, reason,
+           cancelled_by_user_id, cancelled_at, cancelled_at_ts, created_at, created_at_ts
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          cancellation.cancellation_id,
+          cancellation.update_id ?? null,
+          cancellation.order_id,
+          cancellation.item_id,
+          cancellation.variant_id ?? null,
+          cancellation.company_id,
+          cancellation.outlet_id,
+          cancellation.cancelled_quantity,
+          cancellation.reason,
+          cancellation.cancelled_by_user_id ?? null,
+          toMysqlDateTime(cancellation.cancelled_at),
+          new Date(cancellation.cancelled_at).getTime(),
+          toMysqlDateTime(cancellation.cancelled_at),
+          new Date(cancellation.cancelled_at).getTime()
+        ]
+      );
+
+      results.push({
+        cancellation_id: cancellation.cancellation_id,
+        result: "OK"
+      });
+    } catch (error) {
+      console.error("Failed to process item cancellation", {
+        correlation_id: correlationId,
+        cancellation_id: cancellation.cancellation_id,
+        error
+      });
+      results.push({
+        cancellation_id: cancellation.cancellation_id,
+        result: "ERROR",
+        message: error instanceof Error ? error.message : "Failed to process cancellation"
+      });
+    }
+  }
+
+  return results;
+}
+
+// ============================================================================
 // Sync Push Routes
 // ============================================================================
 
@@ -1148,8 +1499,18 @@ syncPushRoutes.post("/", async (c) => {
       return errorResponse("VALIDATION_ERROR", "Invalid request payload", 400);
     }
 
-    const { outlet_id, transactions } = validationResult.data;
+    const { outlet_id, transactions, active_orders, order_updates, item_cancellations } = validationResult.data;
     
+    console.info("POST /sync/push parsed request", {
+      correlation_id: correlationId,
+      has_active_orders: !!active_orders,
+      active_orders_count: active_orders?.length ?? 0,
+      has_order_updates: !!order_updates,
+      order_updates_count: order_updates?.length ?? 0,
+      has_item_cancellations: !!item_cancellations,
+      item_cancellations_count: item_cancellations?.length ?? 0
+    });
+
     // Verify outlet access - sync push creates transactions, requires create permission
     const outletAccessGuard = requireAccess({
       roles: ["OWNER", "ADMIN", "CASHIER"], // ACCOUNTANT excluded - only has read permission
@@ -1163,7 +1524,11 @@ syncPushRoutes.post("/", async (c) => {
       return outletAccessResult;
     }
 
-    if (transactions.length === 0) {
+    // Early return only if there's nothing to process (no transactions, active_orders, order_updates, or item_cancellations)
+    const hasActiveOrders = active_orders && active_orders.length > 0;
+    const hasOrderUpdates = order_updates && order_updates.length > 0;
+    const hasItemCancellations = item_cancellations && item_cancellations.length > 0;
+    if (transactions.length === 0 && !hasActiveOrders && !hasOrderUpdates && !hasItemCancellations) {
       return successResponse({ results: [] });
     }
 
@@ -1207,6 +1572,28 @@ syncPushRoutes.post("/", async (c) => {
         results.push(...batchResults);
       }
 
+      // Process active orders, order updates, and item cancellations
+      let orderUpdateResults: OrderUpdateResult[] = [];
+      let itemCancellationResults: ItemCancellationResult[] = [];
+
+      if (active_orders && active_orders.length > 0) {
+        console.info("POST /sync/push processing active_orders", { correlation_id: correlationId, count: active_orders.length });
+        orderUpdateResults = await processActiveOrders({ execute: connection.execute.bind(connection) }, active_orders as ActiveOrder[], correlationId);
+        console.info("POST /sync/push active_orders results", { correlation_id: correlationId, results: orderUpdateResults });
+      }
+
+      if (order_updates && order_updates.length > 0) {
+        console.info("POST /sync/push processing order_updates", { correlation_id: correlationId, count: order_updates.length });
+        orderUpdateResults = await processOrderUpdates({ execute: connection.execute.bind(connection) }, order_updates as OrderUpdate[], correlationId);
+        console.info("POST /sync/push order_updates results", { correlation_id: correlationId, results: orderUpdateResults });
+      }
+
+      if (item_cancellations && item_cancellations.length > 0) {
+        console.info("POST /sync/push processing item_cancellations", { correlation_id: correlationId, count: item_cancellations.length });
+        itemCancellationResults = await processItemCancellations({ execute: connection.execute.bind(connection) }, item_cancellations as ItemCancellation[], correlationId);
+        console.info("POST /sync/push item_cancellations results", { correlation_id: correlationId, results: itemCancellationResults });
+      }
+
       // Log summary
       const okCount = results.filter((r) => r.result === "OK").length;
       const duplicateCount = results.filter((r) => r.result === "DUPLICATE").length;
@@ -1219,10 +1606,19 @@ syncPushRoutes.post("/", async (c) => {
         total_transactions: transactions.length,
         ok_count: okCount,
         duplicate_count: duplicateCount,
-        error_count: errorCount
+        error_count: errorCount,
+        order_update_results_count: orderUpdateResults.length,
+        item_cancellation_results_count: itemCancellationResults.length
       });
 
-      return successResponse({ results });
+      const responsePayload = {
+        results,
+        ...(orderUpdateResults.length > 0 && { order_update_results: orderUpdateResults }),
+        ...(itemCancellationResults.length > 0 && { item_cancellation_results: itemCancellationResults })
+      };
+      console.info("POST /sync/push response payload", { correlation_id: correlationId, payload: JSON.stringify(responsePayload) });
+
+      return successResponse(responsePayload);
     } finally {
       connection.release();
     }
@@ -1336,7 +1732,8 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
         },
         payloadSha256,
         existingRecord.payloadSha256,
-        existingRecord.payloadHashVersion
+        existingRecord.payloadHashVersion,
+        payloadSha256Legacy
       );
 
       if (idempotencyResult.outcome === "RETURN_CACHED") {
@@ -1662,7 +2059,8 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
           },
           payloadSha256,
           existingRecord.payloadSha256,
-          existingRecord.payloadHashVersion
+          existingRecord.payloadHashVersion,
+          payloadSha256Legacy
         );
 
         if (idempotencyResult.outcome === "RETURN_CACHED") {
