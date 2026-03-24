@@ -62,8 +62,19 @@ const UpdateConfigSchema = z.object({
 
 const settingsConfigRoutes = new Hono();
 
+// Auth middleware
+settingsConfigRoutes.use("/*", async (c, next) => {
+  const authResult = await authenticateRequest(c.req.raw);
+  if (!authResult.success) {
+    c.status(401);
+    return c.json({ success: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid access token" } });
+  }
+  c.set("auth", authResult.auth);
+  await next();
+});
+
 // GET /settings/config - Get config values for an outlet
-settingsConfigRoutes.get("/config", async (c) => {
+settingsConfigRoutes.get("/", async (c) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({
@@ -151,7 +162,7 @@ settingsConfigRoutes.get("/config", async (c) => {
 });
 
 // PATCH /settings/config - Update config values for an outlet
-settingsConfigRoutes.patch("/config", async (c) => {
+settingsConfigRoutes.patch("/", async (c) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({

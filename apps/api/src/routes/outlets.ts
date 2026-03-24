@@ -90,16 +90,25 @@ outletsRoutes.get("/", async (c) => {
     const url = new URL(c.req.raw.url);
     const companyIdParam = url.searchParams.get("company_id");
 
-    // If company_id is specified, it must match the authenticated user's company
+    // Determine which company to list outlets for
+    let targetCompanyId = auth.companyId;
     if (companyIdParam !== null) {
       const requestedCompanyId = Number(companyIdParam);
       if (requestedCompanyId !== auth.companyId) {
-        return errorResponse("INVALID_REQUEST", "Cannot list outlets for another company", 400);
+        // Check if user is SUPER_ADMIN - only they can access other companies
+        const accessCheck = await checkUserAccess({
+          userId: auth.userId,
+          companyId: auth.companyId
+        });
+        if (!accessCheck || !accessCheck.isSuperAdmin) {
+          return errorResponse("INVALID_REQUEST", "Cannot list outlets for another company", 400);
+        }
+        targetCompanyId = requestedCompanyId;
       }
     }
 
-    // List outlets for the authenticated user's company
-    const outlets = await listOutletsByCompany(auth.companyId);
+    // List outlets for the target company
+    const outlets = await listOutletsByCompany(targetCompanyId);
     return successResponse(outlets);
   } catch (error) {
     console.error("GET /outlets failed", error);
