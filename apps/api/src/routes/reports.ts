@@ -350,6 +350,7 @@ reportRoutes.get("/pos-transactions", async (c) => {
     const url = new URL(c.req.raw.url);
     const parsed = paginationSchema.extend({
       status: z.enum(["COMPLETED", "VOID", "REFUND"]).optional(),
+      as_of_id: z.coerce.number().int().positive().optional(),
     }).parse({
       outlet_id: url.searchParams.get("outlet_id") ?? undefined,
       date_from: url.searchParams.get("date_from") ?? undefined,
@@ -357,6 +358,7 @@ reportRoutes.get("/pos-transactions", async (c) => {
       limit: url.searchParams.get("limit") ?? undefined,
       offset: url.searchParams.get("offset") ?? undefined,
       status: url.searchParams.get("status") ?? undefined,
+      as_of_id: url.searchParams.get("as_of_id") ?? undefined,
     });
 
     const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
@@ -392,6 +394,7 @@ reportRoutes.get("/pos-transactions", async (c) => {
         userId: cashierOnly ? auth.userId : undefined,
         limit,
         offset,
+        asOfId: parsed.as_of_id,
       }),
       QUERY_TIMEOUT_MS
     );
@@ -451,6 +454,7 @@ reportRoutes.get("/journals", async (c) => {
     const url = new URL(c.req.raw.url);
     const parsed = paginationSchema.extend({
       as_of: z.string().datetime({ offset: true }).optional(),
+      as_of_id: z.coerce.number().int().positive().optional(),
     }).parse({
       outlet_id: url.searchParams.get("outlet_id") ?? undefined,
       date_from: url.searchParams.get("date_from") ?? undefined,
@@ -458,6 +462,7 @@ reportRoutes.get("/journals", async (c) => {
       limit: url.searchParams.get("limit") ?? undefined,
       offset: url.searchParams.get("offset") ?? undefined,
       as_of: url.searchParams.get("as_of") ?? undefined,
+      as_of_id: url.searchParams.get("as_of_id") ?? undefined,
     });
 
     const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
@@ -489,6 +494,7 @@ reportRoutes.get("/journals", async (c) => {
         limit,
         offset,
         asOf: parsed.as_of,
+        asOfId: parsed.as_of_id,
         includeUnassignedOutlet: !parsed.outlet_id,
       }),
       QUERY_TIMEOUT_MS
