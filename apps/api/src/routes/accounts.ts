@@ -25,7 +25,12 @@ import {
   FixedAssetUpdateRequestSchema,
   DepreciationPlanCreateRequestSchema,
   DepreciationPlanUpdateRequestSchema,
-  DepreciationRunCreateRequestSchema
+  DepreciationRunCreateRequestSchema,
+  AcquisitionRequestSchema,
+  TransferRequestSchema,
+  ImpairmentRequestSchema,
+  DisposalRequestSchema,
+  VoidEventRequestSchema
 } from "@jurnapod/shared";
 import {
   authenticateRequest,
@@ -76,6 +81,15 @@ import {
   DepreciationPlanStatusError,
   DatabaseReferenceError
 } from "../lib/depreciation.js";
+import {
+  recordAcquisition,
+  recordTransfer,
+  recordImpairment,
+  recordDisposal,
+  voidEvent,
+  getAssetLedger,
+  getAssetBook
+} from "../lib/fixed-assets-lifecycle.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -981,6 +995,343 @@ accountRoutes.get("/types", async (c) => {
   } catch (error) {
     console.error("GET /accounts/types failed", error);
     return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
+  }
+});
+
+// ============================================================================
+// Fixed Asset Lifecycle Routes
+// ============================================================================
+
+// POST /accounts/fixed-assets/:id/acquisition - Record asset acquisition
+accountRoutes.post("/fixed-assets/:id/acquisition", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = AcquisitionRequestSchema.parse(payload);
+
+    // Verify asset exists
+    const asset = await findFixedAssetById(auth.companyId, assetId);
+    if (!asset) {
+      return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
+    }
+
+    const result = await recordAcquisition(auth.companyId, assetId, input, {
+      userId: auth.userId
+    });
+
+    return successResponse({
+      event_id: result.event_id,
+      journal_batch_id: result.journal_batch_id,
+      book: result.book,
+      duplicate: result.duplicate
+    }, 201);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "NOT_FOUND") {
+      return errorResponse("NOT_FOUND", err.message || "Fixed asset not found", 404);
+    }
+    if (err.code === "ASSET_ALREADY_DISPOSED") {
+      return errorResponse("CONFLICT", err.message || "Asset already disposed", 409);
+    }
+    if (err.code === "DUPLICATE_EVENT") {
+      return errorResponse("CONFLICT", "Duplicate event", 409);
+    }
+    if (err.code === "INVALID_REFERENCE") {
+      return errorResponse("INVALID_REFERENCE", err.message || "Invalid reference", 400);
+    }
+    if (err.code === "FORBIDDEN") {
+      return errorResponse("FORBIDDEN", err.message || "Forbidden", 403);
+    }
+
+    console.error("POST /accounts/fixed-assets/:id/acquisition failed", error);
+    return errorResponse("INTERNAL_ERROR", "Acquisition failed", 500);
+  }
+});
+
+// POST /accounts/fixed-assets/:id/transfer - Transfer asset to another outlet
+accountRoutes.post("/fixed-assets/:id/transfer", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = TransferRequestSchema.parse(payload);
+
+    const result = await recordTransfer(auth.companyId, assetId, input, {
+      userId: auth.userId
+    });
+
+    return successResponse({
+      event_id: result.event_id,
+      journal_batch_id: result.journal_batch_id,
+      to_outlet_id: result.to_outlet_id,
+      duplicate: result.duplicate
+    }, 201);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "NOT_FOUND") {
+      return errorResponse("NOT_FOUND", err.message || "Asset not found", 404);
+    }
+    if (err.code === "ASSET_NOT_ACTIVE" || err.code === "ASSET_ALREADY_DISPOSED") {
+      return errorResponse("CONFLICT", err.message || "Asset is not active", 409);
+    }
+    if (err.code === "DUPLICATE_EVENT") {
+      return errorResponse("CONFLICT", "Duplicate event", 409);
+    }
+
+    console.error("POST /accounts/fixed-assets/:id/transfer failed", error);
+    return errorResponse("INTERNAL_ERROR", "Transfer failed", 500);
+  }
+});
+
+// POST /accounts/fixed-assets/:id/impairment - Record asset impairment
+accountRoutes.post("/fixed-assets/:id/impairment", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = ImpairmentRequestSchema.parse(payload);
+
+    const result = await recordImpairment(auth.companyId, assetId, input, {
+      userId: auth.userId
+    });
+
+    return successResponse({
+      event_id: result.event_id,
+      journal_batch_id: result.journal_batch_id,
+      book: result.book,
+      duplicate: result.duplicate
+    }, result.duplicate ? 200 : 201);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "NOT_FOUND") {
+      return errorResponse("NOT_FOUND", err.message || "Asset not found", 404);
+    }
+    if (err.code === "ASSET_NOT_ACTIVE" || err.code === "ASSET_ALREADY_DISPOSED") {
+      return errorResponse("CONFLICT", err.message || "Asset is not active", 409);
+    }
+    if (err.code === "DUPLICATE_EVENT") {
+      return errorResponse("CONFLICT", "Duplicate event", 409);
+    }
+    if (err.code === "INVALID_STATE") {
+      return errorResponse("CONFLICT", err.message || "Invalid asset state", 409);
+    }
+
+    console.error("POST /accounts/fixed-assets/:id/impairment failed", error);
+    return errorResponse("INTERNAL_ERROR", "Impairment failed", 500);
+  }
+});
+
+// POST /accounts/fixed-assets/:id/disposal - Record asset disposal
+accountRoutes.post("/fixed-assets/:id/disposal", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = DisposalRequestSchema.parse(payload);
+
+    const result = await recordDisposal(auth.companyId, assetId, input, {
+      userId: auth.userId
+    });
+
+    return successResponse({
+      event_id: result.event_id,
+      journal_batch_id: result.journal_batch_id,
+      disposal: result.disposal,
+      book: result.book,
+      duplicate: result.duplicate
+    }, result.duplicate ? 200 : 201);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "NOT_FOUND") {
+      return errorResponse("NOT_FOUND", err.message || "Asset not found", 404);
+    }
+    if (err.code === "ASSET_ALREADY_DISPOSED" || err.code === "ASSET_NOT_ACTIVE") {
+      return errorResponse("CONFLICT", err.message || "Asset already disposed", 409);
+    }
+    if (err.code === "DUPLICATE_EVENT") {
+      return errorResponse("CONFLICT", "Duplicate event", 409);
+    }
+    if (err.code === "INVALID_STATE") {
+      return errorResponse("CONFLICT", err.message || "Invalid asset state", 409);
+    }
+    if (err.code === "INVALID_REFERENCE") {
+      return errorResponse("CONFLICT", err.message || "Invalid reference", 409);
+    }
+
+    console.error("POST /accounts/fixed-assets/:id/disposal failed", error);
+    return errorResponse("INTERNAL_ERROR", "Disposal failed", 500);
+  }
+});
+
+// GET /accounts/fixed-assets/:id/ledger - Get asset ledger
+accountRoutes.get("/fixed-assets/:id/ledger", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "read"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+
+    const ledger = await getAssetLedger(auth.companyId, assetId, { userId: auth.userId });
+
+    return successResponse(ledger);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid asset ID", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "NOT_FOUND") {
+      return errorResponse("NOT_FOUND", "Asset not found", 404);
+    }
+
+    console.error("GET /accounts/fixed-assets/:id/ledger failed", error);
+    return errorResponse("INTERNAL_ERROR", "Failed to get ledger", 500);
+  }
+});
+
+// GET /accounts/fixed-assets/:id/book - Get asset book
+accountRoutes.get("/fixed-assets/:id/book", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "read"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const assetId = NumericIdSchema.parse(c.req.param("id"));
+
+    const book = await getAssetBook(auth.companyId, assetId, { userId: auth.userId });
+
+    return successResponse(book);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid asset ID", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "NOT_FOUND") {
+      return errorResponse("NOT_FOUND", "Asset not found", 404);
+    }
+
+    console.error("GET /accounts/fixed-assets/:id/book failed", error);
+    return errorResponse("INTERNAL_ERROR", "Failed to get book", 500);
+  }
+});
+
+// POST /accounts/fixed-assets/events/:id/void - Void an event
+accountRoutes.post("/fixed-assets/events/:id/void", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "accounts",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const eventId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json().catch(() => ({}));
+    const input = VoidEventRequestSchema.parse(payload);
+
+    const result = await voidEvent(auth.companyId, eventId, {
+      void_reason: input.void_reason,
+      idempotency_key: input.idempotency_key
+    }, { userId: auth.userId });
+
+    return successResponse({
+      void_event_id: result.void_event_id,
+      original_event_id: result.original_event_id,
+      journal_batch_id: result.journal_batch_id,
+      duplicate: result.duplicate
+    }, result.duplicate ? 200 : 201);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "NOT_FOUND" || err.code === "EVENT_NOT_FOUND") {
+      return errorResponse("NOT_FOUND", err.message || "Event not found", 404);
+    }
+    if (err.code === "EVENT_ALREADY_VOIDED" || err.code === "EVENT_NOT_VOIDABLE") {
+      return errorResponse("CONFLICT", err.message || "Cannot void this event", 409);
+    }
+
+    console.error("POST /accounts/fixed-assets/events/:id/void failed", error);
+    return errorResponse("INTERNAL_ERROR", "Void failed", 500);
   }
 });
 

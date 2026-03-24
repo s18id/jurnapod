@@ -464,42 +464,22 @@ test(
       assert.equal(actionOnDisposedResponse.status, 409, "Action on disposed asset should fail");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Events are voided via API which nullifies entries rather than deleting
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
+      // Outlets cannot be deleted when referenced by journal_batches (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM asset_depreciation_plans WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'IMPAIRMENT', 'DISPOSAL', 'VOID'))`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'IMPAIRMENT', 'DISPOSAL', 'VOID')`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdExpenseAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdExpenseAccountId]);
-      }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
-      if (createdLossAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdLossAccountId]);
-      }
-      if (createdDisposalExpenseAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdDisposalExpenseAccountId]);
-      }
-      if (createdOutletId > 0) {
-        await db.execute("DELETE FROM outlets WHERE id = ?", [createdOutletId]);
-      }
+      // Note: Accounts and Outlets are intentionally not deleted - they may be referenced
+      // by journal_lines/journal_batches which cannot be deleted due to BEFORE DELETE triggers.
     }
   }
 );
@@ -613,28 +593,17 @@ test(
       assert.equal(Number(bookCount[0].cnt), 0, "No book row should be created");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION')`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION'`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -763,41 +732,22 @@ test(
       assert.equal(conflictBody.data, undefined, "No data should be exposed in conflict response");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId1 > 0) {
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId1]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId1]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION')`,
-          [createdAssetId1]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION'`,
-          [createdAssetId1]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId1]);
       }
       if (createdAssetId2 > 0) {
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId2]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId2]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION')`,
-          [createdAssetId2]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION'`,
-          [createdAssetId2]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId2]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -926,17 +876,11 @@ test(
       assert.equal(conflictBody.data, undefined, "No data should be exposed in conflict response");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER'))`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER')`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (targetOutletId > 0) {
@@ -946,12 +890,7 @@ test(
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -1078,28 +1017,17 @@ test(
       assert.equal(retryBody.data.book.carrying_amount, 10000000, "Should return correct carrying_amount");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION')`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION'`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -1251,46 +1179,19 @@ test(
       assert.equal(bookAfterVoidBody.data.carrying_amount, 0, "Carrying amount should be reset");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM asset_depreciation_plans WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-
-        await db.execute(
-          "DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'IMPAIRMENT', 'DISPOSAL'))",
-          [createdAssetId]
-        );
-        await db.execute(
-          "DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'IMPAIRMENT', 'DISPOSAL')",
-          [createdAssetId]
-        );
-
-        if (createdEventId > 0) {
-          await db.execute(
-            "DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?)",
-            [createdEventId]
-          );
-          await db.execute(
-            "DELETE FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?",
-            [createdEventId]
-          );
-        }
-
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdExpenseAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdExpenseAccountId]);
-      }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -1524,33 +1425,19 @@ test(
       assert.equal(voidResponse.status, 404, "Should return 404 for voiding event in other outlet");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM asset_depreciation_plans WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'IMPAIRMENT', 'DISPOSAL', 'VOID'))`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'IMPAIRMENT', 'DISPOSAL', 'VOID')`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdExpenseAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdExpenseAccountId]);
-      }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
       if (deniedOutletId > 0) {
         await db.execute("DELETE FROM outlets WHERE id = ?", [deniedOutletId]);
       }
@@ -1751,51 +1638,19 @@ test(
       assert.equal(assetAfterVoid[0].disposed_at, null, "disposed_at should be cleared after void");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM asset_depreciation_plans WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId]);
-        // Delete events first (releases FK references to journal_batches)
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
-        // Then delete VOID journal entries (by event_id, not asset_id)
-        if (createdDisposalEventId > 0) {
-          await db.execute(
-            "DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?)",
-            [createdDisposalEventId]
-          );
-          await db.execute(
-            "DELETE FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?",
-            [createdDisposalEventId]
-          );
-        }
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'IMPAIRMENT', 'DISPOSAL', 'VOID'))`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'IMPAIRMENT', 'DISPOSAL', 'VOID')`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdExpenseAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdExpenseAccountId]);
-      }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
-      if (createdLossAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdLossAccountId]);
-      }
-      if (createdDisposalExpenseAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdDisposalExpenseAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -1952,43 +1807,19 @@ test(
       assert.equal(bookAfterVoid.data.carrying_amount, 9500000, "Carrying amount should be restored with salvage preserved (cost - salvage)");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM asset_depreciation_plans WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
-        if (createdDisposalEventId > 0) {
-          await db.execute(
-            "DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?)",
-            [createdDisposalEventId]
-          );
-          await db.execute(
-            "DELETE FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?",
-            [createdDisposalEventId]
-          );
-        }
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL', 'VOID'))`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL', 'VOID')`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
-      if (createdLossAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdLossAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -2127,34 +1958,18 @@ test(
       assert.equal(bookData.data.carrying_amount, 0, "Carrying amount should reset");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Legacy FA_ACQUISITION events have their journals kept as historical record
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
-        // Delete events first (releases FK references to journal_batches)
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
-        // Then delete VOID journal entries (by event_id)
-        if (createdEventId > 0) {
-          await db.execute(
-            "DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?)",
-            [createdEventId]
-          );
-          await db.execute(
-            "DELETE FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?",
-            [createdEventId]
-          );
-        }
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [journalBatchId]);
-        await db.execute("DELETE FROM journal_batches WHERE id = ?", [journalBatchId]);
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -2451,30 +2266,19 @@ test(
       assert.equal(Number(idempotencyRows[0].cnt), 1, "Exactly one event for idempotency key");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM asset_depreciation_plans WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION')`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type = 'ACQUISITION'`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -2637,7 +2441,7 @@ test(
           notes: "Altered payload - should be ignored"
         })
       });
-      assert.equal(dupDispResponse.status, 201);
+      assert.equal(dupDispResponse.status, 200, "Duplicate retry should return 200");
       const dupDispBody = await dupDispResponse.json();
       assert.equal(dupDispBody.data.duplicate, true, "Should be marked duplicate");
       assert.equal(dupDispBody.data.event_id, originalEventId, "Event id should match original");
@@ -2653,38 +2457,18 @@ test(
       assert.equal(Number(idempotencyRows[0].cnt), 1, "Exactly one event for idempotency key");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL'))`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL')`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
-      if (createdExpenseAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdExpenseAccountId]);
-      }
-      if (createdLossAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdLossAccountId]);
-      }
-      if (createdDisposalExpenseAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdDisposalExpenseAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -2863,49 +2647,24 @@ test(
       assert.equal(crossBody.data?.disposal, undefined, "disposal must not be leaked");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId1 > 0) {
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId1]);
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId1]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId1]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL'))`,
-          [createdAssetId1]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL')`,
-          [createdAssetId1]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId1]);
       }
       if (createdAssetId2 > 0) {
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId2]);
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId2]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId2]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL'))`,
-          [createdAssetId2]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'DISPOSAL')`,
-          [createdAssetId2]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId2]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
-      if (createdExpenseAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdExpenseAccountId]);
-      }
-      if (createdLossAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdLossAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -3070,30 +2829,16 @@ test(
       assert.equal(crossBody.data?.journal_batch_id, undefined, "journal_batch_id must not be leaked");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId1 > 0) {
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId1]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId1]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER'))`,
-          [createdAssetId1]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER')`,
-          [createdAssetId1]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId1]);
       }
       if (createdAssetId2 > 0) {
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId2]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId2]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER'))`,
-          [createdAssetId2]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER')`,
-          [createdAssetId2]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId2]);
       }
       if (targetOutletId > 0) {
@@ -3103,12 +2848,7 @@ test(
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -3229,28 +2969,17 @@ test(
       assert.equal(conflictBody.data?.journal_batch_id, undefined, "journal_batch_id must not be leaked");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER'))`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER')`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -3394,17 +3123,11 @@ test(
       assert.equal(retryBody.data.to_outlet_id, targetOutletId, "Should return correct to_outlet_id");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER'))`,
-          [createdAssetId]
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE doc_id = ? AND doc_type IN ('ACQUISITION', 'TRANSFER')`,
-          [createdAssetId]
-        );
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (targetOutletId > 0) {
@@ -3414,12 +3137,7 @@ test(
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
@@ -3606,42 +3324,19 @@ test(
       assert.equal(bookData.data.carrying_amount, 10000000, "Carrying amount should be restored");
 
     } finally {
+      // Note: journal_lines and journal_batches are immutable (BEFORE DELETE triggers)
+      // Legacy FA_ACQUISITION and FA_DISPOSAL events have their journals kept as historical record
+      // Accounts cannot be deleted when referenced by journal_lines (FK constraint)
       if (createdAssetId > 0) {
         await db.execute("DELETE FROM fixed_asset_disposals WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_events WHERE asset_id = ?", [createdAssetId]);
         await db.execute("DELETE FROM fixed_asset_books WHERE asset_id = ?", [createdAssetId]);
-        if (acqJournalBatchId > 0) {
-          await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [acqJournalBatchId]);
-          await db.execute("DELETE FROM journal_batches WHERE id = ?", [acqJournalBatchId]);
-        }
-        if (dispJournalBatchId > 0) {
-          await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [dispJournalBatchId]);
-          await db.execute("DELETE FROM journal_batches WHERE id = ?", [dispJournalBatchId]);
-        }
-        if (createdDispEventId > 0) {
-          await db.execute(
-            "DELETE FROM journal_lines WHERE journal_batch_id IN (SELECT id FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?)",
-            [createdDispEventId]
-          );
-          await db.execute(
-            "DELETE FROM journal_batches WHERE doc_type = 'VOID' AND doc_id = ?",
-            [createdDispEventId]
-          );
-        }
         await db.execute("DELETE FROM fixed_assets WHERE id = ?", [createdAssetId]);
       }
       if (createdCategoryId > 0) {
         await db.execute("DELETE FROM fixed_asset_categories WHERE id = ?", [createdCategoryId]);
       }
-      if (createdExpenseAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdExpenseAccountId]);
-      }
-      if (createdAssetAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdAssetAccountId]);
-      }
-      if (createdCashAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [createdCashAccountId]);
-      }
+      // Note: Accounts are intentionally not deleted - they may be referenced by journal_lines
     }
   }
 );
