@@ -200,12 +200,14 @@ settingsConfigRoutes.patch("/", async (c) => {
         );
       }
 
-      // Map "int" and "enum" to more generic types for storage
+      // Map registry value types to storage value types
       let valueType: "string" | "number" | "boolean" | "json" = "string";
       if (registryEntry.valueType === "boolean") {
         valueType = "boolean";
-      } else if (registryEntry.valueType === "int" || registryEntry.valueType === "enum") {
+      } else if (registryEntry.valueType === "int") {
         valueType = "number";
+      } else if (registryEntry.valueType === "enum") {
+        valueType = "string";
       }
 
       // Upsert the setting
@@ -238,6 +240,89 @@ settingsConfigRoutes.patch("/", async (c) => {
     }
 
     console.error("PATCH /settings/config failed", error);
+    return errorResponse("INTERNAL_ERROR", "Failed to update settings", 500);
+  }
+});
+
+// PUT /settings/config - Update config values for an outlet (same as PATCH)
+settingsConfigRoutes.put("/", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "settings",
+    permission: "update"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const payload = await c.req.json();
+    const input = UpdateConfigSchema.parse(payload);
+
+    const results: Array<{ key: string; value: unknown; value_type: string }> = [];
+
+    for (const item of input.settings) {
+      // Validate key exists in registry
+      if (!(item.key in SETTINGS_REGISTRY)) {
+        return errorResponse("INVALID_REQUEST", `Invalid setting key: ${item.key}`, 400);
+      }
+
+      const registryEntry = SETTINGS_REGISTRY[item.key as SettingKey];
+
+      // Validate and coerce value
+      let validatedValue: string | number | boolean | Record<string, unknown>;
+      try {
+        validatedValue = registryEntry.schema.parse(item.value) as string | number | boolean | Record<string, unknown>;
+      } catch {
+        return errorResponse(
+          "INVALID_REQUEST",
+          `Invalid value for ${item.key}: expected ${registryEntry.valueType}`,
+          400
+        );
+      }
+
+      // Map registry value types to storage value types
+      let valueType: "string" | "number" | "boolean" | "json" = "string";
+      if (registryEntry.valueType === "boolean") {
+        valueType = "boolean";
+      } else if (registryEntry.valueType === "int") {
+        valueType = "number";
+      } else if (registryEntry.valueType === "enum") {
+        valueType = "string";
+      }
+
+      // Upsert the setting
+      const setting = await setSetting({
+        companyId: auth.companyId,
+        key: item.key,
+        value: validatedValue,
+        valueType,
+        outletId: input.outlet_id,
+        actor: {
+          userId: auth.userId,
+          ipAddress: c.req.raw.headers.get("x-forwarded-for") ?? "unknown"
+        }
+      });
+
+      results.push({
+        key: setting.key,
+        value: setting.value,
+        value_type: setting.value_type
+      });
+    }
+
+    return successResponse({
+      outlet_id: input.outlet_id,
+      settings: results
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    console.error("PUT /settings/config failed", error);
     return errorResponse("INTERNAL_ERROR", "Failed to update settings", 500);
   }
 });
