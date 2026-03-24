@@ -89,7 +89,7 @@ test(
       // Setup: Create Company B
       // ========================================
       const [companyBResult] = await db.execute(
-        `INSERT INTO companies (code, name) VALUES (?, ?)`,
+        `INSERT INTO companies (code, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), name = VALUES(name)`,
         [companyBCode, `Test Company B ${runId}`]
       );
       companyBId = Number(companyBResult.insertId);
@@ -97,7 +97,7 @@ test(
 
       // Create outlet for Company B
       const [outletBResult] = await db.execute(
-        `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
+        `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), id = LAST_INSERT_ID(id), updated_at = CURRENT_TIMESTAMP`,
         [companyBId, `MAIN-B-${runId}`, "Main Outlet B"]
       );
       const outletBId = Number(outletBResult.insertId);
