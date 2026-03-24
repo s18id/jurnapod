@@ -33,18 +33,20 @@ import {
   deleteItem,
   listItems,
   getItemVariantStats,
+  findItemById,
   createItemPrice,
   updateItemPrice,
   deleteItemPrice,
   findItemPriceById,
-  findItemById,
   listItemPrices,
   createItemGroup,
+  createItemGroupsBulk,
   updateItemGroup,
   deleteItemGroup,
   DatabaseConflictError,
   DatabaseReferenceError,
-  DatabaseForbiddenError
+  DatabaseForbiddenError,
+  ItemGroupBulkConflictError
 } from "../lib/master-data.js";
 import { checkUserAccess } from "../lib/auth.js";
 
@@ -529,6 +531,63 @@ inventoryRoutes.post("/item-groups", async (c) => {
 
     console.error("POST /inventory/item-groups failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Item group creation failed", 500);
+  }
+});
+
+// POST /inventory/item-groups/bulk - Bulk create item groups
+inventoryRoutes.post("/item-groups/bulk", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "inventory",
+    permission: "create"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const payload = await c.req.json();
+    const input = z.object({
+      rows: z.array(
+        z.object({
+          code: z.string().max(32).nullish(),
+          name: z.string().min(1).max(100),
+          parent_code: z.string().max(32).nullish(),
+          is_active: z.boolean().optional().default(true)
+        })
+      ).min(1)
+    }).parse(payload);
+
+    // Transform to match ItemGroupBulkRow type
+    const rows = input.rows.map((r) => ({
+      code: r.code ?? null,
+      name: r.name,
+      parent_code: r.parent_code ?? null,
+      is_active: r.is_active
+    }));
+
+    const result = await createItemGroupsBulk(auth.companyId, rows, {
+      userId: auth.userId
+    });
+
+    return successResponse(result, 201);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof ItemGroupBulkConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    console.error("POST /inventory/item-groups/bulk failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Bulk item group creation failed", 500);
   }
 });
 
