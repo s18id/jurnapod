@@ -6,13 +6,94 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
   ensureDailySalesView,
-  loginOwner,
+  loginAndGetUserContext,
   readEnv,
   setupIntegrationTests,
   TEST_TIMEOUT_MS
 } from "./integration-harness.mjs";
+import { normalizeDate } from "../../src/lib/date-helpers.ts";
 
 const testContext = setupIntegrationTests(test);
+
+/**
+ * Get company timezone via API.
+ * @param {string} baseUrl - API base URL
+ * @param {string} accessToken - Auth token
+ * @param {number} companyId - Company ID
+ * @returns {Promise<string>} Company timezone
+ */
+async function getCompanyTimezone(baseUrl, accessToken, companyId) {
+  const response = await fetch(`${baseUrl}/api/companies/${companyId}`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+  
+  if (response.status !== 200) {
+    throw new Error(`Failed to get company. status=${response.status}`);
+  }
+  
+  const body = await response.json();
+  if (!body?.success || !body?.data) {
+    throw new Error(`Invalid company response. body=${JSON.stringify(body)}`);
+  }
+  
+  return body.data.timezone || "UTC";
+}
+
+/**
+ * Push a POS transaction via sync/push API.
+ * @param {string} baseUrl - API base URL
+ * @param {string} accessToken - Auth token
+ * @param {number} outletId - Outlet ID
+ * @param {number} companyId - Company ID
+ * @param {number} cashierUserId - Cashier user ID
+ * @param {string} clientTxId - Unique client transaction ID
+ * @param {string} trxAt - Transaction timestamp (ISO string)
+ * @param {Array} items - Transaction items
+ * @param {Array} payments - Transaction payments
+ * @returns {Promise<void>}
+ */
+async function pushPosTransaction(baseUrl, accessToken, outletId, companyId, cashierUserId, clientTxId, trxAt, items, payments) {
+  const response = await fetch(`${baseUrl}/api/sync/push`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      outlet_id: outletId,
+      transactions: [
+        {
+          client_tx_id: clientTxId,
+          company_id: companyId,
+          outlet_id: outletId,
+          cashier_user_id: cashierUserId,
+          status: "COMPLETED",
+          trx_at: trxAt,
+          items: items,
+          payments: payments
+        }
+      ]
+    })
+  });
+
+  if (response.status !== 200) {
+    const body = await response.text();
+    throw new Error(`Sync push failed. status=${response.status} body=${body}`);
+  }
+
+  const body = await response.json();
+  if (!body?.success) {
+    throw new Error(`Sync push failed. body=${JSON.stringify(body)}`);
+  }
+
+  // Check that the transaction was accepted
+  const result = body.data?.results?.[0];
+  if (!result || result.result !== "OK") {
+    throw new Error(`Transaction not accepted. result=${JSON.stringify(result)}`);
+  }
+}
 
 test(
   "reports integration: daily-sales falls back to base tables when view is unavailable",
@@ -27,78 +108,65 @@ test(
     const ownerPassword = readEnv("JP_OWNER_PASSWORD");
 
     try {
-      const [ownerRows] = await db.execute(
-        `SELECT u.id, u.company_id, o.id AS outlet_id
-         FROM users u
-         INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
-           AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
-      const owner = ownerRows[0];
-      if (!owner) {
-        throw new Error(
-          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
-        );
-      }
+      const baseUrl = testContext.baseUrl;
 
-      const companyId = Number(owner.company_id);
-      const outletId = Number(owner.outlet_id);
-      const reportDate = "2099-03-10";
-      const trxAtSql = "2099-03-10 10:15:00";
+      // Login and get user context via API (no direct DB)
+      const userContext = await loginAndGetUserContext(
+        baseUrl,
+        companyCode,
+        ownerEmail,
+        ownerPassword,
+        outletCode
+      );
+
+      const companyId = userContext.companyId;
+      const outletId = userContext.outletId;
+      const ownerUserId = userContext.userId;
+      const accessToken = userContext.accessToken;
+
+      // Get company timezone for proper date handling
+      const timezone = await getCompanyTimezone(baseUrl, accessToken, companyId);
+
+      // Use a date within fiscal year range (FY 2026: 2026-01-01 to 2026-12-31)
+      const reportDate = "2026-03-10";
+      
+      // Convert local date to UTC for transaction timestamp
+      // The transaction should fall within the report date range in the company's timezone
+      const trxAtUTC = normalizeDate(reportDate, timezone, 'start');
+      // Use a time within the day (add 10 hours in milliseconds to get 10:00 AM local time)
+      const trxAtDate = new Date(new Date(trxAtUTC).getTime() + 10 * 60 * 60 * 1000);
+      const trxAt = trxAtDate.toISOString();
 
       await ensureDailySalesView(db);
 
       txClientId = randomUUID();
-      const [txInsert] = await db.execute(
-        `INSERT INTO pos_transactions (
-           company_id,
-           outlet_id,
-           client_tx_id,
-           status,
-           trx_at,
-           payload_sha256,
-           payload_hash_version
-         ) VALUES (?, ?, ?, 'COMPLETED', ?, '', 1)`,
-        [companyId, outletId, txClientId, trxAtSql]
-      );
-      const txId = Number(txInsert.insertId);
 
-      await db.execute(
-        `INSERT INTO pos_transaction_items (
-           pos_transaction_id,
-           company_id,
-           outlet_id,
-           line_no,
-           item_id,
-           qty,
-           price_snapshot,
-           name_snapshot
-         ) VALUES (?, ?, ?, 1, 1, 2, 15000, 'Fallback Item')`,
-        [txId, companyId, outletId]
+      // Create transaction via sync/push API (no direct DB)
+      await pushPosTransaction(
+        baseUrl,
+        accessToken,
+        outletId,
+        companyId,
+        ownerUserId,
+        txClientId,
+        trxAt,
+        [
+          {
+            item_id: 1,
+            qty: 2,
+            price_snapshot: 15000,
+            name_snapshot: "Fallback Item"
+          }
+        ],
+        [
+          {
+            method: "CASH",
+            amount: 30000
+          }
+        ]
       );
 
-      await db.execute(
-        `INSERT INTO pos_transaction_payments (
-           pos_transaction_id,
-           company_id,
-           outlet_id,
-           payment_no,
-           method,
-           amount
-         ) VALUES (?, ?, ?, 1, 'CASH', 30000)`,
-        [txId, companyId, outletId]
-      );
-
-      const baseUrl = testContext.baseUrl;
-
-      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
-
+      // Drop view to test fallback (direct DB - testing DB-level behavior)
       await db.execute("DROP VIEW IF EXISTS v_pos_daily_totals");
 
       const response = await fetch(
@@ -119,12 +187,12 @@ test(
       assert.equal(Number(row.gross_total) >= 30000, true);
       assert.equal(Number(row.paid_total) >= 30000, true);
     } finally {
+      // Cleanup: restore view and delete test transaction (direct DB - allowed for cleanup)
       await ensureDailySalesView(db);
 
       if (txClientId) {
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [txClientId]);
       }
-
     }
   }
 );
@@ -144,74 +212,65 @@ test(
     const runId = Date.now().toString(36);
 
     try {
-      const [ownerRows] = await db.execute(
-        `SELECT u.id, u.company_id, o.id AS outlet_id
-         FROM users u
-         INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
-           AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
-      const owner = ownerRows[0];
-      if (!owner) {
-        throw new Error(
-          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
-        );
-      }
+      const baseUrl = testContext.baseUrl;
 
-      const companyId = Number(owner.company_id);
-      const outletId = Number(owner.outlet_id);
-      const reportDate = "2099-03-11";
-      const trxAtSql = "2099-03-11 10:15:00";
+      // Login and get user context via API (no direct DB)
+      const userContext = await loginAndGetUserContext(
+        baseUrl,
+        companyCode,
+        ownerEmail,
+        ownerPassword,
+        outletCode
+      );
+
+      const companyId = userContext.companyId;
+      const outletId = userContext.outletId;
+      const ownerUserId = userContext.userId;
+      const accessToken = userContext.accessToken;
+
+      // Get company timezone for proper date handling
+      const timezone = await getCompanyTimezone(baseUrl, accessToken, companyId);
+
+      // Use a date within fiscal year range (FY 2026: 2026-01-01 to 2026-12-31)
+      const reportDate = "2026-03-11";
+      
+      // Convert local date to UTC for transaction timestamp
+      // The transaction should fall within the report date range in the company's timezone
+      const trxAtUTC = normalizeDate(reportDate, timezone, 'start');
+      // Use a time within the day (add 10 hours in milliseconds to get 10:00 AM local time)
+      const trxAtDate = new Date(new Date(trxAtUTC).getTime() + 10 * 60 * 60 * 1000);
+      const trxAt = trxAtDate.toISOString();
 
       await ensureDailySalesView(db);
 
       txClientId = randomUUID();
-      const [txInsert] = await db.execute(
-        `INSERT INTO pos_transactions (
-           company_id,
-           outlet_id,
-           client_tx_id,
-           status,
-           trx_at,
-           payload_sha256,
-           payload_hash_version
-         ) VALUES (?, ?, ?, 'COMPLETED', ?, '', 1)`,
-        [companyId, outletId, txClientId, trxAtSql]
-      );
-      const txId = Number(txInsert.insertId);
 
-      await db.execute(
-        `INSERT INTO pos_transaction_items (
-           pos_transaction_id,
-           company_id,
-           outlet_id,
-           line_no,
-           item_id,
-           qty,
-           price_snapshot,
-           name_snapshot
-         ) VALUES (?, ?, ?, 1, 1, 2, 17500, 'Fallback Invalid View Item')`,
-        [txId, companyId, outletId]
+      // Create transaction via sync/push API (no direct DB)
+      await pushPosTransaction(
+        baseUrl,
+        accessToken,
+        outletId,
+        companyId,
+        ownerUserId,
+        txClientId,
+        trxAt,
+        [
+          {
+            item_id: 1,
+            qty: 2,
+            price_snapshot: 17500,
+            name_snapshot: "Fallback Invalid View Item"
+          }
+        ],
+        [
+          {
+            method: "CASH",
+            amount: 35000
+          }
+        ]
       );
 
-      await db.execute(
-        `INSERT INTO pos_transaction_payments (
-           pos_transaction_id,
-           company_id,
-           outlet_id,
-           payment_no,
-           method,
-           amount
-         ) VALUES (?, ?, ?, 1, 'CASH', 35000)`,
-        [txId, companyId, outletId]
-      );
-
+      // Create invalid view scenario (direct DB - testing DB-level behavior)
       invalidSourceTable = `it_daily_invalid_${runId}`;
       await db.execute(
         `CREATE TABLE \`${invalidSourceTable}\` (
@@ -241,10 +300,6 @@ test(
 
       await db.execute(`DROP TABLE \`${invalidSourceTable}\``);
 
-      const baseUrl = testContext.baseUrl;
-
-      const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
-
       const response = await fetch(
         `${baseUrl}/api/reports/daily-sales?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&status=COMPLETED`,
         {
@@ -263,6 +318,7 @@ test(
       assert.equal(Number(row.gross_total) >= 35000, true);
       assert.equal(Number(row.paid_total) >= 35000, true);
     } finally {
+      // Cleanup: restore view, drop test table, delete test transaction (direct DB - allowed for cleanup)
       await ensureDailySalesView(db);
 
       if (invalidSourceTable) {
@@ -272,7 +328,6 @@ test(
       if (txClientId) {
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [txClientId]);
       }
-
     }
   }
 );

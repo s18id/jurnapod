@@ -216,10 +216,11 @@ function toDateTimeRange(dateFrom: string, dateTo: string, timezone?: string): {
     const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, timezone);
     // Convert to MySQL DATETIME format (YYYY-MM-DD HH:MM:SS)
     const fromStart = range.fromStartUTC.slice(0, 19).replace("T", " ");
-    // For end boundary, add 1ms and convert to next day start
+    // For end boundary, add 1ms to get the start of the next day in UTC
     const endDate = new Date(range.toEndUTC);
     endDate.setUTCMilliseconds(endDate.getUTCMilliseconds() + 1);
-    const nextDayStart = endDate.toISOString().slice(0, 10) + " 00:00:00";
+    // Use the full UTC datetime, not just the date portion
+    const nextDayStart = endDate.toISOString().slice(0, 19).replace("T", " ");
     return { fromStart, nextDayStart };
   }
 

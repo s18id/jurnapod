@@ -274,6 +274,67 @@ export async function loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword
   return loginUser(baseUrl, companyCode, ownerEmail, ownerPassword, serverLogs);
 }
 
+/**
+ * Login and get user context via API (avoids direct DB queries in tests).
+ * Returns user info including outlet assignment.
+ * 
+ * @param {string} baseUrl - API base URL
+ * @param {string} companyCode - Company code
+ * @param {string} email - User email
+ * @param {string} password - User password
+ * @param {string} outletCode - Outlet code to find in user's outlets
+ * @returns {Promise<{accessToken: string, userId: number, companyId: number, outletId: number}>}
+ */
+export async function loginAndGetUserContext(baseUrl, companyCode, email, password, outletCode, serverLogs = null) {
+  const accessToken = await loginUser(baseUrl, companyCode, email, password, serverLogs);
+  
+  const meResponse = await fetch(`${baseUrl}/api/users/me`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+  
+  if (meResponse.status !== 200) {
+    let responseBody = "";
+    try {
+      responseBody = await meResponse.text();
+    } catch {
+      responseBody = "";
+    }
+    const logDetail = serverLogs ? `\n${serverLogs.join("")}` : "";
+    throw new Error(`Failed to get user info. status=${meResponse.status} body=${responseBody}${logDetail}`);
+  }
+  
+  const meBody = await meResponse.json();
+  if (!meBody?.success || !meBody?.data) {
+    throw new Error("Invalid /users/me response format");
+  }
+  
+  const userData = meBody.data;
+  const userId = Number(userData.id);
+  const companyId = Number(userData.company_id);
+  
+  // Find the outlet_id for the given outlet_code
+  let outletId = null;
+  if (userData.outlets && Array.isArray(userData.outlets)) {
+    const outlet = userData.outlets.find(o => o.code === outletCode);
+    if (outlet) {
+      outletId = Number(outlet.id);
+    }
+  }
+  
+  if (outletId === null) {
+    throw new Error(`Outlet '${outletCode}' not found in user's outlets`);
+  }
+  
+  return {
+    accessToken,
+    userId,
+    companyId,
+    outletId
+  };
+}
+
 export function createIntegrationTestContext(options = {}) {
   const serverOptions = options.serverOptions ?? {};
   const hasServerOptions = Object.keys(serverOptions).length > 0;
