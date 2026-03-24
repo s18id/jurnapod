@@ -51,8 +51,8 @@ test(
 
       const companyId = Number(owner.company_id);
       const outletId = Number(owner.outlet_id);
-      const reportDate = "2020-02-20";
-      const postedAtSql = "2020-02-20 12:00:00";
+      const reportDate = "2026-03-15";
+      const postedAtSql = "2026-03-15 12:00:00";
 
       const outletAccountCode = `ITRPTOS${runId}`.slice(0, 32).toUpperCase();
       const nullAccountCode = `ITRPTNS${runId}`.slice(0, 32).toUpperCase();
@@ -118,7 +118,7 @@ test(
       const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, null);
 
       const journalsResponse = await fetch(
-        `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&limit=200`,
+        `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&limit=100`,
         {
           headers: {
             authorization: `Bearer ${accessToken}`
@@ -168,7 +168,7 @@ test(
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
     const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
     const ownerPassword = readEnv("JP_OWNER_PASSWORD");
-    const reportDate = "2020-05-10";
+    const reportDate = "2026-03-16";
     const runId = Date.now().toString(36);
 
     try {
@@ -272,7 +272,7 @@ test(
       assert.equal(asOfResponse.status, 200);
       const asOfBody = await asOfResponse.json();
       assert.equal(asOfBody.success, true);
-      assert.equal(asOfBody.data.total, 2);
+      assert.equal(asOfBody.data.pagination.total, 2);
 
       const page1Response = await fetch(
         `${baseUrl}/api/reports/journals?outlet_id=${outletId}&date_from=${reportDate}&date_to=${reportDate}&limit=1&offset=0`,
@@ -287,7 +287,7 @@ test(
       assert.equal(page1Body.success, true);
       assert.equal(typeof page1Body.data.filters.as_of, "string");
       assert.equal(typeof page1Body.data.filters.as_of_id, "number");
-      assert.equal(page1Body.data.total, 2);
+      assert.equal(page1Body.data.pagination.total, 2);
       const firstPageBatchId = page1Body.data.journals[0]?.id;
 
       const [batch3Insert] = await db.execute(
@@ -325,7 +325,7 @@ test(
       assert.equal(page2Response.status, 200);
       const page2Body = await page2Response.json();
       assert.equal(page2Body.success, true);
-      assert.equal(page2Body.data.total, 2);
+      assert.equal(page2Body.data.pagination.total, 2);
 
       const returnedPage2Ids = page2Body.data.journals.map((row) => row.id);
       assert.equal(returnedPage2Ids.includes(concurrentBatchId), false);

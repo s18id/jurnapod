@@ -489,6 +489,7 @@ reportRoutes.get("/journals", async (c) => {
         limit,
         offset,
         asOf: parsed.as_of,
+        includeUnassignedOutlet: !parsed.outlet_id,
       }),
       QUERY_TIMEOUT_MS
     );
