@@ -315,6 +315,7 @@ test(
     } finally {
       // Note: journal_lines are immutable (enforced by trigger) - cannot delete
       // journal_batches cannot be deleted due to FK constraint with journal_lines
+      // Outlets cannot be deleted once referenced by journal_batches
       // Test data will remain as immutable records
 
       if (createdInvoiceIds.length > 0) {
@@ -359,56 +360,8 @@ test(
         );
       }
 
-      if (createdOutletId > 0) {
-        if (companyId > 0) {
-          await db.execute(
-            `DELETE FROM sales_invoice_taxes
-             WHERE company_id = ?
-               AND outlet_id = ?`,
-            [companyId, createdOutletId]
-          );
-
-          await db.execute(
-            `DELETE FROM sales_invoice_lines
-             WHERE company_id = ?
-               AND outlet_id = ?`,
-            [companyId, createdOutletId]
-          );
-
-          await db.execute(
-            `DELETE FROM sales_payments
-             WHERE company_id = ?
-               AND outlet_id = ?`,
-            [companyId, createdOutletId]
-          );
-
-          await db.execute(
-            `DELETE FROM sales_invoices
-             WHERE company_id = ?
-               AND outlet_id = ?`,
-            [companyId, createdOutletId]
-          );
-
-          await db.execute(
-            `DELETE FROM outlet_account_mappings
-             WHERE company_id = ?
-               AND outlet_id = ?`,
-            [companyId, createdOutletId]
-          );
-
-          if (createdMappingAccountIds.length > 0) {
-            const accountPlaceholders = createdMappingAccountIds.map(() => "?").join(", ");
-            await db.execute(
-              `DELETE FROM accounts
-               WHERE company_id = ?
-                 AND id IN (${accountPlaceholders})`,
-              [companyId, ...createdMappingAccountIds]
-            );
-          }
-        }
-
-        await db.execute("DELETE FROM outlets WHERE id = ?", [createdOutletId]);
-      }
+      // Note: Cannot delete outlet because journal_batches reference it
+      // The outlet and its account mappings will remain as test artifacts
     }
   }
 );

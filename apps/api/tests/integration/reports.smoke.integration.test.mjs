@@ -149,7 +149,7 @@ test(
       const posBody = await posResponse.json();
       assert.equal(posBody.success, true);
       assert.equal(Array.isArray(posBody.data.transactions), true);
-      assert.equal(typeof posBody.data.total, "number");
+      assert.equal(typeof posBody.data.pagination.total, "number");
 
       const dailySalesResponse = await fetch(
         `${baseUrl}/api/reports/daily-sales?outlet_id=${outletId}&date_from=${dateFromIso}&date_to=${dateToIso}`,

@@ -114,7 +114,7 @@ test(
       assert.equal(body.success, true);
 
       const row = body.data.rows.find((entry) => Number(entry.outlet_id) === outletId);
-      assert.equal(Boolean(row), true);
+      assert.equal(Boolean(row), true, JSON.stringify(body));
       assert.equal(Number(row.tx_count) >= 1, true);
       assert.equal(Number(row.gross_total) >= 30000, true);
       assert.equal(Number(row.paid_total) >= 30000, true);
