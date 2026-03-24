@@ -313,6 +313,10 @@ test(
       assert.equal(csvText.includes("invoice_id,invoice_no"), true);
       assert.equal(csvText.includes(currentInvoice.invoice_no), true);
     } finally {
+      // Note: journal_lines are immutable (enforced by trigger) - cannot delete
+      // journal_batches cannot be deleted due to FK constraint with journal_lines
+      // Test data will remain as immutable records
+
       if (createdInvoiceIds.length > 0) {
         const placeholders = createdInvoiceIds.map(() => "?").join(", ");
         await db.execute(
@@ -332,21 +336,6 @@ test(
         await db.execute(
           `DELETE FROM sales_credit_notes
            WHERE invoice_id IN (${placeholders})`,
-          createdInvoiceIds
-        );
-
-        await db.execute(
-          `DELETE jl FROM journal_lines jl
-           INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-           WHERE jb.doc_type = 'SALES_INVOICE'
-             AND jb.doc_id IN (${placeholders})`,
-          createdInvoiceIds
-        );
-
-        await db.execute(
-          `DELETE FROM journal_batches
-           WHERE doc_type = 'SALES_INVOICE'
-             AND doc_id IN (${placeholders})`,
           createdInvoiceIds
         );
 
@@ -372,23 +361,6 @@ test(
 
       if (createdOutletId > 0) {
         if (companyId > 0) {
-          await db.execute(
-            `DELETE jl FROM journal_lines jl
-             INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-             WHERE jb.company_id = ?
-               AND jb.outlet_id = ?
-               AND jb.doc_type = 'SALES_INVOICE'`,
-            [companyId, createdOutletId]
-          );
-
-          await db.execute(
-            `DELETE FROM journal_batches
-             WHERE company_id = ?
-               AND outlet_id = ?
-               AND doc_type = 'SALES_INVOICE'`,
-            [companyId, createdOutletId]
-          );
-
           await db.execute(
             `DELETE FROM sales_invoice_taxes
              WHERE company_id = ?

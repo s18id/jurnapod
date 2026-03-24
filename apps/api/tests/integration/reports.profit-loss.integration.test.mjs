@@ -153,18 +153,10 @@ test(
       assert.equal(Number(body.data.totals.total_credit), 70);
       assert.equal(Number(body.data.totals.net), 60);
     } finally {
-      if (journalBatchId > 0) {
-        await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [journalBatchId]);
-        await db.execute("DELETE FROM journal_batches WHERE id = ?", [journalBatchId]);
-      }
-
-      if (includedAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [includedAccountId]);
-      }
-
-      if (excludedAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [excludedAccountId]);
-      }
+      // Note: journal_lines are immutable (enforced by trigger) - cannot delete
+      // journal_batches cannot be deleted due to FK constraint with journal_lines
+      // Accounts referenced by journal_lines cannot be deleted due to FK constraint
+      // Test data will remain as immutable records
 
       if (profitLossTypeId > 0) {
         await db.execute("DELETE FROM account_types WHERE id = ?", [profitLossTypeId]);

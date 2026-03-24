@@ -147,23 +147,10 @@ test(
       assert.equal(accountIds.includes(outletAccountId), true);
       assert.equal(accountIds.includes(nullAccountId), false);
     } finally {
-      if (outletBatchId > 0) {
-        await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [outletBatchId]);
-        await db.execute("DELETE FROM journal_batches WHERE id = ?", [outletBatchId]);
-      }
-
-      if (nullBatchId > 0) {
-        await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [nullBatchId]);
-        await db.execute("DELETE FROM journal_batches WHERE id = ?", [nullBatchId]);
-      }
-
-      if (outletAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [outletAccountId]);
-      }
-
-      if (nullAccountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [nullAccountId]);
-      }
+      // Note: journal_lines are immutable (enforced by trigger) - cannot delete
+      // journal_batches cannot be deleted due to FK constraint with journal_lines
+      // Accounts referenced by journal_lines cannot be deleted due to FK constraint
+      // Test data will remain as immutable records
 
     }
   }
@@ -344,20 +331,10 @@ test(
       assert.equal(returnedPage2Ids.includes(concurrentBatchId), false);
       assert.equal(returnedPage2Ids.includes(firstPageBatchId), false);
     } finally {
-      if (batchIds.length > 0) {
-        await db.execute(
-          `DELETE FROM journal_lines WHERE journal_batch_id IN (${batchIds.map(() => "?").join(", ")})`,
-          batchIds
-        );
-        await db.execute(
-          `DELETE FROM journal_batches WHERE id IN (${batchIds.map(() => "?").join(", ")})`,
-          batchIds
-        );
-      }
-
-      if (accountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [accountId]);
-      }
+      // Note: journal_lines are immutable (enforced by trigger) - cannot delete
+      // journal_batches cannot be deleted due to FK constraint with journal_lines
+      // Accounts referenced by journal_lines cannot be deleted due to FK constraint
+      // Test data will remain as immutable records
 
     }
   }
