@@ -1,6 +1,6 @@
 # Story 0.1.2: DbClient Integration
 
-Status: in-progress
+Status: done
 
 ## Story
 
