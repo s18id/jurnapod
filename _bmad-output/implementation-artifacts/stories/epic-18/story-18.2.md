@@ -1,6 +1,6 @@
 # Story 18.2: Remove dropped-column references from tests and fixtures
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -36,8 +36,9 @@ so that the schema drop does not break automated validation.
 
 ### Technical Requirements
 
-- Remove only the dropped-column references.
+- Remove only references to the three dropped columns.
 - Keep test intent intact.
+- Remove assertions and fixture usage for `pos_order_updates.created_at_ts` if present; rely on `created_at` instead.
 - Respect integration fixture policy: API-driven setup for business entities where applicable. [Source: `apps/api/AGENTS.md#Integration test fixture policy`]
 
 ### Architecture Compliance
@@ -86,7 +87,8 @@ openai/gpt-5.4
 
 ### Completion Notes List
 
-- Pending implementation.
+- Removed remaining test/fixture inserts for dropped `created_at_ts` columns in service-session, reservation, and outlet-table tests.
+- Verified targeted affected test files pass post-cleanup.
 
 ### File List
 

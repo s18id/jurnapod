@@ -217,11 +217,10 @@ const nowTs = Date.now();
            opened_at_ts,
            closed_at,
            closed_at_ts,
-           notes,
-           updated_at,
-           updated_at_ts,
-           created_at_ts
-          ) VALUES (?, ?, ?, 'DINE_IN', 'WALK_IN', 'DEFERRED', ?, ?, ?, 0, 'OPEN', 'OPEN', 0, NOW(), ?, NULL, NULL, NULL, NOW(), ?, ?)`,
+            notes,
+            updated_at,
+            updated_at_ts
+           ) VALUES (?, ?, ?, 'DINE_IN', 'WALK_IN', 'DEFERRED', ?, ?, ?, 0, 'OPEN', 'OPEN', 0, NOW(), ?, NULL, NULL, NULL, NOW(), ?)`,
         [
           openOrderId,
           companyId,
@@ -229,7 +228,6 @@ const nowTs = Date.now();
           table3.id,
           reservationWithOpenOrder.reservation_id,
           reservationWithOpenOrder.guest_count,
-          nowTs,
           nowTs,
           nowTs
         ]

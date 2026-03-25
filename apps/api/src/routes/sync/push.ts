@@ -1236,10 +1236,9 @@ async function runAcceptedSyncPushHook(
  * - opened_at_ts: STATE TRANSITION - when the order was opened (client-authored)
  * - closed_at_ts: STATE TRANSITION - when the order was closed (client-authored)
  * - updated_at_ts: SNAPSHOT FRESHNESS - when this snapshot was generated (client-authored)
- * - created_at_ts: SERVER INGEST TIME - when this record was first inserted server-side
+ * - created_at: SERVER INGEST TIME - DB-owned CURRENT_TIMESTAMP on first insert
  *
- * created_at_ts is set to server current time on INSERT and preserved on UPDATE
- * (ON DUPLICATE KEY UPDATE does not touch created_at columns).
+ * ON DUPLICATE KEY UPDATE does not touch created_at.
  */
 async function processActiveOrders(
   executor: QueryExecutor,
@@ -1250,22 +1249,15 @@ async function processActiveOrders(
 
   for (const order of orders) {
     try {
-      // Generate server-authoritative ingest time for created_at / created_at_ts
-      // This is the time the server ingests the snapshot, not the event time.
-      const serverNow = new Date();
-      const serverCreatedAtMysql = toMysqlDateTimeStrict(serverNow.toISOString(), "server_created_at");
-      const serverCreatedAtTs = serverNow.getTime();
-
       // Upsert the order snapshot
-      // Note: created_at and created_at_ts are NOT in the ON DUPLICATE KEY UPDATE clause,
-      // so they are preserved on existing rows and set to serverNow on new rows.
+      // Note: created_at_ts was removed per ADR-0001 / Story 18.1.
+      // created_at is retained and populated by the DB default CURRENT_TIMESTAMP on INSERT.
       await executor.execute(
         `INSERT INTO pos_order_snapshots (
            order_id, company_id, outlet_id, service_type, source_flow, settlement_flow,
            table_id, reservation_id, guest_count, is_finalized, order_status, order_state,
-           paid_amount, opened_at, opened_at_ts, closed_at, closed_at_ts, notes, updated_at, updated_at_ts,
-           created_at, created_at_ts
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           paid_amount, opened_at, opened_at_ts, closed_at, closed_at_ts, notes, updated_at, updated_at_ts
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            service_type = VALUES(service_type),
            source_flow = VALUES(source_flow),
@@ -1298,14 +1290,12 @@ async function processActiveOrders(
           order.paid_amount,
            toMysqlDateTimeStrict(order.opened_at, "opened_at"),
            toTimestampMs(order.opened_at, "opened_at"),
-           order.closed_at ? toMysqlDateTimeStrict(order.closed_at, "closed_at") : null,
-           order.closed_at ? toTimestampMs(order.closed_at, "closed_at") : null,
-           order.notes ?? null,
-           toMysqlDateTimeStrict(order.updated_at, "updated_at"),
-           toTimestampMs(order.updated_at, "updated_at"),
-           serverCreatedAtMysql,
-           serverCreatedAtTs
-        ]
+            order.closed_at ? toMysqlDateTimeStrict(order.closed_at, "closed_at") : null,
+            order.closed_at ? toTimestampMs(order.closed_at, "closed_at") : null,
+            order.notes ?? null,
+            toMysqlDateTimeStrict(order.updated_at, "updated_at"),
+            toTimestampMs(order.updated_at, "updated_at")
+         ]
       );
 
       // Delete existing lines and re-insert (simpler than diffing)
@@ -1317,7 +1307,7 @@ async function processActiveOrders(
       // Insert new lines
       // Timestamp semantics for snapshot lines:
       // - updated_at_ts: snapshot freshness/update time (from line's updated_at)
-      // - created_at_ts: server ingest time (serverNow) - distinct from updated_at_ts
+      // - created_at_ts: removed per ADR-0001 / Story 18.1
       if (order.lines.length > 0) {
         const lineValues = order.lines.map((line) => [
           order.order_id,
@@ -1332,19 +1322,17 @@ async function processActiveOrders(
           line.qty,
           line.discount_amount,
           toMysqlDateTimeStrict(line.updated_at, "updated_at"),
-          toTimestampMs(line.updated_at, "updated_at"), // updated_at_ts = snapshot freshness
-          serverCreatedAtMysql,                        // created_at = server ingest time
-          serverCreatedAtTs                             // created_at_ts = server ingest time
+          toTimestampMs(line.updated_at, "updated_at")
         ]);
 
-        const placeholders = lineValues.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+        const placeholders = lineValues.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
         const flatValues = lineValues.flat();
 
         await executor.execute(
           `INSERT INTO pos_order_snapshot_lines (
              order_id, company_id, outlet_id, item_id, variant_id, sku_snapshot,
              name_snapshot, item_type_snapshot, unit_price_snapshot, qty,
-             discount_amount, updated_at, updated_at_ts, created_at, created_at_ts
+             discount_amount, updated_at, updated_at_ts
            ) VALUES ${placeholders}`,
           flatValues
         );
@@ -1376,7 +1364,7 @@ async function processActiveOrders(
  *
  * Authority semantics:
  * - event_at / event_at_ts: CLIENT-authoritative - preserve from payload after validation
- * - created_at / created_at_ts: SERVER-authoritative - generated server-side at ingest time
+ * - created_at: SERVER-authoritative - populated by DB default CURRENT_TIMESTAMP at ingest time
  * - base_order_updated_at / base_order_updated_at_ts: VERSION MARKER METADATA - copied from the
  *   base order's updated_at at the time the update was created. This is NOT business time,
  *   event time, or display time. It is preserved metadata for potential future stale detection
@@ -1395,8 +1383,8 @@ async function processActiveOrders(
  *
  * Idempotency is preserved via update_id uniqueness.
  *
- * This ensures offline replay and ordering remain deterministic without conflating
- * the time the event occurred on device with the time it was ingested server-side.
+ * This ensures offline replay remains deterministic without conflating
+ * the time the event occurred on device with the DB-owned ingest timestamp.
  */
 async function processOrderUpdates(
   executor: QueryExecutor,
@@ -1424,12 +1412,6 @@ async function processOrderUpdates(
         continue;
       }
 
-      // Generate server-authoritative ingest time for created_at / created_at_ts
-      // This is the time the server ingests the update, not the time the event occurred on device
-      const serverNow = new Date();
-      const serverCreatedAtMysql = toMysqlDateTimeStrict(serverNow.toISOString(), "server_created_at");
-      const serverCreatedAtTs = serverNow.getTime();
-
       // Insert the order update
       // Note: base_order_updated_at_ts is stored as VERSION MARKER METADATA only.
       // No server-side stale detection is performed - see JSDoc for rationale.
@@ -1437,8 +1419,8 @@ async function processOrderUpdates(
       await executor.execute(
         `INSERT INTO pos_order_updates (
            update_id, order_id, company_id, outlet_id, base_order_updated_at, base_order_updated_at_ts,
-           event_type, delta_json, actor_user_id, device_id, event_at, event_at_ts, created_at, created_at_ts
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           event_type, delta_json, actor_user_id, device_id, event_at, event_at_ts
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           update.update_id,
           update.order_id,
@@ -1455,9 +1437,7 @@ async function processOrderUpdates(
           update.actor_user_id ?? null,
           update.device_id,
           toMysqlDateTimeStrict(update.event_at, "event_at"),
-          toTimestampMs(update.event_at, "event_at"),
-          serverCreatedAtMysql,
-          serverCreatedAtTs
+          toTimestampMs(update.event_at, "event_at")
         ]
       );
       console.info("processOrderUpdates: insert complete", { correlation_id: correlationId, update_id: update.update_id });
@@ -1488,10 +1468,10 @@ async function processOrderUpdates(
  *
  * Authority semantics:
  * - cancelled_at / cancelled_at_ts: CLIENT-authoritative - preserve from payload after validation
- * - created_at / created_at_ts: SERVER-authoritative - generated server-side at ingest time
+ * - created_at: SERVER-authoritative - populated by DB default CURRENT_TIMESTAMP at ingest time
  *
- * This ensures offline replay and ordering remain deterministic without conflating
- * the time the cancellation occurred on device with the time it was ingested server-side.
+ * This ensures offline replay remains deterministic without conflating
+ * the time the cancellation occurred on device with the DB-owned ingest timestamp.
  */
 async function processItemCancellations(
   executor: QueryExecutor,
@@ -1516,19 +1496,13 @@ async function processItemCancellations(
         continue;
       }
 
-      // Generate server-authoritative ingest time for created_at / created_at_ts
-      // This is the time the server ingests the cancellation, not the time it occurred on device
-      const serverNow = new Date();
-      const serverCreatedAtMysql = toMysqlDateTimeStrict(serverNow.toISOString(), "server_created_at");
-      const serverCreatedAtTs = serverNow.getTime();
-
       // Insert the cancellation
       await executor.execute(
         `INSERT INTO pos_item_cancellations (
            cancellation_id, update_id, order_id, item_id, variant_id,
            company_id, outlet_id, cancelled_quantity, reason,
-           cancelled_by_user_id, cancelled_at, cancelled_at_ts, created_at, created_at_ts
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           cancelled_by_user_id, cancelled_at, cancelled_at_ts
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           cancellation.cancellation_id,
           cancellation.update_id ?? null,
@@ -1541,9 +1515,7 @@ async function processItemCancellations(
           cancellation.reason,
           cancellation.cancelled_by_user_id ?? null,
           toMysqlDateTimeStrict(cancellation.cancelled_at, "cancelled_at"),
-          toTimestampMs(cancellation.cancelled_at, "cancelled_at"),
-          serverCreatedAtMysql,
-          serverCreatedAtTs
+          toTimestampMs(cancellation.cancelled_at, "cancelled_at")
         ]
       );
 

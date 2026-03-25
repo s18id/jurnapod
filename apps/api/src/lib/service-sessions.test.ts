@@ -749,9 +749,9 @@ test(
       const nowTs = Date.now();
       await pool.execute(
         `INSERT INTO pos_order_snapshots
-         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts, created_at_ts)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?, ?)`,
-        [snapshotId, companyId, outletId, nowTs, nowTs, nowTs]
+         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs]
       );
 
       // Update session to be locked with persisted snapshot link
@@ -835,9 +835,9 @@ test(
       const nowTs = Date.now();
       await pool.execute(
         `INSERT INTO pos_order_snapshots
-         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts, created_at_ts)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?, ?)`,
-        [snapshotId, companyId, outletId, nowTs, nowTs, nowTs]
+         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs]
       );
 
       // Link snapshot to session (required for close invariant)
@@ -877,12 +877,11 @@ test(
 // ============================================================================
 // TEST 10b: closeSession - snapshot lines have correct timestamp semantics (Story 17.3)
 // This test exercises syncSnapshotLinesFromSession through the closeSession path
-// and verifies the snapshot line timestamps follow the expected semantics:
+// and verifies the remaining snapshot line timestamp semantics:
 // - updated_at_ts: snapshot freshness derived from source line updated_at
-// - created_at_ts: server ingest time for the materialized snapshot-line row
 // ============================================================================
 test(
-  "closeSession - snapshot lines derive freshness from source lines and ingest from server time (Story 17.3)",
+  "closeSession - snapshot lines derive freshness from source lines (Story 17.3 / 18.2)",
   { concurrency: false, timeout: 30000 },
   async () => {
     const pool = getDbPool();
@@ -903,9 +902,9 @@ test(
       const nowTs = Date.now();
       await pool.execute(
         `INSERT INTO pos_order_snapshots
-         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts, created_at_ts)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?, ?)`,
-        [snapshotId, companyId, outletId, nowTs, nowTs, nowTs]
+         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs]
       );
 
       // Update session to be ACTIVE with snapshot link (simulating lock being called)
@@ -926,8 +925,6 @@ test(
         [sessionId, productId, sourceLineUpdatedAt]
       );
 
-      const beforeClose = Date.now();
-
       // Close the session - this triggers syncSnapshotLinesFromSession internally
       const input: CloseSessionInput = {
         companyId,
@@ -939,14 +936,12 @@ test(
 
       const closedSession = await closeSession(input);
 
-      const afterClose = Date.now();
-
       assert.equal(closedSession.id, sessionId, "Session ID should match");
       assert.equal(closedSession.statusId, ServiceSessionStatus.CLOSED, "Status should be CLOSED");
 
-      // Verify the snapshot line timestamps
+      // Verify the retained snapshot line timestamp semantics
       const [lineRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT updated_at_ts, created_at_ts
+        `SELECT updated_at_ts
          FROM pos_order_snapshot_lines
          WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
         [snapshotId, companyId, outletId]
@@ -954,10 +949,9 @@ test(
 
       assert.ok(lineRows.length > 0, "Should have created snapshot lines via syncSnapshotLinesFromSession");
 
-      const { updated_at_ts, created_at_ts } = lineRows[0];
+      const { updated_at_ts } = lineRows[0];
 
       const storedUpdatedAtTs = Number(updated_at_ts);
-      const storedCreatedAtTs = Number(created_at_ts);
       const [expectedRows] = await pool.execute<RowDataPacket[]>(
         `SELECT UNIX_TIMESTAMP(?) * 1000 AS expected_updated_at_ts`,
         [sourceLineUpdatedAt]
@@ -968,19 +962,6 @@ test(
       assert.ok(
         Math.abs(storedUpdatedAtTs - expectedUpdatedAtTs) < 1000,
         `updated_at_ts (${storedUpdatedAtTs}) should reflect source line freshness (~${expectedUpdatedAtTs})`
-      );
-
-      // created_at_ts is the server ingest time for the materialized snapshot-line row
-      assert.ok(
-        storedCreatedAtTs >= beforeClose && storedCreatedAtTs <= afterClose + 1000,
-        `created_at_ts (${storedCreatedAtTs}) should be within server time window [${beforeClose}, ${afterClose + 1000}]`
-      );
-
-      // The two retained timestamps have distinct meanings and therefore should differ here.
-      assert.notEqual(
-        storedUpdatedAtTs,
-        storedCreatedAtTs,
-        "updated_at_ts should reflect source freshness while created_at_ts reflects server ingest"
       );
 
     } finally {
@@ -1441,9 +1422,9 @@ test(
       const snapshotId = `snap-${runId}`;
       const nowTs = Date.now();
       await pool.execute(
-        `INSERT INTO pos_order_snapshots (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, opened_at, opened_at_ts, created_at_ts, updated_at, updated_at_ts)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, NOW(), ?, ?, NOW(), ?)`,
-        [snapshotId, companyId, outletId, nowTs, nowTs, nowTs]
+        `INSERT INTO pos_order_snapshots (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, opened_at, opened_at_ts, updated_at, updated_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, NOW(), ?, NOW(), ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs]
       );
       createdSnapshotIds.push(snapshotId);
 

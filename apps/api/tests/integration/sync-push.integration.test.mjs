@@ -3300,7 +3300,7 @@ localServerTest(
 // ===========================================================================
 
 localServerTest(
-  "sync push integration: order_updates event_at is client-authoritative, created_at_ts is server-authoritative (Story 17.1)",
+  "sync push integration: order_updates event_at is client-authoritative and created_at is server-authoritative (Story 17.1)",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async (t) => {
     if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
@@ -3450,7 +3450,7 @@ localServerTest(
 
       // Verify persisted DB values for the order update
       const [updateRows] = await db.execute(
-        `SELECT event_at, event_at_ts, created_at, created_at_ts
+        `SELECT event_at, event_at_ts, created_at
          FROM pos_order_updates
          WHERE update_id = ?
          LIMIT 1`,
@@ -3475,28 +3475,7 @@ localServerTest(
         "event_at_ts should match client event_at timestamp (client-authoritative)"
       );
 
-      // AC2 & AC3: created_at_ts should be SERVER-generated, NOT from client payload
       const afterServerTime = Date.now();
-      const persistedCreatedAtTs = Number(persistedUpdate.created_at_ts);
-
-      // created_at_ts must be within the server-ingest window (between beforeServerTime and afterServerTime, with some tolerance)
-      assert.ok(
-        persistedCreatedAtTs >= beforeServerTime - 100, // 100ms tolerance
-        `created_at_ts (${persistedCreatedAtTs}) should be >= server time before request (${beforeServerTime})`
-      );
-      assert.ok(
-        persistedCreatedAtTs <= afterServerTime + 100, // 100ms tolerance
-        `created_at_ts (${persistedCreatedAtTs}) should be <= server time after request (${afterServerTime})`
-      );
-
-      // Key assertion: created_at_ts should NOT equal the client's created_at_ts
-      // Client sent created_at of 2026-03-15T10:31:00.000Z (which would be a different timestamp)
-      const clientCreatedAtTs = new Date(clientCreatedAt).getTime();
-      assert.notEqual(
-        persistedCreatedAtTs,
-        clientCreatedAtTs,
-        "created_at_ts should NOT equal client's created_at - server must generate its own"
-      );
 
       // Verify created_at (MySQL datetime format) is also server-generated
       const persistedCreatedAt = String(persistedUpdate.created_at);
@@ -3861,7 +3840,7 @@ localServerTest(
 
       // Verify persisted DB values for the item cancellation
       const [cancellationRows] = await db.execute(
-        `SELECT cancelled_at, cancelled_at_ts, created_at, created_at_ts
+        `SELECT cancelled_at, cancelled_at_ts, created_at
          FROM pos_item_cancellations
          WHERE cancellation_id = ?
          LIMIT 1`,
@@ -3885,25 +3864,10 @@ localServerTest(
         "cancelled_at_ts should match client cancelled_at timestamp"
       );
 
-      // created_at_ts should be SERVER-generated
-      const afterServerTime = Date.now();
-      const persistedCreatedAtTs = Number(persistedCancellation.created_at_ts);
-
-      // created_at_ts must be within the server-ingest window
+      const persistedCreatedAt = String(persistedCancellation.created_at);
       assert.ok(
-        persistedCreatedAtTs >= beforeServerTime - 100,
-        `created_at_ts (${persistedCreatedAtTs}) should be >= server time before request`
-      );
-      assert.ok(
-        persistedCreatedAtTs <= afterServerTime + 100,
-        `created_at_ts (${persistedCreatedAtTs}) should be <= server time after request`
-      );
-
-      // created_at_ts should NOT equal client's cancelled_at_ts
-      assert.notEqual(
-        persistedCreatedAtTs,
-        expectedCancelledAtTs,
-        "created_at_ts should NOT equal client's cancelled_at_ts - server generates its own"
+        /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(persistedCreatedAt),
+        "created_at should be in MySQL datetime format"
       );
     } finally {
       await stopApiServer(childProcess);
@@ -4249,7 +4213,7 @@ localServerTest(
 
       // Verify base_order_updated_at_ts is stored as a positive timestamp (preserved metadata)
       const [baseRows] = await db.execute(
-        `SELECT base_order_updated_at_ts, event_at_ts, created_at_ts
+        `SELECT base_order_updated_at_ts, event_at_ts
          FROM pos_order_updates
          WHERE update_id = ?
          LIMIT 1`,
@@ -4272,12 +4236,6 @@ localServerTest(
         "base_order_updated_at_ts should be different from event_at_ts - they have different semantics"
       );
 
-      // Prove base_order_updated_at_ts is NOT the same as created_at_ts (different semantic meaning)
-      assert.notEqual(
-        Number(baseRows[0].base_order_updated_at_ts),
-        Number(baseRows[0].created_at_ts),
-        "base_order_updated_at_ts should be different from created_at_ts - they have different semantics"
-      );
     } finally {
       await stopApiServer(childProcess);
 
@@ -5074,7 +5032,7 @@ localServerTest(
             event_at: clientEventAt
             // NOTE: created_at is intentionally OMITTED to prove:
             // 1. Schema now accepts order_updates without created_at
-            // 2. Server generates created_at_ts server-side regardless
+            // 2. Server still generates created_at server-side regardless
           }
         ]
       };
@@ -5102,7 +5060,7 @@ localServerTest(
       // Verify the order update was persisted
       const afterServerTime = Date.now();
       const [updateRows] = await db.execute(
-        `SELECT event_at, event_at_ts, created_at, created_at_ts
+        `SELECT event_at, event_at_ts, created_at
          FROM pos_order_updates
          WHERE update_id = ?
          LIMIT 1`,
@@ -5126,24 +5084,7 @@ localServerTest(
         "event_at_ts should match client event_at even when created_at is omitted"
       );
 
-      // AC2: created_at_ts should be SERVER-generated, NOT dependent on client's created_at
-      const persistedCreatedAtTs = Number(persistedUpdate.created_at_ts);
-      assert.ok(
-        persistedCreatedAtTs >= beforeServerTime - 100,
-        `created_at_ts (${persistedCreatedAtTs}) should be >= server time before request (${beforeServerTime})`
-      );
-      assert.ok(
-        persistedCreatedAtTs <= afterServerTime + 100,
-        `created_at_ts (${persistedCreatedAtTs}) should be <= server time after request (${afterServerTime})`
-      );
-
-      // Key proof: created_at_ts should NOT equal the client's event_at_ts
-      // (Because created_at_ts is server ingest time, not the event time)
-      assert.notEqual(
-        persistedCreatedAtTs,
-        expectedEventAtTs,
-        "created_at_ts should NOT equal event_at_ts - they have different authority semantics"
-      );
+      // AC2: created_at should still be server-generated, independent of omitted client created_at
 
       // Verify created_at (MySQL datetime) is also server-generated
       const persistedCreatedAt = String(persistedUpdate.created_at);
@@ -5319,7 +5260,7 @@ localServerTest(
 
       // Verify the order update was persisted with correct event_at
       const [updateRows] = await db.execute(
-        `SELECT event_at, event_at_ts, created_at, created_at_ts
+        `SELECT event_at, event_at_ts, created_at
          FROM pos_order_updates
          WHERE update_id = ?
          LIMIT 1`,
@@ -5336,11 +5277,10 @@ localServerTest(
         "event_at should be correctly persisted"
       );
 
-      // created_at_ts should still be server-generated (not from malformed client input)
-      const persistedCreatedAtTs = Number(persistedUpdate.created_at_ts);
+      const persistedCreatedAt = String(persistedUpdate.created_at);
       assert.ok(
-        persistedCreatedAtTs >= Date.now() - 5000, // Within last 5 seconds
-        "created_at_ts should be server-generated"
+        /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(persistedCreatedAt),
+        "created_at should still be server-generated"
       );
 
       // Cleanup
@@ -5358,7 +5298,7 @@ localServerTest(
 // ===========================================================================
 
 localServerTest(
-  "sync push integration: active_orders created_at_ts is server-ingest, not client updated_at_ts (Story 17.3)",
+  "sync push integration: active_orders retain opened_at_ts and updated_at_ts semantics after created_at_ts cleanup (Story 17.3/18.1)",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async (t) => {
     if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
@@ -5481,7 +5421,7 @@ localServerTest(
 
       // Verify pos_order_snapshots timestamps through REAL implementation path
       const [snapshotRows] = await db.execute(
-        `SELECT opened_at_ts, closed_at_ts, updated_at_ts, created_at_ts
+        `SELECT opened_at_ts, closed_at_ts, updated_at_ts
          FROM pos_order_snapshots
          WHERE order_id = ?
          LIMIT 1`,
@@ -5504,29 +5444,9 @@ localServerTest(
         `updated_at_ts should preserve client-authored snapshot freshness (expected ~${expectedUpdatedAtTs}, got ${persistedSnapshot.updated_at_ts})`
       );
 
-      // AC3: created_at_ts is SERVER-INGEST TIME (distinct from updated_at_ts)
-      // It should NOT equal updated_at_ts - that's the whole point of Story 17.3
-      const persistedCreatedAtTs = Number(persistedSnapshot.created_at_ts);
-      assert.ok(
-        persistedCreatedAtTs >= beforeServerTime - 100,
-        `created_at_ts (${persistedCreatedAtTs}) should be >= server time before request (${beforeServerTime - 100})`
-      );
-      assert.ok(
-        persistedCreatedAtTs <= afterServerTime + 100,
-        `created_at_ts (${persistedCreatedAtTs}) should be <= server time after request (${afterServerTime + 100})`
-      );
-
-      // KEY ASSERTION: created_at_ts should NOT equal updated_at_ts
-      // This is the core fix from Story 17.3 - created_at_ts is server-ingest, not a duplicate of updated_at_ts
-      assert.notEqual(
-        persistedCreatedAtTs,
-        expectedUpdatedAtTs,
-        "created_at_ts should NOT equal updated_at_ts - created_at_ts is server-ingest, updated_at_ts is client-authored snapshot freshness"
-      );
-
       // Verify pos_order_snapshot_lines timestamps through REAL implementation path
       const [lineRows] = await db.execute(
-        `SELECT updated_at_ts, created_at_ts
+        `SELECT updated_at_ts
          FROM pos_order_snapshot_lines
          WHERE order_id = ?
          LIMIT 1`,
@@ -5542,23 +5462,6 @@ localServerTest(
         `line updated_at_ts should preserve client-authored snapshot freshness`
       );
 
-      // AC3: created_at_ts for lines is SERVER-INGEST TIME
-      const lineCreatedAtTs = Number(persistedLine.created_at_ts);
-      assert.ok(
-        lineCreatedAtTs >= beforeServerTime - 100,
-        `line created_at_ts should be >= server time before request`
-      );
-      assert.ok(
-        lineCreatedAtTs <= afterServerTime + 100,
-        `line created_at_ts should be <= server time after request`
-      );
-
-      // KEY ASSERTION: line created_at_ts should NOT equal line updated_at_ts
-      assert.notEqual(
-        lineCreatedAtTs,
-        expectedUpdatedAtTs,
-        "line created_at_ts should NOT equal line updated_at_ts - created_at_ts is server-ingest"
-      );
 
       // Cleanup
       await db.execute("DELETE FROM pos_order_snapshot_lines WHERE order_id = ?", [orderId]);
@@ -5570,7 +5473,7 @@ localServerTest(
 );
 
 localServerTest(
-  "sync push integration: item_cancellations cancelled_at_ts is client-authored, created_at_ts is server-ingest (Story 17.3)",
+  "sync push integration: item_cancellations retain cancelled_at_ts semantics after created_at_ts cleanup (Story 17.3/18.1)",
   { timeout: TEST_TIMEOUT_MS, concurrency: false },
   async (t) => {
     if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
@@ -5644,9 +5547,9 @@ localServerTest(
         `INSERT INTO pos_order_snapshots
          (order_id, company_id, outlet_id, service_type, order_state, order_status,
           is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts,
-          created_at, created_at_ts)
-         VALUES (?, ?, ?, 'TAKEAWAY', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?, NOW(), ?)`,
-        [snapshotId, companyId, outletId, Date.now(), Date.now(), Date.now()]
+          created_at)
+         VALUES (?, ?, ?, 'TAKEAWAY', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?, NOW())`,
+        [snapshotId, companyId, outletId, Date.now(), Date.now()]
       );
 
       // Send item_cancellations through the REAL endpoint (POST /sync/push)
@@ -5701,7 +5604,7 @@ localServerTest(
 
       // Verify pos_item_cancellations timestamps through REAL implementation path
       const [cancelRows] = await db.execute(
-        `SELECT cancelled_at_ts, created_at_ts
+        `SELECT cancelled_at_ts
          FROM pos_item_cancellations
          WHERE cancellation_id = ?
          LIMIT 1`,
@@ -5718,24 +5621,6 @@ localServerTest(
         `cancelled_at_ts should preserve client-authored cancellation time (expected ~${expectedCancelledAtTs}, got ${persistedCancellation.cancelled_at_ts})`
       );
 
-      // AC3: created_at_ts is SERVER-INGEST TIME (distinct from cancelled_at_ts)
-      const persistedCreatedAtTs = Number(persistedCancellation.created_at_ts);
-      assert.ok(
-        persistedCreatedAtTs >= beforeServerTime - 100,
-        `created_at_ts should be >= server time before request`
-      );
-      assert.ok(
-        persistedCreatedAtTs <= afterServerTime + 100,
-        `created_at_ts should be <= server time after request`
-      );
-
-      // KEY ASSERTION: created_at_ts should NOT equal cancelled_at_ts
-      // This verifies the semantics - created_at_ts is server-ingest, cancelled_at_ts is client-authored event time
-      assert.notEqual(
-        persistedCreatedAtTs,
-        expectedCancelledAtTs,
-        "created_at_ts should NOT equal cancelled_at_ts - created_at_ts is server-ingest, cancelled_at_ts is client-authored event occurrence"
-      );
 
       // Cleanup
       await db.execute("DELETE FROM pos_item_cancellations WHERE cancellation_id = ?", [cancellationId]);

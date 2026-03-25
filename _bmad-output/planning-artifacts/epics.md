@@ -229,7 +229,7 @@ Ensure POS sync, replay, stale-update detection, and reservation window behavior
 **FRs covered:** FR-ADR2, FR-ADR3, FR-ADR4, FR-ADR5, FR-ADR6
 
 ### Epic 18: Redundant Timestamp Cleanup and Schema Alignment
-Remove low-value snapshot/cancellation creation epoch columns and align schema/docs only after application cleanup and validation are complete.
+Remove redundant `created_at_ts` columns and align schema/docs only after application cleanup and validation are complete, using DB-owned `created_at DEFAULT CURRENT_TIMESTAMP` as the retained ingest-time field.
 **FRs covered:** FR-ADR1, FR-ADR7, FR-ADR8, FR-ADR9
 
 ## Epic 1: Authentication and Access Foundation
@@ -2843,7 +2843,7 @@ So that the schema drop does not break automated validation.
 
 **And** repo-wide search confirms no active app/test references remain outside intended historical/schema artifacts
 
-### Story 18.3: Add guarded drop migration for redundant `created_at_ts` columns
+### Story 18.3: Add guarded drop migration for redundant snapshot/cancellation `created_at_ts` columns
 
 As a developer,
 I want a rerunnable MySQL/MariaDB-safe migration that drops only the redundant columns,

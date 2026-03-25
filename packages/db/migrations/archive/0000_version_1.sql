@@ -2428,7 +2428,7 @@ CREATE TABLE `pos_order_updates` (
   `actor_user_id` bigint(20) unsigned DEFAULT NULL,
   `device_id` varchar(191) NOT NULL,
   `event_at` datetime NOT NULL,
-  `created_at` datetime NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`sequence_no`),
   UNIQUE KEY `uq_pos_order_updates_update_id` (`update_id`),
   KEY `idx_pos_order_updates_scope_seq` (`company_id`,`outlet_id`,`sequence_no`),

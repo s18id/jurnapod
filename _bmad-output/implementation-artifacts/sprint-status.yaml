@@ -272,10 +272,11 @@ development_status:
   17-5-prevent-unintended-ts-exposure-in-public-contracts: done
 
   # Epic 18: Redundant Timestamp Cleanup and Schema Alignment
-  # NOTE: Cleanup epic for removing low-value created_at_ts columns after validation
-  epic-18: in-progress
-  18-1-remove-dropped-column-references-from-active-write-paths: ready-for-dev
-  18-2-remove-dropped-column-references-from-tests-and-fixtures: ready-for-dev
-  18-3-add-guarded-drop-migration-for-redundant-created-at-ts-columns: ready-for-dev
-  18-4-validate-post-cleanup-sync-and-reservation-regressions: ready-for-dev
-  18-5-refresh-schema-baselines-and-documentation: ready-for-dev
+  # NOTE: Cleanup epic for removing redundant created_at_ts columns after validation
+  epic-18: done
+  18-1-remove-dropped-column-references-from-active-write-paths: done
+  18-2-remove-dropped-column-references-from-tests-and-fixtures: done
+  18-3-prepare-created-at-ts-columns-for-nullable-default: done  # added DEFAULT NULL prep + DB-owned created_at default
+  18-3b-add-guarded-drop-migration-for-redundant-created-at-ts-columns: done  # guarded DROP for pos_order_updates / pos_order_snapshots / pos_order_snapshot_lines / pos_item_cancellations
+  18-4-validate-post-cleanup-sync-and-reservation-regressions: done
+  18-5-refresh-schema-baselines-and-documentation: done

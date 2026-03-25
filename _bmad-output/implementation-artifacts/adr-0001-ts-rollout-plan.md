@@ -4,7 +4,7 @@
 
 Implement ADR-0001 safely by:
 
-1. removing low-value snapshot/cancellation `created_at_ts` columns
+1. removing redundant `created_at_ts` columns
 2. preserving retained `_ts` semantics for POS sync and reservations
 3. proving safety with targeted tests before any destructive migration
 
@@ -13,13 +13,13 @@ Implement ADR-0001 safely by:
 ## Scope
 
 ### Dropped columns
+- `pos_order_updates.created_at_ts`
 - `pos_item_cancellations.created_at_ts`
 - `pos_order_snapshot_lines.created_at_ts`
 - `pos_order_snapshots.created_at_ts`
 
 ### Retained semantics requiring enforcement
 - `pos_order_updates.event_at_ts`
-- `pos_order_updates.created_at_ts`
 - `pos_order_updates.base_order_updated_at_ts`
 - `pos_order_snapshots.opened_at_ts`
 - `pos_order_snapshots.closed_at_ts`
@@ -35,6 +35,8 @@ Implement ADR-0001 safely by:
 
 Use a **code-first, migration-last** sequence.
 
+Important: ADR-0001 removes redundant `created_at_ts` duplicates and uses DB-owned `created_at DEFAULT CURRENT_TIMESTAMP` as the retained ingest-time field where needed.
+
 Do not drop columns until:
 
 - app write paths no longer reference them
@@ -47,7 +49,7 @@ Do not drop columns until:
 ## Phase 1 — Dependency Cleanup
 
 ### Objective
-Remove all application and test references to the three dropped columns.
+Remove all application and test references to the dropped columns.
 
 ### Target files from current audit
 - `apps/api/src/routes/sync/push.ts`
@@ -60,8 +62,10 @@ Remove all application and test references to the three dropped columns.
 - Remove `created_at_ts` from snapshot upsert SQL and values
 - Remove `created_at_ts` from snapshot-line insert SQL and values
 - Remove `created_at_ts` from item-cancellation insert SQL and values
+- Remove `created_at_ts` from order-update insert SQL and values
 - Remove dropped-column usage from unit/integration fixtures
 - Re-run repo-wide search for dropped columns
+- Ensure `pos_order_updates.created_at` has `DEFAULT CURRENT_TIMESTAMP` before removing its `created_at_ts` writes.
 
 ### Exit gate
 - `rg -n "pos_item_cancellations\.created_at_ts|pos_order_snapshot_lines\.created_at_ts|pos_order_snapshots\.created_at_ts" apps packages docs _bmad-output` returns only historical schema/docs locations intentionally kept until final cleanup
@@ -81,7 +85,7 @@ Align retained `_ts` fields with ADR semantics.
 - reservation boundary timestamps where applicable from booking flows
 
 #### Server-authoritative
-- `pos_order_updates.created_at_ts`
+- `pos_order_updates.created_at`
 - `pos_order_snapshots.updated_at_ts`
 - `pos_order_snapshot_lines.updated_at_ts`
 
@@ -140,7 +144,7 @@ Add sync integration command(s) used by the repo’s existing API test workflow 
 ## Phase 4 — Guarded Drop Migration
 
 ### Objective
-Drop the three low-value `created_at_ts` columns safely for MySQL and MariaDB.
+Drop the redundant `created_at_ts` columns safely for MySQL and MariaDB.
 
 ### Migration requirements
 - new migration only; do not rewrite historical migration `0115_pos_sync_timestamps_unix_ms_columns.sql`
@@ -149,6 +153,7 @@ Drop the three low-value `created_at_ts` columns safely for MySQL and MariaDB.
 - use guarded `information_schema` existence checks before `ALTER TABLE ... DROP COLUMN`
 
 ### Columns to drop
+- `pos_order_updates.created_at_ts`
 - `pos_item_cancellations.created_at_ts`
 - `pos_order_snapshot_lines.created_at_ts`
 - `pos_order_snapshots.created_at_ts`

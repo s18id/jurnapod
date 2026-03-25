@@ -1,6 +1,6 @@
 # Story 18.1: Remove dropped-column references from active write paths
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -11,10 +11,11 @@ so that schema cleanup can proceed without breaking sync, snapshots, or cancella
 ## Acceptance Criteria
 
 1. Active write paths no longer insert or update:
+   - `pos_order_updates.created_at_ts`
    - `pos_order_snapshots.created_at_ts`
    - `pos_order_snapshot_lines.created_at_ts`
    - `pos_item_cancellations.created_at_ts`
-2. Retained `_ts` fields continue to be written according to their defined semantics.
+2. `created_at` remains server-authoritative via DB defaults, and retained `_ts` fields continue to be written according to their defined semantics.
 3. Active write-path tests remain green after cleanup.
 
 ## Tasks / Subtasks
@@ -40,8 +41,9 @@ so that schema cleanup can proceed without breaking sync, snapshots, or cancella
 ### Technical Requirements
 
 - Remove only the dropped-column writes.
-- Preserve retained `_ts` semantics (`opened_at_ts`, `closed_at_ts`, `updated_at_ts`, `cancelled_at_ts`).
+- Preserve retained `_ts` semantics (`opened_at_ts`, `closed_at_ts`, `updated_at_ts`, `cancelled_at_ts`, `event_at_ts`, `base_order_updated_at_ts`).
 - Keep sync push idempotency behavior unchanged.
+- Use DB-owned `created_at DEFAULT CURRENT_TIMESTAMP` as the single retained ingest-time field.
 
 ### Architecture Compliance
 
@@ -88,7 +90,9 @@ openai/gpt-5.4
 
 ### Completion Notes List
 
-- Pending implementation.
+- Removed active writes for `created_at_ts` from sync push paths.
+- Switched retained ingest-time handling to DB-owned `created_at` defaults.
+- Verified critical sync integration coverage passes after cleanup.
 
 ### File List
 

@@ -1,6 +1,6 @@
 # Story 18.4: Validate post-cleanup sync and reservation regressions
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -83,7 +83,8 @@ openai/gpt-5.4
 
 ### Completion Notes List
 
-- Pending implementation.
+- Ran targeted post-drop regression suites for sync push integration, service sessions, reservations, and outlet tables.
+- Full API unit suite passed (692/692), along with API typecheck and lint.
 
 ### File List
 

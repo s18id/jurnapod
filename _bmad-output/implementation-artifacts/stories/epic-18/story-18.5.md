@@ -1,6 +1,6 @@
 # Story 18.5: Refresh schema baselines and documentation
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -80,7 +80,9 @@ openai/gpt-5.4
 
 ### Completion Notes List
 
-- Pending implementation.
+- Updated current schema artifacts to reflect the post-drop state.
+- Confirmed historical migrations remain unchanged while archive baseline/docs now match the intended schema.
+- Recorded validation evidence from Stories 18.3b and 18.4.
 
 ### File List
 

@@ -1672,17 +1672,16 @@ async function syncSnapshotLinesFromSession(
   );
 
   const finalizedFilter = params.onlyFinalized ? "AND COALESCE(l.line_state, 1) = ?" : "";
-  const nowTs = Date.now();
   // Snapshot-line timestamp semantics for service-session aggregation:
   // - updated_at / updated_at_ts: snapshot freshness, derived from the latest source line update
-  // - created_at / created_at_ts: server ingest time for the materialized snapshot-line row
+  // - created_at_ts: removed per ADR-0001 / Story 18.1 (created_at is retained)
   //
   // This path does not have source `_ts` columns, but it does have source `updated_at` DATETIME.
   // We therefore derive freshness from MAX(l.updated_at) rather than fabricating chronology.
   const [insertResult] = await connection.execute<ResultSetHeader>(
     `INSERT INTO pos_order_snapshot_lines
      (order_id, company_id, outlet_id, item_id, sku_snapshot, name_snapshot,
-      item_type_snapshot, unit_price_snapshot, qty, discount_amount, updated_at, updated_at_ts, created_at, created_at_ts)
+      item_type_snapshot, unit_price_snapshot, qty, discount_amount, updated_at, updated_at_ts)
      SELECT
        ? AS order_id,
        ? AS company_id,
@@ -1695,9 +1694,7 @@ async function syncSnapshotLinesFromSession(
        SUM(l.quantity) AS qty,
        ROUND(SUM(l.discount_amount), 2) AS discount_amount,
        MAX(l.updated_at) AS updated_at,
-       UNIX_TIMESTAMP(MAX(l.updated_at)) * 1000 AS updated_at_ts,
-       NOW(6) AS created_at,
-       ? AS created_at_ts
+       UNIX_TIMESTAMP(MAX(l.updated_at)) * 1000 AS updated_at_ts
      FROM table_service_session_lines l
      WHERE l.session_id = ?
        AND l.is_voided = 0
@@ -1707,7 +1704,6 @@ async function syncSnapshotLinesFromSession(
       params.snapshotId,
       params.companyId,
       params.outletId,
-      nowTs,
       params.sessionId,
       ...(params.onlyFinalized ? [ServiceSessionLineState.FINALIZED] : [])
     ]
