@@ -42,11 +42,11 @@ export { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
  * @returns UTC ISO string (e.g., "2026-03-16T10:30:00.000Z")
  */
 export function normalizeDateTime(rfc3339: string): string {
-  const date = new Date(rfc3339);
-  if (isNaN(date.getTime())) {
+  // Guard with isValidDateTime to catch rolled dates and invalid time components.
+  if (!isValidDateTime(rfc3339)) {
     throw new Error(`Invalid RFC 3339 datetime: ${rfc3339}`);
   }
-  return date.toISOString();
+  return new Date(rfc3339).toISOString();
 }
 
 // ---------------------------------------------------------------------------
@@ -74,8 +74,9 @@ export function isValidTimeZone(tz: string): boolean {
   // Reject known non-IANA patterns that Intl.DateTimeFormat may accept
   // in some environments but are not valid IANA identifiers.
   // Bare "GMT" and "UTC" are accepted as valid legacy identifiers;
-  // offset variants (GMT+8, EST-5) are rejected.
-  if (/^(?:GMT|EST|EDT|CST|CDT|MST|PDT|PST)[+-]\d{1,2}(?::\d{2})?$/i.test(tz)) {
+  // offset variants (GMT+8, EST-5, AST-4) are rejected.
+  // Also reject other abbreviations that may be accepted by Intl but are not IANA.
+  if (/^(?:GMT|EST|EDT|CST|CDT|MST|PDT|PST|AST|HST|AKST)[+-]\d{1,2}(?::\d{2})?$/i.test(tz)) {
     return false;
   }
   if (/^[+-]\d{1,2}:\d{2}$/.test(tz)) {
@@ -113,16 +114,12 @@ export function isValidTimeZone(tz: string): boolean {
  * toUtcInstant("2026-03-16T17:30:00+07:00")  // "2026-03-16T10:30:00.000Z"
  */
 export function toUtcInstant(input: string): string {
-  // Reject ambiguous or locale-dependent formats by enforcing RFC 3339 shape first.
-  // new Date() is lenient enough to accept formats we don't want to rely on.
+  // isValidDateTime validates format (regex) and semantics (Temporal) before we convert.
+  // After passing isValidDateTime, the Date path is guaranteed safe — no redundant check needed.
   if (!isValidDateTime(input)) {
     throw new Error(`Cannot convert to UTC instant: ${input}`);
   }
-  const date = new Date(input);
-  if (isNaN(date.getTime())) {
-    throw new Error(`Cannot convert to UTC instant: ${input}`);
-  }
-  return date.toISOString();
+  return new Date(input).toISOString();
 }
 
 /**
@@ -246,6 +243,18 @@ function normalizeDateWithTime(
   }
 
   // Validate local time component ranges
+  if (!Number.isInteger(hour)) {
+    throw new Error(`Invalid hour: ${hour}. Must be an integer.`);
+  }
+  if (!Number.isInteger(minute)) {
+    throw new Error(`Invalid minute: ${minute}. Must be an integer.`);
+  }
+  if (!Number.isInteger(second)) {
+    throw new Error(`Invalid second: ${second}. Must be an integer.`);
+  }
+  if (!Number.isInteger(millisecond)) {
+    throw new Error(`Invalid millisecond: ${millisecond}. Must be an integer.`);
+  }
   if (hour < 0 || hour > 23) {
     throw new Error(`Invalid hour: ${hour}. Expected: 0-23`);
   }
@@ -403,9 +412,11 @@ export function toDateTimeRangeWithTimezone(
  * silently accepts (e.g. `"2026-02-30T10:30:00Z"` becomes March 2 in JS `Date` but
  * is correctly rejected by Temporal as an invalid instant).
  *
- * The regex enforces valid time-component ranges (hour 0–23, minute 0–59, second 0–59)
- * so obviously-invalid strings like `"2026-01-01T25:61:61Z"` are rejected fast without
- * entering the Temporal path.
+ * The regex enforces valid time-component ranges (hour 0–23, minute 0–59, second 0–59,
+ * no leap-second 60) so obviously-invalid strings like `"2026-01-01T25:61:61Z"` are
+ * rejected fast without entering the Temporal path. Leap seconds (ss=60) are explicitly
+ * rejected — Temporal would silently normalize them to ss=59, which could cause
+ * subtle off-by-one-second audit discrepancies in financial systems.
  *
  * @param value - String to validate
  * @returns true if valid RFC 3339
@@ -413,8 +424,9 @@ export function toDateTimeRangeWithTimezone(
 export function isValidDateTime(value: string): boolean {
   // Structural check: enforce valid time-component ranges.
   // hour: 00-23, minute: 00-59, second: 00-59, optional fractional, Z or ±HH:MM offset.
+  // Offset hour is also restricted to 00-23 to catch invalid offsets like +25:00 early.
   const rfc3339Regex =
-    /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+    /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(\.\d+)?(Z|[+-]([01]\d|2[0-3]):\d{2})$/;
   if (!rfc3339Regex.test(value)) return false;
 
   // Semantic validation via Temporal — catches rolled dates (e.g. Feb 30 → Mar 2).

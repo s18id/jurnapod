@@ -271,6 +271,21 @@ describe("normalizeDateTime()", () => {
       /Invalid RFC 3339 datetime/
     );
   });
+
+  test("throws on rolled date (Feb 30) via isValidDateTime guard", () => {
+    // new Date("2026-02-30T10:30:00Z") silently rolls to March 2 — normalizeDateTime now rejects.
+    assert.throws(
+      () => normalizeDateTime("2026-02-30T10:30:00Z"),
+      /Invalid RFC 3339 datetime/
+    );
+  });
+
+  test("throws on invalid time component (hour 25) via isValidDateTime guard", () => {
+    assert.throws(
+      () => normalizeDateTime("2026-01-01T25:00:00Z"),
+      /Invalid RFC 3339 datetime/
+    );
+  });
 });
 
 describe("isValidDate()", () => {
@@ -323,6 +338,17 @@ describe("isValidDateTime()", () => {
     assert.equal(isValidDateTime("2026-01-01T25:00:00Z"), false);
     assert.equal(isValidDateTime("2026-01-01T12:61:00Z"), false);
     assert.equal(isValidDateTime("2026-01-01T12:30:61Z"), false);
+  });
+
+  test("returns false for invalid offset hours (e.g. +25:00)", () => {
+    assert.equal(isValidDateTime("2026-01-01T10:30:00+25:00"), false);
+    assert.equal(isValidDateTime("2026-01-01T10:30:00+00:99"), false);
+  });
+
+  test("returns false for leap seconds (ss=60) — not supported by this system", () => {
+    // Leap seconds are silently rolled back to ss=59 by Temporal, which could cause
+    // off-by-one-second audit discrepancies in financial systems. We reject them.
+    assert.equal(isValidDateTime("2026-01-01T23:59:60Z"), false);
   });
 });
 
@@ -503,6 +529,12 @@ describe("isValidTimeZone()", () => {
     assert.equal(isValidTimeZone("gmt"), true); // case-insensitive
     assert.equal(isValidTimeZone("GMT+8"), false);
     assert.equal(isValidTimeZone("GMT-05:00"), false);
+  });
+
+  test("rejects non-IANA US timezone abbreviations with offsets (AST, HST, AKST)", () => {
+    assert.equal(isValidTimeZone("AST-4"), false);
+    assert.equal(isValidTimeZone("HST+0"), false);
+    assert.equal(isValidTimeZone("AKST-9"), false);
   });
 
   test("returns false for garbage input", () => {
@@ -721,6 +753,17 @@ describe("local time range validation", () => {
     assert.throws(
       () => resolveEventTime({ date: "2026-03-16", timezone: "UTC", minute: -1 }),
       /Invalid minute/
+    );
+  });
+
+  test("throws on non-integer float values for hour and minute", () => {
+    assert.throws(
+      () => resolveEventTime({ date: "2026-03-16", timezone: "UTC", hour: 2.5 }),
+      /Invalid hour.*Must be an integer/s
+    );
+    assert.throws(
+      () => resolveEventTime({ date: "2026-03-16", timezone: "UTC", minute: 30.5 }),
+      /Invalid minute.*Must be an integer/s
     );
   });
 });
