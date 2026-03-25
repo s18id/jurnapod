@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@hono/zod-openapi": "^0.14.8",
+    "@js-temporal/polyfill": "^0.5.1",
     "@jurnapod/backoffice-sync": "0.1.0",
     "@jurnapod/modules-accounting": "0.1.0",
     "@jurnapod/modules-platform": "0.1.0",

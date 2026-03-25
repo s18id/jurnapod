@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-23T10:00:00+0700
+last_updated: 2026-03-25T10:00:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -252,3 +252,30 @@ development_status:
   15-5-1-dine-in-routes: done  # COMPLETE - Hono dine-in routes with outlet access validation, 6 tests passing, code review clean
   15-5-2-report-routes: done  # COMPLETE - Report routes with 24 tests passing, code review clean
   15-5-3-journal-routes: done  # COMPLETE - Journal routes with 15 tests passing, code review clean
+
+  # Epic 16: Unified Time Handling via date-helpers
+  # NOTE: Foundation epic for canonical UTC/business-date/epoch handling across API/POS/backoffice
+  epic-16: in-progress
+  16-1-define-date-helpers-contract: in-progress  # Fix pass complete: @js-temporal/polyfill replace, 83 tests passing, typecheck+lint clean
+  16-2-implement-temporal-backed-date-helpers: in-progress  # Done as part of fix pass: normalizeDateWithTime + fromUtcInstant both now use Temporal
+  16-3-define-dst-ambiguity-policy: ready-for-dev
+  16-4-add-date-helpers-test-coverage: ready-for-dev
+  16-5-migrate-adr-0001-critical-call-sites-to-date-helpers: ready-for-dev
+
+  # Epic 17: Reliable POS Sync and Reservation Time Semantics
+  # NOTE: Applies explicit _ts authority and reservation boundary semantics on top of Epic 16
+  epic-17: in-progress
+  17-1-enforce-ts-authority-rules-in-sync-update-ingestion: ready-for-dev
+  17-2-preserve-base-order-updated-at-ts-version-marker: ready-for-dev
+  17-3-apply-canonical-ts-semantics-to-snapshot-and-cancellation-writes: ready-for-dev
+  17-4-preserve-reservation-boundary-timestamp-behavior: ready-for-dev
+  17-5-prevent-unintended-ts-exposure-in-public-contracts: ready-for-dev
+
+  # Epic 18: Redundant Timestamp Cleanup and Schema Alignment
+  # NOTE: Cleanup epic for removing low-value created_at_ts columns after validation
+  epic-18: in-progress
+  18-1-remove-dropped-column-references-from-active-write-paths: ready-for-dev
+  18-2-remove-dropped-column-references-from-tests-and-fixtures: ready-for-dev
+  18-3-add-guarded-drop-migration-for-redundant-created-at-ts-columns: ready-for-dev
+  18-4-validate-post-cleanup-sync-and-reservation-regressions: ready-for-dev
+  18-5-refresh-schema-baselines-and-documentation: ready-for-dev

@@ -3,6 +3,7 @@ stepsCompleted: ["step-01-validate-prerequisites", "step-02-design-epics", "step
 inputDocuments:
   - '/home/ahmad/jurnapod/_bmad-output/planning-artifacts/prd.md'
   - '/home/ahmad/jurnapod/_bmad-output/planning-artifacts/architecture.md'
+  - '/home/ahmad/jurnapod/_bmad-output/planning-artifacts/table-reservation-pos-sync-architecture.md'
   - '/home/ahmad/jurnapod/_bmad-output/planning-artifacts/epics-backoffice-ux.md'
 workflowComplete: true
 dateCompleted: 2026-03-18
@@ -218,6 +219,18 @@ Migrate API framework from Next.js App Router to Hono for improved performance, 
 ### Epic 15: Stub Route Implementation
 Implement business logic for all stub routes created in Epic 14's Hono migration, completing the API surface for auth, sync, entities, sales, dine-in, reports, and journals.
 **FRs covered:** FR12, FR5, FR6, FR7, FR8, FR9, FR10, FR11, FR22, FR23, FR24 (route implementation)
+
+### Epic 16: Unified Time Handling via `date-helpers`
+Establish `date-helpers` as Jurnapod’s single public API for UTC instants, business dates, epoch timestamps, timezone validation, and event-time normalization so API, POS, and backoffice stop inventing time logic independently.
+**FRs covered:** TH1, TH2, TH3, TH4, TH5, TH6
+
+### Epic 17: Reliable POS Sync and Reservation Time Semantics
+Ensure POS sync, replay, stale-update detection, and reservation window behavior use explicit `_ts` semantics on top of the shared `date-helpers` foundation so offline-first operations remain deterministic and safe.
+**FRs covered:** FR-ADR2, FR-ADR3, FR-ADR4, FR-ADR5, FR-ADR6
+
+### Epic 18: Redundant Timestamp Cleanup and Schema Alignment
+Remove low-value snapshot/cancellation creation epoch columns and align schema/docs only after application cleanup and validation are complete.
+**FRs covered:** FR-ADR1, FR-ADR7, FR-ADR8, FR-ADR9
 
 ## Epic 1: Authentication and Access Foundation
 
@@ -2430,7 +2443,7 @@ So that I can record manual adjustments and review GL activity.
 
 ---
 
-## Epic 15: Implementation Standards
+## Appendix: Implementation Standards
 
 ### Standard Hono Route Template
 
@@ -2546,3 +2559,339 @@ All story files are located in: `_bmad-output/implementation-artifacts/stories/e
 | story-15.5.1.md | Dine-In Routes | ready-for-dev |
 | story-15.5.2.md | Report Routes | ready-for-dev |
 | story-15.5.3.md | Journal Routes | ready-for-dev |
+
+---
+
+## ADR-0001 Addendum: `_ts` Time Semantics and POS Sync Cleanup Requirements
+
+### Functional Requirements
+
+FR-ADR1: Remove low-value creation epoch columns from `pos_item_cancellations.created_at_ts`, `pos_order_snapshot_lines.created_at_ts`, and `pos_order_snapshots.created_at_ts`.  
+FR-ADR2: Preserve retained `_ts` fields with explicit field-by-field semantics rather than suffix-only interpretation.  
+FR-ADR3: Enforce client-authoritative vs server-authoritative `_ts` handling in sync and application write paths.  
+FR-ADR4: Preserve `pos_order_updates.base_order_updated_at_ts` as a version marker rather than domain event time.  
+FR-ADR5: Keep `reservations.reservation_start_ts` and `reservations.reservation_end_ts` canonical for overlap and range queries.  
+FR-ADR6: Exclude internal `_ts` fields from public response DTOs unless explicitly contracted.  
+FR-ADR7: Complete code/test cleanup before any destructive migration lands.  
+FR-ADR8: Add a guarded, rerunnable MySQL/MariaDB-compatible migration to drop only the three removed columns.  
+FR-ADR9: Refresh schema baseline and documentation after migration.
+
+### Non-Functional Requirements
+
+NFR-ADR1: No POS sync idempotency regression.  
+NFR-ADR2: No stale update or replay ordering regression.  
+NFR-ADR3: No reservation overlap or adjacency regression.  
+NFR-ADR4: Reservation overlap and range queries remain index-friendly.  
+NFR-ADR5: Migration remains rerunnable and compatible with MySQL and MariaDB.  
+NFR-ADR6: Reporting and business-date logic must not derive from `_ts`.  
+NFR-ADR7: No tenant or outlet isolation regression.  
+NFR-ADR8: All impacted tests must pass before destructive migration.
+
+### Additional Requirements
+
+- Offline-first POS and idempotent sync via `client_tx_id` remain invariant.
+- Multi-tenant enforcement via `company_id` and `outlet_id` remains mandatory.
+- Financial and audit correctness takes priority over cosmetic schema cleanup.
+- Reservation boundary logic remains canonical for window checks.
+- Migration approach must use guarded `information_schema` checks and avoid non-portable DDL shortcuts.
+- Finalized/shared dine-in snapshot state must remain deterministic across terminals.
+
+### UX Design Requirements
+
+None identified for this ADR-focused scope.
+
+> Note: The ADR-focused Epics 16-18 below are appended planning work for future implementation and do not modify completed sprint history for earlier epics.
+
+### FR Coverage Map
+
+FR-ADR1: Epic 18 - Remove low-value `created_at_ts` columns safely after cleanup.  
+FR-ADR2: Epic 17 - Define and enforce retained `_ts` semantics in sync/reservation paths.  
+FR-ADR3: Epic 17 - Apply client/server authority rules for machine-time handling.  
+FR-ADR4: Epic 17 - Preserve `base_order_updated_at_ts` as a version marker.  
+FR-ADR5: Epic 17 - Preserve canonical reservation boundary timestamp behavior.  
+FR-ADR6: Epic 17 - Prevent unintended public DTO exposure of internal `_ts` fields.  
+FR-ADR7: Epic 18 - Complete code/test cleanup before destructive migration.  
+FR-ADR8: Epic 18 - Add guarded MySQL/MariaDB-compatible drop migration.  
+FR-ADR9: Epic 18 - Refresh schema baseline and documentation after migration.  
+TH1: Epic 16 - Standardize `date-helpers` as the public time API.  
+TH2: Epic 16 - Wrap `@js-temporal/polyfill` internally without leaking Temporal types.  
+TH3: Epic 16 - Provide canonical conversion helpers for UTC, local time, business date, epoch, and event resolution.  
+TH4: Epic 16 - Define DST ambiguity and nonexistent-time policy.  
+TH5: Epic 16 - Enforce API integration rules against inline timezone logic.  
+TH6: Epic 16 - Add deterministic tests for time conversions and event resolution.
+
+## Epic 16: Unified Time Handling via `date-helpers`
+
+Establish `date-helpers` as Jurnapod’s single public API for UTC instants, business dates, epoch timestamps, timezone validation, and event-time normalization so API, POS, and backoffice stop inventing time logic independently.
+
+### Story 16.1: Define the public `date-helpers` contract
+
+As a developer,
+I want a stable `date-helpers` API for timezone validation and canonical time conversion,
+So that business code can use one consistent interface across the monorepo.
+
+**Acceptance Criteria:**
+
+**Given** the time-handling standard
+**When** the helper module is updated
+**Then** it exposes public functions for timezone validation, UTC/local conversion, business date derivation, epoch conversion, and event-time resolution
+**And** the API returns simple primitives only
+
+**Given** Jurnapod’s canonical time model
+**When** helper contracts are documented in code
+**Then** `*_at`, `*_date`, and `*_ts` semantics are reflected explicitly
+**And** raw Temporal objects are not part of the public API
+
+### Story 16.2: Implement Temporal-backed internals in `date-helpers`
+
+As a developer,
+I want `date-helpers` to use `@js-temporal/polyfill` internally,
+So that timezone and DST handling are deterministic and safer than ad hoc `Date` usage.
+
+**Acceptance Criteria:**
+
+**Given** the helper module implementation
+**When** conversions are executed
+**Then** internal logic uses `@js-temporal/polyfill` for parsing and timezone-aware resolution
+**And** callers do not need to instantiate Temporal objects directly
+
+**Given** malformed UTC/local/timezone inputs
+**When** the helper is called
+**Then** it fails deterministically
+**And** errors are testable and consistent
+
+### Story 16.3: Define and implement DST ambiguity policy
+
+As a developer,
+I want ambiguous and nonexistent local times handled by explicit policy,
+So that reservation and event-time normalization does not silently pick the wrong instant.
+
+**Acceptance Criteria:**
+
+**Given** a nonexistent local time in a DST-observing timezone
+**When** conversion is attempted
+**Then** the helper rejects it by default
+
+**Given** an ambiguous local time in a DST-observing timezone
+**When** conversion is attempted
+**Then** the helper rejects it unless an explicit strategy is supported and documented
+
+**Given** the helper module
+**When** another developer reads or uses it
+**Then** the DST policy is documented in code and tests
+
+### Story 16.4: Add canonical time-helper test coverage
+
+As a developer,
+I want comprehensive tests for `date-helpers`,
+So that time conversion behavior remains safe during future refactors.
+
+**Acceptance Criteria:**
+
+**Given** helper tests
+**When** they run
+**Then** they cover UTC roundtrip, business date derivation, epoch consistency, invalid timezone rejection, DST edge cases, and `resolveEventTime`
+
+**Given** a valid event time input
+**When** `resolveEventTime` is called
+**Then** `atUtc`, `ts`, `businessDate`, and `timeZone` align correctly
+
+### Story 16.5: Migrate ADR-0001-critical call sites to `date-helpers`
+
+As a developer,
+I want the sync and reservation paths affected by ADR-0001 to use `date-helpers`,
+So that the new `_ts` and time-semantics work sits on a consistent foundation.
+
+**Acceptance Criteria:**
+
+**Given** ADR-0001-related reservation and sync code paths
+**When** they perform timezone or epoch normalization
+**Then** they call `date-helpers` instead of inline `Date`/raw Temporal logic
+
+**Given** API handlers in the impacted scope
+**When** they normalize event or reservation time inputs
+**Then** they do not depend on server local timezone
+**And** they do not implement timezone logic inline
+
+## Epic 17: Reliable POS Sync and Reservation Time Semantics
+
+Ensure POS sync, replay, stale-update detection, and reservation window behavior use explicit `_ts` semantics on top of the shared `date-helpers` foundation so offline-first operations remain deterministic and safe.
+
+### Story 17.1: Enforce `_ts` authority rules in sync update ingestion
+
+As a developer,
+I want sync update ingestion to distinguish client-authoritative event time from server-authoritative ingest time,
+So that offline replay and ordering remain deterministic without conflating occurrence time and persistence time.
+
+**Acceptance Criteria:**
+
+**Given** a sync update payload with event time fields
+**When** the API ingests it
+**Then** client-authoritative event time is validated and preserved according to contract
+**And** server-authoritative ingest time is generated or overwritten server-side
+
+**Given** `pos_order_updates.created_at_ts`
+**When** the sync layer persists updates
+**Then** it is treated as ingest/order metadata
+**And** not as domain event occurrence time
+
+### Story 17.2: Preserve `base_order_updated_at_ts` as version-marker semantics
+
+As a developer,
+I want `base_order_updated_at_ts` treated as a copied version marker,
+So that stale update detection remains correct during retries, replays, and concurrent sync.
+
+**Acceptance Criteria:**
+
+**Given** an update built from a base order version
+**When** it is validated or persisted
+**Then** `base_order_updated_at_ts` is used for optimistic concurrency / stale update checks
+**And** is not interpreted as a business or display timestamp
+
+**Given** stale update scenarios
+**When** tests run
+**Then** stale updates are rejected or handled according to current sync contract
+
+### Story 17.3: Apply canonical `_ts` semantics to snapshot and cancellation write paths
+
+As a developer,
+I want retained snapshot and cancellation `_ts` fields to follow explicit semantics,
+So that materialized state and event timelines stay consistent after ADR-0001 changes.
+
+**Acceptance Criteria:**
+
+**Given** snapshot write paths
+**When** snapshot rows are inserted or updated
+**Then** `opened_at_ts`, `closed_at_ts`, and `updated_at_ts` follow their ADR-defined semantics
+
+**Given** cancellation write paths
+**When** a cancellation is recorded
+**Then** `cancelled_at_ts` preserves cancellation occurrence time according to contract
+
+**And** no retained `_ts` field relies on dropped `created_at_ts` for ordering behavior
+
+### Story 17.4: Preserve reservation boundary timestamp behavior
+
+As a developer,
+I want reservation boundary timestamps to remain canonical for overlap and range logic,
+So that booking behavior and indexed query semantics do not regress.
+
+**Acceptance Criteria:**
+
+**Given** reservation overlap checks
+**When** the system evaluates windows
+**Then** it continues using `reservation_start_ts` and `reservation_end_ts` as canonical boundaries
+
+**Given** adjacent reservations
+**When** one reservation ends exactly when another begins
+**Then** they are treated as non-overlapping
+
+**Given** reservation date/window filters
+**When** queries run
+**Then** they remain index-friendly and do not wrap canonical timestamp columns in SQL functions
+
+### Story 17.5: Prevent unintended `_ts` exposure in public contracts
+
+As a developer,
+I want internal `_ts` fields excluded from public response DTOs unless explicitly required,
+So that machine-ordering fields are not mistaken for display or business-date values.
+
+**Acceptance Criteria:**
+
+**Given** public API response DTOs in affected flows
+**When** contracts are reviewed or updated
+**Then** internal `_ts` fields are omitted unless explicitly documented
+
+**Given** any intentionally exposed `_ts` field
+**When** it remains in a contract
+**Then** its machine-time semantics are documented and tested
+
+## Epic 18: Redundant Timestamp Cleanup and Schema Alignment
+
+Remove low-value snapshot/cancellation creation epoch columns and align schema/docs only after application cleanup and validation are complete.
+
+### Story 18.1: Remove dropped-column references from active write paths
+
+As a developer,
+I want application write paths to stop referencing low-value `created_at_ts` columns,
+So that schema cleanup can proceed without breaking sync, snapshots, or cancellations.
+
+**Acceptance Criteria:**
+
+**Given** active write paths for snapshots, snapshot lines, and item cancellations
+**When** code is updated
+**Then** they no longer insert or update:
+- `pos_order_snapshots.created_at_ts`
+- `pos_order_snapshot_lines.created_at_ts`
+- `pos_item_cancellations.created_at_ts`
+
+**And** retained `_ts` fields continue to be written according to their defined semantics
+
+### Story 18.2: Remove dropped-column references from tests and fixtures
+
+As a developer,
+I want tests and fixtures cleaned up before migration,
+So that the schema drop does not break automated validation.
+
+**Acceptance Criteria:**
+
+**Given** impacted tests and fixtures
+**When** cleanup is complete
+**Then** they no longer reference the three dropped columns
+
+**And** targeted affected test files pass after fixture cleanup
+
+**And** repo-wide search confirms no active app/test references remain outside intended historical/schema artifacts
+
+### Story 18.3: Add guarded drop migration for redundant `created_at_ts` columns
+
+As a developer,
+I want a rerunnable MySQL/MariaDB-safe migration that drops only the redundant columns,
+So that schema cleanup is operationally safe.
+
+**Acceptance Criteria:**
+
+**Given** the migration file
+**When** it runs on MySQL or MariaDB
+**Then** it uses guarded `information_schema` existence checks before dropping columns
+
+**And** it drops only:
+- `pos_order_snapshots.created_at_ts`
+- `pos_order_snapshot_lines.created_at_ts`
+- `pos_item_cancellations.created_at_ts`
+
+**And** the migration is idempotent/rerunnable
+
+### Story 18.4: Validate post-cleanup sync and reservation regressions
+
+As a developer,
+I want focused regression coverage after cleanup and migration,
+So that destructive schema simplification does not introduce behavioral bugs.
+
+**Acceptance Criteria:**
+
+**Given** targeted sync tests
+**When** retries, replays, and stale update cases are exercised
+**Then** behavior remains correct
+
+**Given** targeted reservation tests
+**When** overlap, adjacency, date filtering, and timezone behavior are exercised
+**Then** behavior remains unchanged
+
+**And** all P0/P1 ADR-0001 test-matrix checks pass before completion
+
+### Story 18.5: Refresh schema baselines and documentation
+
+As a developer,
+I want schema artifacts and docs aligned with the cleaned-up schema,
+So that contributors and future migrations reflect the intended post-ADR state.
+
+**Acceptance Criteria:**
+
+**Given** schema baseline and documentation artifacts
+**When** rollout is complete
+**Then** they no longer list the dropped columns in current-schema references
+
+**And** historical migrations remain unchanged
+
+**And** implementation/completion notes capture touched files, tests run, and migration evidence

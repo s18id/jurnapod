@@ -16,7 +16,14 @@ import {
   isInFiscalYear,
   nowUTC,
   addDays,
-  compareDates
+  compareDates,
+  isValidTimeZone,
+  toUtcInstant,
+  fromUtcInstant,
+  toEpochMs,
+  fromEpochMs,
+  toBusinessDate,
+  resolveEventTime
 } from "./date-helpers";
 
 describe("normalizeDate()", () => {
@@ -304,20 +311,39 @@ describe("isValidDateTime()", () => {
   test("returns false for invalid date values", () => {
     assert.equal(isValidDateTime("2026-13-16T10:30:00Z"), false);
   });
+
+  test("returns false for rolled dates (Feb 30, March 32) that Date accepts silently", () => {
+    // new Date("2026-02-30T10:30:00Z") silently rolls to March 2 — must reject.
+    assert.equal(isValidDateTime("2026-02-30T10:30:00Z"), false);
+    // March 32 does not exist — must reject.
+    assert.equal(isValidDateTime("2026-03-32T10:30:00Z"), false);
+  });
+
+  test("returns false for invalid time components (hour 25, minute 61, second 61)", () => {
+    assert.equal(isValidDateTime("2026-01-01T25:00:00Z"), false);
+    assert.equal(isValidDateTime("2026-01-01T12:61:00Z"), false);
+    assert.equal(isValidDateTime("2026-01-01T12:30:61Z"), false);
+  });
 });
 
 describe("formatForDisplay()", () => {
   test("formats UTC for display in target timezone", () => {
     const result = formatForDisplay("2026-03-16T10:30:00.000Z", "Asia/Jakarta");
     // 10:30 UTC = 17:30 in Jakarta (+7)
-    assert.ok(result.includes("03/16/2024") || result.includes("17") || result.includes("5"));
+    assert.equal(result, "2026-03-16 17:30:00");
   });
 
   test("excludes time when includeTime is false", () => {
     const result = formatForDisplay("2026-03-16T10:30:00.000Z", "UTC", false);
-    // Should return date without time - format is MM/DD/YYYY
-    assert.ok(result.includes("03/16/2026") || result.includes("2026"));
-    assert.ok(!result.includes(":"), "Should not contain time separator");
+    assert.equal(result, "2026-03-16");
+  });
+
+  test("throws on invalid UTC instant", () => {
+    assert.throws(() => formatForDisplay("not-a-date", "UTC"), /Invalid UTC instant/);
+  });
+
+  test("throws on invalid timezone", () => {
+    assert.throws(() => formatForDisplay("2026-03-16T10:30:00.000Z", "Not/A_Timezone"), /Invalid timezone/);
   });
 });
 
@@ -325,6 +351,14 @@ describe("toDateOnly()", () => {
   test("extracts date portion from UTC ISO string", () => {
     assert.equal(toDateOnly("2026-03-16T10:30:00.000Z"), "2026-03-16");
     assert.equal(toDateOnly("2024-01-01T00:00:00.000Z"), "2024-01-01");
+  });
+
+  test("normalizes offset timestamps before extracting UTC date", () => {
+    assert.equal(toDateOnly("2026-03-16T01:30:00+07:00"), "2026-03-15");
+  });
+
+  test("throws on invalid input", () => {
+    assert.throws(() => toDateOnly("not-a-date"), /Cannot convert to UTC instant/);
   });
 });
 
@@ -433,5 +467,306 @@ describe("compareDates()", () => {
 
   test("returns 0 when dates are equal", () => {
     assert.equal(compareDates("2024-01-01T00:00:00.000Z", "2024-01-01T00:00:00.000Z"), 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New public contract tests
+// ---------------------------------------------------------------------------
+
+describe("isValidTimeZone()", () => {
+  test("returns true for valid IANA timezones", () => {
+    assert.equal(isValidTimeZone("Asia/Jakarta"), true);
+    assert.equal(isValidTimeZone("America/New_York"), true);
+    assert.equal(isValidTimeZone("UTC"), true);
+    assert.equal(isValidTimeZone("Pacific/Auckland"), true);
+  });
+
+  test("returns false for invalid timezone strings", () => {
+    assert.equal(isValidTimeZone("Not/A_Timezone"), false);
+    assert.equal(isValidTimeZone("GMT+8"), false);
+    assert.equal(isValidTimeZone(""), false);
+  });
+
+  test("returns false for UTC+offset legacy forms", () => {
+    assert.equal(isValidTimeZone("UTC+8"), false);
+    assert.equal(isValidTimeZone("UTC-05:00"), false);
+    assert.equal(isValidTimeZone("UTC+07:30"), false);
+  });
+
+  test("accepts bare UTC (valid IANA timezone)", () => {
+    assert.equal(isValidTimeZone("UTC"), true);
+  });
+
+  test("accepts bare GMT; rejects GMT+offset forms", () => {
+    assert.equal(isValidTimeZone("GMT"), true);
+    assert.equal(isValidTimeZone("gmt"), true); // case-insensitive
+    assert.equal(isValidTimeZone("GMT+8"), false);
+    assert.equal(isValidTimeZone("GMT-05:00"), false);
+  });
+
+  test("returns false for garbage input", () => {
+    assert.equal(isValidTimeZone("something"), false);
+  });
+});
+
+describe("toUtcInstant()", () => {
+  test("converts RFC 3339 with positive offset to UTC", () => {
+    const result = toUtcInstant("2026-03-16T17:30:00+07:00");
+    assert.equal(result, "2026-03-16T10:30:00.000Z");
+  });
+
+  test("converts RFC 3339 with negative offset to UTC", () => {
+    const result = toUtcInstant("2026-03-16T10:30:00-05:00");
+    assert.equal(result, "2026-03-16T15:30:00.000Z");
+  });
+
+  test("accepts bare UTC ISO string unchanged", () => {
+    const result = toUtcInstant("2026-03-16T10:30:00.000Z");
+    assert.equal(result, "2026-03-16T10:30:00.000Z");
+  });
+
+  test("throws on unparseable input", () => {
+    assert.throws(() => toUtcInstant("not-a-date"), /Cannot convert to UTC instant/);
+  });
+
+  test("returns primitives only (string)", () => {
+    const result = toUtcInstant("2026-03-16T10:30:00.000Z");
+    assert.equal(typeof result, "string");
+  });
+});
+
+describe("fromUtcInstant()", () => {
+  test("formats UTC instant in target timezone with offset", () => {
+    // 10:30 UTC = 17:30 Jakarta (+07:00)
+    const result = fromUtcInstant("2026-03-16T10:30:00.000Z", "Asia/Jakarta");
+    assert.equal(result, "2026-03-16T17:30:00.000+07:00");
+  });
+
+  test("formats UTC instant in negative offset timezone", () => {
+    // 10:30 UTC = 05:30 New York (EST, UTC-5) in January
+    const result = fromUtcInstant("2026-01-15T10:30:00.000Z", "America/New_York");
+    assert.equal(result, "2026-01-15T05:30:00.000-05:00");
+  });
+
+  test("formats UTC instant in UTC timezone", () => {
+    const result = fromUtcInstant("2026-03-16T10:30:00.000Z", "UTC");
+    assert.equal(result, "2026-03-16T10:30:00.000+00:00");
+  });
+
+  test("throws on invalid UTC instant", () => {
+    assert.throws(() => fromUtcInstant("not-a-date", "Asia/Jakarta"), /Invalid UTC instant/);
+  });
+
+  test("returns primitives only (string)", () => {
+    const result = fromUtcInstant("2026-03-16T10:30:00.000Z", "UTC");
+    assert.equal(typeof result, "string");
+  });
+});
+
+describe("toEpochMs()", () => {
+  test("converts UTC ISO to epoch milliseconds", () => {
+    // Use a value we derive from the ISO string so the pair is self-consistent
+    const iso = "2026-03-16T10:30:00.000Z";
+    const expected = new Date(iso).getTime();
+    const result = toEpochMs(iso);
+    assert.equal(result, expected);
+  });
+
+  test("throws on invalid UTC instant", () => {
+    assert.throws(() => toEpochMs("not-a-date"), /Invalid UTC instant/);
+  });
+
+  test("returns primitives only (number)", () => {
+    const iso = "2026-03-16T10:30:00.000Z";
+    const result = toEpochMs(iso);
+    assert.equal(typeof result, "number");
+    assert.equal(result, new Date(iso).getTime());
+  });
+});
+
+describe("fromEpochMs()", () => {
+  test("converts epoch milliseconds to UTC ISO string", () => {
+    // Self-consistent: round-trip through Date to avoid hardcoding
+    const ts = 1773657000000; // pick a known epoch
+    const expected = new Date(ts).toISOString();
+    assert.equal(fromEpochMs(ts), expected);
+  });
+
+  test("returns primitives only (string)", () => {
+    const result = fromEpochMs(1710587400000);
+    assert.equal(typeof result, "string");
+  });
+});
+
+describe("toBusinessDate()", () => {
+  test("derives business-local date from UTC instant in Jakarta", () => {
+    // 2026-03-15T17:00:00Z = 2026-03-16T00:00:00+07:00
+    const result = toBusinessDate("2026-03-15T17:00:00.000Z", "Asia/Jakarta");
+    assert.equal(result, "2026-03-16");
+  });
+
+  test("derives business-local date from UTC instant in New York (EST)", () => {
+    // 2026-01-15T05:00:00Z = 2026-01-15T00:00:00-05:00
+    const result = toBusinessDate("2026-01-15T05:00:00.000Z", "America/New_York");
+    assert.equal(result, "2026-01-15");
+  });
+
+  test("throws on invalid UTC instant", () => {
+    assert.throws(() => toBusinessDate("not-a-date", "Asia/Jakarta"), /Invalid UTC instant/);
+  });
+
+  test("throws on invalid timezone", () => {
+    assert.throws(() => toBusinessDate("2026-03-15T17:00:00.000Z", "Not/A_Timezone"), /Invalid timezone/);
+  });
+
+  test("returns primitives only (string)", () => {
+    const result = toBusinessDate("2026-03-15T17:00:00.000Z", "Asia/Jakarta");
+    assert.equal(typeof result, "string");
+    assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(result));
+  });
+});
+
+describe("resolveEventTime()", () => {
+  test("resolves from UTC instant (at)", () => {
+    const result = resolveEventTime({ at: "2026-03-16T10:30:00.000Z" });
+    assert.equal(result, "2026-03-16T10:30:00.000Z");
+  });
+
+  test("resolves from epoch ms (ts)", () => {
+    // Self-consistent: use the Date object to derive expected value
+    const ts = 1773657000000;
+    const expected = new Date(ts).toISOString();
+    const result = resolveEventTime({ ts });
+    assert.equal(result, expected);
+  });
+
+  test("resolves from business-local date (date+timezone)", () => {
+    // midnight March 16 in Jakarta = 2026-03-15T17:00:00Z
+    const result = resolveEventTime({
+      date: "2026-03-16",
+      timezone: "Asia/Jakarta"
+    });
+    assert.equal(result, "2026-03-15T17:00:00.000Z");
+  });
+
+  test("resolves from business-local date with hour/minute", () => {
+    // 09:00 March 16 in Jakarta = 2026-03-16T02:00:00Z
+    const result = resolveEventTime({
+      date: "2026-03-16",
+      timezone: "Asia/Jakarta",
+      hour: 9,
+      minute: 0
+    });
+    assert.equal(result, "2026-03-16T02:00:00.000Z");
+  });
+
+  test("throws when given no valid input", () => {
+    assert.throws(
+      () => resolveEventTime({}),
+      /resolveEventTime requires/
+    );
+  });
+
+  test("throws on non-finite epoch ms (NaN)", () => {
+    assert.throws(
+      () => resolveEventTime({ ts: NaN }),
+      /Invalid epoch ms/
+    );
+  });
+
+  test("throws on non-finite epoch ms (Infinity)", () => {
+    assert.throws(
+      () => resolveEventTime({ ts: Infinity }),
+      /Invalid epoch ms/
+    );
+  });
+
+  test("throws on invalid timezone for date+timezone input", () => {
+    assert.throws(
+      () => resolveEventTime({ date: "2026-03-16", timezone: "Not/A_Timezone" }),
+      /Invalid timezone/
+    );
+  });
+
+  test("returns primitives only (string)", () => {
+    const result = resolveEventTime({ at: "2026-03-16T10:30:00.000Z" });
+    assert.equal(typeof result, "string");
+  });
+});
+
+describe("local time range validation", () => {
+  test("throws on invalid hour (> 23)", () => {
+    assert.throws(
+      () => resolveEventTime({ date: "2026-03-16", timezone: "UTC", hour: 24 }),
+      /Invalid hour/
+    );
+  });
+
+  test("throws on invalid hour (< 0)", () => {
+    assert.throws(
+      () => resolveEventTime({ date: "2026-03-16", timezone: "UTC", hour: -1 }),
+      /Invalid hour/
+    );
+  });
+
+  test("throws on invalid minute (> 59)", () => {
+    assert.throws(
+      () => resolveEventTime({ date: "2026-03-16", timezone: "UTC", minute: 60 }),
+      /Invalid minute/
+    );
+  });
+
+  test("throws on invalid minute (< 0)", () => {
+    assert.throws(
+      () => resolveEventTime({ date: "2026-03-16", timezone: "UTC", minute: -1 }),
+      /Invalid minute/
+    );
+  });
+});
+
+describe("DST gap and overlap handling", () => {
+  test("throws when local time falls in a DST spring-forward gap (America/New_York)", () => {
+    // March 10, 2024: clocks spring forward from 2:00 AM to 3:00 AM.
+    // 02:30 local time does not exist on this day.
+    assert.throws(
+      () => resolveEventTime({ date: "2024-03-10", timezone: "America/New_York", hour: 2, minute: 30 }),
+      /Invalid date-time/
+    );
+  });
+
+  test("throws when local time falls in a DST overlap (America/New_York fall-back)", () => {
+    // November 3, 2024: clocks fall back from 2:00 AM to 1:00 AM.
+    // 01:30 occurs twice (before and after the fall-back); disambiguation: 'reject' throws.
+    assert.throws(
+      () => resolveEventTime({ date: "2024-11-03", timezone: "America/New_York", hour: 1, minute: 30 }),
+      /Invalid date-time/
+    );
+  });
+
+  test("DST gap error message contains timezone and DST keyword (not raw Temporal error)", () => {
+    try {
+      resolveEventTime({ date: "2024-03-10", timezone: "America/New_York", hour: 2, minute: 30 });
+      assert.fail("should have thrown");
+    } catch (err) {
+      const msg = (err as Error).message;
+      assert.ok(msg.includes("Invalid date-time"), `Expected "Invalid date-time" in message, got: ${msg}`);
+      assert.ok(msg.includes("America/New_York"), `Expected timezone in message, got: ${msg}`);
+      assert.ok(msg.includes("DST"), `Expected "DST" keyword in message, got: ${msg}`);
+    }
+  });
+
+  test("valid local time on a DST transition day resolves without error", () => {
+    // 03:00 on March 10, 2024 exists (after spring-forward).
+    const result = resolveEventTime({ date: "2024-03-10", timezone: "America/New_York", hour: 3, minute: 0 });
+    assert.equal(typeof result, "string");
+    assert.ok(result.endsWith("Z"));
+  });
+
+  test("valid local time before DST transition resolves without error", () => {
+    // 01:00 on March 10, 2024 exists (before spring-forward).
+    const result = resolveEventTime({ date: "2024-03-10", timezone: "America/New_York", hour: 1, minute: 0 });
+    assert.equal(typeof result, "string");
+    assert.ok(result.endsWith("Z"));
   });
 });

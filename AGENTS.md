@@ -57,7 +57,14 @@ Important:
 - Treat anything that can cause incorrect ledger balances, duplicate posting, duplicate POS transaction creation, tenant data leakage, or auth bypass as P0/P1.
 - Treat missing validation on money movement, posting, sync, import, auth, or tenant/outlet scoping as P1.
 - Treat missing or broken tests for critical accounting, sync, auth, or migration logic as P1 when the PR changes those areas.
-- Ignore purely cosmetic issues unless they create a real correctness, readability, or maintainability risk.
+- Do not dismiss findings as "minor" by default.
+- Do not tolerate or hand-wave issues as acceptable merely because they look small.
+- Review outputs should use risk-based severity language such as P0/P1/P2/P3 or blocker/actionable follow-up.
+- Avoid labels like "minor", "low priority", or "nice to have" unless tied to a concrete operational or maintenance risk.
+- Every review finding must either:
+  - map to a concrete risk in correctness, readability, maintainability, consistency, operability, or test confidence, or
+  - be explicitly marked out-of-scope with rationale.
+- Purely cosmetic comments should be omitted unless they create a real correctness, readability, maintainability, consistency, or workflow risk.
 
 ### Global invariants
 - Accounting/GL stays the center: final business documents must reconcile to journal effects.
