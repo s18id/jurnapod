@@ -265,11 +265,11 @@ development_status:
   # Epic 17: Reliable POS Sync and Reservation Time Semantics
   # NOTE: Applies explicit _ts authority and reservation boundary semantics on top of Epic 16
   epic-17: in-progress
-  17-1-enforce-ts-authority-rules-in-sync-update-ingestion: ready-for-dev
-  17-2-preserve-base-order-updated-at-ts-version-marker: ready-for-dev
-  17-3-apply-canonical-ts-semantics-to-snapshot-and-cancellation-writes: ready-for-dev
-  17-4-preserve-reservation-boundary-timestamp-behavior: ready-for-dev
-  17-5-prevent-unintended-ts-exposure-in-public-contracts: ready-for-dev
+  17-1-enforce-ts-authority-rules-in-sync-update-ingestion: done
+  17-2-preserve-base-order-updated-at-ts-version-marker: done
+  17-3-apply-canonical-ts-semantics-to-snapshot-and-cancellation-writes: done
+  17-4-preserve-reservation-boundary-timestamp-behavior: done
+  17-5-prevent-unintended-ts-exposure-in-public-contracts: done
 
   # Epic 18: Redundant Timestamp Cleanup and Schema Alignment
   # NOTE: Cleanup epic for removing low-value created_at_ts columns after validation

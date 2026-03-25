@@ -469,9 +469,9 @@ export async function getReservationGroup(input: {
         table_code: r.table_code,
         table_name: r.table_name,
         status: r.status,
-        reservation_at: r.reservation_at,
-        reservation_start_ts: r.reservation_start_ts,
-        reservation_end_ts: r.reservation_end_ts
+        reservation_at: r.reservation_at
+        // reservation_start_ts and reservation_end_ts omitted from public contract
+        // (internal machine-time fields for overlap/range queries only)
       }))
     };
 

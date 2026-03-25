@@ -700,6 +700,47 @@ test(
   }
 );
 
+test(
+  "getReservationGroup public contract omits internal _ts fields",
+  { concurrency: false, timeout: 30000 },
+  async () => {
+    const ctx = await resolveTestContext();
+    const fixtures = await createTestGroup(ctx, 2, 4);
+
+    try {
+      const group = await getReservationGroup({ companyId: ctx.companyId, groupId: fixtures.groupId });
+      assert.ok(group, "Group should exist");
+
+      // Verify the public contract shape
+      assert.ok(Array.isArray(group.reservations), "reservations should be an array");
+      assert.ok(group.reservations.length > 0, "Should have at least one reservation");
+
+      const reservation = group.reservations[0]!;
+
+      // Public fields MUST be present
+      assert.ok("reservation_id" in reservation, "reservation_id must be in public contract");
+      assert.ok("table_id" in reservation, "table_id must be in public contract");
+      assert.ok("table_code" in reservation, "table_code must be in public contract");
+      assert.ok("table_name" in reservation, "table_name must be in public contract");
+      assert.ok("status" in reservation, "status must be in public contract");
+      assert.ok("reservation_at" in reservation, "reservation_at must be in public contract");
+
+      // Internal _ts fields must NOT be exposed in public contract
+      assert.ok(
+        !("reservation_start_ts" in reservation),
+        "reservation_start_ts is internal and must NOT be in public contract"
+      );
+      assert.ok(
+        !("reservation_end_ts" in reservation),
+        "reservation_end_ts is internal and must NOT be in public contract"
+      );
+
+    } finally {
+      await cleanupGroup(fixtures.groupId, fixtures.tableIds);
+    }
+  }
+);
+
 // Standard DB pool cleanup - runs after all tests in this file
 test.after(async () => {
   await closeDbPool();

@@ -24,6 +24,7 @@ import {
   type ListReservationsParams
 } from "./reservations";
 import { createOutletTable } from "./outlet-tables";
+import { toDateTimeRangeWithTimezone } from "./date-helpers";
 
 loadEnvIfPresent();
 
@@ -1115,6 +1116,462 @@ test(
       assert.equal(cancelled.statusId, ReservationStatusV2.CANCELLED, "Status should be CANCELLED");
       // Note: cancellation_reason and notes fields may not exist in current schema
       // The update function handles this gracefully by checking column existence
+    } finally {
+      if (createdReservationIds.length > 0) {
+        const placeholders = createdReservationIds.map(() => "?").join(", ");
+        await pool.execute(
+          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
+          [companyId, outletId, ...createdReservationIds]
+        );
+      }
+    }
+  }
+);
+
+// ============================================================================
+// STORY 17.4 - RESERVATION BOUNDARY TIMESTAMP REGRESSION TESTS
+// ============================================================================
+
+test(
+  "Story 17.4: listReservationsV2 uses canonical timestamps for date filtering",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId, userId } = await resolveFixtureContext();
+    const createdReservationIds: bigint[] = [];
+
+    try {
+      // Create test reservations at specific future times
+      const baseTime = new Date();
+      baseTime.setHours(baseTime.getHours() + 24); // Tomorrow
+      baseTime.setMinutes(0, 0, 0);
+
+      const reservation1Time = new Date(baseTime); // Tomorrow 00:00
+      const reservation2Time = new Date(baseTime.getTime() + 3 * 60 * 60 * 1000); // Tomorrow 03:00
+      const reservation3Time = new Date(baseTime.getTime() + 6 * 60 * 60 * 1000); // Tomorrow 06:00
+
+      const input1: CreateReservationInput = {
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        partySize: 2,
+        customerName: `DateFilter1 ${runId}`,
+        reservationTime: reservation1Time,
+        durationMinutes: 60,
+        createdBy: "test-user"
+      };
+      const res1 = await createReservationV2(input1);
+      createdReservationIds.push(res1.id);
+
+      const input2: CreateReservationInput = {
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        partySize: 2,
+        customerName: `DateFilter2 ${runId}`,
+        reservationTime: reservation2Time,
+        durationMinutes: 60,
+        createdBy: "test-user"
+      };
+      const res2 = await createReservationV2(input2);
+      createdReservationIds.push(res2.id);
+
+      const input3: CreateReservationInput = {
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        partySize: 2,
+        customerName: `DateFilter3 ${runId}`,
+        reservationTime: reservation3Time,
+        durationMinutes: 60,
+        createdBy: "test-user"
+      };
+      const res3 = await createReservationV2(input3);
+      createdReservationIds.push(res3.id);
+
+      // Test 1: Filter by fromDate only (should include all future reservations)
+      const fromOnly = await listReservationsV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        limit: 10,
+        offset: 0,
+        fromDate: baseTime
+      });
+      assert.ok(fromOnly.reservations.length >= 3, "Should find at least 3 reservations from tomorrow onwards");
+
+      // Test 2: Filter by toDate only (should include reservations up to that time)
+      const toTime = new Date(baseTime.getTime() + 4 * 60 * 60 * 1000); // Tomorrow 04:00
+      const toOnly = await listReservationsV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        limit: 10,
+        offset: 0,
+        toDate: toTime
+      });
+      // Should include reservations 1 and 2 (starting at 00:00 and 03:00, both before 04:00)
+      const before4Count = [res1, res2].filter(r =>
+        toOnly.reservations.some(found => found.id === r.id)
+      ).length;
+      assert.ok(before4Count >= 2, "Should find reservations starting before 04:00");
+
+      // Test 3: Filter by both fromDate and toDate (report mode - uses start timestamp)
+      const rangeResult = await listReservationsV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        limit: 10,
+        offset: 0,
+        fromDate: baseTime,
+        toDate: new Date(baseTime.getTime() + 5 * 60 * 60 * 1000) // Tomorrow 05:00
+      });
+      // In report mode, should include reservations starting within range (res1 at 00:00, res2 at 03:00)
+      const inRangeCount = [res1, res2].filter(r =>
+        rangeResult.reservations.some(found => found.id === r.id)
+      ).length;
+      assert.ok(inRangeCount >= 2, "Report mode should find reservations starting within range");
+
+      // Test 4: Verify canonical timestamps are present in returned reservations
+      const firstReservation = rangeResult.reservations.find(r => r.id === res1.id);
+      assert.ok(firstReservation, "Should find first reservation");
+      assert.ok(firstReservation!.reservationTime instanceof Date, "reservationTime should be a Date");
+      // reservationTime should be derived from reservation_start_ts, not reservation_at
+
+    } finally {
+      if (createdReservationIds.length > 0) {
+        const placeholders = createdReservationIds.map(() => "?").join(", ");
+        await pool.execute(
+          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
+          [companyId, outletId, ...createdReservationIds]
+        );
+      }
+    }
+  }
+);
+
+test(
+  "Story 17.4: listReservationsV2 calendar mode (useOverlapFilter) shows day-spanning reservations",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId, userId } = await resolveFixtureContext();
+    const createdReservationIds: bigint[] = [];
+
+    try {
+      // Create a reservation that spans midnight (23:00 -> 02:00 next day)
+      const dayStart = new Date(Date.now() + 48 * 60 * 60 * 1000);
+      dayStart.setHours(0, 0, 0, 0);
+      const previousDayStart = new Date(dayStart.getTime() - 24 * 60 * 60 * 1000);
+      const nextDayStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+      const spanningStart = new Date(dayStart.getTime() - 1 * 60 * 60 * 1000); // previous day 23:00
+
+      const spanningReservation = await createReservationV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        partySize: 4,
+        customerName: `Spanning ${runId}`,
+        reservationTime: spanningStart,
+        durationMinutes: 180, // 3 hours - ends at 02:00 next day
+        createdBy: "test-user"
+      });
+      createdReservationIds.push(spanningReservation.id);
+
+      // Calendar view for the previous day: should include the reservation because it starts at 23:00.
+      const calendarModePreviousDay = await listReservationsV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        limit: 10,
+        offset: 0,
+        fromDate: previousDayStart,
+        toDate: new Date(dayStart.getTime() - 1),
+        useOverlapFilter: true
+      });
+
+      // Calendar view for the next day: should also include it because it overlaps until 02:00.
+      const calendarModeNextDay = await listReservationsV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        limit: 10,
+        offset: 0,
+        fromDate: dayStart,
+        toDate: new Date(nextDayStart.getTime() - 1),
+        useOverlapFilter: true
+      });
+
+      const foundPreviousDay = calendarModePreviousDay.reservations.some(r => r.id === spanningReservation.id);
+      const foundNextDay = calendarModeNextDay.reservations.some(r => r.id === spanningReservation.id);
+      assert.ok(foundPreviousDay, "Calendar overlap filter should include spanning reservation on its start day");
+      assert.ok(foundNextDay, "Calendar overlap filter should include spanning reservation on the next day it overlaps");
+
+      // In report mode, the reservation should appear only on its start day, not on the next day.
+      const reportModePreviousDay = await listReservationsV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        limit: 10,
+        offset: 0,
+        fromDate: previousDayStart,
+        toDate: new Date(dayStart.getTime() - 1),
+        useOverlapFilter: false
+      });
+      const reportModeNextDay = await listReservationsV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        limit: 10,
+        offset: 0,
+        fromDate: dayStart,
+        toDate: new Date(nextDayStart.getTime() - 1),
+        useOverlapFilter: false
+      });
+
+      assert.ok(
+        reportModePreviousDay.reservations.some(r => r.id === spanningReservation.id),
+        "Report mode should include the spanning reservation on its start day"
+      );
+      assert.ok(
+        !reportModeNextDay.reservations.some(r => r.id === spanningReservation.id),
+        "Report mode should exclude the spanning reservation on the following day because filtering is by start timestamp"
+      );
+
+    } finally {
+      if (createdReservationIds.length > 0) {
+        const placeholders = createdReservationIds.map(() => "?").join(", ");
+        await pool.execute(
+          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
+          [companyId, outletId, ...createdReservationIds]
+        );
+      }
+    }
+  }
+);
+
+test(
+  "Story 17.4: verify overlap rule preserves adjacency non-overlap semantics",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId, userId } = await resolveFixtureContext();
+    const createdTableIds: number[] = [];
+    const createdReservationIds: bigint[] = [];
+
+    try {
+      const table = await createOutletTable({
+        company_id: companyId,
+        outlet_id: outletId,
+        code: `T-ADJ-${runId}`.slice(0, 32),
+        name: `Adjacency Test Table ${runId}`,
+        zone: "Main",
+        capacity: 4,
+        status: "AVAILABLE",
+        actor: { userId, outletId, ipAddress: "127.0.0.1" }
+      });
+      createdTableIds.push(table.id);
+
+      // Create first reservation: 10:00 - 11:00
+      const firstStart = new Date(Date.now() + 48 * 60 * 60 * 1000);
+      firstStart.setHours(10, 0, 0, 0);
+      const firstDurationMinutes = 60;
+
+      const firstRes = await createReservationV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        tableId: BigInt(table.id),
+        partySize: 2,
+        customerName: `Adjacency First ${runId}`,
+        reservationTime: firstStart,
+        durationMinutes: firstDurationMinutes,
+        createdBy: "test-user"
+      });
+      createdReservationIds.push(firstRes.id);
+
+      // Verify first reservation timestamps
+      const [firstRow] = await pool.execute<RowDataPacket[]>(
+        `SELECT reservation_start_ts, reservation_end_ts FROM reservations WHERE id = ?`,
+        [firstRes.id]
+      );
+      assert.ok(firstRow.length > 0, "First reservation should exist in DB");
+      const firstStartTs = Number(firstRow[0].reservation_start_ts);
+      const firstEndTs = Number(firstRow[0].reservation_end_ts);
+      assert.ok(firstEndTs > firstStartTs, "End must be after start");
+      assert.strictEqual(firstEndTs - firstStartTs, firstDurationMinutes * 60000, "Duration should match");
+
+      // Create second reservation starting exactly when first ends (adjacent)
+      const secondStart = new Date(firstEndTs);
+      const secondRes = await createReservationV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        tableId: BigInt(table.id),
+        partySize: 2,
+        customerName: `Adjacent Second ${runId}`,
+        reservationTime: secondStart,
+        durationMinutes: 45,
+        createdBy: "test-user"
+      });
+      createdReservationIds.push(secondRes.id);
+
+      // Verify second reservation timestamps
+      const [secondRow] = await pool.execute<RowDataPacket[]>(
+        `SELECT reservation_start_ts, reservation_end_ts FROM reservations WHERE id = ?`,
+        [secondRes.id]
+      );
+      assert.ok(secondRow.length > 0, "Second reservation should exist in DB");
+      const secondStartTs = Number(secondRow[0].reservation_start_ts);
+      const secondEndTs = Number(secondRow[0].reservation_end_ts);
+
+      // Critical assertion: adjacent reservations should have end == next start
+      assert.strictEqual(
+        firstEndTs,
+        secondStartTs,
+        "Adjacent reservation: first.end should equal second.start"
+      );
+
+      // The key verification: both reservations should coexist without conflict
+      // If the overlap rule was wrong (using >= instead of >), the second creation would fail
+      // This is already proven by the successful creation of both reservations above.
+      
+      // Additional DB-level verification: query both reservations
+      const [bothReservations] = await pool.execute<RowDataPacket[]>(
+        `SELECT id, reservation_start_ts, reservation_end_ts
+         FROM reservations
+         WHERE company_id = ? AND outlet_id = ? AND table_id = ?
+           AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
+           AND reservation_start_ts IS NOT NULL
+           AND reservation_end_ts IS NOT NULL
+         ORDER BY reservation_start_ts ASC`,
+        [companyId, outletId, table.id]
+      );
+      
+      assert.strictEqual(bothReservations.length, 2, "Should have exactly 2 reservations");
+      
+      // Verify timestamps are correctly stored and adjacent
+      const [res1, res2] = bothReservations;
+      const storedFirstStart = Number(res1.reservation_start_ts);
+      const storedFirstEnd = Number(res1.reservation_end_ts);
+      const storedSecondStart = Number(res2.reservation_start_ts);
+      const storedSecondEnd = Number(res2.reservation_end_ts);
+      
+      assert.strictEqual(
+        storedFirstEnd,
+        storedSecondStart,
+        "Stored first_end should equal stored second_start (adjacent)"
+      );
+      
+      // Verify the strict inequality overlap check with DB timestamps
+      // This is the same pattern used in checkReservationOverlap
+      // For adjacency: first_end == second_start
+      // Check: first_start < second_end AND first_end > second_start
+      // Since first_end == second_start: first_end > second_start = FALSE
+      const [overlapForFirst] = await pool.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) as cnt
+         FROM reservations
+         WHERE reservation_start_ts < ? AND reservation_end_ts > ? AND id = ?`,
+        [storedSecondEnd, storedSecondStart, res1.id]
+      );
+      assert.strictEqual(
+        Number(overlapForFirst[0].cnt),
+        0,
+        "First reservation should NOT overlap with [second_start, second_end] interval"
+      );
+      
+      // Check: second_start < first_end AND second_end > first_start
+      // Since second_start == first_end: second_start < first_end = FALSE
+      const [overlapForSecond] = await pool.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) as cnt
+         FROM reservations
+         WHERE reservation_start_ts < ? AND reservation_end_ts > ? AND id = ?`,
+        [storedFirstEnd, storedFirstStart, res2.id]
+      );
+      assert.strictEqual(
+        Number(overlapForSecond[0].cnt),
+        0,
+        "Second reservation should NOT overlap with [first_start, first_end] interval"
+      );
+
+    } finally {
+      if (createdReservationIds.length > 0) {
+        const placeholders = createdReservationIds.map(() => "?").join(", ");
+        await pool.execute(
+          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
+          [companyId, outletId, ...createdReservationIds]
+        );
+      }
+      if (createdTableIds.length > 0) {
+        const placeholders = createdTableIds.map(() => "?").join(", ");
+        await pool.execute(
+          `DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
+          [companyId, outletId, ...createdTableIds]
+        );
+      }
+    }
+  }
+);
+
+test(
+  "Story 17.4: timezone-prepared date boundaries preserve local-day classification",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId } = await resolveFixtureContext();
+    const createdReservationIds: bigint[] = [];
+
+    try {
+      const timezone = "Asia/Jakarta";
+      const localBusinessDay = "2026-03-20";
+      const nextLocalBusinessDay = "2026-03-21";
+      const { fromStartUTC, toEndUTC } = toDateTimeRangeWithTimezone(
+        localBusinessDay,
+        localBusinessDay,
+        timezone
+      );
+      const nextDayRange = toDateTimeRangeWithTimezone(
+        nextLocalBusinessDay,
+        nextLocalBusinessDay,
+        timezone
+      );
+
+      // 00:30 on 2026-03-20 in Asia/Jakarta = 2026-03-19T17:30:00.000Z
+      const reservationTime = new Date("2026-03-19T17:30:00.000Z");
+
+      const input: CreateReservationInput = {
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        partySize: 2,
+        customerName: `TimezoneBoundary ${runId}`,
+        reservationTime,
+        durationMinutes: 90,
+        createdBy: "test-user"
+      };
+
+      const reservation = await createReservationV2(input);
+      createdReservationIds.push(reservation.id);
+
+      const sameDayResults = await listReservationsV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        limit: 10,
+        offset: 0,
+        fromDate: new Date(fromStartUTC),
+        toDate: new Date(toEndUTC),
+        useOverlapFilter: false
+      });
+      assert.ok(
+        sameDayResults.reservations.some(r => r.id === reservation.id),
+        "Timezone-prepared boundaries should classify the reservation on its local business day"
+      );
+
+      const nextDayResults = await listReservationsV2({
+        companyId: BigInt(companyId),
+        outletId: BigInt(outletId),
+        limit: 10,
+        offset: 0,
+        fromDate: new Date(nextDayRange.fromStartUTC),
+        toDate: new Date(nextDayRange.toEndUTC),
+        useOverlapFilter: false
+      });
+      assert.ok(
+        !nextDayResults.reservations.some(r => r.id === reservation.id),
+        "Timezone-prepared boundaries should not misclassify the reservation onto the next local business day"
+      );
+
     } finally {
       if (createdReservationIds.length > 0) {
         const placeholders = createdReservationIds.map(() => "?").join(", ");
