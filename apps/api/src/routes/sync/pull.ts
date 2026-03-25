@@ -20,7 +20,7 @@ import { z } from "zod";
 import { type RowDataPacket } from "mysql2";
 import { NumericIdSchema, SyncPullPayloadSchema, type SyncPullPayload } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
-import { buildSyncPullPayload } from "../../lib/master-data.js";
+import { buildSyncPullPayload } from "../../lib/sync/master-data.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { getDbPool } from "../../lib/db.js";
