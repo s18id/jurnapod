@@ -1064,28 +1064,44 @@ export function DataTable<TData>({
       <LoadingOverlay visible={showLoadingOverlay} testId={testId} />
 
       {/* Table */}
-      <ScrollArea
-        type="auto"
-        scrollbarSize={8}
-        offsetScrollbars
-        id={ariaIds.skipLink}
-        tabIndex={0}
-        style={{ outline: "none" }}
-        ref={tableRef}
+      <Box
+        style={{
+          border: "1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5))",
+          borderRadius: "8px",
+          overflow: "hidden",
+          backgroundColor: "light-dark(var(--mantine-color-white), var(--mantine-color-dark-8))",
+        }}
       >
+        <ScrollArea
+          type="auto"
+          scrollbarSize={8}
+          offsetScrollbars
+          id={ariaIds.skipLink}
+          tabIndex={0}
+          style={{ outline: "none" }}
+          ref={tableRef}
+        >
         <Table
           stickyHeader={stickyHeader}
           highlightOnHover={!zebraStriping}
-          withTableBorder
-          withColumnBorders
+          withTableBorder={false}
+          withColumnBorders={false}
         >
           {renderHeader()}
           {renderBody()}
         </Table>
-      </ScrollArea>
+        </ScrollArea>
+      </Box>
 
       {/* Pagination Controls */}
-      <Box py="sm" px="md">
+      <Box 
+        py="md" 
+        px="lg"
+        style={{
+          borderTop: "1px solid light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-6))",
+          backgroundColor: "light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-7))",
+        }}
+      >
         <PaginationControls
           page={pagination.page}
           pageSize={pagination.pageSize}
@@ -1105,15 +1121,75 @@ export function DataTable<TData>({
         .datatable-sortable-header {
           cursor: pointer;
           user-select: none;
+          transition: background-color 0.15s ease;
+          border-radius: 4px;
+          margin: -4px;
+          padding: 4px;
         }
         .datatable-sortable-header:hover {
-          background-color: var(--mantine-color-gray-0);
+          background-color: var(--mantine-color-gray-1);
         }
         .datatable-zebra-row {
           background-color: var(--mantine-color-gray-0);
         }
         .datatable-batch-bar {
           transition: opacity 0.2s ease;
+        }
+        
+        /* Modern table styling */
+        [data-mantine-color-scheme="light"] table thead th {
+          background-color: var(--mantine-color-gray-0);
+          border-bottom: 2px solid var(--mantine-color-gray-2);
+          font-weight: 600;
+          font-size: 0.875rem;
+          color: var(--mantine-color-gray-7);
+          padding: 16px;
+          text-transform: uppercase;
+          letter-spacing: 0.025em;
+        }
+        
+        [data-mantine-color-scheme="light"] table tbody td {
+          border-bottom: 1px solid var(--mantine-color-gray-1);
+          padding: 16px;
+          vertical-align: middle;
+          font-size: 0.875rem;
+        }
+        
+        [data-mantine-color-scheme="light"] table tbody tr:hover {
+          background-color: var(--mantine-color-blue-0);
+          transition: background-color 0.15s ease;
+        }
+        
+        [data-mantine-color-scheme="light"] table tbody tr:last-child td {
+          border-bottom: none;
+        }
+        
+        /* Dark mode styling */
+        [data-mantine-color-scheme="dark"] table thead th {
+          background-color: var(--mantine-color-dark-7);
+          border-bottom: 2px solid var(--mantine-color-dark-5);
+          font-weight: 600;
+          font-size: 0.875rem;
+          color: var(--mantine-color-dark-1);
+          padding: 16px;
+          text-transform: uppercase;
+          letter-spacing: 0.025em;
+        }
+        
+        [data-mantine-color-scheme="dark"] table tbody td {
+          border-bottom: 1px solid var(--mantine-color-dark-6);
+          padding: 16px;
+          vertical-align: middle;
+          font-size: 0.875rem;
+        }
+        
+        [data-mantine-color-scheme="dark"] table tbody tr:hover {
+          background-color: var(--mantine-color-dark-6);
+          transition: background-color 0.15s ease;
+        }
+        
+        [data-mantine-color-scheme="dark"] table tbody tr:last-child td {
+          border-bottom: none;
         }
         .sr-only {
           position: absolute;

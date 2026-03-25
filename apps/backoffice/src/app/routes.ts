@@ -256,7 +256,10 @@ export function normalizeHashPath(hash: string): string {
   if (cleaned.length === 0 || cleaned === "/") {
     return DEFAULT_ROUTE_PATH;
   }
-  return cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
+  
+  // Strip query parameters from the path
+  const pathWithoutQuery = cleaned.split('?')[0];
+  return pathWithoutQuery.startsWith("/") ? pathWithoutQuery : `/${pathWithoutQuery}`;
 }
 
 export function findRoute(path: string): AppRoute | null {

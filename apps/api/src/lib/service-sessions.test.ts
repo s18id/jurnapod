@@ -59,8 +59,8 @@ async function resolveFixtureContext(): Promise<FixtureContext> {
 
 async function createTestTable(pool: ReturnType<typeof getDbPool>, companyId: bigint, outletId: bigint, runId: string): Promise<bigint> {
   const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-     VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
+    `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+     VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
     [companyId, outletId, `TST-${runId}`.slice(0, 32), `Test Table ${runId}`, "Test Zone", 4]
   );
   return BigInt(result.insertId);
@@ -159,8 +159,25 @@ test(
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
+    const createdItemIds: bigint[] = [];
 
     try {
+      // Get a real product from the company
+      const [productRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT id FROM items WHERE company_id = ? LIMIT 1`,
+        [companyId]
+      );
+      const productId = productRows.length > 0 ? productRows[0].id : null;
+
+      if (!productId) {
+        // Create a test product if none exists
+        const [itemResult] = await pool.execute<ResultSetHeader>(
+          `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
+          [companyId, `Test Product ${runId}`, `TEST-${runId}`]
+        );
+        createdItemIds.push(BigInt(itemResult.insertId));
+      }
+
       const tableId = await createTestTable(pool, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
@@ -170,8 +187,8 @@ test(
       // Add a line to the session
       await pool.execute(
         `INSERT INTO table_service_session_lines (session_id, line_number, product_id, product_name, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
-         VALUES (?, 1, 1, 'Test Product', 2, 10.00, 0, 0, 20.00, 0, NOW(), NOW())`,
-        [sessionId]
+         VALUES (?, 1, ?, 'Test Product', 2, 10.00, 0, 0, 20.00, 0, NOW(), NOW())`,
+        [sessionId, productId ?? createdItemIds[0]]
       );
 
       const session = await getSession(companyId, outletId, sessionId);
@@ -187,7 +204,7 @@ test(
       assert.equal(session?.lines[0].quantity, 2, "Line quantity should match");
       assert.equal(session?.lines[0].lineTotal, 20.00, "Line total should match");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
     }
   }
 );
@@ -729,11 +746,12 @@ test(
       const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.LOCKED_FOR_PAYMENT);
       createdSessionIds.push(sessionId);
 
+      const nowTs = Date.now();
       await pool.execute(
         `INSERT INTO pos_order_snapshots
-         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, updated_at, created_at)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), NOW(), NOW())`,
-        [snapshotId, companyId, outletId]
+         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs]
       );
 
       // Update session to be locked with persisted snapshot link
@@ -814,11 +832,12 @@ test(
       createdSessionIds.push(sessionId);
 
       // Create snapshot for the session (required for closing)
+      const nowTs = Date.now();
       await pool.execute(
         `INSERT INTO pos_order_snapshots
-         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, updated_at, created_at)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), NOW(), NOW())`,
-        [snapshotId, companyId, outletId]
+         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs]
       );
 
       // Link snapshot to session (required for close invariant)
@@ -841,6 +860,110 @@ test(
 
       assert.equal(closedSession.statusId, ServiceSessionStatus.CLOSED, "Status should be CLOSED");
       assert.ok(closedSession.closedAt !== null, "ClosedAt should be set");
+    } finally {
+      await pool.execute(
+        `DELETE FROM pos_order_snapshot_lines WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
+        [snapshotId, companyId, outletId]
+      );
+      await pool.execute(
+        `DELETE FROM pos_order_snapshots WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
+        [snapshotId, companyId, outletId]
+      );
+      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+    }
+  }
+);
+
+// ============================================================================
+// TEST 10b: closeSession - snapshot lines have correct timestamp semantics (Story 17.3)
+// This test exercises syncSnapshotLinesFromSession through the closeSession path
+// and verifies the remaining snapshot line timestamp semantics:
+// - updated_at_ts: snapshot freshness derived from source line updated_at
+// ============================================================================
+test(
+  "closeSession - snapshot lines derive freshness from source lines (Story 17.3 / 18.2)",
+  { concurrency: false, timeout: 30000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId } = await resolveFixtureContext();
+    const createdSessionIds: bigint[] = [];
+    const createdTableIds: bigint[] = [];
+    const snapshotId = `snap-ts-${runId}`.slice(0, 36);
+
+    try {
+      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      createdTableIds.push(tableId);
+
+      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      createdSessionIds.push(sessionId);
+
+      // Create and link a snapshot
+      const nowTs = Date.now();
+      await pool.execute(
+        `INSERT INTO pos_order_snapshots
+         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs]
+      );
+
+      // Update session to be ACTIVE with snapshot link (simulating lock being called)
+      await pool.execute(
+        `UPDATE table_service_sessions
+         SET pos_order_snapshot_id = ?
+         WHERE id = ?`,
+        [snapshotId, sessionId]
+      );
+
+      // Add a session line (this is what will be synced to snapshot lines)
+      const productId = await getOrCreateTestItem(pool, companyId);
+      const sourceLineUpdatedAt = new Date("2026-03-20T10:15:00.000Z");
+      await pool.execute(
+        `INSERT INTO table_service_session_lines
+          (session_id, line_number, product_id, product_name, product_sku, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
+         VALUES (?, 1, ?, 'Test Product', 'TEST-SKU', 2, 15.00, 0, 0, 30.00, 0, NOW(), ?)`,
+        [sessionId, productId, sourceLineUpdatedAt]
+      );
+
+      // Close the session - this triggers syncSnapshotLinesFromSession internally
+      const input: CloseSessionInput = {
+        companyId,
+        outletId,
+        sessionId,
+        clientTxId: `close-ts-${runId}`,
+        updatedBy: "test-user"
+      };
+
+      const closedSession = await closeSession(input);
+
+      assert.equal(closedSession.id, sessionId, "Session ID should match");
+      assert.equal(closedSession.statusId, ServiceSessionStatus.CLOSED, "Status should be CLOSED");
+
+      // Verify the retained snapshot line timestamp semantics
+      const [lineRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT updated_at_ts
+         FROM pos_order_snapshot_lines
+         WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
+        [snapshotId, companyId, outletId]
+      );
+
+      assert.ok(lineRows.length > 0, "Should have created snapshot lines via syncSnapshotLinesFromSession");
+
+      const { updated_at_ts } = lineRows[0];
+
+      const storedUpdatedAtTs = Number(updated_at_ts);
+      const [expectedRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT UNIX_TIMESTAMP(?) * 1000 AS expected_updated_at_ts`,
+        [sourceLineUpdatedAt]
+      );
+      const expectedUpdatedAtTs = Number(expectedRows[0].expected_updated_at_ts);
+
+      // updated_at_ts is derived from the latest source line updated_at
+      assert.ok(
+        Math.abs(storedUpdatedAtTs - expectedUpdatedAtTs) < 1000,
+        `updated_at_ts (${storedUpdatedAtTs}) should reflect source line freshness (~${expectedUpdatedAtTs})`
+      );
+
     } finally {
       await pool.execute(
         `DELETE FROM pos_order_snapshot_lines WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
@@ -1297,10 +1420,11 @@ test(
 
       // Create snapshot
       const snapshotId = `snap-${runId}`;
+      const nowTs = Date.now();
       await pool.execute(
-        `INSERT INTO pos_order_snapshots (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, opened_at, created_at, updated_at)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, NOW(), NOW(), NOW())`,
-        [snapshotId, companyId, outletId]
+        `INSERT INTO pos_order_snapshots (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, opened_at, opened_at_ts, updated_at, updated_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, NOW(), ?, NOW(), ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs]
       );
       createdSnapshotIds.push(snapshotId);
 

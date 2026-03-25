@@ -292,12 +292,18 @@ export async function restoreCompanyDefaultTaxRate(db, companyId, previous) {
   }
 
   if (Number.isFinite(previous.createdAccountId) && Number(previous.createdAccountId) > 0) {
-    await db.execute(
-      `DELETE FROM accounts
-       WHERE company_id = ?
-         AND id = ?`,
-      [companyId, previous.createdAccountId]
+    // journal_lines are immutable (DB trigger) so we cannot delete them.
+    // Only delete the account if no journal lines reference it.
+    const [refRows] = await db.execute(
+      `SELECT 1 FROM journal_lines WHERE account_id = ? LIMIT 1`,
+      [previous.createdAccountId]
     );
+    if (refRows.length === 0) {
+      await db.execute(
+        `DELETE FROM accounts WHERE company_id = ? AND id = ?`,
+        [companyId, previous.createdAccountId]
+      );
+    }
   }
 }
 
@@ -487,26 +493,8 @@ export async function cleanupCreatedOutletAccountMappings(db, companyId, outletI
 }
 
 export async function cleanupSyncPushPersistedArtifacts(db, clientTxId) {
-  // Delete revenue journal lines first
-  await db.execute(
-    `DELETE jl
-     FROM journal_lines jl
-     INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-     INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
-     WHERE jb.doc_type = ?
-       AND pt.client_tx_id = ?`,
-    [POS_SALE_DOC_TYPE, clientTxId]
-  );
-
-  // Delete revenue journal batches
-  await db.execute(
-    `DELETE jb
-     FROM journal_batches jb
-     INNER JOIN pos_transactions pt ON pt.id = jb.doc_id
-     WHERE jb.doc_type = ?
-       AND pt.client_tx_id = ?`,
-    [POS_SALE_DOC_TYPE, clientTxId]
-  );
+  // Note: journal_lines and journal_batches are immutable (enforced by DB triggers).
+  // They are left in place; doc_id has no FK constraint so pos_transaction deletion is safe.
 
   // Delete audit logs
   await db.execute(

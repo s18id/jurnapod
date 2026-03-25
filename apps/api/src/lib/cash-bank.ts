@@ -6,6 +6,7 @@ import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/share
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection, Pool } from "mysql2/promise";
 import { getDbPool } from "./db";
+import { toMysqlDateTime } from "./date-helpers";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 import { userHasOutletAccess } from "./auth";
 
@@ -115,12 +116,12 @@ function toIsoDateTime(value: string | Date): string {
   return value.toISOString();
 }
 
-function toMysqlDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+function toMysqlDateTimeStrict(value: string): string {
+  try {
+    return toMysqlDateTime(value);
+  } catch {
     throw new CashBankValidationError("Invalid datetime");
   }
-  return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
 function toCashBankTransaction(row: CashBankRow): CashBankTransaction {
@@ -422,10 +423,10 @@ async function postCashBankToJournal(
   const baseDocType = DOC_TYPE_BY_TRANSACTION_TYPE[tx.transaction_type];
   const docType = options.voidMode ? `${baseDocType}_VOID` : baseDocType;
   const postedAt = options.voidMode
-    ? toMysqlDateTime(new Date().toISOString())
+    ? toMysqlDateTimeStrict(new Date().toISOString())
     : tx.posted_at
-      ? toMysqlDateTime(tx.posted_at)
-      : toMysqlDateTime(new Date().toISOString());
+      ? toMysqlDateTimeStrict(tx.posted_at)
+      : toMysqlDateTimeStrict(new Date().toISOString());
 
   const service = new PostingService(new CashBankPostingRepository(executor, postedAt), {
     [docType]: new CashBankPostingMapper(tx, Boolean(options.voidMode))

@@ -12,6 +12,7 @@ import {
   updateReservationGroup,
   deleteReservationGroupSafe
 } from "./reservation-groups";
+import { createOutletTable } from "./outlet-tables";
 import type { ReservationGroupDetail } from "@jurnapod/shared";
 
 loadEnvIfPresent();
@@ -19,6 +20,7 @@ loadEnvIfPresent();
 type TestContext = {
   companyId: number;
   outletId: number;
+  userId: number;
   runId: string;
 };
 
@@ -26,19 +28,23 @@ async function resolveTestContext(): Promise<TestContext> {
   const pool = getDbPool();
   const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
   const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
+  const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT c.id AS company_id, o.id AS outlet_id
+    `SELECT c.id AS company_id, o.id AS outlet_id, u.id AS user_id
      FROM companies c
      INNER JOIN outlets o ON o.company_id = c.id
-     WHERE c.code = ? AND o.code = ?
+     INNER JOIN users u ON u.company_id = c.id
+     INNER JOIN user_outlets uo ON uo.user_id = u.id AND uo.outlet_id = o.id
+     WHERE c.code = ? AND o.code = ? AND u.email = ?
      LIMIT 1`,
-    [companyCode, outletCode]
+    [companyCode, outletCode, ownerEmail]
   );
 
-  assert.ok(rows.length > 0, "Fixture company/outlet not found; run seed first");
+  assert.ok(rows.length > 0, "Fixture company/outlet/user not found; run seed first");
   return {
     companyId: Number(rows[0].company_id),
     outletId: Number(rows[0].outlet_id),
+    userId: Number(rows[0].user_id),
     runId: Date.now().toString(36)
   };
 }
@@ -62,17 +68,21 @@ async function createTestGroup(
   tableCount: number = 3,
   guestCount: number = 6
 ): Promise<CreatedFixtures> {
-  const pool = getDbPool();
   const tableIds: number[] = [];
 
   // Create test tables
   for (let i = 0; i < tableCount; i++) {
-    const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
-      [ctx.companyId, ctx.outletId, `TG-${ctx.runId}-${i}`.slice(0, 32), `Test Group Table ${i}`, "TestZone", 4]
-    );
-    tableIds.push(Number(result.insertId));
+    const table = await createOutletTable({
+      company_id: ctx.companyId,
+      outlet_id: ctx.outletId,
+      code: `TG-${ctx.runId}-${i}`.slice(0, 32),
+      name: `Test Group Table ${i}`,
+      zone: "TestZone",
+      capacity: 4,
+      status: "AVAILABLE",
+      actor: { userId: ctx.userId, outletId: ctx.outletId, ipAddress: "127.0.0.1" }
+    });
+    tableIds.push(table.id);
   }
 
   // Create reservation group
@@ -198,14 +208,18 @@ test(
 
     try {
       // Create additional tables
-      const pool = getDbPool();
       for (let i = 0; i < 2; i++) {
-        const [result] = await pool.execute<ResultSetHeader>(
-          `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-           VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE')`,
-          [ctx.companyId, ctx.outletId, `TAN-${ctx.runId}-${i}`.slice(0, 32), `New Table ${i}`, "TestZone", 4]
-        );
-        newTableIds.push(Number(result.insertId));
+        const table = await createOutletTable({
+          company_id: ctx.companyId,
+          outlet_id: ctx.outletId,
+          code: `TAN-${ctx.runId}-${i}`.slice(0, 32),
+          name: `New Table ${i}`,
+          zone: "TestZone",
+          capacity: 4,
+          status: "AVAILABLE",
+          actor: { userId: ctx.userId, outletId: ctx.outletId, ipAddress: "127.0.0.1" }
+        });
+        newTableIds.push(table.id);
       }
 
       const allTableIds = [...fixtures.tableIds, ...newTableIds];
@@ -405,8 +419,8 @@ test(
       const conflictTimeIso = conflictDate.toISOString();
       const conflictTimeDb = toDbDateTime(conflictDate);
       await pool.execute(
-        `INSERT INTO reservations (company_id, outlet_id, table_id, customer_name, guest_count, reservation_at, reservation_start_ts, reservation_end_ts, duration_minutes, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED')`,
+        `INSERT INTO reservations (company_id, outlet_id, table_id, customer_name, guest_count, reservation_at, reservation_start_ts, reservation_end_ts, duration_minutes, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1)`,
         [
           ctx.companyId,
           ctx.outletId,
@@ -679,6 +693,47 @@ test(
       assert.strictEqual(after[0].notes, beforeNotes);
       assert.notStrictEqual(after[0].customer_name, "Should Not Persist");
       assert.notStrictEqual(after[0].notes, "Corrupted");
+
+    } finally {
+      await cleanupGroup(fixtures.groupId, fixtures.tableIds);
+    }
+  }
+);
+
+test(
+  "getReservationGroup public contract omits internal _ts fields",
+  { concurrency: false, timeout: 30000 },
+  async () => {
+    const ctx = await resolveTestContext();
+    const fixtures = await createTestGroup(ctx, 2, 4);
+
+    try {
+      const group = await getReservationGroup({ companyId: ctx.companyId, groupId: fixtures.groupId });
+      assert.ok(group, "Group should exist");
+
+      // Verify the public contract shape
+      assert.ok(Array.isArray(group.reservations), "reservations should be an array");
+      assert.ok(group.reservations.length > 0, "Should have at least one reservation");
+
+      const reservation = group.reservations[0]!;
+
+      // Public fields MUST be present
+      assert.ok("reservation_id" in reservation, "reservation_id must be in public contract");
+      assert.ok("table_id" in reservation, "table_id must be in public contract");
+      assert.ok("table_code" in reservation, "table_code must be in public contract");
+      assert.ok("table_name" in reservation, "table_name must be in public contract");
+      assert.ok("status" in reservation, "status must be in public contract");
+      assert.ok("reservation_at" in reservation, "reservation_at must be in public contract");
+
+      // Internal _ts fields must NOT be exposed in public contract
+      assert.ok(
+        !("reservation_start_ts" in reservation),
+        "reservation_start_ts is internal and must NOT be in public contract"
+      );
+      assert.ok(
+        !("reservation_end_ts" in reservation),
+        "reservation_end_ts is internal and must NOT be in public contract"
+      );
 
     } finally {
       await cleanupGroup(fixtures.groupId, fixtures.tableIds);

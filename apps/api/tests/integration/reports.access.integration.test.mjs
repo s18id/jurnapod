@@ -228,6 +228,25 @@ test(
           [userId, outletId, roleIdByCode.get(roleCode)]
         );
 
+        // Add module_roles entry for pos module with report permission (bit 16)
+        // Use ON DUPLICATE KEY UPDATE to make idempotent for repeated runs
+        await db.execute(
+          `INSERT INTO module_roles (role_id, module, company_id, permission_mask)
+           VALUES (?, 'pos', ?, 18)  -- read(2) + report(16) = 18
+           ON DUPLICATE KEY UPDATE permission_mask = VALUES(permission_mask)`,
+          [roleIdByCode.get(roleCode), companyId]
+        );
+
+        // Add module_roles entry for accounting module with report permission (bit 16)
+        // Only for ADMIN and ACCOUNTANT, not for CASHIER
+        if (roleCode !== "CASHIER") {
+          await db.execute(
+            `INSERT INTO module_roles (role_id, module, company_id, permission_mask)
+             VALUES (?, 'accounting', ?, 18)  -- read(2) + report(16) = 18
+             ON DUPLICATE KEY UPDATE permission_mask = VALUES(permission_mask)`,
+            [roleIdByCode.get(roleCode), companyId]
+          );
+        }
       }
 
       assert.ok(cashierUserId > 0, "Cashier fixture not found");
@@ -333,7 +352,7 @@ test(
         assert.equal(body.success, true);
 
         if (reportUrl.includes("/pos-transactions")) {
-          assert.equal(body.data.total, 1);
+          assert.equal(body.data.pagination.total, 1);
           assert.equal(body.data.transactions.length, 1);
           assert.equal(body.data.transactions[0].gross_total, 100);
         }
@@ -372,7 +391,6 @@ test(
       }
 
       for (const userId of createdUserIds) {
-        await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [userId]);
         await db.execute("DELETE FROM user_role_assignments WHERE user_id = ?", [userId]);
         await db.execute("DELETE FROM users WHERE id = ?", [userId]);
       }

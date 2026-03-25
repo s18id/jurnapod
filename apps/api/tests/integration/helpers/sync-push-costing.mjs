@@ -25,19 +25,18 @@ export async function cleanupInventoryAndCostArtifacts(db, clientTxId) {
   if (transactionIds.length > 0) {
     const placeholders = transactionIds.map(() => "?").join(", ");
 
-    // Delete cost layer consumption records (FK to inventory_transactions)
+    // Restore remaining_qty on cost layers BEFORE deleting consumption records
     await db.execute(
-      `DELETE FROM cost_layer_consumption WHERE transaction_id IN (${placeholders})`,
+      `UPDATE inventory_cost_layers cl
+       INNER JOIN cost_layer_consumption clc ON clc.layer_id = cl.id
+       SET cl.remaining_qty = cl.remaining_qty + clc.consumed_qty
+       WHERE clc.transaction_id IN (${placeholders})`,
       transactionIds
     );
 
-    // Reset remaining_qty on any cost layers that were consumed by these transactions
-    // This is idempotent - if no consumption occurred, it's a no-op
+    // Delete cost layer consumption records (FK to inventory_transactions)
     await db.execute(
-      `UPDATE inventory_cost_layers cl
-       INNER JOIN cost_layer_consumption_history clch ON clch.layer_id = cl.id
-       SET cl.remaining_qty = cl.remaining_qty + clch.consumed_qty
-       WHERE clch.transaction_id IN (${placeholders})`,
+      `DELETE FROM cost_layer_consumption WHERE transaction_id IN (${placeholders})`,
       transactionIds
     );
 
@@ -93,12 +92,21 @@ export async function setupTrackedItemWithCost(db, companyId, outletId, itemSuff
 
   // Update cost summary
   await db.execute(
-    `INSERT INTO inventory_item_costs 
+    `INSERT INTO inventory_item_costs
      (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost)
-     VALUES (?, ?, 'AVG', 10.00, 100.0000, 1000.00)
-     ON DUPLICATE KEY UPDATE 
+     VALUES (?, ?, 'FIFO', 10.00, 100.0000, 1000.00)
+     ON DUPLICATE KEY UPDATE
      current_avg_cost = 10.00, total_layers_qty = 100.0000, total_layers_cost = 1000.00`,
     [companyId, itemId]
+  );
+
+  // Set company costing method to FIFO so calculateCost uses FIFOCostingStrategy,
+  // which records cost_layer_consumption entries (AVG strategy does not).
+  await db.execute(
+    `INSERT INTO company_settings (company_id, outlet_id, \`key\`, value_type, value_json, created_at, updated_at)
+     VALUES (?, NULL, 'inventory.costing_method', 'STRING', '"FIFO"', NOW(), NOW())
+     ON DUPLICATE KEY UPDATE value_json = '"FIFO"'`,
+    [companyId]
   );
 
   return itemId;
@@ -193,15 +201,18 @@ export async function disableCogsFeature(db, companyId) {
  */
 export async function cleanupCogsAccounts(db, companyId) {
   await db.execute(
-    `DELETE FROM company_account_mappings 
+    `DELETE FROM company_account_mappings
      WHERE company_id = ? AND mapping_key IN ('COGS_DEFAULT', 'INVENTORY_ASSET_DEFAULT')`,
     [companyId]
   );
 
-  // Find and delete test accounts by name pattern
+  // Only delete test accounts that have no journal lines referencing them
+  // (journal_lines are immutable by DB trigger and cannot be deleted)
   await db.execute(
-    `DELETE FROM accounts 
-     WHERE company_id = ? AND name IN ('COGS Test Account', 'Inventory Asset Test Account')`,
+    `DELETE FROM accounts
+     WHERE company_id = ?
+       AND name IN ('COGS Test Account', 'Inventory Asset Test Account')
+       AND id NOT IN (SELECT DISTINCT account_id FROM journal_lines WHERE account_id IS NOT NULL)`,
     [companyId]
   );
 }
@@ -252,6 +263,13 @@ export async function cleanupTrackedItems(db, companyId, itemIds) {
   await db.execute(
     `DELETE FROM items WHERE company_id = ? AND id IN (${placeholders})`,
     [companyId, ...itemIds]
+  );
+
+  // Remove FIFO costing method setting inserted by setupTrackedItemWithCost
+  await db.execute(
+    `DELETE FROM company_settings
+     WHERE company_id = ? AND outlet_id IS NULL AND \`key\` = 'inventory.costing_method'`,
+    [companyId]
   );
 }
 

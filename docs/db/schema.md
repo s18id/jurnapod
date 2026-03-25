@@ -735,7 +735,7 @@ Notes:
 | actor_user_id | bigint(20) unsigned | YES | MUL | NULL |
 | device_id | varchar(191) | NO | | NULL |
 | event_at | datetime | NO | | NULL |
-| created_at | datetime | NO | | NULL |
+| created_at | datetime | NO | | current_timestamp() |
 
 ### pos_transaction_items
 

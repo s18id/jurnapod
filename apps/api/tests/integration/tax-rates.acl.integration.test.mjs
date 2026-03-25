@@ -10,7 +10,8 @@ import {
   setupIntegrationTests,
   loginUser,
   readEnv,
-  TEST_TIMEOUT_MS
+  TEST_TIMEOUT_MS,
+  createCleanupHelper
 } from "./integration-harness.mjs";
 
 const testContext = setupIntegrationTests(test);
@@ -49,6 +50,9 @@ test(
     const createdAccountIds = [];
     const createdTaxRateIds = [];
 
+    // Use cleanup helper for proper cleanup order
+    const cleanup = createCleanupHelper(db);
+
     let companyAId = null;
     let companyBId = null;
     let companyAOwnerToken = null;
@@ -85,7 +89,7 @@ test(
       // Setup: Create Company B
       // ========================================
       const [companyBResult] = await db.execute(
-        `INSERT INTO companies (code, name) VALUES (?, ?)`,
+        `INSERT INTO companies (code, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), name = VALUES(name)`,
         [companyBCode, `Test Company B ${runId}`]
       );
       companyBId = Number(companyBResult.insertId);
@@ -93,7 +97,7 @@ test(
 
       // Create outlet for Company B
       const [outletBResult] = await db.execute(
-        `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
+        `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), id = LAST_INSERT_ID(id), updated_at = CURRENT_TIMESTAMP`,
         [companyBId, `MAIN-B-${runId}`, "Main Outlet B"]
       );
       const outletBId = Number(outletBResult.insertId);
@@ -292,45 +296,7 @@ test(
       // ========================================
       // Cleanup
       // ========================================
-      if (createdTaxRateIds.length > 0) {
-        const placeholders = createdTaxRateIds.map(() => "?").join(", ");
-        await db.execute(
-          `DELETE FROM tax_rates WHERE id IN (${placeholders})`,
-          createdTaxRateIds
-        );
-      }
-
-      if (createdAccountIds.length > 0) {
-        const placeholders = createdAccountIds.map(() => "?").join(", ");
-        await db.execute(
-          `DELETE FROM accounts WHERE id IN (${placeholders})`,
-          createdAccountIds
-        );
-      }
-
-      if (createdUserIds.length > 0) {
-        for (const userId of createdUserIds) {
-          await db.execute(`DELETE FROM user_role_assignments WHERE user_id = ?`, [userId]);
-          await db.execute(`DELETE FROM user_outlets WHERE user_id = ?`, [userId]);
-          await db.execute(`DELETE FROM users WHERE id = ?`, [userId]);
-        }
-      }
-
-      if (createdOutletIds.length > 0) {
-        const placeholders = createdOutletIds.map(() => "?").join(", ");
-        await db.execute(
-          `DELETE FROM outlets WHERE id IN (${placeholders})`,
-          createdOutletIds
-        );
-      }
-
-      if (createdCompanyIds.length > 0) {
-        const placeholders = createdCompanyIds.map(() => "?").join(", ");
-        await db.execute(
-          `DELETE FROM companies WHERE id IN (${placeholders})`,
-          createdCompanyIds
-        );
-      }
+      await cleanup.execute();
     }
   }
 );

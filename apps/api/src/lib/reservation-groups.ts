@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
-import { getDbPool } from "@/lib/db";
+import { getDbPool } from "./db";
 import type {
   ReservationGroupDetail,
   TableSuggestion
@@ -124,8 +124,8 @@ export async function createReservationGroupWithTables(input: {
          (company_id, outlet_id, reservation_group_id, table_id,
           customer_name, customer_phone, guest_count,
           reservation_at, reservation_start_ts, reservation_end_ts,
-          duration_minutes, notes, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED')`,
+          duration_minutes, notes, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1)`,
         [
           input.companyId,
           input.outletId,
@@ -469,9 +469,9 @@ export async function getReservationGroup(input: {
         table_code: r.table_code,
         table_name: r.table_name,
         status: r.status,
-        reservation_at: r.reservation_at,
-        reservation_start_ts: r.reservation_start_ts,
-        reservation_end_ts: r.reservation_end_ts
+        reservation_at: r.reservation_at
+        // reservation_start_ts and reservation_end_ts omitted from public contract
+        // (internal machine-time fields for overlap/range queries only)
       }))
     };
 
@@ -846,8 +846,8 @@ export async function updateReservationGroup(input: {
            (company_id, outlet_id, reservation_group_id, table_id,
             customer_name, customer_phone, guest_count,
             reservation_at, reservation_start_ts, reservation_end_ts,
-            duration_minutes, notes, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED')`,
+            duration_minutes, notes, status, status_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1)`,
           [
             input.companyId, 
             group.outlet_id, 

@@ -570,14 +570,15 @@ export async function userHasOutletAccess(
   return rows.length > 0;
 }
 
-export type ModulePermission = "create" | "read" | "update" | "delete";
+export type ModulePermission = "create" | "read" | "update" | "delete" | "report";
 
-// Permission bits for module_roles.permission_mask (create=1, read=2, update=4, delete=8).
+// Permission bits for module_roles.permission_mask (create=1, read=2, update=4, delete=8, report=16).
 export const MODULE_PERMISSION_BITS: Record<ModulePermission, number> = {
   create: 1,
   read: 2,
   update: 4,
-  delete: 8
+  delete: 8,
+  report: 16
 };
 
 export function buildPermissionMask(params: {
@@ -585,12 +586,14 @@ export function buildPermissionMask(params: {
   canRead?: boolean;
   canUpdate?: boolean;
   canDelete?: boolean;
+  canReport?: boolean;
 }): number {
   return (
     (params.canCreate ? MODULE_PERMISSION_BITS.create : 0) |
     (params.canRead ? MODULE_PERMISSION_BITS.read : 0) |
     (params.canUpdate ? MODULE_PERMISSION_BITS.update : 0) |
-    (params.canDelete ? MODULE_PERMISSION_BITS.delete : 0)
+    (params.canDelete ? MODULE_PERMISSION_BITS.delete : 0) |
+    (params.canReport ? MODULE_PERMISSION_BITS.report : 0)
   );
 }
 

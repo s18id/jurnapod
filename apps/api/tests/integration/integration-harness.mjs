@@ -9,6 +9,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
 
+// Re-export normalizeDate for use in integration tests
+import { normalizeDate } from "./helpers/date-helpers.mjs";
+export { normalizeDate };
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const apiRoot = path.resolve(__dirname, "../..");
@@ -274,6 +278,67 @@ export async function loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword
   return loginUser(baseUrl, companyCode, ownerEmail, ownerPassword, serverLogs);
 }
 
+/**
+ * Login and get user context via API (avoids direct DB queries in tests).
+ * Returns user info including outlet assignment.
+ * 
+ * @param {string} baseUrl - API base URL
+ * @param {string} companyCode - Company code
+ * @param {string} email - User email
+ * @param {string} password - User password
+ * @param {string} outletCode - Outlet code to find in user's outlets
+ * @returns {Promise<{accessToken: string, userId: number, companyId: number, outletId: number}>}
+ */
+export async function loginAndGetUserContext(baseUrl, companyCode, email, password, outletCode, serverLogs = null) {
+  const accessToken = await loginUser(baseUrl, companyCode, email, password, serverLogs);
+  
+  const meResponse = await fetch(`${baseUrl}/api/users/me`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+  
+  if (meResponse.status !== 200) {
+    let responseBody = "";
+    try {
+      responseBody = await meResponse.text();
+    } catch {
+      responseBody = "";
+    }
+    const logDetail = serverLogs ? `\n${serverLogs.join("")}` : "";
+    throw new Error(`Failed to get user info. status=${meResponse.status} body=${responseBody}${logDetail}`);
+  }
+  
+  const meBody = await meResponse.json();
+  if (!meBody?.success || !meBody?.data) {
+    throw new Error("Invalid /users/me response format");
+  }
+  
+  const userData = meBody.data;
+  const userId = Number(userData.id);
+  const companyId = Number(userData.company_id);
+  
+  // Find the outlet_id for the given outlet_code
+  let outletId = null;
+  if (userData.outlets && Array.isArray(userData.outlets)) {
+    const outlet = userData.outlets.find(o => o.code === outletCode);
+    if (outlet) {
+      outletId = Number(outlet.id);
+    }
+  }
+  
+  if (outletId === null) {
+    throw new Error(`Outlet '${outletCode}' not found in user's outlets`);
+  }
+  
+  return {
+    accessToken,
+    userId,
+    companyId,
+    outletId
+  };
+}
+
 export function createIntegrationTestContext(options = {}) {
   const serverOptions = options.serverOptions ?? {};
   const hasServerOptions = Object.keys(serverOptions).length > 0;
@@ -356,4 +421,141 @@ export function setupIntegrationTests(testInstance, options = {}) {
     await context.stop();
   });
   return context;
+}
+
+/**
+ * Comprehensive cleanup helper for integration tests.
+ * Handles proper deletion order and ignores errors from:
+ * 1. Immutability triggers (journal_lines, journal_batches)
+ * 2. FK constraint violations (accounts referenced by journals)
+ * 
+ * Usage:
+ *   const cleanup = createCleanupHelper(db);
+ *   cleanup.addCompany(companyId);
+ *   cleanup.addUser(userId);
+ *   cleanup.addOutlet(outletId);
+ *   cleanup.addAccount(accountId);
+ *   cleanup.addTaxRate(taxRateId);
+ *   cleanup.addCashBankTx(txId);
+ *   // In test finally block:
+ *   await cleanup.execute();
+ */
+export function createCleanupHelper(db) {
+  const companyIds = [];
+  const userIds = [];
+  const outletIds = [];
+  const accountIds = [];
+  const taxRateIds = [];
+  const cashBankTxIds = [];
+  
+  return {
+    addCompany: (id) => companyIds.push(id),
+    addUser: (id) => userIds.push(id),
+    addOutlet: (id) => outletIds.push(id),
+    addAccount: (id) => accountIds.push(id),
+    addTaxRate: (id) => taxRateIds.push(id),
+    addCashBankTx: (id) => cashBankTxIds.push(id),
+    
+    async execute() {
+      // Delete in correct order to handle FK constraints
+      // Note: journal_lines and journal_batches cannot be deleted due to immutability triggers
+      
+      // 1. Tax rates (may reference accounts)
+      if (taxRateIds.length > 0) {
+        const placeholders = taxRateIds.map(() => "?").join(", ");
+        try {
+          await db.execute(`DELETE FROM tax_rates WHERE id IN (${placeholders})`, taxRateIds);
+        } catch (e) {
+          // Ignore - may be referenced or already deleted
+        }
+      }
+      
+      // 2. Cash bank transactions (may reference accounts)
+      if (cashBankTxIds.length > 0) {
+        const placeholders = cashBankTxIds.map(() => "?").join(", ");
+        try {
+          await db.execute(`DELETE FROM cash_bank_transactions WHERE id IN (${placeholders})`, cashBankTxIds);
+        } catch (e) {
+          // Ignore - may be referenced or already deleted
+        }
+      }
+      
+      // 3. User role assignments ( FK to users, outlets)
+      for (const userId of userIds) {
+        try {
+          await db.execute(`DELETE FROM user_role_assignments WHERE user_id = ?`, [userId]);
+        } catch (e) {
+          // Ignore
+        }
+        try {
+          await db.execute(`DELETE FROM user_outlets WHERE user_id = ?`, [userId]);
+        } catch (e) {
+          // Ignore
+        }
+      }
+      
+      // 4. Users
+      for (const userId of userIds) {
+        try {
+          await db.execute(`DELETE FROM users WHERE id = ?`, [userId]);
+        } catch (e) {
+          // Ignore
+        }
+      }
+      
+      // 5. Outlets
+      if (outletIds.length > 0) {
+        const placeholders = outletIds.map(() => "?").join(", ");
+        try {
+          await db.execute(`DELETE FROM outlets WHERE id IN (${placeholders})`, outletIds);
+        } catch (e) {
+          // Ignore - may be referenced
+        }
+      }
+      
+      // 6. Accounts (will fail if referenced by journal_lines due to immutability)
+      for (const accountId of accountIds) {
+        try {
+          await db.execute(`DELETE FROM accounts WHERE id = ?`, [accountId]);
+        } catch (e) {
+          // Ignore - likely referenced by immutable journal_lines
+        }
+      }
+      
+      // 7. Companies (will fail if referenced by outlets, users, etc.)
+      for (const companyId of companyIds) {
+        try {
+          await db.execute(`DELETE FROM companies WHERE id = ?`, [companyId]);
+        } catch (e) {
+          // Ignore - likely has related data
+        }
+      }
+    }
+  };
+}
+
+/**
+ * Helper to cleanup journal entries that are protected by immutability triggers.
+ * @deprecated Use createCleanupHelper() instead for comprehensive cleanup.
+ */
+export async function cleanupJournalEntriesSafe(
+  db,
+  companyId,
+  docTypePattern,
+  docIds
+) {
+  if (!docIds.length) return;
+  
+  const placeholders = docIds.map(() => "?").join(", ");
+  
+  try {
+    await db.execute(
+      `DELETE FROM cash_bank_transactions WHERE company_id = ? AND id IN (${placeholders})`,
+      [companyId, ...docIds]
+    );
+  } catch (e) {
+    if (!e?.message?.includes("immutable")) {
+      throw e;
+    }
+  }
 }

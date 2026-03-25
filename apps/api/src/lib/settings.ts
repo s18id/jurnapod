@@ -29,7 +29,7 @@ export class SettingValidationError extends Error {}
 export class SettingKeyInvalidError extends Error {}
 
 const VALID_VALUE_TYPES: SettingValueType[] = ["string", "number", "boolean", "json"];
-const VALID_KEY_REGEX = /^[a-z][a-z0-9_]{0,62}[a-z0-9]$/;
+const VALID_KEY_REGEX = /^[a-z][a-z0-9_.]{0,62}[a-z0-9]$/;
 const MAX_KEY_LENGTH = 64;
 const MAX_VALUE_LENGTH = 65535;
 
@@ -69,7 +69,7 @@ function validateKey(key: string): void {
   }
   if (!VALID_KEY_REGEX.test(key)) {
     throw new SettingKeyInvalidError(
-      "Setting key must start with lowercase letter, contain only lowercase letters, numbers, and underscores, and end with letter or number"
+      "Setting key must start with lowercase letter, contain only lowercase letters, numbers, underscores, and dots, and end with letter or number"
     );
   }
 }

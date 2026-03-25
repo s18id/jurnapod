@@ -100,10 +100,10 @@ export function useVariants({ user, accessToken, itemId }: UseVariantsProps): Us
 
     try {
       const [attrsRes, variantsRes] = await Promise.all([
-        apiRequest<VariantAttributesResponse>(`/api/inventory/items/${itemId}/variant-attributes`, {
+        apiRequest<VariantAttributesResponse>(`/inventory/items/${itemId}/variant-attributes`, {
           headers: { Authorization: `Bearer ${accessToken}` },
         }),
-        apiRequest<VariantsResponse>(`/api/inventory/items/${itemId}/variants`, {
+        apiRequest<VariantsResponse>(`/inventory/items/${itemId}/variants`, {
           headers: { Authorization: `Bearer ${accessToken}` },
         }),
       ]);

@@ -1922,27 +1922,20 @@ test(
       });
       assert.equal(getAfterDeleteResponse.status, 404);
 
+      // Old /api/supplies route should return 404 (removed, use /api/inventory/supplies)
       const movedListResponse = await fetch(`${baseUrl}/api/supplies`, {
         headers: {
           authorization: `Bearer ${accessToken}`
         }
       });
-      assert.equal(movedListResponse.status, 410);
-      const movedListBody = await movedListResponse.json();
-      assert.equal(movedListBody.success, false);
-      assert.equal(movedListBody.error.code, "ROUTE_MOVED");
-      assert.equal(movedListBody.error.new_path, "/api/inventory/supplies");
+      assert.equal(movedListResponse.status, 404);
 
       const movedGetResponse = await fetch(`${baseUrl}/api/supplies/${createdSupplyId2}`, {
         headers: {
           authorization: `Bearer ${accessToken}`
         }
       });
-      assert.equal(movedGetResponse.status, 410);
-      const movedGetBody = await movedGetResponse.json();
-      assert.equal(movedGetBody.success, false);
-      assert.equal(movedGetBody.error.code, "ROUTE_MOVED");
-      assert.equal(movedGetBody.error.new_path, "/api/inventory/supplies/:supplyId");
+      assert.equal(movedGetResponse.status, 404);
     } finally {
       if (createdSupplyId1 > 0) {
         await db.execute("DELETE FROM supplies WHERE id = ?", [createdSupplyId1]);

@@ -17,7 +17,8 @@ import {
   UserNotFoundError,
   RoleNotFoundError,
   RoleLevelViolationError,
-  SuperAdminProtectionError
+  SuperAdminProtectionError,
+  CrossCompanyAccessError
 } from "./users";
 import type { RowDataPacket } from "mysql2";
 
@@ -100,7 +101,7 @@ test(
       createdUserIds.push(created.id);
       testUserId = created.id;
 
-      const listed = await listUsers(companyId, { isActive: true });
+      const listed = await listUsers(companyId, { userId: ownerUserId, companyId }, { isActive: true });
       assert.ok(listed.some((u) => u.email === testEmail.toLowerCase()), "User should appear in list");
 
       const updated = await updateUserEmail({
@@ -176,10 +177,12 @@ test(
       if (otherCompanyRows.length > 0) {
         otherCompanyId = Number(otherCompanyRows[0].id);
 
-        const usersInOtherCompany = await listUsers(otherCompanyId, {});
-        for (const user of usersInOtherCompany) {
-          assert.notStrictEqual(user.company_id, companyId, "Should not see other company users");
-        }
+        // Non-super-admin should not be able to list users from another company
+        await assert.rejects(
+          async () => listUsers(otherCompanyId, { userId: ownerUserId, companyId }),
+          CrossCompanyAccessError,
+          "Non-super-admin should not access other company users"
+        );
       }
 
       console.log("✅ tenant isolation test passed");
@@ -270,6 +273,74 @@ test(
     } finally {
       if (testUserId > 0) {
         await pool.execute(`DELETE FROM users WHERE id = ?`, [testUserId]);
+      }
+    }
+  }
+);
+
+test(
+  "userHasOutletAccess - global roles get access to all outlets",
+  { concurrency: false, timeout: 30000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+    const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
+
+    let companyId = 0;
+    let ownerUserId = 0;
+    let testOutletId = 0;
+
+    try {
+      // Get company and owner info
+      const [companyRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT c.id, u.id AS owner_id
+         FROM companies c
+         INNER JOIN users u ON u.company_id = c.id
+         WHERE c.code = ? AND u.email = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail]
+      );
+
+      if (companyRows.length === 0) {
+        throw new Error(`Company ${companyCode} or owner ${ownerEmail} not found`);
+      }
+
+      companyId = companyRows[0].id;
+      ownerUserId = companyRows[0].owner_id;
+
+      // Create a test outlet
+      const [outletResult] = await pool.execute<RowDataPacket[]>(
+        `INSERT INTO outlets (company_id, code, name, created_at, updated_at)
+         VALUES (?, ?, ?, NOW(), NOW())`,
+        [companyId, `TEST_OUTLET_${runId}`, `Test Outlet ${runId}`]
+      );
+      testOutletId = (outletResult as any).insertId;
+
+      // Test that owner has access to the new outlet using role-based logic
+      const { userHasOutletAccess } = await import("./auth.js");
+      const hasAccess = await userHasOutletAccess(ownerUserId, companyId, testOutletId);
+
+      assert.equal(hasAccess, true, "Owner should have access to newly created outlet via global role");
+
+      // Test that owner has access to all existing outlets
+      const [outlets] = await pool.execute<RowDataPacket[]>(
+        `SELECT id FROM outlets WHERE company_id = ?`,
+        [companyId]
+      );
+
+      for (const outlet of outlets) {
+        const hasOutletAccess = await userHasOutletAccess(ownerUserId, companyId, outlet.id);
+        assert.equal(hasOutletAccess, true, `Owner should have access to outlet ${outlet.id}`);
+      }
+
+      console.log(`✅ Owner has access to all ${outlets.length} outlets via global role`);
+
+    } finally {
+      // Cleanup test outlet
+      if (testOutletId > 0) {
+        await pool.execute(`DELETE FROM outlets WHERE id = ?`, [testOutletId]);
       }
     }
   }

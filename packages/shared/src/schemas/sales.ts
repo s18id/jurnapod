@@ -90,7 +90,8 @@ export const SalesInvoiceCreateRequestSchema = z.object({
   due_term: SalesInvoiceDueTermSchema.optional(),
   tax_amount: MoneyInputNonNegativeSchema.default(0),
   lines: z.array(SalesInvoiceLineInputSchema).min(1),
-  taxes: z.array(SalesInvoiceTaxInputSchema).optional()
+  taxes: z.array(SalesInvoiceTaxInputSchema).optional(),
+  draft: z.boolean().optional()
 });
 
 export const SalesInvoiceUpdateRequestSchema = z

@@ -65,7 +65,8 @@ export const TableSuggestionSchema = z.object({
 });
 
 /**
- * A single reservation within a group (for detail view)
+ * A single reservation within a group (for detail view).
+ * Internal machine-time fields (`_ts`) are omitted from this public contract.
  */
 export const ReservationGroupReservationSchema = z.object({
   reservation_id: NumericIdSchema,
@@ -73,9 +74,9 @@ export const ReservationGroupReservationSchema = z.object({
   table_code: z.string(),
   table_name: z.string(),
   status: z.string(),
-  reservation_at: z.string().datetime({ offset: true }),
-  reservation_start_ts: z.number().nullable(), // Unix ms
-  reservation_end_ts: z.number().nullable() // Unix ms
+  reservation_at: z.string().datetime({ offset: true })
+  // reservation_start_ts and reservation_end_ts are internal canonical
+  // timestamps (Unix ms) used for overlap/range queries only - not for display.
 });
 
 /**

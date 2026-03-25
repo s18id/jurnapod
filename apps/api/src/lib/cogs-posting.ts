@@ -563,8 +563,10 @@ export async function postCogsForSale(
     const mapper = new CogsPostingMapper(conn, saleDetail);
     
     // Create posting request
-    // saleId can be a string identifier, we hash it to a number for doc_id
-    const saleIdNumeric = Number(input.saleId) || input.saleId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    // saleId is typically "INV-{id}" or similar format; extract numeric ID for doc_id
+    // If saleId is purely numeric, use it directly; otherwise extract trailing digits
+    const numericMatch = input.saleId.match(/\d+$/);
+    const saleIdNumeric = numericMatch ? Number(numericMatch[0]) : Number(input.saleId) || input.saleId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const postingRequest: PostingRequest = {
       doc_type: COGS_DOC_TYPE,
       doc_id: saleIdNumeric,

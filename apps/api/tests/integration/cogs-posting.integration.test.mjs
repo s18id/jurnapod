@@ -7,7 +7,8 @@ import {
   createIntegrationTestContext,
   loginOwner,
   readEnv,
-  TEST_TIMEOUT_MS
+  TEST_TIMEOUT_MS,
+  createCleanupHelper
 } from "./integration-harness.mjs";
 
 const testContext = createIntegrationTestContext();
@@ -204,6 +205,9 @@ test(
       outletId = Number(owner.outlet_id);
       const ownerUserId = Number(owner.id);
 
+      // Do NOT clean up existing COGS journal batches - journal_lines are immutable
+      // The test uses unique identifiers and will not conflict with existing data
+
       await ensureOpenFiscalYear(companyId, ownerUserId);
       await ensureInventoryModuleCogsEnabled(companyId, ownerUserId);
 
@@ -257,13 +261,34 @@ test(
       );
       createdPriceItemIds.push(itemId);
 
+      // Create stock inventory for the item (required for COGS posting)
+      await db.execute(
+        `INSERT INTO inventory_stock (company_id, product_id, outlet_id, quantity, available_quantity)
+         VALUES (?, ?, ?, 100, 100)
+         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), available_quantity = VALUES(available_quantity)`,
+        [companyId, itemId, outletId]
+      );
+
+      // Create cost tracking entry for COGS (required for AVGCostingStrategy)
+      await db.execute(
+        `INSERT INTO inventory_item_costs 
+         (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost, updated_at)
+         VALUES (?, ?, 'AVG', 1500, 100, 150000, NOW())
+         ON DUPLICATE KEY UPDATE
+         current_avg_cost = VALUES(current_avg_cost),
+         total_layers_qty = VALUES(total_layers_qty),
+         total_layers_cost = VALUES(total_layers_cost),
+         updated_at = NOW()`,
+        [companyId, itemId]
+      );
+
       const token = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
       const authHeaders = {
         authorization: `Bearer ${token}`,
         "content-type": "application/json"
       };
 
-      const createInvoiceRes = await requestJson("/api/sales/invoices", {
+       const createInvoiceRes = await requestJson("/api/sales/invoices", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({
@@ -324,73 +349,97 @@ test(
       assert.ok(totalDebit > 0);
       assert.ok(lineRows.every((row) => String(row.line_date).slice(0, 10) === invoiceDate));
     } finally {
-      if (createdInvoiceIds.length > 0) {
-        await db.execute(
-          `DELETE FROM sales_invoice_lines WHERE invoice_id IN (${createdInvoiceIds.map(() => "?").join(",")})`,
-          createdInvoiceIds
-        );
-        await db.execute(
-          `DELETE FROM sales_invoices WHERE id IN (${createdInvoiceIds.map(() => "?").join(",")})`,
-          createdInvoiceIds
-        );
-      }
+      // Note: journal_lines cannot be deleted due to immutability triggers (migration 0114)
+      // Also, items may be referenced by sales_invoice_lines FK constraint
+      
+      try {
+        if (createdInvoiceIds.length > 0) {
+          await db.execute(
+            `DELETE FROM sales_invoice_lines WHERE invoice_id IN (${createdInvoiceIds.map(() => "?").join(",")})`,
+            createdInvoiceIds
+          );
+          await db.execute(
+            `DELETE FROM sales_invoices WHERE id IN (${createdInvoiceIds.map(() => "?").join(",")})`,
+            createdInvoiceIds
+          );
+        }
 
-      if (createdPriceItemIds.length > 0) {
-        await db.execute(
-          `DELETE FROM item_prices WHERE item_id IN (${createdPriceItemIds.map(() => "?").join(",")})`,
-          createdPriceItemIds
-        );
-      }
+        if (createdPriceItemIds.length > 0) {
+          await db.execute(
+            `DELETE FROM item_prices WHERE item_id IN (${createdPriceItemIds.map(() => "?").join(",")})`,
+            createdPriceItemIds
+          );
+        }
 
-      if (createdItemIds.length > 0) {
-        await db.execute(
-          `DELETE FROM items WHERE id IN (${createdItemIds.map(() => "?").join(",")})`,
-          createdItemIds
-        );
-      }
+        if (createdItemIds.length > 0) {
+          // Delete cost tracking before stock (due to potential FK constraints)
+          await db.execute(
+            `DELETE FROM inventory_item_costs WHERE item_id IN (${createdItemIds.map(() => "?").join(",")})`,
+            createdItemIds
+          );
+          // Delete inventory stock before items (FK constraint)
+          await db.execute(
+            `DELETE FROM inventory_stock WHERE product_id IN (${createdItemIds.map(() => "?").join(",")})`,
+            createdItemIds
+          );
+          await db.execute(
+            `DELETE FROM items WHERE id IN (${createdItemIds.map(() => "?").join(",")})`,
+            createdItemIds
+          );
+        }
 
-      if (createdAccountIds.length > 0 && companyId != null) {
-        await db.execute(
-          `DELETE FROM journal_lines WHERE account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
-          createdAccountIds
-        );
-        await db.execute(
-          `DELETE FROM company_account_mappings WHERE company_id = ? AND account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
-          [companyId, ...createdAccountIds]
-        );
-        await db.execute(
-          `DELETE FROM outlet_account_mappings WHERE company_id = ? AND account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
-          [companyId, ...createdAccountIds]
-        );
-        await db.execute(
-          `DELETE FROM accounts WHERE company_id = ? AND id IN (${createdAccountIds.map(() => "?").join(",")})`,
-          [companyId, ...createdAccountIds]
-        );
+        if (createdAccountIds.length > 0 && companyId != null) {
+          // journal_lines cannot be deleted - immutability triggers
+          await db.execute(
+            `DELETE FROM company_account_mappings WHERE company_id = ? AND account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
+            [companyId, ...createdAccountIds]
+          );
+          await db.execute(
+            `DELETE FROM outlet_account_mappings WHERE company_id = ? AND account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
+            [companyId, ...createdAccountIds]
+          );
+          await db.execute(
+            `DELETE FROM accounts WHERE company_id = ? AND id IN (${createdAccountIds.map(() => "?").join(",")})`,
+            [companyId, ...createdAccountIds]
+          );
+        }
+      } catch (e) {
+        // Ignore cleanup errors - FK constraints or immutability may prevent deletion
       }
 
       if (companyId != null && createdInvoiceIds.length > 0) {
-        const placeholders = createdInvoiceIds.map(() => "?").join(",");
+        // Compute possible doc_id values for COGS journal batches
+        // doc_id could be the invoice ID itself or a hash of "INV-${invoiceId}"
+        const possibleDocIds = new Set();
+        
+        for (const invoiceId of createdInvoiceIds) {
+          // Add the invoice ID itself (in case saleId was numeric)
+          possibleDocIds.add(invoiceId);
+          
+          // Compute hash the same way as cogs-posting.ts
+          const saleId = `INV-${invoiceId}`;
+          const saleIdNumeric = Number(saleId) || saleId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          possibleDocIds.add(saleIdNumeric);
+        }
+        
+        const docIdArray = Array.from(possibleDocIds);
+        const placeholders = docIdArray.map(() => "?").join(",");
+        
         const [batchRows] = await db.execute(
           `SELECT id
            FROM journal_batches
            WHERE company_id = ?
              AND doc_type = 'COGS'
              AND doc_id IN (${placeholders})`,
-          [companyId, ...createdInvoiceIds]
+          [companyId, ...docIdArray]
         );
         const batchIds = batchRows.map((row) => Number(row.id));
 
         if (batchIds.length > 0) {
-          await db.execute(
-            `DELETE FROM journal_lines
-             WHERE journal_batch_id IN (${batchIds.map(() => "?").join(",")})`,
-            batchIds
-          );
-          await db.execute(
-            `DELETE FROM journal_batches
-             WHERE id IN (${batchIds.map(() => "?").join(",")})`,
-            batchIds
-          );
+          // journal_lines cannot be deleted due to immutability triggers (migration 0114)
+          // journal_batches cannot be deleted due to foreign key constraint with journal_lines
+          // Test data will remain in the database as immutable records
+          // console.log(`Test created COGS journal batches: ${batchIds.join(', ')}`);
         }
       }
     }

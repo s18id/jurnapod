@@ -15,6 +15,7 @@
     "test:unit:auth": "node --test --test-concurrency=1 --import tsx src/lib/auth.test.ts",
     "test:unit:supplies": "node --test --test-concurrency=1 --import tsx src/lib/master-data.supplies.test.ts",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.integration.test.mjs",
+    "test:integration:single": "node --test --test-concurrency=1",
     "test:integration:verbose": "JP_INTEGRATION_VERBOSE=1 JP_HTTP_LOG=1 node --test --test-concurrency=1 tests/integration/*.integration.test.mjs",
     "test:all": "npm run test:unit && npm run test:integration",
     "test:ws": "node ../../scripts/websocket-test.js",
@@ -22,6 +23,7 @@
   },
   "dependencies": {
     "@hono/zod-openapi": "^0.14.8",
+    "@js-temporal/polyfill": "^0.5.1",
     "@jurnapod/backoffice-sync": "0.1.0",
     "@jurnapod/modules-accounting": "0.1.0",
     "@jurnapod/modules-platform": "0.1.0",

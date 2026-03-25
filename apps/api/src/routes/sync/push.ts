@@ -22,6 +22,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import {
   NumericIdSchema,
+  OrderUpdateEventTypeSchema,
   PosOrderServiceTypeSchema,
   PosOrderStatusSchema,
   PosSourceFlowSchema,
@@ -60,6 +61,7 @@ import {
   SYNC_RESULT_CODES
 } from "@jurnapod/sync-core";
 import { getAppEnv } from "../../lib/env.js";
+import { toEpochMs, toMysqlDateTime, toUtcInstant } from "../../lib/date-helpers.js";
 
 // Extend Hono context with auth
 declare module "hono" {
@@ -75,7 +77,7 @@ declare module "hono" {
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 const MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE = 1205;
 const MYSQL_DEADLOCK_ERROR_CODE = 1213;
-const POS_TRANSACTIONS_CLIENT_TX_UNIQUE_KEY = "uq_pos_transactions_client_tx_id";
+const POS_TRANSACTIONS_CLIENT_TX_UNIQUE_KEY = "uq_pos_transactions_outlet_client_tx";
 const POS_SALE_DOC_TYPE = "POS_SALE";
 const SYNC_PUSH_ACCEPTED_AUDIT_ACTION = "SYNC_PUSH_ACCEPTED";
 const SYNC_PUSH_DUPLICATE_AUDIT_ACTION = "SYNC_PUSH_DUPLICATE";
@@ -200,6 +202,84 @@ type QueryExecutor = {
 };
 
 // ============================================================================
+// Order Sync Types
+// ============================================================================
+
+type OrderUpdateResult = {
+  update_id: string;
+  result: "OK" | "DUPLICATE" | "ERROR";
+  message?: string;
+};
+
+type ItemCancellationResult = {
+  cancellation_id: string;
+  result: "OK" | "DUPLICATE" | "ERROR";
+  message?: string;
+};
+
+type ActiveOrder = {
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  service_type: string;
+  source_flow?: string;
+  settlement_flow?: string;
+  table_id?: number | null;
+  reservation_id?: number | null;
+  guest_count?: number | null;
+  is_finalized: boolean;
+  order_status: string;
+  order_state: string;
+  paid_amount: number;
+  opened_at: string;
+  closed_at?: string | null;
+  notes?: string | null;
+  updated_at: string;
+  lines: Array<{
+    item_id: number;
+    variant_id?: number;
+    sku_snapshot?: string | null;
+    name_snapshot: string;
+    item_type_snapshot: string;
+    unit_price_snapshot: number;
+    qty: number;
+    discount_amount: number;
+    updated_at: string;
+  }>;
+};
+
+type OrderUpdate = {
+  update_id: string;
+  order_id: string;
+  company_id: number;
+  outlet_id: number;
+  base_order_updated_at?: string | null;
+  event_type: string;
+  delta_json: string;
+  actor_user_id?: number | null;
+  device_id: string;
+  event_at: string;
+  // created_at is SERVER-authoritative ingest metadata.
+  // The server generates this at ingest time; client-provided value is IGNORED.
+  // Marked optional to reflect schema contract.
+  created_at?: string;
+};
+
+type ItemCancellation = {
+  cancellation_id: string;
+  update_id?: string;
+  order_id: string;
+  item_id: number;
+  variant_id?: number;
+  company_id: number;
+  outlet_id: number;
+  cancelled_quantity: number;
+  reason: string;
+  cancelled_by_user_id?: number | null;
+  cancelled_at: string;
+};
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -277,13 +357,24 @@ function isClientTxIdDuplicateError(error: unknown): error is MysqlError {
   return readDuplicateKeyName(error) === POS_TRANSACTIONS_CLIENT_TX_UNIQUE_KEY;
 }
 
-function toMysqlDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid trx_at");
+function toCanonicalUtcInstant(value: string, fieldName: string): string {
+  try {
+    return toUtcInstant(value);
+  } catch {
+    throw new Error(`Invalid ${fieldName}`);
   }
+}
 
-  return date.toISOString().slice(0, 19).replace("T", " ");
+function toMysqlDateTimeStrict(value: string, fieldName: string = "datetime"): string {
+  try {
+    return toMysqlDateTime(value);
+  } catch {
+    throw new Error(`Invalid ${fieldName}`);
+  }
+}
+
+function toTimestampMs(value: string, fieldName: string = "datetime"): number {
+  return toEpochMs(toCanonicalUtcInstant(value, fieldName));
 }
 
 function normalizeMoney(value: number): number {
@@ -503,7 +594,7 @@ async function postCogsFromStockResults(
 
   const cogsResult = await postCogsForSale(
     {
-      saleId: `POS-${posTransactionId}`,
+      saleId: String(posTransactionId),
       companyId: tx.company_id,
       outletId: tx.outlet_id,
       items: cogsItems,
@@ -558,10 +649,10 @@ function canonicalizeTransactionForHash(tx: SyncPushTransactionPayload): string 
     reservation_id: tx.reservation_id ?? null,
     guest_count: tx.guest_count ?? null,
     order_status: tx.order_status ?? "COMPLETED",
-    opened_at: tx.opened_at ? toMysqlDateTime(tx.opened_at) : null,
-    closed_at: tx.closed_at ? toMysqlDateTime(tx.closed_at) : null,
+    opened_at: tx.opened_at ? toMysqlDateTimeStrict(tx.opened_at) : null,
+    closed_at: tx.closed_at ? toMysqlDateTimeStrict(tx.closed_at) : null,
     notes: tx.notes ?? null,
-    trx_at: toMysqlDateTime(tx.trx_at),
+    trx_at: normalizeTrxAtForHash(tx.trx_at),
     items: tx.items.map((item) => ({
       item_id: item.item_id,
       variant_id: item.variant_id ?? null,
@@ -582,6 +673,32 @@ function canonicalizeTransactionForHash(tx: SyncPushTransactionPayload): string 
   });
 }
 
+/**
+ * Normalize trx_at timestamp to unix milliseconds for consistent hashing.
+ * Handles ISO 8601 variants like:
+ * - 2026-03-24T10:30:00Z
+ * - 2026-03-24T10:30:00.000Z
+ * - 2026-03-24T10:30:00.123Z
+ * All normalize to the same unix timestamp in milliseconds.
+ * Also handles numeric unix timestamps (seconds or milliseconds).
+ */
+function normalizeTrxAtForHash(trxAt: string | number): number {
+  // Handle numeric input (unix timestamp)
+  if (typeof trxAt === 'number') {
+    // Detect if seconds or milliseconds by magnitude
+    // Unix seconds are ~10 digits, Unix ms are ~13 digits
+    return trxAt > 1e12 ? trxAt : trxAt * 1000;
+  }
+
+  // String input: validate via isValidDateTime then convert via toEpochMs
+  // so rolled dates and invalid formats are rejected instead of silently mishandled.
+  try {
+    return toEpochMs(toUtcInstant(trxAt));
+  } catch {
+    throw new Error(`Invalid trx_at: ${trxAt}`);
+  }
+}
+
 function canonicalizeTransactionForLegacyHash(tx: SyncPushTransactionPayload): string {
   return JSON.stringify({
     client_tx_id: tx.client_tx_id,
@@ -592,7 +709,8 @@ function canonicalizeTransactionForLegacyHash(tx: SyncPushTransactionPayload): s
     trx_at: tx.trx_at,
     items: tx.items.map((item) => ({
       item_id: item.item_id,
-      variant_id: item.variant_id ?? null,
+      // Omit variant_id if null to match legacy hash computation (test helper behavior)
+      ...(item.variant_id != null ? { variant_id: item.variant_id } : {}),
       qty: item.qty,
       price_snapshot: item.price_snapshot,
       name_snapshot: item.name_snapshot
@@ -649,7 +767,8 @@ function listLegacyEquivalentTrxAtVariants(trxAt: string): string[] {
 
 function hasLegacyEquivalentHashMatch(existingHash: string, incomingTx: SyncPushTransactionPayload): boolean {
   for (const trxAtVariant of listLegacyEquivalentTrxAtVariants(incomingTx.trx_at)) {
-    const candidateHash = computePayloadSha256(canonicalizeTransactionForLegacyHash(incomingTx));
+    const txWithVariant = { ...incomingTx, trx_at: trxAtVariant };
+    const candidateHash = computePayloadSha256(canonicalizeTransactionForLegacyHash(txWithVariant));
     if (candidateHash === existingHash) {
       return true;
     }
@@ -868,7 +987,7 @@ async function doesLegacyPayloadReplayMatch(
     company_id: incomingTx.company_id,
     outlet_id: incomingTx.outlet_id,
     status: incomingTx.status,
-    trx_at: toMysqlDateTime(incomingTx.trx_at),
+    trx_at: toMysqlDateTimeStrict(incomingTx.trx_at),
     items: incomingTx.items.map((item) => ({
       item_id: item.item_id,
       variant_id: item.variant_id,
@@ -1106,6 +1225,322 @@ async function runAcceptedSyncPushHook(
 }
 
 // ============================================================================
+// Order Sync Processing Functions
+// ============================================================================
+
+/**
+ * Process active orders - upserts order snapshots and their lines
+ * Uses INSERT ... ON DUPLICATE KEY UPDATE for idempotency
+ *
+ * Timestamp semantics:
+ * - opened_at_ts: STATE TRANSITION - when the order was opened (client-authored)
+ * - closed_at_ts: STATE TRANSITION - when the order was closed (client-authored)
+ * - updated_at_ts: SNAPSHOT FRESHNESS - when this snapshot was generated (client-authored)
+ * - created_at: SERVER INGEST TIME - DB-owned CURRENT_TIMESTAMP on first insert
+ *
+ * ON DUPLICATE KEY UPDATE does not touch created_at.
+ */
+async function processActiveOrders(
+  executor: QueryExecutor,
+  orders: ActiveOrder[],
+  correlationId: string
+): Promise<OrderUpdateResult[]> {
+  const results: OrderUpdateResult[] = [];
+
+  for (const order of orders) {
+    try {
+      // Upsert the order snapshot
+      // Note: created_at_ts was removed per ADR-0001 / Story 18.1.
+      // created_at is retained and populated by the DB default CURRENT_TIMESTAMP on INSERT.
+      await executor.execute(
+        `INSERT INTO pos_order_snapshots (
+           order_id, company_id, outlet_id, service_type, source_flow, settlement_flow,
+           table_id, reservation_id, guest_count, is_finalized, order_status, order_state,
+           paid_amount, opened_at, opened_at_ts, closed_at, closed_at_ts, notes, updated_at, updated_at_ts
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           service_type = VALUES(service_type),
+           source_flow = VALUES(source_flow),
+           settlement_flow = VALUES(settlement_flow),
+           table_id = VALUES(table_id),
+           reservation_id = VALUES(reservation_id),
+           guest_count = VALUES(guest_count),
+           is_finalized = VALUES(is_finalized),
+           order_status = VALUES(order_status),
+           order_state = VALUES(order_state),
+           paid_amount = VALUES(paid_amount),
+           closed_at = VALUES(closed_at),
+           closed_at_ts = VALUES(closed_at_ts),
+           notes = VALUES(notes),
+           updated_at = VALUES(updated_at),
+           updated_at_ts = VALUES(updated_at_ts)`,
+        [
+          order.order_id,
+          order.company_id,
+          order.outlet_id,
+          order.service_type,
+          order.source_flow ?? null,
+          order.settlement_flow ?? null,
+          order.table_id ?? null,
+          order.reservation_id ?? null,
+          order.guest_count ?? null,
+          order.is_finalized ? 1 : 0,
+          order.order_status,
+          order.order_state,
+          order.paid_amount,
+           toMysqlDateTimeStrict(order.opened_at, "opened_at"),
+           toTimestampMs(order.opened_at, "opened_at"),
+            order.closed_at ? toMysqlDateTimeStrict(order.closed_at, "closed_at") : null,
+            order.closed_at ? toTimestampMs(order.closed_at, "closed_at") : null,
+            order.notes ?? null,
+            toMysqlDateTimeStrict(order.updated_at, "updated_at"),
+            toTimestampMs(order.updated_at, "updated_at")
+         ]
+      );
+
+      // Delete existing lines and re-insert (simpler than diffing)
+      await executor.execute(
+        `DELETE FROM pos_order_snapshot_lines WHERE order_id = ? AND company_id = ?`,
+        [order.order_id, order.company_id]
+      );
+
+      // Insert new lines
+      // Timestamp semantics for snapshot lines:
+      // - updated_at_ts: snapshot freshness/update time (from line's updated_at)
+      // - created_at_ts: removed per ADR-0001 / Story 18.1
+      if (order.lines.length > 0) {
+        const lineValues = order.lines.map((line) => [
+          order.order_id,
+          order.company_id,
+          order.outlet_id,
+          line.item_id,
+          line.variant_id ?? null,
+          line.sku_snapshot ?? null,
+          line.name_snapshot,
+          line.item_type_snapshot,
+          line.unit_price_snapshot,
+          line.qty,
+          line.discount_amount,
+          toMysqlDateTimeStrict(line.updated_at, "updated_at"),
+          toTimestampMs(line.updated_at, "updated_at")
+        ]);
+
+        const placeholders = lineValues.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+        const flatValues = lineValues.flat();
+
+        await executor.execute(
+          `INSERT INTO pos_order_snapshot_lines (
+             order_id, company_id, outlet_id, item_id, variant_id, sku_snapshot,
+             name_snapshot, item_type_snapshot, unit_price_snapshot, qty,
+             discount_amount, updated_at, updated_at_ts
+           ) VALUES ${placeholders}`,
+          flatValues
+        );
+      }
+
+      results.push({
+        update_id: order.order_id, // Use order_id as update_id for snapshot finalize
+        result: "OK"
+      });
+    } catch (error) {
+      console.error("Failed to process active order", {
+        correlation_id: correlationId,
+        order_id: order.order_id,
+        error
+      });
+      results.push({
+        update_id: order.order_id,
+        result: "ERROR",
+        message: error instanceof Error ? error.message : "Failed to process order"
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Process order updates - inserts order update events with idempotency via update_id
+ *
+ * Authority semantics:
+ * - event_at / event_at_ts: CLIENT-authoritative - preserve from payload after validation
+ * - created_at: SERVER-authoritative - populated by DB default CURRENT_TIMESTAMP at ingest time
+ * - base_order_updated_at / base_order_updated_at_ts: VERSION MARKER METADATA - copied from the
+ *   base order's updated_at at the time the update was created. This is NOT business time,
+ *   event time, or display time. It is preserved metadata for potential future stale detection
+ *   when an authoritative server-side order version is available.
+ *
+ * The base_order_updated_at_ts is stored as-is from the client payload. It represents the
+ * client's claim about what version of the order they observed when creating the update.
+ * Currently, no server-side stale detection is enforced because:
+ *   1. There is no authoritative server-generated order version currently available
+ *   2. Comparing client-claimed values (base_order_updated_at_ts) against each other is not
+ *      true optimistic-concurrency - it would be a fabricated heuristic
+ * Future enhancement: When an authoritative server-side order version exists (e.g., a
+ * server-generated sequence number or verified snapshot updated_at_ts), stale detection
+ * can be implemented by comparing incoming base_order_updated_at_ts against that authoritative
+ * source, with proper enforcement that snapshot updates advance the authoritative version.
+ *
+ * Idempotency is preserved via update_id uniqueness.
+ *
+ * This ensures offline replay remains deterministic without conflating
+ * the time the event occurred on device with the DB-owned ingest timestamp.
+ */
+async function processOrderUpdates(
+  executor: QueryExecutor,
+  updates: OrderUpdate[],
+  correlationId: string
+): Promise<OrderUpdateResult[]> {
+  const results: OrderUpdateResult[] = [];
+
+  for (const update of updates) {
+    console.info("processOrderUpdates: processing update", { correlation_id: correlationId, update_id: update.update_id });
+    try {
+      // Check if update already exists (idempotency via update_id)
+      const [existing] = await executor.execute<RowDataPacket[]>(
+        `SELECT update_id FROM pos_order_updates WHERE update_id = ? LIMIT 1`,
+        [update.update_id]
+      );
+
+      console.info("processOrderUpdates: existing check", { correlation_id: correlationId, update_id: update.update_id, existingCount: existing.length });
+
+      if (existing.length > 0) {
+        results.push({
+          update_id: update.update_id,
+          result: "DUPLICATE"
+        });
+        continue;
+      }
+
+      // Insert the order update
+      // Note: base_order_updated_at_ts is stored as VERSION MARKER METADATA only.
+      // No server-side stale detection is performed - see JSDoc for rationale.
+      console.info("processOrderUpdates: inserting", { correlation_id: correlationId, update_id: update.update_id });
+      await executor.execute(
+        `INSERT INTO pos_order_updates (
+           update_id, order_id, company_id, outlet_id, base_order_updated_at, base_order_updated_at_ts,
+           event_type, delta_json, actor_user_id, device_id, event_at, event_at_ts
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          update.update_id,
+          update.order_id,
+          update.company_id,
+          update.outlet_id,
+          update.base_order_updated_at
+            ? toMysqlDateTimeStrict(update.base_order_updated_at, "base_order_updated_at")
+            : null,
+          update.base_order_updated_at
+            ? toTimestampMs(update.base_order_updated_at, "base_order_updated_at")
+            : null,
+          update.event_type,
+          update.delta_json,
+          update.actor_user_id ?? null,
+          update.device_id,
+          toMysqlDateTimeStrict(update.event_at, "event_at"),
+          toTimestampMs(update.event_at, "event_at")
+        ]
+      );
+      console.info("processOrderUpdates: insert complete", { correlation_id: correlationId, update_id: update.update_id });
+
+      results.push({
+        update_id: update.update_id,
+        result: "OK"
+      });
+    } catch (error) {
+      console.error("processOrderUpdates: failed", {
+        correlation_id: correlationId,
+        update_id: update.update_id,
+        error
+      });
+      results.push({
+        update_id: update.update_id,
+        result: "ERROR",
+        message: error instanceof Error ? error.message : "Failed to process order update"
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Process item cancellations - inserts cancellation records with idempotency via cancellation_id
+ *
+ * Authority semantics:
+ * - cancelled_at / cancelled_at_ts: CLIENT-authoritative - preserve from payload after validation
+ * - created_at: SERVER-authoritative - populated by DB default CURRENT_TIMESTAMP at ingest time
+ *
+ * This ensures offline replay remains deterministic without conflating
+ * the time the cancellation occurred on device with the DB-owned ingest timestamp.
+ */
+async function processItemCancellations(
+  executor: QueryExecutor,
+  cancellations: ItemCancellation[],
+  correlationId: string
+): Promise<ItemCancellationResult[]> {
+  const results: ItemCancellationResult[] = [];
+
+  for (const cancellation of cancellations) {
+    try {
+      // Check if cancellation already exists (idempotency)
+      const [existing] = await executor.execute<RowDataPacket[]>(
+        `SELECT cancellation_id FROM pos_item_cancellations WHERE cancellation_id = ? LIMIT 1`,
+        [cancellation.cancellation_id]
+      );
+
+      if (existing.length > 0) {
+        results.push({
+          cancellation_id: cancellation.cancellation_id,
+          result: "DUPLICATE"
+        });
+        continue;
+      }
+
+      // Insert the cancellation
+      await executor.execute(
+        `INSERT INTO pos_item_cancellations (
+           cancellation_id, update_id, order_id, item_id, variant_id,
+           company_id, outlet_id, cancelled_quantity, reason,
+           cancelled_by_user_id, cancelled_at, cancelled_at_ts
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          cancellation.cancellation_id,
+          cancellation.update_id ?? null,
+          cancellation.order_id,
+          cancellation.item_id,
+          cancellation.variant_id ?? null,
+          cancellation.company_id,
+          cancellation.outlet_id,
+          cancellation.cancelled_quantity,
+          cancellation.reason,
+          cancellation.cancelled_by_user_id ?? null,
+          toMysqlDateTimeStrict(cancellation.cancelled_at, "cancelled_at"),
+          toTimestampMs(cancellation.cancelled_at, "cancelled_at")
+        ]
+      );
+
+      results.push({
+        cancellation_id: cancellation.cancellation_id,
+        result: "OK"
+      });
+    } catch (error) {
+      console.error("Failed to process item cancellation", {
+        correlation_id: correlationId,
+        cancellation_id: cancellation.cancellation_id,
+        error
+      });
+      results.push({
+        cancellation_id: cancellation.cancellation_id,
+        result: "ERROR",
+        message: error instanceof Error ? error.message : "Failed to process cancellation"
+      });
+    }
+  }
+
+  return results;
+}
+
+// ============================================================================
 // Sync Push Routes
 // ============================================================================
 
@@ -1148,8 +1583,18 @@ syncPushRoutes.post("/", async (c) => {
       return errorResponse("VALIDATION_ERROR", "Invalid request payload", 400);
     }
 
-    const { outlet_id, transactions } = validationResult.data;
+    const { outlet_id, transactions, active_orders, order_updates, item_cancellations } = validationResult.data;
     
+    console.info("POST /sync/push parsed request", {
+      correlation_id: correlationId,
+      has_active_orders: !!active_orders,
+      active_orders_count: active_orders?.length ?? 0,
+      has_order_updates: !!order_updates,
+      order_updates_count: order_updates?.length ?? 0,
+      has_item_cancellations: !!item_cancellations,
+      item_cancellations_count: item_cancellations?.length ?? 0
+    });
+
     // Verify outlet access - sync push creates transactions, requires create permission
     const outletAccessGuard = requireAccess({
       roles: ["OWNER", "ADMIN", "CASHIER"], // ACCOUNTANT excluded - only has read permission
@@ -1163,7 +1608,11 @@ syncPushRoutes.post("/", async (c) => {
       return outletAccessResult;
     }
 
-    if (transactions.length === 0) {
+    // Early return only if there's nothing to process (no transactions, active_orders, order_updates, or item_cancellations)
+    const hasActiveOrders = active_orders && active_orders.length > 0;
+    const hasOrderUpdates = order_updates && order_updates.length > 0;
+    const hasItemCancellations = item_cancellations && item_cancellations.length > 0;
+    if (transactions.length === 0 && !hasActiveOrders && !hasOrderUpdates && !hasItemCancellations) {
       return successResponse({ results: [] });
     }
 
@@ -1207,6 +1656,28 @@ syncPushRoutes.post("/", async (c) => {
         results.push(...batchResults);
       }
 
+      // Process active orders, order updates, and item cancellations
+      let orderUpdateResults: OrderUpdateResult[] = [];
+      let itemCancellationResults: ItemCancellationResult[] = [];
+
+      if (active_orders && active_orders.length > 0) {
+        console.info("POST /sync/push processing active_orders", { correlation_id: correlationId, count: active_orders.length });
+        orderUpdateResults = await processActiveOrders({ execute: connection.execute.bind(connection) }, active_orders as ActiveOrder[], correlationId);
+        console.info("POST /sync/push active_orders results", { correlation_id: correlationId, results: orderUpdateResults });
+      }
+
+      if (order_updates && order_updates.length > 0) {
+        console.info("POST /sync/push processing order_updates", { correlation_id: correlationId, count: order_updates.length });
+        orderUpdateResults = await processOrderUpdates({ execute: connection.execute.bind(connection) }, order_updates as OrderUpdate[], correlationId);
+        console.info("POST /sync/push order_updates results", { correlation_id: correlationId, results: orderUpdateResults });
+      }
+
+      if (item_cancellations && item_cancellations.length > 0) {
+        console.info("POST /sync/push processing item_cancellations", { correlation_id: correlationId, count: item_cancellations.length });
+        itemCancellationResults = await processItemCancellations({ execute: connection.execute.bind(connection) }, item_cancellations as ItemCancellation[], correlationId);
+        console.info("POST /sync/push item_cancellations results", { correlation_id: correlationId, results: itemCancellationResults });
+      }
+
       // Log summary
       const okCount = results.filter((r) => r.result === "OK").length;
       const duplicateCount = results.filter((r) => r.result === "DUPLICATE").length;
@@ -1219,10 +1690,19 @@ syncPushRoutes.post("/", async (c) => {
         total_transactions: transactions.length,
         ok_count: okCount,
         duplicate_count: duplicateCount,
-        error_count: errorCount
+        error_count: errorCount,
+        order_update_results_count: orderUpdateResults.length,
+        item_cancellation_results_count: itemCancellationResults.length
       });
 
-      return successResponse({ results });
+      const responsePayload = {
+        results,
+        ...(orderUpdateResults.length > 0 && { order_update_results: orderUpdateResults }),
+        ...(itemCancellationResults.length > 0 && { item_cancellation_results: itemCancellationResults })
+      };
+      console.info("POST /sync/push response payload", { correlation_id: correlationId, payload: JSON.stringify(responsePayload) });
+
+      return successResponse(responsePayload);
     } finally {
       connection.release();
     }
@@ -1316,11 +1796,19 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       return result;
     }
 
-    const trxAtCanonical = toMysqlDateTime(tx.trx_at);
-    const openedAtCanonical = tx.opened_at ? toMysqlDateTime(tx.opened_at) : trxAtCanonical;
-    const closedAtCanonical = tx.closed_at ? toMysqlDateTime(tx.closed_at) : trxAtCanonical;
+    const trxAtCanonical = toMysqlDateTimeStrict(tx.trx_at);
+    const openedAtCanonical = tx.opened_at ? toMysqlDateTimeStrict(tx.opened_at) : trxAtCanonical;
+    const closedAtCanonical = tx.closed_at ? toMysqlDateTimeStrict(tx.closed_at) : trxAtCanonical;
     const payloadSha256 = computePayloadSha256(canonicalizeTransactionForHash(tx));
-    const payloadSha256Legacy = computePayloadSha256(canonicalizeTransactionForLegacyHash(tx));
+
+    // Compute legacy hash variants to handle trx_at format differences (.000Z vs Z)
+    const legacyHashVariants: string[] = [];
+    for (const trxAtVariant of listLegacyEquivalentTrxAtVariants(tx.trx_at)) {
+      // Create a temporary tx with this variant's trx_at
+      const txWithVariant = { ...tx, trx_at: trxAtVariant };
+      legacyHashVariants.push(computePayloadSha256(canonicalizeTransactionForLegacyHash(txWithVariant)));
+    }
+
     let acceptedContextForFailureAudit: AcceptedSyncPushContext | null = null;
 
     // Check for existing transaction (idempotency)
@@ -1336,7 +1824,8 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
         },
         payloadSha256,
         existingRecord.payloadSha256,
-        existingRecord.payloadHashVersion
+        existingRecord.payloadHashVersion,
+        legacyHashVariants
       );
 
       if (idempotencyResult.outcome === "RETURN_CACHED") {
@@ -1567,7 +2056,7 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && tx.table_id) {
         await orderDbConnection.execute(
           `UPDATE outlet_tables
-           SET status = 'AVAILABLE', updated_at = CURRENT_TIMESTAMP
+           SET status = 'AVAILABLE', status_id = 1, updated_at = CURRENT_TIMESTAMP
            WHERE company_id = ? AND outlet_id = ? AND id = ?`,
           [tx.company_id, tx.outlet_id, tx.table_id]
         );
@@ -1581,6 +2070,10 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
                status = CASE
                  WHEN status IN ('CANCELLED', 'NO_SHOW', 'COMPLETED') THEN status
                  ELSE 'COMPLETED'
+               END,
+               status_id = CASE
+                 WHEN status IN ('CANCELLED', 'NO_SHOW', 'COMPLETED') THEN status_id
+                 ELSE 6
                END,
                seated_at = COALESCE(seated_at, CURRENT_TIMESTAMP),
                updated_at = CURRENT_TIMESTAMP
@@ -1645,11 +2138,27 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       if (isClientTxIdDuplicateError(error)) {
         await rollbackQuietly(orderDbConnection);
 
-        const existingRecord = await readExistingIdempotencyRecordByClientTxId(orderDbConnection, tx.company_id, tx.outlet_id, tx.client_tx_id);
+        // The conflicting row may not be visible yet (race: original tx not yet committed).
+        // Retry with backoff to give the original transaction time to commit.
+        let existingRecord = null;
+        for (let retryAttempt = 0; retryAttempt < 10 && !existingRecord; retryAttempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          existingRecord = await readExistingIdempotencyRecordByClientTxId(orderDbConnection, tx.company_id, tx.outlet_id, tx.client_tx_id);
+        }
+
         if (!existingRecord) {
-          const result = toErrorResult(tx.client_tx_id, RETRYABLE_DB_LOCK_TIMEOUT_MESSAGE);
-          logTransactionResult("ERROR");
-          return result;
+          // Row exists (caused the unique constraint violation) but is still not readable
+          // after retries. The unique constraint guarantees it was the same client_tx_id,
+          // so treating this as DUPLICATE is correct and safe.
+          const operationResult: SyncOperationResult = {
+            client_tx_id: tx.client_tx_id,
+            result: "DUPLICATE",
+            latency_ms: Math.max(0, Date.now() - startedAtMs),
+            is_retry: false
+          };
+          metricsCollector.recordResults([operationResult]);
+          logTransactionResult("DUPLICATE");
+          return { client_tx_id: tx.client_tx_id, result: "DUPLICATE" };
         }
 
         const idempotencyResult = syncIdempotencyService.determineReplayOutcome(
@@ -1662,7 +2171,8 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
           },
           payloadSha256,
           existingRecord.payloadSha256,
-          existingRecord.payloadHashVersion
+          existingRecord.payloadHashVersion,
+          legacyHashVariants
         );
 
         if (idempotencyResult.outcome === "RETURN_CACHED") {

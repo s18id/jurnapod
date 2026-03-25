@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Badge,
@@ -34,9 +34,11 @@ import { ApiError } from "../lib/api-client";
 import {
   DataTable,
   type DataTableColumnDef,
+  type LoadingState,
   type PaginationState,
   type SortState,
   type RowSelectionState,
+  type TableError,
 } from "../components/ui/DataTable";
 import { DirtyConfirmDialog } from "../components/dirty-confirm-dialog";
 import { FilterBar } from "../components/FilterBar";
@@ -50,7 +52,14 @@ import {
   IconShield,
   IconBuildingStore,
   IconLock,
+  IconUserMinus,
+  IconUserCheck,
+  IconUserPlus,
+  IconRefresh,
+  IconSearch,
+  IconFilter,
   IconBan,
+  IconX,
   IconCheck
 } from "@tabler/icons-react";
 
@@ -123,44 +132,63 @@ export function UsersPage(props: UsersPageProps) {
   const [sort, setSort] = useState<SortState | null>(null);
   const [selection, setSelection] = useState<RowSelectionState>({});
 
-  // Reset pagination helper
-  const resetPagination = () => {
+  // Reset pagination helper - Memoized for stability
+  const resetPagination = useCallback(() => {
     setPagination((prev) => ({ ...prev, page: 1 }));
-  };
+  }, []);
 
-  // Filter change handlers that reset pagination
-  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Filter change handlers that reset pagination - Memoized for stability
+  const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.currentTarget.value);
     resetPagination();
-  };
+  }, [resetPagination]);
 
-  const handleStatusFilterChange = (value: string | null) => {
+  const handleStatusFilterChange = useCallback((value: string | null) => {
     setStatusFilter((value as "all" | "active" | "inactive") || "active");
     resetPagination();
-  };
+  }, [resetPagination]);
 
-  const handleRoleFilterChange = (value: string | null) => {
+  const handleRoleFilterChange = useCallback((value: string | null) => {
     setRoleFilter(value || "all");
     resetPagination();
-  };
+  }, [resetPagination]);
 
-  const handleOutletFilterChange = (value: string | null) => {
+  const handleOutletFilterChange = useCallback((value: string | null) => {
     setOutletFilter(value || "all");
     resetPagination();
-  };
+  }, [resetPagination]);
 
-  // Clear all filters function
-  const clearAllFilters = () => {
+  // Clear all filters function - Memoized for stability
+  const clearAllFilters = useCallback(() => {
     setSearchTerm("");
     setSearchQuery("");
     setStatusFilter("active");
     setRoleFilter("all");
     setOutletFilter("all");
     resetPagination();
-  };
+  }, [resetPagination]);
 
   // Check if any filters are active (for showing Clear All button)
-  const hasActiveFilters = searchTerm !== "" || statusFilter !== "active" || roleFilter !== "all" || outletFilter !== "all";
+  const hasActiveFilters = useMemo(() => 
+    searchTerm !== "" || statusFilter !== "active" || roleFilter !== "all" || outletFilter !== "all",
+    [searchTerm, statusFilter, roleFilter, outletFilter]
+  );
+
+  // Stable status filter options
+  const statusFilterOptions = useMemo(() => [
+    { value: "all", label: "All Status" },
+    { value: "active", label: "Active Only" },
+    { value: "inactive", label: "Inactive Only" }
+  ], []);
+
+  // Stable style objects
+  const filterStyles = useMemo(() => ({
+    company: { minWidth: 200, flex: 1 },
+    search: { minWidth: 240, flex: 2 },
+    status: { minWidth: 140, flex: 1 },
+    role: { minWidth: 140, flex: 1 },
+    outlet: { minWidth: 140, flex: 1 }
+  }), []);
   
   // Dialog state
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
@@ -193,22 +221,52 @@ export function UsersPage(props: UsersPageProps) {
   // API hooks
   const activeCompanyId = isSuperAdmin ? selectedCompanyId : user.company_id;
 
+  // Memoize filters object to prevent infinite re-renders
+  const usersFilters = useMemo(() => ({
+    is_active: statusFilter === "all" ? undefined : statusFilter === "active",
+    search: searchQuery || undefined
+  }), [statusFilter, searchQuery]);
+
+  // Memoize sort object to prevent infinite re-renders
+  const usersSort = useMemo(() => 
+    sort ? { id: sort.id, direction: sort.direction } : undefined,
+    [sort]
+  );
+
   const usersQuery = useUsers(activeCompanyId, accessToken, {
-    filters: {
-      is_active: statusFilter === "all" ? undefined : statusFilter === "active",
-      search: searchQuery || undefined
-    },
+    filters: usersFilters,
     pagination,
-    sort: sort ? { id: sort.id, direction: sort.direction } : undefined
+    sort: usersSort
   });
 
   const rolesQuery = useRoles(accessToken, activeCompanyId);
-  const companiesQuery = useCompanies(accessToken, { enabled: isSuperAdmin });
+  
+  // Memoize companies query options to prevent infinite re-renders
+  const companiesOptions = useMemo(() => ({ enabled: isSuperAdmin }), [isSuperAdmin]);
+  const companiesQuery = useCompanies(accessToken, companiesOptions);
   const outletCompanyId =
     isSuperAdmin && dialogMode === "account-create"
       ? (formData.company_id ?? activeCompanyId)
       : activeCompanyId;
-  const outletsQuery = useOutlets(outletCompanyId, accessToken);
+   const outletsQuery = useOutlets(outletCompanyId, accessToken);
+
+  // Convert loading state for DataTable
+  const tableLoadingState = useMemo((): LoadingState => {
+    if (usersQuery.loading) return "loading";
+    if (usersQuery.error) return "error";
+    return "idle";
+  }, [usersQuery.loading, usersQuery.error]);
+
+  // Convert error state for DataTable
+  const tableError = useMemo((): TableError | null => {
+    if (usersQuery.error) {
+      return {
+        message: usersQuery.error,
+        retryable: true
+      };
+    }
+    return null;
+  }, [usersQuery.error]);
 
   const availableRoles = useMemo(() => {
     const roles = rolesQuery.data || [];
@@ -293,8 +351,8 @@ export function UsersPage(props: UsersPageProps) {
     return result;
   }, [usersQuery.data, roleFilter, outletFilter]);
   
-  // Handlers
-  const openCreateDialog = () => {
+  // Handlers - Memoized for stability
+  const openCreateDialog = useCallback(() => {
     setFormData({
       ...emptyForm,
       company_id: isSuperAdmin ? activeCompanyId : null
@@ -314,9 +372,15 @@ export function UsersPage(props: UsersPageProps) {
     setError(null);
     setSuccessMessage(null);
     setHasUnsavedChanges(false);
-  };
+  }, [isSuperAdmin, activeCompanyId]);
   
-  const openAccountDialog = (targetUser: UserResponse) => {
+  const openAccountDialog = useCallback((targetUser: UserResponse) => {
+    // Prevent editing super-admin users
+    if (targetUser.global_roles.includes("SUPER_ADMIN")) {
+      setError("Cannot modify SUPER_ADMIN user.");
+      return;
+    }
+    
     setAccountFormData({
       email: targetUser.email,
       password: "",
@@ -328,9 +392,9 @@ export function UsersPage(props: UsersPageProps) {
     setError(null);
     setSuccessMessage(null);
     setHasUnsavedChanges(false);
-  };
+  }, []);
   
-  const openAccessDialog = (targetUser: UserResponse) => {
+  const openAccessDialog = useCallback((targetUser: UserResponse) => {
     setAccessFormData({
       global_role_codes: targetUser.global_roles,
       outlet_role_assignments: targetUser.outlet_role_assignments.map((assignment) => ({
@@ -344,9 +408,15 @@ export function UsersPage(props: UsersPageProps) {
     setError(null);
     setSuccessMessage(null);
     setHasUnsavedChanges(false);
-  };
+  }, []);
   
-  const openPasswordDialog = (targetUser: UserResponse) => {
+  const openPasswordDialog = useCallback((targetUser: UserResponse) => {
+    // Prevent changing password for super-admin users
+    if (targetUser.global_roles.includes("SUPER_ADMIN")) {
+      setError("Cannot modify SUPER_ADMIN user.");
+      return;
+    }
+    
     setFormData({ ...emptyForm, password: "" });
     setFormErrors({});
     setEditingUser(targetUser);
@@ -354,7 +424,7 @@ export function UsersPage(props: UsersPageProps) {
     setError(null);
     setSuccessMessage(null);
     setHasUnsavedChanges(false);
-  };
+  }, []);
   
   const closeDialog = () => {
     if (hasUnsavedChanges) {
@@ -842,7 +912,7 @@ export function UsersPage(props: UsersPageProps) {
     return () => {
       window.clearTimeout(handle);
     };
-  }, [searchTerm]);
+  }, [searchTerm, resetPagination]);
 
   useEffect(() => {
     if (isSuperAdmin && companiesQuery.data && companiesQuery.data.length > 0) {
@@ -850,7 +920,7 @@ export function UsersPage(props: UsersPageProps) {
         setSelectedCompanyId(companiesQuery.data[0].id);
       }
     }
-  }, [companiesQuery.data, isSuperAdmin, selectedCompanyId]);
+  }, [companiesQuery.data, isSuperAdmin]); // Remove selectedCompanyId from dependencies to prevent infinite loop
 
   useEffect(() => {
     setOutletFilter("all");
@@ -859,85 +929,120 @@ export function UsersPage(props: UsersPageProps) {
   const columns = useMemo<DataTableColumnDef<UserResponse>[]>(() => {
     return [
       {
-        id: "email",
-        header: "Email",
-        sortable: true,
-        cell: (info) => <Text>{info.row.original.email}</Text>
-      },
-      {
-        id: "roles",
-        header: "Roles",
+        id: "user",
+        header: "User",
         sortable: true,
         cell: (info) => {
-          const globalRoles = info.row.original.global_roles;
-          const outletRoleSet = new Set<string>();
-          info.row.original.outlet_role_assignments.forEach((assignment) => {
-            assignment.role_codes.forEach((code) => outletRoleSet.add(code));
-          });
-          const outletRoles = [...outletRoleSet].filter(
-            (code) => !globalRoles.includes(code as Role)
-          );
-          if (globalRoles.length === 0 && outletRoles.length === 0) {
-            return (
-              <Text size="sm" c="dimmed">
-                No roles
-              </Text>
-            );
-          }
+          const user = info.row.original;
           return (
-            <Group gap="xs" wrap="wrap">
-              {globalRoles.map((role) => (
-                <Badge key={`global-${role}`} variant="light" color="blue">
-                  {role}
-                </Badge>
-              ))}
-              {outletRoles.map((role) => (
-                <Badge key={`outlet-${role}`} variant="light" color="teal">
-                  {role}
-                </Badge>
-              ))}
-            </Group>
+            <Stack gap="xs">
+              <Text fw={500} size="sm">{user.email}</Text>
+              <Group gap="xs" align="center">
+                <Text size="xs" c="dimmed">
+                  ID: {user.id}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  •
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {new Date(user.created_at).toLocaleDateString()}
+                </Text>
+              </Group>
+            </Stack>
           );
         }
       },
       {
-        id: "outlets",
-        header: "Outlets",
+        id: "access",
+        header: "Roles & Access",
         sortable: true,
         cell: (info) => {
-          const outlets = info.row.original.outlet_role_assignments;
-          if (outlets.length === 0) {
+          const globalRoles = info.row.original.global_roles;
+          const outletAssignments = info.row.original.outlet_role_assignments;
+          
+          if (globalRoles.length === 0 && outletAssignments.length === 0) {
             return (
               <Text size="sm" c="dimmed">
-                No outlets
+                No access assigned
               </Text>
             );
           }
-          if (outlets.length > 3) {
-            const displayOutlets = outlets.slice(0, 2);
-            const remaining = outlets.length - 2;
-            const allOutletNames = outlets.map(o => o.outlet_name).join(', ');
-            return (
-              <Group gap="xs" wrap="nowrap">
-                {displayOutlets.map((outlet) => (
-                  <Badge key={outlet.outlet_id} variant="light" color="yellow" size="sm">
-                    {outlet.outlet_name}
-                  </Badge>
-                ))}
-                <Badge variant="light" color="gray" size="sm" title={allOutletNames}>
-                  +{remaining} more
-                </Badge>
-              </Group>
-            );
-          }
+          
           return (
-            <Group gap="xs" wrap="wrap">
-              {outlets.map((outlet) => (
-                <Badge key={outlet.outlet_id} variant="light" color="yellow">
-                  {outlet.outlet_name}
-                </Badge>
-              ))}
-            </Group>
+            <Stack gap="xs">
+              {/* Global Roles */}
+              {globalRoles.length > 0 && (
+                <Group gap="xs" wrap="wrap" align="center">
+                  <Badge 
+                    variant="dot" 
+                    color="blue" 
+                    size="xs"
+                    style={{ textTransform: 'uppercase', fontSize: '10px', fontWeight: 600 }}
+                  >
+                    Global
+                  </Badge>
+                  {globalRoles.map((role, index) => (
+                    <Badge 
+                      key={`global-${role}-${index}`} 
+                      variant="filled" 
+                      color="blue"
+                      size="sm"
+                      radius="md"
+                    >
+                      {role}
+                    </Badge>
+                  ))}
+                </Group>
+              )}
+              
+              {/* Outlet-Specific Roles */}
+              {outletAssignments.length > 0 && (
+                <Stack gap="xs">
+                  {outletAssignments.slice(0, 2).map((assignment) => (
+                    <Group key={assignment.outlet_id} gap="xs" wrap="wrap" align="center">
+                      <Badge 
+                        variant="light" 
+                        color="gray" 
+                        size="xs"
+                        style={{ 
+                          minWidth: 'fit-content',
+                          textTransform: 'none',
+                          fontWeight: 500
+                        }}
+                      >
+                        {assignment.outlet_name}
+                      </Badge>
+                      {assignment.role_codes.map((role, roleIndex) => (
+                        <Badge 
+                          key={`outlet-${assignment.outlet_id}-${role}-${roleIndex}`}
+                          variant="light" 
+                          color="teal"
+                          size="sm"
+                          radius="md"
+                        >
+                          {role}
+                        </Badge>
+                      ))}
+                    </Group>
+                  ))}
+                  
+                  {/* Show remaining outlets if more than 2 */}
+                  {outletAssignments.length > 2 && (
+                    <Group gap="xs" align="center">
+                      <Badge 
+                        variant="light" 
+                        color="gray" 
+                        size="xs"
+                        title={outletAssignments.slice(2).map(a => `${a.outlet_name}: ${a.role_codes.join(', ')}`).join('\n')}
+                        style={{ cursor: 'help' }}
+                      >
+                        +{outletAssignments.length - 2} more outlet{outletAssignments.length > 3 ? 's' : ''}
+                      </Badge>
+                    </Group>
+                  )}
+                </Stack>
+              )}
+            </Stack>
           );
         }
       },
@@ -945,11 +1050,25 @@ export function UsersPage(props: UsersPageProps) {
         id: "status",
         header: "Status",
         sortable: true,
-        cell: (info) => (
-          <Badge variant="light" color={info.row.original.is_active ? "green" : "red"}>
-            {info.row.original.is_active ? "Active" : "Inactive"}
-          </Badge>
-        )
+        cell: (info) => {
+          const isActive = info.row.original.is_active;
+          return (
+            <Group gap="xs" align="center">
+              <Badge 
+                variant="dot" 
+                color={isActive ? "green" : "red"}
+                size="sm"
+              >
+                {isActive ? "Active" : "Inactive"}
+              </Badge>
+              {!isActive && (
+                <Text size="xs" c="dimmed">
+                  Suspended
+                </Text>
+              )}
+            </Group>
+          );
+        }
       },
       {
         id: "actions",
@@ -958,10 +1077,14 @@ export function UsersPage(props: UsersPageProps) {
           const targetUser = info.row.original;
           const isSelf = targetUser.id === user.id;
           const isSuperAdminUser = targetUser.global_roles.includes("SUPER_ADMIN");
+          const disableEditAction = isSuperAdminUser; // Super-admin users cannot be edited
+          const disablePasswordAction = isSuperAdminUser; // Super-admin passwords cannot be changed by others
           const disableRoleAction = isSelf || isSuperAdminUser;
           const disableDeactivateAction = isSelf || isSuperAdminUser;
           const selfTooltip = isSelf ? "You cannot modify your own access." : undefined;
           const superAdminTooltip = isSuperAdminUser ? "Cannot modify SUPER_ADMIN user." : undefined;
+          const editTooltip = isSuperAdminUser ? superAdminTooltip : undefined;
+          const passwordTooltip = isSuperAdminUser ? superAdminTooltip : undefined;
           const roleTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
           const deactivateTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
 
@@ -970,7 +1093,11 @@ export function UsersPage(props: UsersPageProps) {
           return (
             <Menu>
               <Menu.Target>
-                <ActionIcon variant="subtle" onClick={() => trackActionMenuOpen("users", actorRole)}>
+                <ActionIcon 
+                  variant="subtle" 
+                  size="sm"
+                  onClick={() => trackActionMenuOpen("users", actorRole)}
+                >
                   <IconDots size={16} />
                 </ActionIcon>
               </Menu.Target>
@@ -981,6 +1108,8 @@ export function UsersPage(props: UsersPageProps) {
                     trackActionSelect("users", actorRole, "edit-user", "success");
                     openAccountDialog(targetUser);
                   }}
+                  disabled={disableEditAction}
+                  title={editTooltip}
                 >
                   Edit User
                 </Menu.Item>
@@ -1012,9 +1141,14 @@ export function UsersPage(props: UsersPageProps) {
                     trackActionSelect("users", actorRole, "change-password", "success");
                     openPasswordDialog(targetUser);
                   }}
+                  disabled={disablePasswordAction}
+                  title={passwordTooltip}
                 >
                   Change Password
                 </Menu.Item>
+                
+                <Menu.Divider />
+                
                 {targetUser.is_active ? (
                   <Menu.Item
                     leftSection={<IconBan size={14} />}
@@ -1054,27 +1188,30 @@ export function UsersPage(props: UsersPageProps) {
       <Stack gap="md">
         <PageCard
           title="User Management"
-          description="Manage users, roles, and permissions for your organization."
+          description="Manage user accounts, assign roles, and control access permissions across your organization."
           actions={
-            <Button
-              onClick={openCreateDialog}
-              disabled={isSuperAdmin && companyOptions.length === 0}
-            >
-              Create User
-            </Button>
+            <Group gap="sm">
+              <Button
+                variant="light"
+                onClick={() => usersQuery.refetch({ force: true })}
+                loading={usersQuery.loading}
+                leftSection={<IconRefresh size={16} />}
+                size="sm"
+              >
+                Refresh
+              </Button>
+              <Button
+                onClick={openCreateDialog}
+                disabled={isSuperAdmin && companyOptions.length === 0}
+                leftSection={<IconUserPlus size={16} />}
+                size="sm"
+              >
+                Add User
+              </Button>
+            </Group>
           }
         >
           <Stack gap="sm">
-            {usersQuery.loading ? (
-              <Text size="sm" c="dimmed">
-                Loading users...
-              </Text>
-            ) : null}
-            {usersQuery.error ? (
-              <Alert color="red" title="Unable to load users">
-                {usersQuery.error}
-              </Alert>
-            ) : null}
             {error ? (
               <Alert color="red" title="Action failed">
                 {error}
@@ -1098,53 +1235,88 @@ export function UsersPage(props: UsersPageProps) {
                 value={companyOptions.length === 0 ? "" : String(selectedCompanyId)}
                 onChange={(value) => setSelectedCompanyId(Number(value ?? 0))}
                 disabled={companyOptions.length === 0}
-                style={{ minWidth: 240 }}
+                style={filterStyles.company}
               />
             ) : null}
 
             <TextInput
-              label="Search"
-              placeholder="Search by email"
+              label="Search Users"
+              placeholder="Search by email or name..."
               value={searchTerm}
               onChange={handleSearchChange}
-              style={{ minWidth: 220 }}
+              style={filterStyles.search}
+              leftSection={<IconSearch size={16} />}
+              rightSection={
+                searchTerm && (
+                  <ActionIcon
+                    size="sm"
+                    variant="transparent"
+                    onClick={() => setSearchTerm("")}
+                  >
+                    <IconX size={12} />
+                  </ActionIcon>
+                )
+              }
             />
 
             <Select
               label="Status"
-              data={[
-                { value: "all", label: "All Status" },
-                { value: "active", label: "Active Only" },
-                { value: "inactive", label: "Inactive Only" }
-              ]}
+              placeholder="All statuses"
+              data={statusFilterOptions}
               value={statusFilter}
               onChange={handleStatusFilterChange}
-              style={{ minWidth: 170 }}
+              style={filterStyles.status}
+              leftSection={<IconUserCheck size={16} />}
             />
 
             <Select
               label="Role"
+              placeholder="All roles"
               data={roleOptions}
               value={roleFilter}
               onChange={handleRoleFilterChange}
-              style={{ minWidth: 170 }}
+              style={filterStyles.role}
+              leftSection={<IconShield size={16} />}
             />
 
             <Select
               label="Outlet"
+              placeholder="All outlets"
               data={outletOptions}
               value={outletFilter}
               onChange={handleOutletFilterChange}
-              style={{ minWidth: 170 }}
+              style={filterStyles.outlet}
+              leftSection={<IconBuildingStore size={16} />}
             />
           </FilterBar>
         </PageCard>
 
-        <PageCard title={`Users (${filteredUsers.length})`}>
+        <PageCard>
+          <Stack gap="md">
+            <Group gap="sm" align="center" justify="space-between">
+              <Group gap="sm" align="center">
+                <Text fw={600} size="lg">Users</Text>
+                <Badge variant="light" color="blue" size="lg">
+                  {filteredUsers.length}
+                </Badge>
+                {hasActiveFilters && (
+                  <Badge variant="light" color="orange" size="sm">
+                    Filtered
+                  </Badge>
+                )}
+                {usersQuery.totalCount > filteredUsers.length && (
+                  <Text size="sm" c="dimmed">
+                    of {usersQuery.totalCount} total
+                  </Text>
+                )}
+              </Group>
+            </Group>
           <DataTable
             columns={columns}
             data={filteredUsers}
             getRowId={(row) => String(row.id)}
+            loading={tableLoadingState}
+            error={tableError}
             pagination={pagination}
             sort={sort}
             selection={selection}
@@ -1152,13 +1324,15 @@ export function UsersPage(props: UsersPageProps) {
             onPaginationChange={setPagination}
             onSortChange={setSort}
             onSelectionChange={setSelection}
+            onRetry={() => usersQuery.refetch({ force: true })}
             minWidth={900}
             emptyState={
               searchTerm.trim().length > 0
                 ? "No users match your search."
                 : "No users found."
             }
-          />
+            />
+          </Stack>
         </PageCard>
       </Stack>
 

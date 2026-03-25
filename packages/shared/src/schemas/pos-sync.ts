@@ -54,10 +54,10 @@ export const PosTransactionSchema = z.object({
   reservation_id: NumericIdSchema.nullable().optional(),
   guest_count: z.coerce.number().int().positive().nullable().optional(),
   order_status: PosOrderStatusSchema.default("COMPLETED"),
-  opened_at: z.string().datetime().optional(),
-  closed_at: z.string().datetime().nullable().optional(),
+  opened_at: z.string().datetime({ offset: true }).optional(),
+  closed_at: z.string().datetime({ offset: true }).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
-  trx_at: z.string().datetime(),
+  trx_at: z.string().datetime({ offset: true }),
   items: z.array(PosItemSchema).min(1),
   payments: z.array(PosPaymentSchema).min(1),
   taxes: z.array(PosTaxLineSchema).optional()
@@ -82,10 +82,10 @@ export const SyncPushRequestSchema = z.object({
         order_status: PosOrderStatusSchema,
         order_state: z.enum(["OPEN", "CLOSED"]),
         paid_amount: z.number().finite().nonnegative(),
-        opened_at: z.string().datetime(),
-        closed_at: z.string().datetime().nullable(),
+        opened_at: z.string().datetime({ offset: true }),
+        closed_at: z.string().datetime({ offset: true }).nullable(),
         notes: z.string().trim().max(500).nullable(),
-        updated_at: z.string().datetime(),
+        updated_at: z.string().datetime({ offset: true }),
         lines: z.array(
           z.object({
             item_id: NumericIdSchema,
@@ -97,7 +97,7 @@ export const SyncPushRequestSchema = z.object({
             unit_price_snapshot: z.number().finite().nonnegative(),
             qty: z.number().positive(),
             discount_amount: z.number().finite().min(0),
-            updated_at: z.string().datetime()
+            updated_at: z.string().datetime({ offset: true })
           })
         )
       })
@@ -110,13 +110,17 @@ export const SyncPushRequestSchema = z.object({
         order_id: UUID,
         company_id: NumericIdSchema,
         outlet_id: NumericIdSchema,
-        base_order_updated_at: z.string().datetime().nullable(),
+        base_order_updated_at: z.string().datetime({ offset: true }).nullable(),
         event_type: OrderUpdateEventTypeSchema,
         delta_json: z.string().min(2),
         actor_user_id: NumericIdSchema.nullable(),
         device_id: z.string().min(1),
-        event_at: z.string().datetime(),
-        created_at: z.string().datetime()
+        event_at: z.string().datetime({ offset: true }),
+        // created_at is SERVER-authoritative ingest metadata, not client truth.
+        // It is optional because the server generates it at ingest time.
+        // Clients SHOULD NOT send this field; if sent, it is IGNORED.
+        // Since the server ignores this field entirely, no validation is performed on it.
+        created_at: z.string().optional()
       })
     )
     .optional(),
@@ -133,7 +137,7 @@ export const SyncPushRequestSchema = z.object({
         cancelled_quantity: z.number().positive(),
         reason: z.string().trim().min(1).max(500),
         cancelled_by_user_id: NumericIdSchema.nullable(),
-        cancelled_at: z.string().datetime()
+        cancelled_at: z.string().datetime({ offset: true })
       })
     )
     .optional()

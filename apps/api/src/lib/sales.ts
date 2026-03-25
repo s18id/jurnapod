@@ -14,7 +14,7 @@ import {
   NumberingTemplateNotFoundError
 } from "./numbering";
 import type { DocumentType } from "./numbering";
-import { toDateTimeRangeWithTimezone } from "./date-helpers";
+import { toDateTimeRangeWithTimezone, toMysqlDateTime, toMysqlDateTimeFromDateLike } from "./date-helpers";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 type SalesInvoiceRow = RowDataPacket & {
@@ -379,15 +379,6 @@ function resolveInvoiceDueDate(input: {
   return addDaysToDateOnly(input.invoiceDate, INVOICE_DUE_TERM_DAYS[term]);
 }
 
-function toMysqlDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid datetime");
-  }
-
-  return date.toISOString().slice(0, 19).replace("T", " ");
-}
-
 function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
   return {
     id: Number(row.id),
@@ -404,7 +395,7 @@ function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
     grand_total: Number(row.grand_total),
     paid_total: Number(row.paid_total),
     approved_by_user_id: row.approved_by_user_id ? Number(row.approved_by_user_id) : null,
-    approved_at: row.approved_at ? toMysqlDateTime(row.approved_at.toString()) : null,
+    approved_at: row.approved_at ? toMysqlDateTimeFromDateLike(row.approved_at.toString()) : null,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
     created_at: toRfc3339Required(row.created_at),
@@ -1510,7 +1501,7 @@ function normalizeIncomingDatetimeForCompare(paymentAt: string): string {
 }
 
 function normalizeExistingDatetimeForCompare(paymentAt: string): string {
-  return toMysqlDateTime(paymentAt);
+  return toMysqlDateTimeFromDateLike(paymentAt);
 }
 
 function buildCanonicalInput(
@@ -2108,7 +2099,9 @@ export async function updatePayment(
     const nextOutletId = input.outlet_id ?? current.outlet_id;
     const nextInvoiceId = input.invoice_id ?? current.invoice_id;
     const nextPaymentNo = input.payment_no ?? current.payment_no;
-    const nextPaymentAt = toMysqlDateTime(input.payment_at ?? current.payment_at);
+    const nextPaymentAt = input.payment_at
+      ? toMysqlDateTime(input.payment_at)
+      : toMysqlDateTimeFromDateLike(current.payment_at);
     const nextMethod = input.method ?? current.method;
 
     if (typeof input.invoice_id === "number" || typeof input.outlet_id === "number") {
@@ -2512,13 +2505,13 @@ function normalizeSalesOrderRow(row: SalesOrderRow): SalesOrder {
     tax_amount: Number(row.tax_amount),
     grand_total: Number(row.grand_total),
     confirmed_by_user_id: row.confirmed_by_user_id,
-    confirmed_at: row.confirmed_at ? toMysqlDateTime(row.confirmed_at.toString()) : undefined,
+    confirmed_at: row.confirmed_at ? toMysqlDateTimeFromDateLike(row.confirmed_at.toString()) : undefined,
     completed_by_user_id: row.completed_by_user_id,
-    completed_at: row.completed_at ? toMysqlDateTime(row.completed_at.toString()) : undefined,
+    completed_at: row.completed_at ? toMysqlDateTimeFromDateLike(row.completed_at.toString()) : undefined,
     created_by_user_id: row.created_by_user_id,
     updated_by_user_id: row.updated_by_user_id,
-    created_at: toMysqlDateTime(row.created_at.toString()),
-    updated_at: toMysqlDateTime(row.updated_at.toString())
+    created_at: toMysqlDateTimeFromDateLike(row.created_at.toString()),
+    updated_at: toMysqlDateTimeFromDateLike(row.updated_at.toString())
   };
 }
 

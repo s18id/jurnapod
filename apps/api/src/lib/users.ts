@@ -250,20 +250,18 @@ async function getUserMaxRoleLevelForConnection(
 
 async function userHasSuperAdminRole(
   connection: PoolConnection | ReturnType<typeof getDbPool>,
-  companyId: number,
   userId: number
 ): Promise<boolean> {
+  // SUPER_ADMIN is a global role - no company_id check needed
   const [rows] = await connection.execute<RowDataPacket[]>(
     `SELECT 1
      FROM user_role_assignments ura
      INNER JOIN roles r ON r.id = ura.role_id
-     INNER JOIN users u ON u.id = ura.user_id
-     WHERE u.id = ?
-       AND u.company_id = ?
+     WHERE ura.user_id = ?
        AND r.code = 'SUPER_ADMIN'
        AND ura.outlet_id IS NULL
      LIMIT 1`,
-    [userId, companyId]
+    [userId]
   );
 
   return rows.length > 0;
@@ -293,17 +291,16 @@ async function userHasRoleCode(
 
 async function ensureSuperAdminTargetManagedBySelf(
   connection: PoolConnection | ReturnType<typeof getDbPool>,
-  companyId: number,
   actorUserId: number,
   targetUserId: number
 ): Promise<void> {
-  const targetIsSuperAdmin = await userHasSuperAdminRole(connection, companyId, targetUserId);
+  const targetIsSuperAdmin = await userHasSuperAdminRole(connection, targetUserId);
   if (!targetIsSuperAdmin) {
     return;
   }
 
   const actorIsSelf = actorUserId === targetUserId;
-  const actorIsSuperAdmin = await userHasRoleCode(connection, companyId, actorUserId, "SUPER_ADMIN");
+  const actorIsSuperAdmin = await userHasSuperAdminRole(connection, actorUserId);
 
   if (!actorIsSelf || !actorIsSuperAdmin) {
     throw new SuperAdminProtectionError("Only SUPER_ADMIN user can manage their own account");
@@ -332,30 +329,7 @@ async function ensureOutletIdsExist(
   }
 }
 
-async function syncUserOutletsFromRoles(
-  connection: PoolConnection | ReturnType<typeof getDbPool>,
-  userId: number
-): Promise<void> {
-  await connection.execute<ResultSetHeader>(
-    `DELETE uo
-     FROM user_outlets uo
-     LEFT JOIN user_role_assignments ura
-       ON ura.user_id = uo.user_id
-      AND ura.outlet_id = uo.outlet_id
-     WHERE uo.user_id = ?
-       AND ura.user_id IS NULL`,
-    [userId]
-  );
 
-  await connection.execute<ResultSetHeader>(
-    `INSERT IGNORE INTO user_outlets (user_id, outlet_id)
-     SELECT DISTINCT user_id, outlet_id
-     FROM user_role_assignments
-     WHERE user_id = ?
-       AND outlet_id IS NOT NULL`,
-    [userId]
-  );
-}
 
 async function hydrateUserGlobalRoles(
   connection: PoolConnection | ReturnType<typeof getDbPool>,
@@ -452,8 +426,23 @@ function normalizeUserRow(row: UserRow): Omit<UserProfile, "global_roles" | "out
   };
 }
 
-export async function listUsers(companyId: number, filters?: { isActive?: boolean; search?: string }) {
+export class CrossCompanyAccessError extends Error {}
+
+export async function listUsers(
+  companyId: number,
+  actor: { userId: number; companyId: number },
+  filters?: { isActive?: boolean; search?: string }
+) {
   const pool = getDbPool();
+
+  // Cross-company access check: only SUPER_ADMIN can list users from other companies
+  if (companyId !== actor.companyId) {
+    const isSuperAdmin = await userHasSuperAdminRole(pool, actor.userId);
+    if (!isSuperAdmin) {
+      throw new CrossCompanyAccessError("Cannot list users from another company");
+    }
+  }
+
   const values: Array<string | number> = [companyId];
   let sql =
     "SELECT id, company_id, name, email, is_active, created_at, updated_at FROM users WHERE company_id = ?";
@@ -629,7 +618,7 @@ export async function createUser(params: {
       }
     }
 
-    await syncUserOutletsFromRoles(connection, userId);
+
 
     await auditService.logCreate(auditContext, "user", userId, {
       email,
@@ -671,7 +660,6 @@ export async function updateUserEmail(params: {
 
     await ensureSuperAdminTargetManagedBySelf(
       connection,
-      params.companyId,
       params.actor.userId,
       params.userId
     );
@@ -736,7 +724,6 @@ export async function setUserRoles(params: {
 
     await ensureSuperAdminTargetManagedBySelf(
       connection,
-      params.companyId,
       params.actor.userId,
       params.userId
     );
@@ -817,7 +804,7 @@ export async function setUserRoles(params: {
         );
       }
 
-      await syncUserOutletsFromRoles(connection, params.userId);
+
 
       await auditService.logUpdate(
         auditContext,
@@ -896,7 +883,6 @@ export async function setUserOutlets(params: {
 
     await ensureSuperAdminTargetManagedBySelf(
       connection,
-      params.companyId,
       params.actor.userId,
       params.userId
     );
@@ -928,7 +914,7 @@ export async function setUserOutlets(params: {
       );
     }
 
-    await syncUserOutletsFromRoles(connection, params.userId);
+
 
     await auditService.logUpdate(
       auditContext,
@@ -970,7 +956,6 @@ export async function setUserPassword(params: {
 
     await ensureSuperAdminTargetManagedBySelf(
       connection,
-      params.companyId,
       params.actor.userId,
       params.userId
     );
@@ -1019,7 +1004,6 @@ export async function setUserActiveState(params: {
     if (!params.isActive) {
       const isSuperAdmin = await userHasSuperAdminRole(
         connection,
-        params.companyId,
         params.userId
       );
       if (isSuperAdmin) {
@@ -1031,12 +1015,11 @@ export async function setUserActiveState(params: {
 
     // For reactivate, ensure only self SUPER_ADMIN can reactivate SUPER_ADMIN
     if (params.isActive) {
-      await ensureSuperAdminTargetManagedBySelf(
-        connection,
-        params.companyId,
-        params.actor.userId,
-        params.userId
-      );
+    await ensureSuperAdminTargetManagedBySelf(
+      connection,
+      params.actor.userId,
+      params.userId
+    );
     }
 
     const [result] = await connection.execute<ResultSetHeader>(

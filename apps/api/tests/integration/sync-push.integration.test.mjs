@@ -514,6 +514,16 @@ localServerTest(
         [adminUserId, Number(owner.outlet_id), Number(adminRoleId)]
       );
 
+      // Ensure ADMIN role has pos module with create permission (permission_mask = 1)
+      // Sync push requires: roles: ["OWNER", "ADMIN", "CASHIER"], module: "pos", permission: "create"
+      // Use bitwise OR to ensure create bit is set regardless of existing permissions
+      await db.execute(
+        `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
+         VALUES (?, ?, 'pos', 1)
+         ON DUPLICATE KEY UPDATE permission_mask = permission_mask | 1`,
+        [Number(owner.company_id), Number(adminRoleId)]
+      );
+
 
       const ownerUserId = Number(owner.id);
       const companyId = Number(owner.company_id);
@@ -2790,8 +2800,8 @@ localServerTest(
 
       const tableCode = `ITBL${Date.now().toString(36)}`.slice(0, 12).toUpperCase();
       const [tableInsert] = await db.execute(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'RESERVED')`,
+        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'RESERVED', 2)`,
         [companyId, outletId, tableCode, "Integration Table", "Main", 4]
       );
       tableId = Number(tableInsert.insertId);
@@ -2808,8 +2818,9 @@ localServerTest(
            reservation_at,
            duration_minutes,
            status,
+           status_id,
            notes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SEATED', ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SEATED', 4, ?)`,
         [companyId, outletId, tableId, "Integration Guest", "+620000000001", 4, reservationAt, 90, "Window side"]
       );
       reservationId = Number(reservationInsert.insertId);
@@ -2995,6 +3006,8 @@ localServerTest(
     const createdClientTxIds = [];
     const createdItemIds = [];
     let postingFixture = null;
+    let companyId = 0;
+    let outletId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -3023,8 +3036,8 @@ localServerTest(
       }
 
       const ownerUserId = Number(owner.id);
-      const companyId = Number(owner.company_id);
-      const outletId = Number(owner.outlet_id);
+      companyId = Number(owner.company_id);
+      outletId = Number(owner.outlet_id);
 
       // Setup COGS accounts and enable feature
       await setupCogsAccounts(db, companyId);
@@ -3153,6 +3166,8 @@ localServerTest(
     const createdClientTxIds = [];
     const createdItemIds = [];
     let postingFixture = null;
+    let companyId = 0;
+    let outletId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
@@ -3181,8 +3196,8 @@ localServerTest(
       }
 
       const ownerUserId = Number(owner.id);
-      const companyId = Number(owner.company_id);
-      const outletId = Number(owner.outlet_id);
+      companyId = Number(owner.company_id);
+      outletId = Number(owner.outlet_id);
 
       // Setup COGS accounts and enable feature
       await setupCogsAccounts(db, companyId);
@@ -3276,6 +3291,2342 @@ localServerTest(
       await cleanupCogsAccounts(db, companyId);
       await disableCogsFeature(db, companyId);
       await cleanupTrackedItems(db, companyId, createdItemIds);
+    }
+  }
+);
+
+// ===========================================================================
+// Story 17.1: Order Update Authority Semantics - Route-Level Tests
+// ===========================================================================
+
+localServerTest(
+  "sync push integration: order_updates event_at is client-authoritative and created_at is server-authoritative (Story 17.1)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_order_updates"))) {
+      t.skip("pos_order_updates table not available in current DB");
+      return;
+    }
+
+    let childProcess;
+    let orderId = "";
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      orderId = randomUUID();
+      const updateId = randomUUID();
+
+      // Use a specific client event_at that is DIFFERENT from server time
+      // Client says the event happened at a specific time in the past
+      const clientEventAt = "2026-03-15T10:30:00.000Z"; // Client says event happened at 10:30 UTC
+      const clientCreatedAt = "2026-03-15T10:31:00.000Z"; // Client sends different created_at (should be ignored)
+      const beforeServerTime = Date.now();
+
+      const payload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "DINE_IN",
+            source_flow: "WALK_IN",
+            settlement_flow: "DEFERRED",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 2,
+            is_finalized: true,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: clientEventAt,
+            closed_at: null,
+            notes: "authority-test-order",
+            updated_at: clientEventAt,
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 12500,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: clientEventAt
+              }
+            ]
+          }
+        ],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_CANCELLED",
+            delta_json: JSON.stringify({ reason: "authority-test", cancelled_qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: clientEventAt,
+            created_at: clientCreatedAt  // This should be IGNORED by server
+          }
+        ]
+      };
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(response.status, 200);
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+      assert.deepEqual(body.data.order_update_results, [
+        {
+          update_id: updateId,
+          result: "OK"
+        }
+      ]);
+
+      // Verify persisted DB values for the order update
+      const [updateRows] = await db.execute(
+        `SELECT event_at, event_at_ts, created_at
+         FROM pos_order_updates
+         WHERE update_id = ?
+         LIMIT 1`,
+        [updateId]
+      );
+      assert.equal(updateRows.length, 1, "Should find the persisted order update");
+
+      const persistedUpdate = updateRows[0];
+
+      // AC1: event_at/event_at_ts should be PRESERVED from client payload (client-authoritative)
+      // Client said event happened at 2026-03-15T10:30:00.000Z
+      const expectedEventAtMysql = "2026-03-15 10:30:00";
+      const expectedEventAtTs = new Date(clientEventAt).getTime();
+      assert.equal(
+        String(persistedUpdate.event_at),
+        expectedEventAtMysql,
+        "event_at should be preserved from client payload (client-authoritative)"
+      );
+      assert.equal(
+        Number(persistedUpdate.event_at_ts),
+        expectedEventAtTs,
+        "event_at_ts should match client event_at timestamp (client-authoritative)"
+      );
+
+      const afterServerTime = Date.now();
+
+      // Verify created_at (MySQL datetime format) is also server-generated
+      const persistedCreatedAt = String(persistedUpdate.created_at);
+      // Should be in MySQL datetime format YYYY-MM-DD HH:mm:ss
+      assert.ok(
+        /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(persistedCreatedAt),
+        "created_at should be in MySQL datetime format"
+      );
+      // The date should be today (server's current date), not the client's past date
+      const today = new Date().toISOString().slice(0, 10);
+      assert.ok(
+        persistedCreatedAt.startsWith(today),
+        `created_at (${persistedCreatedAt}) should be from today (${today}) - server-generated, not client-provided ${clientCreatedAt}`
+      );
+
+      // Cleanup will happen in finally block via cleanupOrderSyncArtifacts
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (orderId) {
+        await cleanupOrderSyncArtifacts(db, orderId);
+      }
+    }
+  }
+);
+
+localServerTest(
+  "sync push integration: order_updates malformed event_at is rejected at schema level (Story 17.1)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_order_updates"))) {
+      t.skip("pos_order_updates table not available in current DB");
+      return;
+    }
+
+    let childProcess;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const orderId = randomUUID();
+      const updateId = randomUUID();
+
+      // Test case 1: Malformed event_at - rolled date (Feb 30 doesn't exist)
+      const rolledDatePayload = {
+        outlet_id: outletId,
+        transactions: [],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_CANCELLED",
+            delta_json: "{}",
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: "2026-02-30T10:30:00Z",  // Invalid: Feb 30 doesn't exist
+            created_at: new Date().toISOString()
+          }
+        ]
+      };
+
+      const rolledDateResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(rolledDatePayload)
+      });
+
+      // Schema validation should reject this at Zod level before even reaching business logic
+      assert.equal(rolledDateResponse.status, 400, "Should reject malformed event_at with 400");
+
+      // Test case 2: Completely invalid format
+      const invalidFormatPayload = {
+        outlet_id: outletId,
+        transactions: [],
+        order_updates: [
+          {
+            update_id: randomUUID(),
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_CANCELLED",
+            delta_json: "{}",
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: "not-a-valid-datetime",  // Invalid format
+            created_at: new Date().toISOString()
+          }
+        ]
+      };
+
+      const invalidFormatResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(invalidFormatPayload)
+      });
+
+      assert.equal(invalidFormatResponse.status, 400, "Should reject invalid event_at format with 400");
+
+      // Test case 3: Missing timezone offset (naive datetime)
+      const naiveDatetimePayload = {
+        outlet_id: outletId,
+        transactions: [],
+        order_updates: [
+          {
+            update_id: randomUUID(),
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_CANCELLED",
+            delta_json: "{}",
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: "2026-03-15T10:30:00",  // Missing Z or offset
+            created_at: new Date().toISOString()
+          }
+        ]
+      };
+
+      const naiveDatetimeResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(naiveDatetimePayload)
+      });
+
+      // Schema requires offset (Z or ±HH:MM), so naive datetime should be rejected
+      assert.equal(naiveDatetimeResponse.status, 400, "Should reject naive datetime without timezone offset");
+    } finally {
+      await stopApiServer(childProcess);
+    }
+  }
+);
+
+localServerTest(
+  "sync push integration: item_cancellations authority semantics - cancelled_at client, created_at server (Story 17.1)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_item_cancellations"))) {
+      t.skip("pos_item_cancellations table not available in current DB");
+      return;
+    }
+
+    let childProcess;
+    let orderId = "";
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      orderId = randomUUID();
+      const updateId = randomUUID();
+      const cancellationId = randomUUID();
+
+      // Client says cancellation happened at a specific past time
+      const clientCancelledAt = "2026-03-15T14:45:00.000+07:00"; // Client's local time
+      const beforeServerTime = Date.now();
+
+      const payload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "TAKEAWAY",
+            source_flow: "WALK_IN",
+            settlement_flow: "IMMEDIATE",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 1,
+            is_finalized: true,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: new Date().toISOString(),
+            closed_at: null,
+            notes: "authority-test-cancellation",
+            updated_at: new Date().toISOString(),
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 10000,
+                qty: 2,
+                discount_amount: 0,
+                updated_at: new Date().toISOString()
+              }
+            ]
+          }
+        ],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_CANCELLED",
+            delta_json: "{}",
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: new Date().toISOString(),
+            created_at: new Date().toISOString()
+          }
+        ],
+        item_cancellations: [
+          {
+            cancellation_id: cancellationId,
+            update_id: updateId,
+            order_id: orderId,
+            item_id: 1,
+            company_id: companyId,
+            outlet_id: outletId,
+            cancelled_quantity: 1,
+            reason: "authority-test",
+            cancelled_by_user_id: ownerUserId,
+            cancelled_at: clientCancelledAt  // Client says cancellation happened at this time
+          }
+        ]
+      };
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(response.status, 200);
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+      assert.deepEqual(body.data.item_cancellation_results, [
+        {
+          cancellation_id: cancellationId,
+          result: "OK"
+        }
+      ]);
+
+      // Verify persisted DB values for the item cancellation
+      const [cancellationRows] = await db.execute(
+        `SELECT cancelled_at, cancelled_at_ts, created_at
+         FROM pos_item_cancellations
+         WHERE cancellation_id = ?
+         LIMIT 1`,
+        [cancellationId]
+      );
+      assert.equal(cancellationRows.length, 1, "Should find the persisted item cancellation");
+
+      const persistedCancellation = cancellationRows[0];
+
+      // cancelled_at/cancelled_at_ts should be PRESERVED from client payload (client-authoritative)
+      const expectedCancelledAtMysql = "2026-03-15 07:45:00"; // 14:45+07:00 converted to UTC
+      const expectedCancelledAtTs = new Date(clientCancelledAt).getTime();
+      assert.equal(
+        String(persistedCancellation.cancelled_at),
+        expectedCancelledAtMysql,
+        "cancelled_at should be preserved from client payload (client-authoritative)"
+      );
+      assert.equal(
+        Number(persistedCancellation.cancelled_at_ts),
+        expectedCancelledAtTs,
+        "cancelled_at_ts should match client cancelled_at timestamp"
+      );
+
+      const persistedCreatedAt = String(persistedCancellation.created_at);
+      assert.ok(
+        /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(persistedCreatedAt),
+        "created_at should be in MySQL datetime format"
+      );
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (orderId) {
+        await cleanupOrderSyncArtifacts(db, orderId);
+      }
+    }
+  }
+);
+
+localServerTest(
+  "sync push integration: order_updates idempotency preserved with authority semantics (Story 17.1)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_order_updates"))) {
+      t.skip("pos_order_updates table not available in current DB");
+      return;
+    }
+
+    let childProcess;
+    let orderId = "";
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      orderId = randomUUID();
+      const updateId = randomUUID();
+      const eventAt = "2026-03-20T09:00:00.000Z";
+
+      const payload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "TAKEAWAY",
+            source_flow: "WALK_IN",
+            settlement_flow: "IMMEDIATE",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 1,
+            is_finalized: true,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: eventAt,
+            closed_at: null,
+            notes: "idempotency-test",
+            updated_at: eventAt,
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 10000,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: eventAt
+              }
+            ]
+          }
+        ],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_CANCELLED",
+            delta_json: "{}",
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: eventAt,
+            created_at: eventAt
+          }
+        ]
+      };
+
+      // First push - should succeed
+      const firstResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(firstResponse.status, 200);
+      const firstBody = await parseJsonResponse(firstResponse);
+      assert.equal(firstBody.success, true);
+      assert.deepEqual(firstBody.data.order_update_results, [
+        {
+          update_id: updateId,
+          result: "OK"
+        }
+      ]);
+
+      // Second push with same update_id - should be DUPLICATE (idempotency preserved)
+      const secondResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(secondResponse.status, 200);
+      const secondBody = await parseJsonResponse(secondResponse);
+      assert.equal(secondBody.success, true);
+      assert.deepEqual(secondBody.data.order_update_results, [
+        {
+          update_id: updateId,
+          result: "DUPLICATE"
+        }
+      ]);
+
+      // Verify only ONE row exists (no duplicate created)
+      const [countRows] = await db.execute(
+        `SELECT COUNT(*) as cnt FROM pos_order_updates WHERE update_id = ?`,
+        [updateId]
+      );
+      assert.equal(Number(countRows[0].cnt), 1, "Should only have one order update (idempotency)");
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (orderId) {
+        await cleanupOrderSyncArtifacts(db, orderId);
+      }
+    }
+  }
+);
+
+// Story 17.2: base_order_updated_at_ts as Version Marker Metadata - Route-Level Tests
+// Note: True optimistic-concurrency stale detection requires an authoritative server-side order version,
+// which does not currently exist in the codebase. base_order_updated_at_ts is preserved as metadata only.
+// ===========================================================================
+
+localServerTest(
+  "sync push integration: order_updates base_order_updated_at_ts is preserved as metadata, not as event/business time (Story 17.2)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_order_updates"))) {
+      t.skip("pos_order_updates table not available in current DB");
+      return;
+    }
+
+    let childProcess;
+    let orderId = "";
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      orderId = randomUUID();
+      const updateId = randomUUID();
+
+      // Create order snapshot and send order update with different timestamps
+      const eventAt = "2026-03-20T10:00:00.000Z";
+      const baseOrderUpdatedAt = "2026-03-20T09:55:00.000Z"; // Different from event_at - proves base is metadata
+
+      const payload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "TAKEAWAY",
+            source_flow: "WALK_IN",
+            settlement_flow: "IMMEDIATE",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 1,
+            is_finalized: true,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: eventAt,
+            closed_at: null,
+            notes: "metadata-test",
+            updated_at: baseOrderUpdatedAt,
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 10000,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: baseOrderUpdatedAt
+              }
+            ]
+          }
+        ],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: baseOrderUpdatedAt,
+            event_type: "ITEM_ADDED",
+            delta_json: JSON.stringify({ item_id: 2, qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: eventAt,
+            created_at: eventAt
+          }
+        ]
+      };
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(response.status, 200);
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+      assert.deepEqual(body.data.order_update_results, [
+        {
+          update_id: updateId,
+          result: "OK"
+        }
+      ]);
+
+      // Verify base_order_updated_at_ts is stored as a positive timestamp (preserved metadata)
+      const [baseRows] = await db.execute(
+        `SELECT base_order_updated_at_ts, event_at_ts
+         FROM pos_order_updates
+         WHERE update_id = ?
+         LIMIT 1`,
+        [updateId]
+      );
+      assert.ok(baseRows.length > 0, "Should have stored the order update");
+
+      const expectedBaseTs = new Date(baseOrderUpdatedAt).getTime();
+      assert.equal(
+        Number(baseRows[0].base_order_updated_at_ts),
+        expectedBaseTs,
+        "base_order_updated_at_ts should be preserved from client payload"
+      );
+
+      // Prove base_order_updated_at_ts is NOT the same as event_at_ts (different semantic meaning)
+      const expectedEventAtTs = new Date(eventAt).getTime();
+      assert.notEqual(
+        Number(baseRows[0].base_order_updated_at_ts),
+        Number(baseRows[0].event_at_ts),
+        "base_order_updated_at_ts should be different from event_at_ts - they have different semantics"
+      );
+
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (orderId) {
+        await cleanupOrderSyncArtifacts(db, orderId);
+      }
+    }
+  }
+);
+
+localServerTest(
+  "sync push integration: order_updates null base_order_updated_at is stored as null (Story 17.2)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_order_updates"))) {
+      t.skip("pos_order_updates table not available in current DB");
+      return;
+    }
+
+    let childProcess;
+    let orderId = "";
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      orderId = randomUUID();
+      const updateId = randomUUID();
+      const eventAt = "2026-03-20T10:00:00.000Z";
+
+      // First: create an active order snapshot
+      const firstPayload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "TAKEAWAY",
+            source_flow: "WALK_IN",
+            settlement_flow: "IMMEDIATE",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 1,
+            is_finalized: true,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: eventAt,
+            closed_at: null,
+            notes: "null-base-test",
+            updated_at: eventAt,
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 10000,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: eventAt
+              }
+            ]
+          }
+        ],
+        order_updates: []
+      };
+
+      const firstResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(firstPayload)
+      });
+      assert.equal(firstResponse.status, 200);
+
+      // Send an order update with null base_order_updated_at
+      const updatePayload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_ADDED",
+            delta_json: JSON.stringify({ item_id: 2, qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: eventAt,
+            created_at: eventAt
+          }
+        ]
+      };
+
+      const updateResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(updatePayload)
+      });
+      assert.equal(updateResponse.status, 200);
+      const updateBody = await parseJsonResponse(updateResponse);
+      assert.equal(updateBody.success, true);
+      assert.deepEqual(updateBody.data.order_update_results, [
+        {
+          update_id: updateId,
+          result: "OK"
+        }
+      ]);
+
+      // Verify base_order_updated_at_ts was stored as null
+      const [baseRows] = await db.execute(
+        `SELECT base_order_updated_at_ts FROM pos_order_updates WHERE update_id = ?`,
+        [updateId]
+      );
+      assert.ok(baseRows.length > 0, "Should have stored the order update");
+      assert.equal(baseRows[0].base_order_updated_at_ts, null, "base_order_updated_at_ts should be NULL");
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (orderId) {
+        await cleanupOrderSyncArtifacts(db, orderId);
+      }
+    }
+  }
+);
+
+localServerTest(
+  "sync push integration: order_updates idempotency via update_id still works with base_order_updated_at (Story 17.2)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_order_updates"))) {
+      t.skip("pos_order_updates table not available in current DB");
+      return;
+    }
+
+    let childProcess;
+    let orderId = "";
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      orderId = randomUUID();
+      const updateId = randomUUID();
+      const eventAt = "2026-03-20T10:00:00.000Z";
+      const baseOrderUpdatedAt = "2026-03-20T09:55:00.000Z";
+
+      // First: create an active order snapshot
+      const firstPayload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "TAKEAWAY",
+            source_flow: "WALK_IN",
+            settlement_flow: "IMMEDIATE",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 1,
+            is_finalized: true,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: eventAt,
+            closed_at: null,
+            notes: "idempotency-test",
+            updated_at: eventAt,
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 10000,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: eventAt
+              }
+            ]
+          }
+        ],
+        order_updates: []
+      };
+
+      const firstResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(firstPayload)
+      });
+      assert.equal(firstResponse.status, 200);
+
+      // Send an order update with base_order_updated_at
+      const updatePayload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: baseOrderUpdatedAt,
+            event_type: "ITEM_ADDED",
+            delta_json: JSON.stringify({ item_id: 2, qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: eventAt,
+            created_at: eventAt
+          }
+        ]
+      };
+
+      // First attempt - should succeed
+      const firstUpdateResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(updatePayload)
+      });
+      assert.equal(firstUpdateResponse.status, 200);
+      const firstUpdateBody = await parseJsonResponse(firstUpdateResponse);
+      assert.equal(firstUpdateBody.success, true);
+      assert.deepEqual(firstUpdateBody.data.order_update_results, [
+        {
+          update_id: updateId,
+          result: "OK"
+        }
+      ]);
+
+      // Retry with same update_id - should be DUPLICATE (idempotency preserved)
+      const retryResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(updatePayload)
+      });
+      assert.equal(retryResponse.status, 200);
+      const retryBody = await parseJsonResponse(retryResponse);
+      assert.equal(retryBody.success, true);
+      assert.deepEqual(retryBody.data.order_update_results, [
+        {
+          update_id: updateId,
+          result: "DUPLICATE"
+        }
+      ]);
+
+      // Verify only ONE row exists (no duplicate created)
+      const [countRows] = await db.execute(
+        `SELECT COUNT(*) as cnt FROM pos_order_updates WHERE update_id = ?`,
+        [updateId]
+      );
+      assert.equal(Number(countRows[0].cnt), 1, "Should only have one order update (idempotency)");
+
+      // Verify base_order_updated_at_ts was correctly stored
+      const [baseRows] = await db.execute(
+        `SELECT base_order_updated_at_ts FROM pos_order_updates WHERE update_id = ?`,
+        [updateId]
+      );
+      assert.ok(baseRows.length > 0, "Should have stored base_order_updated_at_ts");
+      const expectedBaseTs = new Date(baseOrderUpdatedAt).getTime();
+      assert.equal(
+        Number(baseRows[0].base_order_updated_at_ts),
+        expectedBaseTs,
+        "base_order_updated_at_ts should be correctly stored"
+      );
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (orderId) {
+        await cleanupOrderSyncArtifacts(db, orderId);
+      }
+    }
+  }
+);
+
+localServerTest(
+  "sync push integration: order_updates multiple base versions stored without OCC rejection (Story 17.2)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_order_updates"))) {
+      t.skip("pos_order_updates table not available in current DB");
+      return;
+    }
+
+    let childProcess;
+    let orderId = "";
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      orderId = randomUUID();
+      const baseEventAt = "2026-03-20T10:00:00.000Z";
+
+      // First: create an active order snapshot
+      const firstPayload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "TAKEAWAY",
+            source_flow: "WALK_IN",
+            settlement_flow: "IMMEDIATE",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 1,
+            is_finalized: true,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: baseEventAt,
+            closed_at: null,
+            notes: "multi-base-test",
+            updated_at: baseEventAt,
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 10000,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: baseEventAt
+              }
+            ]
+          }
+        ],
+        order_updates: []
+      };
+
+      const firstResponse = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(firstPayload)
+      });
+      assert.equal(firstResponse.status, 200);
+
+      // Send multiple updates with different base versions - ALL should be accepted (no OCC rejection)
+      const updateId1 = randomUUID();
+      const updateId2 = randomUUID();
+      const updateId3 = randomUUID();
+
+      const earlierBase = "2026-03-20T09:55:00.000Z"; // Earlier than snapshot updated_at
+      const sameBase = baseEventAt; // Same as snapshot updated_at
+      const laterBase = "2026-03-20T10:05:00.000Z"; // Later than snapshot updated_at
+
+      const updatePayload1 = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [],
+        order_updates: [
+          {
+            update_id: updateId1,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: earlierBase,
+            event_type: "ITEM_ADDED",
+            delta_json: JSON.stringify({ item_id: 2, qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: "2026-03-20T10:01:00.000Z",
+            created_at: "2026-03-20T10:01:00.000Z"
+          }
+        ]
+      };
+
+      const updatePayload2 = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [],
+        order_updates: [
+          {
+            update_id: updateId2,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: sameBase,
+            event_type: "ITEM_ADDED",
+            delta_json: JSON.stringify({ item_id: 3, qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: "2026-03-20T10:02:00.000Z",
+            created_at: "2026-03-20T10:02:00.000Z"
+          }
+        ]
+      };
+
+      const updatePayload3 = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [],
+        order_updates: [
+          {
+            update_id: updateId3,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: laterBase,
+            event_type: "ITEM_ADDED",
+            delta_json: JSON.stringify({ item_id: 4, qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: "2026-03-20T10:06:00.000Z",
+            created_at: "2026-03-20T10:06:00.000Z"
+          }
+        ]
+      };
+
+      // All three updates should be accepted (no OCC rejection - no authoritative server version exists)
+      const response1 = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(updatePayload1)
+      });
+      assert.equal(response1.status, 200);
+      const body1 = await parseJsonResponse(response1);
+      assert.equal(body1.success, true);
+      assert.deepEqual(body1.data.order_update_results, [{ update_id: updateId1, result: "OK" }]);
+
+      const response2 = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(updatePayload2)
+      });
+      assert.equal(response2.status, 200);
+      const body2 = await parseJsonResponse(response2);
+      assert.equal(body2.success, true);
+      assert.deepEqual(body2.data.order_update_results, [{ update_id: updateId2, result: "OK" }]);
+
+      const response3 = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(updatePayload3)
+      });
+      assert.equal(response3.status, 200);
+      const body3 = await parseJsonResponse(response3);
+      assert.equal(body3.success, true);
+      assert.deepEqual(body3.data.order_update_results, [{ update_id: updateId3, result: "OK" }]);
+
+      // Verify all three updates were persisted with their respective base_order_updated_at_ts values
+      const [countRows] = await db.execute(
+        `SELECT COUNT(*) as cnt FROM pos_order_updates WHERE order_id = ?`,
+        [orderId]
+      );
+      assert.equal(Number(countRows[0].cnt), 3, "All three updates should be persisted (no OCC rejection)");
+
+      const [baseRows] = await db.execute(
+        `SELECT update_id, base_order_updated_at_ts
+         FROM pos_order_updates
+         WHERE order_id = ?
+         ORDER BY base_order_updated_at_ts ASC`,
+        [orderId]
+      );
+
+      assert.equal(baseRows.length, 3);
+      assert.equal(Number(baseRows[0].base_order_updated_at_ts), new Date(earlierBase).getTime());
+      assert.equal(Number(baseRows[1].base_order_updated_at_ts), new Date(sameBase).getTime());
+      assert.equal(Number(baseRows[2].base_order_updated_at_ts), new Date(laterBase).getTime());
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (orderId) {
+        await cleanupOrderSyncArtifacts(db, orderId);
+      }
+    }
+  }
+);
+
+// ===========================================================================
+// Story 17.1 Correction: Missing client created_at is accepted (contract fix)
+// ===========================================================================
+
+localServerTest(
+  "sync push integration: order_updates missing client created_at is accepted - server generates ingest time (Story 17.1 Contract Fix)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_order_updates"))) {
+      t.skip("pos_order_updates table not available in current DB");
+      return;
+    }
+
+    let childProcess;
+    let orderId = "";
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      orderId = randomUUID();
+      const updateId = randomUUID();
+
+      // Payload WITHOUT created_at field - proves contract is now optional
+      const clientEventAt = "2026-03-25T10:00:00.000Z";
+      const beforeServerTime = Date.now();
+
+      const payloadWithoutCreatedAt = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "TAKEAWAY",
+            source_flow: "WALK_IN",
+            settlement_flow: "IMMEDIATE",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 1,
+            is_finalized: true,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: clientEventAt,
+            closed_at: null,
+            notes: "contract-test-no-created-at",
+            updated_at: clientEventAt,
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 10000,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: clientEventAt
+              }
+            ]
+          }
+        ],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_ADDED",
+            delta_json: JSON.stringify({ item_id: 1, qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: clientEventAt
+            // NOTE: created_at is intentionally OMITTED to prove:
+            // 1. Schema now accepts order_updates without created_at
+            // 2. Server still generates created_at server-side regardless
+          }
+        ]
+      };
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payloadWithoutCreatedAt)
+      });
+
+      // Should succeed - missing created_at is now accepted
+      assert.equal(response.status, 200, "Missing created_at should be accepted");
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true, "Response should indicate success");
+      assert.deepEqual(body.data.order_update_results, [
+        {
+          update_id: updateId,
+          result: "OK"
+        }
+      ]);
+
+      // Verify the order update was persisted
+      const afterServerTime = Date.now();
+      const [updateRows] = await db.execute(
+        `SELECT event_at, event_at_ts, created_at
+         FROM pos_order_updates
+         WHERE update_id = ?
+         LIMIT 1`,
+        [updateId]
+      );
+      assert.equal(updateRows.length, 1, "Should find the persisted order update");
+
+      const persistedUpdate = updateRows[0];
+
+      // AC1: event_at/event_at_ts should be PRESERVED from client payload (client-authoritative)
+      const expectedEventAtMysql = "2026-03-25 10:00:00";
+      const expectedEventAtTs = new Date(clientEventAt).getTime();
+      assert.equal(
+        String(persistedUpdate.event_at),
+        expectedEventAtMysql,
+        "event_at should be preserved from client payload even when created_at is omitted"
+      );
+      assert.equal(
+        Number(persistedUpdate.event_at_ts),
+        expectedEventAtTs,
+        "event_at_ts should match client event_at even when created_at is omitted"
+      );
+
+      // AC2: created_at should still be server-generated, independent of omitted client created_at
+
+      // Verify created_at (MySQL datetime) is also server-generated
+      const persistedCreatedAt = String(persistedUpdate.created_at);
+      assert.ok(
+        /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(persistedCreatedAt),
+        "created_at should be in MySQL datetime format"
+      );
+      // The date should be today (server's current date)
+      const today = new Date().toISOString().slice(0, 10);
+      assert.ok(
+        persistedCreatedAt.startsWith(today),
+        `created_at (${persistedCreatedAt}) should be from today (${today}) - server-generated`
+      );
+    } finally {
+      await stopApiServer(childProcess);
+
+      if (orderId) {
+        await cleanupOrderSyncArtifacts(db, orderId);
+      }
+    }
+  }
+);
+
+localServerTest(
+  "sync push integration: order_updates malformed created_at is ignored, event_at validation still enforced (Story 17.1 Contract Fix)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    if (!(await hasTable(db, "pos_order_updates"))) {
+      t.skip("pos_order_updates table not available in current DB");
+      return;
+    }
+
+    let childProcess;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const orderId = randomUUID();
+      const updateId = randomUUID();
+
+      // Payload with MALFORMED created_at but VALID event_at
+      // The malformed created_at should be IGNORED, but valid event_at should be accepted
+      // Need to include active_orders first to create the order snapshot (FK constraint)
+      const clientEventAt = "2026-03-25T11:00:00.000Z";
+      const payloadWithMalformedCreatedAt = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "TAKEAWAY",
+            source_flow: "WALK_IN",
+            settlement_flow: "IMMEDIATE",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 1,
+            is_finalized: false,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: clientEventAt,
+            closed_at: null,
+            notes: "malformed-created-at-test",
+            updated_at: clientEventAt,
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 10000,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: clientEventAt
+              }
+            ]
+          }
+        ],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_ADDED",
+            delta_json: JSON.stringify({ item_id: 1, qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: clientEventAt,  // Valid event_at - should be accepted
+            created_at: "not-a-valid-datetime"  // Malformed - should be IGNORED by server
+          }
+        ]
+      };
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payloadWithMalformedCreatedAt)
+      });
+
+      // Should succeed because:
+      // 1. event_at is valid and will be used (client-authoritative)
+      // 2. created_at is malformed but will be IGNORED (server generates its own)
+      assert.equal(response.status, 200, "Malformed created_at should be ignored, request should succeed");
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+      assert.deepEqual(body.data.order_update_results, [
+        {
+          update_id: updateId,
+          result: "OK"
+        }
+      ]);
+
+      // Verify the order update was persisted with correct event_at
+      const [updateRows] = await db.execute(
+        `SELECT event_at, event_at_ts, created_at
+         FROM pos_order_updates
+         WHERE update_id = ?
+         LIMIT 1`,
+        [updateId]
+      );
+      assert.equal(updateRows.length, 1, "Should find the persisted order update");
+
+      const persistedUpdate = updateRows[0];
+
+      // event_at should be correctly persisted (client-authoritative)
+      assert.equal(
+        String(persistedUpdate.event_at),
+        "2026-03-25 11:00:00",
+        "event_at should be correctly persisted"
+      );
+
+      const persistedCreatedAt = String(persistedUpdate.created_at);
+      assert.ok(
+        /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(persistedCreatedAt),
+        "created_at should still be server-generated"
+      );
+
+      // Cleanup
+      await db.execute("DELETE FROM pos_order_updates WHERE update_id = ?", [updateId]);
+      await db.execute("DELETE FROM pos_order_snapshots WHERE order_id = ?", [orderId]);
+    } finally {
+      await stopApiServer(childProcess);
+    }
+  }
+);
+
+// ===========================================================================
+// Story 17.3: Snapshot and Cancellation Timestamp Semantics Tests
+// These tests exercise the REAL write paths through POST /sync/push
+// ===========================================================================
+
+localServerTest(
+  "sync push integration: active_orders retain opened_at_ts and updated_at_ts semantics after created_at_ts cleanup (Story 17.3/18.1)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let childProcess;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const orderId = randomUUID();
+      const clientUpdatedAt = "2026-03-20T10:00:00.000Z"; // Client says snapshot was generated at 10:00
+      const beforeServerTime = Date.now();
+
+      // Send active_orders through the REAL endpoint (POST /sync/push)
+      const payload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [
+          {
+            order_id: orderId,
+            company_id: companyId,
+            outlet_id: outletId,
+            service_type: "TAKEAWAY",
+            source_flow: "WALK_IN",
+            settlement_flow: "IMMEDIATE",
+            table_id: null,
+            reservation_id: null,
+            guest_count: 1,
+            is_finalized: false,
+            order_status: "OPEN",
+            order_state: "OPEN",
+            paid_amount: 0,
+            opened_at: "2026-03-20T09:00:00.000Z", // Client says order opened at 09:00
+            closed_at: null,
+            notes: "Story 17.3 snapshot test",
+            updated_at: clientUpdatedAt, // Client says snapshot was generated at 10:00
+            lines: [
+              {
+                item_id: 1,
+                sku_snapshot: null,
+                name_snapshot: "Test Item",
+                item_type_snapshot: "PRODUCT",
+                unit_price_snapshot: 10000,
+                qty: 1,
+                discount_amount: 0,
+                updated_at: clientUpdatedAt // Client says line updated at 10:00
+              }
+            ]
+          }
+        ],
+        order_updates: [],
+        item_cancellations: []
+      };
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(response.status, 200);
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+
+      const afterServerTime = Date.now();
+
+      // Verify pos_order_snapshots timestamps through REAL implementation path
+      const [snapshotRows] = await db.execute(
+        `SELECT opened_at_ts, closed_at_ts, updated_at_ts
+         FROM pos_order_snapshots
+         WHERE order_id = ?
+         LIMIT 1`,
+        [orderId]
+      );
+      assert.equal(snapshotRows.length, 1, "Should find persisted snapshot");
+
+      const persistedSnapshot = snapshotRows[0];
+
+      // AC1: opened_at_ts, updated_at_ts are CLIENT-AUTHORITATIVE (preserved from payload)
+      const expectedOpenedAtTs = new Date("2026-03-20T09:00:00.000Z").getTime();
+      assert.ok(
+        Math.abs(Number(persistedSnapshot.opened_at_ts) - expectedOpenedAtTs) < 1000,
+        `opened_at_ts should preserve client-authored state-transition time (expected ~${expectedOpenedAtTs}, got ${persistedSnapshot.opened_at_ts})`
+      );
+
+      const expectedUpdatedAtTs = new Date(clientUpdatedAt).getTime();
+      assert.ok(
+        Math.abs(Number(persistedSnapshot.updated_at_ts) - expectedUpdatedAtTs) < 1000,
+        `updated_at_ts should preserve client-authored snapshot freshness (expected ~${expectedUpdatedAtTs}, got ${persistedSnapshot.updated_at_ts})`
+      );
+
+      // Verify pos_order_snapshot_lines timestamps through REAL implementation path
+      const [lineRows] = await db.execute(
+        `SELECT updated_at_ts
+         FROM pos_order_snapshot_lines
+         WHERE order_id = ?
+         LIMIT 1`,
+        [orderId]
+      );
+      assert.equal(lineRows.length, 1, "Should find persisted snapshot line");
+
+      const persistedLine = lineRows[0];
+
+      // AC1: updated_at_ts for lines is snapshot freshness (from line's updated_at)
+      assert.ok(
+        Math.abs(Number(persistedLine.updated_at_ts) - expectedUpdatedAtTs) < 1000,
+        `line updated_at_ts should preserve client-authored snapshot freshness`
+      );
+
+
+      // Cleanup
+      await db.execute("DELETE FROM pos_order_snapshot_lines WHERE order_id = ?", [orderId]);
+      await db.execute("DELETE FROM pos_order_snapshots WHERE order_id = ?", [orderId]);
+    } finally {
+      await stopApiServer(childProcess);
+    }
+  }
+);
+
+localServerTest(
+  "sync push integration: item_cancellations retain cancelled_at_ts semantics after created_at_ts cleanup (Story 17.3/18.1)",
+  { timeout: TEST_TIMEOUT_MS, concurrency: false },
+  async (t) => {
+    if (typeof loadEnvFile === "function" && existsSync(ENV_PATH)) {
+      loadEnvFile(ENV_PATH);
+    }
+
+    const db = testContext.db;
+    let childProcess;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_outlets uo ON uo.user_id = u.id
+         INNER JOIN outlets o ON o.id = uo.outlet_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+      const owner = ownerRows[0];
+      if (!owner) {
+        throw new Error(
+          "owner fixture not found; run `npm run db:migrate && npm run db:seed` before integration tests"
+        );
+      }
+
+      const ownerUserId = Number(owner.id);
+      const companyId = Number(owner.company_id);
+      const outletId = Number(owner.outlet_id);
+
+      const port = await getFreePort();
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const server = startApiServer(port, { enableSyncPushTestHooks: true });
+      childProcess = server.childProcess;
+      await waitForHealthcheck(baseUrl, childProcess, server.serverLogs);
+
+      const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          companyCode,
+          email: ownerEmail,
+          password: ownerPassword
+        })
+      });
+      assert.equal(loginResponse.status, 200);
+      const loginBody = await parseJsonResponse(loginResponse);
+      assert.equal(loginBody.success, true);
+      const accessToken = loginBody.data.access_token;
+
+      const orderId = randomUUID();
+      const snapshotId = randomUUID();
+      const updateId = randomUUID();
+      const cancellationId = randomUUID();
+      const clientCancelledAt = "2026-03-20T11:00:00.000Z"; // Client says cancellation happened at 11:00
+      const beforeServerTime = Date.now();
+
+      // First create a snapshot to satisfy FK constraints
+      await db.execute(
+        `INSERT INTO pos_order_snapshots
+         (order_id, company_id, outlet_id, service_type, order_state, order_status,
+          is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts,
+          created_at)
+         VALUES (?, ?, ?, 'TAKEAWAY', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?, NOW())`,
+        [snapshotId, companyId, outletId, Date.now(), Date.now()]
+      );
+
+      // Send item_cancellations through the REAL endpoint (POST /sync/push)
+      const payload = {
+        outlet_id: outletId,
+        transactions: [],
+        active_orders: [],
+        order_updates: [
+          {
+            update_id: updateId,
+            order_id: snapshotId,
+            company_id: companyId,
+            outlet_id: outletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_CANCELLED",
+            delta_json: JSON.stringify({ reason: "Story 17.3 cancellation test", cancelled_qty: 1 }),
+            actor_user_id: ownerUserId,
+            device_id: "WEB_POS",
+            event_at: clientCancelledAt,
+            created_at: clientCancelledAt
+          }
+        ],
+        item_cancellations: [
+          {
+            cancellation_id: cancellationId,
+            update_id: updateId,
+            order_id: snapshotId,
+            item_id: 1,
+            company_id: companyId,
+            outlet_id: outletId,
+            cancelled_quantity: 1,
+            reason: "Story 17.3 cancellation test",
+            cancelled_by_user_id: ownerUserId,
+            cancelled_at: clientCancelledAt // Client says cancellation happened at 11:00
+          }
+        ]
+      };
+
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(response.status, 200);
+      const body = await parseJsonResponse(response);
+      assert.equal(body.success, true);
+
+      const afterServerTime = Date.now();
+
+      // Verify pos_item_cancellations timestamps through REAL implementation path
+      const [cancelRows] = await db.execute(
+        `SELECT cancelled_at_ts
+         FROM pos_item_cancellations
+         WHERE cancellation_id = ?
+         LIMIT 1`,
+        [cancellationId]
+      );
+      assert.equal(cancelRows.length, 1, "Should find persisted cancellation");
+
+      const persistedCancellation = cancelRows[0];
+
+      // AC2: cancelled_at_ts is CLIENT-AUTHORITATIVE (preserved from payload)
+      const expectedCancelledAtTs = new Date(clientCancelledAt).getTime();
+      assert.ok(
+        Math.abs(Number(persistedCancellation.cancelled_at_ts) - expectedCancelledAtTs) < 1000,
+        `cancelled_at_ts should preserve client-authored cancellation time (expected ~${expectedCancelledAtTs}, got ${persistedCancellation.cancelled_at_ts})`
+      );
+
+
+      // Cleanup
+      await db.execute("DELETE FROM pos_item_cancellations WHERE cancellation_id = ?", [cancellationId]);
+      await db.execute("DELETE FROM pos_order_snapshots WHERE order_id = ?", [snapshotId]);
+    } finally {
+      await stopApiServer(childProcess);
     }
   }
 );

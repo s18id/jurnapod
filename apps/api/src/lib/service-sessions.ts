@@ -3,7 +3,7 @@
 
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
-import { getDbPool } from "@/lib/db";
+import { getDbPool } from "./db";
 import {
   ServiceSessionStatus,
   ServiceSessionLineState,
@@ -1672,21 +1672,16 @@ async function syncSnapshotLinesFromSession(
   );
 
   const finalizedFilter = params.onlyFinalized ? "AND COALESCE(l.line_state, 1) = ?" : "";
-  const queryParams: (string | bigint | number)[] = [
-    params.snapshotId,
-    params.companyId,
-    params.outletId,
-    params.sessionId,
-  ];
-
-  if (params.onlyFinalized) {
-    queryParams.push(ServiceSessionLineState.FINALIZED);
-  }
-
+  // Snapshot-line timestamp semantics for service-session aggregation:
+  // - updated_at / updated_at_ts: snapshot freshness, derived from the latest source line update
+  // - created_at_ts: removed per ADR-0001 / Story 18.1 (created_at is retained)
+  //
+  // This path does not have source `_ts` columns, but it does have source `updated_at` DATETIME.
+  // We therefore derive freshness from MAX(l.updated_at) rather than fabricating chronology.
   const [insertResult] = await connection.execute<ResultSetHeader>(
     `INSERT INTO pos_order_snapshot_lines
      (order_id, company_id, outlet_id, item_id, sku_snapshot, name_snapshot,
-      item_type_snapshot, unit_price_snapshot, qty, discount_amount, updated_at, created_at)
+      item_type_snapshot, unit_price_snapshot, qty, discount_amount, updated_at, updated_at_ts)
      SELECT
        ? AS order_id,
        ? AS company_id,
@@ -1698,14 +1693,20 @@ async function syncSnapshotLinesFromSession(
        ROUND(MAX(l.unit_price), 2) AS unit_price_snapshot,
        SUM(l.quantity) AS qty,
        ROUND(SUM(l.discount_amount), 2) AS discount_amount,
-       NOW() AS updated_at,
-       NOW() AS created_at
+       MAX(l.updated_at) AS updated_at,
+       UNIX_TIMESTAMP(MAX(l.updated_at)) * 1000 AS updated_at_ts
      FROM table_service_session_lines l
      WHERE l.session_id = ?
        AND l.is_voided = 0
        ${finalizedFilter}
      GROUP BY l.product_id`,
-    queryParams
+    [
+      params.snapshotId,
+      params.companyId,
+      params.outletId,
+      params.sessionId,
+      ...(params.onlyFinalized ? [ServiceSessionLineState.FINALIZED] : [])
+    ]
   );
 
   return insertResult.affectedRows;

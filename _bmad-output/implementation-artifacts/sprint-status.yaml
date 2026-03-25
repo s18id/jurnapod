@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-23T10:00:00+0700
+last_updated: 2026-03-25T12:00:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -252,3 +252,31 @@ development_status:
   15-5-1-dine-in-routes: done  # COMPLETE - Hono dine-in routes with outlet access validation, 6 tests passing, code review clean
   15-5-2-report-routes: done  # COMPLETE - Report routes with 24 tests passing, code review clean
   15-5-3-journal-routes: done  # COMPLETE - Journal routes with 15 tests passing, code review clean
+
+  # Epic 16: Unified Time Handling via date-helpers
+  # NOTE: Foundation epic for canonical UTC/business-date/epoch handling across API/POS/backoffice
+  epic-16: done
+  16-1-define-date-helpers-contract: done  # COMPLETE - Public contract defined, @js-temporal/polyfill internals, 105 tests, all review rounds passed (P0/P1 cleared, P2/P3 resolved), committed
+  16-2-implement-temporal-backed-date-helpers: done  # COMPLETE - Temporal internals done as part of 16.1 fix pass; normalizeDateWithTime + fromUtcInstant use Temporal
+  16-3-define-dst-ambiguity-policy: done  # COMPLETE - reject-by-default policy documented in module JSDoc + resolveEventTime JSDoc; 4 DST tests verify deterministic behavior; 105 tests passing
+  16-4-add-date-helpers-test-coverage: done  # COMPLETE - 117 tests, UTC/epoch roundtrip suites, resolveEventTimeDetails with aligned atUtc/ts/businessDate/timezone contract, AC1-3 met
+  16-5-migrate-adr-0001-critical-call-sites-to-date-helpers: done  # COMPLETE - sync/reservation paths migrated, MySQL datetime normalization centralized in date-helpers, targeted tests + typecheck passing
+
+  # Epic 17: Reliable POS Sync and Reservation Time Semantics
+  # NOTE: Applies explicit _ts authority and reservation boundary semantics on top of Epic 16
+  epic-17: in-progress
+  17-1-enforce-ts-authority-rules-in-sync-update-ingestion: done
+  17-2-preserve-base-order-updated-at-ts-version-marker: done
+  17-3-apply-canonical-ts-semantics-to-snapshot-and-cancellation-writes: done
+  17-4-preserve-reservation-boundary-timestamp-behavior: done
+  17-5-prevent-unintended-ts-exposure-in-public-contracts: done
+
+  # Epic 18: Redundant Timestamp Cleanup and Schema Alignment
+  # NOTE: Cleanup epic for removing redundant created_at_ts columns after validation
+  epic-18: done
+  18-1-remove-dropped-column-references-from-active-write-paths: done
+  18-2-remove-dropped-column-references-from-tests-and-fixtures: done
+  18-3-prepare-created-at-ts-columns-for-nullable-default: done  # added DEFAULT NULL prep + DB-owned created_at default
+  18-3b-add-guarded-drop-migration-for-redundant-created-at-ts-columns: done  # guarded DROP for pos_order_updates / pos_order_snapshots / pos_order_snapshot_lines / pos_item_cancellations
+  18-4-validate-post-cleanup-sync-and-reservation-regressions: done
+  18-5-refresh-schema-baselines-and-documentation: done

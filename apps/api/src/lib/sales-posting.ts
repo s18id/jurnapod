@@ -10,6 +10,7 @@ import {
 } from "@jurnapod/shared";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
+import { toMysqlDateTime, toMysqlDateTimeFromDateLike } from "./date-helpers";
 import type { SalesInvoiceDetail, SalesPayment } from "./sales";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 
@@ -536,15 +537,6 @@ class SalesPostingRepository implements PostingRepository {
   }
 }
 
-function toMysqlDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid datetime");
-  }
-
-  return date.toISOString().slice(0, 19).replace("T", " ");
-}
-
 function toDateOnly(value: string): string {
   if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
     return value.slice(0, 10);
@@ -681,7 +673,7 @@ export async function postCreditNoteToJournal(
   };
 
   const postingService = new PostingService(
-    new SalesPostingRepository(dbExecutor, toMysqlDateTime(creditNote.updated_at)),
+    new SalesPostingRepository(dbExecutor, toMysqlDateTimeFromDateLike(creditNote.updated_at)),
     {
       [SALES_CREDIT_NOTE_DOC_TYPE]: new SalesCreditNotePostingMapper(dbExecutor, creditNote)
     }
@@ -747,7 +739,7 @@ export async function voidCreditNoteToJournal(
   };
 
   const postingService = new PostingService(
-    new SalesPostingRepository(dbExecutor, toMysqlDateTime(creditNote.updated_at)),
+    new SalesPostingRepository(dbExecutor, toMysqlDateTimeFromDateLike(creditNote.updated_at)),
     {
       [`${SALES_CREDIT_NOTE_DOC_TYPE}_VOID`]: new VoidCreditNotePostingMapper(dbExecutor, creditNote)
     }

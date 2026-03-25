@@ -473,28 +473,9 @@ test(
       // ========================================
       // Cleanup
       // ========================================
-
-      // Delete journal lines and batches for created payments
-      if (createdPaymentIds.length > 0) {
-        const payPlaceholders = createdPaymentIds.map(() => "?").join(", ");
-        
-        await db.execute(
-          `DELETE jl FROM journal_lines jl
-           INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-           WHERE jb.company_id = ?
-             AND jb.doc_id IN (${payPlaceholders})
-             AND jb.doc_type = 'SALES_PAYMENT_IN'`,
-          [companyAId, ...createdPaymentIds]
-        );
-
-        await db.execute(
-          `DELETE FROM journal_batches
-           WHERE company_id = ?
-             AND doc_id IN (${payPlaceholders})
-             AND doc_type = 'SALES_PAYMENT_IN'`,
-          [companyAId, ...createdPaymentIds]
-        );
-      }
+      // Note: journal_lines and journal_batches are immutable (protected by triggers)
+      // and cannot be deleted directly. Payments and invoices are deleted below.
+      // The journal entries will remain but this is acceptable for test cleanup.
 
       // Delete payments
       if (createdPaymentIds.length > 0) {

@@ -1,9 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { readdir } from "node:fs/promises";
-import { dirname, join, relative, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { compress } from "hono/compress";
@@ -16,6 +15,7 @@ import { initWebSocketManager } from "./lib/websocket/index.js";
 import { stockRoutes } from "./routes/stock.js";
 import { syncRoutes } from "./routes/sync.js";
 import { salesRoutes } from "./routes/sales.js";
+import { inventoryRoutes } from "./routes/inventory.js";
 import { healthRoutes } from "./routes/health.js";
 import { rolesRoutes } from "./routes/roles.js";
 import { authRoutes } from "./routes/auth.js";
@@ -24,6 +24,16 @@ import { reportRoutes } from "./routes/reports.js";
 import { accountRoutes } from "./routes/accounts.js";
 import { companyRoutes } from "./routes/companies.js";
 import { dineinRoutes } from "./routes/dinein.js";
+import { usersRoutes } from "./routes/users.js";
+import { taxRatesRoutes } from "./routes/tax-rates.js";
+import { modulesRoutes } from "./routes/settings-modules.js";
+import { moduleRolesRoutes } from "./routes/settings-module-roles.js";
+import { adminPagesRoutes, publicPagesRoutes } from "./routes/settings-pages.js";
+import { settingsConfigRoutes } from "./routes/settings-config.js";
+import { outletsRoutes } from "./routes/outlets.js";
+import { recipesRoutes } from "./routes/recipes.js";
+import { cashBankTransactionsRoutes } from "./routes/cash-bank-transactions.js";
+import { suppliesRoutes } from "./routes/supplies.js";
 import { printRoutes } from "./lib/routes.js";
 
 // Validate environment configuration before starting server
@@ -80,129 +90,7 @@ function getAllowedOrigins(): string[] {
     .filter((origin) => origin.length > 0);
 }
 
-function toApiRoutePath(routesRoot: string, routeFilePath: string): string {
-  const routeDir = dirname(routeFilePath);
-  const routeRelativeDir = relative(routesRoot, routeDir);
-  const routeSegments = routeRelativeDir === "." ? "" : routeRelativeDir.split(sep).join("/");
-  const nextStylePath = routeSegments.length > 0 ? `/api/${routeSegments}` : "/api";
-  return nextStylePath.replace(/\[([^\]]+)\]/g, ":$1");
-}
-
-async function listRouteFiles(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const files: string[] = [];
-  const dynamics: string[] = [];
-
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name.startsWith("[")) {
-        dynamics.push(...(await listRouteFiles(fullPath)))
-      } else {
-        files.push(...(await listRouteFiles(fullPath)));
-      }
-      continue;
-    }
-
-    if (entry.isFile() && entry.name === "route.ts") {
-      files.push(fullPath);
-    }
-  }
-
-  if (dynamics.length > 0) {
-    for (const dynamic of dynamics) {
-      if (dynamic.length > 0){
-          files.push(dynamic)
-      }
-    }
-  }
-
-  return files;
-}
-
-function cloneRequestForHandler(request: Request): Request {
-  const isBodylessMethod = request.method === "GET" || request.method === "HEAD";
-  const init: RequestInit = {
-    method: request.method,
-    headers: request.headers,
-    body: isBodylessMethod ? undefined : request.body
-  };
-  // Required for streaming bodies in Node.js fetch
-  if (!isBodylessMethod && request.body) {
-    (init as any).duplex = 'half';
-  }
-  return new Request(request.url, init);
-}
-
-function registerRoute(app: Hono, routePath: string, method: HttpMethod, handler: (request: Request) => Promise<Response> | Response): void {
-  const wrappedHandler = async (c: Context) => {
-    const startTime = Date.now();
-    const origin = c.req.header("origin") ?? null;
-    const requestForHandler = cloneRequestForHandler(c.req.raw);
-
-    try {
-      const response = await handler(requestForHandler);
-      if (shouldLog(c.req.path)) {
-        logRequest(c.req.method, c.req.path, response.status, Date.now() - startTime, origin);
-      }
-      
-      // Return response and let Hono handle it
-      return response;
-    } catch (error) {
-      console.error(`Route handler failed for ${method} ${routePath}`, error);
-      
-      if (shouldLog(c.req.path)) {
-        logRequest(c.req.method, c.req.path, 500, Date.now() - startTime, origin);
-      }
-      
-      return c.json(
-        {
-          success: false,
-          error: {
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Internal Server Error"
-          }
-        },
-        500
-      );
-    }
-  };
-
-  switch (method) {
-    case "GET":
-      app.get(routePath, wrappedHandler);
-      break;
-    case "POST":
-      app.post(routePath, wrappedHandler);
-      break;
-    case "PUT":
-      app.put(routePath, wrappedHandler);
-      break;
-    case "PATCH":
-      app.patch(routePath, wrappedHandler);
-      break;
-    case "DELETE":
-      app.delete(routePath, wrappedHandler);
-      break;
-  }
-}
-
-async function registerRoutes(app: Hono): Promise<void> {
-  const routesRoot = join(__dirname, "..", "app", "api");
-  const routeFiles = await listRouteFiles(routesRoot);
-
-  for (const routeFilePath of routeFiles) {
-    const routePath = toApiRoutePath(routesRoot, routeFilePath);
-    const routeModule = (await import(pathToFileURL(routeFilePath).href)) as RouteModule;
-
-    for (const method of HTTP_METHODS) {
-      const handler = routeModule[method];
-      if (typeof handler === "function") {
-        registerRoute(app, routePath, method, handler);
-      }
-    }
-  }
-}
+// Clean Hono-only server - no messy subfolder routing
 
 const app = new Hono();
 const allowedOrigins = getAllowedOrigins();
@@ -242,31 +130,55 @@ app.use("/api/*", async (c: any, next: () => Promise<void>) => {
 });
 
 // Register stock routes using Hono's app.route() pattern
-// URL standardization: /outlets/:outletId/stock/* (RESTful nesting)
-app.route("/outlets/:outletId/stock", stockRoutes);
+// URL standardization: /api/outlets/:outletId/stock/* (RESTful nesting)
+app.route("/api/outlets/:outletId/stock", stockRoutes);
 
 // Register sync routes using Hono's app.route() pattern
-// URL standardization: /sync/* (cross-outlet operation)
-app.route("/sync", syncRoutes);
+// URL standardization: /api/sync/* (cross-outlet operation)
+app.route("/api/sync", syncRoutes);
 
 // Register sales routes using Hono's app.route() pattern
-app.route("/sales", salesRoutes);
+app.route("/api/sales", salesRoutes);
 
 // Register health routes (no auth required)
-app.route("/health", healthRoutes);
+app.route("/api/health", healthRoutes);
 
 // Register auth routes (special handling - no auth for login)
-app.route("/auth", authRoutes);
+app.route("/api/auth", authRoutes);
 
 // Register remaining route groups
-app.route("/roles", rolesRoutes);
-app.route("/journals", journalRoutes);
-app.route("/reports", reportRoutes);
-app.route("/accounts", accountRoutes);
-app.route("/companies", companyRoutes);
-app.route("/dinein", dineinRoutes);
+app.route("/api/roles", rolesRoutes);
+app.route("/api/journals", journalRoutes);
+app.route("/api/reports", reportRoutes);
+app.route("/api/accounts", accountRoutes);
+app.route("/api/companies", companyRoutes);
+app.route("/api/dinein", dineinRoutes);
 
-await registerRoutes(app);
+// Register inventory routes using clean Hono structure  
+app.route("/api/inventory", inventoryRoutes);
+
+// Register users routes
+app.route("/api/users", usersRoutes);
+
+// Register tax rates routes  
+app.route("/api/settings/tax-rates", taxRatesRoutes);
+app.route("/api/settings/modules", modulesRoutes);
+app.route("/api/settings/module-roles", moduleRolesRoutes);
+app.route("/api/settings/config", settingsConfigRoutes);
+app.route("/api/settings/pages", adminPagesRoutes);
+app.route("/api/pages", publicPagesRoutes);
+
+// Register outlets routes
+app.route("/api/outlets", outletsRoutes);
+
+// Register recipe routes under inventory
+app.route("/api/inventory/recipes", recipesRoutes);
+
+// Register cash bank transactions routes
+app.route("/api/cash-bank-transactions", cashBankTransactionsRoutes);
+
+// Register supplies routes under inventory
+app.route("/api/inventory/supplies", suppliesRoutes);
 
 // Initialize sync modules after routes are registered
 try {

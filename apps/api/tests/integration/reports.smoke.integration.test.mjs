@@ -149,7 +149,7 @@ test(
       const posBody = await posResponse.json();
       assert.equal(posBody.success, true);
       assert.equal(Array.isArray(posBody.data.transactions), true);
-      assert.equal(typeof posBody.data.total, "number");
+      assert.equal(typeof posBody.data.pagination.total, "number");
 
       const dailySalesResponse = await fetch(
         `${baseUrl}/api/reports/daily-sales?outlet_id=${outletId}&date_from=${dateFromIso}&date_to=${dateToIso}`,
@@ -200,14 +200,10 @@ test(
       assert.equal(Number(fixtureRow.total_debit), 100);
       assert.equal(Number(fixtureRow.total_credit), 100);
     } finally {
-      if (journalBatchId > 0) {
-        await db.execute("DELETE FROM journal_lines WHERE journal_batch_id = ?", [journalBatchId]);
-        await db.execute("DELETE FROM journal_batches WHERE id = ?", [journalBatchId]);
-      }
-
-      if (accountId > 0) {
-        await db.execute("DELETE FROM accounts WHERE id = ?", [accountId]);
-      }
+      // Note: journal_lines are immutable (enforced by trigger) - cannot delete
+      // journal_batches cannot be deleted due to FK constraint with journal_lines
+      // Accounts referenced by journal_lines cannot be deleted due to FK constraint
+      // Test data will remain as immutable records
 
       if (txClientId) {
         await db.execute("DELETE FROM pos_transactions WHERE client_tx_id = ?", [txClientId]);

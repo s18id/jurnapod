@@ -73,11 +73,7 @@ export async function createTestFixture(
   );
   const userId = Number((userResult as any).insertId);
   
-  // Assign user to outlet
-  await dbPool.execute(
-    `INSERT INTO user_outlets (user_id, outlet_id, created_at) VALUES (?, ?, NOW())`,
-    [userId, outletId]
-  );
+  // Note: User outlet access is determined by role assignments, not user_outlets table
   
   // Assign OWNER role (global role, so outlet_id is NULL)
   await dbPool.execute(
@@ -93,7 +89,7 @@ export async function createTestFixture(
     cleanup: async () => {
       // Cleanup in reverse order
       await dbPool.execute('DELETE FROM user_role_assignments WHERE user_id = ?', [userId]);
-      await dbPool.execute('DELETE FROM user_outlets WHERE user_id = ?', [userId]);
+
       await dbPool.execute('DELETE FROM users WHERE id = ?', [userId]);
       await dbPool.execute('DELETE FROM outlets WHERE id = ?', [outletId]);
       await dbPool.execute('DELETE FROM companies WHERE id = ?', [companyId]);
