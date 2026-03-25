@@ -99,9 +99,20 @@ openai/gpt-5.4
   - reservations.ts: mapRow uses fromEpochMs for ts→ISO conversion; toIso kept as Date→ISO for DB layer compat
   - sync/push.ts: normalizeTrxAtForHash uses toEpochMs(toUtcInstant()) instead of raw new Date().getTime()
   - sync/push.ts active-order, order-update, snapshot-line, and cancellation `_ts` writes now use date-helpers-backed normalization instead of raw Date parsing
+  - strict `toMysqlDateTime()` and compatibility `toMysqlDateTimeFromDateLike()` now live in `date-helpers` as the single shared MySQL datetime normalization API
+  - duplicate MySQL datetime helpers were removed from sync-push-posting, reports, depreciation-posting, sales-posting, sales, and cash-bank
   - packages/shared pos-sync schema now requires timezone offsets on sync order/update/cancellation timestamp fields
   - Both files import from date-helpers.ts
-- 677 API unit tests passing (previous run), plus direct sync-push timestamp regression tests for malformed and valid order-update payloads
+- Validation evidence:
+  - `npm run test:single apps/api/src/lib/date-helpers.test.ts` ✅ (126/126)
+  - `npm run test:single apps/api/src/routes/sync/push.test.ts` ✅ (34/34)
+  - `npm run test:single apps/api/src/routes/reports.test.ts` ✅ (24/24)
+  - `npm run test:single apps/api/src/lib/cash-bank.test.ts` ✅ (16/16)
+  - `npm run test:single apps/api/src/lib/sales-posting-fallback.test.ts` ✅ (11/11)
+  - `npm run test:single apps/api/src/lib/sales.payment-variance.test.ts` ✅ (21/21)
+  - `npm run test:single apps/api/src/lib/sales.test.ts` ✅ (35/35)
+  - `npm run typecheck -w @jurnapod/api` ✅
+- Known limitation: `sales.idempotency.test.ts` could not be executed directly because the test runner still fails to resolve an existing `@/services` alias import in `sales.ts`.
 - Note: DB layer toIso keeps Date parsing (not toUtcInstant) for MySQL DATETIME format compat ('YYYY-MM-DD HH:MM:SS'). API-layer (user input) functions use date-helpers validation.
 
 ### File List
@@ -109,6 +120,13 @@ openai/gpt-5.4
 - `apps/api/src/lib/reservations.ts`  (date-helpers import, toUnixMs uses toEpochMs, mapRow uses fromEpochMs)
 - `apps/api/src/routes/sync/push.ts`  (date-helpers import, normalizeTrxAtForHash uses toEpochMs+toUtcInstant)
 - `apps/api/src/lib/date-helpers.ts`
+- `apps/api/src/lib/reports.ts`
+- `apps/api/src/lib/sync-push-posting.ts`
+- `apps/api/src/lib/depreciation-posting.ts`
+- `apps/api/src/lib/sales-posting.ts`
+- `apps/api/src/lib/sales.ts`
+- `apps/api/src/lib/cash-bank.ts`
 - `apps/api/src/routes/sync/push.test.ts`  (sync timestamp regression coverage added)
 - `apps/api/src/lib/reservations.test.ts`  (12/12 tests pass)
+- `apps/api/src/lib/date-helpers.test.ts`
 - `packages/shared/src/schemas/pos-sync.ts`

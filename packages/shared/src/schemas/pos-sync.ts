@@ -116,7 +116,11 @@ export const SyncPushRequestSchema = z.object({
         actor_user_id: NumericIdSchema.nullable(),
         device_id: z.string().min(1),
         event_at: z.string().datetime({ offset: true }),
-        created_at: z.string().datetime({ offset: true })
+        // created_at is SERVER-authoritative ingest metadata, not client truth.
+        // It is optional because the server generates it at ingest time.
+        // Clients SHOULD NOT send this field; if sent, it is IGNORED.
+        // Since the server ignores this field entirely, no validation is performed on it.
+        created_at: z.string().optional()
       })
     )
     .optional(),

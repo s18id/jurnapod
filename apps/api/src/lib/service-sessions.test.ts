@@ -875,6 +875,129 @@ test(
 );
 
 // ============================================================================
+// TEST 10b: closeSession - snapshot lines have correct timestamp semantics (Story 17.3)
+// This test exercises syncSnapshotLinesFromSession through the closeSession path
+// and verifies the snapshot line timestamps follow the expected semantics:
+// - updated_at_ts: snapshot freshness derived from source line updated_at
+// - created_at_ts: server ingest time for the materialized snapshot-line row
+// ============================================================================
+test(
+  "closeSession - snapshot lines derive freshness from source lines and ingest from server time (Story 17.3)",
+  { concurrency: false, timeout: 30000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+    const { companyId, outletId } = await resolveFixtureContext();
+    const createdSessionIds: bigint[] = [];
+    const createdTableIds: bigint[] = [];
+    const snapshotId = `snap-ts-${runId}`.slice(0, 36);
+
+    try {
+      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      createdTableIds.push(tableId);
+
+      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      createdSessionIds.push(sessionId);
+
+      // Create and link a snapshot
+      const nowTs = Date.now();
+      await pool.execute(
+        `INSERT INTO pos_order_snapshots
+         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts, created_at_ts)
+         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?, ?)`,
+        [snapshotId, companyId, outletId, nowTs, nowTs, nowTs]
+      );
+
+      // Update session to be ACTIVE with snapshot link (simulating lock being called)
+      await pool.execute(
+        `UPDATE table_service_sessions
+         SET pos_order_snapshot_id = ?
+         WHERE id = ?`,
+        [snapshotId, sessionId]
+      );
+
+      // Add a session line (this is what will be synced to snapshot lines)
+      const productId = await getOrCreateTestItem(pool, companyId);
+      const sourceLineUpdatedAt = new Date("2026-03-20T10:15:00.000Z");
+      await pool.execute(
+        `INSERT INTO table_service_session_lines
+          (session_id, line_number, product_id, product_name, product_sku, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
+         VALUES (?, 1, ?, 'Test Product', 'TEST-SKU', 2, 15.00, 0, 0, 30.00, 0, NOW(), ?)`,
+        [sessionId, productId, sourceLineUpdatedAt]
+      );
+
+      const beforeClose = Date.now();
+
+      // Close the session - this triggers syncSnapshotLinesFromSession internally
+      const input: CloseSessionInput = {
+        companyId,
+        outletId,
+        sessionId,
+        clientTxId: `close-ts-${runId}`,
+        updatedBy: "test-user"
+      };
+
+      const closedSession = await closeSession(input);
+
+      const afterClose = Date.now();
+
+      assert.equal(closedSession.id, sessionId, "Session ID should match");
+      assert.equal(closedSession.statusId, ServiceSessionStatus.CLOSED, "Status should be CLOSED");
+
+      // Verify the snapshot line timestamps
+      const [lineRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT updated_at_ts, created_at_ts
+         FROM pos_order_snapshot_lines
+         WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
+        [snapshotId, companyId, outletId]
+      );
+
+      assert.ok(lineRows.length > 0, "Should have created snapshot lines via syncSnapshotLinesFromSession");
+
+      const { updated_at_ts, created_at_ts } = lineRows[0];
+
+      const storedUpdatedAtTs = Number(updated_at_ts);
+      const storedCreatedAtTs = Number(created_at_ts);
+      const [expectedRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT UNIX_TIMESTAMP(?) * 1000 AS expected_updated_at_ts`,
+        [sourceLineUpdatedAt]
+      );
+      const expectedUpdatedAtTs = Number(expectedRows[0].expected_updated_at_ts);
+
+      // updated_at_ts is derived from the latest source line updated_at
+      assert.ok(
+        Math.abs(storedUpdatedAtTs - expectedUpdatedAtTs) < 1000,
+        `updated_at_ts (${storedUpdatedAtTs}) should reflect source line freshness (~${expectedUpdatedAtTs})`
+      );
+
+      // created_at_ts is the server ingest time for the materialized snapshot-line row
+      assert.ok(
+        storedCreatedAtTs >= beforeClose && storedCreatedAtTs <= afterClose + 1000,
+        `created_at_ts (${storedCreatedAtTs}) should be within server time window [${beforeClose}, ${afterClose + 1000}]`
+      );
+
+      // The two retained timestamps have distinct meanings and therefore should differ here.
+      assert.notEqual(
+        storedUpdatedAtTs,
+        storedCreatedAtTs,
+        "updated_at_ts should reflect source freshness while created_at_ts reflects server ingest"
+      );
+
+    } finally {
+      await pool.execute(
+        `DELETE FROM pos_order_snapshot_lines WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
+        [snapshotId, companyId, outletId]
+      );
+      await pool.execute(
+        `DELETE FROM pos_order_snapshots WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
+        [snapshotId, companyId, outletId]
+      );
+      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+    }
+  }
+);
+
+// ============================================================================
 // TEST 11: closeSession - rejects if already closed
 // ============================================================================
 test(

@@ -625,4 +625,13 @@ describe("Sync Push Routes", { concurrency: false }, () => {
       assert.equal(result.length, 1, "Should filter out zero-amount tax");
     });
   });
+
+  // ===========================================================================
+  // Snapshot and Cancellation Timestamp Semantics Tests (Story 17.3)
+  // NOTE: Real implementation-path tests are in the integration test file:
+  // apps/api/tests/integration/sync-push.integration.test.mjs
+  // These tests verify the actual POST /sync/push endpoint writes:
+  // - "sync push integration: active_orders created_at_ts is server-ingest..."
+  // - "sync push integration: item_cancellations cancelled_at_ts is client-authored..."
+  // ===========================================================================
 });
