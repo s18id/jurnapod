@@ -37,6 +37,17 @@ type ItemRow = RowDataPacket & {
   is_active: number;
 };
 
+type IngredientInventoryCostRow = RowDataPacket & {
+  product_id: number;
+  inbound_quantity: number | string;
+  inbound_total_cost: number | string;
+};
+
+type IngredientPriceRow = RowDataPacket & {
+  item_id: number;
+  unit_cost: number | string;
+};
+
 // Custom error classes
 export class DatabaseConflictError extends Error {
   constructor(message: string) {
@@ -112,56 +123,89 @@ async function resolveIngredientUnitCost(
   companyId: number,
   itemId: number
 ): Promise<number> {
+  const costs = await resolveIngredientUnitCosts(executor, companyId, [itemId]);
+  return costs.get(itemId) ?? 0;
+}
+
+async function resolveIngredientUnitCosts(
+  executor: SqlExecutor,
+  companyId: number,
+  itemIds: readonly number[]
+): Promise<Map<number, number>> {
+  const uniqueItemIds = Array.from(new Set(itemIds.map(Number))).filter((id) => Number.isInteger(id) && id > 0);
+  if (uniqueItemIds.length === 0) {
+    return new Map();
+  }
+
   const hasInventoryUnitCost = await hasInventoryTransactionUnitCostColumn(executor);
+  const resolvedCosts = new Map<number, number>();
 
   if (hasInventoryUnitCost) {
-    const [inventoryRows] = await executor.execute<RowDataPacket[]>(
+    const placeholders = uniqueItemIds.map(() => "?").join(", ");
+    const [inventoryRows] = await executor.execute<IngredientInventoryCostRow[]>(
       `SELECT
+         product_id,
          COALESCE(SUM(quantity_delta), 0) AS inbound_quantity,
          COALESCE(SUM(quantity_delta * unit_cost), 0) AS inbound_total_cost
        FROM inventory_transactions
        WHERE company_id = ?
-         AND product_id = ?
-         AND quantity_delta > 0`,
-      [companyId, itemId]
+         AND product_id IN (${placeholders})
+         AND quantity_delta > 0
+       GROUP BY product_id`,
+      [companyId, ...uniqueItemIds]
     );
 
-    const inboundQuantity = Number(inventoryRows[0]?.inbound_quantity ?? 0);
-    const inboundTotalCost = Number(inventoryRows[0]?.inbound_total_cost ?? 0);
-
-    if (inboundQuantity > 0 && inboundTotalCost > 0) {
-      return normalizeMoney(inboundTotalCost / inboundQuantity);
+    for (const row of inventoryRows) {
+      const productId = Number(row.product_id);
+      const inboundQuantity = Number(row.inbound_quantity ?? 0);
+      const inboundTotalCost = Number(row.inbound_total_cost ?? 0);
+      if (inboundQuantity > 0 && inboundTotalCost > 0) {
+        resolvedCosts.set(productId, normalizeMoney(inboundTotalCost / inboundQuantity));
+      }
     }
   }
 
   const itemPriceCostColumn = await resolveItemPriceCostColumn(executor);
-
-  const [priceRows] = itemPriceCostColumn === "base_cost"
-    ? await executor.execute<RowDataPacket[]>(
-      `SELECT COALESCE(NULLIF(base_cost, 0), price, 0) AS unit_cost
-       FROM item_prices
-       WHERE company_id = ? AND item_id = ?
-         AND is_active = 1
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [companyId, itemId]
-    )
-    : await executor.execute<RowDataPacket[]>(
-      `SELECT COALESCE(price, 0) AS unit_cost
-       FROM item_prices
-       WHERE company_id = ? AND item_id = ?
-         AND is_active = 1
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [companyId, itemId]
-    );
-
-  if (priceRows.length === 0) {
-    return 0;
+  const fallbackIds = uniqueItemIds.filter((itemId) => !resolvedCosts.has(itemId));
+  if (fallbackIds.length === 0) {
+    return resolvedCosts;
   }
 
-  const price = Number(priceRows[0].unit_cost ?? 0);
-  return price > 0 ? normalizeMoney(price) : 0;
+  const fallbackPlaceholders = fallbackIds.map(() => "?").join(", ");
+
+  const [priceRows] = itemPriceCostColumn === "base_cost"
+    ? await executor.execute<IngredientPriceRow[]>(
+      `SELECT COALESCE(NULLIF(base_cost, 0), price, 0) AS unit_cost
+       , item_id
+       FROM item_prices
+       WHERE company_id = ? AND item_id IN (${fallbackPlaceholders})
+         AND is_active = 1
+       ORDER BY item_id ASC, created_at DESC, id DESC`,
+      [companyId, ...fallbackIds]
+    )
+    : await executor.execute<IngredientPriceRow[]>(
+      `SELECT COALESCE(price, 0) AS unit_cost
+       , item_id
+       FROM item_prices
+       WHERE company_id = ? AND item_id IN (${fallbackPlaceholders})
+         AND is_active = 1
+       ORDER BY item_id ASC, created_at DESC, id DESC`,
+      [companyId, ...fallbackIds]
+    );
+
+  for (const row of priceRows) {
+    const itemId = Number(row.item_id);
+    if (resolvedCosts.has(itemId)) {
+      continue;
+    }
+
+    const price = Number(row.unit_cost ?? 0);
+    if (price > 0) {
+      resolvedCosts.set(itemId, normalizeMoney(price));
+    }
+  }
+
+  return resolvedCosts;
 }
 
 async function resolveItemPriceCostColumn(executor: SqlExecutor): Promise<"base_cost" | "price"> {
@@ -529,13 +573,15 @@ export async function getRecipeIngredients(
     [companyId, recipeItemId]
   );
 
-  return await Promise.all(rows.map(async (row) => {
+  const unitCosts = await resolveIngredientUnitCosts(
+    pool,
+    companyId,
+    rows.map((row) => Number(row.ingredient_item_id))
+  );
+
+  return rows.map((row) => {
     const normalized = normalizeRecipeIngredient(row as RecipeIngredientRow);
-    const unitCost = await resolveIngredientUnitCost(
-      pool,
-      companyId,
-      Number(normalized.ingredient_item_id)
-    );
+    const unitCost = unitCosts.get(Number(normalized.ingredient_item_id)) ?? 0;
     return {
       ...normalized,
       ingredient_name: row.ingredient_name as string,
@@ -548,7 +594,7 @@ export async function getRecipeIngredients(
       unit_cost: unitCost,
       total_cost: normalizeMoney(normalized.quantity * unitCost)
     };
-  }));
+  });
 }
 
 // Update recipe ingredient
@@ -707,13 +753,15 @@ export async function calculateRecipeCost(
     [companyId, recipeItemId]
   );
 
-  const ingredients = await Promise.all(ingredientRows.map(async (row) => {
+  const unitCosts = await resolveIngredientUnitCosts(
+    pool,
+    companyId,
+    ingredientRows.map((row) => Number(row.ingredient_item_id))
+  );
+
+  const ingredients = ingredientRows.map((row) => {
     const quantity = Number(row.quantity);
-    const unitCost = await resolveIngredientUnitCost(
-      pool,
-      companyId,
-      Number(row.ingredient_item_id)
-    );
+    const unitCost = unitCosts.get(Number(row.ingredient_item_id)) ?? 0;
     const lineCost = normalizeMoney(quantity * unitCost);
 
     return {
@@ -725,7 +773,7 @@ export async function calculateRecipeCost(
       unit_cost: unitCost,
       line_cost: lineCost
     };
-  }));
+  });
 
   const totalCost = normalizeMoney(ingredients.reduce((sum, ing) => sum + ing.line_cost, 0));
 

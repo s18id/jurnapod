@@ -162,6 +162,15 @@ test(
       );
       companyId = Number(companyRows[0].id);
 
+      const [unitCostColumnRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) AS column_exists
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'inventory_transactions'
+           AND COLUMN_NAME = 'unit_cost'`
+      );
+      const supportsUnitCost = Number(unitCostColumnRows[0]?.column_exists ?? 0) > 0;
+
       const [recipeResult] = await pool.execute(
         `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
         [companyId, `Recipe ${runId}`]
@@ -649,6 +658,113 @@ test(
       assert.strictEqual(recalculated.total_ingredient_cost, 10.5);
 
     } finally {
+      if (ingredientItemId1) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId1]);
+      if (ingredientItemId2) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId2]);
+      if (recipeIngredientId1) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId1]);
+      if (recipeIngredientId2) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId2]);
+      if (ingredientItemId1) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId1]);
+      if (ingredientItemId2) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId2]);
+      if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+    }
+  }
+);
+
+test(
+  "calculateRecipeCost - batches mixed inventory and fallback ingredient cost resolution",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+
+    let companyId = 0;
+    let recipeItemId = 0;
+    let ingredientItemId1 = 0;
+    let ingredientItemId2 = 0;
+    let recipeIngredientId1 = 0;
+    let recipeIngredientId2 = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+
+    try {
+      const [companyRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
+        [companyCode]
+      );
+      companyId = Number(companyRows[0].id);
+
+      const [recipeResult] = await pool.execute(
+        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
+        [companyId, `Batch Recipe ${runId}`]
+      );
+      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+
+      const [ing1Result] = await pool.execute(
+        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
+        [companyId, `Batch Ingredient Inv ${runId}`]
+      );
+      ingredientItemId1 = Number((ing1Result as { insertId: number }).insertId);
+
+      const [ing2Result] = await pool.execute(
+        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
+        [companyId, `Batch Ingredient Price ${runId}`]
+      );
+      ingredientItemId2 = Number((ing2Result as { insertId: number }).insertId);
+
+      const ing1 = await addIngredientToRecipe(companyId, recipeItemId, {
+        ingredient_item_id: ingredientItemId1,
+        quantity: 2
+      });
+      recipeIngredientId1 = ing1.id;
+
+      const ing2 = await addIngredientToRecipe(companyId, recipeItemId, {
+        ingredient_item_id: ingredientItemId2,
+        quantity: 3
+      });
+      recipeIngredientId2 = ing2.id;
+
+      const [unitCostColumnRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) AS column_exists
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'inventory_transactions'
+           AND COLUMN_NAME = 'unit_cost'`
+      );
+      const supportsUnitCost = Number(unitCostColumnRows[0]?.column_exists ?? 0) > 0;
+
+      if (supportsUnitCost) {
+        await pool.execute(
+          `INSERT INTO inventory_transactions (company_id, product_id, transaction_type, quantity_delta, unit_cost, created_at)
+           VALUES (?, ?, 6, ?, ?, NOW())`,
+          [companyId, ingredientItemId1, 10, 2.5]
+        );
+      } else {
+        await pool.execute(
+          `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
+           VALUES (?, ?, NULL, ?)`,
+          [companyId, ingredientItemId1, 2.5]
+        );
+      }
+
+      await pool.execute(
+        `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
+         VALUES (?, ?, NULL, ?)`,
+        [companyId, ingredientItemId2, 4.25]
+      );
+
+      const costBreakdown = await calculateRecipeCost(companyId, recipeItemId);
+
+      assert.strictEqual(costBreakdown.total_ingredient_cost, 17.75);
+
+      const ingredientOne = costBreakdown.ingredients.find((line) => line.ingredient_item_id === ingredientItemId1);
+      const ingredientTwo = costBreakdown.ingredients.find((line) => line.ingredient_item_id === ingredientItemId2);
+      assert.ok(ingredientOne);
+      assert.ok(ingredientTwo);
+      assert.strictEqual(ingredientOne.unit_cost, 2.5);
+      assert.strictEqual(ingredientOne.line_cost, 5);
+      assert.strictEqual(ingredientTwo.unit_cost, 4.25);
+      assert.strictEqual(ingredientTwo.line_cost, 12.75);
+    } finally {
+      if (ingredientItemId1) await pool.execute(`DELETE FROM inventory_transactions WHERE company_id = ? AND product_id = ?`, [companyId, ingredientItemId1]);
       if (ingredientItemId1) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId1]);
       if (ingredientItemId2) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId2]);
       if (recipeIngredientId1) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId1]);
