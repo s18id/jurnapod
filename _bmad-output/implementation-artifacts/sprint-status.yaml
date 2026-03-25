@@ -57,3 +57,14 @@ development_status:
   1-1-journals-route-migration: done
   1-2-account-types-route-migration: done
   1-3-epic-1-documentation: done
+
+  # Epic 2: Sync Routes & POS Offline-First
+  epic-2: in-progress
+  2-1-sync-push-layered-architecture: done
+  2-2-sync-pull-layered-architecture: done
+  2-3-sync-push-kysely-migration: done
+  2-4-sync-pull-kysely-migration: done
+  2-5-reports-routes-migration: done
+  2-6-td-001-cogs-posting-n1-fix: done
+  2-7-td-002-cogs-calculation-n1-fix: done
+  2-8-td-003-recipe-composition-n1-fix: done
