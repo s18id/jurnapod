@@ -1,0 +1,123 @@
+// Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
+// Ownership: Ahmad Faruk (Signal18 ID)
+
+/**
+ * Sync Push Stock Helpers
+ * 
+ * Stock deduction functions for sync push.
+ * These functions have zero HTTP knowledge.
+ */
+
+import type { PoolConnection, RowDataPacket } from "mysql2/promise";
+import type { SyncPushTransactionPayload } from "./types.js";
+import { deductStockWithCost } from "../../../services/stock.js";
+import type { StockDeductResult } from "../../../services/stock.js";
+
+/**
+ * Deduct stock for a single variant
+ */
+export async function deductVariantStock(
+  dbConnection: PoolConnection,
+  companyId: number,
+  variantId: number,
+  quantity: number
+): Promise<boolean> {
+  const [variantRows] = await dbConnection.execute<RowDataPacket[]>(
+    `SELECT stock_quantity FROM item_variants
+     WHERE id = ? AND company_id = ? AND is_active = TRUE
+     FOR UPDATE`,
+    [variantId, companyId]
+  );
+
+  if (variantRows.length === 0) {
+    throw new Error(`Variant ${variantId} not found or inactive`);
+  }
+
+  const currentStock = Number(variantRows[0].stock_quantity);
+  const newStock = currentStock - quantity;
+
+  if (newStock < 0) {
+    throw new Error(`Insufficient stock for variant ${variantId}: ${currentStock} < ${quantity}`);
+  }
+
+  await dbConnection.execute(
+    `UPDATE item_variants
+     SET stock_quantity = ?
+     WHERE id = ? AND company_id = ?`,
+    [newStock, variantId, companyId]
+  );
+
+  return true;
+}
+
+/**
+ * Resolve and deduct stock for a transaction
+ */
+export async function resolveAndDeductStockForTransaction(
+  dbConnection: PoolConnection,
+  tx: SyncPushTransactionPayload,
+  posTransactionId: number
+): Promise<StockDeductResult[] | null> {
+  if (tx.status !== "COMPLETED") {
+    return null;
+  }
+
+  if (tx.items.length === 0) {
+    return null;
+  }
+
+  const variantItems = tx.items.filter((item) => item.variant_id);
+  const regularItems = tx.items.filter((item) => !item.variant_id);
+
+  for (const item of variantItems) {
+    if (item.variant_id) {
+      await deductVariantStock(dbConnection, tx.company_id, item.variant_id, item.qty);
+    }
+  }
+
+  if (regularItems.length === 0) {
+    return null;
+  }
+
+  const itemIds = regularItems.map((item) => item.item_id);
+  if (itemIds.length === 0) {
+    return null;
+  }
+
+  const placeholders = itemIds.map(() => "?").join(", ");
+  const [trackedRows] = await dbConnection.execute<RowDataPacket[]>(
+    `SELECT id FROM items
+     WHERE company_id = ?
+       AND id IN (${placeholders})
+       AND track_stock = 1`,
+    [tx.company_id, ...itemIds]
+  );
+
+  const trackedItemIds = new Set((trackedRows as Array<{ id: number }>).map((row) => row.id));
+
+  if (trackedItemIds.size === 0) {
+    return null;
+  }
+
+  const stockItems = regularItems
+    .filter((item) => trackedItemIds.has(item.item_id))
+    .map((item) => ({
+      product_id: item.item_id,
+      quantity: item.qty
+    }));
+
+  if (stockItems.length === 0) {
+    return null;
+  }
+
+  const stockResults = await deductStockWithCost(
+    tx.company_id,
+    tx.outlet_id,
+    stockItems,
+    tx.client_tx_id,
+    tx.cashier_user_id,
+    dbConnection
+  );
+
+  return stockResults;
+}
