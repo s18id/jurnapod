@@ -61,7 +61,7 @@ import {
   SYNC_RESULT_CODES
 } from "@jurnapod/sync-core";
 import { getAppEnv } from "../../lib/env.js";
-import { toEpochMs, toUtcInstant } from "../../lib/date-helpers.js";
+import { toEpochMs, toMysqlDateTime, toUtcInstant } from "../../lib/date-helpers.js";
 
 // Extend Hono context with auth
 declare module "hono" {
@@ -354,13 +354,24 @@ function isClientTxIdDuplicateError(error: unknown): error is MysqlError {
   return readDuplicateKeyName(error) === POS_TRANSACTIONS_CLIENT_TX_UNIQUE_KEY;
 }
 
-function toMysqlDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid trx_at");
+function toCanonicalUtcInstant(value: string, fieldName: string): string {
+  try {
+    return toUtcInstant(value);
+  } catch {
+    throw new Error(`Invalid ${fieldName}`);
   }
+}
 
-  return date.toISOString().slice(0, 19).replace("T", " ");
+function toMysqlDateTimeStrict(value: string, fieldName: string = "datetime"): string {
+  try {
+    return toMysqlDateTime(value);
+  } catch {
+    throw new Error(`Invalid ${fieldName}`);
+  }
+}
+
+function toTimestampMs(value: string, fieldName: string = "datetime"): number {
+  return toEpochMs(toCanonicalUtcInstant(value, fieldName));
 }
 
 function normalizeMoney(value: number): number {
@@ -635,8 +646,8 @@ function canonicalizeTransactionForHash(tx: SyncPushTransactionPayload): string 
     reservation_id: tx.reservation_id ?? null,
     guest_count: tx.guest_count ?? null,
     order_status: tx.order_status ?? "COMPLETED",
-    opened_at: tx.opened_at ? toMysqlDateTime(tx.opened_at) : null,
-    closed_at: tx.closed_at ? toMysqlDateTime(tx.closed_at) : null,
+    opened_at: tx.opened_at ? toMysqlDateTimeStrict(tx.opened_at) : null,
+    closed_at: tx.closed_at ? toMysqlDateTimeStrict(tx.closed_at) : null,
     notes: tx.notes ?? null,
     trx_at: normalizeTrxAtForHash(tx.trx_at),
     items: tx.items.map((item) => ({
@@ -973,7 +984,7 @@ async function doesLegacyPayloadReplayMatch(
     company_id: incomingTx.company_id,
     outlet_id: incomingTx.outlet_id,
     status: incomingTx.status,
-    trx_at: toMysqlDateTime(incomingTx.trx_at),
+    trx_at: toMysqlDateTimeStrict(incomingTx.trx_at),
     items: incomingTx.items.map((item) => ({
       item_id: item.item_id,
       variant_id: item.variant_id,
@@ -1265,16 +1276,16 @@ async function processActiveOrders(
            order.order_status,
            order.order_state,
            order.paid_amount,
-           toMysqlDateTime(order.opened_at),
-           new Date(order.opened_at).getTime(),
-           order.closed_at ? toMysqlDateTime(order.closed_at) : null,
-           order.closed_at ? new Date(order.closed_at).getTime() : null,
-           order.notes ?? null,
-           toMysqlDateTime(order.updated_at),
-           new Date(order.updated_at).getTime(),
-           toMysqlDateTime(order.updated_at),
-           new Date(order.updated_at).getTime()
-         ]
+            toMysqlDateTimeStrict(order.opened_at, "opened_at"),
+            toTimestampMs(order.opened_at, "opened_at"),
+            order.closed_at ? toMysqlDateTimeStrict(order.closed_at, "closed_at") : null,
+            order.closed_at ? toTimestampMs(order.closed_at, "closed_at") : null,
+            order.notes ?? null,
+            toMysqlDateTimeStrict(order.updated_at, "updated_at"),
+            toTimestampMs(order.updated_at, "updated_at"),
+            toMysqlDateTimeStrict(order.updated_at, "updated_at"),
+            toTimestampMs(order.updated_at, "updated_at")
+          ]
       );
 
       // Delete existing lines and re-insert (simpler than diffing)
@@ -1297,10 +1308,10 @@ async function processActiveOrders(
           line.unit_price_snapshot,
           line.qty,
           line.discount_amount,
-          toMysqlDateTime(line.updated_at),
-          new Date(line.updated_at).getTime(), // updated_at_ts
-          toMysqlDateTime(line.updated_at),
-          new Date(line.updated_at).getTime() // created_at_ts
+          toMysqlDateTimeStrict(line.updated_at, "updated_at"),
+          toTimestampMs(line.updated_at, "updated_at"), // updated_at_ts
+          toMysqlDateTimeStrict(line.updated_at, "updated_at"),
+          toTimestampMs(line.updated_at, "updated_at") // created_at_ts
         ]);
 
         const placeholders = lineValues.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
@@ -1378,16 +1389,20 @@ async function processOrderUpdates(
           update.order_id,
           update.company_id,
           update.outlet_id,
-          update.base_order_updated_at ? toMysqlDateTime(update.base_order_updated_at) : null,
-          update.base_order_updated_at ? new Date(update.base_order_updated_at).getTime() : null,
+          update.base_order_updated_at
+            ? toMysqlDateTimeStrict(update.base_order_updated_at, "base_order_updated_at")
+            : null,
+          update.base_order_updated_at
+            ? toTimestampMs(update.base_order_updated_at, "base_order_updated_at")
+            : null,
           update.event_type,
           update.delta_json,
           update.actor_user_id ?? null,
           update.device_id,
-          toMysqlDateTime(update.event_at),
-          new Date(update.event_at).getTime(),
-          toMysqlDateTime(update.created_at),
-          new Date(update.created_at).getTime()
+          toMysqlDateTimeStrict(update.event_at, "event_at"),
+          toTimestampMs(update.event_at, "event_at"),
+          toMysqlDateTimeStrict(update.created_at, "created_at"),
+          toTimestampMs(update.created_at, "created_at")
         ]
       );
       console.info("processOrderUpdates: insert complete", { correlation_id: correlationId, update_id: update.update_id });
@@ -1457,10 +1472,10 @@ async function processItemCancellations(
           cancellation.cancelled_quantity,
           cancellation.reason,
           cancellation.cancelled_by_user_id ?? null,
-          toMysqlDateTime(cancellation.cancelled_at),
-          new Date(cancellation.cancelled_at).getTime(),
-          toMysqlDateTime(cancellation.cancelled_at),
-          new Date(cancellation.cancelled_at).getTime()
+          toMysqlDateTimeStrict(cancellation.cancelled_at, "cancelled_at"),
+          toTimestampMs(cancellation.cancelled_at, "cancelled_at"),
+          toMysqlDateTimeStrict(cancellation.cancelled_at, "cancelled_at"),
+          toTimestampMs(cancellation.cancelled_at, "cancelled_at")
         ]
       );
 
@@ -1741,9 +1756,9 @@ async function processSyncPushTransaction(params: ProcessTransactionParams): Pro
       return result;
     }
 
-    const trxAtCanonical = toMysqlDateTime(tx.trx_at);
-    const openedAtCanonical = tx.opened_at ? toMysqlDateTime(tx.opened_at) : trxAtCanonical;
-    const closedAtCanonical = tx.closed_at ? toMysqlDateTime(tx.closed_at) : trxAtCanonical;
+    const trxAtCanonical = toMysqlDateTimeStrict(tx.trx_at);
+    const openedAtCanonical = tx.opened_at ? toMysqlDateTimeStrict(tx.opened_at) : trxAtCanonical;
+    const closedAtCanonical = tx.closed_at ? toMysqlDateTimeStrict(tx.closed_at) : trxAtCanonical;
     const payloadSha256 = computePayloadSha256(canonicalizeTransactionForHash(tx));
 
     // Compute legacy hash variants to handle trx_at format differences (.000Z vs Z)

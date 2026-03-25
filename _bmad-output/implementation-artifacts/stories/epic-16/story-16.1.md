@@ -1,6 +1,6 @@
 # Story 16.1: Define the public `date-helpers` contract
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 

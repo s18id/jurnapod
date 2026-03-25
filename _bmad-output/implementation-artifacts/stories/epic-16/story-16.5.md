@@ -1,6 +1,6 @@
 # Story 16.5: Migrate ADR-0001-critical call sites to `date-helpers`
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -98,8 +98,10 @@ openai/gpt-5.4
   - reservations.ts: toUnixMs now uses toEpochMs(toUtcInstant()) with ReservationValidationError on failure
   - reservations.ts: mapRow uses fromEpochMs for ts→ISO conversion; toIso kept as Date→ISO for DB layer compat
   - sync/push.ts: normalizeTrxAtForHash uses toEpochMs(toUtcInstant()) instead of raw new Date().getTime()
+  - sync/push.ts active-order, order-update, snapshot-line, and cancellation `_ts` writes now use date-helpers-backed normalization instead of raw Date parsing
+  - packages/shared pos-sync schema now requires timezone offsets on sync order/update/cancellation timestamp fields
   - Both files import from date-helpers.ts
-- 677 API unit tests passing (677 total), 12 reservations tests, 31 sync push tests
+- 677 API unit tests passing (previous run), plus direct sync-push timestamp regression tests for malformed and valid order-update payloads
 - Note: DB layer toIso keeps Date parsing (not toUtcInstant) for MySQL DATETIME format compat ('YYYY-MM-DD HH:MM:SS'). API-layer (user input) functions use date-helpers validation.
 
 ### File List
@@ -107,5 +109,6 @@ openai/gpt-5.4
 - `apps/api/src/lib/reservations.ts`  (date-helpers import, toUnixMs uses toEpochMs, mapRow uses fromEpochMs)
 - `apps/api/src/routes/sync/push.ts`  (date-helpers import, normalizeTrxAtForHash uses toEpochMs+toUtcInstant)
 - `apps/api/src/lib/date-helpers.ts`
-- `apps/api/src/routes/sync/push.test.ts`  (31/31 tests pass)
+- `apps/api/src/routes/sync/push.test.ts`  (sync timestamp regression coverage added)
 - `apps/api/src/lib/reservations.test.ts`  (12/12 tests pass)
+- `packages/shared/src/schemas/pos-sync.ts`

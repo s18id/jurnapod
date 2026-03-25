@@ -18,16 +18,9 @@ import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
 import { closeDbPool, getDbPool } from "../../lib/db";
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
-import { createHash } from "node:crypto";
-
-// Helper functions copied from push.ts for testing
-function toMysqlDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid trx_at");
-  }
-  return date.toISOString().slice(0, 19).replace("T", " ");
-}
+import { createHash, randomUUID } from "node:crypto";
+import { toEpochMs, toMysqlDateTime, toUtcInstant } from "../../lib/date-helpers";
+import { SyncPushRequestSchema } from "@jurnapod/shared";
 
 function computePayloadSha256(canonicalPayload: string): string {
   return createHash("sha256").update(canonicalPayload).digest("hex");
@@ -97,7 +90,7 @@ describe("Sync Push Routes", { concurrency: false }, () => {
     test("throws on invalid datetime", () => {
       assert.throws(
         () => toMysqlDateTime("invalid-date"),
-        /Invalid trx_at/,
+        /Cannot convert to MySQL datetime/,
         "Should throw on invalid date"
       );
     });
@@ -168,6 +161,47 @@ describe("Sync Push Routes", { concurrency: false }, () => {
           `Status ${status} should be invalid`
         );
       }
+    });
+  });
+
+  describe("Sync payload timestamp validation", () => {
+    test("schema requires timezone offsets for order update timestamps", () => {
+      const result = SyncPushRequestSchema.safeParse({
+        outlet_id: testOutletId,
+        transactions: [],
+        order_updates: [
+          {
+            update_id: randomUUID(),
+            order_id: randomUUID(),
+            company_id: testCompanyId,
+            outlet_id: testOutletId,
+            base_order_updated_at: null,
+            event_type: "ITEM_ADDED",
+            delta_json: "{}",
+            actor_user_id: testUserId,
+            device_id: "device-1",
+            event_at: "2026-03-16T10:30:00",
+            created_at: "2026-03-16T10:31:00"
+          }
+        ]
+      });
+
+      assert.equal(result.success, false, "offsetless timestamps should fail schema validation");
+    });
+
+    test("canonical helper normalization rejects rolled order update event_at values", () => {
+      assert.throws(
+        () => toEpochMs(toUtcInstant("2026-02-30T10:30:00Z")),
+        /Cannot convert to UTC instant/
+      );
+    });
+
+    test("canonical helper normalization preserves valid order update timestamps", () => {
+      const eventAt = "2026-03-16T17:30:00+07:00";
+      const createdAt = "2026-03-16T10:31:45.123Z";
+
+      assert.equal(toEpochMs(toUtcInstant(eventAt)), Date.parse(eventAt));
+      assert.equal(toEpochMs(toUtcInstant(createdAt)), Date.parse(createdAt));
     });
   });
 

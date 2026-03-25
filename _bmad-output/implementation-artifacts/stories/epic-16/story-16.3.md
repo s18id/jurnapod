@@ -1,6 +1,6 @@
 # Story 16.3: Define and implement DST ambiguity policy
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 

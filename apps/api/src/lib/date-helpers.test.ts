@@ -19,6 +19,8 @@ import {
   compareDates,
   isValidTimeZone,
   toUtcInstant,
+  toMysqlDateTime,
+  toMysqlDateTimeFromDateLike,
   fromUtcInstant,
   toEpochMs,
   fromEpochMs,
@@ -569,6 +571,56 @@ describe("toUtcInstant()", () => {
   });
 });
 
+describe("toMysqlDateTime()", () => {
+  test("converts RFC 3339 with positive offset to canonical UTC MySQL datetime", () => {
+    const result = toMysqlDateTime("2026-03-16T17:30:00+07:00");
+    assert.equal(result, "2026-03-16 10:30:00");
+  });
+
+  test("converts UTC instant to canonical MySQL datetime", () => {
+    const result = toMysqlDateTime("2026-03-16T10:30:00.987Z");
+    assert.equal(result, "2026-03-16 10:30:00");
+  });
+
+  test("converts RFC 3339 with negative offset to canonical UTC MySQL datetime", () => {
+    const result = toMysqlDateTime("2026-03-16T10:30:00-05:00");
+    assert.equal(result, "2026-03-16 15:30:00");
+  });
+
+  test("rejects rolled dates", () => {
+    assert.throws(
+      () => toMysqlDateTime("2026-02-30T10:30:00Z"),
+      /Cannot convert to MySQL datetime/
+    );
+  });
+
+  test("rejects offsetless datetime strings to avoid server-local parsing", () => {
+    assert.throws(
+      () => toMysqlDateTime("2026-03-16T10:30:00"),
+      /Cannot convert to MySQL datetime/
+    );
+  });
+});
+
+describe("toMysqlDateTimeFromDateLike()", () => {
+  test("converts Date instances to canonical UTC MySQL datetime", () => {
+    const result = toMysqlDateTimeFromDateLike(new Date("2026-03-16T10:30:00.987Z"));
+    assert.equal(result, "2026-03-16 10:30:00");
+  });
+
+  test("converts RFC 3339 strings through Date-like compatibility path", () => {
+    const result = toMysqlDateTimeFromDateLike("2026-03-16T17:30:00+07:00");
+    assert.equal(result, "2026-03-16 10:30:00");
+  });
+
+  test("throws on invalid date-like input", () => {
+    assert.throws(
+      () => toMysqlDateTimeFromDateLike("invalid-date"),
+      /Cannot convert date-like value to MySQL datetime/
+    );
+  });
+});
+
 describe("fromUtcInstant()", () => {
   test("formats UTC instant in target timezone with offset", () => {
     // 10:30 UTC = 17:30 Jakarta (+07:00)
@@ -629,6 +681,11 @@ describe("fromEpochMs()", () => {
   test("returns primitives only (string)", () => {
     const result = fromEpochMs(1710587400000);
     assert.equal(typeof result, "string");
+  });
+
+  test("throws on non-finite epoch milliseconds", () => {
+    assert.throws(() => fromEpochMs(NaN), /Invalid epoch ms/);
+    assert.throws(() => fromEpochMs(Infinity), /Invalid epoch ms/);
   });
 });
 

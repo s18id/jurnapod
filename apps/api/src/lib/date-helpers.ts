@@ -142,6 +142,55 @@ export function toUtcInstant(input: string): string {
 }
 
 /**
+ * Convert an RFC 3339 instant into canonical MySQL DATETIME text in UTC.
+ *
+ * Output format is always `YYYY-MM-DD HH:mm:ss` with millisecond precision truncated,
+ * which matches the repository's current DATETIME persistence contract.
+ *
+ * This helper is intentionally strict: it accepts only valid RFC 3339/ISO instants that
+ * pass {@link toUtcInstant}. Offsetless/local datetime strings are rejected to avoid
+ * accidental dependence on server-local timezone parsing.
+ *
+ * @param input - RFC 3339 datetime with `Z` or explicit numeric offset.
+ * @returns Canonical UTC MySQL DATETIME string.
+ * @throws {Error} when `input` is malformed or not a valid instant.
+ *
+ * @example
+ * toMysqlDateTime("2026-03-16T17:30:00+07:00")  // "2026-03-16 10:30:00"
+ */
+export function toMysqlDateTime(input: string): string {
+  try {
+    return toUtcInstant(input).slice(0, 19).replace("T", " ");
+  } catch {
+    throw new Error(`Cannot convert to MySQL datetime: ${input}`);
+  }
+}
+
+/**
+ * Convert a Date-like value into canonical MySQL DATETIME text in UTC.
+ *
+ * This helper exists for legacy/internal paths that already operate on database-returned
+ * values or JavaScript `Date` instances, where strict RFC 3339 validation is not the
+ * correct contract. It intentionally preserves the repository's existing `new Date(...)`
+ * interpretation semantics for those internal compatibility paths.
+ *
+ * Do not use this for new API/client timestamp inputs. Prefer {@link toMysqlDateTime}
+ * for strict RFC 3339/offset-aware input validation.
+ *
+ * @param input - JavaScript `Date` or date-like string accepted by `new Date(...)`.
+ * @returns Canonical UTC MySQL DATETIME string.
+ * @throws {Error} when `input` cannot be parsed into a valid date.
+ */
+export function toMysqlDateTimeFromDateLike(input: Date | string): string {
+  const date = new Date(input);
+  if (isNaN(date.getTime())) {
+    throw new Error(`Cannot convert date-like value to MySQL datetime: ${String(input)}`);
+  }
+
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
+/**
  * The inverse of {@link toUtcInstant}: take a UTC ISO string and format it
  * in a target IANA timezone.
  *
@@ -419,7 +468,16 @@ export function toEpochMs(utcAt: string): number {
  * fromEpochMs(1710587400000)  // "2026-03-16T10:30:00.000Z"
  */
 export function fromEpochMs(ts: number): string {
-  return new Date(ts).toISOString();
+  if (!Number.isFinite(ts)) {
+    throw new Error(`Invalid epoch ms: ${ts}`);
+  }
+
+  const date = new Date(ts);
+  if (isNaN(date.getTime())) {
+    throw new Error(`Invalid epoch ms: ${ts}`);
+  }
+
+  return date.toISOString();
 }
 
 // ---------------------------------------------------------------------------

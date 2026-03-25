@@ -1,6 +1,6 @@
 # Story 16.2: Implement Temporal-backed internals in `date-helpers`
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -96,9 +96,13 @@ openai/gpt-5.4
 
 ### Completion Notes List
 
-- Pending implementation.
+- Story 16.2 complete. `date-helpers` now uses `@js-temporal/polyfill` internally for timezone-aware conversion logic.
+- Temporal remains private to the module; public helper signatures still return primitive values only.
+- Malformed UTC/local/timezone inputs fail deterministically, including invalid epoch-ms inputs via `fromEpochMs()`.
+- Existing helper behavior remains covered by the expanded `date-helpers.test.ts` regression suite.
 
 ### File List
 
 - `apps/api/src/lib/date-helpers.ts`
 - `apps/api/src/lib/date-helpers.test.ts`
+- `apps/api/package.json`

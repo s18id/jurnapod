@@ -4,7 +4,7 @@
 import type { RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "./db";
-import { toDateTimeRangeWithTimezone, normalizeDate } from "./date-helpers";
+import { toDateTimeRangeWithTimezone, normalizeDate, toMysqlDateTime } from "./date-helpers";
 
 type PosTransactionRow = RowDataPacket & {
   id: number;
@@ -201,13 +201,12 @@ function toIsoDate(value: Date | string): string {
   return new Date(value).toISOString().slice(0, 10);
 }
 
-function toMysqlDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return new Date().toISOString().slice(0, 19).replace("T", " ");
+function toMysqlDateTimeOrNow(value: string): string {
+  try {
+    return toMysqlDateTime(value);
+  } catch {
+    return toMysqlDateTime(new Date().toISOString());
   }
-
-  return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
 function toDateTimeRange(dateFrom: string, dateTo: string, timezone?: string): { fromStart: string; nextDayStart: string } {
@@ -275,7 +274,7 @@ export async function listPosTransactions(filter: PosTransactionFilter) {
   const outletClause = buildOutletInClause(filter.outletIds);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
   const asOf = filter.asOf ?? new Date().toISOString();
-  const asOfSql = toMysqlDateTime(asOf);
+  const asOfSql = toMysqlDateTimeOrNow(asOf);
 
   const coreValues: Array<number | string> = [
     filter.companyId,
@@ -571,7 +570,7 @@ export async function listJournalBatches(filter: JournalFilter) {
   const outletClause = buildOutletInClauseForJournals(filter.outletIds, filter.includeUnassignedOutlet ?? true);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
   const asOf = filter.asOf ?? new Date().toISOString();
-  const asOfSql = toMysqlDateTime(asOf);
+  const asOfSql = toMysqlDateTimeOrNow(asOf);
   const coreValues: Array<number | string> = [
     filter.companyId,
     range.fromStart,

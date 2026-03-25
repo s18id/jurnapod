@@ -1,6 +1,6 @@
 # Story 16.4: Add canonical time-helper test coverage
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 

@@ -10,6 +10,7 @@ import {
 } from "@jurnapod/shared";
 import type { ResultSetHeader } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
+import { toDateOnly, toMysqlDateTime } from "./date-helpers";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 import { listCompanyDefaultTaxRates, resolveCombinedTaxConfig } from "./taxes";
 
@@ -143,24 +144,6 @@ class PosSyncPushPostingRepository implements PostingRepository {
       values
     );
   }
-}
-
-function toMysqlDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid trx_at");
-  }
-
-  return date.toISOString().slice(0, 19).replace("T", " ");
-}
-
-function toDateOnly(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid trx_at");
-  }
-
-  return date.toISOString().slice(0, 10);
 }
 
 function toMinorUnits(value: number): number {

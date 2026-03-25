@@ -10,6 +10,7 @@ import {
 } from "@jurnapod/shared";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
+import { toMysqlDateTime } from "./date-helpers";
 import type { SalesInvoiceDetail, SalesPayment } from "./sales";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 
@@ -534,15 +535,6 @@ class SalesPostingRepository implements PostingRepository {
       values
     );
   }
-}
-
-function toMysqlDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid datetime");
-  }
-
-  return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
 function toDateOnly(value: string): string {

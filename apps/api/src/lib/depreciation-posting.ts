@@ -6,6 +6,7 @@ import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/share
 import type { ResultSetHeader } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import type { DepreciationPlan, DepreciationRun } from "./depreciation";
+import { toMysqlDateTime } from "./date-helpers";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 
 const DEPRECIATION_DOC_TYPE = "DEPRECIATION";
@@ -110,15 +111,6 @@ class DepreciationPostingRepository implements PostingRepository {
       values
     );
   }
-}
-
-function toMysqlDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid datetime");
-  }
-
-  return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
 export async function postDepreciationRunToJournal(
