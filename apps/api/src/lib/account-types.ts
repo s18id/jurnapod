@@ -1,8 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { Pool, PoolConnection } from "mysql2/promise";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import {
   AccountTypesService,
   type AccountTypesDbClient
@@ -15,62 +13,7 @@ import type {
 } from "@jurnapod/shared";
 import { getDbPool } from "./db";
 import { getAuditService } from "./audit";
-
-/**
- * MySQL adapter for AccountTypesDbClient with transaction support
- */
-class MySQLAccountTypesDbClient implements AccountTypesDbClient {
-  private connection: PoolConnection | null = null;
-
-  constructor(private readonly pool: Pool) {}
-
-  async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
-    const executor = this.connection || this.pool;
-    const [rows] = await executor.execute<RowDataPacket[]>(sql, params || []);
-    return rows as T[];
-  }
-
-  async execute(sql: string, params?: any[]): Promise<{ affectedRows: number; insertId?: number }> {
-    const executor = this.connection || this.pool;
-    const [result] = await executor.execute<ResultSetHeader>(sql, params || []);
-    return {
-      affectedRows: result.affectedRows,
-      insertId: result.insertId
-    };
-  }
-
-  async begin(): Promise<void> {
-    if (this.connection) {
-      throw new Error("Transaction already in progress");
-    }
-    this.connection = await this.pool.getConnection();
-    await this.connection.beginTransaction();
-  }
-
-  async commit(): Promise<void> {
-    if (!this.connection) {
-      throw new Error("No transaction in progress");
-    }
-    try {
-      await this.connection.commit();
-    } finally {
-      this.connection.release();
-      this.connection = null;
-    }
-  }
-
-  async rollback(): Promise<void> {
-    if (!this.connection) {
-      throw new Error("No transaction in progress");
-    }
-    try {
-      await this.connection.rollback();
-    } finally {
-      this.connection.release();
-      this.connection = null;
-    }
-  }
-}
+import { DbConn } from "@jurnapod/db";
 
 /**
  * Audit service interface (matches AccountTypesService expectations)
@@ -142,30 +85,21 @@ class AuditServiceAdapter implements AuditServiceInterface {
 }
 
 /**
- * Shared DB client that implements both AccountTypesDbClient and AuditDbClient
- * This allows both services to share the same connection during transactions
- */
-class SharedMySQLDbClient extends MySQLAccountTypesDbClient {
-  // Inherits all methods from MySQLAccountTypesDbClient
-  // which already implements both query, execute, begin, commit, rollback
-}
-
-/**
- * Create AccountTypesService instance with MySQL adapter and audit service
- * Both services share the same db client to support transactions
+ * Create AccountTypesService instance with DbConn and audit service.
+ * Both services share the same db client to support transactions.
  */
 async function createAccountTypesService(): Promise<AccountTypesService> {
   const pool = getDbPool();
-  const sharedDbClient = new SharedMySQLDbClient(pool);
+  const dbClient = new DbConn(pool);
   
   // Import AuditService class using dynamic import
   const { AuditService } = await import("@jurnapod/modules-platform");
   
   // Create audit service with the SAME db client to share transactions
-  const auditService = new AuditService(sharedDbClient);
+  const auditService = new AuditService(dbClient);
   const auditServiceAdapter = new AuditServiceAdapter(auditService);
   
-  return new AccountTypesService(sharedDbClient, auditServiceAdapter);
+  return new AccountTypesService(dbClient as AccountTypesDbClient, auditServiceAdapter);
 }
 
 // Singleton instance

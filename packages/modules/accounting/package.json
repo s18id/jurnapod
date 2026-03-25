@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@jurnapod/core": "0.1.0",
+    "@jurnapod/db": "0.1.0",
     "@jurnapod/shared": "0.1.0"
   },
   "devDependencies": {

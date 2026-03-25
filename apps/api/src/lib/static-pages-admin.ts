@@ -7,6 +7,7 @@ import { AuditService, type AuditDbClient } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
 import { invalidateStaticPageCache } from "./static-pages";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
+import { newKyselyConnection } from "@jurnapod/db";
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
 
@@ -84,6 +85,10 @@ type ConnectionExecutor = PoolConnection | ReturnType<typeof getDbPool>;
 
 class ConnectionAuditDbClient implements AuditDbClient {
   constructor(private readonly connection: PoolConnection) {}
+
+  get kysely() {
+    return newKyselyConnection(this.connection);
+  }
 
   async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
     const [rows] = await this.connection.execute<RowDataPacket[]>(sql, params || []);

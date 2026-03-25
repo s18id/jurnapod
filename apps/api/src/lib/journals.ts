@@ -1,8 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { Pool, PoolConnection } from "mysql2/promise";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import {
   JournalsService,
   type JournalsDbClient
@@ -13,73 +11,20 @@ import type {
   JournalListQuery
 } from "@jurnapod/shared";
 import { getDbPool } from "./db";
+import { DbConn } from "@jurnapod/db";
 
 /**
- * MySQL adapter for JournalsDbClient
- */
-class MySQLJournalsDbClient implements JournalsDbClient {
-  constructor(private readonly pool: Pool) {}
-  
-  private txConnection: PoolConnection | null = null;
-
-  async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
-    const conn = this.txConnection ?? this.pool;
-    const [rows] = await conn.execute<RowDataPacket[]>(sql, params || []);
-    return rows as T[];
-  }
-
-  async execute(sql: string, params?: any[]): Promise<{ affectedRows: number; insertId?: number }> {
-    const conn = this.txConnection ?? this.pool;
-    const [result] = await conn.execute<ResultSetHeader>(sql, params || []);
-    return {
-      affectedRows: result.affectedRows,
-      insertId: result.insertId
-    };
-  }
-
-  async begin(): Promise<void> {
-    if (!this.txConnection) {
-      this.txConnection = await this.pool.getConnection();
-      await this.txConnection.beginTransaction();
-    }
-  }
-
-  async commit(): Promise<void> {
-    if (this.txConnection) {
-      await this.txConnection.commit();
-      this.txConnection.release();
-      this.txConnection = null;
-    }
-  }
-
-  async rollback(): Promise<void> {
-    if (this.txConnection) {
-      await this.txConnection.rollback();
-      this.txConnection.release();
-      this.txConnection = null;
-    }
-  }
-}
-
-/**
- * Shared DB client for both journals and audit
- */
-class SharedMySQLDbClient extends MySQLJournalsDbClient {
-  // Inherits all methods
-}
-
-/**
- * Create JournalsService instance with MySQL adapter and audit service
+ * Create JournalsService instance with DbConn and audit service
  */
 async function createJournalsService(): Promise<JournalsService> {
   const pool = getDbPool();
-  const sharedDbClient = new SharedMySQLDbClient(pool);
+  const dbClient = new DbConn(pool);
   
   // Import AuditService class using dynamic import
   const { AuditService } = await import("@jurnapod/modules-platform");
   
   // Create audit service with the SAME db client to share transactions
-  const auditService = new AuditService(sharedDbClient);
+  const auditService = new AuditService(dbClient);
   
   // Adapter for audit service (journals only need logCreate)
   const auditServiceAdapter = {
@@ -91,7 +36,7 @@ async function createJournalsService(): Promise<JournalsService> {
     logReactivate: async () => { throw new Error("Not implemented for journals"); }
   };
   
-  return new JournalsService(sharedDbClient, auditServiceAdapter);
+  return new JournalsService(dbClient as JournalsDbClient, auditServiceAdapter);
 }
 
 // Singleton instance

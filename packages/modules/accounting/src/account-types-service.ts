@@ -8,18 +8,13 @@ import type {
   AccountTypeUpdateRequest
 } from "@jurnapod/shared";
 import type { AuditServiceInterface } from "./accounts-service";
+import type { JurnapodDbClient } from "@jurnapod/db";
 
 /**
  * Database client interface for dependency injection
  * Should support parameterized queries and transactions
  */
-export interface AccountTypesDbClient {
-  query<T = any>(sql: string, params?: any[]): Promise<T[]>;
-  execute(sql: string, params?: any[]): Promise<{ affectedRows: number; insertId?: number }>;
-  begin?(): Promise<void>;
-  commit?(): Promise<void>;
-  rollback?(): Promise<void>;
-}
+export interface AccountTypesDbClient extends JurnapodDbClient {}
 
 /**
  * Custom error classes for domain-specific errors
@@ -123,7 +118,7 @@ export class AccountTypesService {
 
     // Use transaction if supported
     const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-    
+
     try {
       if (useTransaction) {
         await this.db.begin!();

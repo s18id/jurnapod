@@ -28,6 +28,10 @@
     "@node-rs/argon2": "^2.0.2",
     "bcryptjs": "^3.0.2",
     "dotenv": "^16.4.7",
+    "kysely": "^0.28.2",
     "mysql2": "^3.15.3"
+  },
+  "devDependencies": {
+    "kysely-codegen": "^0.12.0"
   }
 }

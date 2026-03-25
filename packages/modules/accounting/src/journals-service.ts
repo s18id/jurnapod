@@ -8,17 +8,12 @@ import type {
   JournalLineResponse
 } from "@jurnapod/shared";
 import { toRfc3339Required } from "@jurnapod/shared";
+import type { JurnapodDbClient } from "@jurnapod/db";
 
 /**
  * Database client interface for dependency injection
  */
-export interface JournalsDbClient {
-  query<T = any>(sql: string, params?: any[]): Promise<T[]>;
-  execute(sql: string, params?: any[]): Promise<{ affectedRows: number; insertId?: number }>;
-  begin?(): Promise<void>;
-  commit?(): Promise<void>;
-  rollback?(): Promise<void>;
-}
+export interface JournalsDbClient extends JurnapodDbClient {}
 
 /**
  * Custom error classes

@@ -8,18 +8,13 @@ import type {
   AccountTreeNode,
   AccountUpdateRequest
 } from "@jurnapod/shared";
+import type { JurnapodDbClient } from "@jurnapod/db";
 
 /**
  * Database client interface for dependency injection
  * Should support parameterized queries and transactions
  */
-export interface AccountsDbClient {
-  query<T = any>(sql: string, params?: any[]): Promise<T[]>;
-  execute(sql: string, params?: any[]): Promise<{ affectedRows: number; insertId?: number }>;
-  begin?(): Promise<void>;
-  commit?(): Promise<void>;
-  rollback?(): Promise<void>;
-}
+export interface AccountsDbClient extends JurnapodDbClient {}
 
 /**
  * Custom error classes for domain-specific errors
@@ -113,52 +108,51 @@ export class AccountsService {
   async listAccounts(filters: AccountListQuery): Promise<AccountResponse[]> {
     const { company_id, is_active, is_payable, report_group, parent_account_id, search } = filters;
 
-    let sql = `
-      SELECT 
-        id, company_id, code, name, type_name, normal_balance, report_group,
-        parent_account_id, account_type_id, is_group, is_payable, is_active, created_at, updated_at
-      FROM accounts
-      WHERE company_id = ?
-    `;
-    const params: any[] = [company_id];
+    let query = this.db.kysely
+      .selectFrom('accounts')
+      .where('company_id', '=', company_id)
+      .select([
+        'id', 'company_id', 'code', 'name', 'type_name', 'normal_balance', 'report_group',
+        'parent_account_id', 'account_type_id', 'is_group', 'is_payable', 'is_active', 'created_at', 'updated_at'
+      ])
+      .orderBy('code', 'asc');
 
     if (is_active !== undefined) {
-      sql += ` AND is_active = ?`;
-      params.push(is_active ? 1 : 0);
+      query = query.where('is_active', '=', is_active ? 1 : 0);
     }
 
     if (is_payable !== undefined) {
-      sql += ` AND is_payable = ?`;
-      params.push(is_payable ? 1 : 0);
+      query = query.where('is_payable', '=', is_payable ? 1 : 0);
     }
 
     if (report_group) {
       if (report_group === "PL") {
-        sql += ` AND report_group IN ('PL', 'LR')`;
+        query = query.where((eb) => eb.or([
+          eb('report_group', '=', 'PL'),
+          eb('report_group', '=', 'LR')
+        ]));
       } else {
-        sql += ` AND report_group = ?`;
-        params.push(report_group);
+        query = query.where('report_group', '=', report_group);
       }
     }
 
     if (parent_account_id !== undefined) {
       if (parent_account_id === null) {
-        sql += ` AND parent_account_id IS NULL`;
+        query = query.where('parent_account_id', 'is', null);
       } else {
-        sql += ` AND parent_account_id = ?`;
-        params.push(parent_account_id);
+        query = query.where('parent_account_id', '=', parent_account_id);
       }
     }
 
     if (search) {
-      sql += ` AND (code LIKE ? OR name LIKE ?)`;
       const searchPattern = `%${search}%`;
-      params.push(searchPattern, searchPattern);
+      query = query.where((eb) => eb.or([
+        eb('code', 'like', searchPattern),
+        eb('name', 'like', searchPattern)
+      ]));
     }
 
-    sql += ` ORDER BY code ASC`;
-
-    const rows = await this.db.query<AccountResponse>(sql, params);
+    const rows = await query.execute();
     return this.mapRowsToAccountResponses(rows);
   }
 
@@ -166,22 +160,21 @@ export class AccountsService {
    * Get single account by ID
    */
   async getAccountById(accountId: number, companyId: number): Promise<AccountResponse> {
-    const sql = `
-      SELECT 
-        id, company_id, code, name, account_type_id, type_name, normal_balance, report_group,
-        parent_account_id, is_group, is_payable, is_active, created_at, updated_at
-      FROM accounts
-      WHERE id = ? AND company_id = ?
-      LIMIT 1
-    `;
+    const row = await this.db.kysely
+      .selectFrom('accounts')
+      .where('id', '=', accountId)
+      .where('company_id', '=', companyId)
+      .select([
+        'id', 'company_id', 'code', 'name', 'account_type_id', 'type_name', 'normal_balance', 'report_group',
+        'parent_account_id', 'is_group', 'is_payable', 'is_active', 'created_at', 'updated_at'
+      ])
+      .executeTakeFirst();
 
-    const rows = await this.db.query<AccountResponse>(sql, [accountId, companyId]);
-
-    if (rows.length === 0) {
+    if (!row) {
       throw new AccountNotFoundError(accountId, companyId);
     }
 
-    return this.mapRowToAccountResponse(rows[0]);
+    return this.mapRowToAccountResponse(row);
   }
 
   /**
@@ -235,36 +228,30 @@ export class AccountsService {
 
     // Use transaction if supported
     const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-    
+
     try {
       if (useTransaction) {
         await this.db.begin!();
       }
 
-      const sql = `
-        INSERT INTO accounts (
-          company_id, code, name, account_type_id, type_name, normal_balance, report_group,
-          parent_account_id, is_group, is_payable, is_active, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-      `;
+      const result = await this.db.kysely
+        .insertInto('accounts')
+        .values({
+          company_id: data.company_id,
+          code: data.code,
+          name: data.name,
+          account_type_id: data.account_type_id ?? null,
+          type_name: effectiveTypeName,
+          normal_balance: effectiveNormalBalance,
+          report_group: effectiveReportGroup,
+          parent_account_id: data.parent_account_id ?? null,
+          is_group: data.is_group ? 1 : 0,
+          is_payable: data.is_payable ? 1 : 0,
+          is_active: data.is_active ? 1 : 0
+        })
+        .executeTakeFirst();
 
-      const params = [
-        data.company_id,
-        data.code,
-        data.name,
-        data.account_type_id ?? null,
-        effectiveTypeName,
-        effectiveNormalBalance,
-        effectiveReportGroup,
-        data.parent_account_id ?? null,
-        data.is_group ? 1 : 0,
-        data.is_payable ? 1 : 0,
-        data.is_active ? 1 : 0
-      ];
-
-      const result = await this.db.execute(sql, params);
-      const accountId = result.insertId!;
+      const accountId = Number(result.insertId);
 
       // Audit log (inside transaction)
       if (this.auditService && userId) {
@@ -514,20 +501,18 @@ export class AccountsService {
 
     // Use transaction if supported
     const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-    
+
     try {
       if (useTransaction) {
         await this.db.begin!();
       }
 
-      const sql = `
-        UPDATE accounts
-        SET ${updateFields.join(", ")}
-        WHERE id = ? AND company_id = ?
-      `;
-
+      // Execute update using raw SQL (complex dynamic SQL is already built)
       params.push(accountId, companyId);
-      await this.db.execute(sql, params);
+      await this.db.execute(
+        `UPDATE accounts SET ${updateFields.join(", ")} WHERE id = ? AND company_id = ?`,
+        params
+      );
 
       // Fetch updated account
       const after = await this.getAccountById(accountId, companyId);
@@ -571,19 +556,18 @@ export class AccountsService {
 
     // Use transaction if supported
     const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-    
+
     try {
       if (useTransaction) {
         await this.db.begin!();
       }
 
-      const sql = `
-        UPDATE accounts
-        SET is_active = 0
-        WHERE id = ? AND company_id = ?
-      `;
-
-      await this.db.execute(sql, [accountId, companyId]);
+      await this.db.kysely
+        .updateTable('accounts')
+        .set({ is_active: 0 })
+        .where('id', '=', accountId)
+        .where('company_id', '=', companyId)
+        .execute();
 
       const account = await this.getAccountById(accountId, companyId);
 
@@ -619,19 +603,18 @@ export class AccountsService {
 
     // Use transaction if supported
     const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-    
+
     try {
       if (useTransaction) {
         await this.db.begin!();
       }
 
-      const sql = `
-        UPDATE accounts
-        SET is_active = 1
-        WHERE id = ? AND company_id = ?
-      `;
-
-      await this.db.execute(sql, [accountId, companyId]);
+      await this.db.kysely
+        .updateTable('accounts')
+        .set({ is_active: 1 })
+        .where('id', '=', accountId)
+        .where('company_id', '=', companyId)
+        .execute();
 
       const account = await this.getAccountById(accountId, companyId);
 
@@ -662,22 +645,20 @@ export class AccountsService {
    * Build hierarchical account tree
    */
   async getAccountTree(companyId: number, includeInactive = false): Promise<AccountTreeNode[]> {
-    let sql = `
-      SELECT 
-        id, company_id, code, name, account_type_id, type_name, normal_balance, report_group,
-        parent_account_id, is_group, is_payable, is_active, created_at, updated_at
-      FROM accounts
-      WHERE company_id = ?
-    `;
-    const params: any[] = [companyId];
+    let query = this.db.kysely
+      .selectFrom('accounts')
+      .where('company_id', '=', companyId)
+      .select([
+        'id', 'company_id', 'code', 'name', 'account_type_id', 'type_name', 'normal_balance', 'report_group',
+        'parent_account_id', 'is_group', 'is_payable', 'is_active', 'created_at', 'updated_at'
+      ])
+      .orderBy('code', 'asc');
 
     if (!includeInactive) {
-      sql += ` AND is_active = 1`;
+      query = query.where('is_active', '=', 1);
     }
 
-    sql += ` ORDER BY code ASC`;
-
-    const rows = await this.db.query<AccountResponse>(sql, params);
+    const rows = await query.execute();
     const accounts = this.mapRowsToAccountResponses(rows);
 
     // Build tree structure
@@ -689,28 +670,27 @@ export class AccountsService {
    */
   async isAccountInUse(accountId: number, companyId: number): Promise<boolean> {
     // Check journal lines
-    const journalSql = `
-      SELECT COUNT(*) as count
-      FROM journal_lines
-      WHERE account_id = ? AND company_id = ?
-      LIMIT 1
-    `;
+    const journalCount = await this.db.kysely
+      .selectFrom('journal_lines')
+      .where('account_id', '=', accountId)
+      .where('company_id', '=', companyId)
+      .select((eb) => [eb.fn.count('id').as('count')])
+      .executeTakeFirst();
 
-    const journalRows = await this.db.query<{ count: number }>(journalSql, [accountId, companyId]);
-    if (journalRows.length > 0 && journalRows[0].count > 0) {
+    if (Number(journalCount?.count ?? 0) > 0) {
       return true;
     }
 
     // Check active child accounts
-    const childrenSql = `
-      SELECT COUNT(*) as count
-      FROM accounts
-      WHERE parent_account_id = ? AND company_id = ? AND is_active = 1
-      LIMIT 1
-    `;
+    const childrenCount = await this.db.kysely
+      .selectFrom('accounts')
+      .where('parent_account_id', '=', accountId)
+      .where('company_id', '=', companyId)
+      .where('is_active', '=', 1)
+      .select((eb) => [eb.fn.count('id').as('count')])
+      .executeTakeFirst();
 
-    const childrenRows = await this.db.query<{ count: number }>(childrenSql, [accountId, companyId]);
-    if (childrenRows.length > 0 && childrenRows[0].count > 0) {
+    if (Number(childrenCount?.count ?? 0) > 0) {
       return true;
     }
 
@@ -721,23 +701,19 @@ export class AccountsService {
    * Validate account code uniqueness
    */
   async validateAccountCode(code: string, companyId: number, excludeAccountId?: number): Promise<void> {
-    let sql = `
-      SELECT id
-      FROM accounts
-      WHERE company_id = ? AND code = ?
-    `;
-    const params: any[] = [companyId, code];
+    let query = this.db.kysely
+      .selectFrom('accounts')
+      .where('company_id', '=', companyId)
+      .where('code', '=', code)
+      .select('id');
 
     if (excludeAccountId !== undefined) {
-      sql += ` AND id != ?`;
-      params.push(excludeAccountId);
+      query = query.where('id', '!=', excludeAccountId);
     }
 
-    sql += ` LIMIT 1`;
+    const row = await query.executeTakeFirst();
 
-    const rows = await this.db.query<{ id: number }>(sql, params);
-
-    if (rows.length > 0) {
+    if (row) {
       throw new AccountCodeExistsError(code, companyId);
     }
   }
@@ -747,20 +723,17 @@ export class AccountsService {
    */
   async validateParentAccount(parentId: number, accountId: number | null, companyId: number): Promise<void> {
     // Verify parent account exists and belongs to the same company
-    const parentSql = `
-      SELECT id, company_id
-      FROM accounts
-      WHERE id = ?
-      LIMIT 1
-    `;
+    const parentRow = await this.db.kysely
+      .selectFrom('accounts')
+      .where('id', '=', parentId)
+      .select(['id', 'company_id'])
+      .executeTakeFirst();
 
-    const parentRows = await this.db.query<{ id: number; company_id: number }>(parentSql, [parentId]);
-
-    if (parentRows.length === 0) {
+    if (!parentRow) {
       throw new AccountNotFoundError(parentId, companyId);
     }
 
-    if (parentRows[0].company_id !== companyId) {
+    if (parentRow.company_id !== companyId) {
       throw new ParentAccountCompanyMismatchError(parentId, companyId);
     }
 
@@ -782,20 +755,17 @@ export class AccountsService {
    * Validate account type exists and belongs to the same company
    */
   async validateAccountType(accountTypeId: number, companyId: number): Promise<void> {
-    const sql = `
-      SELECT id, company_id
-      FROM account_types
-      WHERE id = ?
-      LIMIT 1
-    `;
+    const row = await this.db.kysely
+      .selectFrom('account_types')
+      .where('id', '=', accountTypeId)
+      .select(['id', 'company_id'])
+      .executeTakeFirst();
 
-    const rows = await this.db.query<{ id: number; company_id: number }>(sql, [accountTypeId]);
-
-    if (rows.length === 0) {
+    if (!row) {
       throw new Error(`Account type ${accountTypeId} not found`);
     }
 
-    if (rows[0].company_id !== companyId) {
+    if (row.company_id !== companyId) {
       throw new AccountTypeCompanyMismatchError(accountTypeId, companyId);
     }
   }
@@ -808,24 +778,22 @@ export class AccountsService {
     accountTypeId: number,
     companyId: number
   ): Promise<{ name: string; normal_balance: string | null; report_group: string | null } | null> {
-    const sql = `
-      SELECT name, normal_balance, report_group
-      FROM account_types
-      WHERE id = ? AND company_id = ?
-      LIMIT 1
-    `;
+    const row = await this.db.kysely
+      .selectFrom('account_types')
+      .where('id', '=', accountTypeId)
+      .where('company_id', '=', companyId)
+      .select(['name', 'normal_balance', 'report_group'])
+      .executeTakeFirst();
 
-    const rows = await this.db.query<{
-      name: string;
-      normal_balance: string | null;
-      report_group: string | null;
-    }>(sql, [accountTypeId, companyId]);
-
-    if (rows.length === 0) {
+    if (!row) {
       return null;
     }
 
-    return rows[0];
+    return {
+      name: row.name,
+      normal_balance: row.normal_balance,
+      report_group: row.report_group
+    };
   }
 
   /**
@@ -851,47 +819,34 @@ export class AccountsService {
       visited.add(currentId);
 
       // Look for accounts with explicit classification fields directly
-      const sql = `
-        SELECT id, account_type_id, parent_account_id, name, type_name, normal_balance, report_group
-        FROM accounts
-        WHERE id = ? AND company_id = ?
-        LIMIT 1
-      `;
+      const row = await this.db.kysely
+        .selectFrom('accounts')
+        .where('id', '=', currentId)
+        .where('company_id', '=', companyId)
+        .select(['id', 'account_type_id', 'parent_account_id', 'name', 'type_name', 'normal_balance', 'report_group'])
+        .executeTakeFirst();
 
-      type AncestorRow = {
-        id: number;
-        account_type_id: number | null;
-        parent_account_id: number | null;
-        name: string;
-        type_name: string | null;
-        normal_balance: string | null;
-        report_group: string | null;
-      };
-      const rows: AncestorRow[] = await this.db.query<AncestorRow>(sql, [currentId, companyId]);
-
-      if (rows.length === 0) {
+      if (!row) {
         return null;
       }
 
-      const account: AncestorRow = rows[0];
-      
       // Check if this account has explicit classification (from accounts table)
-      const hasClassification = account.type_name || account.normal_balance || account.report_group;
+      const hasClassification = row.type_name || row.normal_balance || row.report_group;
       if (hasClassification) {
         return {
-          account_type_id: account.account_type_id ?? 0,
-          name: account.type_name || account.name,
-          normal_balance: account.normal_balance,
-          report_group: account.report_group
+          account_type_id: row.account_type_id ?? 0,
+          name: row.type_name || row.name,
+          normal_balance: row.normal_balance,
+          report_group: row.report_group
         };
       }
 
       // Also check if account has a template attached that has values
-      if (account.account_type_id) {
-        const typeMeta = await this.getAccountTypeMetadata(account.account_type_id, companyId);
+      if (row.account_type_id) {
+        const typeMeta = await this.getAccountTypeMetadata(row.account_type_id, companyId);
         if (typeMeta && (typeMeta.normal_balance || typeMeta.report_group)) {
           return {
-            account_type_id: account.account_type_id,
+            account_type_id: row.account_type_id,
             name: typeMeta.name,
             normal_balance: typeMeta.normal_balance,
             report_group: typeMeta.report_group
@@ -899,7 +854,7 @@ export class AccountsService {
         }
       }
 
-      currentId = account.parent_account_id;
+      currentId = row.parent_account_id;
     }
 
     return null;
@@ -909,13 +864,6 @@ export class AccountsService {
    * Check if potentialDescendant is a descendant of accountId
    */
   private async isDescendantOf(potentialDescendantId: number, accountId: number): Promise<boolean> {
-    const sql = `
-      SELECT parent_account_id
-      FROM accounts
-      WHERE id = ?
-      LIMIT 1
-    `;
-
     let currentId: number | null = potentialDescendantId;
     const visited = new Set<number>();
 
@@ -930,13 +878,17 @@ export class AccountsService {
         return true;
       }
 
-      const parentRows: Array<{ parent_account_id: number | null }> = await this.db.query<{ parent_account_id: number | null }>(sql, [currentId]);
+      const row = await this.db.kysely
+        .selectFrom('accounts')
+        .where('id', '=', currentId)
+        .select('parent_account_id')
+        .executeTakeFirst();
 
-      if (parentRows.length === 0 || parentRows[0].parent_account_id === null) {
+      if (!row || row.parent_account_id === null) {
         break;
       }
 
-      currentId = parentRows[0].parent_account_id;
+      currentId = row.parent_account_id;
     }
 
     return false;

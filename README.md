@@ -18,7 +18,7 @@ Modular ERP monorepo with Accounting/GL at the center, offline-first POS, and mo
 - `packages/core` - Framework-agnostic business logic
 - `packages/modules/*` - Domain module implementations
 - `packages/db` - MySQL 8.0.44 SQL migrations
-- `docs/` - ADRs, API contracts, accounting mappings, guides
+- `docs/` - API contracts, guides, accounting mappings, ADRs
 
 ---
 

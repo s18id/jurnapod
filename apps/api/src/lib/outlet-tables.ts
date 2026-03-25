@@ -12,6 +12,7 @@ import {
   outletTableStatusToId,
   toRfc3339Required
 } from "@jurnapod/shared";
+import { newKyselyConnection } from "@jurnapod/db";
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 
@@ -67,6 +68,10 @@ type OutletTableActor = {
 
 class ConnectionAuditDbClient {
   constructor(private readonly connection: PoolConnection) {}
+
+  get kysely() {
+    return newKyselyConnection(this.connection);
+  }
 
   async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
     const [rows] = await this.connection.execute<RowDataPacket[]>(sql, params || []);

@@ -9,6 +9,7 @@ import { hashPassword, type PasswordHashPolicy } from "./password-hash";
 import { getDbPool } from "./db";
 import { getAppEnv } from "./env";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
+import { newKyselyConnection } from "@jurnapod/db";
 
 export class UserNotFoundError extends Error {}
 export class UserEmailExistsError extends Error {}
@@ -94,6 +95,10 @@ type OutletRoleJoinRow = RowDataPacket & {
 
 class ConnectionAuditDbClient {
   constructor(private readonly connection: PoolConnection) {}
+
+  get kysely() {
+    return newKyselyConnection(this.connection);
+  }
 
   async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
     const [rows] = await this.connection.execute<RowDataPacket[]>(sql, params || []);
@@ -1067,37 +1072,29 @@ export async function listRoles(
   Array<{ id: number; code: string; name: string; company_id: number | null; is_global: boolean; role_level: number }>
 > {
   const pool = getDbPool();
+  const db = new (await import("@jurnapod/db")).DbConn(pool);
 
-  let rows: RoleRow[];
+  let query = db.kysely
+    .selectFrom('roles')
+    .select(['id', 'code', 'name', 'company_id', 'is_global', 'role_level'])
+    .orderBy('company_id', 'asc')
+    .orderBy('code', 'asc');
 
   if (isSuperAdmin) {
     if (filterCompanyId !== undefined) {
-      const [result] = await pool.execute<RoleRow[]>(
-        `SELECT id, code, name, company_id, is_global, role_level
-         FROM roles
-         WHERE company_id = ? OR company_id IS NULL
-         ORDER BY company_id ASC, code ASC`,
-        [filterCompanyId]
-      );
-      rows = result;
-    } else {
-      const [result] = await pool.execute<RoleRow[]>(
-        `SELECT id, code, name, company_id, is_global, role_level
-         FROM roles
-         ORDER BY company_id ASC, code ASC`
-      );
-      rows = result;
+      query = query.where((eb) => eb.or([
+        eb('company_id', '=', filterCompanyId),
+        eb('company_id', 'is', null)
+      ]));
     }
   } else {
-    const [result] = await pool.execute<RoleRow[]>(
-      `SELECT id, code, name, company_id, is_global, role_level
-       FROM roles
-       WHERE company_id = ? OR company_id IS NULL
-       ORDER BY company_id ASC, code ASC`,
-      [companyId]
-    );
-    rows = result;
+    query = query.where((eb) => eb.or([
+      eb('company_id', '=', companyId),
+      eb('company_id', 'is', null)
+    ]));
   }
+
+  const rows = await query.execute();
 
   return rows.map((row) => ({
     id: Number(row.id),
@@ -1117,23 +1114,24 @@ export async function getRole(roleId: number): Promise<{
   role_level: number;
 }> {
   const pool = getDbPool();
-  const [rows] = await pool.execute<RoleRow[]>(
-    `SELECT id, code, name, is_global, role_level
-     FROM roles
-     WHERE id = ?`,
-    [roleId]
-  );
+  const db = new (await import("@jurnapod/db")).DbConn(pool);
 
-  if (rows.length === 0) {
+  const row = await db.kysely
+    .selectFrom('roles')
+    .where('id', '=', roleId)
+    .select(['id', 'code', 'name', 'is_global', 'role_level'])
+    .executeTakeFirst();
+
+  if (!row) {
     throw new RoleNotFoundError(`Role with id ${roleId} not found`);
   }
 
   return {
-    id: Number(rows[0].id),
-    code: rows[0].code,
-    name: rows[0].name,
-    is_global: Boolean(rows[0].is_global),
-    role_level: Number(rows[0].role_level ?? 0)
+    id: Number(row.id),
+    code: row.code,
+    name: row.name,
+    is_global: Boolean(row.is_global),
+    role_level: Number(row.role_level ?? 0)
   };
 }
 
@@ -1169,6 +1167,7 @@ export async function createRole(params: {
 }): Promise<{ id: number; code: string; name: string; company_id: number | null; is_global: boolean; role_level: number }> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
+  const kysely = newKyselyConnection(connection);
   const auditService = createAuditServiceForConnection(connection);
 
   try {
@@ -1186,20 +1185,27 @@ export async function createRole(params: {
     }
 
     // Check if role code already exists for this company
-    const [existing] = await connection.execute<RoleRow[]>(
-      `SELECT id FROM roles WHERE company_id = ? AND code = ?`,
-      [params.companyId, params.code]
-    );
+    const existing = await kysely
+      .selectFrom('roles')
+      .where('company_id', '=', params.companyId)
+      .where('code', '=', params.code)
+      .select('id')
+      .executeTakeFirst();
 
-    if (existing.length > 0) {
+    if (existing) {
       throw new Error(`Role with code ${params.code} already exists`);
     }
 
     // Insert role with company_id
-    const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO roles (code, name, company_id, role_level) VALUES (?, ?, ?, ?)`,
-      [params.code, params.name, params.companyId, newRoleLevel]
-    );
+    const result = await kysely
+      .insertInto('roles')
+      .values({
+        code: params.code,
+        name: params.name,
+        company_id: params.companyId,
+        role_level: newRoleLevel
+      })
+      .executeTakeFirst();
 
     const roleId = Number(result.insertId);
     const auditContext = buildAuditContext(params.companyId, params.actor);
@@ -1238,22 +1244,22 @@ export async function updateRole(params: {
 }): Promise<{ id: number; code: string; name: string; is_global: boolean; role_level: number }> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
+  const kysely = newKyselyConnection(connection);
   const auditService = createAuditServiceForConnection(connection);
 
   try {
     await connection.beginTransaction();
 
     // Get current role
-    const [rows] = await connection.execute<RoleRow[]>(
-      `SELECT id, code, name, is_global, role_level FROM roles WHERE id = ?`,
-      [params.roleId]
-    );
+    const currentRole = await kysely
+      .selectFrom('roles')
+      .where('id', '=', params.roleId)
+      .select(['id', 'code', 'name', 'is_global', 'role_level'])
+      .executeTakeFirst();
 
-    if (rows.length === 0) {
+    if (!currentRole) {
       throw new RoleNotFoundError(`Role with id ${params.roleId} not found`);
     }
-
-    const currentRole = rows[0];
 
     const actorMaxLevel = await getUserMaxRoleLevelForConnection(
       connection,
@@ -1268,10 +1274,11 @@ export async function updateRole(params: {
 
     // Build update
     if (params.name && params.name !== currentRole.name) {
-      await connection.execute(
-        `UPDATE roles SET name = ? WHERE id = ?`,
-        [params.name, params.roleId]
-      );
+      await kysely
+        .updateTable('roles')
+        .set({ name: params.name })
+        .where('id', '=', params.roleId)
+        .execute();
 
       const auditContext = buildAuditContext(params.companyId, params.actor);
       await auditService.logUpdate(
@@ -1307,22 +1314,22 @@ export async function deleteRole(params: {
 }): Promise<void> {
   const pool = getDbPool();
   const connection = await pool.getConnection();
+  const kysely = newKyselyConnection(connection);
   const auditService = createAuditServiceForConnection(connection);
 
   try {
     await connection.beginTransaction();
 
     // Get current role
-    const [rows] = await connection.execute<RoleRow[]>(
-      `SELECT id, code, name, role_level FROM roles WHERE id = ?`,
-      [params.roleId]
-    );
+    const role = await kysely
+      .selectFrom('roles')
+      .where('id', '=', params.roleId)
+      .select(['id', 'code', 'name', 'role_level'])
+      .executeTakeFirst();
 
-    if (rows.length === 0) {
+    if (!role) {
       throw new RoleNotFoundError(`Role with id ${params.roleId} not found`);
     }
-
-    const role = rows[0];
 
     const actorMaxLevel = await getUserMaxRoleLevelForConnection(
       connection,
@@ -1336,20 +1343,22 @@ export async function deleteRole(params: {
     }
 
     // Check if role is in use
-    const [userRoles] = await connection.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM user_role_assignments WHERE role_id = ?`,
-      [params.roleId]
-    );
+    const userRolesCount = await kysely
+      .selectFrom('user_role_assignments')
+      .where('role_id', '=', params.roleId)
+      .select((eb) => [eb.fn.count('id').as('count')])
+      .executeTakeFirst();
 
-    if (userRoles[0].count > 0) {
-      throw new Error(`Cannot delete role ${role.code}: ${userRoles[0].count} users are assigned to this role`);
+    const count = Number(userRolesCount?.count ?? 0);
+    if (count > 0) {
+      throw new Error(`Cannot delete role ${role.code}: ${count} users are assigned to this role`);
     }
 
     // Delete role
-    await connection.execute(
-      `DELETE FROM roles WHERE id = ?`,
-      [params.roleId]
-    );
+    await kysely
+      .deleteFrom('roles')
+      .where('id', '=', params.roleId)
+      .execute();
 
     const auditContext = buildAuditContext(params.companyId, params.actor);
     await auditService.logDelete(auditContext, "setting", params.roleId, {

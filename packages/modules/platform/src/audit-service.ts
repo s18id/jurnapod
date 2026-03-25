@@ -3,18 +3,13 @@
 
 import type { AuditLogEntryRequest, AuditAction, AuditEntityType, AuditResult, AuditStatusCode } from "@jurnapod/shared";
 import { AuditStatus } from "@jurnapod/shared";
+import type { JurnapodDbClient } from "@jurnapod/db";
 
 /**
  * Database client interface for audit logging
  * Should support parameterized queries and transactions
  */
-export interface AuditDbClient {
-  query<T = any>(sql: string, params?: any[]): Promise<T[]>;
-  execute(sql: string, params?: any[]): Promise<{ affectedRows: number; insertId?: number }>;
-  begin?(): Promise<void>;
-  commit?(): Promise<void>;
-  rollback?(): Promise<void>;
-}
+export interface AuditDbClient extends JurnapodDbClient {}
 
 /**
  * Context for audit operations

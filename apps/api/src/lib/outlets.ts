@@ -6,6 +6,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { AuditService } from "@jurnapod/modules-platform";
 import { getDbPool } from "./db";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
+import { newKyselyConnection } from "@jurnapod/db";
 
 export class OutletNotFoundError extends Error {}
 export class OutletCodeExistsError extends Error {}
@@ -63,6 +64,10 @@ type OutletActor = {
 
 class ConnectionAuditDbClient {
   constructor(private readonly connection: PoolConnection) {}
+
+  get kysely() {
+    return newKyselyConnection(this.connection);
+  }
 
   async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
     const [rows] = await this.connection.execute<RowDataPacket[]>(sql, params || []);
