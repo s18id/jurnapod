@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-25T10:00:00+0700
+last_updated: 2026-03-25T12:00:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -256,8 +256,8 @@ development_status:
   # Epic 16: Unified Time Handling via date-helpers
   # NOTE: Foundation epic for canonical UTC/business-date/epoch handling across API/POS/backoffice
   epic-16: in-progress
-  16-1-define-date-helpers-contract: in-progress  # Fix pass complete: @js-temporal/polyfill replace, 83 tests passing, typecheck+lint clean
-  16-2-implement-temporal-backed-date-helpers: in-progress  # Done as part of fix pass: normalizeDateWithTime + fromUtcInstant both now use Temporal
+  16-1-define-date-helpers-contract: done  # COMPLETE - Public contract defined, @js-temporal/polyfill internals, 105 tests, all review rounds passed (P0/P1 cleared, P2/P3 resolved), committed
+  16-2-implement-temporal-backed-date-helpers: done  # COMPLETE - Temporal internals done as part of 16.1 fix pass; normalizeDateWithTime + fromUtcInstant use Temporal
   16-3-define-dst-ambiguity-policy: ready-for-dev
   16-4-add-date-helpers-test-coverage: ready-for-dev
   16-5-migrate-adr-0001-critical-call-sites-to-date-helpers: ready-for-dev
