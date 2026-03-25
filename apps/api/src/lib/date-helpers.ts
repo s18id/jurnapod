@@ -239,6 +239,75 @@ export function resolveEventTime(event: {
 }
 
 /**
+ * Resolve the full event-time details: UTC instant, epoch ms, business date, and timezone.
+ *
+ * Returns an aligned object from a single input form. This is useful for business logic
+ * that needs all four values simultaneously (e.g. logging, event emission, or
+ * cross-system timestamp propagation).
+ *
+ * - From `at`: `businessDate` is derived from the given `timezone`.
+ * - From `ts`: `businessDate` is derived from the given `timezone`.
+ * - From `date` + `timezone`: `atUtc` is computed via {@link normalizeDateWithTime},
+ *   then `businessDate` is derived from it.
+ *
+ * DST Ambiguity Policy: same as {@link resolveEventTime} — nonexistent and ambiguous
+ * local times are rejected by default via `disambiguation: 'reject'`.
+ *
+ * @param event - Event time descriptor.
+ * @param event.timezone - Company IANA timezone; required for all input forms.
+ * @returns Aligned event-time object with `atUtc`, `ts`, `businessDate`, and `timezone`.
+ *
+ * @example
+ * resolveEventTimeDetails({ at: "2026-03-16T10:30:00.000Z" }, "Asia/Jakarta")
+ * // { atUtc: "2026-03-16T10:30:00.000Z", ts: 1710587400000, businessDate: "2026-03-16", timezone: "Asia/Jakarta" }
+ */
+export function resolveEventTimeDetails(
+  event: {
+    at?: string;
+    ts?: number;
+    date?: string;
+    hour?: number;
+    minute?: number;
+  },
+  timezone: string
+): {
+  atUtc: string;
+  ts: number;
+  businessDate: string;
+  timezone: string;
+} {
+  if (!isValidTimeZone(timezone)) {
+    throw new Error(`Invalid timezone: ${timezone}`);
+  }
+
+  let atUtc: string;
+
+  if (event.at !== undefined) {
+    atUtc = toUtcInstant(event.at);
+  } else if (event.ts !== undefined) {
+    if (!Number.isFinite(event.ts)) {
+      throw new Error(`Invalid epoch ms: ${event.ts} is not a finite number`);
+    }
+    atUtc = fromEpochMs(event.ts);
+  } else if (event.date !== undefined) {
+    const hour = event.hour ?? 0;
+    const minute = event.minute ?? 0;
+    atUtc = normalizeDateWithTime(event.date, timezone, hour, minute);
+  } else {
+    throw new Error(
+      "resolveEventTimeDetails requires one of: at (UTC ISO), ts (epoch ms), or date+timezone"
+    );
+  }
+
+  return {
+    atUtc,
+    ts: toEpochMs(atUtc),
+    businessDate: toBusinessDate(atUtc, timezone),
+    timezone
+  };
+}
+
+/**
  * Convert a business-local YYYY-MM-DD date in a given timezone to a UTC ISO
  * string at a specified hour and minute (business-local time).
  *

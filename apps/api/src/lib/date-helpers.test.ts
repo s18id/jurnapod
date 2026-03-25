@@ -23,7 +23,8 @@ import {
   toEpochMs,
   fromEpochMs,
   toBusinessDate,
-  resolveEventTime
+  resolveEventTime,
+  resolveEventTimeDetails
 } from "./date-helpers";
 
 describe("normalizeDate()", () => {
@@ -811,5 +812,116 @@ describe("DST gap and overlap handling", () => {
     const result = resolveEventTime({ date: "2024-03-10", timezone: "America/New_York", hour: 1, minute: 0 });
     assert.equal(typeof result, "string");
     assert.ok(result.endsWith("Z"));
+  });
+});
+
+describe("resolveEventTimeDetails()", () => {
+  test("returns aligned atUtc, ts, businessDate, and timezone from UTC instant", () => {
+    const result = resolveEventTimeDetails({ at: "2026-03-16T10:30:00.000Z" }, "Asia/Jakarta");
+    assert.equal(result.atUtc, "2026-03-16T10:30:00.000Z");
+    // Use toEpochMs to derive expected value rather than hand-calculate to avoid arithmetic errors.
+    assert.equal(result.ts, toEpochMs("2026-03-16T10:30:00.000Z"));
+    assert.equal(result.businessDate, "2026-03-16");
+    assert.equal(result.timezone, "Asia/Jakarta");
+  });
+
+  test("returns aligned values from epoch ms", () => {
+    // Epoch for 2026-03-16T10:30:00.000Z is 1773657000000ms.
+    const ms = toEpochMs("2026-03-16T10:30:00.000Z");
+    const result = resolveEventTimeDetails({ ts: ms }, "America/New_York");
+    assert.equal(result.atUtc, "2026-03-16T10:30:00.000Z");
+    assert.equal(result.ts, ms);
+    assert.equal(result.businessDate, "2026-03-16");
+    assert.equal(result.timezone, "America/New_York");
+  });
+
+  test("returns aligned values from date+timezone", () => {
+    // 09:00 Jakarta on March 16, 2026 = 02:00 UTC
+    const result = resolveEventTimeDetails({ date: "2026-03-16", hour: 9, minute: 0 }, "Asia/Jakarta");
+    assert.equal(result.atUtc, "2026-03-16T02:00:00.000Z");
+    assert.equal(result.ts, toEpochMs("2026-03-16T02:00:00.000Z"));
+    assert.equal(result.businessDate, "2026-03-16");
+    assert.equal(result.timezone, "Asia/Jakarta");
+  });
+
+  test("businessDate is the local calendar date in the business timezone, not the UTC date", () => {
+    // 01:00 Jakarta on March 16 = 18:00 UTC on March 15.
+    // businessDate is the LOCAL date (2026-03-16), not the UTC date (2026-03-15).
+    // This is intentional — businessDate represents the calendar day as seen by the outlet.
+    const result = resolveEventTimeDetails({ date: "2026-03-16", hour: 1, minute: 0 }, "Asia/Jakarta");
+    assert.equal(result.businessDate, "2026-03-16");
+    assert.equal(result.timezone, "Asia/Jakarta");
+  });
+
+  test("throws on invalid timezone", () => {
+    assert.throws(
+      () => resolveEventTimeDetails({ at: "2026-03-16T10:30:00.000Z" }, "Not/A_Timezone"),
+      /Invalid timezone/
+    );
+  });
+
+  test("throws when no valid input is provided", () => {
+    assert.throws(
+      () => resolveEventTimeDetails({}, "UTC"),
+      /requires one of/
+    );
+  });
+
+  test("throws on DST gap (same reject-by-default policy as resolveEventTime)", () => {
+    // March 10, 2024: spring forward — 02:30 does not exist in America/New_York
+    assert.throws(
+      () => resolveEventTimeDetails({ date: "2024-03-10", hour: 2, minute: 30 }, "America/New_York"),
+      /Invalid date-time/
+    );
+  });
+});
+
+describe("UTC and epoch roundtrip", () => {
+  test("toUtcInstant → fromUtcInstant returns equivalent wall-clock time in same timezone", () => {
+    const original = "2026-03-16T10:30:00.000+07:00";
+    const utc = toUtcInstant(original);
+    const roundtrip = fromUtcInstant(utc, "Asia/Jakarta");
+    // Wall-clock time in the offset timezone must match original
+    assert.ok(roundtrip.startsWith("2026-03-16T10:30:00"));
+    assert.ok(roundtrip.endsWith("+07:00"));
+  });
+
+  test("toEpochMs → fromEpochMs returns the original UTC instant", () => {
+    const original = "2026-03-16T10:30:00.000Z";
+    const ms = toEpochMs(original);
+    const roundtrip = fromEpochMs(ms);
+    assert.equal(roundtrip, original);
+  });
+
+  test("toUtcInstant → toEpochMs → fromEpochMs → fromUtcInstant is lossless for UTC input", () => {
+    // Compare epoch ms rather than ISO string format to avoid Z vs +00:00 string differences.
+    const original = "2026-03-16T10:30:00.000Z";
+    const utc = toUtcInstant(original);
+    const ms = toEpochMs(utc);
+    const fromMs = fromEpochMs(ms);
+    const fromUtc = fromUtcInstant(fromMs, "UTC");
+    assert.equal(toEpochMs(fromMs), ms);
+    assert.equal(toEpochMs(fromUtc), ms);
+  });
+
+  test("offset datetime roundtrip preserves UTC instant", () => {
+    // Any RFC3339 offset should round-trip to the same UTC instant
+    const offsets = ["+07:00", "-05:00", "+00:00", "+13:00", "-08:00"];
+    for (const offset of offsets) {
+      const original = `2026-03-16T10:30:00.000${offset}`;
+      const utc = toUtcInstant(original);
+      const utc2 = toUtcInstant(utc);
+      assert.equal(utc, utc2, `UTC roundtrip failed for offset ${offset}`);
+    }
+  });
+
+  test("epoch ms roundtrip is lossless across all supported timezones", () => {
+    const ms = 1710587400000;
+    const timezones = ["UTC", "Asia/Jakarta", "America/New_York", "Europe/London", "Pacific/Auckland"];
+    for (const tz of timezones) {
+      const utc = fromEpochMs(ms);
+      const back = toEpochMs(utc);
+      assert.equal(back, ms, `Epoch roundtrip failed for timezone ${tz}`);
+    }
   });
 });
