@@ -107,6 +107,11 @@ N/A - This is a backend infrastructure initiative with no UI changes.
   - **Story 0.1.5: Accounts Route Migration** - Migrate accounts route to Kysely
   - **Story 0.1.6: ADR Update and Documentation** - Document Kysely adoption decision
 
+- **Epic 1: Continue Kysely ORM Migration** - Migrate journals and account-types routes to Kysely
+  - **Story 1.1: Journals Route Migration** - Migrate journals route to Kysely, preserve raw SQL for GL aggregations
+  - **Story 1.2: Account Types Route Migration** - Migrate account-types route to Kysely
+  - **Story 1.3: Epic 1 Documentation** - Update ADR-0009 with lessons learned from Epic 1
+
 ---
 
 ## Epic 0: Infrastructure & Technical Debt
@@ -648,6 +653,263 @@ const costs = await resolveIngredientUnitCostBatch(pool, companyId, ingredientId
 
 ---
 
+## Epic 1: Continue Kysely ORM Migration
+
+**Goal:** Continue the incremental Kysely migration by migrating journals and account-types routes, while preserving raw SQL for complex financial queries (GL aggregations, reconciliation).
+
+**Business Value:**
+- Maintain developer velocity gains from Kysely for CRUD operations
+- Preserve explicit SQL control for complex financial queries
+- Improve type safety for journal and account-type operations
+- Build on Epic 0 infrastructure and patterns
+
+**Success Metrics:**
+- All existing tests pass (journals, account-types)
+- Type checking passes with zero errors
+- No regressions in journal balance validation
+- Documentation updated with lessons learned
+
+**Technical Context:**
+- Kysely infrastructure already established in Epic 0
+- Journals have batch/line relationships requiring explicit JOINs
+- Complex GL queries (trial balance, reconciliation) should preserve raw SQL
+- Account-types have soft-delete pattern with usage checks
+
+**Why Continue the Migration:**
+1. Journals and account-types are core accounting entities
+2. Both have complex relationships (batch→lines, soft-delete with FK checks)
+3. Lessons from these migrations inform Epic 2 targets
+4. Validates Kysely patterns at scale
+
+**Rollback Strategy:**
+- Each story is independently deployable
+- Raw SQL fallback preserved for complex queries
+- If critical issues arise, revert individual story implementations
+
+---
+
+### Story 1.1: Journals Route Migration
+
+As a **Jurnapod developer**,
+I want **the journals route migrated to Kysely**,
+So that **I can validate Kysely integration with a route that has complex financial queries while preserving raw SQL for GL aggregations**.
+
+**Acceptance Criteria:**
+
+**AC1: JournalsService Kysely Integration**
+**Given** the JournalsService in modules-accounting
+**When** migrated to use Kysely
+**Then** CRUD operations use Kysely query builder
+**And** complex financial queries (GL aggregations, reconciliation) preserve raw SQL
+
+**AC2: GET /journals Migration**
+**Given** the existing GET /journals endpoint
+**When** migrated to Kysely
+**Then** the endpoint returns identical results to raw SQL implementation
+**And** type checking passes
+
+**AC3: POST /journals Migration**
+**Given** the existing POST /journals endpoint
+**When** migrated to Kysely
+**Then** journal batch and lines creation uses Kysely
+**And** balance validation logic is preserved
+
+**AC4: GET /journals/:id Migration**
+**Given** the existing GET /journals/:id endpoint
+**When** migrated to Kysely
+**Then** the endpoint retrieves batch with lines using Kysely
+**And** type checking passes
+
+**AC5: Test Validation**
+**Given** the existing journals test suite
+**When** migration is complete
+**Then** all existing tests pass
+**And** `npm run test:unit -w @jurnapod/api` passes
+
+**Technical Requirements:**
+
+1. **Key Decision: Preserve Raw SQL for Complex Financial Queries**
+   ```typescript
+   // MIGRATE to Kysely: Simple CRUD
+   const batches = await db.kysely
+     .selectFrom('journal_batches')
+     .where('company_id', '=', companyId)
+     .selectAll()
+     .execute();
+
+   // PRESERVE as Raw SQL: GL aggregation, reconciliation
+   const glQuery = `
+     SELECT jb.id, jb.entry_date, jl.account_id, jl.debit, jl.credit
+     FROM journal_batches jb
+     INNER JOIN journal_lines jl ON jl.journal_batch_id = jb.id
+     WHERE jb.company_id = ? AND jb.deleted_at IS NULL
+   `;
+   ```
+
+2. **Batch/Line JOIN Pattern:**
+   ```typescript
+   // Use explicit JOINs to avoid N+1
+   const result = await db.kysely
+     .selectFrom('journal_batches')
+     .innerJoin('journal_lines', 'journal_batches.id', 'journal_lines.journal_batch_id')
+     .where('journal_batches.company_id', '=', companyId)
+     .select(['journal_batches.id', 'journal_lines.account_id', 'journal_lines.debit'])
+     .execute();
+   ```
+
+**Files to Modify:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `packages/modules-accounting/src/journals-service.ts` | Modify | Add kysely to interface, migrate CRUD |
+| `apps/api/src/lib/journals.ts` | Modify | Ensure kysely integration |
+| `apps/api/src/routes/journals.ts` | Modify | Migrate endpoints to Kysely |
+
+**Estimated Effort:** 2 days
+
+**Risk Level:** Medium (financial data, batch/line relationships, balance validation)
+
+**Dependencies:** Story 0.1.2
+
+**FRs Covered:** FR3
+
+---
+
+### Story 1.2: Account Types Route Migration
+
+As a **Jurnapod developer**,
+I want **the account-types route migrated to Kysely**,
+So that **I can validate Kysely with a route that has soft-delete patterns and audit logging**.
+
+**Acceptance Criteria:**
+
+**AC1: AccountTypesService Kysely Integration**
+**Given** the AccountTypesService in modules-accounting
+**When** migrated to use Kysely
+**Then** all CRUD operations use Kysely query builder
+
+**AC2: GET /account-types Migration**
+**Given** the existing GET /account-types endpoint
+**When** migrated to Kysely
+**Then** the endpoint returns identical results to raw SQL implementation
+**And** type checking passes
+
+**AC3: POST /account-types Migration**
+**Given** the existing POST /account-types endpoint
+**When** migrated to Kysely
+**Then** the endpoint creates account types with identical behavior
+**And** type checking passes
+
+**AC4: PUT /account-types/:id Migration**
+**Given** the existing PUT /account-types/:id endpoint
+**When** migrated to Kysely
+**Then** the endpoint updates account types with identical behavior
+**And** type checking passes
+
+**AC5: DELETE /account-types/:id Migration**
+**Given** the existing DELETE /account-types/:id endpoint
+**When** migrated to Kysely
+**Then** the endpoint soft-deletes account types with identical behavior
+**And** type checking passes
+
+**AC6: Test Validation**
+**Given** the existing account-types test suite
+**When** migration is complete
+**Then** all existing tests pass
+**And** `npm run test:unit -w @jurnapod/api` passes
+
+**Technical Requirements:**
+
+1. **Soft-Delete Pattern:**
+   ```typescript
+   // Kysely soft-delete (update deleted_at)
+   const result = await db.kysely
+     .updateTable('account_types')
+     .set({ deleted_at: new Date() })
+     .where('id', '=', id)
+     .where('company_id', '=', companyId)
+     .executeTakeFirst();
+
+   const affected = Number(result?.numUpdatedRows ?? 0);
+   ```
+
+2. **Usage Check Before Soft-Delete:**
+   ```typescript
+   const inUse = await db.kysely
+     .selectFrom('accounts')
+     .where('account_type_id', '=', accountTypeId)
+     .where('company_id', '=', companyId)
+     .where('deleted_at', 'is', null)
+     .select((eb) => eb.fn.count('id').as('count'))
+     .executeTakeFirst();
+
+   if (Number(inUse?.count ?? 0) > 0) {
+     throw new AccountTypeInUseError();
+   }
+   ```
+
+**Files to Modify:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `packages/modules-accounting/src/account-types-service.ts` | Modify | Add kysely to interface, migrate CRUD |
+| `apps/api/src/lib/account-types.ts` | Modify | Ensure kysely integration |
+| `apps/api/src/routes/account-types.ts` | Create | Create route file if missing |
+
+**Estimated Effort:** 1 day
+
+**Risk Level:** Low (standard CRUD with soft-delete)
+
+**Dependencies:** Story 1.1
+
+**FRs Covered:** FR3
+
+---
+
+### Story 1.3: Epic 1 Documentation
+
+As a **Jurnapod developer**,
+I want **Epic 1 lessons documented in ADR-0009 and migration guides**,
+So that **future developers can learn from the journals/account-types migration patterns**.
+
+**Acceptance Criteria:**
+
+**AC1: ADR-0009 Update**
+**Given** the lessons learned from journals/account-types migration
+**When** ADR-0009 is updated
+**Then** it documents new patterns discovered
+**And** it clarifies Kysely vs raw SQL boundaries
+
+**AC2: Migration Guide Update**
+**Given** the journals/account-types migration experience
+**When** the migration guide is updated
+**Then** it includes examples from journals (batch/line relationships)
+**And** it includes examples from account-types (soft-delete patterns)
+
+**AC3: Epic 1 Summary**
+**Given** Epic 1 completion
+**When** documentation is complete
+**Then** it summarizes what was migrated
+**And** it identifies next targets for Epic 2
+
+**Files to Modify:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `docs/adr/ADR-0009-kysely-type-safe-query-builder.md` | Modify | Add Epic 1 lessons |
+| `docs/kysely-migration-guide.md` | Modify | Add new patterns |
+| `_bmad-output/planning-artifacts/epics.md` | Modify | Add Epic 1 summary |
+
+**Estimated Effort:** 0.5 days
+
+**Risk Level:** Low (documentation only)
+
+**Dependencies:** Story 1.1, Story 1.2
+
+**FRs Covered:** None (documentation)
+
+---
+
 ## References
 
 - [ADR-0007: MySQL2 Pool Singleton with Raw Parameterized SQL](../docs/adr/ADR-0007-mysql2-pool-singleton-raw-sql.md)
@@ -655,3 +917,4 @@ const costs = await resolveIngredientUnitCostBatch(pool, companyId, ingredientId
 - [AGENTS.md](../AGENTS.md)
 - [Kysely Documentation](https://kysely.dev/)
 - [Kysely GitHub](https://github.com/kysely-org/kysely)
+- [Epic 0: Kysely ORM Infrastructure](./epic-0/index.md)

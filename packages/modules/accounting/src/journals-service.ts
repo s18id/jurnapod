@@ -225,35 +225,77 @@ export class JournalsService {
   }
 
   /**
-   * Get a journal batch by ID
+   * Get a journal batch by ID (Migrated to Kysely with JOIN)
    */
   async getJournalBatch(batchId: number, companyId: number): Promise<JournalBatchResponse> {
-    const batchSql = `
-      SELECT id, company_id, outlet_id, doc_type, doc_id, client_ref, posted_at, created_at, updated_at
-      FROM journal_batches
-      WHERE id = ? AND company_id = ?
-      LIMIT 1
-    `;
+    // Use Kysely with JOIN to get batch and lines in one query (fixes N+1)
+    const result = await this.db.kysely
+      .selectFrom('journal_batches as jb')
+      .leftJoin('journal_lines as jl', 'jb.id', 'jl.journal_batch_id')
+      .where('jb.id', '=', batchId)
+      .where('jb.company_id', '=', companyId)
+      .select([
+        'jb.id',
+        'jb.company_id',
+        'jb.outlet_id',
+        'jb.doc_type',
+        'jb.doc_id',
+        'jb.client_ref',
+        'jb.posted_at',
+        'jb.created_at',
+        'jb.updated_at',
+        'jl.id as jl_id',
+        'jl.journal_batch_id',
+        'jl.company_id as jl_company_id',
+        'jl.outlet_id as jl_outlet_id',
+        'jl.account_id',
+        'jl.line_date',
+        'jl.debit',
+        'jl.credit',
+        'jl.description as jl_description',
+        'jl.created_at as jl_created_at',
+        'jl.updated_at as jl_updated_at'
+      ])
+      .orderBy('jl.id', 'asc')
+      .execute();
 
-    const batches = await this.db.query<any>(batchSql, [batchId, companyId]);
-    
-    if (batches.length === 0) {
+    if (result.length === 0) {
       throw new JournalNotFoundError(batchId);
     }
 
-    const batch = batches[0];
+    const firstRow = result[0];
 
-    // Get lines
-    const linesSql = `
-      SELECT 
-        id, journal_batch_id, company_id, outlet_id, account_id,
-        line_date, debit, credit, description, created_at, updated_at
-      FROM journal_lines
-      WHERE journal_batch_id = ?
-      ORDER BY id ASC
-    `;
+    // Extract batch fields
+    const batch = {
+      id: firstRow.id,
+      company_id: firstRow.company_id,
+      outlet_id: firstRow.outlet_id,
+      doc_type: firstRow.doc_type,
+      doc_id: firstRow.doc_id,
+      client_ref: firstRow.client_ref,
+      posted_at: firstRow.posted_at,
+      created_at: firstRow.created_at,
+      updated_at: firstRow.updated_at
+    };
 
-    const lines = await this.db.query<any>(linesSql, [batchId]);
+    // Transform lines from flat result
+    const lines = result
+      .filter(row => row.jl_id !== null && row.jl_id !== undefined)
+      .map(row => ({
+        id: row.jl_id as number,
+        journal_batch_id: row.journal_batch_id as number,
+        company_id: row.jl_company_id as number,
+        outlet_id: row.jl_outlet_id as number | null,
+        account_id: row.account_id as number,
+        line_date: row.line_date instanceof Date 
+          ? row.line_date.toISOString().split('T')[0]
+          : String(row.line_date).split('T')[0],
+        debit: Number(row.debit),
+        credit: Number(row.credit),
+        description: row.jl_description as string,
+        created_at: toRfc3339Required(row.jl_created_at as Date),
+        updated_at: toRfc3339Required(row.jl_updated_at as Date)
+      }));
 
     return {
       id: batch.id,
@@ -265,88 +307,129 @@ export class JournalsService {
       posted_at: toRfc3339Required(batch.posted_at),
       created_at: toRfc3339Required(batch.created_at),
       updated_at: toRfc3339Required(batch.updated_at),
-      lines: lines.map(line => ({
-        id: line.id,
-        journal_batch_id: line.journal_batch_id,
-        company_id: line.company_id,
-        outlet_id: line.outlet_id,
-        account_id: line.account_id,
-        line_date: typeof line.line_date === 'string' ? line.line_date.split('T')[0] : (line.line_date instanceof Date ? line.line_date.toISOString().split('T')[0] : line.line_date),
-        debit: parseFloat(line.debit),
-        credit: parseFloat(line.credit),
-        description: line.description,
-        created_at: toRfc3339Required(line.created_at),
-        updated_at: toRfc3339Required(line.updated_at)
-      }))
+      lines
     };
   }
 
   /**
-   * List journal batches with optional filters
+   * List journal batches with optional filters (Migrated to Kysely, fixes N+1)
    */
   async listJournalBatches(filters: JournalListQuery): Promise<JournalBatchResponse[]> {
-    let sql = `
-      SELECT DISTINCT
-        jb.id, jb.company_id, jb.outlet_id, jb.doc_type, jb.doc_id, 
-        jb.posted_at, jb.created_at, jb.updated_at
-      FROM journal_batches jb
-    `;
-
-    const params: any[] = [];
-    const whereClauses: string[] = [];
-
-    // Company filter (required)
-    whereClauses.push("jb.company_id = ?");
-    params.push(filters.company_id);
+    // Step 1: Get batch IDs with pagination using Kysely
+    let batchQuery = this.db.kysely
+      .selectFrom('journal_batches as jb')
+      .where('jb.company_id', '=', filters.company_id);
 
     // Optional filters
     if (filters.outlet_id !== undefined) {
-      whereClauses.push("jb.outlet_id = ?");
-      params.push(filters.outlet_id);
+      batchQuery = batchQuery.where('jb.outlet_id', '=', filters.outlet_id);
     }
 
     if (filters.doc_type) {
-      whereClauses.push("jb.doc_type = ?");
-      params.push(filters.doc_type);
+      batchQuery = batchQuery.where('jb.doc_type', '=', filters.doc_type);
     }
 
     if (filters.start_date) {
-      whereClauses.push("jb.posted_at >= ?");
-      params.push(filters.start_date);
+      batchQuery = batchQuery.where('jb.posted_at', '>=', filters.start_date as any);
     }
 
     if (filters.end_date) {
-      whereClauses.push("jb.posted_at <= ?");
-      params.push(filters.end_date);
+      batchQuery = batchQuery.where('jb.posted_at', '<=', filters.end_date as any);
     }
 
     // Account filter (requires join with journal_lines)
     if (filters.account_id !== undefined) {
-      sql += ` INNER JOIN journal_lines jl ON jl.journal_batch_id = jb.id`;
-      whereClauses.push("jl.account_id = ?");
-      params.push(filters.account_id);
+      batchQuery = batchQuery
+        .innerJoin('journal_lines as jl', 'jb.id', 'jl.journal_batch_id')
+        .where('jl.account_id', '=', filters.account_id);
     }
 
-    if (whereClauses.length > 0) {
-      sql += ` WHERE ${whereClauses.join(" AND ")}`;
+    const batchesResult = await batchQuery
+      .select([
+        'jb.id',
+        'jb.company_id',
+        'jb.outlet_id',
+        'jb.doc_type',
+        'jb.doc_id',
+        'jb.client_ref',
+        'jb.posted_at',
+        'jb.created_at',
+        'jb.updated_at'
+      ])
+      .orderBy('jb.posted_at', 'desc')
+      .orderBy('jb.id', 'desc')
+      .limit(filters.limit ?? 100)
+      .offset(filters.offset ?? 0)
+      .distinct()
+      .execute();
+
+    if (batchesResult.length === 0) {
+      return [];
     }
 
-    sql += ` ORDER BY jb.posted_at DESC, jb.id DESC`;
-    sql += ` LIMIT ? OFFSET ?`;
-    params.push(filters.limit ?? 100);
-    params.push(filters.offset ?? 0);
-
-    const batches = await this.db.query<any>(sql, params);
-
-    // Fetch lines for each batch
-    const results: JournalBatchResponse[] = [];
+    // Step 2: Get all lines for the batch IDs in ONE query (fixes N+1)
+    const batchIds = batchesResult.map(b => b.id);
     
-    for (const batch of batches) {
-      const batchWithLines = await this.getJournalBatch(batch.id, filters.company_id);
-      results.push(batchWithLines);
+    const linesResult = await this.db.kysely
+      .selectFrom('journal_lines')
+      .where('journal_batch_id', 'in', batchIds)
+      .orderBy('id', 'asc')
+      .execute();
+
+    // Step 3: Group lines by batch_id in memory
+    // Type the line properly - use explicit interface
+    type JournalLineFlat = {
+      id: number;
+      journal_batch_id: number;
+      company_id: number;
+      outlet_id: number | null;
+      account_id: number;
+      line_date: Date;
+      debit: string;
+      credit: string;
+      description: string;
+      created_at: Date;
+      updated_at: Date;
+    };
+
+    const linesByBatchId = new Map<number, JournalLineFlat[]>();
+    for (const line of linesResult as JournalLineFlat[]) {
+      const existing = linesByBatchId.get(line.journal_batch_id) || [];
+      existing.push(line);
+      linesByBatchId.set(line.journal_batch_id, existing);
     }
 
-    return results;
+    // Step 4: Transform to response format
+    return batchesResult.map(batch => {
+      const batchLines = linesByBatchId.get(batch.id) || [];
+      
+      return {
+        id: batch.id,
+        company_id: batch.company_id,
+        outlet_id: batch.outlet_id,
+        doc_type: batch.doc_type,
+        doc_id: batch.doc_id,
+        client_ref: batch.client_ref ?? null,
+        posted_at: toRfc3339Required(batch.posted_at),
+        created_at: toRfc3339Required(batch.created_at),
+        updated_at: toRfc3339Required(batch.updated_at),
+        lines: batchLines.map(line => ({
+          id: line.id,
+          journal_batch_id: line.journal_batch_id,
+          company_id: line.company_id,
+          outlet_id: line.outlet_id,
+          account_id: line.account_id,
+          line_date: line.line_date instanceof Date
+            ? line.line_date.toISOString().split('T')[0]
+            : String(line.line_date).split('T')[0],
+          debit: Number(line.debit),
+          credit: Number(line.credit),
+          description: line.description,
+          created_at: toRfc3339Required(line.created_at),
+          updated_at: toRfc3339Required(line.updated_at)
+        }))
+      };
+    });
   }
 }
 

@@ -8,16 +8,16 @@
  */
 
 // Re-export from kysely subdirectory
-export * from './kysely/index';
+export * from './kysely/index.js';
 
 // Base client interface
-export * from './jurnapod-client';
+export * from './jurnapod-client.js';
 
 // Unified MySQL client
-export * from './mysql-client';
+export * from './mysql-client.js';
 
 // Connection-based Kysely helper
-export * from './connection-kysely';
+export * from './connection-kysely.js';
 
 // Pool factory
-export * from './pool';
+export * from './pool.js';
