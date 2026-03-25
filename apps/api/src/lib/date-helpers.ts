@@ -25,6 +25,25 @@
  * All timezone parameters accept canonical IANA names (e.g. `"Asia/Jakarta"`, `"America/New_York"`).
  * Use {@link isValidTimeZone} to validate before passing to other helpers.
  *
+ * ## DST Ambiguity Policy (Story 16.3)
+ *
+ * **Reject-by-default** for both nonexistent and ambiguous local wall-clock times.
+ *
+ * - **Nonexistent local times** occur during spring-forward transitions
+ *   (e.g. 02:30 on a day when clocks spring from 02:00 → 03:00).
+ * - **Ambiguous local times** occur during fall-back transitions
+ *   (e.g. 01:30 on a day when clocks fall back from 02:00 → 01:00).
+ *
+ * Both cases throw with a clear error message that includes the offending wall-clock time,
+ * the affected timezone, and the keyword `"DST"` — so callers and operators can identify
+ * the issue immediately without decoding a technical Temporal RangeError.
+ *
+ * Callers that need to handle DST boundaries explicitly should:
+ *   1. Catch the error and resolve the intended instant before retrying, or
+ *   2. Pre-validate the local time against the known transition schedule.
+ *
+ * This policy is enforced via `disambiguation: 'reject'` in Temporal's `ZonedDateTime.from()`.
+ *
  * ## Implementation Notes
  *
  * Internally these helpers use `@js-temporal/polyfill` to handle DST transitions and
@@ -171,6 +190,11 @@ export function fromUtcInstant(utcAt: string, timezone: string): string {
  * - A UTC ISO instant (`*_at` field) — returned as-is.
  * - A `reservation_start_ts` / `reservation_end_ts` epoch value — converted to UTC ISO.
  * - A business-local date (`*_date`) + company timezone + optional hour/minute — converted to UTC ISO.
+ *
+ * **DST Ambiguity Policy**: When resolving from `date` + `timezone`, nonexistent local times
+ * (spring-forward gaps) and ambiguous local times (fall-back overlaps) are **rejected by default**
+ * via `disambiguation: 'reject'`. This prevents silent coercion to the wrong instant, which
+ * could misplace reservations or billing events by ±1 hour. See module-level DST policy docs.
  *
  * @param event - Event time descriptor.
  * @param event.timezone - Company IANA timezone; required when deriving from `*_date`.

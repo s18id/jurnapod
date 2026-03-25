@@ -258,7 +258,7 @@ development_status:
   epic-16: in-progress
   16-1-define-date-helpers-contract: done  # COMPLETE - Public contract defined, @js-temporal/polyfill internals, 105 tests, all review rounds passed (P0/P1 cleared, P2/P3 resolved), committed
   16-2-implement-temporal-backed-date-helpers: done  # COMPLETE - Temporal internals done as part of 16.1 fix pass; normalizeDateWithTime + fromUtcInstant use Temporal
-  16-3-define-dst-ambiguity-policy: ready-for-dev
+  16-3-define-dst-ambiguity-policy: done  # COMPLETE - reject-by-default policy documented in module JSDoc + resolveEventTime JSDoc; 4 DST tests verify deterministic behavior; 105 tests passing
   16-4-add-date-helpers-test-coverage: ready-for-dev
   16-5-migrate-adr-0001-critical-call-sites-to-date-helpers: ready-for-dev
 

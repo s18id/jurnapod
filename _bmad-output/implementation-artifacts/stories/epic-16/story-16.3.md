@@ -17,16 +17,16 @@ so that reservation and event-time normalization does not silently pick the wron
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Define the DST policy in the helper contract (AC: 1, 2, 3)
-  - [ ] Subtask 1.1: Choose explicit default behavior for nonexistent and ambiguous local times.
-  - [ ] Subtask 1.2: Document any optional strategy mechanism if introduced.
-- [ ] Task 2: Implement policy enforcement in conversion helpers (AC: 1, 2)
-  - [ ] Subtask 2.1: Detect nonexistent local times during timezone resolution.
-  - [ ] Subtask 2.2: Detect ambiguous local times during timezone resolution.
-- [ ] Task 3: Add DST-focused tests (AC: 3, 4)
-  - [ ] Subtask 3.1: Cover spring-forward nonexistent wall time rejection.
-  - [ ] Subtask 3.2: Cover fall-back ambiguous wall time rejection or explicit strategy behavior.
-  - [ ] Subtask 3.3: Verify error messaging remains deterministic.
+- [x] Task 1: Define the DST policy in the helper contract (AC: 1, 2, 3)
+  - [x] Subtask 1.1: Choose explicit default behavior for nonexistent and ambiguous local times. → reject-by-default chosen (disambiguation: 'reject')
+  - [x] Subtask 1.2: Document any optional strategy mechanism if introduced. → documented in module JSDoc and resolveEventTime JSDoc
+- [x] Task 2: Implement policy enforcement in conversion helpers (AC: 1, 2)
+  - [x] Subtask 2.1: Detect nonexistent local times during timezone resolution. → disambiguation: 'reject' in normalizeDateWithTime
+  - [x] Subtask 2.2: Detect ambiguous local times during timezone resolution. → disambiguation: 'reject' in normalizeDateWithTime
+- [x] Task 3: Add DST-focused tests (AC: 3, 4)
+  - [x] Subtask 3.1: Cover spring-forward nonexistent wall time rejection. → "throws when local time falls in a DST spring-forward gap"
+  - [x] Subtask 3.2: Cover fall-back ambiguous wall time rejection or explicit strategy behavior. → "throws when local time falls in a DST overlap"
+  - [x] Subtask 3.3: Verify error messaging remains deterministic. → "DST gap error message contains timezone and DST keyword" test
 
 ## Dev Notes
 
@@ -86,9 +86,13 @@ openai/gpt-5.4
 
 ### Completion Notes List
 
-- Pending implementation.
+- Story 16.3 implementation was substantially done as part of the Story 16.1 fix passes.
+- normalizeDateWithTime uses disambiguation: 'reject' to reject both DST gaps (nonexistent) and DST overlaps (ambiguous) — this IS the reject-by-default policy.
+- 4 DST tests verify deterministic behavior: spring-forward gap rejection, fall-back overlap rejection, valid times on transition days, error message content.
+- This completion pass added formal policy documentation: module header JSDoc and resolveEventTime JSDoc.
+- AC1 ✓, AC2 ✓, AC3 ✓, AC4 ✓
 
 ### File List
 
-- `apps/api/src/lib/date-helpers.ts`
-- `apps/api/src/lib/date-helpers.test.ts`
+- `apps/api/src/lib/date-helpers.ts`  (module JSDoc updated with DST policy; resolveEventTime JSDoc updated)
+- `apps/api/src/lib/date-helpers.test.ts`  (DST gap/overlap tests already present from 16.1 fix passes)
