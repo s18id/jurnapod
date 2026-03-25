@@ -61,6 +61,7 @@ import {
   SYNC_RESULT_CODES
 } from "@jurnapod/sync-core";
 import { getAppEnv } from "../../lib/env.js";
+import { toEpochMs, toUtcInstant } from "../../lib/date-helpers.js";
 
 // Extend Hono context with auth
 declare module "hono" {
@@ -675,12 +676,13 @@ function normalizeTrxAtForHash(trxAt: string | number): number {
     return trxAt > 1e12 ? trxAt : trxAt * 1000;
   }
 
-  const date = new Date(trxAt);
-  if (Number.isNaN(date.getTime())) {
+  // String input: validate via isValidDateTime then convert via toEpochMs
+  // so rolled dates and invalid formats are rejected instead of silently mishandled.
+  try {
+    return toEpochMs(toUtcInstant(trxAt));
+  } catch {
     throw new Error(`Invalid trx_at: ${trxAt}`);
   }
-
-  return date.getTime(); // Returns unix milliseconds
 }
 
 function canonicalizeTransactionForLegacyHash(tx: SyncPushTransactionPayload): string {

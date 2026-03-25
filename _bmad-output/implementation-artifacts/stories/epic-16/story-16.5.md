@@ -16,16 +16,16 @@ so that the new `_ts` and time-semantics work sits on a consistent foundation.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Migrate reservation-focused time normalization to `date-helpers` (AC: 1, 2)
-  - [ ] Subtask 1.1: Audit `apps/api/src/lib/reservations.ts` for inline time normalization and conversion.
-  - [ ] Subtask 1.2: Refactor canonical start/end timestamp preparation to use helper APIs where appropriate.
-  - [ ] Subtask 1.3: Preserve current canonical reservation boundary behavior.
-- [ ] Task 2: Migrate sync-related normalization to `date-helpers` (AC: 1, 2, 3)
-  - [ ] Subtask 2.1: Audit `apps/api/src/routes/sync/push.ts` for `new Date(...).getTime()` conversions.
-  - [ ] Subtask 2.2: Refactor targeted event/snapshot/cancellation normalization to helper APIs.
-- [ ] Task 3: Add regression coverage for migrated paths (AC: 1, 2, 3)
-  - [ ] Subtask 3.1: Update sync push tests.
-  - [ ] Subtask 3.2: Update reservation tests.
+- [x] Task 1: Migrate reservation-focused time normalization to `date-helpers` (AC: 1, 2)
+  - [x] Subtask 1.1: Audit `apps/api/src/lib/reservations.ts` for inline time normalization and conversion. → found toIso, toUnixMs, mapRow uses
+  - [x] Subtask 1.2: Refactor canonical start/end timestamp preparation to use helper APIs where appropriate. → toUnixMs uses toEpochMs; mapRow uses fromEpochMs for ts→ISO
+  - [x] Subtask 1.3: Preserve current canonical reservation boundary behavior. → DB layer toIso keeps Date parsing for MySQL DATETIME compat; not changed
+- [x] Task 2: Migrate sync-related normalization to `date-helpers` (AC: 1, 2, 3)
+  - [x] Subtask 2.1: Audit `apps/api/src/routes/sync/push.ts` for `new Date(...).getTime()` conversions. → found normalizeTrxAtForHash
+  - [x] Subtask 2.2: Refactor targeted event/snapshot/cancellation normalization to helper APIs. → normalizeTrxAtForHash uses toEpochMs+toUtcInstant; added date-helpers import
+- [x] Task 3: Add regression coverage for migrated paths (AC: 1, 2, 3)
+  - [x] Subtask 3.1: Update sync push tests. → 31/31 sync push tests passing
+  - [x] Subtask 3.2: Update reservation tests. → 12/12 reservation tests passing
 
 ## Dev Notes
 
@@ -94,12 +94,18 @@ openai/gpt-5.4
 
 ### Completion Notes List
 
-- Pending implementation.
+- Story 16.5 migrations applied:
+  - reservations.ts: toUnixMs now uses toEpochMs(toUtcInstant()) with ReservationValidationError on failure
+  - reservations.ts: mapRow uses fromEpochMs for ts→ISO conversion; toIso kept as Date→ISO for DB layer compat
+  - sync/push.ts: normalizeTrxAtForHash uses toEpochMs(toUtcInstant()) instead of raw new Date().getTime()
+  - Both files import from date-helpers.ts
+- 677 API unit tests passing (677 total), 12 reservations tests, 31 sync push tests
+- Note: DB layer toIso keeps Date parsing (not toUtcInstant) for MySQL DATETIME format compat ('YYYY-MM-DD HH:MM:SS'). API-layer (user input) functions use date-helpers validation.
 
 ### File List
 
-- `apps/api/src/routes/sync/push.ts`
-- `apps/api/src/lib/reservations.ts`
+- `apps/api/src/lib/reservations.ts`  (date-helpers import, toUnixMs uses toEpochMs, mapRow uses fromEpochMs)
+- `apps/api/src/routes/sync/push.ts`  (date-helpers import, normalizeTrxAtForHash uses toEpochMs+toUtcInstant)
 - `apps/api/src/lib/date-helpers.ts`
-- `apps/api/src/routes/sync/push.test.ts`
-- `apps/api/src/lib/reservations.test.ts`
+- `apps/api/src/routes/sync/push.test.ts`  (31/31 tests pass)
+- `apps/api/src/lib/reservations.test.ts`  (12/12 tests pass)

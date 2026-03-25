@@ -25,6 +25,7 @@ import {
   TableOccupancyConflictError,
   TableNotAvailableError
 } from "./table-occupancy";
+import { toUtcInstant, toEpochMs, fromEpochMs } from "./date-helpers";
 
 // ============================================================================
 // ERROR CLASSES
@@ -208,11 +209,18 @@ function toIso(value: Date | string | null): string | null {
   if (!value) {
     return null;
   }
-  if (value instanceof Date) {
-    return value.toISOString();
+  try {
+    // Use Date parsing (not toUtcInstant) because row values from MySQL DATETIME columns
+    // are in 'YYYY-MM-DD HH:MM:SS' format, which new Date() accepts but isValidDateTime
+    // (RFC 3339) would reject. This maintains backward compatibility with the DB layer.
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+    return date.toISOString();
+  } catch {
+    return null;
   }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function toDbDateTime(value: Date | string): string {
@@ -225,12 +233,12 @@ function toDbDateTime(value: Date | string): string {
 }
 
 function toUnixMs(value: Date | string): number {
-  const parsed = value instanceof Date ? value : new Date(value);
-  const ts = parsed.getTime();
-  if (Number.isNaN(ts)) {
+  try {
+    const iso = value instanceof Date ? value.toISOString() : value;
+    return toEpochMs(iso);
+  } catch {
     throw new ReservationValidationError("Invalid reservation datetime value");
   }
-  return ts;
 }
 
 function fromUnixMs(value: number | string | null | undefined): number | null {
@@ -302,7 +310,11 @@ async function getTableOccupancySnapshotWithConnection(
 
 function mapRow(row: ReservationDbRow): ReservationRow {
   const reservationStartTs = fromUnixMs(row.reservation_start_ts);
-  const reservationAt = reservationStartTs !== null ? toIso(new Date(reservationStartTs)) : toIso(row.reservation_at);
+  // Use fromEpochMs for ts→ISO, toUtcInstant for legacy reservation_at.
+  const reservationAt =
+    reservationStartTs !== null
+      ? fromEpochMs(reservationStartTs)
+      : toUtcInstant(row.reservation_at);
   const createdAt = toIso(row.created_at);
   const updatedAt = toIso(row.updated_at);
   if (!reservationAt || !createdAt || !updatedAt) {
