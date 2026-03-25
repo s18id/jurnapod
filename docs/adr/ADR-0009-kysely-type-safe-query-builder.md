@@ -232,6 +232,98 @@ Continue with mysql2/raw SQL exclusively. Rejected because:
 
 ---
 
+## Epic 1 Lessons Learned (2026-03-26)
+
+Epic 1 continued the Kysely migration with journals and account-types routes. Key patterns discovered:
+
+### Batch/Line Relationship Pattern (Journals)
+
+Journals have batch → lines relationships. N+1 prevention requires explicit JOINs:
+
+```typescript
+// GOOD: 2 queries total - batch IDs then all lines
+const batches = await db.kysely
+  .selectFrom('journal_batches')
+  .where('company_id', '=', companyId)
+  .select(['id', 'posted_at', 'doc_type'])
+  .execute();
+
+const batchIds = batches.map(b => b.id);
+const allLines = await db.kysely
+  .selectFrom('journal_lines')
+  .where('journal_batch_id', 'in', batchIds)
+  .execute();
+
+// Group lines by batch in memory
+const linesByBatch = new Map<number, JournalLine[]>();
+for (const line of allLines) {
+  const list = linesByBatch.get(line.journal_batch_id) || [];
+  list.push(line);
+  linesByBatch.set(line.journal_batch_id, list);
+}
+```
+
+### Soft-Delete Pattern (Account-Types)
+
+Soft-delete sets `is_active = 0` instead of removing rows:
+
+```typescript
+// Check before soft-delete (is in use?)
+const result = await db.kysely
+  .selectFrom('accounts')
+  .where('account_type_id', '=', accountTypeId)
+  .where('company_id', '=', companyId)
+  .select((eb) => eb.fn.count('id').as('count'))
+  .executeTakeFirst();
+
+if (Number(result?.count ?? 0) > 0) {
+  throw new AccountTypeInUseError();
+}
+
+// Soft-delete via update
+await db.kysely
+  .updateTable('account_types')
+  .set({ is_active: 0 })
+  .where('id', '=', accountTypeId)
+  .where('company_id', '=', companyId)
+  .execute();
+```
+
+### When to Preserve Raw SQL
+
+**PRESERVE raw SQL for financial-critical operations:**
+
+1. **Journal creation** (`createManualEntry`): Transaction spans batch + lines with audit logging. Complex business logic best expressed as readable SQL.
+
+2. **GL aggregations**: Complex joins with GROUP BY, SUM, subqueries for reports like trial balance, P&L.
+
+3. **Reconciliation queries**: Multiple conditions, nullable joins, and business-rule filters are clearer in SQL.
+
+```typescript
+// Keep as raw SQL - complex financial logic
+const glSql = `
+  SELECT a.id, a.code, a.name,
+    SUM(jl.debit) AS total_debit,
+    SUM(jl.credit) AS total_credit
+  FROM accounts a
+  LEFT JOIN journal_lines jl ON jl.account_id = a.id
+  LEFT JOIN journal_batches jb ON jb.id = jl.journal_batch_id
+  WHERE a.company_id = ?
+    AND a.deleted_at IS NULL
+    AND (jb.deleted_at IS NULL OR jb.posted_at >= ?)
+  GROUP BY a.id, a.code, a.name
+  ORDER BY a.code
+`;
+```
+
+### Key Takeaways
+
+- **Use Kysely for**: CRUD operations, simple queries, count/check queries, dynamic filter building
+- **Preserve raw SQL for**: Financial-critical operations, complex aggregations, reports requiring SQL readability
+- **Always prevent N+1**: Batch fetch related data in 2 queries, then group in memory
+
+---
+
 ## Consequences
 
 ### Positive
@@ -264,7 +356,10 @@ Continue with mysql2/raw SQL exclusively. Rejected because:
 - `apps/api/src/lib/db.ts` — API entry point (thin wrapper)
 - `apps/api/src/lib/taxes.ts` — Example migrated route (Kysely CRUD)
 - `apps/api/src/lib/users.ts` — Example migrated route (Kysely CRUD)
+- `packages/modules/accounting/src/journals-service.ts` — Journal batch/line pattern, preserve raw SQL for creation
+- `packages/modules/accounting/src/account-types-service.ts` — Soft-delete pattern
 - `packages/modules/accounting/src/accounts-service.ts` — Example migrated service
 - `ADR-0007-mysql2-pool-singleton-raw-sql.md` — Raw SQL approach (still valid for complex queries)
 - [Kysely Documentation](https://kysely.dev/)
 - Epic 0: Kysely ORM Infrastructure (Stories 0.1.1–0.1.6)
+- Epic 1: Continue Kysely Migration (Stories 1.1–1.3)

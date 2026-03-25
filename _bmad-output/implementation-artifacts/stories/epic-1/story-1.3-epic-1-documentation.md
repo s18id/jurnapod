@@ -1,6 +1,6 @@
 # Story 1.3: Epic 1 Documentation
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -171,3 +171,41 @@ Low (documentation only)
 ### FRs Covered
 
 None (documentation)
+
+## Dev Agent Record
+
+### Agent Model Used
+
+kimi-k2.5
+
+### Completion Notes
+
+**Story 1.3: Epic 1 Documentation - COMPLETED**
+
+**AC Evidence:**
+- AC1: ✅ ADR-0009 updated with Epic 1 lessons
+- AC2: ✅ Documentation patterns added (batch/line, soft-delete, raw SQL boundaries)
+- AC3: ✅ Epic 1 summary added to epics.md
+
+**Documentation Updates:**
+- ADR-0009: Added "Epic 1 Lessons Learned" section
+  - Batch/Line Relationship Pattern (Journals)
+  - Soft-Delete Pattern (Account-Types)
+  - When to Preserve Raw SQL
+- epics.md: Added "Epic 1 Completion Summary"
+  - Stories completed
+  - Key patterns documented
+  - Next targets for Epic 2
+
+**Next Targets for Epic 2:**
+- Sync routes (POS sync push/pull)
+- Reports routes (GL aggregations)
+- Additional accounting module services
+
+**Validation Results:**
+```
+npm run typecheck -w @jurnapod/api ✅
+npm run build -w @jurnapod/api ✅
+npm run lint -w @jurnapod/api ✅
+npm run test:unit -w @jurnapod/api ✅ (692 tests)
+```

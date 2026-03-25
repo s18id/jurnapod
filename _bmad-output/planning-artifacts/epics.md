@@ -910,6 +910,31 @@ So that **future developers can learn from the journals/account-types migration 
 
 ---
 
+## Epic 1 Completion Summary (2026-03-26)
+
+**Status:** COMPLETED
+
+**Stories Completed:**
+- Story 1.1: Journals Route Migration ✅
+- Story 1.2: Account Types Route Migration ✅
+- Story 1.3: Epic 1 Documentation ✅
+
+**What Was Migrated:**
+- JournalsService: `getJournalBatch()` and `listJournalBatches()` to Kysely (N+1 fix)
+- AccountTypesService: All CRUD operations to Kysely
+
+**Key Patterns Documented:**
+- Batch/Line Relationship Pattern (Journals)
+- Soft-Delete Pattern (Account-Types)
+- When to Preserve Raw SQL (financial-critical operations)
+
+**Next Targets for Epic 2:**
+- Sync routes (POS sync push/pull)
+- Reports routes (GL aggregations)
+- Additional accounting module services
+
+---
+
 ## References
 
 - [ADR-0007: MySQL2 Pool Singleton with Raw Parameterized SQL](../docs/adr/ADR-0007-mysql2-pool-singleton-raw-sql.md)
