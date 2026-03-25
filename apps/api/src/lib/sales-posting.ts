@@ -10,7 +10,7 @@ import {
 } from "@jurnapod/shared";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
-import { toMysqlDateTime } from "./date-helpers";
+import { toMysqlDateTime, toMysqlDateTimeFromDateLike } from "./date-helpers";
 import type { SalesInvoiceDetail, SalesPayment } from "./sales";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 
@@ -673,7 +673,7 @@ export async function postCreditNoteToJournal(
   };
 
   const postingService = new PostingService(
-    new SalesPostingRepository(dbExecutor, toMysqlDateTime(creditNote.updated_at)),
+    new SalesPostingRepository(dbExecutor, toMysqlDateTimeFromDateLike(creditNote.updated_at)),
     {
       [SALES_CREDIT_NOTE_DOC_TYPE]: new SalesCreditNotePostingMapper(dbExecutor, creditNote)
     }
@@ -739,7 +739,7 @@ export async function voidCreditNoteToJournal(
   };
 
   const postingService = new PostingService(
-    new SalesPostingRepository(dbExecutor, toMysqlDateTime(creditNote.updated_at)),
+    new SalesPostingRepository(dbExecutor, toMysqlDateTimeFromDateLike(creditNote.updated_at)),
     {
       [`${SALES_CREDIT_NOTE_DOC_TYPE}_VOID`]: new VoidCreditNotePostingMapper(dbExecutor, creditNote)
     }

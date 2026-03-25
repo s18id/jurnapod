@@ -617,20 +617,11 @@ async function cleanupTestJournals(db, companyId, invoiceNos) {
        AND doc_id IN (${batchPlaceholders})`,
     [companyId, SALES_INVOICE_DOC_TYPE, ...invoiceIds]
   );
-  const batchIds = batchRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
-  if (batchIds.length === 0) return;
 
-  const journalPlaceholders = batchIds.map(() => "?").join(", ");
-  await db.execute(
-    `DELETE FROM journal_lines
-     WHERE journal_batch_id IN (${journalPlaceholders})`,
-    batchIds
-  );
-  await db.execute(
-    `DELETE FROM journal_batches
-     WHERE id IN (${journalPlaceholders})`,
-    batchIds
-  );
+  // journal_batches / journal_lines are immutable by DB trigger.
+  // Integration cleanup should remove mutable business fixtures only.
+  // We intentionally leave posted journal artifacts in place.
+  void batchRows;
 }
 
 async function cleanupTestPayments(db, paymentNos) {
@@ -657,25 +648,15 @@ async function cleanupTestCreditNotes(db, companyId, creditNoteNos) {
   const cnIds = cnRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
   if (cnIds.length === 0) return;
 
-  // Delete related journal lines for credit notes
+  // journal_batches / journal_lines are immutable by DB trigger.
+  // Integration cleanup should remove mutable business fixtures only.
   const cnPlaceholders = cnIds.map(() => "?").join(", ");
   const [cnBatchRows] = await db.execute(
     `SELECT id FROM journal_batches
      WHERE company_id = ? AND doc_type IN ('SALES_CREDIT_NOTE', 'SALES_CREDIT_NOTE_VOID') AND doc_id IN (${cnPlaceholders})`,
     [companyId, ...cnIds]
   );
-  const cnBatchIds = cnBatchRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
-  if (cnBatchIds.length > 0) {
-    const batchPlaceholders = cnBatchIds.map(() => "?").join(", ");
-    await db.execute(
-      `DELETE FROM journal_lines WHERE journal_batch_id IN (${batchPlaceholders})`,
-      cnBatchIds
-    );
-    await db.execute(
-      `DELETE FROM journal_batches WHERE id IN (${batchPlaceholders})`,
-      cnBatchIds
-    );
-  }
+  void cnBatchRows;
 
   // Delete credit note lines, then credit notes
   await db.execute(
@@ -2412,23 +2393,14 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
         if (mappingFixture.createdAccountIds.length > 0) {
           const placeholders = mappingFixture.createdAccountIds.map(() => "?").join(", ");
           await db.execute(
-            `DELETE FROM journal_lines
-             WHERE company_id = ?
-               AND account_id IN (${placeholders})`,
-            [companyId, ...mappingFixture.createdAccountIds]
-          );
-          await db.execute(
             `DELETE FROM sales_payments
              WHERE company_id = ?
                AND account_id IN (${placeholders})`,
             [companyId, ...mappingFixture.createdAccountIds]
           );
-          await db.execute(
-            `DELETE FROM accounts
-             WHERE company_id = ?
-               AND id IN (${placeholders})`,
-            [companyId, ...mappingFixture.createdAccountIds]
-          );
+
+          // Do not delete accounts referenced by immutable journal lines.
+          // These test-created accounts use unique codes per run, so leaving them is safe.
         }
       }
 
@@ -2437,17 +2409,7 @@ test("Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async (t) => {
       await cleanupTestJournals(db, companyId, testInvoiceNos);
       await cleanupTestInvoices(db, testInvoiceNos);
       if (testJournalBatchIds.length > 0) {
-        const placeholders = testJournalBatchIds.map(() => "?").join(", ");
-        await db.execute(
-          `DELETE FROM journal_lines
-           WHERE journal_batch_id IN (${placeholders})`,
-          testJournalBatchIds
-        );
-        await db.execute(
-          `DELETE FROM journal_batches
-           WHERE id IN (${placeholders})`,
-          testJournalBatchIds
-        );
+        // Manual journal batches are immutable too; leave them in place.
       }
       console.log('Database cleanup complete');
     } catch (cleanupErr) {
