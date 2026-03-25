@@ -677,7 +677,11 @@ Notes:
 | reason | varchar(500) | NO | | NULL |
 | cancelled_by_user_id | bigint(20) unsigned | YES | MUL | NULL |
 | cancelled_at | datetime | NO | | NULL |
+| cancelled_at_ts | bigint(20) unsigned | NO | | NULL |
 | created_at | datetime | NO | | current_timestamp() |
+
+**Notes:**
+- `cancelled_at_ts` is the canonical unix milliseconds timestamp for the cancellation event.
 
 ### pos_order_snapshot_lines
 
@@ -688,14 +692,21 @@ Notes:
 | company_id | bigint(20) unsigned | NO | MUL | |
 | outlet_id | bigint(20) unsigned | NO | MUL | |
 | item_id | bigint(20) unsigned | NO | | NULL |
+| variant_id | bigint(20) unsigned | YES | | NULL |
 | sku_snapshot | varchar(191) | YES | | NULL |
+| variant_name_snapshot | varchar(191) | YES | | NULL |
 | name_snapshot | varchar(191) | NO | | NULL |
 | item_type_snapshot | varchar(16) | NO | | NULL |
 | unit_price_snapshot | decimal(18,2) | NO | | NULL |
 | qty | decimal(18,4) | NO | | NULL |
 | discount_amount | decimal(18,2) | NO | | 0.00 |
 | updated_at | datetime | YES | | NULL |
+| updated_at_ts | bigint(20) unsigned | NO | | NULL |
 | created_at | datetime | NO | | current_timestamp() |
+
+**Notes:**
+- `variant_id` links to item variants for products with multiple options (e.g., sizes, flavors).
+- `updated_at_ts` is the canonical unix milliseconds timestamp.
 
 ### pos_order_snapshots
 
@@ -715,10 +726,16 @@ Notes:
 | order_state | varchar(16) | NO | | NULL |
 | paid_amount | decimal(18,2) | NO | | 0.00 |
 | opened_at | datetime | NO | | NULL |
+| opened_at_ts | bigint(20) unsigned | NO | | NULL |
 | closed_at | datetime | YES | | NULL |
+| closed_at_ts | bigint(20) unsigned | YES | | NULL |
 | notes | varchar(500) | YES | | NULL |
 | updated_at | datetime | YES | | NULL |
+| updated_at_ts | bigint(20) unsigned | NO | | NULL |
 | created_at | datetime | NO | | current_timestamp() |
+
+**Notes:**
+- `opened_at_ts`, `closed_at_ts`, `updated_at_ts` are canonical unix milliseconds timestamps.
 
 ### pos_order_updates
 
@@ -730,12 +747,18 @@ Notes:
 | company_id | bigint(20) unsigned | NO | MUL | |
 | outlet_id | bigint(20) unsigned | NO | MUL | |
 | base_order_updated_at | datetime | YES | | NULL |
+| base_order_updated_at_ts | bigint(20) unsigned | YES | | NULL |
 | event_type | varchar(32) | NO | | NULL |
 | delta_json | longtext | NO | | NULL |
 | actor_user_id | bigint(20) unsigned | YES | MUL | NULL |
 | device_id | varchar(191) | NO | | NULL |
 | event_at | datetime | NO | | NULL |
+| event_at_ts | bigint(20) unsigned | NO | | NULL |
 | created_at | datetime | NO | | current_timestamp() |
+
+**Notes:**
+- `event_at_ts` is the canonical unix milliseconds timestamp for event ordering.
+- `base_order_updated_at_ts` preserves the base order version marker for sync.
 
 ### pos_transaction_items
 
@@ -809,10 +832,13 @@ Notes:
 | company_id | bigint(20) unsigned | NO | MUL | |
 | outlet_id | bigint(20) unsigned | NO | | NULL |
 | table_id | bigint(20) unsigned | YES | | NULL |
+| reservation_group_id | bigint(20) unsigned | YES | MUL | NULL |
 | customer_name | varchar(191) | NO | | NULL |
 | customer_phone | varchar(64) | YES | | NULL |
 | guest_count | int(10) unsigned | NO | | NULL |
 | reservation_at | datetime | NO | | NULL |
+| reservation_start_ts | bigint(20) unsigned | YES | MUL | NULL |
+| reservation_end_ts | bigint(20) unsigned | YES | MUL | NULL |
 | duration_minutes | int(10) unsigned | YES | | NULL |
 | status | varchar(16) | NO | | BOOKED |
 | notes | varchar(500) | YES | | NULL |
@@ -822,6 +848,15 @@ Notes:
 | cancelled_at | datetime | YES | | NULL |
 | created_at | datetime | NO | | current_timestamp() |
 | updated_at | datetime | NO | | current_timestamp() on update |
+
+**Indexes:**
+- `idx_reservations_company_outlet_start_ts` on `(company_id, outlet_id, reservation_start_ts, id)`
+- `idx_reservations_scope_table_window_ts` on `(company_id, outlet_id, table_id, reservation_start_ts, reservation_end_ts, status)`
+
+**Notes:**
+- `reservation_start_ts` and `reservation_end_ts` are canonical unix milliseconds (BIGINT) for date-range filtering and overlap checks.
+- `reservation_at` remains for API compatibility but is derived from `reservation_start_ts`.
+- Overlap rule: `a_start < b_end && b_start < a_end`; `end == next start` is non-overlap.
 
 ### roles
 
@@ -1177,6 +1212,231 @@ Indexes:
 - `pos_order_snapshot_lines.unit_price_snapshot` uses `DECIMAL(18,2)`.
 - Finalize/close sync paths must apply explicit and deterministic 2dp rounding policy.
 
+### reservation_groups
+
+| Column | Type | Nullable | Key | Default |
+|--------|------|----------|-----|---------|
+| id | bigint(20) unsigned | NO | PRI | |
+| company_id | bigint(20) unsigned | NO | MUL | |
+| outlet_id | bigint(20) unsigned | NO | | NULL |
+| group_name | varchar(191) | YES | | NULL |
+| total_guest_count | int(10) unsigned | NO | | NULL |
+| created_at | datetime | NO | | current_timestamp() |
+| updated_at | datetime | NO | | current_timestamp() on update |
+
+**Purpose:** Groups multiple reservations for large parties requiring 2+ tables.
+
+**Indexes:**
+- `idx_company_outlet` on `(company_id, outlet_id)`
+- `idx_created_at` on `(created_at)`
+
+### table_occupancy
+
+| Column | Type | Nullable | Key | Default |
+|--------|------|----------|-----|---------|
+| id | bigint(20) unsigned | NO | PRI | |
+| company_id | bigint(20) unsigned | NO | MUL | |
+| outlet_id | bigint(20) unsigned | NO | MUL | |
+| table_id | bigint(20) unsigned | NO | MUL | NULL |
+| status_id | int(10) unsigned | NO | | NULL |
+| version | int(10) unsigned | NO | | 1 |
+| service_session_id | bigint(20) unsigned | YES | MUL | NULL |
+| reservation_id | bigint(20) unsigned | YES | MUL | NULL |
+| occupied_at | datetime | YES | | NULL |
+| reserved_until | datetime | YES | | NULL |
+| guest_count | int(10) unsigned | YES | | NULL |
+| notes | text | YES | | NULL |
+| created_at | datetime | NO | | current_timestamp() |
+| updated_at | datetime | NO | | current_timestamp() on update |
+| created_by | varchar(255) | YES | | NULL |
+| updated_by | varchar(255) | YES | | NULL |
+
+**Status Values:**
+- 1 = AVAILABLE
+- 2 = OCCUPIED
+- 3 = RESERVED
+- 4 = CLEANING
+- 5 = OUT_OF_SERVICE
+
+**Indexes:**
+- `uk_table_occupancy_table` UNIQUE on `(table_id)`
+- `idx_table_occupancy_company_outlet` on `(company_id, outlet_id)`
+- `idx_table_occupancy_status` on `(status_id)`
+- `idx_table_occupancy_session` on `(service_session_id)`
+- `idx_table_occupancy_reservation` on `(reservation_id)`
+
+**Notes:**
+- Uses optimistic locking via `version` column for multi-cashier concurrency.
+- `table_id` is unique - one occupancy record per table.
+
+### table_events
+
+| Column | Type | Nullable | Key | Default |
+|--------|------|----------|-----|---------|
+| id | bigint(20) unsigned | NO | PRI | |
+| company_id | bigint(20) unsigned | NO | MUL | |
+| outlet_id | bigint(20) unsigned | NO | MUL | |
+| table_id | bigint(20) unsigned | NO | MUL | NULL |
+| event_type_id | int(10) unsigned | NO | | NULL |
+| client_tx_id | varchar(255) | NO | UNI | NULL |
+| occupancy_version_before | int(10) unsigned | YES | | NULL |
+| occupancy_version_after | int(10) unsigned | YES | | NULL |
+| event_data | json | YES | | NULL |
+| status_id_before | int(10) unsigned | YES | | NULL |
+| status_id_after | int(10) unsigned | YES | | NULL |
+| service_session_id | bigint(20) unsigned | YES | MUL | NULL |
+| reservation_id | bigint(20) unsigned | YES | MUL | NULL |
+| pos_order_id | char(36) | YES | MUL | NULL |
+| synced_at | datetime | YES | | NULL |
+| source_device | varchar(255) | YES | | NULL |
+| occurred_at | datetime | NO | | NULL |
+| created_at | datetime | NO | | current_timestamp() |
+| created_by | varchar(255) | YES | | NULL |
+
+**Event Type IDs:**
+- 1 = TABLE_OPENED
+- 2 = TABLE_CLOSED
+- 3 = RESERVATION_CREATED
+- 4 = RESERVATION_CONFIRMED
+- 5 = RESERVATION_CANCELLED
+- 6 = STATUS_CHANGED
+- 7 = GUEST_COUNT_CHANGED
+- 8 = TABLE_TRANSFERRED
+- 9 = SESSION_LINE_ADDED
+- 10 = SESSION_LINE_UPDATED
+- 11 = SESSION_LINE_REMOVED
+- 12 = SESSION_LOCKED
+- 13 = SESSION_CLOSED
+- 14 = SESSION_BATCH_FINALIZED
+- 15 = SESSION_LINE_ADJUSTED
+- 16 = SESSION_VERSION_BUMPED
+
+**Indexes:**
+- `uk_table_events_client_tx` UNIQUE on `(company_id, outlet_id, client_tx_id)`
+- `idx_table_events_company_outlet` on `(company_id, outlet_id)`
+- `idx_table_events_table` on `(table_id)`
+- `idx_table_events_type` on `(event_type_id)`
+- `idx_table_events_occurred` on `(occurred_at)`
+- `idx_table_events_session` on `(service_session_id)`
+- `idx_table_events_reservation` on `(reservation_id)`
+- `idx_table_events_order` on `(pos_order_id)`
+- `idx_table_events_synced` on `(synced_at)`
+
+**Notes:**
+- APPEND-ONLY table - UPDATE and DELETE are blocked by triggers.
+- `client_tx_id` provides idempotency for POS sync replay.
+
+### table_service_sessions
+
+| Column | Type | Nullable | Key | Default |
+|--------|------|----------|-----|---------|
+| id | bigint(20) unsigned | NO | PRI | |
+| company_id | bigint(20) unsigned | NO | MUL | |
+| outlet_id | bigint(20) unsigned | NO | MUL | NULL |
+| table_id | bigint(20) unsigned | NO | MUL | NULL |
+| status_id | int(10) unsigned | NO | | NULL |
+| started_at | datetime | NO | | NULL |
+| completed_at | datetime | YES | | NULL |
+| locked_at | datetime | YES | | NULL |
+| closed_at | datetime | YES | | NULL |
+| guest_count | int(10) unsigned | NO | | NULL |
+| guest_name | varchar(255) | YES | | NULL |
+| pos_order_id | char(36) | YES | MUL | NULL |
+| pos_order_snapshot_id | char(36) | YES | MUL | NULL |
+| reservation_id | bigint(20) unsigned | YES | MUL | NULL |
+| total_amount | decimal(15,4) | YES | | NULL |
+| server_user_id | bigint(20) unsigned | YES | MUL | NULL |
+| cashier_user_id | bigint(20) unsigned | YES | MUL | NULL |
+| session_version | int(10) unsigned | NO | | 1 |
+| last_finalized_batch_no | int(10) unsigned | NO | | 0 |
+| notes | text | YES | | NULL |
+| created_at | datetime | NO | | current_timestamp() |
+| updated_at | datetime | NO | | current_timestamp() on update |
+| created_by | varchar(255) | YES | | NULL |
+| updated_by | varchar(255) | YES | | NULL |
+
+**Status Values:**
+- 1 = ACTIVE
+- 2 = COMPLETED
+- 3 = CANCELLED
+
+**Indexes:**
+- `idx_service_sessions_company_outlet` on `(company_id, outlet_id)`
+- `idx_service_sessions_table` on `(table_id)`
+- `idx_service_sessions_status` on `(status_id)`
+- `idx_service_sessions_started` on `(started_at)`
+- `idx_service_sessions_order` on `(pos_order_id)`
+- `idx_service_sessions_server` on `(server_user_id)`
+- `idx_service_sessions_cashier` on `(cashier_user_id)`
+- `idx_service_sessions_scope_version` on `(company_id, outlet_id, session_version)`
+
+**Notes:**
+- `session_version` enables optimistic locking for multi-cashier conflict-safe refresh.
+- `last_finalized_batch_no` tracks the last finalize checkpoint for the session.
+
+### table_service_session_lines
+
+| Column | Type | Nullable | Key | Default |
+|--------|------|----------|-----|---------|
+| id | bigint(20) unsigned | NO | PRI | |
+| session_id | bigint(20) unsigned | NO | MUL | NULL |
+| line_number | int(10) unsigned | NO | | NULL |
+| product_id | bigint(20) unsigned | NO | MUL | NULL |
+| product_name | varchar(255) | NO | | NULL |
+| product_sku | varchar(255) | YES | | NULL |
+| quantity | int(10) unsigned | NO | | NULL |
+| unit_price | decimal(15,4) | NO | | NULL |
+| discount_amount | decimal(15,4) | NO | | 0.00 |
+| tax_amount | decimal(15,4) | NO | | 0.00 |
+| line_total | decimal(15,4) | NO | | NULL |
+| batch_no | int(10) unsigned | YES | | NULL |
+| line_state | int(10) unsigned | NO | | 1 |
+| adjustment_parent_line_id | bigint(20) unsigned | YES | MUL | NULL |
+| notes | text | YES | | NULL |
+| is_voided | tinyint(1) | NO | | 0 |
+| voided_at | datetime | YES | | NULL |
+| void_reason | varchar(255) | YES | | NULL |
+| created_at | datetime | NO | | current_timestamp() |
+| updated_at | datetime | NO | | current_timestamp() on update |
+
+**Line States:**
+- 1 = OPEN
+- 2 = FINALIZED
+- 3 = VOIDED
+
+**Indexes:**
+- `idx_session_lines_session` on `(session_id)`
+- `idx_session_lines_product` on `(product_id)`
+- `idx_session_lines_session_batch` on `(session_id, batch_no)`
+- `idx_session_lines_session_state` on `(session_id, line_state)`
+- `idx_session_lines_adjustment_parent` on `(adjustment_parent_line_id)`
+
+**Notes:**
+- `unit_price` uses `DECIMAL(15,4)` for in-session precision.
+- `adjustment_parent_line_id` enables audit chain for line cancellations/reductions.
+
+### table_service_session_checkpoints
+
+| Column | Type | Nullable | Key | Default |
+|--------|------|----------|-----|---------|
+| id | bigint(20) unsigned | NO | PRI | |
+| company_id | bigint(20) unsigned | NO | MUL | |
+| outlet_id | bigint(20) unsigned | NO | MUL | NULL |
+| session_id | bigint(20) unsigned | NO | MUL | NULL |
+| batch_no | int(10) unsigned | NO | | NULL |
+| snapshot_id | char(36) | NO | | NULL |
+| finalized_at | datetime | NO | | NULL |
+| finalized_by | varchar(255) | YES | | NULL |
+| client_tx_id | varchar(255) | NO | UNI | NULL |
+| created_at | datetime | NO | | current_timestamp() |
+
+**Indexes:**
+- `uk_session_checkpoint_batch` UNIQUE on `(session_id, batch_no)`
+- `uk_session_checkpoint_client_tx` UNIQUE on `(company_id, outlet_id, client_tx_id)`
+- `idx_session_checkpoint_scope_session_time` on `(company_id, outlet_id, session_id, finalized_at)`
+
+**Purpose:** Records finalize checkpoint sequence for repeated order finalization before payment close.
+
 ## Table Summary
 
 | Category | Tables |
@@ -1191,16 +1451,37 @@ Indexes:
 | Dine-in Operations | table_occupancy, table_service_sessions, table_service_session_lines, table_events, table_service_session_checkpoints |
 | Sales | sales_invoices, sales_invoice_lines, sales_invoice_taxes, sales_orders, sales_order_lines, sales_payments, sales_payment_splits, sales_credit_notes, sales_credit_note_lines |
 | Fixed Assets | fixed_assets, fixed_asset_categories, fixed_asset_books, fixed_asset_events, fixed_asset_disposals, asset_depreciation_plans, asset_depreciation_runs |
-| Items | items, item_prices, item_groups |
+| Items | items, item_prices, item_groups, item_variants, item_images |
 | Tax | tax_rates, company_tax_defaults |
-| Tables & Reservations | outlet_tables, reservations |
+| Tables & Reservations | outlet_tables, reservations, reservation_groups |
 | Mappings | outlet_account_mappings, outlet_payment_method_mappings, company_account_mappings, company_payment_method_mappings |
 | Numbering | numbering_templates |
 | Fiscal | fiscal_years |
 | Data Import | data_imports |
-| Sync | sync_data_versions |
+| Sync | sync_data_versions, sync_operations |
 | Email | email_tokens, email_outbox |
 | Static Content | static_pages |
 | Supplies | supplies |
 | Cash/Bank | cash_bank_transactions |
 | Reference | schema_migrations, v_pos_daily_totals |
+
+## Canonical Timestamp Policy
+
+Jurnapod uses unix milliseconds (BIGINT) as the canonical timestamp format for:
+
+| Table | Canonical Columns |
+|-------|------------------|
+| reservations | reservation_start_ts, reservation_end_ts |
+| pos_order_updates | event_at_ts |
+| pos_order_snapshots | opened_at_ts, closed_at_ts, updated_at_ts |
+| pos_order_snapshot_lines | updated_at_ts |
+| pos_item_cancellations | cancelled_at_ts |
+
+**Benefits:**
+- Timezone-agnostic for reporting and filtering
+- Deterministic sort order without timezone conversion
+- Index-friendly for range queries
+
+**Query Rules:**
+- Never wrap indexed timestamp columns in SQL functions
+- Apply functions only on constants or pass numeric boundaries from app layer

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-15T09:32:00.000Z
-last_updated: 2026-03-25T12:00:00+0700
+last_updated: 2026-03-25T12:10:00+0700
 project: jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -234,7 +234,7 @@ development_status:
   # Epic 15: Stub Route Implementation Plan
   # NOTE: Implement business logic for all 25+ stub routes from Epic 14 Hono migration
   # Dependencies: Epic 14 (Hono migration) completed
-  epic-15: in-progress
+  epic-15: done
   # Sprint 1: Auth Routes
   15-1-1-login-route-migration: done  # COMPLETE - Hono login route with Zod validation, throttling, audit logging, refresh tokens
   15-1-2-logout-route-migration: done  # COMPLETE - Hono logout with token revocation and cookie clearing
@@ -264,12 +264,17 @@ development_status:
 
   # Epic 17: Reliable POS Sync and Reservation Time Semantics
   # NOTE: Applies explicit _ts authority and reservation boundary semantics on top of Epic 16
-  epic-17: in-progress
+  epic-17: done
   17-1-enforce-ts-authority-rules-in-sync-update-ingestion: done
   17-2-preserve-base-order-updated-at-ts-version-marker: done
   17-3-apply-canonical-ts-semantics-to-snapshot-and-cancellation-writes: done
   17-4-preserve-reservation-boundary-timestamp-behavior: done
   17-5-prevent-unintended-ts-exposure-in-public-contracts: done
+
+  # Follow-up: Sales Integration Regression Fix
+  # Fix: credit note posting timestamp normalization and immutable journal cleanup
+  # Commit: 674f045 - fix(sales): normalize credit note posting timestamps and respect immutable journal cleanup
+  sales-credit-note-posting-fix: done
 
   # Epic 18: Redundant Timestamp Cleanup and Schema Alignment
   # NOTE: Cleanup epic for removing redundant created_at_ts columns after validation
