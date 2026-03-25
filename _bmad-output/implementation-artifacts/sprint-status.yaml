@@ -255,12 +255,12 @@ development_status:
 
   # Epic 16: Unified Time Handling via date-helpers
   # NOTE: Foundation epic for canonical UTC/business-date/epoch handling across API/POS/backoffice
-  epic-16: in-progress
+  epic-16: done
   16-1-define-date-helpers-contract: done  # COMPLETE - Public contract defined, @js-temporal/polyfill internals, 105 tests, all review rounds passed (P0/P1 cleared, P2/P3 resolved), committed
   16-2-implement-temporal-backed-date-helpers: done  # COMPLETE - Temporal internals done as part of 16.1 fix pass; normalizeDateWithTime + fromUtcInstant use Temporal
   16-3-define-dst-ambiguity-policy: done  # COMPLETE - reject-by-default policy documented in module JSDoc + resolveEventTime JSDoc; 4 DST tests verify deterministic behavior; 105 tests passing
   16-4-add-date-helpers-test-coverage: done  # COMPLETE - 117 tests, UTC/epoch roundtrip suites, resolveEventTimeDetails with aligned atUtc/ts/businessDate/timezone contract, AC1-3 met
-  16-5-migrate-adr-0001-critical-call-sites-to-date-helpers: in-progress  # Migrations done: reservations.ts (toIso/toUnixMs/mapRow), sync/push.ts (normalizeTrxAtForHash); 677 tests passing
+  16-5-migrate-adr-0001-critical-call-sites-to-date-helpers: done  # COMPLETE - migrations applied; 677 API tests passing
 
   # Epic 17: Reliable POS Sync and Reservation Time Semantics
   # NOTE: Applies explicit _ts authority and reservation boundary semantics on top of Epic 16
