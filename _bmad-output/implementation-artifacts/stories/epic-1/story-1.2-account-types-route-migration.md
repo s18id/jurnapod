@@ -1,6 +1,6 @@
 # Story 1.2: Account Types Route Migration
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -143,3 +143,63 @@ Low (standard CRUD with soft-delete)
 ### FRs Covered
 
 FR3 (Incremental migration path)
+
+## Dev Agent Record
+
+### Agent Model Used
+
+kimi-k2.5
+
+### Completion Notes
+
+**Story 1.2: Account Types Route Migration - COMPLETED**
+
+**AC Evidence:**
+- AC1: ✅ AccountTypesService fully migrated to Kysely
+- AC2: ✅ GET /account-types (listAccountTypes) uses Kysely
+- AC3: ✅ POST /account-types (createAccountType) uses Kysely
+- AC4: ✅ PUT /account-types/:id (updateAccountType) uses Kysely
+- AC5: ✅ DELETE /account-types/:id (deactivateAccountType) uses Kysely
+- AC6: ✅ All 692 tests pass
+
+**Migration Summary:**
+All CRUD operations migrated from raw SQL to Kysely:
+- `listAccountTypes()` - Kysely with dynamic filters
+- `getAccountTypeById()` - Kysely select with single row
+- `createAccountType()` - Kysely insert with transaction
+- `updateAccountType()` - Kysely update with dynamic set
+- `deactivateAccountType()` - Kysely update for soft-delete
+- `isAccountTypeInUse()` - Kysely count query
+- `validateAccountTypeName()` - Kysely existence check
+
+**Key Patterns Used:**
+```typescript
+// Count with expression builder
+const result = await this.db.kysely
+  .selectFrom('accounts')
+  .where('account_type_id', '=', accountTypeId)
+  .where('company_id', '=', companyId)
+  .select((eb) => eb.fn.count('id').as('count'))
+  .executeTakeFirst();
+
+// Dynamic update
+const updates: Record<string, any> = {};
+if (data.name !== undefined) updates.name = data.name;
+if (data.category !== undefined) updates.category = data.category;
+await this.db.kysely
+  .updateTable('account_types')
+  .set(updates)
+  .where('id', '=', accountTypeId)
+  .execute();
+```
+
+**Files Modified:**
+- `packages/modules/accounting/src/account-types-service.ts` - All CRUD migrated to Kysely
+
+**Validation Results:**
+```
+npm run typecheck -w @jurnapod/api ✅
+npm run build -w @jurnapod/api ✅
+npm run lint -w @jurnapod/api ✅
+npm run test:unit -w @jurnapod/api ✅ (692 tests)
+```
