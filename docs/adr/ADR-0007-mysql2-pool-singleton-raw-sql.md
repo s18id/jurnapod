@@ -114,6 +114,22 @@ try {
 
 ---
 
+## Note: Kysely Preferred for New Code
+
+**For new route development, prefer Kysely (see [ADR-0009](./ADR-0009-kysely-type-safe-query-builder.md))** over raw SQL. Kysely provides:
+- Compile-time type safety for column/table names
+- Explicit SQL generation (no ORM magic)
+- Reduced CRUD boilerplate
+- Same mysql2 pool singleton reuse
+
+**Raw SQL remains valid and preferred for:**
+- Complex financial queries (GL aggregations, reconciliation joins)
+- Custom upsert patterns (`INSERT ... ON DUPLICATE KEY`)
+- Performance-critical queries requiring specific index hints
+- Any query where explicit SQL readability is critical
+
+---
+
 ## Alternatives Considered
 
 ### Prisma ORM
@@ -158,5 +174,7 @@ Rejected. Creating a new connection per request has significant latency overhead
 - `apps/api/src/lib/db.ts` — pool singleton, `getDbPool()`, `closeDbPool()`
 - `AGENTS.md § Test cleanup (CRITICAL)` — required `closeDbPool()` pattern
 - `packages/db/` — migration files (MySQL/MariaDB compatible DDL)
+- `ADR-0009-kysely-type-safe-query-builder.md` — Kysely ORM adoption (preferred for new code)
 - Epic 7: Sync infrastructure (DB-integrated version manager, composite indexes)
 - Epic 16: Unified time handling via date-helpers (`dateStrings: true` motivation)
+- Epic 0: Kysely ORM Infrastructure (Stories 0.1.1–0.1.6)

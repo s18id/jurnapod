@@ -43,11 +43,11 @@ story_location: _bmad-output/implementation-artifacts/stories
 
 development_status:
   # Epic 0: Infrastructure & Technical Debt
-  epic-0: in-progress
+  epic-0: done
   0-1-1-kysely-setup-and-type-generation: done
   0-1-2-dbclient-integration: done
   0-1-3-tax-rates-route-migration: done
   0-1-4-roles-route-migration: done
   0-1-5-accounts-route-migration: done
-  0-1-6-adr-update-and-documentation: backlog
+  0-1-6-adr-update-and-documentation: done
   epic-0-retrospective: optional
