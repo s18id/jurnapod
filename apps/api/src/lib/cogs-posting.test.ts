@@ -9,6 +9,7 @@ import type { RowDataPacket } from "mysql2";
 import {
   calculateSaleCogs,
   getItemAccounts,
+  getItemAccountsBatch,
   postCogsForSale,
   CogsCalculationError,
   CogsAccountConfigError,
@@ -297,6 +298,45 @@ test("calculateSaleCogs - should fall back to base_cost from item_prices", async
   assert.strictEqual(cogsDetails[0].totalCost, 15.0);
 });
 
+test("calculateSaleCogs - should batch mixed inventory and fallback price lookups", async () => {
+  const inventoryItemId = await createTestItem(conn, TEST_COMPANY_ID, 'Batch Inv Item', 'PRODUCT', true);
+  const fallbackPriceItemId = await createTestItem(conn, TEST_COMPANY_ID, 'Batch Price Item', 'PRODUCT', true);
+
+  if (supportsUnitCost) {
+    await createInventoryTransaction(conn, TEST_COMPANY_ID, inventoryItemId, 8, 2.5);
+  } else {
+    await conn.execute(
+      `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
+       VALUES (?, ?, NULL, 2.5)`,
+      [TEST_COMPANY_ID, inventoryItemId]
+    );
+  }
+
+  await conn.execute(
+    `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
+     VALUES (?, ?, NULL, 4.25)`,
+    [TEST_COMPANY_ID, fallbackPriceItemId]
+  );
+
+  const cogsDetails = await calculateSaleCogs(
+    TEST_COMPANY_ID,
+    [
+      { itemId: inventoryItemId, quantity: 2 },
+      { itemId: fallbackPriceItemId, quantity: 3 }
+    ],
+    conn
+  );
+
+  assert.strictEqual(cogsDetails.length, 2);
+  assert.strictEqual(cogsDetails[0].itemId, inventoryItemId);
+  assert.strictEqual(cogsDetails[0].unitCost, 2.5);
+  assert.strictEqual(cogsDetails[0].totalCost, 5);
+
+  assert.strictEqual(cogsDetails[1].itemId, fallbackPriceItemId);
+  assert.strictEqual(cogsDetails[1].unitCost, 4.25);
+  assert.strictEqual(cogsDetails[1].totalCost, 12.75);
+});
+
 test("getItemAccounts - should return item-specific accounts when configured", async () => {
   const itemCogsId = await createTestAccount(conn, TEST_COMPANY_ID, '6101-ITEM', 'Item COGS', 'EXPENSE', 'D');
   const itemInvId = await createTestAccount(conn, TEST_COMPANY_ID, '1101-ITEM', 'Item Inventory', 'ASSET', 'D');
@@ -376,6 +416,32 @@ test("getItemAccounts - should throw error when no accounts are configured", asy
       [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
     );
   }
+});
+
+test("getItemAccountsBatch - should resolve mixed item-specific and default accounts in one call", async () => {
+  const itemSpecificCogsId = await createTestAccount(conn, TEST_COMPANY_ID, '6102-BATCH', 'Batch COGS', 'EXPENSE', 'D');
+  const itemSpecificInvId = await createTestAccount(conn, TEST_COMPANY_ID, '1102-BATCH', 'Batch Inventory', 'ASSET', 'D');
+
+  const itemWithSpecificAccounts = await createTestItem(
+    conn, TEST_COMPANY_ID, 'Batch Specific Item', 'PRODUCT', true,
+    itemSpecificCogsId, itemSpecificInvId
+  );
+  const itemUsingDefaults = await createTestItem(conn, TEST_COMPANY_ID, 'Batch Default Item', 'PRODUCT', true);
+
+  const accountsByItemId = await getItemAccountsBatch(
+    TEST_COMPANY_ID,
+    [itemWithSpecificAccounts, itemUsingDefaults],
+    conn
+  );
+
+  assert.deepStrictEqual(accountsByItemId.get(itemWithSpecificAccounts), {
+    cogsAccountId: itemSpecificCogsId,
+    inventoryAssetAccountId: itemSpecificInvId
+  });
+  assert.deepStrictEqual(accountsByItemId.get(itemUsingDefaults), {
+    cogsAccountId,
+    inventoryAssetAccountId: inventoryAccountId
+  });
 });
 
 test("postCogsForSale - should successfully post COGS journal for sale", async () => {

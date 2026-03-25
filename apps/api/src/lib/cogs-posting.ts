@@ -75,8 +75,15 @@ interface ItemAccountMapping {
 }
 
 interface InventoryStockRow extends RowDataPacket {
+  product_id?: number;
   quantity_on_hand: number;
   total_cost: number;
+}
+
+interface ItemPriceLookupRow extends RowDataPacket {
+  item_id: number;
+  base_cost?: number | null;
+  price: number | null;
 }
 
 interface ItemAccountRow extends RowDataPacket {
@@ -85,6 +92,7 @@ interface ItemAccountRow extends RowDataPacket {
 }
 
 interface AccountTypeRow extends RowDataPacket {
+  account_id?: number;
   account_type: string;
 }
 
@@ -165,28 +173,66 @@ export async function calculateSaleCogs(
   try {
     const inventoryHasUnitCost = await hasColumn(conn, "inventory_transactions", "unit_cost");
     const itemPricesHasBaseCost = await hasColumn(conn, "item_prices", "base_cost");
+    const uniqueItemIds = Array.from(new Set(saleItems.map((item) => Number(item.itemId))));
+
+    const stockByItemId = new Map<number, { quantityOnHand: number; totalCost: number }>();
+    const latestPriceByItemId = new Map<number, { baseCost: number; price: number }>();
+
+    if (uniqueItemIds.length > 0) {
+      const itemPlaceholders = uniqueItemIds.map(() => "?").join(", ");
+      const stockSql = inventoryHasUnitCost
+        ? `SELECT
+             product_id,
+             COALESCE(SUM(quantity_delta), 0) as quantity_on_hand,
+             COALESCE(SUM(CASE WHEN quantity_delta > 0 THEN quantity_delta * unit_cost ELSE 0 END), 0) as total_cost
+           FROM inventory_transactions
+           WHERE company_id = ? AND product_id IN (${itemPlaceholders})
+           GROUP BY product_id`
+        : `SELECT
+             product_id,
+             COALESCE(SUM(quantity_delta), 0) as quantity_on_hand,
+             0 as total_cost
+           FROM inventory_transactions
+           WHERE company_id = ? AND product_id IN (${itemPlaceholders})
+           GROUP BY product_id`;
+
+      const [stockRows] = await conn.execute<InventoryStockRow[]>(stockSql, [companyId, ...uniqueItemIds]);
+      for (const row of stockRows) {
+        const productId = Number(row.product_id ?? 0);
+        if (!productId) continue;
+        stockByItemId.set(productId, {
+          quantityOnHand: Number(row.quantity_on_hand ?? 0),
+          totalCost: Number(row.total_cost ?? 0)
+        });
+      }
+
+      const priceSql = itemPricesHasBaseCost
+        ? `SELECT item_id, base_cost, price
+           FROM item_prices
+           WHERE company_id = ? AND item_id IN (${itemPlaceholders})
+           ORDER BY item_id ASC, updated_at DESC, id DESC`
+        : `SELECT item_id, price
+           FROM item_prices
+           WHERE company_id = ? AND item_id IN (${itemPlaceholders})
+           ORDER BY item_id ASC, updated_at DESC, id DESC`;
+
+      const [priceRows] = await conn.execute<ItemPriceLookupRow[]>(priceSql, [companyId, ...uniqueItemIds]);
+      for (const row of priceRows) {
+        const itemId = Number(row.item_id ?? 0);
+        if (!itemId || latestPriceByItemId.has(itemId)) continue;
+        latestPriceByItemId.set(itemId, {
+          baseCost: itemPricesHasBaseCost ? Number(row.base_cost ?? 0) : 0,
+          price: Number(row.price ?? 0)
+        });
+      }
+    }
 
     const cogsDetails: CogsItemDetail[] = [];
     
     for (const saleItem of saleItems) {
-      // Get current inventory stock and cost
-      const stockSql = inventoryHasUnitCost
-        ? `SELECT
-             COALESCE(SUM(quantity_delta), 0) as quantity_on_hand,
-             COALESCE(SUM(CASE WHEN quantity_delta > 0 THEN quantity_delta * unit_cost ELSE 0 END), 0) as total_cost
-           FROM inventory_transactions
-           WHERE company_id = ? AND product_id = ?`
-        : `SELECT
-             COALESCE(SUM(quantity_delta), 0) as quantity_on_hand,
-             0 as total_cost
-           FROM inventory_transactions
-           WHERE company_id = ? AND product_id = ?`;
-
-      const [stockRows] = await conn.execute<InventoryStockRow[]>(stockSql, [companyId, saleItem.itemId]);
-      
-      const stock = stockRows[0];
-      const quantityOnHand = Number(stock?.quantity_on_hand ?? 0);
-      const totalCost = Number(stock?.total_cost ?? 0);
+      const stock = stockByItemId.get(saleItem.itemId);
+      const quantityOnHand = Number(stock?.quantityOnHand ?? 0);
+      const totalCost = Number(stock?.totalCost ?? 0);
       
       // Calculate average cost
       let unitCost = 0;
@@ -196,23 +242,10 @@ export async function calculateSaleCogs(
       
       // If no stock history, try to get cost from item prices
       if (unitCost === 0) {
-        const priceSql = itemPricesHasBaseCost
-          ? `SELECT base_cost, price
-             FROM item_prices
-             WHERE company_id = ? AND item_id = ?
-             ORDER BY updated_at DESC, id DESC
-             LIMIT 1`
-          : `SELECT price
-             FROM item_prices
-             WHERE company_id = ? AND item_id = ?
-             ORDER BY updated_at DESC, id DESC
-             LIMIT 1`;
-
-        const [priceRows] = await conn.execute<RowDataPacket[]>(priceSql, [companyId, saleItem.itemId]);
-        
-        if (priceRows.length > 0) {
-          const baseCost = itemPricesHasBaseCost ? Number(priceRows[0].base_cost ?? 0) : 0;
-          const price = Number(priceRows[0].price ?? 0);
+        const priceRow = latestPriceByItemId.get(saleItem.itemId);
+        if (priceRow) {
+          const baseCost = priceRow.baseCost;
+          const price = priceRow.price;
           unitCost = baseCost > 0 ? baseCost : price;
         }
       }
@@ -251,27 +284,46 @@ export async function getItemAccounts(
   itemId: number,
   connection?: PoolConnection
 ): Promise<ItemAccountMapping> {
+  const mappings = await getItemAccountsBatch(companyId, [itemId], connection);
+  const mapping = mappings.get(itemId);
+  if (!mapping) {
+    throw new CogsAccountConfigError(`Item ${itemId} not found in company ${companyId}`);
+  }
+  return mapping;
+}
+
+export async function getItemAccountsBatch(
+  companyId: number,
+  itemIds: readonly number[],
+  connection?: PoolConnection
+): Promise<Map<number, ItemAccountMapping>> {
   const pool = getDbPool();
   const conn = connection ?? await pool.getConnection();
-  
+
   try {
-    // Get item-specific accounts
-    const [itemRows] = await conn.execute<ItemAccountRow[]>(
-      `SELECT cogs_account_id, inventory_asset_account_id 
-       FROM items 
-       WHERE company_id = ? AND id = ?`,
-      [companyId, itemId]
-    );
-    
-    if (itemRows.length === 0) {
-      throw new CogsAccountConfigError(`Item ${itemId} not found in company ${companyId}`);
+    const uniqueItemIds = Array.from(new Set(itemIds.map(Number)));
+    if (uniqueItemIds.length === 0) {
+      return new Map();
     }
-    
-    let cogsAccountId = itemRows[0].cogs_account_id;
-    let inventoryAssetAccountId = itemRows[0].inventory_asset_account_id;
-    
-    // Fall back to company defaults if needed
-    if (!cogsAccountId || !inventoryAssetAccountId) {
+
+    const itemPlaceholders = uniqueItemIds.map(() => "?").join(", ");
+    const [itemRows] = await conn.execute<(ItemAccountRow & { id: number })[]>(
+      `SELECT id, cogs_account_id, inventory_asset_account_id
+       FROM items
+       WHERE company_id = ? AND id IN (${itemPlaceholders})`,
+      [companyId, ...uniqueItemIds]
+    );
+
+    const itemRowById = new Map(itemRows.map((row) => [Number(row.id), row]));
+    for (const itemId of uniqueItemIds) {
+      if (!itemRowById.has(itemId)) {
+        throw new CogsAccountConfigError(`Item ${itemId} not found in company ${companyId}`);
+      }
+    }
+
+    let defaultCogsAccountId: number | null = null;
+    let defaultInventoryAssetAccountId: number | null = null;
+    if (itemRows.some((row) => !row.cogs_account_id || !row.inventory_asset_account_id)) {
       const hasMappingTypeId = await hasColumn(conn, "company_account_mappings", "mapping_type_id");
 
       const [companyRows] = await conn.execute<RowDataPacket[]>(
@@ -300,72 +352,66 @@ export async function getItemAccounts(
           accountMap.set(mappingCode, Number(row.account_id));
         }
       }
-      
+
+      defaultCogsAccountId = accountMap.get('COGS_DEFAULT') ?? null;
+      defaultInventoryAssetAccountId = accountMap.get('INVENTORY_ASSET_DEFAULT') ?? null;
+    }
+
+    const result = new Map<number, ItemAccountMapping>();
+    const accountIdsToValidate = new Set<number>();
+
+    for (const itemId of uniqueItemIds) {
+      const row = itemRowById.get(itemId)!;
+      const cogsAccountId = row.cogs_account_id ?? defaultCogsAccountId;
+      const inventoryAssetAccountId = row.inventory_asset_account_id ?? defaultInventoryAssetAccountId;
+
       if (!cogsAccountId) {
-        cogsAccountId = accountMap.get('COGS_DEFAULT') ?? null;
+        throw new CogsAccountConfigError(`No COGS account configured for item ${itemId} and no company default set`);
       }
-      
+
       if (!inventoryAssetAccountId) {
-        inventoryAssetAccountId = accountMap.get('INVENTORY_ASSET_DEFAULT') ?? null;
+        throw new CogsAccountConfigError(`No inventory asset account configured for item ${itemId} and no company default set`);
+      }
+
+      result.set(itemId, {
+        cogsAccountId: Number(cogsAccountId),
+        inventoryAssetAccountId: Number(inventoryAssetAccountId)
+      });
+      accountIdsToValidate.add(Number(cogsAccountId));
+      accountIdsToValidate.add(Number(inventoryAssetAccountId));
+    }
+
+    const accountIds = Array.from(accountIdsToValidate);
+    const accountPlaceholders = accountIds.map(() => "?").join(", ");
+    const [accountTypeRows] = await conn.execute<AccountTypeRow[]>(
+      `SELECT a.id AS account_id, at.name AS account_type
+       FROM accounts a
+       JOIN account_types at ON a.account_type_id = at.id
+       WHERE a.company_id = ? AND a.id IN (${accountPlaceholders})`,
+      [companyId, ...accountIds]
+    );
+
+    const accountTypeById = new Map(accountTypeRows.map((row) => [Number(row.account_id), row.account_type?.toUpperCase() ?? null]));
+
+    for (const [itemId, mapping] of result.entries()) {
+      const cogsType = accountTypeById.get(mapping.cogsAccountId);
+      if (!cogsType) {
+        throw new CogsAccountConfigError(`COGS account ${mapping.cogsAccountId} not found`);
+      }
+      if (cogsType !== 'EXPENSE') {
+        throw new CogsAccountConfigError(`COGS account must be an expense account, got ${cogsType}`);
+      }
+
+      const invType = accountTypeById.get(mapping.inventoryAssetAccountId);
+      if (!invType) {
+        throw new CogsAccountConfigError(`Inventory asset account ${mapping.inventoryAssetAccountId} not found`);
+      }
+      if (invType !== 'ASSET') {
+        throw new CogsAccountConfigError(`Inventory asset account must be an asset account, got ${invType}`);
       }
     }
-    
-    // Validate accounts are configured
-    if (!cogsAccountId) {
-      throw new CogsAccountConfigError(
-        `No COGS account configured for item ${itemId} and no company default set`
-      );
-    }
-    
-    if (!inventoryAssetAccountId) {
-      throw new CogsAccountConfigError(
-        `No inventory asset account configured for item ${itemId} and no company default set`
-      );
-    }
-    
-    // Validate account types
-    const [cogsAccountRows] = await conn.execute<AccountTypeRow[]>(
-      `SELECT at.name as account_type 
-       FROM accounts a
-       JOIN account_types at ON a.account_type_id = at.id
-       WHERE a.id = ? AND a.company_id = ?`,
-      [cogsAccountId, companyId]
-    );
-    
-    if (cogsAccountRows.length === 0) {
-      throw new CogsAccountConfigError(`COGS account ${cogsAccountId} not found`);
-    }
-    
-    const cogsType = cogsAccountRows[0].account_type?.toUpperCase();
-    if (cogsType !== 'EXPENSE') {
-      throw new CogsAccountConfigError(
-        `COGS account must be an expense account, got ${cogsType}`
-      );
-    }
-    
-    const [invAccountRows] = await conn.execute<AccountTypeRow[]>(
-      `SELECT at.name as account_type 
-       FROM accounts a
-       JOIN account_types at ON a.account_type_id = at.id
-       WHERE a.id = ? AND a.company_id = ?`,
-      [inventoryAssetAccountId, companyId]
-    );
-    
-    if (invAccountRows.length === 0) {
-      throw new CogsAccountConfigError(`Inventory asset account ${inventoryAssetAccountId} not found`);
-    }
-    
-    const invType = invAccountRows[0].account_type?.toUpperCase();
-    if (invType !== 'ASSET') {
-      throw new CogsAccountConfigError(
-        `Inventory asset account must be an asset account, got ${invType}`
-      );
-    }
-    
-    return {
-      cogsAccountId,
-      inventoryAssetAccountId
-    };
+
+    return result;
   } finally {
     if (!connection) {
       conn.release();
@@ -480,13 +526,17 @@ class CogsPostingMapper implements PostingMapper {
   async mapToJournal(_request: PostingRequest): Promise<JournalLine[]> {
     const lines: JournalLine[] = [];
     const inventoryCreditsByAccount = new Map<number, number>();
+    const itemAccounts = await getItemAccountsBatch(
+      this.saleDetail.companyId,
+      this.saleDetail.items.map((item) => item.itemId),
+      this.dbExecutor as PoolConnection
+    );
 
     for (const item of this.saleDetail.items) {
-      const accounts = await getItemAccounts(
-        this.saleDetail.companyId,
-        item.itemId,
-        this.dbExecutor as PoolConnection
-      );
+      const accounts = itemAccounts.get(item.itemId);
+      if (!accounts) {
+        throw new CogsAccountConfigError(`Item ${item.itemId} not found in company ${this.saleDetail.companyId}`);
+      }
 
       // Debit COGS for this item
       lines.push({
