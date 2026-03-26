@@ -1,50 +1,13 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 
 import { ModuleConfigWarning } from "../components/module-config-warning";
 import { SyncNotification } from "../components/sync-notification";
 import { LoginPage } from "../features/auth/login-page";
 import { ForgotPasswordPage } from "../features/forgot-password-page";
 import { InvitePage } from "../features/invite-page";
-import { OutletTablesPage } from "../features/outlet-tables-page";
-import {
-  AccountsPage,
-  AccountTypesPage,
-  AccountingWorksheetPage,
-  TransactionsPage,
-  TransactionTemplatesPage,
-  DailySalesPage,
-  ForbiddenPage,
-  ItemGroupsPage,
-  ItemsPage,
-  PricesPage,
-  JournalsPage,
-  GeneralLedgerPage,
-  ProfitLossPage,
-  FixedAssetsPage,
-  PosPaymentsPage,
-  PosTransactionsPage,
-  SalesInvoicesPage,
-  SalesPaymentsPage,
-  SuppliesPage,
-  AccountMappingsPage,
-  FeatureSettingsPage,
-  ModulesPage,
-  TaxRatesPage,
-  InventorySettingsPage,
-  StaticPagesPage,
-  UsersPage,
-  RolesPage,
-  ModuleRolesPage,
-  CompaniesPage,
-  OutletsPage,
-  PlatformSettingsPage,
-  FiscalYearsPage,
-  AuditLogsPage,
-  CashBankPage
-} from "../features/pages";
 import { useHeaderAlerts } from "../hooks/use-header-alerts";
 import { useModules } from "../hooks/use-modules";
 import { ApiError, getApiBaseUrl } from "../lib/api-client";
@@ -63,9 +26,6 @@ import { PublicStaticPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
 import { SyncHistoryPage } from "../features/sync-history-page";
 import { PWASettingsPage } from "../features/pwa-settings-page";
-import { ReservationsPage } from "../features/reservations-page";
-import { ReservationCalendarPage } from "../features/reservation-calendar-page";
-import { TableBoardPage } from "../features/table-board-page";
 import { ResetPasswordPage } from "../features/reset-password-page";
 import { VerifyEmailPage } from "../features/verify-email-page";
 
@@ -80,6 +40,66 @@ import {
 } from "./routes";
 
 type SessionStatus = "loading" | "anonymous" | "authenticated";
+
+function lazyNamed<TModule extends Record<string, unknown>, TName extends keyof TModule & string>(
+  loader: () => Promise<TModule>,
+  exportName: TName
+) {
+  return lazy(async () => {
+    const module = await loader();
+    return { default: module[exportName] as ComponentType<any> };
+  });
+}
+
+const loadPagesModule = () => import("../features/pages");
+
+const AccountsPage = lazyNamed(loadPagesModule, "AccountsPage");
+const AccountTypesPage = lazyNamed(loadPagesModule, "AccountTypesPage");
+const AccountingWorksheetPage = lazyNamed(loadPagesModule, "AccountingWorksheetPage");
+const TransactionsPage = lazyNamed(loadPagesModule, "TransactionsPage");
+const TransactionTemplatesPage = lazyNamed(loadPagesModule, "TransactionTemplatesPage");
+const DailySalesPage = lazyNamed(loadPagesModule, "DailySalesPage");
+const ForbiddenPage = lazyNamed(loadPagesModule, "ForbiddenPage");
+const ItemGroupsPage = lazyNamed(loadPagesModule, "ItemGroupsPage");
+const ItemsPage = lazyNamed(loadPagesModule, "ItemsPage");
+const PricesPage = lazyNamed(loadPagesModule, "PricesPage");
+const JournalsPage = lazyNamed(loadPagesModule, "JournalsPage");
+const GeneralLedgerPage = lazyNamed(loadPagesModule, "GeneralLedgerPage");
+const ProfitLossPage = lazyNamed(loadPagesModule, "ProfitLossPage");
+const FixedAssetsPage = lazyNamed(loadPagesModule, "FixedAssetsPage");
+const PosPaymentsPage = lazyNamed(loadPagesModule, "PosPaymentsPage");
+const PosTransactionsPage = lazyNamed(loadPagesModule, "PosTransactionsPage");
+const SalesInvoicesPage = lazyNamed(loadPagesModule, "SalesInvoicesPage");
+const SalesPaymentsPage = lazyNamed(loadPagesModule, "SalesPaymentsPage");
+const SuppliesPage = lazyNamed(loadPagesModule, "SuppliesPage");
+const AccountMappingsPage = lazyNamed(loadPagesModule, "AccountMappingsPage");
+const FeatureSettingsPage = lazyNamed(loadPagesModule, "FeatureSettingsPage");
+const ModulesPage = lazyNamed(loadPagesModule, "ModulesPage");
+const TaxRatesPage = lazyNamed(loadPagesModule, "TaxRatesPage");
+const InventorySettingsPage = lazyNamed(loadPagesModule, "InventorySettingsPage");
+const StaticPagesPage = lazyNamed(loadPagesModule, "StaticPagesPage");
+const UsersPage = lazyNamed(loadPagesModule, "UsersPage");
+const RolesPage = lazyNamed(loadPagesModule, "RolesPage");
+const ModuleRolesPage = lazyNamed(loadPagesModule, "ModuleRolesPage");
+const CompaniesPage = lazyNamed(loadPagesModule, "CompaniesPage");
+const OutletsPage = lazyNamed(loadPagesModule, "OutletsPage");
+const PlatformSettingsPage = lazyNamed(loadPagesModule, "PlatformSettingsPage");
+const FiscalYearsPage = lazyNamed(loadPagesModule, "FiscalYearsPage");
+const AuditLogsPage = lazyNamed(loadPagesModule, "AuditLogsPage");
+const CashBankPage = lazyNamed(loadPagesModule, "CashBankPage");
+
+const OutletTablesPage = lazyNamed(() => import("../features/outlet-tables-page"), "OutletTablesPage");
+const ReservationsPage = lazyNamed(() => import("../features/reservations-page"), "ReservationsPage");
+const ReservationCalendarPage = lazyNamed(() => import("../features/reservation-calendar-page"), "ReservationCalendarPage");
+const TableBoardPage = lazyNamed(() => import("../features/table-board-page"), "TableBoardPage");
+
+function RouteLoadingFallback() {
+  return <div style={{ padding: "1rem" }}>Loading…</div>;
+}
+
+function renderLazyPage(element: ReactNode) {
+  return <Suspense fallback={<RouteLoadingFallback />}>{element}</Suspense>;
+}
 
 const OAUTH_STATE_KEY = "jurnapod.backoffice.oauth.state";
 const OAUTH_COMPANY_KEY = "jurnapod.backoffice.oauth.company";
@@ -144,7 +164,7 @@ function RedirectToPath(props: { targetPath: string; user: SessionUser; accessTo
   useEffect(() => {
     globalThis.location.hash = `#${props.targetPath}`;
   }, [props.targetPath]);
-  return <ItemsPage user={props.user} accessToken={props.accessToken} />;
+  return renderLazyPage(<ItemsPage user={props.user} accessToken={props.accessToken} />);
 }
 
 function RouteScreen(props: { path: string; user: SessionUser; accessToken: string }) {
@@ -154,82 +174,82 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
 
   if (props.path === "/users") {
-    return <UsersPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<UsersPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/roles") {
-    return <RolesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<RolesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/module-roles") {
-    return <ModuleRolesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<ModuleRolesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/companies") {
-    return <CompaniesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<CompaniesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/outlets") {
-    return <OutletsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<OutletsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/items") {
-    return <ItemsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<ItemsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/prices") {
-    return <PricesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<PricesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/item-groups") {
-    return <ItemGroupsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<ItemGroupsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/supplies") {
-    return <SuppliesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<SuppliesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/fixed-assets") {
-    return <FixedAssetsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<FixedAssetsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/sales-invoices") {
-    return <SalesInvoicesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<SalesInvoicesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/sales-payments") {
-    return <SalesPaymentsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<SalesPaymentsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/pos-transactions") {
-    return <PosTransactionsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<PosTransactionsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/pos-payments") {
-    return <PosPaymentsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<PosPaymentsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/outlet-tables") {
-    return <OutletTablesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<OutletTablesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/reservations") {
-    return <ReservationsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<ReservationsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/reservation-calendar") {
-    return <ReservationCalendarPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<ReservationCalendarPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/table-board") {
-    return <TableBoardPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<TableBoardPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/daily-sales") {
-    return <DailySalesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<DailySalesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/profit-loss") {
-    return <ProfitLossPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<ProfitLossPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/general-ledger") {
-    return <GeneralLedgerPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<GeneralLedgerPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/chart-of-accounts") {
-    return <AccountsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<AccountsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/fiscal-years") {
-    return <FiscalYearsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<FiscalYearsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/account-types") {
-    return <AccountTypesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<AccountTypesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/transactions") {
-    return <TransactionsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<TransactionsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/transaction-templates") {
-    return <TransactionTemplatesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<TransactionTemplatesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/sync-queue") {
     return <SyncQueuePage user={props.user} />;
@@ -241,40 +261,40 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
     return <PWASettingsPage />;
   }
   if (props.path === "/account-mappings") {
-    return <AccountMappingsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<AccountMappingsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/outlet-settings" || props.path === "/feature-settings") {
-    return <FeatureSettingsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<FeatureSettingsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/modules" || props.path === "/feature-flags") {
-    return <ModulesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<ModulesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/tax-rates") {
-    return <TaxRatesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<TaxRatesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/inventory-settings") {
-    return <InventorySettingsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<InventorySettingsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/static-pages") {
-    return <StaticPagesPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<StaticPagesPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/platform-settings") {
-    return <PlatformSettingsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<PlatformSettingsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/journals") {
-    return <JournalsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<JournalsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/accounting-worksheet") {
-    return <AccountingWorksheetPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<AccountingWorksheetPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/audit-logs") {
-    return <AuditLogsPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<AuditLogsPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/cash-bank") {
-    return <CashBankPage user={props.user} accessToken={props.accessToken} />;
+    return renderLazyPage(<CashBankPage user={props.user} accessToken={props.accessToken} />);
   }
   // Fallback: render items page
-  return <ItemsPage user={props.user} accessToken={props.accessToken} />;
+  return renderLazyPage(<ItemsPage user={props.user} accessToken={props.accessToken} />);
 }
 
 export function AppRouter() {

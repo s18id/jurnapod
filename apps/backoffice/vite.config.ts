@@ -100,7 +100,47 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: "dist",
-      sourcemap: true
+      sourcemap: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) {
+              return undefined;
+            }
+
+            if (
+              id.includes("@mantine/hooks") ||
+              id.includes("@mantine/notifications") ||
+              id.includes("@floating-ui") ||
+              id.includes("react") ||
+              id.includes("scheduler")
+            ) {
+              return "mantine-core-vendor";
+            }
+
+            if (id.includes("@mantine/core")) {
+              return "mantine-components-vendor";
+            }
+
+            if (id.includes("@mantine/dates") || id.includes("dayjs")) {
+              return "mantine-dates-vendor";
+            }
+
+            if (id.includes("@tanstack/react-table")) {
+              return "table-vendor";
+            }
+
+            if (id.includes("dexie") || id.includes("reconnecting-websocket")) {
+              return "offline-vendor";
+            }
+
+            if (id.includes("marked") || id.includes("dompurify")) {
+              return "content-vendor";
+            }
+            return undefined;
+          }
+        }
+      }
     }
   };
 });

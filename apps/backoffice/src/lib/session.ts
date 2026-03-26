@@ -1,11 +1,23 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { apiRequest, getApiBaseUrl } from "./api-client";
+import { apiRequest } from "./api-client";
+import { getApiBaseUrl } from "./api-base-url";
+import {
+  clearAccessToken,
+  getStoredAccessToken,
+  getStoredCompanyTimezone,
+  storeAccessToken,
+  storeCompanyTimezone
+} from "./auth-storage";
 
-// Memory-only token storage (no localStorage)
-let inMemoryAccessToken: string | null = null;
-let inMemoryCompanyTimezone: string | null = null;
+export {
+  clearAccessToken,
+  getStoredAccessToken,
+  getStoredCompanyTimezone,
+  storeAccessToken,
+  storeCompanyTimezone
+} from "./auth-storage";
 
 export type RoleCode =
   | "SUPER_ADMIN"
@@ -64,31 +76,6 @@ export type GoogleLoginInput = {
   code: string;
   redirectUri: string;
 };
-
-export function getStoredAccessToken(): string | null {
-  // Check for E2E test token first
-  if (typeof window !== "undefined" && (window as any).__E2E_ACCESS_TOKEN__) {
-    return (window as any).__E2E_ACCESS_TOKEN__;
-  }
-  return inMemoryAccessToken;
-}
-
-export function storeAccessToken(token: string): void {
-  inMemoryAccessToken = token;
-}
-
-export function clearAccessToken(): void {
-  inMemoryAccessToken = null;
-  inMemoryCompanyTimezone = null;
-}
-
-export function getStoredCompanyTimezone(): string | null {
-  return inMemoryCompanyTimezone;
-}
-
-export function storeCompanyTimezone(timezone: string | null | undefined): void {
-  inMemoryCompanyTimezone = timezone && timezone.trim() ? timezone : null;
-}
 
 export async function login(input: LoginInput): Promise<{ token: string; user: SessionUser }> {
   const auth = await apiRequest<LoginResponse>("/auth/login", {
