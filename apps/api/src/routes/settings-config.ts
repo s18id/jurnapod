@@ -41,12 +41,12 @@ declare module "hono" {
 // Request Schemas
 // =============================================================================
 
-const GetConfigSchema = z.object({
+export const GetConfigSchema = z.object({
   outlet_id: NumericIdSchema,
   keys: z.string().min(1) // comma-separated keys
 });
 
-const UpdateConfigSchema = z.object({
+export const UpdateConfigSchema = z.object({
   outlet_id: NumericIdSchema,
   settings: z.array(
     z.object({

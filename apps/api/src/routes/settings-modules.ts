@@ -32,13 +32,13 @@ declare module "hono" {
 // Request Schemas
 // =============================================================================
 
-const ModuleUpdateSchema = z.object({
+export const ModuleUpdateSchema = z.object({
   code: z.string(),
   enabled: z.boolean(),
   config_json: z.string().optional()
 });
 
-const ModulesUpdateSchema = z.object({
+export const ModulesUpdateSchema = z.object({
   modules: z.array(ModuleUpdateSchema)
 });
 

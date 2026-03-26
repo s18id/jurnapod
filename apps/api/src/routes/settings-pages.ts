@@ -44,7 +44,7 @@ declare module "hono" {
 // Request Schemas
 // =============================================================================
 
-const CreatePageSchema = z.object({
+export const CreatePageSchema = z.object({
   slug: z.string().min(1).max(100),
   title: z.string().min(1).max(191),
   content_md: z.string(),
@@ -52,7 +52,7 @@ const CreatePageSchema = z.object({
   meta_json: z.record(z.any()).optional()
 });
 
-const UpdatePageSchema = z.object({
+export const UpdatePageSchema = z.object({
   slug: z.string().min(1).max(100).optional(),
   title: z.string().min(1).max(191).optional(),
   content_md: z.string().optional(),
