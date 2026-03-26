@@ -22,11 +22,25 @@ import { getDbPool } from "../lib/db.js";
 import {
   generateCSVBuffer,
   generateExcel,
+  generateExcelChunked,
+  generateCSVStream,
+  createReadableStream,
   getContentType,
   getFileExtension,
   type ExportColumn,
   type ExportFormat
 } from "../lib/export/index.js";
+
+// Constants for streaming thresholds
+const STREAMING_THRESHOLD = 10000; // Use streaming for CSV >10K rows
+const EXCEL_MAX_ROWS = 50000;      // Hard limit for Excel
+
+/**
+ * Check if export should use streaming mode
+ */
+function shouldUseStreaming(rowCount: number): boolean {
+  return rowCount > STREAMING_THRESHOLD;
+}
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -38,9 +52,9 @@ declare module "hono" {
 // Types
 // =============================================================================
 
-type EntityType = "items" | "prices";
+export type EntityType = "items" | "prices";
 
-interface ExportQueryParams {
+export interface ExportQueryParams {
   format: ExportFormat;
   columns: string[];
   search?: string;
@@ -60,7 +74,7 @@ interface ExportQueryParams {
 // Column Definitions
 // =============================================================================
 
-const ITEM_EXPORT_COLUMNS: ExportColumn[] = [
+export const ITEM_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "id", header: "ID", fieldType: "number" },
   { key: "sku", header: "SKU", fieldType: "string" },
   { key: "name", header: "Name", fieldType: "string" },
@@ -75,7 +89,7 @@ const ITEM_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "updated_at", header: "Updated At", fieldType: "datetime" }
 ];
 
-const PRICE_EXPORT_COLUMNS: ExportColumn[] = [
+export const PRICE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "id", header: "ID", fieldType: "number" },
   { key: "item_id", header: "Item ID", fieldType: "number" },
   { key: "item_sku", header: "Item SKU", fieldType: "string" },
@@ -89,14 +103,14 @@ const PRICE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: "updated_at", header: "Updated At", fieldType: "datetime" }
 ];
 
-const DEFAULT_ITEM_COLUMNS = ["id", "sku", "name", "item_type", "item_group_name", "is_active"];
-const DEFAULT_PRICE_COLUMNS = ["item_sku", "item_name", "outlet_name", "price", "is_active"];
+export const DEFAULT_ITEM_COLUMNS = ["id", "sku", "name", "item_type", "item_group_name", "is_active"];
+export const DEFAULT_PRICE_COLUMNS = ["item_sku", "item_name", "outlet_name", "price", "is_active"];
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
-function parseExportParams(url: URL): ExportQueryParams {
+export function parseExportParams(url: URL): ExportQueryParams {
   const format = (url.searchParams.get("format") as ExportFormat) || "csv";
   const columnsParam = url.searchParams.get("columns");
   const columns = columnsParam
@@ -138,7 +152,7 @@ function parseExportParams(url: URL): ExportQueryParams {
   };
 }
 
-function getColumnsForEntity(
+export function getColumnsForEntity(
   entityType: EntityType,
   selectedColumns: string[]
 ): ExportColumn[] {
@@ -155,7 +169,7 @@ function getColumnsForEntity(
     .filter((col): col is ExportColumn => col !== undefined);
 }
 
-function generateFilename(entityType: EntityType, format: ExportFormat): string {
+export function generateFilename(entityType: EntityType, format: ExportFormat): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return `jurnapod-${entityType}-${timestamp}${getFileExtension(format)}`;
 }
@@ -425,21 +439,64 @@ exportRoutes.post("/:entityType", async (c) => {
         ? await fetchItemsForExport(auth.companyId, params)
         : await fetchPricesForExport(auth.companyId, params);
 
-    // Generate export
     const format = params.format;
+    const rowCount = data.length;
+    const filename = generateFilename(entityType, format);
+
+    // Handle large Excel exports (>50K rows)
+    if (format === "xlsx" && rowCount > EXCEL_MAX_ROWS) {
+      return errorResponse(
+        "INVALID_REQUEST",
+        `Excel export is limited to ${EXCEL_MAX_ROWS.toLocaleString()} rows. ` +
+        `This export has ${rowCount.toLocaleString()} rows. ` +
+        `Please use CSV format for larger datasets or apply filters to reduce the result set.`,
+        400
+      );
+    }
+
+    // Use streaming for large CSV datasets (>10K rows)
+    if (format === "csv" && shouldUseStreaming(rowCount)) {
+      // Create async generator from data array
+      async function* dataGenerator() {
+        for (const row of data) {
+          yield row;
+        }
+      }
+
+      // Create streaming response
+      const streamGenerator = generateCSVStream(dataGenerator(), columns, {
+        format: "csv",
+        includeHeaders: true
+      });
+      
+      const readableStream = createReadableStream(streamGenerator);
+
+      return new Response(readableStream, {
+        status: 200,
+        headers: {
+          "Content-Type": getContentType("csv"),
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0"
+        }
+      });
+    }
+
+    // For Excel or small CSV, use buffer-based approach (existing logic continues...)
     let buffer: Buffer;
     let contentType: string;
 
     if (format === "xlsx") {
-      buffer = generateExcel(data, columns, { format: "xlsx" });
+      // Use chunked generation for large datasets (>10K rows)
+      buffer = rowCount > STREAMING_THRESHOLD
+        ? generateExcelChunked(data, columns, { format: "xlsx" })
+        : generateExcel(data, columns, { format: "xlsx" });
       contentType = getContentType("xlsx");
     } else {
       buffer = generateCSVBuffer(data, columns, { format: "csv" });
       contentType = getContentType("csv");
     }
-
-    // Generate filename
-    const filename = generateFilename(entityType, format);
 
     // Return file download
     // Convert Buffer to Uint8Array (valid BlobPart), then to Blob (valid BodyInit)

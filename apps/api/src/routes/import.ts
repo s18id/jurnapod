@@ -28,42 +28,19 @@ import {
   type ImportRow,
   type FieldType,
   type ImportParseResult,
+  batchValidateForeignKeys,
 } from "../lib/import/index.js";
+import {
+  createSession,
+  getSession,
+  updateSession,
+  deleteSession,
+  cleanupExpiredSessions,
+} from "../lib/import/session-store.js";
 import { randomUUID } from "node:crypto";
 
-// In-memory storage for upload sessions (TODO: move to Redis/database)
-// WARNING: This will not work in multi-instance/production deployments
-// All instances share memory but not sessions - users may hit different instances
-const uploadSessions = new Map<string, UploadSession>();
-
-// Session cleanup interval (30 minutes)
-const SESSION_CLEANUP_INTERVAL = 30 * 60 * 1000;
-
-// Warning threshold for session count
-const SESSION_COUNT_WARNING_THRESHOLD = 1000;
-
-// Cleanup old sessions periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [sessionId, session] of uploadSessions.entries()) {
-    if (now - session.createdAt.getTime() > SESSION_CLEANUP_INTERVAL) {
-      uploadSessions.delete(sessionId);
-    }
-  }
-}, SESSION_CLEANUP_INTERVAL);
-
-// Warn if too many active sessions (memory leak indicator)
-function checkSessionCount() {
-  if (uploadSessions.size > SESSION_COUNT_WARNING_THRESHOLD) {
-    console.warn(
-      `[IMPORT WARNING] High session count: ${uploadSessions.size} active sessions. ` +
-      `This may indicate a memory leak. Consider switching to Redis/database session storage.`
-    );
-  }
-}
-
-// Check session count every 5 minutes
-setInterval(checkSessionCount, 5 * 60 * 1000);
+// Clean up expired sessions at startup (non-fatal if DB not yet ready)
+cleanupExpiredSessions(getDbPool()).catch(() => {/* non-fatal at startup */});
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -261,28 +238,69 @@ function mapRowData(
 }
 
 // =============================================================================
-// Validation Functions
+// Validation Functions (TD-012: Batch FK Validation)
 // =============================================================================
 
-async function validateItemRow(
-  row: Record<string, unknown>,
-  companyId: number,
-  pool: ReturnType<typeof getDbPool>
-): Promise<Array<{ field: string; message: string }>> {
-  const errors: Array<{ field: string; message: string }> = [];
+import type { FkLookupResults } from "../lib/import/index.js";
 
-  // Check SKU uniqueness within company
-  if (row.sku) {
-    const [existing] = await pool.execute<RowDataPacket[]>(
-      "SELECT id FROM items WHERE company_id = ? AND sku = ? LIMIT 1",
-      [companyId, row.sku]
-    );
-    if (existing.length > 0) {
-      errors.push({ field: "sku", message: `SKU '${row.sku}' already exists` });
+/**
+ * Collects FK IDs from item rows for batch validation.
+ * Used to prefetch all FK references before row-level validation.
+ */
+function collectItemRowFkIds(
+  rows: Array<{ rowNumber: number; mappedData: Record<string, unknown> }>
+): Map<number, number> {
+  // Map rowNumber -> item_group_id for FK validation
+  const itemGroupIds = new Map<number, number>();
+  
+  for (const { rowNumber, mappedData } of rows) {
+    if (mappedData.item_group_id) {
+      const groupId = parseInt(String(mappedData.item_group_id), 10);
+      if (!isNaN(groupId)) {
+        itemGroupIds.set(rowNumber, groupId);
+      }
     }
   }
+  
+  return itemGroupIds;
+}
 
-  // Validate item_type
+/**
+ * Collects FK IDs from price rows for batch validation.
+ * Used to prefetch all FK references before row-level validation.
+ */
+function collectPriceRowFkIds(
+  rows: Array<{ rowNumber: number; mappedData: Record<string, unknown> }>
+): Map<number, number> {
+  // Map rowNumber -> outlet_id for FK validation
+  const outletIds = new Map<number, number>();
+  
+  for (const { rowNumber, mappedData } of rows) {
+    if (mappedData.outlet_id) {
+      const id = parseInt(String(mappedData.outlet_id), 10);
+      if (!isNaN(id)) {
+        outletIds.set(rowNumber, id);
+      }
+    }
+  }
+  
+  return outletIds;
+}
+
+/**
+ * Validates item row fields (non-FK) and checks FK results from batch query.
+ * 
+ * @param row - The mapped row data
+ * @param fkResults - Pre-fetched FK validation results from batchValidateForeignKeys
+ * @returns Array of validation errors
+ */
+function validateItemRowWithFkCache(
+  row: Record<string, unknown>,
+  fkResults: FkLookupResults
+): Array<{ field: string; message: string }> {
+  const errors: Array<{ field: string; message: string }> = [];
+
+  // Validate item_type (enum check)
   if (row.item_type) {
     const validTypes = ["INVENTORY", "NON_INVENTORY", "SERVICE", "RAW_MATERIAL"];
     if (!validTypes.includes(String(row.item_type))) {
@@ -290,15 +308,13 @@ async function validateItemRow(
     }
   }
 
-  // Validate item_group_id if provided
+  // Validate item_group_id using pre-fetched FK results (O(1) lookup)
   if (row.item_group_id) {
     const groupId = parseInt(String(row.item_group_id), 10);
     if (!isNaN(groupId)) {
-      const [existing] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM item_groups WHERE company_id = ? AND id = ? LIMIT 1",
-        [companyId, groupId]
-      );
-      if (existing.length === 0) {
+      // O(1) lookup from batch query results
+      const exists = fkResults.get('item_groups')?.get(groupId);
+      if (exists === false) {
         errors.push({ field: "item_group_id", message: `Item group with ID '${row.item_group_id}' does not exist` });
       }
     }
@@ -307,33 +323,26 @@ async function validateItemRow(
   return errors;
 }
 
-async function validatePriceRow(
+/**
+ * Validates price row fields (non-FK) and checks FK results from batch query.
+ * 
+ * @param row - The mapped row data
+ * @param fkResults - Pre-fetched FK validation results from batchValidateForeignKeys
+ * @returns Array of validation errors
+ */
+function validatePriceRowWithFkCache(
   row: Record<string, unknown>,
-  companyId: number,
-  pool: ReturnType<typeof getDbPool>
-): Promise<Array<{ field: string; message: string }>> {
+  fkResults: FkLookupResults
+): Array<{ field: string; message: string }> {
   const errors: Array<{ field: string; message: string }> = [];
 
-  // Check item exists by SKU
-  if (row.item_sku) {
-    const [items] = await pool.execute<RowDataPacket[]>(
-      "SELECT id FROM items WHERE company_id = ? AND sku = ? LIMIT 1",
-      [companyId, row.item_sku]
-    );
-    if (items.length === 0) {
-      errors.push({ field: "item_sku", message: `Item with SKU '${row.item_sku}' does not exist` });
-    }
-  }
-
-  // Validate outlet_id if provided
+  // Validate outlet_id using pre-fetched FK results (O(1) lookup)
   if (row.outlet_id) {
     const outletId = parseInt(String(row.outlet_id), 10);
     if (!isNaN(outletId)) {
-      const [outlets] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM outlets WHERE company_id = ? AND id = ? LIMIT 1",
-        [companyId, outletId]
-      );
-      if (outlets.length === 0) {
+      // O(1) lookup from batch query results
+      const exists = fkResults.get('outlets')?.get(outletId);
+      if (exists === false) {
         errors.push({ field: "outlet_id", message: `Outlet with ID '${row.outlet_id}' does not exist` });
       }
     }
@@ -350,31 +359,132 @@ async function validatePriceRow(
   return errors;
 }
 
+/**
+ * Validates item rows with SKU uniqueness check.
+ * SKU uniqueness must still be checked per-row as it depends on existing data.
+ * 
+ * @param row - The mapped row data
+ * @param companyId - Company ID for SKU uniqueness check
+ * @param pool - Database pool
+ * @param fkResults - Pre-fetched FK validation results from batchValidateForeignKeys
+ * @returns Array of validation errors
+ */
+async function validateItemRow(
+  row: Record<string, unknown>,
+  companyId: number,
+  pool: ReturnType<typeof getDbPool>,
+  fkResults: FkLookupResults
+): Promise<Array<{ field: string; message: string }>> {
+  const errors: Array<{ field: string; message: string }> = [];
+
+  // Check SKU uniqueness within company (requires per-row DB query)
+  if (row.sku) {
+    const [existing] = await pool.execute<RowDataPacket[]>(
+      "SELECT id FROM items WHERE company_id = ? AND sku = ? LIMIT 1",
+      [companyId, row.sku]
+    );
+    if (existing.length > 0) {
+      errors.push({ field: "sku", message: `SKU '${row.sku}' already exists` });
+    }
+  }
+
+  // Validate non-FK fields and check FK results from cache
+  errors.push(...validateItemRowWithFkCache(row, fkResults));
+
+  return errors;
+}
+
+/**
+ * Validates price rows with item_sku existence check.
+ * Item existence by SKU must still be checked per-row as it depends on existing data.
+ * 
+ * @param row - The mapped row data
+ * @param companyId - Company ID for item existence check
+ * @param pool - Database pool
+ * @param fkResults - Pre-fetched FK validation results from batchValidateForeignKeys
+ * @returns Array of validation errors
+ */
+async function validatePriceRow(
+  row: Record<string, unknown>,
+  companyId: number,
+  pool: ReturnType<typeof getDbPool>,
+  fkResults: FkLookupResults
+): Promise<Array<{ field: string; message: string }>> {
+  const errors: Array<{ field: string; message: string }> = [];
+
+  // Check item exists by SKU (requires per-row DB query)
+  if (row.item_sku) {
+    const [items] = await pool.execute<RowDataPacket[]>(
+      "SELECT id FROM items WHERE company_id = ? AND sku = ? LIMIT 1",
+      [companyId, row.item_sku]
+    );
+    if (items.length === 0) {
+      errors.push({ field: "item_sku", message: `Item with SKU '${row.item_sku}' does not exist` });
+    }
+  }
+
+  // Validate non-FK fields and check FK results from cache
+  errors.push(...validatePriceRowWithFkCache(row, fkResults));
+
+  return errors;
+}
+
 // =============================================================================
 // Apply Functions
 // =============================================================================
 
 const BATCH_SIZE = 500;
 
+interface ApplyResult {
+  created: number;
+  updated: number;
+  errors: Array<{ row: number; error: string }>;
+  batchesCompleted: number;
+  batchesFailed: number;
+  rowsProcessed: number;
+}
+
+interface ApplyOptions {
+  /** 0-based batch index to start from (for resume). Default: 0 */
+  startBatch?: number;
+  /** Called after each batch commits — use to persist checkpoint */
+  onBatchCommit?: (batchNumber: number) => Promise<void>;
+}
+
 async function applyItemImport(
   rows: Array<Record<string, unknown>>,
   companyId: number,
-  pool: ReturnType<typeof getDbPool>
-): Promise<{ created: number; updated: number; errors: Array<{ row: number; error: string }> }> {
-  const result = { created: 0, updated: 0, errors: [] as Array<{ row: number; error: string }> };
-  const connection = await pool.getConnection();
+  pool: ReturnType<typeof getDbPool>,
+  options: ApplyOptions = {}
+): Promise<ApplyResult> {
+  const { startBatch = 0, onBatchCommit } = options;
+  const result: ApplyResult = {
+    created: 0,
+    updated: 0,
+    errors: [],
+    batchesCompleted: 0,
+    batchesFailed: 0,
+    rowsProcessed: 0,
+  };
 
-  try {
-    await connection.beginTransaction();
+  const totalBatches = Math.ceil(rows.length / BATCH_SIZE);
 
-    // Process in batches of 500
-    for (let batchStart = 0; batchStart < rows.length; batchStart += BATCH_SIZE) {
-      const batchEnd = Math.min(batchStart + BATCH_SIZE, rows.length);
-      const batch = rows.slice(batchStart, batchEnd);
+  for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+    // Skip already-committed batches (resume support)
+    if (batchIndex < startBatch) {
+      continue;
+    }
 
-      // Batch existence check - O(1) lookup with Map
+    const batchStart = batchIndex * BATCH_SIZE;
+    const batch = rows.slice(batchStart, batchStart + BATCH_SIZE);
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      // Batch existence check — O(1) lookup with Map
       const skus = batch.map(r => String(r.sku || "")).filter(s => s.length > 0);
-      let skuToIdMap = new Map<string, number>();
+      const skuToIdMap = new Map<string, number>();
 
       if (skus.length > 0) {
         const placeholders = skus.map(() => "?").join(",");
@@ -387,7 +497,7 @@ async function applyItemImport(
         }
       }
 
-      // Process each row using the batch lookup
+      // Process each row in the batch
       for (let i = 0; i < batch.length; i++) {
         const row = batch[i];
         const rowIndex = batchStart + i;
@@ -399,56 +509,31 @@ async function applyItemImport(
         }
 
         const existingId = skuToIdMap.get(sku);
+        const groupId = row.item_group_id ? parseInt(String(row.item_group_id), 10) || null : null;
+        const cogsAccountId = row.cogs_account_id ? parseInt(String(row.cogs_account_id), 10) || null : null;
+        const invAccountId = row.inventory_asset_account_id ? parseInt(String(row.inventory_asset_account_id), 10) || null : null;
+        const isActive = row.is_active !== false ? 1 : 0;
 
         try {
           if (existingId !== undefined) {
-            // Update existing item
-            const groupId = row.item_group_id ? parseInt(String(row.item_group_id), 10) || null : null;
-            const cogsAccountId = row.cogs_account_id ? parseInt(String(row.cogs_account_id), 10) || null : null;
-            const invAccountId = row.inventory_asset_account_id ? parseInt(String(row.inventory_asset_account_id), 10) || null : null;
-            const isActive = row.is_active !== false ? 1 : 0;
-
             await connection.execute(
               `UPDATE items SET
                 name = ?, item_type = ?, barcode = ?, item_group_id = ?,
                 cogs_account_id = ?, inventory_asset_account_id = ?, is_active = ?,
                 updated_at = NOW()
               WHERE id = ?`,
-              [
-                String(row.name || ""),
-                String(row.item_type || ""),
-                row.barcode ? String(row.barcode) : null,
-                groupId,
-                cogsAccountId,
-                invAccountId,
-                isActive,
-                existingId,
-              ]
+              [String(row.name || ""), String(row.item_type || ""), row.barcode ? String(row.barcode) : null,
+               groupId, cogsAccountId, invAccountId, isActive, existingId]
             );
             result.updated++;
           } else {
-            // Create new item
-            const groupId = row.item_group_id ? parseInt(String(row.item_group_id), 10) || null : null;
-            const cogsAccountId = row.cogs_account_id ? parseInt(String(row.cogs_account_id), 10) || null : null;
-            const invAccountId = row.inventory_asset_account_id ? parseInt(String(row.inventory_asset_account_id), 10) || null : null;
-            const isActive = row.is_active !== false ? 1 : 0;
-
             await connection.execute(
               `INSERT INTO items (
                 company_id, sku, name, item_type, barcode, item_group_id,
                 cogs_account_id, inventory_asset_account_id, is_active, created_at, updated_at
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-              [
-                companyId,
-                sku,
-                String(row.name || ""),
-                String(row.item_type || ""),
-                row.barcode ? String(row.barcode) : null,
-                groupId,
-                cogsAccountId,
-                invAccountId,
-                isActive,
-              ]
+              [companyId, sku, String(row.name || ""), String(row.item_type || ""),
+               row.barcode ? String(row.barcode) : null, groupId, cogsAccountId, invAccountId, isActive]
             );
             result.created++;
           }
@@ -456,15 +541,21 @@ async function applyItemImport(
           result.errors.push({ row: rowIndex + 1, error: error instanceof Error ? error.message : "Unknown error" });
         }
       }
-    }
 
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    // Re-throw to signal transaction failure to caller
-    throw error;
-  } finally {
-    connection.release();
+      await connection.commit();
+      result.batchesCompleted++;
+      result.rowsProcessed += batch.length;
+      await onBatchCommit?.(batchIndex);
+    } catch (error) {
+      await connection.rollback();
+      result.batchesFailed++;
+      result.errors.push({
+        row: batchStart + 1,
+        error: `Batch ${batchIndex + 1} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      });
+    } finally {
+      connection.release();
+    }
   }
 
   return result;
@@ -473,22 +564,37 @@ async function applyItemImport(
 async function applyPriceImport(
   rows: Array<Record<string, unknown>>,
   companyId: number,
-  pool: ReturnType<typeof getDbPool>
-): Promise<{ created: number; updated: number; errors: Array<{ row: number; error: string }> }> {
-  const result = { created: 0, updated: 0, errors: [] as Array<{ row: number; error: string }> };
-  const connection = await pool.getConnection();
+  pool: ReturnType<typeof getDbPool>,
+  options: ApplyOptions = {}
+): Promise<ApplyResult> {
+  const { startBatch = 0, onBatchCommit } = options;
+  const result: ApplyResult = {
+    created: 0,
+    updated: 0,
+    errors: [],
+    batchesCompleted: 0,
+    batchesFailed: 0,
+    rowsProcessed: 0,
+  };
 
-  try {
-    await connection.beginTransaction();
+  const totalBatches = Math.ceil(rows.length / BATCH_SIZE);
 
-    // Process in batches of 500
-    for (let batchStart = 0; batchStart < rows.length; batchStart += BATCH_SIZE) {
-      const batchEnd = Math.min(batchStart + BATCH_SIZE, rows.length);
-      const batch = rows.slice(batchStart, batchEnd);
+  for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+    // Skip already-committed batches (resume support)
+    if (batchIndex < startBatch) {
+      continue;
+    }
 
-      // Batch item lookup - O(1) lookup with Map
+    const batchStart = batchIndex * BATCH_SIZE;
+    const batch = rows.slice(batchStart, batchStart + BATCH_SIZE);
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      // Batch item lookup — O(1) lookup with Map
       const itemSkus = batch.map(r => String(r.item_sku || "")).filter(s => s.length > 0);
-      let skuToItemIdMap = new Map<string, number>();
+      const skuToItemIdMap = new Map<string, number>();
 
       if (itemSkus.length > 0) {
         const placeholders = itemSkus.map(() => "?").join(",");
@@ -501,9 +607,9 @@ async function applyPriceImport(
         }
       }
 
-      // Batch existing prices lookup - get all prices for items in this batch
+      // Batch existing prices lookup
       const itemIds = [...skuToItemIdMap.values()];
-      let existingPricesMap = new Map<string, number>(); // key: "itemId:outletId" or "itemId:null"
+      const existingPricesMap = new Map<string, number>();
 
       if (itemIds.length > 0) {
         const [existingPrices] = await connection.execute<RowDataPacket[]>(
@@ -511,12 +617,11 @@ async function applyPriceImport(
           [companyId, ...itemIds]
         );
         for (const price of existingPrices) {
-          const key = `${price.item_id}:${price.outlet_id ?? "null"}`;
-          existingPricesMap.set(key, Number(price.id));
+          existingPricesMap.set(`${price.item_id}:${price.outlet_id ?? "null"}`, Number(price.id));
         }
       }
 
-      // Process each row using the batch lookups
+      // Process each row in the batch
       for (let i = 0; i < batch.length; i++) {
         const row = batch[i];
         const rowIndex = batchStart + i;
@@ -536,20 +641,16 @@ async function applyPriceImport(
         const outletId = row.outlet_id ? parseInt(String(row.outlet_id), 10) || null : null;
         const price = parseFloat(String(row.price));
         const isActive = row.is_active !== false ? 1 : 0;
-
-        const priceKey = `${itemId}:${outletId ?? "null"}`;
-        const existingPriceId = existingPricesMap.get(priceKey);
+        const existingPriceId = existingPricesMap.get(`${itemId}:${outletId ?? "null"}`);
 
         try {
           if (existingPriceId !== undefined) {
-            // Update existing price
             await connection.execute(
               `UPDATE item_prices SET price = ?, is_active = ?, updated_at = NOW() WHERE id = ?`,
               [price, isActive, existingPriceId]
             );
             result.updated++;
           } else {
-            // Create new price
             await connection.execute(
               `INSERT INTO item_prices (item_id, company_id, outlet_id, price, is_active, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
@@ -561,15 +662,21 @@ async function applyPriceImport(
           result.errors.push({ row: rowIndex + 1, error: error instanceof Error ? error.message : "Unknown error" });
         }
       }
-    }
 
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    // Re-throw to signal transaction failure to caller
-    throw error;
-  } finally {
-    connection.release();
+      await connection.commit();
+      result.batchesCompleted++;
+      result.rowsProcessed += batch.length;
+      await onBatchCommit?.(batchIndex);
+    } catch (error) {
+      await connection.rollback();
+      result.batchesFailed++;
+      result.errors.push({
+        row: batchStart + 1,
+        error: `Batch ${batchIndex + 1} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      });
+    } finally {
+      connection.release();
+    }
   }
 
   return result;
@@ -669,19 +776,16 @@ importRoutes.post("/:entityType/upload", async (c) => {
     // Get columns from first row
     const columns = parseResult.rows.length > 0 ? Object.keys(parseResult.rows[0].data) : [];
 
-    // Store session
-    const session: UploadSession = {
-      id: sessionId,
-      companyId: auth.companyId,
+    // Persist session to database
+    const pool = getDbPool();
+    await createSession(pool, sessionId, auth.companyId, entityType, {
       entityType,
       filename: file.name,
       rowCount: parseResult.rows.length,
       columns,
       sampleData,
       rows: parseResult.rows,
-      createdAt: new Date(),
-    };
-    uploadSessions.set(sessionId, session);
+    });
 
     return successResponse({
       uploadId: sessionId,
@@ -738,16 +842,14 @@ importRoutes.post("/:entityType/validate", async (c) => {
       return errorResponse("INVALID_REQUEST", "Missing or invalid mappings", 400);
     }
 
-    // Get upload session
-    const session = uploadSessions.get(uploadId);
-    if (!session) {
+    // Get upload session (company isolation enforced in query)
+    const pool = getDbPool();
+    const stored = await getSession(pool, uploadId, auth.companyId);
+    if (!stored) {
       return errorResponse("NOT_FOUND", "Upload session not found or expired", 404);
     }
 
-    // Verify company ownership
-    if (session.companyId !== auth.companyId) {
-      return errorResponse("FORBIDDEN", "Access denied", 403);
-    }
+    const session = stored.payload as unknown as UploadSession;
 
     // Validate mappings
     const mappingValidation = validateMappings(entityType, mappings, session.columns);
@@ -756,16 +858,49 @@ importRoutes.post("/:entityType/validate", async (c) => {
     }
 
     // Map and validate rows
+    // TD-012: Use batch FK validation to avoid N+1 queries
     const fieldDefs = getFieldDefinitions(entityType);
     const validationErrors: Array<{ row: number; column: string; message: string; value: string }> = [];
     const validRowIndices: number[] = [];
     const errorRowIndices: number[] = [];
-    const pool = getDbPool();
 
-    for (let i = 0; i < session.rows.length; i++) {
-      const row = session.rows[i];
+    // Phase 1: Map all rows and collect FK IDs for batch validation
+    const mappedRows: Array<{ row: typeof session.rows[0]; mappedData: Record<string, unknown> }> = [];
+    const itemGroupIds = new Set<number>();
+    const outletIds = new Set<number>();
+
+    for (const row of session.rows) {
       const mappedData = mapRowData(row, mappings, fieldDefs);
+      mappedRows.push({ row, mappedData });
 
+      // Collect FK IDs for batch validation
+      if (entityType === "items" && mappedData.item_group_id) {
+        const groupId = parseInt(String(mappedData.item_group_id), 10);
+        if (!isNaN(groupId)) {
+          itemGroupIds.add(groupId);
+        }
+      } else if (entityType === "prices" && mappedData.outlet_id) {
+        const id = parseInt(String(mappedData.outlet_id), 10);
+        if (!isNaN(id)) {
+          outletIds.add(id);
+        }
+      }
+    }
+
+    // Phase 2: Batch-validate all FK references (single query per table)
+    const fkRequests: Array<{ table: string; ids: Set<number>; companyId: number }> = [];
+    if (entityType === "items" && itemGroupIds.size > 0) {
+      fkRequests.push({ table: 'item_groups', ids: itemGroupIds, companyId: auth.companyId });
+    } else if (entityType === "prices" && outletIds.size > 0) {
+      fkRequests.push({ table: 'outlets', ids: outletIds, companyId: auth.companyId });
+    }
+
+    const fkResults = fkRequests.length > 0
+      ? await batchValidateForeignKeys(fkRequests, pool)
+      : new Map<string, Map<number, boolean>>();
+
+    // Phase 3: Validate rows using cached FK results
+    for (const { row, mappedData } of mappedRows) {
       // Basic field validation
       let hasErrors = false;
       for (const [field, def] of Object.entries(fieldDefs)) {
@@ -785,10 +920,10 @@ importRoutes.post("/:entityType/validate", async (c) => {
         continue;
       }
 
-      // Entity-specific validation
+      // Entity-specific validation with FK cache
       const entityErrors = entityType === "items"
-        ? await validateItemRow(mappedData, auth.companyId, pool)
-        : await validatePriceRow(mappedData, auth.companyId, pool);
+        ? await validateItemRow(mappedData, auth.companyId, pool, fkResults)
+        : await validatePriceRow(mappedData, auth.companyId, pool, fkResults);
 
       if (entityErrors.length > 0) {
         for (const err of entityErrors) {
@@ -857,36 +992,62 @@ importRoutes.post("/:entityType/apply", async (c) => {
       return errorResponse("INVALID_REQUEST", "Missing or invalid mappings", 400);
     }
 
-    // Get upload session
-    const session = uploadSessions.get(uploadId);
-    if (!session) {
+    // Get upload session (company isolation enforced in query)
+    const pool = getDbPool();
+    const stored = await getSession(pool, uploadId, auth.companyId);
+    if (!stored) {
       return errorResponse("NOT_FOUND", "Upload session not found or expired", 404);
     }
 
-    // Verify company ownership
-    if (session.companyId !== auth.companyId) {
-      return errorResponse("FORBIDDEN", "Access denied", 403);
+    // TD-028: Expiry guard — reject if session expires within 60 seconds
+    const expiresInMs = stored.expiresAt.getTime() - Date.now();
+    if (expiresInMs < 60_000) {
+      return errorResponse(
+        "SESSION_EXPIRED",
+        "Upload session is expiring imminently. Please re-upload and try again.",
+        410
+      );
     }
+
+    const session = stored.payload as unknown as UploadSession & {
+      lastSuccessfulBatch?: number;
+    };
+
+    // TD-029: Resume from checkpoint if a previous apply partially succeeded
+    const startBatch = (session.lastSuccessfulBatch !== undefined)
+      ? session.lastSuccessfulBatch + 1
+      : 0;
 
     // Map all rows
     const fieldDefs = getFieldDefinitions(entityType);
     const mappedRows = session.rows.map(row => mapRowData(row, mappings, fieldDefs));
 
-    // Apply import
-    const pool = getDbPool();
-    const result = entityType === "items"
-      ? await applyItemImport(mappedRows, auth.companyId, pool)
-      : await applyPriceImport(mappedRows, auth.companyId, pool);
+    // Apply import — per-batch transactions with checkpoint persistence
+    const applyFn = entityType === "items" ? applyItemImport : applyPriceImport;
+    const result = await applyFn(mappedRows, auth.companyId, pool, {
+      startBatch,
+      onBatchCommit: async (batchIndex: number) => {
+        // Persist checkpoint so resume can skip committed batches
+        const updatedPayload = { ...session, lastSuccessfulBatch: batchIndex };
+        await updateSession(pool, uploadId, auth.companyId, updatedPayload as Record<string, unknown>);
+      },
+    });
 
-    // Clean up session
-    uploadSessions.delete(uploadId);
+    // Only delete session when all batches completed without failure
+    if (result.batchesFailed === 0) {
+      await deleteSession(pool, uploadId, auth.companyId);
+    }
 
     return successResponse({
       success: result.created + result.updated,
       failed: result.errors.length,
       created: result.created,
       updated: result.updated,
-      skipped: 0,
+      batchesCompleted: result.batchesCompleted,
+      batchesFailed: result.batchesFailed,
+      rowsProcessed: result.rowsProcessed,
+      resumable: result.batchesFailed > 0,
+      skipped: startBatch * BATCH_SIZE,
       errors: result.errors,
     });
   } catch (error) {
