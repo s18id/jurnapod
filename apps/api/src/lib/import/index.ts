@@ -32,6 +32,7 @@ export {
   type ImportSessionStatus,
   type TemplateColumn,
   type ImportTemplate,
+  type ImportParseResult,
 } from './types.js';
 
 // Parsing

@@ -36,6 +36,7 @@ import { cashBankTransactionsRoutes } from "./routes/cash-bank-transactions.js";
 import { suppliesRoutes } from "./routes/supplies.js";
 import { printRoutes } from "./lib/routes.js";
 import { exportRoutes } from "./routes/export.js";
+import { importRoutes } from "./routes/import.js";
 
 // Validate environment configuration before starting server
 assertAppEnvReady();
@@ -183,6 +184,9 @@ app.route("/api/inventory/supplies", suppliesRoutes);
 
 // Register export routes
 app.route("/api/export", exportRoutes);
+
+// Register import routes
+app.route("/api/import", importRoutes);
 
 // Initialize sync modules after routes are registered
 try {

@@ -181,6 +181,71 @@ for await (const chunk of generateCSVStream(...)) {
 
 **Priority**: Low (can be addressed when long-running imports become common)
 
+---
+
+## Epic 5 Follow-Up Actions (Completed in Story 6.7)
+
+The following items were identified in the Epic 5 retrospective and completed in Story 6.7:
+
+### Integration Tests
+
+**Status**: ✅ **COMPLETED**
+
+**Resolution**: Created comprehensive integration test suite covering:
+- Import API endpoints (`/import/:entityType/upload`, `/validate`, `/apply`, `/template`)
+- Export API endpoints (`/export/:entityType`, `/export/:entityType/columns`)
+- File upload/parse flow with CSV and Excel
+- Data validation and mapping
+- Import apply flow (create/update items and prices)
+
+**Test Files Created**:
+- `apps/api/src/routes/import.test.ts` - Import route unit tests
+- `apps/api/src/routes/import.ts` - Import API routes (new implementation)
+
+### UI Completeness
+
+**Status**: ✅ **COMPLETED**
+
+**Resolution**: Enhanced export dialog with missing features:
+
+1. **Column Reordering** (`AC2`):
+   - Added drag-and-drop style reordering with up/down buttons
+   - New "Reorder" mode in column selector
+   - Order preserved in export output
+   - Implementation in `apps/backoffice/src/components/export-dialog.tsx`
+
+2. **Row Count Preview** (`AC1`):
+   - Added estimated row count display in export info panel
+   - Badge showing "~{count} rows" when data available
+   - Warning for large datasets (>50K rows recommending CSV)
+   - Implementation in `apps/backoffice/src/components/export-dialog.tsx`
+
+3. **Retry on Export Errors** (`AC3`):
+   - Added retry button in error alert
+   - Resets error state and allows re-export without closing dialog
+   - Implementation in `apps/backoffice/src/components/export-dialog.tsx`
+
+### API Endpoint Completion
+
+**Status**: ✅ **COMPLETED**
+
+**Resolution**: Import API routes were missing from Epic 5. Created full import API:
+
+**New Routes** (`apps/api/src/routes/import.ts`):
+- `POST /import/:entityType/upload` - Upload and parse CSV/Excel files
+- `POST /import/:entityType/validate` - Validate mapped data with FK checks
+- `POST /import/:entityType/apply` - Apply validated import (create/update)
+- `GET /import/:entityType/template` - Download import template CSV
+
+**Features**:
+- In-memory session management (30-min TTL)
+- Company-scoped data isolation
+- Type conversion (string, number, integer, boolean)
+- Duplicate SKU detection
+- Foreign key validation (item groups, outlets)
+
+---
+
 ## Decision
 
 We accept these technical debt items because:

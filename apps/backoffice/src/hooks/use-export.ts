@@ -215,18 +215,19 @@ interface UseExportReturn {
   selectAllColumns: () => void;
   selectDefaultColumns: () => void;
   selectNoColumns: () => void;
-  
+  moveColumn: (key: string, direction: "up" | "down") => void;
+
   // Filters
   setFilters: (filters: ExportFilters) => void;
-  
+
   // Export execution
   executeExport: () => Promise<ExportResult>;
-  
+
   // State
   loading: boolean;
   progress: ExportProgress | null;
   error: string | null;
-  
+
   // Preview
   estimatedRowCount: number;
 }
@@ -283,6 +284,26 @@ export function useExport({ accessToken }: UseExportProps): UseExportReturn {
   const selectNoColumns = useCallback(() => {
     setSelectedColumns([]);
   }, [setSelectedColumns]);
+
+  // Move column up/down in the order
+  const moveColumn = useCallback((key: string, direction: "up" | "down") => {
+    setSelectedColumnsState((prev) => {
+      const index = prev.indexOf(key);
+      if (index === -1) return prev;
+      
+      const newColumns = [...prev];
+      if (direction === "up" && index > 0) {
+        // Swap with previous
+        [newColumns[index - 1], newColumns[index]] = [newColumns[index], newColumns[index - 1]];
+      } else if (direction === "down" && index < newColumns.length - 1) {
+        // Swap with next
+        [newColumns[index], newColumns[index + 1]] = [newColumns[index + 1], newColumns[index]];
+      }
+      
+      saveColumns(entityType, newColumns);
+      return newColumns;
+    });
+  }, [entityType]);
 
   // Execute export
   const executeExport = useCallback(async (): Promise<ExportResult> => {
@@ -413,6 +434,7 @@ export function useExport({ accessToken }: UseExportProps): UseExportReturn {
     selectAllColumns,
     selectDefaultColumns,
     selectNoColumns,
+    moveColumn,
     setFilters,
     executeExport,
     loading,
@@ -452,12 +474,14 @@ interface UseExportDialogReturn {
   selectNone: () => void;
   setFormat: (format: ExportFormat) => void;
   setFilters: (filters: ExportFilters) => void;
-  
+  moveColumn: (key: string, direction: "up" | "down") => void;
+
   // Execution
   export: (overrideFilters?: Partial<ExportFilters>) => Promise<ExportResult>;
   loading: boolean;
   progress: ExportProgress | null;
   error: string | null;
+  retry: () => void;
 }
 
 /**
@@ -505,6 +529,28 @@ export function useExportDialog({
     setSelectedColumns([]);
     saveColumns(entityType, []);
   }, [entityType]);
+
+  const moveColumn = useCallback((key: string, direction: "up" | "down") => {
+    setSelectedColumns((prev) => {
+      const index = prev.indexOf(key);
+      if (index === -1) return prev;
+
+      const newColumns = [...prev];
+      if (direction === "up" && index > 0) {
+        [newColumns[index - 1], newColumns[index]] = [newColumns[index], newColumns[index - 1]];
+      } else if (direction === "down" && index < newColumns.length - 1) {
+        [newColumns[index], newColumns[index + 1]] = [newColumns[index + 1], newColumns[index]];
+      }
+
+      saveColumns(entityType, newColumns);
+      return newColumns;
+    });
+  }, [entityType]);
+
+  const retry = useCallback(() => {
+    setError(null);
+    setProgress(null);
+  }, []);
 
   const exportFn = useCallback(async (overrideFilters?: Partial<ExportFilters>): Promise<ExportResult> => {
     setLoading(true);
@@ -602,9 +648,11 @@ export function useExportDialog({
     selectNone,
     setFormat,
     setFilters,
+    moveColumn,
     export: exportFn,
     loading,
     progress,
     error,
+    retry,
   };
 }

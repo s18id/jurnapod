@@ -16,6 +16,9 @@ import {
   ThemeIcon,
   Collapse,
   ActionIcon,
+  Paper,
+  ScrollArea,
+  Tooltip,
 } from "@mantine/core";
 import { DatePickerInput } from "@mantine/dates";
 import {
@@ -26,6 +29,9 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconCalendar,
+  IconArrowUp,
+  IconArrowDown,
+  IconRefresh,
 } from "@tabler/icons-react";
 import { ColumnSelector } from "./column-selector";
 import { FormatSelector } from "./format-selector";
@@ -61,6 +67,9 @@ export function ExportDialog({
     initialFilters.dateTo ? new Date(initialFilters.dateTo) : null
   );
 
+  // Column reordering mode
+  const [reorderMode, setReorderMode] = useState(false);
+
   // Use the export dialog hook
   const {
     columns,
@@ -72,12 +81,14 @@ export function ExportDialog({
     selectAll,
     selectDefault,
     selectNone,
+    moveColumn,
     setFormat,
     setFilters,
     export: executeExport,
     loading,
     progress,
     error,
+    retry,
   } = useExportDialog({
     entityType,
     accessToken,
@@ -124,9 +135,15 @@ export function ExportDialog({
     }
   }, [executeExport, onClose, filters, dateFrom, dateTo, setFilters]);
 
+  // Handle retry on error
+  const handleRetry = useCallback(() => {
+    retry();
+  }, [retry]);
+
   // Reset state when dialog opens with new entity type
   const handleClose = useCallback(() => {
     setFilters(initialFilters);
+    setReorderMode(false);
     onClose();
   }, [onClose, initialFilters, setFilters]);
 
@@ -151,6 +168,11 @@ export function ExportDialog({
     return 50; // Indeterminate progress
   }, [progress]);
 
+  // Get selected column details for reordering
+  const selectedColumnDetails = useMemo(() => {
+    return selectedColumns.map(key => columns.find(col => col.key === key)).filter(Boolean);
+  }, [selectedColumns, columns]);
+
   return (
     <Modal
       opened={opened}
@@ -172,16 +194,26 @@ export function ExportDialog({
       withCloseButton={!loading}
     >
       <Stack gap="md">
-        {/* Error alert */}
+        {/* Error alert with retry */}
         {error && (
           <Alert
             icon={<IconAlertCircle size={16} />}
             color="red"
             variant="light"
-            withCloseButton
-            onClose={() => {}}
+            title="Export Failed"
           >
-            {error}
+            <Stack gap="xs">
+              <Text size="sm">{error}</Text>
+              <Button
+                size="xs"
+                variant="light"
+                color="red"
+                leftSection={<IconRefresh size={14} />}
+                onClick={handleRetry}
+              >
+                Retry Export
+              </Button>
+            </Stack>
           </Alert>
         )}
 
@@ -221,37 +253,106 @@ export function ExportDialog({
           </Alert>
         )}
 
-        {/* Export info */}
-        <Group justify="space-between" wrap="wrap">
-          <Stack gap={4}>
-            <Text size="sm" fw={500}>
-              {selectedColumns.length} column{selectedColumns.length !== 1 ? "s" : ""} selected
-            </Text>
-            <Text size="xs" c="dimmed">
-              Filename: {exportFilename}
-            </Text>
-          </Stack>
-          <Badge color="blue" variant="light" size="lg">
-            {format.toUpperCase()}
-          </Badge>
-        </Group>
+        {/* Export info with row count */}
+        <Paper p="sm" withBorder bg="gray.0">
+          <Group justify="space-between" wrap="wrap">
+            <Stack gap={4}>
+              <Group gap="xs">
+                <Text size="sm" fw={500}>
+                  {selectedColumns.length} column{selectedColumns.length !== 1 ? "s" : ""} selected
+                </Text>
+                {estimatedRowCount > 0 && (
+                  <Badge size="sm" color="blue" variant="light">
+                    ~{estimatedRowCount.toLocaleString()} rows
+                  </Badge>
+                )}
+              </Group>
+              <Text size="xs" c="dimmed">
+                Filename: {exportFilename}
+              </Text>
+            </Stack>
+            <Badge color="blue" variant="light" size="lg">
+              {format.toUpperCase()}
+            </Badge>
+          </Group>
+          
+          {estimatedRowCount > 50000 && format === "xlsx" && (
+            <Alert icon={<IconAlertCircle size={14} />} color="yellow" variant="light" mt="xs">
+              <Text size="xs">Large dataset detected. CSV format recommended for {estimatedRowCount.toLocaleString()} rows.</Text>
+            </Alert>
+          )}
+        </Paper>
 
         <Divider />
 
         {/* Two-column layout */}
         <Group align="flex-start" wrap="nowrap" gap="lg">
-          {/* Left: Column selector */}
+          {/* Left: Column selector or reorderer */}
           <Stack gap="md" style={{ flex: 1, minWidth: 200 }}>
-            <ColumnSelector
-              columns={columns}
-              selectedColumns={selectedColumns}
-              availableGroups={availableGroups}
-              getColumnsByGroup={getColumnsByGroup}
-              onToggleColumn={toggleColumn}
-              onSelectAll={selectAll}
-              onSelectDefault={selectDefault}
-              onSelectNone={selectNone}
-            />
+            <Group justify="space-between">
+              <Text size="sm" fw={500}>
+                {reorderMode ? "Column Order" : "Columns"}
+              </Text>
+              <Button
+                variant="subtle"
+                size="compact-xs"
+                onClick={() => setReorderMode(!reorderMode)}
+              >
+                {reorderMode ? "Done" : "Reorder"}
+              </Button>
+            </Group>
+
+            {reorderMode ? (
+              /* Column reordering view */
+              <ScrollArea h={300} type="auto">
+                <Stack gap="xs">
+                  {selectedColumnDetails.map((col, index) => (
+                    <Paper key={col!.key} p="xs" withBorder>
+                      <Group justify="space-between" wrap="nowrap">
+                        <Text size="sm" truncate style={{ flex: 1 }}>
+                          {col!.header}
+                        </Text>
+                        <Group gap={4} wrap="nowrap">
+                          <ActionIcon
+                            size="sm"
+                            variant="subtle"
+                            disabled={index === 0}
+                            onClick={() => moveColumn(col!.key, "up")}
+                          >
+                            <IconArrowUp size={14} />
+                          </ActionIcon>
+                          <ActionIcon
+                            size="sm"
+                            variant="subtle"
+                            disabled={index === selectedColumnDetails.length - 1}
+                            onClick={() => moveColumn(col!.key, "down")}
+                          >
+                            <IconArrowDown size={14} />
+                          </ActionIcon>
+                        </Group>
+                      </Group>
+                    </Paper>
+                  ))}
+                  {selectedColumnDetails.length === 0 && (
+                    <Text size="sm" c="dimmed" ta="center" py="xl">
+                      No columns selected. Select columns first.
+                    </Text>
+                  )}
+                </Stack>
+              </ScrollArea>
+            ) : (
+              /* Column selector view */
+              <ColumnSelector
+                columns={columns}
+                selectedColumns={selectedColumns}
+                availableGroups={availableGroups}
+                getColumnsByGroup={getColumnsByGroup}
+                onToggleColumn={toggleColumn}
+                onSelectAll={selectAll}
+                onSelectDefault={selectDefault}
+                onSelectNone={selectNone}
+              />
+            )}
           </Stack>
 
           {/* Divider */}
