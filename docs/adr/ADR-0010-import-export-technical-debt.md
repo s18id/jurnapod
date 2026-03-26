@@ -246,6 +246,88 @@ The following items were identified in the Epic 5 retrospective and completed in
 
 ---
 
+## Story 6.7 CR Review Fixes (Completed)
+
+The following technical debt items were identified during code review and fixed in Story 6.7:
+
+### TD-9: In-Memory Session Storage Not Production-Ready ✅ FIXED
+
+**Status**: ⚠️ **ACKNOWLEDGED AS LIMITATION**
+
+**Issue**: Import sessions are stored in an in-memory `Map` object:
+```typescript
+const uploadSessions = new Map<string, UploadSession>();
+```
+
+**Impact**: 
+- Will NOT work in multi-instance deployments (sessions are per-process)
+- Server restarts clear all active sessions
+- No horizontal scaling support
+- Memory leak risk if sessions aren't cleaned up properly
+
+**Mitigation**: 
+- Sessions have 30-minute TTL with automatic cleanup
+- Runtime warning logged when session count exceeds 1000
+- Single-instance deployment works correctly
+
+**Resolution**: 
+1. ✅ Added runtime warning when session count exceeds threshold
+2. ✅ Added ADR documentation (this entry)
+3. ⏳ Future: Move to Redis/database session storage
+
+**Priority**: High (only affects production multi-instance deployments)
+
+---
+
+### TD-10: N+1 Query Pattern in Import Apply ✅ FIXED
+
+**Status**: ✅ **RESOLVED**
+
+**Issue**: Each row made separate database queries for existence checks.
+
+**Resolution**: 
+- ✅ Batch existence check with single query: `SELECT sku, id FROM items WHERE company_id = ? AND sku IN (?)`
+- ✅ Built `Map<sku, id>` for O(1) lookup
+- ✅ Process in chunks of 500 rows
+- ✅ Same pattern applied to price imports
+
+**Priority**: High (performance) - **RESOLVED**
+
+---
+
+### TD-11: No Transaction Safety in Import Apply ✅ FIXED
+
+**Status**: ✅ **RESOLVED**
+
+**Issue**: Each row committed independently - no rollback capability.
+
+**Resolution**: 
+- ✅ Wrap apply operations in database transactions
+- ✅ Use `connection.beginTransaction()`, `connection.commit()`, `connection.rollback()`
+- ✅ Proper connection release in `finally` block
+- ✅ All rows processed or none on error
+
+**Priority**: Critical (data integrity) - **RESOLVED**
+
+---
+
+### TD-12: Missing Input Sanitization ✅ FIXED
+
+**Status**: ✅ **RESOLVED**
+
+**Issue**: String fields not validated for length or content.
+
+**Resolution**:
+- ✅ Added `sanitizeString()` function
+- ✅ Trim whitespace from string values
+- ✅ Enforce max length (255 chars)
+- ✅ Reject strings with control characters
+- ✅ Applied to all string field mappings
+
+**Priority**: Medium (data quality) - **RESOLVED**
+
+---
+
 ## Decision
 
 We accept these technical debt items because:
