@@ -61,6 +61,89 @@ Finalized records use correction flows instead of mutation:
 
 ---
 
+## Performance Patterns
+
+### Streaming Large Data
+
+File parsing and generation use streaming for large datasets to prevent memory exhaustion:
+
+**CSV/Excel Parsing (Import)**
+- Files approaching 50MB limit use streaming parsers
+- Memory usage stays under 20MB for 50MB files
+- PapaParse CSV streaming for large files
+- XLSX sheet-by-sheet processing for Excel
+
+**Export Streaming**
+- CSV exports >10,000 rows use HTTP streaming
+- No Content-Length header (Transfer-Encoding: chunked)
+- Async generator yields data chunks
+- Client receives data as it's generated
+
+**Example: Streaming CSV Export**
+```typescript
+async function* generateCSVStream(data, columns) {
+  yield Buffer.from(headerRow, 'utf-8');
+  for (const row of data) {
+    yield Buffer.from(formatRow(row, columns) + '\n', 'utf-8');
+  }
+}
+
+const stream = createReadableStream(generateCSVStream(data, columns));
+return new Response(stream, { headers: { "Content-Type": "text/csv" } });
+```
+
+### Batch Validation
+
+Foreign key and existence validation use batch queries to prevent N+1 patterns:
+
+**Pattern: Single IN Clause Query**
+```typescript
+// ❌ N+1 Query Pattern (AVOID)
+for (const row of rows) {
+  const exists = await db.query("SELECT 1 FROM items WHERE id = ?", [row.item_id]);
+}
+// 1000 rows = 1000 queries
+
+// ✅ Batch Query Pattern (USE)
+const ids = rows.map(r => r.item_id);
+const results = await db.query(
+  "SELECT id FROM items WHERE company_id = ? AND id IN (?)",
+  [companyId, ids]
+);
+const existsMap = new Map(results.map(r => [r.id, true]));
+for (const row of rows) {
+  const exists = existsMap.get(row.item_id);
+}
+// 1000 rows = 1 query
+```
+
+**Benefits:**
+- O(1) lookup after single query
+- Reduced database round trips
+- Predictable memory usage
+- Better performance at scale
+
+**Usage in Codebase:**
+- `batchValidateForeignKeys()` in `lib/import/validator.ts`
+- Import validation (Story 7.6)
+- Export data fetching
+
+### Chunked Processing
+
+Large datasets are processed in chunks to maintain responsiveness:
+
+**Excel Generation**
+- Datasets >10,000 rows create multiple sheets (10K per sheet)
+- Hard limit of 50,000 rows for Excel (recommend CSV for larger)
+- Prevents workbook corruption and memory issues
+
+**Batch Operations**
+- Import apply processes in chunks of 500 rows
+- Each chunk is a separate transaction
+- Partial failures don't lose all progress
+
+---
+
 ## Document Status Flow
 
 ### Sales Invoices

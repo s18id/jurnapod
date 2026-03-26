@@ -13,6 +13,7 @@ Complete guide for developing Jurnapod locally.
 - [Frontend Configuration](#frontend-configuration)
 - [Database Operations](#database-operations)
 - [Build & Test](#build--test)
+- [Integration Testing](#integration-testing)
 - [Auth Secrets](#auth-secrets)
 - [Troubleshooting](#troubleshooting)
 
@@ -323,6 +324,93 @@ npm run test -w @jurnapod/pos
 
 # Run script tests
 npm run test:scripts
+```
+
+---
+
+## Integration Testing
+
+Integration tests verify HTTP endpoints with real database and authentication.
+
+### Required Environment Variables
+
+Integration tests require JP_ fixtures in your `.env`:
+
+```bash
+JP_COMPANY_CODE=JP
+JP_COMPANY_NAME=Jurnapod Demo
+JP_OUTLET_CODE=MAIN
+JP_OWNER_EMAIL=owner@example.com
+JP_OWNER_PASSWORD=ChangeMe123!
+```
+
+These fixtures are created by `npm run db:seed`.
+
+### Test Pattern
+
+Standard integration test structure:
+
+```typescript
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { setupIntegrationTests, readEnv, loadEnvIfPresent } from "./integration-harness.mjs";
+
+loadEnvIfPresent();
+const testContext = setupIntegrationTests(test);
+const TEST_TIMEOUT_MS = 180000;
+
+test("test description", { timeout: TEST_TIMEOUT_MS, concurrency: false }, async () => {
+  const db = testContext.db;
+  const connection = await db.getConnection();
+  await connection.beginTransaction();
+  
+  try {
+    // Get test user info
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL");
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const baseUrl = testContext.baseUrl;
+    
+    // Login to get access token
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ companyCode, email: ownerEmail, password: ownerPassword })
+    });
+    const { data: { access_token } } = await loginRes.json();
+    
+    // Make authenticated request
+    const res = await fetch(`${baseUrl}/api/endpoint`, {
+      headers: { "Authorization": `Bearer ${access_token}` }
+    });
+    
+    // Assert response
+    assert.equal(res.status, 200);
+    
+  } finally {
+    // Always rollback and release
+    await connection.rollback();
+    connection.release();
+  }
+});
+```
+
+### Key Points
+
+1. **Transaction Rollback** - All data changes are rolled back after test
+2. **Authentication** - Login with JP_ fixtures to get access token
+3. **Cleanup** - Always use `try/finally` with rollback
+4. **Timeout** - Use 180000ms (3 minutes) for integration tests
+5. **Concurrency** - Set `concurrency: false` to prevent test interference
+
+### Running Integration Tests
+
+```bash
+# Run all integration tests
+npm run test:integration -w @jurnapod/api
+
+# Run specific integration test file
+npm run test:single apps/api/tests/integration/export.integration.test.mjs
 ```
 
 ---

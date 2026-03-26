@@ -478,6 +478,35 @@ Authorization: Bearer {access_token}
 Content-Disposition: attachment; filename="jurnapod-{entityType}-{timestamp}.{ext}"
 ```
 
+### Export Limits and Streaming Behavior
+
+**Size Thresholds:**
+- CSV exports with >10,000 rows use streaming response (no Content-Length header)
+- Excel exports with >10,000 rows use chunked generation (multiple sheets)
+- Excel exports are limited to 50,000 rows maximum
+
+**Error Responses:**
+
+**400 Bad Request** - Excel export exceeds row limit:
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_REQUEST",
+    "message": "Excel export is limited to 50,000 rows. This export has 60,000 rows. Please use CSV format for larger datasets or apply filters to reduce the result set."
+  }
+}
+```
+
+**401 Unauthorized** - Missing or invalid access token
+
+**400 Invalid Request** - Invalid entity type (must be 'items' or 'prices')
+
+**Performance Notes:**
+- Large CSV exports (>10K rows) stream data to minimize memory usage
+- Excel exports >10K rows create multiple sheets (10K rows per sheet)
+- For datasets >50K rows, use CSV format or apply filters
+
 ### Get Available Columns
 
 ```http
@@ -506,6 +535,141 @@ Authorization: Bearer {access_token}
 
 **Available Price Columns:**
 - `id`, `item_id`, `item_sku`, `item_name`, `outlet_id`, `outlet_name`, `price`, `is_active`, `is_override`, `created_at`, `updated_at`
+
+---
+
+## Import
+
+Import master data (items, prices) from CSV or Excel files.
+
+### Upload File
+
+Upload and parse CSV/Excel file, returning column headers for mapping.
+
+```http
+POST /import/:entityType/upload
+Content-Type: multipart/form-data
+Authorization: Bearer {access_token}
+
+file: <csv or xlsx file>
+```
+
+**Path Parameters:**
+- `entityType` - `items` or `prices`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "session_id": "uuid-v4-string",
+    "columns": ["SKU", "Item Name", "Price", "Group"],
+    "preview_rows": [
+      ["SKU001", "Item 1", "10000", "Group A"],
+      ["SKU002", "Item 2", "20000", "Group B"]
+    ],
+    "total_rows": 150,
+    "expires_at": "2026-03-28T12:00:00Z"
+  }
+}
+```
+
+### Validate Data
+
+Validate mapped data and return any errors.
+
+```http
+POST /import/:entityType/validate
+Content-Type: application/json
+Authorization: Bearer {access_token}
+
+{
+  "session_id": "uuid-v4-string",
+  "mapping": {
+    "sku": "SKU",
+    "name": "Item Name",
+    "item_group_id": "Group"
+  }
+}
+```
+
+**Response - Valid:**
+```json
+{
+  "success": true,
+  "data": {
+    "valid": true,
+    "row_count": 150,
+    "errors": []
+  }
+}
+```
+
+**Response - With Errors:**
+```json
+{
+  "success": true,
+  "data": {
+    "valid": false,
+    "row_count": 150,
+    "valid_rows": 148,
+    "error_rows": 2,
+    "errors": [
+      {
+        "row": 5,
+        "field": "sku",
+        "value": "",
+        "error": "Required field missing"
+      }
+    ]
+  }
+}
+```
+
+### Apply Import
+
+Apply validated import to create/update records.
+
+```http
+POST /import/:entityType/apply
+Content-Type: application/json
+Authorization: Bearer {access_token}
+
+{
+  "session_id": "uuid-v4-string"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "created": 75,
+    "updated": 73,
+    "errors": 2,
+    "total": 150
+  }
+}
+```
+
+### Download Template
+
+Get CSV template file for import.
+
+```http
+GET /import/:entityType/template
+Authorization: Bearer {access_token}
+```
+
+**Response:** CSV file download with template headers.
+
+### Import Session Behavior
+
+- Sessions expire after 30 minutes of inactivity
+- Sessions stored in MySQL (survives server restarts)
+- Maximum file size: 50MB
+- Supported formats: CSV, XLSX, XLS
 
 ---
 
