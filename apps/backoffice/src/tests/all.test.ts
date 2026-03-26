@@ -23,3 +23,4 @@ import "../components/ui/FilterBar/FilterBar.test";
 import "../hooks/use-filters.test";
 import "../components/ui/DataTable/DataTable.test";
 import "../hooks/use-breadcrumbs.test";
+import "../components/column-selector.test";

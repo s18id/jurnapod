@@ -40,12 +40,12 @@ import {
 import { useState, useMemo, useCallback } from "react";
 
 import { ImportWizard, type ImportWizardConfig, type ImportPlanRow, type ImportResult } from "../components/import-wizard";
+import { ExportDialog } from "../components/export-dialog";
 import { useAccounts } from "../hooks/use-accounts";
 import { useItemGroups } from "../hooks/use-item-groups";
 import { useItemVariantStats } from "../hooks/use-item-variant-stats";
 import { useItems, type Item, type ItemType } from "../hooks/use-items";
 import { apiRequest } from "../lib/api-client";
-import { downloadCsv, rowsToCsv } from "../lib/import/csv";
 import type { SessionUser } from "../lib/session";
 
 import { ImageUpload } from "./image-upload";
@@ -143,6 +143,10 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
   const [barcodeImageManagerOpen, { open: openBarcodeImageManager, close: closeBarcodeImageManager }] =
     useDisclosure(false);
   const [editingBarcodeImageItem, setEditingBarcodeImageItem] = useState<Item | null>(null);
+
+  // Export dialog state
+  const [exportDialogOpen, { open: openExportDialog, close: closeExportDialog }] =
+    useDisclosure(false);
 
   // Form states
   const [editingItem, setEditingItem] = useState<Item | null>(null);
@@ -409,19 +413,19 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
   };
 
   const handleExport = () => {
-    const headers = ["ID", "SKU", "Name", "Type", "Group", "Status"];
-    const rows = filteredItems.map((item) => [
-      item.id,
-      item.sku ?? "",
-      item.name,
-      item.type,
-      getGroupName(item.item_group_id),
-      item.is_active ? "Active" : "Inactive",
-    ]);
-    const csv = rowsToCsv(headers, rows);
-    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    downloadCsv(csv, `items-${date}.csv`);
+    // Open export dialog with current filters
+    openExportDialog();
   };
+
+  // Build export filters from current filter state
+  const getExportFilters = useCallback(() => {
+    return {
+      search: searchTerm || undefined,
+      type: typeFilter || undefined,
+      groupId: groupFilter ? Number(groupFilter) : null,
+      status: statusFilter,
+    };
+  }, [searchTerm, typeFilter, groupFilter, statusFilter]);
 
   // Import configuration for ImportWizard
   const importConfig: ImportWizardConfig<ItemFormData> = useMemo(() => ({
@@ -1217,6 +1221,16 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
           </Stack>
         )}
       </Modal>
+
+      {/* Export Dialog */}
+      <ExportDialog
+        opened={exportDialogOpen}
+        onClose={closeExportDialog}
+        entityType="items"
+        accessToken={accessToken}
+        initialFilters={getExportFilters()}
+        estimatedRowCount={filteredItems.length}
+      />
     </Stack>
   );
 }

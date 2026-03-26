@@ -28,6 +28,7 @@ import {
 import { useState, useMemo, useCallback, useEffect } from "react";
 
 import { ImportWizard, type ImportWizardConfig, type ImportResult } from "../components/import-wizard";
+import { ExportDialog } from "../components/export-dialog";
 import { useItemGroups } from "../hooks/use-item-groups";
 import { useItems, type Item } from "../hooks/use-items";
 import { apiRequest } from "../lib/api-client";
@@ -36,7 +37,6 @@ import type { SessionUser } from "../lib/session";
 import {
   type NormalizedPriceImportRow,
 } from "./item-prices-import-utils";
-import { downloadPricesCsv } from "./items-prices-export-utils";
 import {
   CreatePriceModal,
   EditPriceModal,
@@ -137,6 +137,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
   const [editModalOpen, { open: openEditModal, close: closeEditModal }] = useDisclosure(false);
   const [deleteModalOpen, { open: openDeleteModal, close: closeDeleteModal }] = useDisclosure(false);
   const [importModalOpen, { open: openImportModal, close: closeImportModal }] = useDisclosure(false);
+  const [exportDialogOpen, { open: openExportDialog, close: closeExportDialog }] = useDisclosure(false);
 
   // Action states
   const [editingPrice, setEditingPrice] = useState<PriceWithItem | null>(null);
@@ -399,9 +400,19 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
   };
 
   const handleExport = () => {
-    const pricesForExport = viewMode === "defaults" ? companyDefaults : prices;
-    downloadPricesCsv(pricesForExport, items, viewMode, selectedOutletId);
+    openExportDialog();
   };
+
+  // Build export filters from current filter state
+  const getExportFilters = useCallback(() => {
+    return {
+      search: searchTerm || undefined,
+      status: statusFilter,
+      outletId: viewMode === "outlet" ? selectedOutletId : undefined,
+      viewMode: viewMode,
+      scopeFilter: scopeFilter as "override" | "default" | null,
+    };
+  }, [searchTerm, statusFilter, viewMode, selectedOutletId, scopeFilter]);
 
   // Import wizard config
   const importConfig: ImportWizardConfig<NormalizedPriceImportRow> = useMemo(() => {
@@ -719,6 +730,16 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
           onCancel={closeImportModal}
         />
       </Modal>
+
+      {/* Export Dialog */}
+      <ExportDialog
+        opened={exportDialogOpen}
+        onClose={closeExportDialog}
+        entityType="prices"
+        accessToken={accessToken}
+        initialFilters={getExportFilters()}
+        estimatedRowCount={filteredPrices.length}
+      />
     </Stack>
   );
 }
