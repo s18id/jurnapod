@@ -21,7 +21,7 @@ import type {
   ExportErrorCode,
 } from './types.js';
 import { buildColumnMap, extractColumnValue, mergeFormatOptions } from './formatter.js';
-import { generateCSVStream, generateExcel, generateCSVBuffer } from './generators.js';
+import { generateCSVStream, generateExcel, generateExcelChunked, generateCSVBuffer } from './generators.js';
 
 // ============================================================================
 // Constants
@@ -72,15 +72,23 @@ export async function* streamExport<T>(
     return;
   }
 
-  // For Excel, we need to collect all data since xlsx library
-  // doesn't support true streaming writes
-  // Process in chunks to avoid memory issues but collect all for final write
+  // For Excel, process in chunks to limit memory usage
+  // The xlsx library doesn't support true streaming, but we can
+  // use chunked generation with multiple sheets for large datasets
+  const maxRows = options.maxRows || 50000; // Limit Excel exports to 50k rows
   const allRows: T[] = [];
-  const maxRows = options.maxRows || Infinity;
   let rowCount = 0;
+  let warnedAboutSize = false;
 
   for await (const row of dataSource) {
     if (rowCount >= maxRows) {
+      if (!warnedAboutSize) {
+        console.warn(
+          `Excel export limited to ${maxRows} rows. ` +
+          'Use CSV format for larger exports or increase maxRows option.'
+        );
+        warnedAboutSize = true;
+      }
       break;
     }
 
@@ -96,17 +104,9 @@ export async function* streamExport<T>(
         startTime,
       });
     }
-
-    // For very large datasets, yield partial Excel files (chunked approach)
-    // This is a tradeoff - we can't do true streaming for Excel
-    if (allRows.length >= BUFFER_SIZE && format === 'xlsx') {
-      // For Excel, we have to collect all data first
-      // This is a limitation of the xlsx library
-      // Just continue collecting
-    }
   }
 
-  // Generate final Excel file
+  // Generate Excel file using chunked generation for large datasets
   reportProgress(onProgress, {
     processedRows: rowCount,
     phase: 'formatting',
@@ -114,7 +114,11 @@ export async function* streamExport<T>(
     startTime,
   });
 
-  const buffer = generateExcel(allRows, columns, options);
+  // Use chunked generation for datasets > 10,000 rows
+  const buffer = allRows.length > 10000
+    ? generateExcelChunked(allRows, columns, options)
+    : generateExcel(allRows, columns, options);
+  
   totalBytesWritten += buffer.length;
   
   yield buffer;

@@ -223,6 +223,89 @@ function formatCellValue(
 }
 
 // ============================================================================
+// Chunked Excel Generation for Large Datasets
+// ============================================================================
+
+const MAX_ROWS_PER_SHEET = 10000; // Excel performance threshold
+
+/**
+ * Generate Excel file with multiple sheets for large datasets
+ * This prevents memory issues by processing data in chunks
+ */
+export function generateExcelChunked<T>(
+  data: T[],
+  columns: ExportColumn<T>[],
+  options: ExportOptions = {}
+): Buffer {
+  const {
+    sheetName = DEFAULT_SHEET_NAME,
+    includeHeaders = true,
+    title,
+  } = options;
+
+  // Build column map
+  const columnMap = buildColumnMap(columns, options);
+
+  // Create workbook
+  const workbook = XLSX.utils.book_new();
+
+  // Split data into chunks
+  const chunks: T[][] = [];
+  for (let i = 0; i < data.length; i += MAX_ROWS_PER_SHEET) {
+    chunks.push(data.slice(i, i + MAX_ROWS_PER_SHEET));
+  }
+
+  // If only one chunk, use original behavior
+  if (chunks.length === 1) {
+    return generateExcel(data, columns, options);
+  }
+
+  // Create a sheet for each chunk
+  chunks.forEach((chunk, index) => {
+    const aoa: unknown[][] = [];
+
+    // Add title if provided (only on first sheet)
+    if (title && index === 0) {
+      aoa.push([title]);
+      aoa.push([]); // Empty row
+    }
+
+    // Add headers if requested
+    if (includeHeaders) {
+      aoa.push(columnMap.map((col) => col.header));
+    }
+
+    // Add data rows
+    for (const row of chunk) {
+      const rowValues = columnMap.map((col) => {
+        const value = extractColumnValue(row, col);
+        return formatCellValue(value, col.fieldType, options);
+      });
+      aoa.push(rowValues);
+    }
+
+    // Create worksheet
+    const worksheet = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Set column widths
+    worksheet['!cols'] = columnMap.map((col) => ({
+      wch: col.width || DEFAULT_COLUMN_WIDTH,
+    }));
+
+    // Determine sheet name
+    const currentSheetName = chunks.length === 1 
+      ? sheetName 
+      : `${sheetName} ${index + 1}`;
+
+    // Append sheet to workbook
+    XLSX.utils.book_append_sheet(workbook, worksheet, currentSheetName);
+  });
+
+  // Write to buffer
+  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+}
+
+// ============================================================================
 // Generic Generation
 // ============================================================================
 
@@ -242,7 +325,12 @@ export function generateExport<T>(
   let filename: string;
 
   if (format === 'xlsx') {
-    buffer = generateExcel(data, columns, options);
+    // Use chunked generation for large datasets
+    if (data.length > MAX_ROWS_PER_SHEET) {
+      buffer = generateExcelChunked(data, columns, options);
+    } else {
+      buffer = generateExcel(data, columns, options);
+    }
     contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     filename = `export-${Date.now()}.xlsx`;
   } else {

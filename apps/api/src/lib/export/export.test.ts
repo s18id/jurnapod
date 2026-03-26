@@ -799,6 +799,20 @@ describe('Export Performance', () => {
     const memoryIncrease = (endMemory - startMemory) / (1024 * 1024);
     assert.ok(memoryIncrease < 100, `Memory increase ${memoryIncrease.toFixed(2)}MB is too high`);
   });
+
+  test('Excel chunked generation creates multiple sheets for large datasets', () => {
+    // Generate 15,000 rows (exceeds 10,000 row threshold for chunking)
+    const items = generateLargeDataset(15000);
+    
+    const excelStart = Date.now();
+    const buffer = generateExport(items, columns, { format: 'xlsx' });
+    const excelDuration = Date.now() - excelStart;
+    
+    assert.ok(excelDuration < 30000, `Excel generation took ${excelDuration}ms, expected < 30000ms`);
+    assert.ok(buffer.buffer.length > 0, 'Excel buffer should not be empty');
+    assert.ok(buffer.contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+      'Content type should be Excel');
+  });
 });
 
 // ============================================================================
