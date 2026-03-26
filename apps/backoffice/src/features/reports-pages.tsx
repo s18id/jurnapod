@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Badge,
@@ -17,15 +16,17 @@ import {
   Title
 } from "@mantine/core";
 import type { ColumnDef } from "@tanstack/react-table";
-import { apiRequest, ApiError } from "../lib/api-client";
-import type { SessionUser } from "../lib/session";
-import { useOnlineStatus } from "../lib/connection";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+
 import { DataTable } from "../components/DataTable";
 import { FilterBar } from "../components/FilterBar";
-import { OfflinePage } from "../components/offline-page";
 import { PageCard } from "../components/PageCard";
 import { StatTiles } from "../components/StatTiles";
+import { OfflinePage } from "../components/offline-page";
 import { useAccounts, useAccountTypes } from "../hooks/use-accounts";
+import { apiRequest, ApiError } from "../lib/api-client";
+import { useOnlineStatus } from "../lib/connection";
+import type { SessionUser } from "../lib/session";
 
 type ReportsProps = {
   user: SessionUser;
@@ -446,7 +447,7 @@ export function PosTransactionsPage(props: ReportsProps) {
     []
   );
 
-  async function loadRows() {
+  const loadRows = useCallback(async () => {
     setError(null);
     try {
       const response = await apiRequest<PosTransactionsResponse>(
@@ -463,13 +464,21 @@ export function PosTransactionsPage(props: ReportsProps) {
         setError("Failed to load POS transactions");
       }
     }
-  }
+  }, [dateFrom, dateTo, outletId, props.accessToken]);
 
   useEffect(() => {
-    if (outletId > 0) {
-      loadRows().catch(() => undefined);
+    if (outletId <= 0) {
+      return;
     }
-  }, [outletId, dateFrom, dateTo]);
+
+    const timeoutId = globalThis.setTimeout(() => {
+      void loadRows();
+    }, 0);
+
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [loadRows, outletId]);
 
   if (!isOnline) {
     return (
@@ -571,7 +580,7 @@ export function DailySalesPage(props: ReportsProps) {
     []
   );
 
-  async function loadRows() {
+  const loadRows = useCallback(async () => {
     setError(null);
     try {
       const response = await apiRequest<DailySalesResponse>(
@@ -587,13 +596,21 @@ export function DailySalesPage(props: ReportsProps) {
         setError("Failed to load daily sales");
       }
     }
-  }
+  }, [dateFrom, dateTo, outletId, props.accessToken]);
 
   useEffect(() => {
-    if (outletId > 0) {
-      loadRows().catch(() => undefined);
+    if (outletId <= 0) {
+      return;
     }
-  }, [outletId, dateFrom, dateTo]);
+
+    const timeoutId = globalThis.setTimeout(() => {
+      void loadRows();
+    }, 0);
+
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [loadRows, outletId]);
 
   const totals = useMemo(
     () =>
@@ -739,7 +756,7 @@ export function GeneralLedgerPage(props: ReportsProps) {
     []
   );
 
-  async function loadRows() {
+  const loadRows = useCallback(async () => {
     if (!accountId) {
       setRows([]);
       setError("Select an account to load the ledger.");
@@ -763,7 +780,7 @@ export function GeneralLedgerPage(props: ReportsProps) {
     } finally {
       setLoading(false);
     }
-  }
+  }, [accountId, dateFrom, dateTo, lineLimit, lineOffset, outletId, props.accessToken]);
 
   useEffect(() => {
     setLineOffset(0);
@@ -774,19 +791,35 @@ export function GeneralLedgerPage(props: ReportsProps) {
       return;
     }
     const defaultYear = resolveDefaultOpenFiscalYear(fiscalYears);
-    if (defaultYear) {
+    if (!defaultYear) {
+      return;
+    }
+
+    const timeoutId = globalThis.setTimeout(() => {
       setDateFrom(defaultYear.start_date);
       setDateTo(defaultYear.end_date);
       setFiscalYearId(String(defaultYear.id));
       setFiscalDefaultApplied(true);
-    }
+    }, 0);
+
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
   }, [fiscalYears, fiscalDefaultApplied]);
 
   useEffect(() => {
-    if (accountId > 0) {
-      loadRows().catch(() => undefined);
+    if (accountId <= 0) {
+      return;
     }
-  }, [outletId, accountId, dateFrom, dateTo, lineLimit, lineOffset]);
+
+    const timeoutId = globalThis.setTimeout(() => {
+      void loadRows();
+    }, 0);
+
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [accountId, loadRows]);
 
   if (!isOnline) {
     return (
@@ -984,7 +1017,7 @@ export function PosPaymentsPage(props: ReportsProps) {
     []
   );
 
-  async function loadRows() {
+  const loadRows = useCallback(async () => {
     setError(null);
     try {
       const response = await apiRequest<PosPaymentsResponse>(
@@ -1000,13 +1033,21 @@ export function PosPaymentsPage(props: ReportsProps) {
         setError("Failed to load POS payment summary");
       }
     }
-  }
+  }, [dateFrom, dateTo, outletId, props.accessToken, status]);
 
   useEffect(() => {
-    if (outletId > 0) {
-      loadRows().catch(() => undefined);
+    if (outletId <= 0) {
+      return;
     }
-  }, [outletId, dateFrom, dateTo, status]);
+
+    const timeoutId = globalThis.setTimeout(() => {
+      void loadRows();
+    }, 0);
+
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [loadRows, outletId]);
 
   const totals = useMemo(
     () =>
@@ -1189,7 +1230,7 @@ export function JournalsPage(props: ReportsProps) {
     []
   );
 
-  async function loadRows() {
+  const loadRows = useCallback(async () => {
     setError(null);
     try {
       const asOf = new Date().toISOString();
@@ -1216,25 +1257,41 @@ export function JournalsPage(props: ReportsProps) {
         setError("Failed to load journal report");
       }
     }
-  }
+  }, [dateFrom, dateTo, outletId, props.accessToken]);
 
   useEffect(() => {
-    if (outletId > 0) {
-      loadRows().catch(() => undefined);
+    if (outletId <= 0) {
+      return;
     }
-  }, [outletId, dateFrom, dateTo]);
+
+    const timeoutId = globalThis.setTimeout(() => {
+      void loadRows();
+    }, 0);
+
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [loadRows, outletId]);
 
   useEffect(() => {
     if (fiscalDefaultApplied) {
       return;
     }
     const defaultYear = resolveDefaultOpenFiscalYear(fiscalYears);
-    if (defaultYear) {
+    if (!defaultYear) {
+      return;
+    }
+
+    const timeoutId = globalThis.setTimeout(() => {
       setDateFrom(defaultYear.start_date);
       setDateTo(defaultYear.end_date);
       setFiscalYearId(String(defaultYear.id));
       setFiscalDefaultApplied(true);
-    }
+    }, 0);
+
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
   }, [fiscalYears, fiscalDefaultApplied]);
 
   if (!isOnline) {
@@ -1360,7 +1417,7 @@ export function ProfitLossPage(props: ReportsProps) {
     props.accessToken
   );
 
-  async function loadRows() {
+  const loadRows = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -1388,33 +1445,38 @@ export function ProfitLossPage(props: ReportsProps) {
     } finally {
       setLoading(false);
     }
-  }
+  }, [dateFrom, dateTo, outletId, props.accessToken]);
 
   useEffect(() => {
-    loadRows().catch(() => undefined);
-  }, [outletId, dateFrom, dateTo]);
+    const timeoutId = globalThis.setTimeout(() => {
+      void loadRows();
+    }, 0);
+
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [loadRows]);
 
   useEffect(() => {
     if (fiscalDefaultApplied) {
       return;
     }
     const defaultYear = resolveDefaultOpenFiscalYear(fiscalYears);
-    if (defaultYear) {
+    if (!defaultYear) {
+      return;
+    }
+
+    const timeoutId = globalThis.setTimeout(() => {
       setDateFrom(defaultYear.start_date);
       setDateTo(defaultYear.end_date);
       setFiscalYearId(String(defaultYear.id));
       setFiscalDefaultApplied(true);
-    }
-  }, [fiscalYears, fiscalDefaultApplied]);
+    }, 0);
 
-  if (!isOnline) {
-    return (
-      <OfflinePage
-        title="Connect to View Reports"
-        message="Reports require real-time data. Please connect to the internet."
-      />
-    );
-  }
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [fiscalYears, fiscalDefaultApplied]);
 
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const accountTypeById = useMemo(
@@ -1485,6 +1547,15 @@ export function ProfitLossPage(props: ReportsProps) {
   const totalTax = taxGroups.reduce((acc, group) => acc + group.displayTotal, 0);
   const taxNet = taxGroups.reduce((acc, group) => acc + group.netTotal, 0);
   const netBeforeTax = totals.net - taxNet;
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to View Reports"
+        message="Reports require real-time data. Please connect to the internet."
+      />
+    );
+  }
 
   const sectionRowStyle = { backgroundColor: "var(--mantine-color-gray-1)" };
   const totalRowStyle = { fontWeight: 700 } as const;
@@ -1735,7 +1806,7 @@ export function AccountingWorksheetPage(props: ReportsProps) {
   } = useFiscalYears(props.accessToken, props.user.company_id);
   const fiscalYearOptions = useMemo(() => buildFiscalYearOptions(fiscalYears), [fiscalYears]);
 
-  async function loadRows() {
+  const loadRows = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -1755,25 +1826,41 @@ export function AccountingWorksheetPage(props: ReportsProps) {
     } finally {
       setLoading(false);
     }
-  }
+  }, [dateFrom, dateTo, outletId, props.accessToken]);
 
   useEffect(() => {
-    if (outletId > 0) {
-      loadRows().catch(() => undefined);
+    if (outletId <= 0) {
+      return;
     }
-  }, [outletId, dateFrom, dateTo]);
+
+    const timeoutId = globalThis.setTimeout(() => {
+      void loadRows();
+    }, 0);
+
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [loadRows, outletId]);
 
   useEffect(() => {
     if (fiscalDefaultApplied) {
       return;
     }
     const defaultYear = resolveDefaultOpenFiscalYear(fiscalYears);
-    if (defaultYear) {
+    if (!defaultYear) {
+      return;
+    }
+
+    const timeoutId = globalThis.setTimeout(() => {
       setDateFrom(defaultYear.start_date);
       setDateTo(defaultYear.end_date);
       setFiscalYearId(String(defaultYear.id));
       setFiscalDefaultApplied(true);
-    }
+    }, 0);
+
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
   }, [fiscalYears, fiscalDefaultApplied]);
 
   if (!isOnline) {

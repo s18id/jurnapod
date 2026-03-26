@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { MantineProvider } from "@mantine/core";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+
 import { buildMantineTheme, getStoredThemeVariant, setStoredThemeVariant, type ThemeVariant } from "./theme";
 
 type ThemeContextValue = {

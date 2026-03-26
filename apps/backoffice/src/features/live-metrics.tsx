@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useState } from "react";
 import { Badge, Group, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
-import { IconArrowDown, IconArrowUp, IconCash, IconReceipt, IconTable, IconUsers } from "@tabler/icons-react";
+import { IconArrowUp, IconCash, IconReceipt, IconTable, IconUsers } from "@tabler/icons-react";
+import { useCallback, useEffect, useState } from "react";
+
 import { getWebSocketClient, connectWebSocket, ConnectionStatus } from "../lib/websocket";
 
 interface LiveMetricsData {
@@ -14,6 +15,12 @@ interface LiveMetricsData {
   lastUpdated: Date;
 }
 
+type TransactionCreatedMessage = {
+  totalAmount?: number | string;
+  customerName?: string;
+  outletName?: string;
+};
+
 interface LiveMetricsProps {
   companyId: number;
 }
@@ -21,10 +28,31 @@ interface LiveMetricsProps {
 export function LiveMetrics({ companyId }: LiveMetricsProps) {
   const [metrics, setMetrics] = useState<LiveMetricsData | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
-  const [lastTransaction, setLastTransaction] = useState<any>(null);
+  const [lastTransaction, setLastTransaction] = useState<TransactionCreatedMessage | null>(null);
+
+  const fetchInitialMetrics = useCallback(async (cid: number) => {
+    try {
+      const response = await fetch(`/api/sync/backoffice/realtime?company_id=${cid}`);
+      const data = await response.json();
+      if (data.success && data.data) {
+        const liveData = data.data.live_sales_metrics;
+        setMetrics({
+          totalSalesToday: Number(liveData?.total_sales_today || 0),
+          transactionCountToday: liveData?.transaction_count_today || 0,
+          activeOrdersCount: liveData?.active_orders_count || 0,
+          occupiedTablesCount: liveData?.occupied_tables_count || 0,
+          lastUpdated: new Date(),
+        });
+      }
+    } catch (error) {
+      console.error("Failed to fetch initial metrics:", error);
+    }
+  }, []);
 
   useEffect(() => {
     const client = getWebSocketClient();
+    let statusTimeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
+    let metricsTimeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
 
     const unsubscribeStatus = client.onStatusChange((newStatus) => {
       setStatus(newStatus);
@@ -53,37 +81,28 @@ export function LiveMetrics({ companyId }: LiveMetricsProps) {
     if (client.getStatus() === "disconnected") {
       connectWebSocket();
     } else {
-      setStatus(client.getStatus());
+      statusTimeoutId = globalThis.setTimeout(() => {
+        setStatus(client.getStatus());
+      }, 0);
     }
 
     // Fetch initial metrics
-    fetchInitialMetrics(companyId);
+    metricsTimeoutId = globalThis.setTimeout(() => {
+      void fetchInitialMetrics(companyId);
+    }, 0);
 
     return () => {
+      if (statusTimeoutId) {
+        globalThis.clearTimeout(statusTimeoutId);
+      }
+      if (metricsTimeoutId) {
+        globalThis.clearTimeout(metricsTimeoutId);
+      }
       unsubscribeStatus();
       unsubscribeTransaction();
       unsubscribeExport();
     };
-  }, [companyId]);
-
-  const fetchInitialMetrics = async (cid: number) => {
-    try {
-      const response = await fetch(`/api/sync/backoffice/realtime?company_id=${cid}`);
-      const data = await response.json();
-      if (data.success && data.data) {
-        const liveData = data.data.live_sales_metrics;
-        setMetrics({
-          totalSalesToday: Number(liveData?.total_sales_today || 0),
-          transactionCountToday: liveData?.transaction_count_today || 0,
-          activeOrdersCount: liveData?.active_orders_count || 0,
-          occupiedTablesCount: liveData?.occupied_tables_count || 0,
-          lastUpdated: new Date(),
-        });
-      }
-    } catch (error) {
-      console.error("Failed to fetch initial metrics:", error);
-    }
-  };
+  }, [companyId, fetchInitialMetrics]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("id-ID", {
@@ -131,7 +150,7 @@ export function LiveMetrics({ companyId }: LiveMetricsProps) {
                 <IconCash size={16} />
               </ThemeIcon>
               <div>
-                <Text size="xs" c="dimmed">Today's Sales</Text>
+                <Text size="xs" c="dimmed">Today&apos;s Sales</Text>
                 <Text fw={700} size="lg">{formatCurrency(metrics.totalSalesToday)}</Text>
               </div>
             </Group>

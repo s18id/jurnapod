@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
@@ -15,10 +14,12 @@ import {
   Text,
   Title
 } from "@mantine/core";
-import type { SessionUser } from "../lib/session";
+import { useEffect, useMemo, useState } from "react";
+
+import { OfflinePage } from "../components/offline-page";
 import { apiRequest, ApiError } from "../lib/api-client";
 import { useOnlineStatus } from "../lib/connection";
-import { OfflinePage } from "../components/offline-page";
+import type { SessionUser } from "../lib/session";
 
 type FeatureSettingsPageProps = {
   user: SessionUser;

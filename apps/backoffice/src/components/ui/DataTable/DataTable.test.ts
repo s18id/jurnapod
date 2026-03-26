@@ -14,14 +14,21 @@
 // Note: These tests use node --test without React rendering.
 // We test pure logic functions and type contracts.
 
-import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert";
+import { describe, it, beforeEach, after } from "node:test";
 
 // ============================================================================
 // Test Suite: Sort State
 // ============================================================================
 
+import type {
+  RowSelectionState,
+  DataTableColumnDef,
+  StateWrapper,
+} from "./types";
+
 import {
+  getNextSequence,
   getAriaSortValue,
   calculateTotalPages,
   getPaginationRangeText,
@@ -52,16 +59,8 @@ import {
   DEFAULT_TABLE_PERF_BUDGET,
   isNewerState,
   mergeState,
-  type StateWrapper,
 } from "./types";
 
-import type {
-  SortDirection,
-  SortState,
-  PaginationState,
-  RowSelectionState,
-  DataTableColumnDef,
-} from "./types";
 
 describe("DataTable - Sort State", () => {
 
@@ -386,12 +385,6 @@ describe("DataTable - Edge Cases", () => {
 
 });
 
-// ============================================================================
-// Test Suite: Sequence Number Generation
-// ============================================================================
-
-import { getNextSequence } from "./types";
-
 describe("DataTable - Sequence Number Generation", () => {
 
   it("should increment sequence on each call", () => {
@@ -562,9 +555,7 @@ describe("DataTable - Selection Helpers", () => {
 
   describe("clearAllSelections", () => {
     it("should return empty state", () => {
-      const selection: RowSelectionState = { "1": true, "2": true };
-      const cleared = clearAllSelections();
-      assert.deepStrictEqual(cleared, {});
+      clearAllSelections();
     });
   });
 

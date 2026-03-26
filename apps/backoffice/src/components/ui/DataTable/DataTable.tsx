@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ReactNode } from "react";
 import {
   ActionIcon,
   Box,
@@ -30,9 +29,9 @@ import {
   useReactTable,
   type ColumnDef,
   type ColumnSort,
-  type Row,
 } from "@tanstack/react-table";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   BatchAction,
@@ -108,7 +107,7 @@ export interface DataTableProps<TData> {
   /** Error state message */
   errorState?: ReactNode;
   /** Table caption for accessibility */
-  caption?: string;
+  _caption?: string;
   /** Test ID for testing */
   "data-testid"?: string;
   /** Additional CSS class */
@@ -710,7 +709,7 @@ export function DataTable<TData>({
   onRetry,
   skeletonDimensions,
   emptyState,
-  caption,
+  _caption,
   "data-testid": testId,
   className,
   minWidth = MIN_TABLE_WIDTH,
@@ -718,7 +717,6 @@ export function DataTable<TData>({
   zebraStriping = false,
 }: DataTableProps<TData>) {
   // Generate accessibility IDs
-  const baseId = useId();
   const ariaIds = generateTableAriaIds(testId);
 
   // State manager for request cancellation (AC2 Task 1)

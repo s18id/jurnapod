@@ -14,8 +14,8 @@
 // Note: These tests use node --test without React rendering.
 // We test pure logic functions and component contracts.
 
-import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert";
+import { describe, it } from "node:test";
 
 // ============================================================================
 // Test Suite: FilterSchema Types
@@ -601,14 +601,12 @@ describe("FilterBar - Accessibility Helpers", () => {
   });
 
   it("should associate help text using aria-describedby", () => {
-    const inputId = "filter-search";
     const helpId = `filter-search-help`;
     const ariaDescribedBy = `${helpId}`;
     assert.strictEqual(ariaDescribedBy, "filter-search-help");
   });
 
   it("should associate error message using aria-describedby", () => {
-    const inputId = "filter-search";
     const errorId = `filter-search-error`;
     const ariaDescribedBy = `${errorId}`;
     assert.strictEqual(ariaDescribedBy, "filter-search-error");

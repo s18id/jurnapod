@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useEffect, useCallback } from "react";
 import {
   Stack,
   Card,
@@ -26,12 +25,13 @@ import {
   IconAlertCircle,
   IconTrash,
   IconPlus,
-  IconChevronRight,
   IconCalculator
 } from "@tabler/icons-react";
+import { useState, useEffect, useCallback } from "react";
+
+import { useItems } from "../hooks/use-items";
 import { apiRequest } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
-import { useItems, type Item } from "../hooks/use-items";
 
 interface RecipeIngredient {
   id: number;
@@ -301,7 +301,7 @@ export function RecipeCompositionEditor({
               {ingredients.length === 0 ? (
                 <Card withBorder py="xl">
                   <Text c="dimmed" ta="center">
-                    No ingredients added yet. Click "Add Ingredient" to build your recipe.
+                    No ingredients added yet. Click &quot;Add Ingredient&quot; to build your recipe.
                   </Text>
                 </Card>
               ) : (

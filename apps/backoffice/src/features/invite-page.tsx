@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState } from "react";
 import {
   Alert,
   Button,
@@ -12,6 +11,8 @@ import {
   Text,
   Title
 } from "@mantine/core";
+import { useState } from "react";
+
 import { apiRequest, ApiError, getApiBaseUrl } from "../lib/api-client";
 
 type InvitePageProps = {
@@ -88,7 +89,7 @@ export function InvitePage({ token }: InvitePageProps) {
         <Stack gap="md">
           <Title order={2}>Accept Invitation</Title>
           <Text size="sm" c="dimmed">
-            You've been invited to join Jurnapod. Set your password below to get started.
+            You have been invited to join Jurnapod. Set your password below to get started.
           </Text>
 
           {error && (

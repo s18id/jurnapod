@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useState } from "react";
 import { Paper, Text, useMantineTheme, Stack, Anchor, Group } from "@mantine/core";
 import { IconExternalLink } from "@tabler/icons-react";
+import { useEffect, useState } from "react";
+
 import { SyncService, type SyncResult } from "../lib/sync-service";
 
 type SyncNotificationProps = {
@@ -11,16 +12,9 @@ type SyncNotificationProps = {
   userId: number;
 };
 
-// Track which entity types were synced for navigation links
-interface SyncedTypes {
-  items: boolean;
-  prices: boolean;
-}
-
 export function SyncNotification({ accessToken, userId }: SyncNotificationProps) {
   const [syncing, setSyncing] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
-  const [syncedTypes, setSyncedTypes] = useState<SyncedTypes>({ items: false, prices: false });
   const theme = useMantineTheme();
 
   useEffect(() => {
@@ -31,18 +25,10 @@ export function SyncNotification({ accessToken, userId }: SyncNotificationProps)
       const nextResult = await SyncService.syncAll(accessToken, userId);
       setSyncing(false);
       
-      // Track which types were synced (check for item/price related sync types)
-      const types: SyncedTypes = { items: false, prices: false };
-      // Note: In a real implementation, SyncService.syncAll would return types
-      // For now, we infer from sync history or assume false
-      // This can be enhanced when SyncService provides detailed type info
-      
       if (nextResult.success > 0 || nextResult.failed > 0 || nextResult.conflicts > 0) {
         setResult(nextResult);
-        setSyncedTypes(types);
         timeoutId = window.setTimeout(() => {
           setResult(null);
-          setSyncedTypes({ items: false, prices: false });
         }, 8000); // Longer timeout to allow link clicks
       }
     }

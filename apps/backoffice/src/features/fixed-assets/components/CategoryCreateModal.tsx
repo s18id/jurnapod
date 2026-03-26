@@ -11,9 +11,10 @@ import {
   Button,
   Group
 } from "@mantine/core";
-import { useState } from "react";
-import { apiRequest, ApiError } from "../../../lib/api-client";
 import { notifications } from "@mantine/notifications";
+import { useState } from "react";
+
+import { apiRequest, ApiError } from "../../../lib/api-client";
 
 type AccountOption = {
   id: number;

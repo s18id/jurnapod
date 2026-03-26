@@ -2,8 +2,9 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { OutboxService } from "../lib/outbox-service";
+
 import type { OutboxItem, AlertReadHistory } from "../lib/offline-db";
+import { OutboxService } from "../lib/outbox-service";
 
 const POLL_INTERVAL_MS = 10000;
 const MAX_ITEMS = 10;

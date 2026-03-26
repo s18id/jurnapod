@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useMemo } from "react";
 import {
   Stack,
   Card,
@@ -23,7 +22,6 @@ import {
   Alert,
   Flex,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import {
   IconAlertCircle,
   IconTrash,
@@ -32,12 +30,12 @@ import {
   IconPackage,
   IconTag,
   IconCheck,
-  IconX,
-  IconCoins,
   IconBuildingStore,
 } from "@tabler/icons-react";
-import type { SessionUser } from "../lib/session";
+import { useState, useMemo } from "react";
+
 import { useVariants, type VariantAttribute, type ItemVariant } from "../hooks/use-variants";
+import type { SessionUser } from "../lib/session";
 
 interface VariantManagerProps {
   user: SessionUser;

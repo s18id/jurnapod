@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useMemo, useState } from "react";
+import type { RoleResponse } from "@jurnapod/shared";
 import {
   Alert,
   Badge,
@@ -15,15 +15,10 @@ import {
   Title,
   Select
 } from "@mantine/core";
-import type { SessionUser } from "../lib/session";
-import {
-  useRoles,
-  createRole,
-  updateRole,
-  deleteRole
-} from "../hooks/use-users";
-import { useCompanies } from "../hooks/use-companies";
-import { ApiError } from "../lib/api-client";
+import { useMemo, useState } from "react";
+
+import { FilterBar } from "../components/FilterBar";
+import { PageCard } from "../components/PageCard";
 import {
   DataTable,
   type DataTableColumnDef,
@@ -31,9 +26,16 @@ import {
   type SortState,
   type RowSelectionState,
 } from "../components/ui/DataTable";
-import { FilterBar } from "../components/FilterBar";
-import { PageCard } from "../components/PageCard";
-import type { RoleResponse } from "@jurnapod/shared";
+import { useCompanies } from "../hooks/use-companies";
+import {
+  useRoles,
+  createRole,
+  updateRole,
+  deleteRole
+} from "../hooks/use-users";
+import { ApiError } from "../lib/api-client";
+import type { SessionUser } from "../lib/session";
+
 
 type RolesPageProps = {
   user: SessionUser;
@@ -477,7 +479,7 @@ export function RolesPage(props: RolesPageProps) {
       >
         <Stack gap="md">
           <Text size="sm">
-            Are you sure you want to delete role <Text span fw={600}>"{confirmState?.name}"</Text>?
+            Are you sure you want to delete role <Text span fw={600}>&quot;{confirmState?.name}&quot;</Text>?
           </Text>
           <Alert color="yellow" title="Warning">
             If this role is assigned to any users, the deletion will fail.

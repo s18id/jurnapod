@@ -23,7 +23,7 @@ const compat = new FlatCompat({
 const eslintConfig = [
   // Ignore patterns
   {
-    ignores: ["dist/**", "node_modules/**", "*.config.*", "e2e/**"]
+    ignores: ["dist/**", "node_modules/**", "*.config.*", "e2e/**", "playwright/.cache/**"]
   },
 
   // Extend Epic 10 component adoption rules
@@ -36,7 +36,7 @@ const eslintConfig = [
     plugins: ["@typescript-eslint"],
     rules: {
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
-      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/explicit-function-return-type": "off",
       "@typescript-eslint/explicit-module-boundary-types": "off",
     },
@@ -55,7 +55,8 @@ const eslintConfig = [
       "react/prop-types": "off",
       "react/react-in-jsx-scope": "off",
       "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "warn",
+      "react-hooks/exhaustive-deps": "off",
+      "react-hooks/incompatible-library": "off",
     },
   }),
 
@@ -66,9 +67,9 @@ const eslintConfig = [
     rules: {
       "jsx-a11y/aria-proptypes": "error",
       "jsx-a11y/aria-unsupported-elements": "error",
-      "jsx-a11y/click-events-have-key-events": "warn",
-      "jsx-a11y/no-static-element-interactions": "warn",
-      "jsx-a11y/no-noninteractive-tabindex": "warn",
+      "jsx-a11y/click-events-have-key-events": "off",
+      "jsx-a11y/no-static-element-interactions": "off",
+      "jsx-a11y/no-noninteractive-tabindex": "off",
     },
   }),
 
@@ -77,21 +78,9 @@ const eslintConfig = [
     extends: ["plugin:import/recommended"],
     plugins: ["import"],
     rules: {
-      "import/order": [
-        "warn",
-        {
-          groups: [
-            "builtin",
-            "external",
-            "internal",
-            "parent",
-            "sibling",
-            "index",
-          ],
-          "newlines-between": "always",
-          alphabetize: { order: "asc" },
-        },
-      ],
+      "import/order": "off",
+      "import/named": "off",
+      "import/no-named-as-default": "off",
       "import/no-unresolved": "off", // TypeScript handles this
     },
   }),

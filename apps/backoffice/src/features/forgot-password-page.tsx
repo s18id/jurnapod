@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, type FormEvent } from "react";
 import {
   Alert,
   Anchor,
@@ -13,6 +12,8 @@ import {
   TextInput,
   Title
 } from "@mantine/core";
+import { useState, type FormEvent } from "react";
+
 import { apiRequest, ApiError, getApiBaseUrl } from "../lib/api-client";
 
 type ForgotPasswordResponse = {

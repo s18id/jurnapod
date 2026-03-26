@@ -1,14 +1,16 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useState } from "react";
+import type { AuditLogResponse } from "@jurnapod/shared";
 import { Stack, Select, TextInput, Button, Group, Alert } from "@mantine/core";
 import type { ColumnDef } from "@tanstack/react-table";
-import { PageCard } from "../components/PageCard";
+import { useEffect, useState } from "react";
+
 import { DataTable } from "../components/DataTable";
+import { PageCard } from "../components/PageCard";
 import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
-import type { AuditLogResponse } from "@jurnapod/shared";
+
 
 type AuditLogsPageProps = {
   user: SessionUser;
@@ -65,7 +67,7 @@ export function AuditLogsPage(props: AuditLogsPageProps) {
   const [entityType, setEntityType] = useState("");
   const [action, setAction] = useState("");
   const [entityId, setEntityId] = useState("");
-  const [limit, setLimit] = useState(50);
+  const [limit] = useState(50);
   const [offset, setOffset] = useState(0);
 
   async function fetchLogs() {

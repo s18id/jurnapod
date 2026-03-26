@@ -13,8 +13,8 @@
 // Note: These tests use node --test without React rendering.
 // We test pure logic functions and hook contract behavior.
 
-import { describe, it } from "node:test";
 import assert from "node:assert";
+import { describe, it } from "node:test";
 
 // Import from the actual hook to test real logic
 import {
@@ -22,7 +22,6 @@ import {
   parseFiltersFromUrl,
   serializeFiltersToUrl,
 } from "../components/ui/FilterBar/types";
-
 import type { FilterSchema, FilterValue } from "../components/ui/FilterBar/types";
 
 // ============================================================================

@@ -10,6 +10,7 @@ import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/newsreader/600.css";
 import "@fontsource/newsreader/700.css";
 import { createRoot } from "react-dom/client";
+
 import { AppRouter } from "./app/router";
 import { ThemeProvider } from "./app/theme-provider";
 

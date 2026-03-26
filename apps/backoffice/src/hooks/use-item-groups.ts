@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+
 import { CacheService } from "../lib/cache-service";
 import type { SessionUser } from "../lib/session";
 
@@ -111,9 +112,12 @@ export function useItemGroups({ user, accessToken }: UseItemGroupsProps): UseIte
   }, [user, accessToken]);
 
   useEffect(() => {
-    fetchItemGroups();
+    const timeoutId = globalThis.setTimeout(() => {
+      void fetchItemGroups();
+    }, 0);
 
     return () => {
+      globalThis.clearTimeout(timeoutId);
       isMounted.current = false;
     };
   }, [fetchItemGroups]);

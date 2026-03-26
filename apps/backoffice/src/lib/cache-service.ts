@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { AccountResponse, AccountTypeResponse } from "@jurnapod/shared";
+
 import { apiRequest } from "./api-client";
 import { db } from "./offline-db";
 

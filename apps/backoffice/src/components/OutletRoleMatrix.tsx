@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useMemo, useState } from "react";
+import type { OutletResponse, RoleResponse } from "@jurnapod/shared";
 import {
   Badge,
   Button,
@@ -15,7 +15,7 @@ import {
   Tooltip,
   Box
 } from "@mantine/core";
-import type { OutletResponse, RoleResponse } from "@jurnapod/shared";
+import { useMemo, useState } from "react";
 
 type OutletRoleMatrixProps = {
   title: string;
@@ -26,7 +26,6 @@ type OutletRoleMatrixProps = {
   outletRoleCodesFor: (outletId: number) => string[];
   onUpdateRoleCode: (outletId: number, roleCode: string, checked: boolean) => void;
   onSetRoleForOutlets: (outletIds: number[], roleCode: string, checked: boolean) => void;
-  onSetAllAssignableRolesForOutlets: (outletIds: number[]) => void;
   onClearRolesForOutlets: (outletIds: number[]) => void;
 };
 
@@ -50,7 +49,6 @@ export function OutletRoleMatrix(props: OutletRoleMatrixProps) {
     outletRoleCodesFor,
     onUpdateRoleCode,
     onSetRoleForOutlets,
-    onSetAllAssignableRolesForOutlets,
     onClearRolesForOutlets
   } = props;
 

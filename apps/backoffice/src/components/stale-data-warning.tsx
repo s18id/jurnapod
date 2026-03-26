@@ -2,8 +2,9 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useEffect, useState } from "react";
-import { db } from "../lib/offline-db";
+
 import { useOnlineStatus } from "../lib/connection";
+import { db } from "../lib/offline-db";
 
 type StaleDataWarningProps = {
   cacheKey: string;

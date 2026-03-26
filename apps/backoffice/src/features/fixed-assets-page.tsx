@@ -1,21 +1,14 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
-import type { SessionUser } from "../lib/session";
-import { apiRequest, ApiError } from "../lib/api-client";
-import { useOnlineStatus } from "../lib/connection";
-import { OfflinePage } from "../components/offline-page";
 
 import {
   Badge,
   Box,
   Button,
   Card,
-  Center,
   Group,
   LoadingOverlay,
-  Menu,
   Modal,
   NumberInput,
   Select,
@@ -24,14 +17,16 @@ import {
   Tabs,
   Text,
   TextInput,
-  Title,
-  ActionIcon,
-  Tooltip,
-  SelectProps,
-  NumberInputProps
+  Title
 } from "@mantine/core";
 import { DatePickerInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
+import { useEffect, useMemo, useState } from "react";
+
+import { OfflinePage } from "../components/offline-page";
+import { apiRequest, ApiError } from "../lib/api-client";
+import { useOnlineStatus } from "../lib/connection";
+import type { SessionUser } from "../lib/session";
 
 type FixedAsset = {
   id: number;
@@ -96,7 +91,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
   const [assets, setAssets] = useState<FixedAsset[]>([]);
   const [categories, setCategories] = useState<FixedAssetCategory[]>([]);
   const [accounts, setAccounts] = useState<Array<{ id: number; code: string; name: string }>>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showInactive, setShowInactive] = useState(false);
   const [outletFilter, setOutletFilter] = useState<string | number>("ALL");

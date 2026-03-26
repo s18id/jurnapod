@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Badge,
@@ -25,14 +24,17 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconUpload, IconPlus, IconDownload } from "@tabler/icons-react";
+import { useEffect, useMemo, useState } from "react";
+
+import { ImportStepBadges } from "../components/import-step-badges";
+import { OfflinePage } from "../components/offline-page";
+import { StaleDataWarning } from "../components/stale-data-warning";
 import { apiRequest, ApiError } from "../lib/api-client";
 import { CacheService, buildCacheKey } from "../lib/cache-service";
-import { readImportFile } from "../lib/import/delimited";
 import { useOnlineStatus } from "../lib/connection";
-import { ImportStepBadges } from "../components/import-step-badges";
-import { StaleDataWarning } from "../components/stale-data-warning";
-import { OfflinePage } from "../components/offline-page";
+import { readImportFile } from "../lib/import/delimited";
 import type { SessionUser } from "../lib/session";
+
 import {
   parseDelimited,
   normalizeImportRow,
@@ -94,9 +96,7 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
     total: 0
   });
   const [isApplying, setIsApplying] = useState(false);
-  const [applyIndex, setApplyIndex] = useState(0);
   const [applyResults, setApplyResults] = useState<ApplyResult[]>([]);
-  const [hasAppliedImport, setHasAppliedImport] = useState(false);
 
   const isOnline = useOnlineStatus();
 
@@ -358,8 +358,6 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
     const body = parsed.slice(1);
     const rows = body.map((cells) => normalizeImportRow(cells, header));
 
-    setHasAppliedImport(false);
-
     const plan = buildImportPlan(rows, itemGroups);
     setImportPlan(plan);
 
@@ -372,9 +370,7 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
   async function runImport() {
     setIsApplying(true);
     setImportStep("apply");
-    setApplyIndex(0);
     setApplyResults([]);
-    setHasAppliedImport(false);
 
     const results: ApplyResult[] = [];
 
@@ -398,7 +394,6 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
       );
 
       for (let i = 0; i < actionable.length; i++) {
-        setApplyIndex(i + 1);
         results.push({
           rowIndex: actionable[i].rowIndex,
           action: "CREATE",
@@ -421,7 +416,6 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
       setApplyResults(results);
     } finally {
       setIsApplying(false);
-      setHasAppliedImport(true);
     }
   }
 
@@ -430,9 +424,7 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
     setImportText("");
     setImportPlan([]);
     setImportSummary({ create: 0, error: 0, total: 0 });
-    setApplyIndex(0);
     setApplyResults([]);
-    setHasAppliedImport(false);
   }
 
   function handleExportCsv() {

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useMemo } from "react";
+import type { AccountTypeResponse } from "@jurnapod/shared";
 import {
   Alert,
   Badge,
@@ -22,19 +22,20 @@ import {
   Title
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import type { SessionUser } from "../lib/session";
-import { useAccountTypes } from "../hooks/use-accounts";
-import {
+import { useState, useMemo } from "react";
+
+import { OfflinePage } from "../components/offline-page";
+import { StaleDataWarning } from "../components/stale-data-warning";
+import { useAccountTypes ,
   createAccountType,
   updateAccountType,
   deactivateAccountType
 } from "../hooks/use-accounts";
 import { ApiError } from "../lib/api-client";
-import { StaleDataWarning } from "../components/stale-data-warning";
 import { buildCacheKey } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
-import { OfflinePage } from "../components/offline-page";
-import type { AccountTypeResponse } from "@jurnapod/shared";
+import type { SessionUser } from "../lib/session";
+
 
 type AccountTypesPageProps = {
   user: SessionUser;
@@ -509,7 +510,7 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
         <Stack gap="md">
           <Text size="sm">
             Are you sure you want to deactivate account type{" "}
-            <Text span fw={600}>"{deactivateTarget?.name}"</Text>? 
+            <Text span fw={600}>&quot;{deactivateTarget?.name}&quot;</Text>?{" "}
             This will prevent new accounts from using this classification template.
           </Text>
           <Group justify="flex-end">

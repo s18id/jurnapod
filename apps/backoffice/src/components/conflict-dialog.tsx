@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { Modal, Stack, Text, Button, Group, Badge } from "@mantine/core";
+
 import type { OutboxItem } from "../lib/offline-db";
 
 type ConflictDialogProps = {

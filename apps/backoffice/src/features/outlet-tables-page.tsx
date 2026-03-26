@@ -1,7 +1,13 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  OutletTableStatusId,
+  outletTableStatusToId,
+  type OutletTableResponse,
+  type OutletTableStatus,
+  type OutletTableStatusIdType
+} from "@jurnapod/shared";
 import {
   Alert,
   Button,
@@ -15,11 +21,12 @@ import {
   NumberInput,
   Badge
 } from "@mantine/core";
+import type { ColumnDef } from "@tanstack/react-table";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
 import { DataTable } from "../components/DataTable";
-import { PageCard } from "../components/PageCard";
 import { FilterBar } from "../components/FilterBar";
-import type { SessionUser } from "../lib/session";
-import { useOutletsFull } from "../hooks/use-outlets";
+import { PageCard } from "../components/PageCard";
 import {
   useOutletTables,
   createOutletTable,
@@ -27,14 +34,9 @@ import {
   updateOutletTable,
   deactivateOutletTable
 } from "../hooks/use-outlet-tables";
-import type { ColumnDef } from "@tanstack/react-table";
-import {
-  OutletTableStatusId,
-  outletTableStatusToId,
-  type OutletTableResponse,
-  type OutletTableStatus,
-  type OutletTableStatusIdType
-} from "@jurnapod/shared";
+import { useOutletsFull } from "../hooks/use-outlets";
+import type { SessionUser } from "../lib/session";
+
 
 type OutletTablesPageProps = {
   user: SessionUser;
@@ -101,7 +103,6 @@ function getEffectiveStatusId(table: OutletTableResponse): OutletTableStatusIdTy
 
 export function OutletTablesPage(props: OutletTablesPageProps) {
   const { user, accessToken } = props;
-  const isSuperAdminOrOwner = user.global_roles.includes("SUPER_ADMIN") || user.global_roles.includes("OWNER");
   const canEditTableCode =
     user.global_roles.includes("SUPER_ADMIN") ||
     user.global_roles.includes("OWNER") ||

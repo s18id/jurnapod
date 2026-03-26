@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useState } from "react";
 import { Button, Card, Container, Group, Select, Stack, Text, Title } from "@mantine/core";
+import { useEffect, useState } from "react";
+
 import { THEME_OPTIONS, type ThemeVariant } from "../app/theme";
 import { useThemeVariant } from "../app/theme-provider";
 import { db } from "../lib/offline-db";

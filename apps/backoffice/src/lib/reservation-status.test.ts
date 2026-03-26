@@ -3,7 +3,9 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+
 import type { ReservationStatus } from "@jurnapod/shared";
+
 import {
   getCheckInTargetStatus,
   getReservationStatusLabel,

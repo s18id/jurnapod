@@ -2,9 +2,10 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useEffect, useState } from "react";
+
+import { useOnlineStatus } from "../lib/connection";
 import { OutboxService } from "../lib/outbox-service";
 import { SyncService } from "../lib/sync-service";
-import { useOnlineStatus } from "../lib/connection";
 
 type QueueStatusBadgeProps = {
   accessToken?: string | null;

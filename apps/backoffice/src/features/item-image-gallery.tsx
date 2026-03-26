@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useCallback, useEffect } from "react";
-import { Stack, Text, Group, Image, Button, Badge, ActionIcon, SimpleGrid, Loader, Alert } from "@mantine/core";
+import { Stack, Text, Group, Image, Badge, ActionIcon, SimpleGrid, Loader, Alert } from "@mantine/core";
 import { IconPhoto, IconStar, IconTrash, IconAlertCircle, IconRefresh, IconArrowUp, IconArrowDown } from "@tabler/icons-react";
-import { apiRequest, ApiError } from "../lib/api-client";
+import { useState, useCallback, useEffect } from "react";
+
+import { apiRequest } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 
 interface ImageItem {
@@ -35,7 +36,7 @@ interface ItemImageGalleryProps {
 }
 
 export function ItemImageGallery({
-  user,
+  user: _user,
   accessToken,
   itemId,
   itemName,
@@ -57,7 +58,7 @@ export function ItemImageGallery({
         accessToken
       );
       setImages(response.images);
-    } catch (err) {
+    } catch {
       setError("Failed to load images");
     } finally {
       setLoading(false);
@@ -84,7 +85,7 @@ export function ItemImageGallery({
       // Refresh images
       await fetchImages();
       onImagesChange?.();
-    } catch (err) {
+    } catch {
       setError("Failed to set primary image");
     } finally {
       setActionLoading(null);
@@ -110,7 +111,7 @@ export function ItemImageGallery({
       // Refresh images
       await fetchImages();
       onImagesChange?.();
-    } catch (err) {
+    } catch {
       setError("Failed to delete image");
     } finally {
       setActionLoading(null);
@@ -135,7 +136,7 @@ export function ItemImageGallery({
       // Refresh images
       await fetchImages();
       onImagesChange?.();
-    } catch (err) {
+    } catch {
       setError("Failed to reorder image");
     } finally {
       setActionLoading(null);
@@ -160,7 +161,7 @@ export function ItemImageGallery({
       // Refresh images
       await fetchImages();
       onImagesChange?.();
-    } catch (err) {
+    } catch {
       setError("Failed to reorder image");
     } finally {
       setActionLoading(null);

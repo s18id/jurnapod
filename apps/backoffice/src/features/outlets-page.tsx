@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
+import type { OutletFullResponse } from "@jurnapod/shared";
 import {
   ActionIcon,
   Alert,
@@ -25,8 +25,33 @@ import {
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { IconDownload, IconEye, IconPlus, IconTrash, IconUpload } from "@tabler/icons-react";
-import { readImportFile } from "../lib/import/delimited";
+import { useEffect, useMemo, useState } from "react";
+
+
+import { FilterBar } from "../components/FilterBar";
+import { PageCard } from "../components/PageCard";
 import { ImportStepBadges } from "../components/import-step-badges";
+import {
+  DataTable,
+  type DataTableColumnDef,
+  type PaginationState,
+  type SortState,
+  type RowSelectionState
+} from "../components/ui/DataTable";
+import { TIMEZONE_OPTIONS } from "../constants/timezones";
+import { useCompanies } from "../hooks/use-companies";
+import {
+  useOutletsFull,
+  createOutlet,
+  updateOutlet,
+  deleteOutlet,
+  type OutletCreateInput,
+  type OutletUpdateInput
+} from "../hooks/use-outlets";
+import { ApiError } from "../lib/api-client";
+import { readImportFile } from "../lib/import/delimited";
+import type { SessionUser } from "../lib/session";
+
 import {
   buildImportPlan,
   computeImportSummary,
@@ -36,28 +61,7 @@ import {
   type ImportPlanRow,
   type ImportSummary
 } from "./outlets-import-export-utils";
-import type { SessionUser } from "../lib/session";
-import {
-  useOutletsFull,
-  createOutlet,
-  updateOutlet,
-  deleteOutlet,
-  type OutletCreateInput,
-  type OutletUpdateInput
-} from "../hooks/use-outlets";
-import { useCompanies } from "../hooks/use-companies";
-import { ApiError } from "../lib/api-client";
-import {
-  DataTable,
-  type DataTableColumnDef,
-  type PaginationState,
-  type SortState,
-  type RowSelectionState
-} from "../components/ui/DataTable";
-import { FilterBar } from "../components/FilterBar";
-import { PageCard } from "../components/PageCard";
-import { TIMEZONE_OPTIONS } from "../constants/timezones";
-import type { OutletFullResponse } from "@jurnapod/shared";
+
 
 type OutletsPageProps = {
   user: SessionUser;
@@ -1050,7 +1054,7 @@ export function OutletsPage(props: OutletsPageProps) {
       >
         <Stack gap="md">
           <Text size="sm">
-            Delete branch "{confirmState?.name}"? This cannot be undone.
+            Delete branch &quot;{confirmState?.name}&quot;? This cannot be undone.
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setConfirmState(null)} disabled={deleting}>

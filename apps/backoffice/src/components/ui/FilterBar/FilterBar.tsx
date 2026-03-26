@@ -1,19 +1,18 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ReactNode } from "react";
 import {
   Box,
   Button,
   Group,
   MultiSelect,
   Select,
-  Stack,
   Text,
   TextInput,
 } from "@mantine/core";
 import { DatePickerInput } from "@mantine/dates";
 import { useDidUpdate } from "@mantine/hooks";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
@@ -21,7 +20,6 @@ import type {
   FilterField,
   FilterSchema,
   FilterValue,
-  SelectOption,
 } from "./types";
 import {
   DEBOUNCE_MS,
@@ -407,21 +405,21 @@ interface LiveRegionProps {
 }
 
 function LiveRegion({ resultCount, isLoading, lastAction, errorMessage }: LiveRegionProps) {
-  const [announcement, setAnnouncement] = useState("");
-
-  useEffect(() => {
+  const announcement = useMemo(() => {
     if (isLoading) {
-      setAnnouncement("Loading results...");
-    } else if (lastAction === "clear") {
-      setAnnouncement("Filters cleared");
-    } else if (lastAction === "error" && errorMessage) {
-      setAnnouncement(`Error: ${errorMessage}`);
-    } else if (resultCount !== undefined) {
-      setAnnouncement(
-        `${resultCount} result${resultCount === 1 ? "" : "s"} found`
-      );
+      return "Loading results...";
     }
-  }, [isLoading, lastAction, errorMessage, resultCount]);
+    if (lastAction === "clear") {
+      return "Filters cleared";
+    }
+    if (lastAction === "error" && errorMessage) {
+      return `Error: ${errorMessage}`;
+    }
+    if (resultCount !== undefined) {
+      return `${resultCount} result${resultCount === 1 ? "" : "s"} found`;
+    }
+    return "";
+  }, [errorMessage, isLoading, lastAction, resultCount]);
 
   return (
     <Box

@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useCallback } from "react";
 import { Stack, Button, Text, Group, Alert, Image, Checkbox, FileButton } from "@mantine/core";
 import { IconUpload, IconPhoto, IconAlertCircle, IconCheck } from "@tabler/icons-react";
+import { useState, useCallback } from "react";
+
 import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 
@@ -19,7 +20,7 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export function ImageUpload({
-  user,
+  user: _user,
   accessToken,
   itemId,
   itemName,

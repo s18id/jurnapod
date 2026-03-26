@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { escapeCsvCell, rowsToCsv, downloadCsv } from "../lib/import/csv";
+import { rowsToCsv, downloadCsv } from "../lib/import/csv";
 
 type ItemForExport = {
   id: number;
@@ -64,8 +64,8 @@ export function downloadItemsCsv(items: ItemForExport[], groups: ItemGroupForExp
 export function buildPricesCsv(
   prices: PriceForExport[],
   items: ItemForExport[],
-  pricingViewMode: "defaults" | "outlet",
-  selectedOutletId: number
+  _pricingViewMode: "defaults" | "outlet",
+  _selectedOutletId: number
 ): string {
   const headers = ["id", "item_sku", "item_name", "scope", "outlet_id", "price", "is_active", "updated_at"];
   const rows = prices.map((price) => {

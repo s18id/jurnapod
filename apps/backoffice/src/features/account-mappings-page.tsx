@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Badge,
@@ -17,8 +16,8 @@ import {
   TextInput,
   Title
 } from "@mantine/core";
-import type { SessionUser } from "../lib/session";
-import { useOnlineStatus } from "../lib/connection";
+import { useEffect, useMemo, useState } from "react";
+
 import { OfflinePage } from "../components/offline-page";
 import { useAccounts } from "../hooks/use-accounts";
 import {
@@ -26,16 +25,16 @@ import {
   type OutletAccountMappingKey,
   type CompanyOnlyMappingKey,
   type AnyMappingKey,
-  type OutletAccountMapping,
   type EffectiveOutletAccountMapping
 } from "../hooks/use-outlet-account-mappings";
 import {
   useOutletPaymentMethodMappings,
   type PaymentMethodConfig,
-  type PaymentMethodMapping,
   type EffectivePaymentMethodMapping
 } from "../hooks/use-outlet-payment-method-mappings";
 import { ApiError } from "../lib/api-client";
+import { useOnlineStatus } from "../lib/connection";
+import type { SessionUser } from "../lib/session";
 
 type AccountMappingsPageProps = {
   user: SessionUser;

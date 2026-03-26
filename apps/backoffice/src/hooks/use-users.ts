@@ -1,8 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { apiRequest, ApiError } from "../lib/api-client";
 import type {
   UserResponse,
   UserCreateRequest,
@@ -13,6 +11,9 @@ import type {
   RoleResponse,
   OutletResponse
 } from "@jurnapod/shared";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { apiRequest, ApiError } from "../lib/api-client";
 
 /**
  * API Response Types
@@ -110,7 +111,7 @@ export function useUsers(
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const refetch = useCallback(
-    async (fetchOptions?: { force?: boolean }) => {
+    async (_fetchOptions?: { force?: boolean }) => {
       // Cancel any in-flight request
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();

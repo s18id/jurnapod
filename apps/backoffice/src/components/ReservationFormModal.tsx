@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReservationRow } from "@jurnapod/shared";
 import {
   Alert,
   Button,
@@ -16,12 +16,14 @@ import {
   Textarea,
   Title
 } from "@mantine/core";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
 import { useOutletTables } from "../hooks/use-outlet-tables";
 import { useTableSuggestions } from "../hooks/use-reservation-groups";
+import { createReservation, updateReservation } from "../hooks/use-reservations";
+
 import { TableMultiSelect } from "./TableMultiSelect";
 import { TableSuggestions } from "./TableSuggestions";
-import type { ReservationRow, TableSuggestion } from "@jurnapod/shared";
-import { createReservation, updateReservation } from "../hooks/use-reservations";
 
 type ReservationFormMode = "create" | "edit" | "edit-group";
 
@@ -332,7 +334,6 @@ export function ReservationFormModal({
             {showTableSuggestions && (
               <TableSuggestions
                 suggestions={fetchedSuggestions}
-                guestCount={formState.guestCount}
                 onSelect={setSelectedTableIds}
                 loading={suggestionsLoading}
               />

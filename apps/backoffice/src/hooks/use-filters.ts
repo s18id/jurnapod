@@ -13,7 +13,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import type {
-  DateRange,
   FilterSchema,
   FilterValue,
 } from "../components/ui/FilterBar/types";
@@ -144,10 +143,9 @@ function mergeWithDefaults(
   const result: Record<string, FilterValue> = { ...defaults };
 
   for (const [key, value] of Object.entries(partial)) {
-    if (value !== undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (result as any)[key] = value;
-    }
+      if (value !== undefined) {
+        result[key] = value;
+      }
   }
 
   return result;

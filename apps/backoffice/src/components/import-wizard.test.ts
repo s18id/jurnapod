@@ -2,8 +2,8 @@
 //
 // ImportWizard component tests
 
-import { describe, it } from "node:test";
 import assert from "node:assert";
+import { describe, it } from "node:test";
 
 // Test TypeScript interface definitions
 interface TestImportRow {
@@ -77,26 +77,6 @@ function parseDelimited(text: string, delimiter = ","): string[][] {
     cells.push(cell.trim());
     return cells;
   });
-}
-
-function readImportFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target?.result as string);
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsText(file);
-  });
-}
-
-// Mock File for testing
-class MockFile {
-  name: string;
-  content: string;
-  
-  constructor(name: string, content: string) {
-    this.name = name;
-    this.content = content;
-  }
 }
 
 describe("ImportWizard TypeScript Interfaces", () => {

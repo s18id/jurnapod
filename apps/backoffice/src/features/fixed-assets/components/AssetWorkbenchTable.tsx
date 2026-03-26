@@ -89,7 +89,7 @@ export function AssetWorkbenchTable({
               <Table.Tr>
                 <Table.Td colSpan={8}>
                   <Text c="dimmed" ta="center" py="xl">
-                    No assets found. Click "New" to create one.
+                    No assets found. Click &quot;New&quot; to create one.
                   </Text>
                 </Table.Td>
               </Table.Tr>

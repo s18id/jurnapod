@@ -1,17 +1,18 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+import type { JournalBatchResponse } from "@jurnapod/shared";
 import { useEffect, useMemo, useState } from "react";
-import type { SessionUser } from "../lib/session";
+
+import { QueueStatusBadge } from "../components/queue-status-badge";
 import { useAccounts } from "../hooks/use-accounts";
 import { useJournalBatches, createManualJournalEntry } from "../hooks/use-journals";
 import { ApiError } from "../lib/api-client";
-import { OutboxService } from "../lib/outbox-service";
 import { useOnlineStatus } from "../lib/connection";
-import { QueueStatusBadge } from "../components/queue-status-badge";
-import { db } from "../lib/offline-db";
 import { ERROR_MESSAGES } from "../lib/error-messages";
-import type { JournalBatchResponse } from "@jurnapod/shared";
+import { db } from "../lib/offline-db";
+import { OutboxService } from "../lib/outbox-service";
+import type { SessionUser } from "../lib/session";
 
 type TransactionsPageProps = {
   user: SessionUser;
@@ -508,10 +509,11 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
           
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "16px", marginBottom: "16px" }}>
             <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+              <label htmlFor="entry-date" style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
                 Date *
               </label>
               <input
+                id="entry-date"
                 type="date"
                 value={entryDate}
                 onChange={(e) => setEntryDate(e.target.value)}
@@ -521,10 +523,11 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
             </div>
             
             <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+              <label htmlFor="entry-description" style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
                 Description *
               </label>
               <input
+                id="entry-description"
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}

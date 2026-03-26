@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { Table, ScrollArea, Text, Badge, Group, Tooltip, Stack, Button, Menu } from "@mantine/core";
-import { ThemeIcon } from "@mantine/core";
+import { Table, ScrollArea, Text, Badge, Group, Tooltip, Stack, Button, Menu , ThemeIcon } from "@mantine/core";
 import { IconAlertTriangle, IconEdit, IconTrash } from "@tabler/icons-react";
+
 import type { Item } from "../../hooks/use-items";
 
 export interface PriceWithItem {

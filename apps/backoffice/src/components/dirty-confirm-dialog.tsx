@@ -2,7 +2,6 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { Button, Group, Modal, Stack, Text } from "@mantine/core";
-import { useState } from "react";
 
 interface DirtyConfirmDialogProps {
   opened: boolean;

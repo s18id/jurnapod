@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   Stack,
   Card,
@@ -16,8 +15,6 @@ import {
   Loader,
   Modal,
   SegmentedControl,
-  useMantineTheme,
-  Anchor,
 } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import {
@@ -27,21 +24,19 @@ import {
   IconDownload,
   IconPackage,
   IconUpload,
-  IconExternalLink,
 } from "@tabler/icons-react";
-import { apiRequest } from "../lib/api-client";
-import { useItems, type Item } from "../hooks/use-items";
-import { useItemGroups } from "../hooks/use-item-groups";
+import { useState, useMemo, useCallback, useEffect } from "react";
+
 import { ImportWizard, type ImportWizardConfig, type ImportResult } from "../components/import-wizard";
+import { useItemGroups } from "../hooks/use-item-groups";
+import { useItems, type Item } from "../hooks/use-items";
+import { apiRequest } from "../lib/api-client";
+import type { SessionUser } from "../lib/session";
+
 import {
-  parsePriceImportRows,
-  buildPriceImportPlan,
-  computePriceImportSummary,
   type NormalizedPriceImportRow,
-  type PriceImportPlanRow,
 } from "./item-prices-import-utils";
 import { downloadPricesCsv } from "./items-prices-export-utils";
-import type { SessionUser } from "../lib/session";
 import {
   CreatePriceModal,
   EditPriceModal,
@@ -77,7 +72,6 @@ interface PriceWithItem extends ItemPrice {
 }
 
 export function PricesPage({ user, accessToken }: PricesPageProps) {
-  const theme = useMantineTheme();
   const isMobile = useMediaQuery("(max-width: 48em)");
 
   // Data hooks
@@ -85,12 +79,10 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
     items,
     loading: itemsLoading,
     error: itemsError,
-    refresh: refreshItems,
     itemMap,
   } = useItems({ user, accessToken });
 
   const {
-    itemGroups,
     loading: groupsLoading,
     error: groupsError,
     groupMap,

@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import ReconnectingWebSocket from "reconnecting-websocket";
+
 import { getStoredAccessToken } from "./session";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "reconnecting" | "error";

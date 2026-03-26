@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -18,10 +17,12 @@ import {
   Title,
   Modal
 } from "@mantine/core";
-import type { SessionUser } from "../lib/session";
+import { useEffect, useState } from "react";
+
+import { OfflinePage } from "../components/offline-page";
 import { apiRequest, ApiError } from "../lib/api-client";
 import { useOnlineStatus } from "../lib/connection";
-import { OfflinePage } from "../components/offline-page";
+import type { SessionUser } from "../lib/session";
 
 type PlatformSettingsPageProps = {
   user: SessionUser;
@@ -33,13 +34,6 @@ type PlatformSettingsResponse = {
   data: {
     settings: Record<string, string>;
   };
-};
-
-type MailerTestRequest = {
-  to: string;
-  subject: string;
-  html?: string;
-  text?: string;
 };
 
 type MailerTestResponse = {
@@ -66,7 +60,7 @@ const initialFormState: Record<string, any> = {
   "mailer.smtp.tls_reject_unauthorized": "true"
 };
 
-export function PlatformSettingsPage({ user, accessToken }: PlatformSettingsPageProps) {
+export function PlatformSettingsPage({ user: _user, accessToken }: PlatformSettingsPageProps) {
   const isOnline = useOnlineStatus();
   
   // Form state

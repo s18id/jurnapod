@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Role, UserResponse } from "@jurnapod/shared";
 import {
   Alert,
   Badge,
@@ -17,7 +17,36 @@ import {
   Title,
   ActionIcon
 } from "@mantine/core";
-import type { SessionUser } from "../lib/session";
+import {
+  IconDots,
+  IconEdit,
+  IconShield,
+  IconBuildingStore,
+  IconLock,
+  IconUserCheck,
+  IconUserPlus,
+  IconRefresh,
+  IconSearch,
+  IconBan,
+  IconX,
+  IconCheck
+} from "@tabler/icons-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { FilterBar } from "../components/FilterBar";
+import { OutletRoleMatrix } from "../components/OutletRoleMatrix";
+import { PageCard } from "../components/PageCard";
+import { DirtyConfirmDialog } from "../components/dirty-confirm-dialog";
+import {
+  DataTable,
+  type DataTableColumnDef,
+  type LoadingState,
+  type PaginationState,
+  type SortState,
+  type RowSelectionState,
+  type TableError,
+} from "../components/ui/DataTable";
+import { useCompanies } from "../hooks/use-companies";
 import {
   useUsers,
   useRoles,
@@ -29,39 +58,10 @@ import {
   deactivateUser,
   reactivateUser
 } from "../hooks/use-users";
-import { useCompanies } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
-import {
-  DataTable,
-  type DataTableColumnDef,
-  type LoadingState,
-  type PaginationState,
-  type SortState,
-  type RowSelectionState,
-  type TableError,
-} from "../components/ui/DataTable";
-import { DirtyConfirmDialog } from "../components/dirty-confirm-dialog";
-import { FilterBar } from "../components/FilterBar";
-import { OutletRoleMatrix } from "../components/OutletRoleMatrix";
-import { PageCard } from "../components/PageCard";
+import type { SessionUser } from "../lib/session";
 import { trackActionMenuOpen, trackActionSelect, trackActionError } from "../lib/telemetry";
-import type { OutletResponse, Role, RoleResponse, UserResponse } from "@jurnapod/shared";
-import {
-  IconDots,
-  IconEdit,
-  IconShield,
-  IconBuildingStore,
-  IconLock,
-  IconUserMinus,
-  IconUserCheck,
-  IconUserPlus,
-  IconRefresh,
-  IconSearch,
-  IconFilter,
-  IconBan,
-  IconX,
-  IconCheck
-} from "@tabler/icons-react";
+
 
 type UsersPageProps = {
   user: SessionUser;
@@ -105,14 +105,6 @@ const emptyForm: UserFormData = {
   global_role_codes: [],
   outlet_role_assignments: [],
   is_active: true
-};
-
-const ROLE_HELP_TEXT: Record<string, string> = {
-  OWNER: "Full operational access for this outlet.",
-  COMPANY_ADMIN: "Manages outlet configuration and staff access.",
-  ADMIN: "Handles daily operations and oversight.",
-  CASHIER: "Runs checkout and sales transactions.",
-  ACCOUNTANT: "Reviews journals and financial records."
 };
 
 export function UsersPage(props: UsersPageProps) {
@@ -499,10 +491,6 @@ export function UsersPage(props: UsersPageProps) {
     return Object.keys(errors).length === 0;
   };
   
-  const validateAccessForm = (): boolean => {
-    return true;
-  };
-  
   const handleSubmit = async () => {
     if (!validateForm()) return;
     
@@ -679,87 +667,6 @@ export function UsersPage(props: UsersPageProps) {
     }
   };
 
-  const outletRoleCodesFor = (outletId: number) =>
-    formData.outlet_role_assignments.find((assignment) => assignment.outlet_id === outletId)
-      ?.role_codes ?? [];
-
-  const mutateOutletRoleAssignments = (
-    mutate: (roleMap: Map<number, Set<string>>) => void
-  ) => {
-    setFormData((prev) => {
-      const roleMap = new Map<number, Set<string>>(
-        prev.outlet_role_assignments.map((assignment) => [assignment.outlet_id, new Set(assignment.role_codes)])
-      );
-      mutate(roleMap);
-      const nextAssignments = [...roleMap.entries()]
-        .filter(([, roleCodes]) => roleCodes.size > 0)
-        .map(([outlet_id, roleCodes]) => ({ outlet_id, role_codes: [...roleCodes] }));
-      return { ...prev, outlet_role_assignments: nextAssignments };
-    });
-  };
-
-  const updateOutletRoleCode = (outletId: number, roleCode: string, checked: boolean) => {
-    mutateOutletRoleAssignments((roleMap) => {
-      const roleSet = roleMap.get(outletId) ?? new Set<string>();
-      if (checked) {
-        roleSet.add(roleCode);
-      } else {
-        roleSet.delete(roleCode);
-      }
-      if (roleSet.size === 0) {
-        roleMap.delete(outletId);
-      } else {
-        roleMap.set(outletId, roleSet);
-      }
-    });
-  };
-
-  const setOutletRoleCodeForOutlets = (outletIds: number[], roleCode: string, checked: boolean) => {
-    if (outletIds.length === 0) {
-      return;
-    }
-    mutateOutletRoleAssignments((roleMap) => {
-      outletIds.forEach((outletId) => {
-        const roleSet = roleMap.get(outletId) ?? new Set<string>();
-        if (checked) {
-          roleSet.add(roleCode);
-        } else {
-          roleSet.delete(roleCode);
-        }
-        if (roleSet.size === 0) {
-          roleMap.delete(outletId);
-        } else {
-          roleMap.set(outletId, roleSet);
-        }
-      });
-    });
-  };
-
-  const setAllAssignableRoleCodesForOutlets = (outletIds: number[]) => {
-    if (outletIds.length === 0) {
-      return;
-    }
-    const assignableRoleCodes = outletRoleOptions
-      .filter((role) => role.role_level < actorMaxRoleLevel)
-      .map((role) => role.code);
-    mutateOutletRoleAssignments((roleMap) => {
-      outletIds.forEach((outletId) => {
-        roleMap.set(outletId, new Set(assignableRoleCodes));
-      });
-    });
-  };
-
-  const clearOutletRolesForOutlets = (outletIds: number[]) => {
-    if (outletIds.length === 0) {
-      return;
-    }
-    mutateOutletRoleAssignments((roleMap) => {
-      outletIds.forEach((outletId) => {
-        roleMap.delete(outletId);
-      });
-    });
-  };
-  
   // Access form outlet role functions
   const accessOutletRoleCodesFor = (outletId: number) =>
     accessFormData.outlet_role_assignments.find((assignment) => assignment.outlet_id === outletId)
@@ -814,20 +721,6 @@ export function UsersPage(props: UsersPageProps) {
         } else {
           roleMap.set(outletId, roleSet);
         }
-      });
-    });
-  };
-
-  const setAllAssignableAccessRoleCodesForOutlets = (outletIds: number[]) => {
-    if (outletIds.length === 0) {
-      return;
-    }
-    const assignableRoleCodes = outletRoleOptions
-      .filter((role) => role.role_level < actorMaxRoleLevel)
-      .map((role) => role.code);
-    mutateAccessOutletRoleAssignments((roleMap) => {
-      outletIds.forEach((outletId) => {
-        roleMap.set(outletId, new Set(assignableRoleCodes));
       });
     });
   };
@@ -1446,7 +1339,6 @@ export function UsersPage(props: UsersPageProps) {
                 outletRoleCodesFor={accessOutletRoleCodesFor}
                 onUpdateRoleCode={updateAccessOutletRoleCode}
                 onSetRoleForOutlets={setAccessOutletRoleCodeForOutlets}
-                onSetAllAssignableRolesForOutlets={setAllAssignableAccessRoleCodesForOutlets}
                 onClearRolesForOutlets={clearAccessOutletRolesForOutlets}
               />
             </>

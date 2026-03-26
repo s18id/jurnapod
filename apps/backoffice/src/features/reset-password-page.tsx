@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState } from "react";
 import {
   Alert,
   Button,
@@ -10,9 +9,10 @@ import {
   PasswordInput,
   Stack,
   Text,
-  TextInput,
   Title
 } from "@mantine/core";
+import { useState } from "react";
+
 import { apiRequest, ApiError, getApiBaseUrl } from "../lib/api-client";
 
 type ResetPasswordPageProps = {

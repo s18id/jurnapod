@@ -2,9 +2,9 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { ApiError, apiRequest } from "./api-client";
+import { ERROR_MESSAGES } from "./error-messages";
 import { db, type OutboxItem } from "./offline-db";
 import { OutboxService } from "./outbox-service";
-import { ERROR_MESSAGES } from "./error-messages";
 
 export type SyncResult = {
   success: number;

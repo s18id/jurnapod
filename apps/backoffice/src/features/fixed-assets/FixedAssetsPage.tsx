@@ -1,24 +1,25 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
-import type { SessionUser } from "../../lib/session";
-import { apiRequest, ApiError } from "../../lib/api-client";
-import { useOnlineStatus } from "../../lib/connection";
-import { OfflinePage } from "../../components/offline-page";
 
 import { Stack, Box } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
+import { useEffect, useMemo, useState } from "react";
 
-import { FixedAssetsToolbar } from "./components/FixedAssetsToolbar";
-import { AssetWorkbenchTable } from "./components/AssetWorkbenchTable";
-import { AssetDetailDrawer } from "./components/AssetDetailDrawer";
+import { OfflinePage } from "../../components/offline-page";
+import { apiRequest, ApiError } from "../../lib/api-client";
+import { useOnlineStatus } from "../../lib/connection";
+import type { SessionUser } from "../../lib/session";
+
 import { AssetCreateModal } from "./components/AssetCreateModal";
+import { AssetDetailDrawer } from "./components/AssetDetailDrawer";
+import { AssetWorkbenchTable } from "./components/AssetWorkbenchTable";
 import { CategoryCreateModal } from "./components/CategoryCreateModal";
+import { FixedAssetsToolbar } from "./components/FixedAssetsToolbar";
 import { AcquisitionModal } from "./components/forms/AcquisitionModal";
-import { TransferModal } from "./components/forms/TransferModal";
-import { ImpairmentModal } from "./components/forms/ImpairmentModal";
 import { DisposalModal } from "./components/forms/DisposalModal";
+import { ImpairmentModal } from "./components/forms/ImpairmentModal";
+import { TransferModal } from "./components/forms/TransferModal";
 
 type FixedAsset = {
   id: number;

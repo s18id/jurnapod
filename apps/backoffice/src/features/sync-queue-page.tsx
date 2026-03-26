@@ -1,14 +1,15 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useState } from "react";
 import { Stack, Table, Button, Group, Text, Badge, Alert } from "@mantine/core";
+import { useEffect, useState } from "react";
+
 import { PageCard } from "../components/PageCard";
-import { OutboxService } from "../lib/outbox-service";
-import { canShowSyncQueueActions } from "../lib/outbox-guards";
-import type { SessionUser } from "../lib/session";
-import type { OutboxItem } from "../lib/offline-db";
 import { ConflictDialog } from "../components/conflict-dialog";
+import type { OutboxItem } from "../lib/offline-db";
+import { canShowSyncQueueActions } from "../lib/outbox-guards";
+import { OutboxService } from "../lib/outbox-service";
+import type { SessionUser } from "../lib/session";
 
 function formatDateTime(value: Date) {
   return new Date(value).toLocaleString("id-ID");

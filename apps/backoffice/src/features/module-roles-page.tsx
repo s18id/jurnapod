@@ -1,20 +1,21 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Checkbox, Group, Select, Stack, Text } from "@mantine/core";
-import type { ColumnDef } from "@tanstack/react-table";
 import type { Module, ModuleRoleResponse, RoleResponse } from "@jurnapod/shared";
 import { ModuleSchema } from "@jurnapod/shared";
-import type { RoleCode, SessionUser } from "../lib/session";
-import { useRoles } from "../hooks/use-users";
-import { useModuleRoles, updateModuleRolePermission } from "../hooks/use-module-roles";
-import { ApiError } from "../lib/api-client";
-import { useOnlineStatus } from "../lib/connection";
+import { Alert, Button, Checkbox, Group, Select, Stack, Text } from "@mantine/core";
+import type { ColumnDef } from "@tanstack/react-table";
+import { useEffect, useMemo, useState } from "react";
+
 import { DataTable } from "../components/DataTable";
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
 import { OfflinePage } from "../components/offline-page";
+import { useModuleRoles, updateModuleRolePermission } from "../hooks/use-module-roles";
+import { useRoles } from "../hooks/use-users";
+import { ApiError } from "../lib/api-client";
+import { useOnlineStatus } from "../lib/connection";
+import type { RoleCode, SessionUser } from "../lib/session";
 
 type ModuleRolesPageProps = {
   user: SessionUser;

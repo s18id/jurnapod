@@ -2,32 +2,13 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useEffect, useMemo, useState } from "react";
-import { AppLayout } from "./layout";
-import {
-  APP_ROUTES,
-  DEFAULT_ROUTE_PATH,
-  findRoute,
-  normalizeHashPath,
-  userCanAccessRoute,
-  filterRoutesByModules
-} from "./routes";
-import { useModules } from "../hooks/use-modules";
-import { useHeaderAlerts } from "../hooks/use-header-alerts";
-import { ApiError, getApiBaseUrl } from "../lib/api-client";
-import { setupMasterDataRefresh } from "../lib/cache-service";
-import { setupAutoSync } from "../lib/auto-sync";
-import { SyncNotification } from "../components/sync-notification";
+
 import { ModuleConfigWarning } from "../components/module-config-warning";
-import {
-  clearAccessToken,
-  fetchCurrentUser,
-  getStoredAccessToken,
-  login,
-  loginWithGoogle,
-  refreshAccessToken,
-  type SessionUser
-} from "../lib/session";
+import { SyncNotification } from "../components/sync-notification";
 import { LoginPage } from "../features/auth/login-page";
+import { ForgotPasswordPage } from "../features/forgot-password-page";
+import { InvitePage } from "../features/invite-page";
+import { OutletTablesPage } from "../features/outlet-tables-page";
 import {
   AccountsPage,
   AccountTypesPage,
@@ -64,18 +45,39 @@ import {
   AuditLogsPage,
   CashBankPage
 } from "../features/pages";
+import { useHeaderAlerts } from "../hooks/use-header-alerts";
+import { useModules } from "../hooks/use-modules";
+import { ApiError, getApiBaseUrl } from "../lib/api-client";
+import { setupAutoSync } from "../lib/auto-sync";
+import { setupMasterDataRefresh } from "../lib/cache-service";
+import {
+  clearAccessToken,
+  fetchCurrentUser,
+  getStoredAccessToken,
+  login,
+  loginWithGoogle,
+  refreshAccessToken,
+  type SessionUser
+} from "../lib/session";
 import { PublicStaticPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
 import { SyncHistoryPage } from "../features/sync-history-page";
 import { PWASettingsPage } from "../features/pwa-settings-page";
-import { OutletTablesPage } from "../features/outlet-tables-page";
 import { ReservationsPage } from "../features/reservations-page";
 import { ReservationCalendarPage } from "../features/reservation-calendar-page";
 import { TableBoardPage } from "../features/table-board-page";
 import { ResetPasswordPage } from "../features/reset-password-page";
-import { InvitePage } from "../features/invite-page";
 import { VerifyEmailPage } from "../features/verify-email-page";
-import { ForgotPasswordPage } from "../features/forgot-password-page";
+
+import { AppLayout } from "./layout";
+import {
+  APP_ROUTES,
+  DEFAULT_ROUTE_PATH,
+  findRoute,
+  normalizeHashPath,
+  userCanAccessRoute,
+  filterRoutesByModules
+} from "./routes";
 
 type SessionStatus = "loading" | "anonymous" | "authenticated";
 
@@ -138,7 +140,19 @@ function toTitleCaseSlug(slug: string): string {
     .join(" ");
 }
 
+function RedirectToPath(props: { targetPath: string; user: SessionUser; accessToken: string }) {
+  useEffect(() => {
+    globalThis.location.hash = `#${props.targetPath}`;
+  }, [props.targetPath]);
+  return <ItemsPage user={props.user} accessToken={props.accessToken} />;
+}
+
 function RouteScreen(props: { path: string; user: SessionUser; accessToken: string }) {
+  // Handle legacy /items-prices route redirect
+  if (props.path === "/items-prices") {
+    return <RedirectToPath targetPath="/items" user={props.user} accessToken={props.accessToken} />;
+  }
+
   if (props.path === "/users") {
     return <UsersPage user={props.user} accessToken={props.accessToken} />;
   }
@@ -153,12 +167,6 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/outlets") {
     return <OutletsPage user={props.user} accessToken={props.accessToken} />;
-  }
-  // Handle legacy route redirect
-  if (props.path === "/items-prices") {
-    // Redirect to new /items page
-    window.location.hash = "#/items";
-    return <ItemsPage user={props.user} accessToken={props.accessToken} />;
   }
   if (props.path === "/items") {
     return <ItemsPage user={props.user} accessToken={props.accessToken} />;
@@ -265,8 +273,7 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   if (props.path === "/cash-bank") {
     return <CashBankPage user={props.user} accessToken={props.accessToken} />;
   }
-  // Fallback: redirect to items page
-  window.location.hash = "#/items";
+  // Fallback: render items page
   return <ItemsPage user={props.user} accessToken={props.accessToken} />;
 }
 

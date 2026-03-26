@@ -5,6 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+
 import { canDeleteFailedOutboxItem, canShowSyncQueueActions, type OutboxItem } from "./outbox-guards";
 
 const makeItem = (overrides: Partial<OutboxItem> = {}): OutboxItem => ({

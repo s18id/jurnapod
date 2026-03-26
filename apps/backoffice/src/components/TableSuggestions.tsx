@@ -1,18 +1,17 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { Stack, Card, Group, Text, Badge, Button, Alert } from "@mantine/core";
 import type { TableSuggestion } from "@jurnapod/shared";
+import { Stack, Card, Group, Text, Badge, Button, Alert } from "@mantine/core";
 
 export type TableSuggestionsProps = {
   suggestions: TableSuggestion[];
-  guestCount: number;
   onSelect: (tableIds: number[]) => void;
   loading?: boolean;
 };
 
 export function TableSuggestions(props: TableSuggestionsProps) {
-  const { suggestions, guestCount, onSelect, loading } = props;
+  const { suggestions, onSelect, loading } = props;
 
   if (suggestions.length === 0 && !loading) {
     return (

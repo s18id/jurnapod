@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ReactNode } from "react";
 import { Card, SimpleGrid, Text } from "@mantine/core";
+import type { ReactNode } from "react";
 
 export type StatTileTone = "default" | "positive" | "negative";
 

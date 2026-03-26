@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { describe, it, mock } from "node:test";
 import assert from "node:assert";
+import { describe, it } from "node:test";
 
 // Task 2.3: Integration test confirming role/outlet state unchanged after profile-only edit
 
@@ -100,8 +100,6 @@ describe("Account Edit - Profile-Only Mutations", () => {
     
     // Account edit scenario: email changed, status same
     const emailChanged = newEmail !== targetUser.email;
-    const statusChanged = false;
-    
     // Build update payload (from handleSubmit logic for account-edit)
     const updatePayload: { email?: string } = {};
     if (emailChanged) {
@@ -204,7 +202,6 @@ describe("Access Edit - Role/Outlet Separation", () => {
     // When editing access, we should call updateUserRoles
     // NOT updateUser (which is for profile fields)
     
-    const targetUser = createMockUser();
     const newGlobalRoles = ["OWNER"];
     
     // Access edit payload structure

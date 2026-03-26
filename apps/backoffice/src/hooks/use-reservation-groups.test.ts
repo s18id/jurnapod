@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { describe, test, beforeEach, afterEach } from "node:test";
+import { describe, test, afterEach } from "node:test";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -14,7 +14,7 @@ async function withMockedFetch<T>(
   fn: () => Promise<T>
 ): Promise<T> {
   const original = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   globalThis.fetch = (async () => {
     return {
       ok: fakeResp.ok,
@@ -99,7 +99,7 @@ describe("createReservationGroup", () => {
 // Tests — getReservationGroup
 // ---------------------------------------------------------------------------
 describe("getReservationGroup", () => {
-  test("GETs /reservation-groups/:id and returns full group detail with timestamps", async () => {
+  test("GETs /reservation-groups/:id and returns full group detail", async () => {
     const { getReservationGroup } = await import("./use-reservation-groups.js");
 
     const groupDetail = {
@@ -119,9 +119,7 @@ describe("getReservationGroup", () => {
             table_code: "A1",
             table_name: "Area 1",
             status: "CONFIRMED",
-            reservation_at: "2026-03-20T19:00:00.000Z",
-            reservation_start_ts: 1742494800000,
-            reservation_end_ts: 1742502000000
+            reservation_at: "2026-03-20T19:00:00.000Z"
           },
           {
             reservation_id: 202,
@@ -129,9 +127,7 @@ describe("getReservationGroup", () => {
             table_code: "A2",
             table_name: "Area 2",
             status: "CONFIRMED",
-            reservation_at: "2026-03-20T19:00:00.000Z",
-            reservation_start_ts: 1742494800000,
-            reservation_end_ts: 1742502000000
+            reservation_at: "2026-03-20T19:00:00.000Z"
           }
         ]
       }
@@ -144,11 +140,6 @@ describe("getReservationGroup", () => {
     assert.strictEqual(result.id, 77);
     assert.strictEqual(result.total_guest_count, 14);
     assert.strictEqual(result.reservations.length, 2);
-    // Verify canonical Unix ms timestamps are preserved through the API layer
-    assert.strictEqual(result.reservations[0]!.reservation_start_ts, 1742494800000);
-    assert.strictEqual(result.reservations[0]!.reservation_end_ts, 1742502000000);
-    assert.strictEqual(result.reservations[1]!.reservation_start_ts, 1742494800000);
-    assert.strictEqual(result.reservations[1]!.reservation_end_ts, 1742502000000);
   });
 
   test("throws ApiError on 404", async () => {

@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, type FormEvent } from "react";
 import {
   Button,
   Card,
@@ -15,6 +14,7 @@ import {
   Title,
   Anchor
 } from "@mantine/core";
+import { useState, type FormEvent } from "react";
 
 type LoginPageProps = {
   isLoading: boolean;

@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useMemo, useCallback } from "react";
 import {
   Stack,
   Card,
@@ -37,21 +36,23 @@ import {
   IconTools,
   IconPackage,
   IconBarcode,
-  IconPhoto,
 } from "@tabler/icons-react";
-import { apiRequest } from "../lib/api-client";
-import { useItems, type Item, type ItemType } from "../hooks/use-items";
+import { useState, useMemo, useCallback } from "react";
+
+import { ImportWizard, type ImportWizardConfig, type ImportPlanRow, type ImportResult } from "../components/import-wizard";
+import { useAccounts } from "../hooks/use-accounts";
 import { useItemGroups } from "../hooks/use-item-groups";
 import { useItemVariantStats } from "../hooks/use-item-variant-stats";
-import { useAccounts } from "../hooks/use-accounts";
-import { ImportWizard, type ImportWizardConfig, type ImportPlanRow, type ImportResult } from "../components/import-wizard";
+import { useItems, type Item, type ItemType } from "../hooks/use-items";
+import { apiRequest } from "../lib/api-client";
 import { downloadCsv, rowsToCsv } from "../lib/import/csv";
 import type { SessionUser } from "../lib/session";
+
+import { ImageUpload } from "./image-upload";
+import { ItemBarcodeManager } from "./item-barcode-manager";
+import { ItemImageGallery } from "./item-image-gallery";
 import { RecipeCompositionEditor } from "./recipe-composition-editor";
 import { VariantManager } from "./variant-manager";
-import { ItemBarcodeManager } from "./item-barcode-manager";
-import { ImageUpload } from "./image-upload";
-import { ItemImageGallery } from "./item-image-gallery";
 
 interface ItemsPageProps {
   user: SessionUser;
@@ -84,7 +85,6 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
     loading: itemsLoading,
     error: itemsError,
     refresh: refreshItems,
-    itemMap,
   } = useItems({ user, accessToken });
 
   const {

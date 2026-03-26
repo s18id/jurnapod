@@ -1,7 +1,15 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  OutletTableResponse,
+  ReservationCreateRequest,
+  ReservationGroupDetail,
+  ReservationRow,
+  ReservationStatus,
+  ReservationUpdateRequest,
+  TableSuggestion
+} from "@jurnapod/shared";
 import {
   Alert,
   Badge,
@@ -22,29 +30,14 @@ import {
   Title
 } from "@mantine/core";
 import { DatePickerInput } from "@mantine/dates";
-import type {
-  OutletTableResponse,
-  ReservationCreateRequest,
-  ReservationGroupDetail,
-  ReservationRow,
-  ReservationStatus,
-  ReservationUpdateRequest,
-  TableSuggestion
-} from "@jurnapod/shared";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
-import { apiRequest } from "../lib/api-client";
-import {
-  getCheckInTargetStatus as getCheckInTargetStatusShared,
-  getReservationStatusLabel,
-  RESERVATION_STATUS_META,
-  RESERVATION_STATUS_OPTIONS
-} from "../lib/reservation-status";
-import { getStoredCompanyTimezone, refreshSessionUser, type SessionUser } from "../lib/session";
-import { useOutletsFull } from "../hooks/use-outlets";
+import { TableMultiSelect } from "../components/TableMultiSelect";
+import { TableSuggestions } from "../components/TableSuggestions";
 import { useOutletTables } from "../hooks/use-outlet-tables";
-import { createReservation, updateReservation } from "../hooks/use-reservations";
-import { cancelReservationGroup, createReservationGroup, getReservationGroup, updateReservationGroup, useTableSuggestions } from "../hooks/use-reservation-groups";
+import { useOutletsFull } from "../hooks/use-outlets";
 import {
   DEFAULT_RESERVATION_DURATION_MINUTES,
   buildDailyUtilization,
@@ -56,8 +49,16 @@ import {
   type ReservationCalendarViewMode,
   useReservationCalendar
 } from "../hooks/use-reservation-calendar";
-import { TableMultiSelect } from "../components/TableMultiSelect";
-import { TableSuggestions } from "../components/TableSuggestions";
+import { cancelReservationGroup, createReservationGroup, getReservationGroup, updateReservationGroup, useTableSuggestions } from "../hooks/use-reservation-groups";
+import { createReservation, updateReservation } from "../hooks/use-reservations";
+import { apiRequest } from "../lib/api-client";
+import {
+  getCheckInTargetStatus as getCheckInTargetStatusShared,
+  getReservationStatusLabel,
+  RESERVATION_STATUS_META,
+  RESERVATION_STATUS_OPTIONS
+} from "../lib/reservation-status";
+import { getStoredCompanyTimezone, refreshSessionUser, type SessionUser } from "../lib/session";
 
 type ReservationCalendarPageProps = {
   user: SessionUser;
@@ -363,25 +364,6 @@ function createFormFromReservation(row: ReservationRow, defaultDurationMinutes?:
   };
 }
 
-function formatTimeRange(
-  row: ReservationRow,
-  defaultDurationMinutes?: number | null,
-  timeZone?: string | null
-): string {
-  const start = new Date(row.reservation_at);
-  const end = getReservationEndAt(row, defaultDurationMinutes);
-  const formatOptions: Intl.DateTimeFormatOptions = {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: timeZone ?? undefined
-  };
-  return `${start.toLocaleTimeString([], formatOptions)} - ${end.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: timeZone ?? undefined
-  })}`;
-}
-
 function formatMinuteLabel(minute: number): string {
   const hours = Math.floor(minute / 60)
     .toString()
@@ -471,7 +453,6 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
 
   const [detailReservation, setDetailReservation] = useState<ReservationRow | null>(null);
   const [detailGroup, setDetailGroup] = useState<ReservationGroupDetail | null>(null);
-  const [loadingDetailGroup, setLoadingDetailGroup] = useState(false);
   const [reminderNotice, setReminderNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -489,7 +470,6 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       return;
     }
 
-    setLoadingDetailGroup(true);
     setDetailGroup(null);
 
     getReservationGroup(detailReservation.reservation_group_id, accessToken)
@@ -499,9 +479,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       .catch(() => {
         setDetailGroup(null);
       })
-      .finally(() => {
-        setLoadingDetailGroup(false);
-      });
+      .finally(() => undefined);
   }, [detailReservation?.reservation_group_id, accessToken]);
 
   const touchStartX = useRef<number | null>(null);
@@ -748,9 +726,9 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
         const groupDetail = await getReservationGroup(row.reservation_group_id, accessToken);
         const firstReservation = groupDetail.reservations[0];
         if (firstReservation) {
-          // Calculate duration from timestamps
-          const startTs = firstReservation.reservation_start_ts ?? new Date(firstReservation.reservation_at).getTime();
-          const endTs = firstReservation.reservation_end_ts ?? startTs + (defaultDurationMinutes ?? 120) * 60 * 1000;
+          // Calculate duration from reservation_at (API only provides reservation_at, not _ts fields)
+          const startTs = new Date(firstReservation.reservation_at).getTime();
+          const endTs = startTs + (defaultDurationMinutes ?? 120) * 60 * 1000;
           const durationMinutes = Math.round((endTs - startTs) / 60 / 1000);
 
           setFormMode("edit-group");
@@ -1393,7 +1371,6 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
               </Text>
               <TableSuggestions
                 suggestions={suggestions}
-                guestCount={formState.guestCount}
                 onSelect={setSelectedTableIds}
               />
               <TableMultiSelect

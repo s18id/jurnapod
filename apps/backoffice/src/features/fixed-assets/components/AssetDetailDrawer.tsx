@@ -54,13 +54,6 @@ type LedgerResponse = {
   events: FixedAssetEvent[];
 };
 
-type SessionUser = {
-  id: number;
-  company_id: number;
-  outlets: Array<{ id: number; code: string; name: string }>;
-  roles: string[];
-};
-
 type AssetDetailDrawerProps = {
   opened: boolean;
   onClose: () => void;

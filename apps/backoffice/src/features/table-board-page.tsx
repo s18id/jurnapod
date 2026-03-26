@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useMemo, useState } from "react";
+import { TableOccupancyStatus } from "@jurnapod/shared";
 import {
   Alert,
   Badge,
@@ -21,14 +21,15 @@ import {
   TextInput,
   Title
 } from "@mantine/core";
-import { TableOccupancyStatus } from "@jurnapod/shared";
-import { PageCard } from "../components/PageCard";
+import { useMemo, useState } from "react";
+
 import { FilterBar } from "../components/FilterBar";
+import { PageCard } from "../components/PageCard";
 import { useOutletsFull } from "../hooks/use-outlets";
 import { createReservation } from "../hooks/use-reservations";
+import { type TableBoardRow, useTableBoard } from "../hooks/use-table-board";
 import { apiRequest } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
-import { type TableBoardRow, useTableBoard } from "../hooks/use-table-board";
 
 export type BoardStatusFilter =
   | "ALL"

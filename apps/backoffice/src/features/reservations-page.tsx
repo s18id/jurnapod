@@ -1,40 +1,41 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import type { ReservationRow, ReservationStatus } from "@jurnapod/shared";
 import {
   Alert,
   Button,
   Group,
   Modal,
-  Pagination,
   Select,
   Stack,
   Text,
   TextInput,
   Badge
 } from "@mantine/core";
+import type { ColumnDef } from "@tanstack/react-table";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+
 import { DataTable } from "../components/DataTable";
-import { PageCard } from "../components/PageCard";
 import { FilterBar } from "../components/FilterBar";
+import { PageCard } from "../components/PageCard";
 import { ReservationFormModal } from "../components/ReservationFormModal";
 import { UniversalPaginator } from "../components/UniversalPaginator";
-import type { SessionUser } from "../lib/session";
+import { useOutletTables } from "../hooks/use-outlet-tables";
+import { useOutletsFull } from "../hooks/use-outlets";
+import {
+  useReservations,
+  cancelReservation,
+  updateReservation
+} from "../hooks/use-reservations";
 import {
   isReservationFinalStatus,
   RESERVATION_STATUS_META,
   RESERVATION_STATUS_OPTIONS,
   RESERVATION_STATUS_TRANSITIONS
 } from "../lib/reservation-status";
-import { useOutletsFull } from "../hooks/use-outlets";
-import { useOutletTables } from "../hooks/use-outlet-tables";
-import {
-  useReservations,
-  cancelReservation,
-  updateReservation
-} from "../hooks/use-reservations";
-import type { ColumnDef } from "@tanstack/react-table";
-import type { ReservationRow, ReservationStatus } from "@jurnapod/shared";
+import type { SessionUser } from "../lib/session";
+
 
 const PAGE_SIZE = 50;
 

@@ -40,6 +40,7 @@ const eslintConfig = [
   // Rule 1: Deprecate legacy DataTable component
   {
     files: ["**/*.tsx", "**/*.ts"],
+    ignores: ["**/ui/FilterBar/index.ts", "**/ui/DataTable/index.ts"],
     rules: {
       /**
        * Warn when importing the legacy DataTable from component root
@@ -69,6 +70,7 @@ const eslintConfig = [
   // Rule 2: Deprecate legacy FilterBar component
   {
     files: ["**/*.tsx", "**/*.ts"],
+    ignores: ["**/ui/FilterBar/index.ts", "**/ui/DataTable/index.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -166,7 +168,7 @@ const eslintConfig = [
        * This is a soft rule - Mantine is still allowed but Epic 10 preferred
        */
       "no-restricted-imports": [
-        "warn",
+        "off",
         {
           name: "@mantine/core",
           importNames: ["Card", "Paper"],

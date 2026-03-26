@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -14,10 +13,12 @@ import {
   TextInput,
   Title
 } from "@mantine/core";
-import type { SessionUser } from "../lib/session";
+import { useEffect, useState } from "react";
+
+import { OfflinePage } from "../components/offline-page";
 import { apiRequest, ApiError } from "../lib/api-client";
 import { useOnlineStatus } from "../lib/connection";
-import { OfflinePage } from "../components/offline-page";
+import type { SessionUser } from "../lib/session";
 
 type ModulesPageProps = {
   user: SessionUser;
@@ -537,7 +538,7 @@ export function ModulesPage({ accessToken }: ModulesPageProps) {
                     </Group>
                     <Text size="xs" c="dimmed">
                       Keys use dot notation (e.g. tax.rate). Values accept JSON literals like true, 10,
-                      ["CASH"], or a JSON object and fall back to strings when invalid.
+                      [&quot;CASH&quot;], or a JSON object and fall back to strings when invalid.
                     </Text>
                     {row.configPairs.length === 0 ? (
                       <Text size="xs" c="dimmed">

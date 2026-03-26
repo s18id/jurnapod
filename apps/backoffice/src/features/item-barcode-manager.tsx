@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useCallback, useEffect } from "react";
 import { Stack, TextInput, Select, Button, Text, Badge, Group, Alert } from "@mantine/core";
 import { IconBarcode, IconCheck, IconTrash, IconAlertCircle } from "@tabler/icons-react";
+import { useState, useCallback, useEffect } from "react";
+
 import { apiRequest, ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 
@@ -27,7 +28,7 @@ const barcodeTypeOptions = [
 ];
 
 export function ItemBarcodeManager({
-  user,
+  user: _user,
   accessToken,
   itemId,
   itemName,
@@ -128,7 +129,7 @@ export function ItemBarcodeManager({
       setBarcodeType('CUSTOM');
       setSuccess("Barcode removed successfully");
       onBarcodeUpdate?.();
-    } catch (err) {
+    } catch {
       setError("Failed to remove barcode");
     } finally {
       setLoading(false);

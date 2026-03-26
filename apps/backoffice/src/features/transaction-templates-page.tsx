@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
-import type { SessionUser } from "../lib/session";
-import { useAccounts } from "../hooks/use-accounts";
 import type { AccountResponse } from "@jurnapod/shared";
+import { useEffect, useMemo, useState } from "react";
+
+import { useAccounts } from "../hooks/use-accounts";
+import type { SessionUser } from "../lib/session";
 
 type TransactionTemplatesPageProps = {
   user: SessionUser;
@@ -107,8 +108,21 @@ export function TransactionTemplatesPage({ user, accessToken }: TransactionTempl
   const companyId = user.company_id;
   const accountsFilter = useMemo(() => ({ is_active: true }), []);
   const { data: accounts } = useAccounts(companyId, accessToken, accountsFilter);
+  const storageKey = useMemo(() => getStorageKey(companyId), [companyId]);
 
-  const [templates, setTemplates] = useState<TransactionTemplate[]>([]);
+  const [templates, setTemplates] = useState<TransactionTemplate[]>(() => {
+    const stored = globalThis.localStorage.getItem(getStorageKey(companyId));
+    if (!stored) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(stored) as TransactionTemplate[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
   const [lines, setLines] = useState<TemplateLine[]>([
@@ -124,23 +138,8 @@ export function TransactionTemplatesPage({ user, accessToken }: TransactionTempl
   const difference = totalDebit - totalCredit;
 
   useEffect(() => {
-    const stored = globalThis.localStorage.getItem(getStorageKey(companyId));
-    if (!stored) {
-      return;
-    }
-    try {
-      const parsed = JSON.parse(stored) as TransactionTemplate[];
-      if (Array.isArray(parsed)) {
-        setTemplates(parsed);
-      }
-    } catch {
-      setTemplates([]);
-    }
-  }, [companyId]);
-
-  useEffect(() => {
-    globalThis.localStorage.setItem(getStorageKey(companyId), JSON.stringify(templates));
-  }, [companyId, templates]);
+    globalThis.localStorage.setItem(storageKey, JSON.stringify(templates));
+  }, [storageKey, templates]);
 
   function updateLine(id: string, field: keyof TemplateLine, value: any) {
     setLines(lines.map((line) => (line.id === id ? { ...line, [field]: value } : line)));
@@ -276,10 +275,11 @@ export function TransactionTemplatesPage({ user, accessToken }: TransactionTempl
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "16px", marginBottom: "16px" }}>
             <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+              <label htmlFor="template-name" style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
                 Template Name *
               </label>
               <input
+                id="template-name"
                 type="text"
                 value={templateName}
                 onChange={(e) => setTemplateName(e.target.value)}
@@ -289,10 +289,11 @@ export function TransactionTemplatesPage({ user, accessToken }: TransactionTempl
               />
             </div>
             <div>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+              <label htmlFor="template-description" style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
                 Description
               </label>
               <input
+                id="template-description"
                 type="text"
                 value={templateDescription}
                 onChange={(e) => setTemplateDescription(e.target.value)}

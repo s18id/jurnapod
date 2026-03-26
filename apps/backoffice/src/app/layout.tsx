@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ReactNode } from "react";
 import {
   ActionIcon,
   AppShell,
@@ -19,12 +18,16 @@ import {
   Title,
   useMantineTheme
 } from "@mantine/core";
-import { IconBell, IconRefresh, IconAlertTriangle } from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
-import type { AppRoute } from "./routes";
-import type { SessionUser } from "../lib/session";
-import type { OutboxItem, AlertReadHistory } from "../lib/offline-db";
+import { IconBell, IconRefresh, IconAlertTriangle } from "@tabler/icons-react";
+import type { ReactNode } from "react";
+
+
 import { useOnlineStatus } from "../lib/connection";
+import type { OutboxItem, AlertReadHistory } from "../lib/offline-db";
+import type { SessionUser } from "../lib/session";
+
+import type { AppRoute } from "./routes";
 
 type AppLayoutProps = {
   user: SessionUser;

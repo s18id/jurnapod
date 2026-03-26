@@ -12,7 +12,7 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach } from "node:test";
+import { describe, it } from "node:test";
 
 import {
   BREADCRUMB_ROUTES,
@@ -23,7 +23,6 @@ import {
   normalizeRoutePath,
   type BreadcrumbRoute,
 } from "./use-breadcrumbs-logic";
-import type { BreadcrumbItem } from "../components/ui/PageHeader/PageHeader";
 
 // Helper to create mock URLSearchParams
 function createMockSearchParams(queryString: string): URLSearchParams {

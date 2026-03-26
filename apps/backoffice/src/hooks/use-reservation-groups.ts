@@ -1,8 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useCallback, useEffect } from "react";
-import { apiRequest } from "../lib/api-client";
 import type {
   ReservationGroupCreateRequest,
   ReservationGroupDetail,
@@ -10,6 +8,9 @@ import type {
   TableSuggestion,
   TableSuggestionQuery
 } from "@jurnapod/shared";
+import { useState, useCallback, useEffect } from "react";
+
+import { apiRequest } from "../lib/api-client";
 
 /**
  * Create a multi-table reservation group

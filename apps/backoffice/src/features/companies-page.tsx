@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useMemo, useState } from "react";
+import type { CompanyResponse } from "@jurnapod/shared";
 import {
   ActionIcon,
   Alert,
@@ -20,7 +20,18 @@ import {
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { IconEye } from "@tabler/icons-react";
-import { storeCompanyTimezone, type SessionUser } from "../lib/session";
+import { useMemo, useState } from "react";
+
+import { FilterBar } from "../components/FilterBar";
+import { PageCard } from "../components/PageCard";
+import {
+  DataTable,
+  type DataTableColumnDef,
+  type PaginationState,
+  type SortState,
+  type RowSelectionState,
+} from "../components/ui/DataTable";
+import { TIMEZONE_OPTIONS } from "../constants/timezones";
 import {
   useCompanies,
   createCompany,
@@ -29,17 +40,8 @@ import {
   reactivateCompany
 } from "../hooks/use-companies";
 import { ApiError } from "../lib/api-client";
-import {
-  DataTable,
-  type DataTableColumnDef,
-  type PaginationState,
-  type SortState,
-  type RowSelectionState,
-} from "../components/ui/DataTable";
-import { FilterBar } from "../components/FilterBar";
-import { PageCard } from "../components/PageCard";
-import { TIMEZONE_OPTIONS } from "../constants/timezones";
-import type { CompanyResponse } from "@jurnapod/shared";
+import { storeCompanyTimezone, type SessionUser } from "../lib/session";
+
 
 type CompaniesPageProps = {
   user: SessionUser;

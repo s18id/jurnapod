@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { Stack, Group, Checkbox, Text, Badge, Card, Alert } from "@mantine/core";
 import type { OutletTableResponse } from "@jurnapod/shared";
+import { Stack, Group, Checkbox, Text, Badge, Card, Alert } from "@mantine/core";
 
 export type TableMultiSelectProps = {
   availableTables: OutletTableResponse[];

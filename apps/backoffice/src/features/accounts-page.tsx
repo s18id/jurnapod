@@ -1,7 +1,12 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useMemo, useEffect } from "react";
+import type {
+  AccountResponse,
+  AccountTreeNode,
+  NormalBalance,
+  ReportGroup
+} from "@jurnapod/shared";
 import {
   ActionIcon,
   Alert,
@@ -26,25 +31,21 @@ import {
   Title
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import type { SessionUser } from "../lib/session";
-import { useAccountTree, useAccountTypes } from "../hooks/use-accounts";
-import {
+import { useState, useMemo, useEffect } from "react";
+
+import { OfflinePage } from "../components/offline-page";
+import { StaleDataWarning } from "../components/stale-data-warning";
+import { useAccountTree, useAccountTypes ,
   createAccount,
   updateAccount,
   deactivateAccount,
   reactivateAccount
 } from "../hooks/use-accounts";
 import { ApiError } from "../lib/api-client";
-import { StaleDataWarning } from "../components/stale-data-warning";
 import { buildCacheKey } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
-import { OfflinePage } from "../components/offline-page";
-import type {
-  AccountResponse,
-  AccountTreeNode,
-  NormalBalance,
-  ReportGroup
-} from "@jurnapod/shared";
+import type { SessionUser } from "../lib/session";
+
 
 type AccountsPageProps = {
   user: SessionUser;
@@ -117,15 +118,6 @@ export function AccountsPage(props: AccountsPageProps) {
     props.accessToken,
     { is_active: undefined }
   );
-
-  if (!isOnline) {
-    return (
-      <OfflinePage
-        title="Connect to Manage Master Data"
-        message="Chart of accounts changes require a connection."
-      />
-    );
-  }
 
   const flatAccounts = useMemo(() => {
     if (!tree) return [];
@@ -248,6 +240,15 @@ export function AccountsPage(props: AccountsPageProps) {
     () => collectExpandableNodeIds(filteredTree),
     [filteredTree]
   );
+
+  if (!isOnline) {
+    return (
+      <OfflinePage
+        title="Connect to Manage Master Data"
+        message="Chart of accounts changes require a connection."
+      />
+    );
+  }
 
   function handleExpandAll() {
     setExpandedNodes(new Set(expandableFilteredNodeIds));
@@ -582,7 +583,7 @@ export function AccountsPage(props: AccountsPageProps) {
               <div>
                 <Title order={2}>Chart of Accounts</Title>
                 <Text c="dimmed" size="sm">
-                  Manage your company's chart of accounts for financial reporting.
+                  Manage your company&apos;s chart of accounts for financial reporting.
                 </Text>
               </div>
               <Button onClick={openCreateForm}>

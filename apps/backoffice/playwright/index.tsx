@@ -4,8 +4,8 @@
 // Playwright Component Test setup file
 // This file is loaded before each component test
 
-import { beforeMount } from "@playwright/experimental-ct-react/hooks";
 import { MantineProvider } from "@mantine/core";
+import { beforeMount } from "@playwright/experimental-ct-react/hooks";
 
 import "@mantine/core/styles.css";
 

@@ -1,14 +1,15 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useCallback, useEffect, useState } from "react";
-import { apiRequest } from "../lib/api-client";
 import type {
   OutletTableResponse,
   OutletTableCreateRequest,
   OutletTableBulkCreateRequest,
   OutletTableUpdateRequest
 } from "@jurnapod/shared";
+import { useCallback, useEffect, useState } from "react";
+
+import { apiRequest } from "../lib/api-client";
 
 /**
  * Hook to fetch outlet tables for a specific outlet

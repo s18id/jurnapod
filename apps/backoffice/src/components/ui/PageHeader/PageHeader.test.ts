@@ -16,8 +16,8 @@
 // We test pure logic functions, component contract/interface behavior,
 // and exported utility functions.
 
-import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert";
+import { describe, it } from "node:test";
 
 // Import from the actual component to test real logic
 import {
@@ -316,7 +316,6 @@ describe("PageHeader - Responsive Layout Logic", () => {
 // ============================================================================
 
 describe("PageHeader - Props Interface", () => {
-  const maxTitleChars = 80;
 
   it("should accept title as required string", () => {
     const props: PageHeaderProps = {
@@ -1025,9 +1024,6 @@ describe("PageHeader - Mantine v7 Breakpoints", () => {
   });
 
   it("should use sm breakpoint for breadcrumb visibility boundary", () => {
-    // Breadcrumbs should be visible from sm (36em/576px) onwards
-    const breadcrumbBoundaryEm = 36;
-    
     // Below boundary - breadcrumbs hidden
     assert.strictEqual(shouldShowBreadcrumbs(35), false);
     
@@ -1036,9 +1032,6 @@ describe("PageHeader - Mantine v7 Breakpoints", () => {
   });
 
   it("should use sm breakpoint for mobile/desktop layout boundary", () => {
-    // Mobile layout below sm, desktop from sm onwards
-    const layoutBoundaryEm = 36;
-    
     // Below boundary - mobile layout
     assert.strictEqual(isMobileLayout(35), true);
     

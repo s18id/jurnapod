@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
@@ -17,11 +16,13 @@ import {
   Title,
   Select
 } from "@mantine/core";
-import type { SessionUser } from "../lib/session";
-import { apiRequest, ApiError } from "../lib/api-client";
-import { useOnlineStatus } from "../lib/connection";
+import { useEffect, useMemo, useState } from "react";
+
 import { OfflinePage } from "../components/offline-page";
 import { useAccounts } from "../hooks/use-accounts";
+import { apiRequest, ApiError } from "../lib/api-client";
+import { useOnlineStatus } from "../lib/connection";
+import type { SessionUser } from "../lib/session";
 
 type TaxRatesPageProps = {
   user: SessionUser;

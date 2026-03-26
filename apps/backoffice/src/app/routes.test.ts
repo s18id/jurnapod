@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+
 import { APP_ROUTES, filterRoutesByModules, findRoute, normalizeHashPath, userCanAccessRoute, DEFAULT_ROUTE_PATH } from "./routes";
 
 describe("table-board route", () => {
