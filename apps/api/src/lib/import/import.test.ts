@@ -662,7 +662,7 @@ describe('Batch Processing', () => {
         },
       };
       
-      const result = await processBatches(items, processor, { batchSize: 2 });
+      const result = await processBatches(items, processor, { companyId: 1, batchSize: 2 });
       
       assert.equal(result.processed.length, 5);
       assert.equal(result.totalErrors, 0);
@@ -698,6 +698,7 @@ describe('Batch Processing', () => {
       };
       
       const result = await processBatches(items, processor, {
+        companyId: 1,
         batchSize: 2,
         continueOnError: true,
       });
@@ -726,6 +727,7 @@ describe('Batch Processing', () => {
       };
       
       const result = await processBatches(items, processor, {
+        companyId: 1,
         batchSize: 2,
         maxErrors: 3,
         continueOnError: true,
@@ -752,6 +754,7 @@ describe('Batch Processing', () => {
       };
       
       await processBatches(items, processor, {
+        companyId: 1,
         batchSize: 2,
         onProgress: (p) => progressCalls.push(p.processedRows),
       });
@@ -776,6 +779,7 @@ describe('Batch Processing', () => {
       };
       
       await processBatches(items, processor, {
+        companyId: 1,
         batchSize: 2,
         onProgress: (p) => {
           lastBatchInfo = { currentBatch: p.currentBatch, totalBatches: p.totalBatches };
@@ -799,7 +803,7 @@ describe('Batch Processing', () => {
         }
       );
       
-      const result = await processBatches(items, processor, { batchSize: 2 });
+      const result = await processBatches(items, processor, { companyId: 1, batchSize: 2 });
       
       assert.equal(result.processed.length, 3);
       assert.deepEqual(processed, [1, 2, 3]);
@@ -817,7 +821,7 @@ describe('Batch Processing', () => {
         }
       );
       
-      const result = await processBatches(items, processor, { batchSize: 2 });
+      const result = await processBatches(items, processor, { companyId: 1, batchSize: 2 });
       
       assert.equal(result.processed.length, 1);
       assert.equal(result.totalErrors, 1);
@@ -943,7 +947,7 @@ describe('Import Framework Integration', () => {
     const batchResult = await processBatches(
       validationResult.validRows.map((r) => r.data),
       processor,
-      { batchSize: 2 }
+      { companyId: 1, batchSize: 2 }
     );
     
     assert.equal(batchResult.processed.length, 3);
@@ -996,7 +1000,7 @@ describe('Performance', () => {
       },
     };
     
-    const result = await processBatches(items, processor, { batchSize: 100 });
+    const result = await processBatches(items, processor, { companyId: 1, batchSize: 100 });
     
     const duration = Date.now() - startTime;
     

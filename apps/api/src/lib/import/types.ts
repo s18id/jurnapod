@@ -260,6 +260,14 @@ export interface ImportValidator<T = unknown> {
  * Options for batch processing
  */
 export interface BatchOptions {
+  /** Company ID for tenant isolation (required) */
+  companyId: number;
+  /** Outlet ID if applicable */
+  outletId?: number;
+  /** User performing the import */
+  userId?: number;
+  /** Import session ID for audit tracking */
+  importSessionId?: string;
   /** Number of rows per batch (default: 100) */
   batchSize?: number;
   /** Maximum number of errors before aborting (default: unlimited) */

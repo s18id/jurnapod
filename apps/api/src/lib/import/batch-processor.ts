@@ -45,9 +45,13 @@ const DEFAULT_CONTINUE_ON_ERROR = true;
 export async function processBatches<T>(
   items: T[],
   processor: BatchProcessor<T>,
-  options: BatchOptions = {}
+  options: BatchOptions
 ): Promise<BatchProcessingResult<T>> {
   const {
+    companyId,
+    outletId,
+    userId,
+    importSessionId,
     batchSize = DEFAULT_BATCH_SIZE,
     maxErrors = DEFAULT_MAX_ERRORS,
     continueOnError = DEFAULT_CONTINUE_ON_ERROR,
@@ -64,9 +68,12 @@ export async function processBatches<T>(
   let errorsEncountered = 0;
   let aborted = false;
 
-  // Create batch context (connection will be acquired per batch)
+  // Create batch context with tenant isolation
   const context: BatchContext = {
-    companyId: 0, // Will be set by caller
+    companyId,
+    outletId,
+    userId,
+    importSessionId,
     startTime,
   };
 
@@ -180,10 +187,14 @@ export async function processBatchesWithTransaction<T>(
   items: T[],
   processor: BatchProcessor<T>,
   context: BatchContext,
-  options: BatchOptions = {}
+  options: BatchOptions
 ): Promise<BatchProcessingResult<T>> {
   const pool = getDbPool();
   const {
+    companyId,
+    outletId,
+    userId,
+    importSessionId,
     batchSize = DEFAULT_BATCH_SIZE,
     maxErrors = DEFAULT_MAX_ERRORS,
     continueOnError = DEFAULT_CONTINUE_ON_ERROR,
