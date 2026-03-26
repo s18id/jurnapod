@@ -45,6 +45,10 @@ export interface ExportFilters {
   outletId?: number;
   viewMode?: "defaults" | "outlet";
   scopeFilter?: "override" | "default" | null;
+  /** Start date for date range filter (ISO string) */
+  dateFrom?: string;
+  /** End date for date range filter (ISO string) */
+  dateTo?: string;
 }
 
 /**
@@ -301,6 +305,8 @@ export function useExport({ accessToken }: UseExportProps): UseExportReturn {
       if (filters.outletId) params.set("outlet_id", String(filters.outletId));
       if (filters.viewMode) params.set("view_mode", filters.viewMode);
       if (filters.scopeFilter) params.set("scope_filter", filters.scopeFilter);
+      if (filters.dateFrom) params.set("date_from", filters.dateFrom);
+      if (filters.dateTo) params.set("date_to", filters.dateTo);
 
       setProgress({ phase: "streaming" });
 
@@ -448,7 +454,7 @@ interface UseExportDialogReturn {
   setFilters: (filters: ExportFilters) => void;
   
   // Execution
-  export: () => Promise<ExportResult>;
+  export: (overrideFilters?: Partial<ExportFilters>) => Promise<ExportResult>;
   loading: boolean;
   progress: ExportProgress | null;
   error: string | null;
@@ -500,10 +506,15 @@ export function useExportDialog({
     saveColumns(entityType, []);
   }, [entityType]);
 
-  const exportFn = useCallback(async (): Promise<ExportResult> => {
+  const exportFn = useCallback(async (overrideFilters?: Partial<ExportFilters>): Promise<ExportResult> => {
     setLoading(true);
     setError(null);
     setProgress({ phase: "preparing" });
+
+    // Merge override filters with current filters
+    const effectiveFilters = overrideFilters 
+      ? { ...filters, ...overrideFilters }
+      : filters;
 
     try {
       // Build query params
@@ -511,15 +522,17 @@ export function useExportDialog({
       params.set("format", format);
       params.set("columns", selectedColumns.join(","));
 
-      if (filters.search) params.set("search", filters.search);
-      if (filters.type) params.set("type", filters.type);
-      if (filters.groupId) params.set("group_id", String(filters.groupId));
-      if (filters.status !== null && filters.status !== undefined) {
-        params.set("is_active", String(filters.status));
+      if (effectiveFilters.search) params.set("search", effectiveFilters.search);
+      if (effectiveFilters.type) params.set("type", effectiveFilters.type);
+      if (effectiveFilters.groupId) params.set("group_id", String(effectiveFilters.groupId));
+      if (effectiveFilters.status !== null && effectiveFilters.status !== undefined) {
+        params.set("is_active", String(effectiveFilters.status));
       }
-      if (filters.outletId) params.set("outlet_id", String(filters.outletId));
-      if (filters.viewMode) params.set("view_mode", filters.viewMode);
-      if (filters.scopeFilter) params.set("scope_filter", filters.scopeFilter);
+      if (effectiveFilters.outletId) params.set("outlet_id", String(effectiveFilters.outletId));
+      if (effectiveFilters.viewMode) params.set("view_mode", effectiveFilters.viewMode);
+      if (effectiveFilters.scopeFilter) params.set("scope_filter", effectiveFilters.scopeFilter);
+      if (effectiveFilters.dateFrom) params.set("date_from", effectiveFilters.dateFrom);
+      if (effectiveFilters.dateTo) params.set("date_to", effectiveFilters.dateTo);
 
       setProgress({ phase: "streaming" });
 

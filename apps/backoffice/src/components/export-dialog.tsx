@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Modal,
   Stack,
@@ -14,12 +14,18 @@ import {
   Divider,
   Badge,
   ThemeIcon,
+  Collapse,
+  ActionIcon,
 } from "@mantine/core";
+import { DatePickerInput } from "@mantine/dates";
 import {
   IconDownload,
   IconX,
   IconAlertCircle,
   IconCheck,
+  IconChevronDown,
+  IconChevronUp,
+  IconCalendar,
 } from "@tabler/icons-react";
 import { ColumnSelector } from "./column-selector";
 import { FormatSelector } from "./format-selector";
@@ -46,6 +52,15 @@ export function ExportDialog({
   initialFilters = {},
   estimatedRowCount = 0,
 }: ExportDialogProps) {
+  // Date range state for prices export
+  const [showDateRange, setShowDateRange] = useState(false);
+  const [dateFrom, setDateFrom] = useState<Date | null>(
+    initialFilters.dateFrom ? new Date(initialFilters.dateFrom) : null
+  );
+  const [dateTo, setDateTo] = useState<Date | null>(
+    initialFilters.dateTo ? new Date(initialFilters.dateTo) : null
+  );
+
   // Use the export dialog hook
   const {
     columns,
@@ -79,11 +94,35 @@ export function ExportDialog({
 
   // Handle export execution
   const handleExport = useCallback(async () => {
-    const result = await executeExport();
+    // Include date range in filters for prices export
+    // Use local date components to avoid timezone issues
+    const formatDateLocal = (date: Date | null): string | undefined => {
+      if (!date) return undefined;
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    
+    const dateFromStr = formatDateLocal(dateFrom);
+    const dateToStr = formatDateLocal(dateTo);
+    
+    // Update filters state for consistency (for next render)
+    setFilters({
+      ...filters,
+      dateFrom: dateFromStr,
+      dateTo: dateToStr,
+    });
+    
+    // Execute export with override filters to ensure date range is included
+    const result = await executeExport({
+      dateFrom: dateFromStr,
+      dateTo: dateToStr,
+    });
     if (result.success) {
       onClose();
     }
-  }, [executeExport, onClose]);
+  }, [executeExport, onClose, filters, dateFrom, dateTo, setFilters]);
 
   // Reset state when dialog opens with new entity type
   const handleClose = useCallback(() => {
@@ -225,6 +264,54 @@ export function ExportDialog({
               onFormatChange={setFormat}
               estimatedRows={estimatedRowCount}
             />
+            
+            {/* Date range filter for prices */}
+            {entityType === "prices" && (
+              <Stack gap="xs">
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>
+                    Date Range
+                  </Text>
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    onClick={() => setShowDateRange(!showDateRange)}
+                    aria-label={showDateRange ? "Hide date range" : "Show date range"}
+                  >
+                    {showDateRange ? (
+                      <IconChevronUp size={16} />
+                    ) : (
+                      <IconChevronDown size={16} />
+                    )}
+                  </ActionIcon>
+                </Group>
+                <Collapse in={showDateRange}>
+                  <Stack gap="xs">
+                    <DatePickerInput
+                      leftSection={<IconCalendar size={16} />}
+                      label="From"
+                      placeholder="Start date"
+                      value={dateFrom}
+                      onChange={setDateFrom}
+                      clearable
+                      size="sm"
+                    />
+                    <DatePickerInput
+                      leftSection={<IconCalendar size={16} />}
+                      label="To"
+                      placeholder="End date"
+                      value={dateTo}
+                      onChange={setDateTo}
+                      clearable
+                      size="sm"
+                    />
+                    <Text size="xs" c="dimmed">
+                      Filter prices by last updated date
+                    </Text>
+                  </Stack>
+                </Collapse>
+              </Stack>
+            )}
           </Stack>
         </Group>
 

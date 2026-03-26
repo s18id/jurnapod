@@ -25,23 +25,19 @@ export function listRoutes(app: Hono): RouteInfo[] {
   const routes: RouteInfo[] = [];
   
   // Access internal route tree
-  const routesMap = (app as any)._routes;
+  const routesMap = (app as Hono).routes;
   if (!routesMap) {
     return routes;
   }
 
   // Traverse the route tree
-  for (const [path, methods] of Object.entries(routesMap)) {
-    if (typeof methods === 'object' && methods !== null) {
-      for (const [method, handler] of Object.entries(methods as Record<string, any>)) {
+  for (const { path, method, handler} of routesMap) {
         if (typeof handler === 'function' && method !== 'middlewares') {
           routes.push({
             method: method.toUpperCase(),
             path: path === '/' ? '/' : path.replace(/^\//, '')
           });
         }
-      }
-    }
   }
 
   return routes.sort((a, b) => {

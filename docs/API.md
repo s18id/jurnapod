@@ -440,6 +440,75 @@ GET /api/reports/pos-transactions?company_id=1&outlet_id=1&from=2026-01-01&to=20
 
 ---
 
+## Export
+
+Export master data (items, prices) to CSV or Excel format.
+
+### Export Items or Prices
+
+```http
+POST /api/export/{entityType}?format=csv&columns=id,sku,name
+Authorization: Bearer {access_token}
+```
+
+**Path Parameters:**
+- `entityType` - `items` or `prices`
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `format` | string | Export format: `csv` (default) or `xlsx` |
+| `columns` | string | Comma-separated list of columns to include |
+| `search` | string | Filter by item name or SKU |
+| `type` | string | Filter items by type (for items only) |
+| `group_id` | number | Filter by item group ID |
+| `is_active` | boolean | Filter by active status (`true` or `false`) |
+| `outlet_id` | number | Filter prices by outlet (for prices only) |
+| `view_mode` | string | `defaults` or `outlet` (for prices only) |
+| `scope_filter` | string | `override` or `default` (for prices only) |
+| `date_from` | string | Start date for date range filter (YYYY-MM-DD, for prices only) |
+| `date_to` | string | End date for date range filter (YYYY-MM-DD, for prices only) |
+
+**Response:** Binary file download with appropriate Content-Type:
+- CSV: `text/csv; charset=utf-8`
+- XLSX: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+
+**Headers:**
+```
+Content-Disposition: attachment; filename="jurnapod-{entityType}-{timestamp}.{ext}"
+```
+
+### Get Available Columns
+
+```http
+GET /api/export/{entityType}/columns
+Authorization: Bearer {access_token}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "entityType": "prices",
+    "columns": [
+      { "key": "id", "header": "ID", "fieldType": "number" },
+      { "key": "item_sku", "header": "Item SKU", "fieldType": "string" },
+      { "key": "price", "header": "Price", "fieldType": "money" }
+    ],
+    "defaultColumns": ["item_sku", "item_name", "outlet_name", "price", "is_active"]
+  }
+}
+```
+
+**Available Item Columns:**
+- `id`, `sku`, `name`, `item_type`, `barcode`, `item_group_name`, `is_active`, `created_at`, `updated_at`
+
+**Available Price Columns:**
+- `id`, `item_id`, `item_sku`, `item_name`, `outlet_id`, `outlet_name`, `price`, `is_active`, `is_override`, `created_at`, `updated_at`
+
+---
+
 ## Accounting
 
 ### Import ODS/Excel
