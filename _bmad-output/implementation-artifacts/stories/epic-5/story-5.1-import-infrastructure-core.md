@@ -186,7 +186,7 @@ See [ADR-0010: Import/Export Framework Technical Debt](../../../docs/adr/ADR-001
 
 **Key Items:**
 - **TD-1/TD-2**: CSV/Excel parsing loads entire file into memory (mitigated by 50MB file size limit)
-- **TD-4**: Batch processor has hardcoded companyId: 0 (must be overridden by caller)
+- **TD-4**: ✅ **RESOLVED** - Batch processor now requires companyId in BatchOptions (no longer hardcoded)
 - **TD-5**: FK validation interface could cause N+1 if not implemented with batch queries
 - **TD-6**: No resume/checkpoint capability for interrupted imports
 

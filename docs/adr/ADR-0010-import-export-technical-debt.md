@@ -82,11 +82,11 @@ for await (const row of dataSource) {
 
 ---
 
-### TD-4: Batch Processor Lacks Proper Context Passing
+### TD-4: Batch Processor Lacks Proper Context Passing ✅ RESOLVED
 
 **Location**: `apps/api/src/lib/import/batch-processor.ts` (lines 68-71)
 
-**Issue**: Company ID is hardcoded to 0 in the batch context:
+**Issue**: Company ID was hardcoded to 0 in the batch context:
 
 ```typescript
 const context: BatchContext = {
@@ -97,11 +97,9 @@ const context: BatchContext = {
 
 **Impact**: Actual import endpoints must override this; risk of tenant isolation bugs if forgotten.
 
-**Mitigation**: Documentation clearly states this must be overridden.
+**Resolution**: ✅ Fixed in commit `004c9e7` - Made `companyId` a required field in `BatchOptions` interface. The batch processor now requires companyId to be explicitly passed, eliminating the risk of accidental tenant isolation bypass.
 
-**Resolution**: Make `companyId` required in `BatchOptions` or pass full context from caller.
-
-**Priority**: High (security/tenant isolation concern)
+**Priority**: High (security/tenant isolation concern) - **RESOLVED**
 
 ---
 
