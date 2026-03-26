@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
   normalizeDate,
-  normalizeDateTime,
   toDateTimeRangeWithTimezone,
   isValidDate,
   isValidDateTime,
@@ -244,50 +243,6 @@ describe("DST transitions", () => {
 
     // March 30 is GMT (UTC+0), midnight = 00:00 UTC
     assert.equal(winter.fromStartUTC, "2024-03-30T00:00:00.000Z");
-  });
-});
-
-describe("normalizeDateTime()", () => {
-  test("converts RFC 3339 with positive offset to UTC", () => {
-    const result = normalizeDateTime("2026-03-16T17:30:00+07:00");
-    assert.equal(result, "2026-03-16T10:30:00.000Z");
-  });
-
-  test("converts RFC 3339 with negative offset to UTC", () => {
-    const result = normalizeDateTime("2026-03-16T10:30:00-05:00");
-    assert.equal(result, "2026-03-16T15:30:00.000Z");
-  });
-
-  test("converts RFC 3339 with Z suffix to UTC", () => {
-    const result = normalizeDateTime("2026-03-16T10:30:00Z");
-    assert.equal(result, "2026-03-16T10:30:00.000Z");
-  });
-
-  test("preserves fractional seconds", () => {
-    const result = normalizeDateTime("2026-03-16T17:30:00.123+07:00");
-    assert.equal(result, "2026-03-16T10:30:00.123Z");
-  });
-
-  test("throws on invalid datetime", () => {
-    assert.throws(
-      () => normalizeDateTime("invalid-datetime"),
-      /Invalid RFC 3339 datetime/
-    );
-  });
-
-  test("throws on rolled date (Feb 30) via isValidDateTime guard", () => {
-    // new Date("2026-02-30T10:30:00Z") silently rolls to March 2 — normalizeDateTime now rejects.
-    assert.throws(
-      () => normalizeDateTime("2026-02-30T10:30:00Z"),
-      /Invalid RFC 3339 datetime/
-    );
-  });
-
-  test("throws on invalid time component (hour 25) via isValidDateTime guard", () => {
-    assert.throws(
-      () => normalizeDateTime("2026-01-01T25:00:00Z"),
-      /Invalid RFC 3339 datetime/
-    );
   });
 });
 

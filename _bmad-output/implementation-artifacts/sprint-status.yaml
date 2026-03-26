@@ -106,8 +106,8 @@ development_status:
   6-2b-service-sessions-lifecycle: done
   6-2c-service-sessions-lines: done
   6-2d-service-sessions-checkpoint: done
-  6-3-type-safety-audit: backlog
-  6-4-deprecation-cleanup: backlog
+  6-3-type-safety-audit: done
+  6-4-deprecation-cleanup: done
   6-5-reservations-domain-extraction: backlog
   6-6-adr-documentation: backlog
   6-7-epic-5-follow-up: backlog

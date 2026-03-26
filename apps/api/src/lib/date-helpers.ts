@@ -54,20 +54,6 @@ import { Temporal } from "@js-temporal/polyfill";
 
 export { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
-/**
- * Parse RFC 3339 datetime and convert to UTC ISO string
- * @deprecated Prefer {@link toUtcInstant} as the canonical public helper.
- * @param rfc3339 - RFC 3339 datetime (e.g., "2026-03-16T17:30:00+07:00")
- * @returns UTC ISO string (e.g., "2026-03-16T10:30:00.000Z")
- */
-export function normalizeDateTime(rfc3339: string): string {
-  // Guard with isValidDateTime to catch rolled dates and invalid time components.
-  if (!isValidDateTime(rfc3339)) {
-    throw new Error(`Invalid RFC 3339 datetime: ${rfc3339}`);
-  }
-  return new Date(rfc3339).toISOString();
-}
-
 // ---------------------------------------------------------------------------
 // Timezone validation
 // ---------------------------------------------------------------------------

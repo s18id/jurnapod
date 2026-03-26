@@ -495,26 +495,6 @@ export async function recordLoginAudit(record: LoginAuditRecord): Promise<void> 
   );
 }
 
-/**
- * @deprecated Use checkUserAccess instead for consistent role checking.
- * This function checks both global and outlet-scoped roles, but does not
- * verify outlet access. For outlet-specific checks, use checkUserAccess
- * with outletId parameter.
- */
-export async function userHasAnyRole(
-  userId: number,
-  companyId: number,
-  allowedRoles: readonly RoleCode[]
-): Promise<boolean> {
-  const access = await checkUserAccess({
-    userId,
-    companyId,
-    allowedRoles
-  });
-  
-  return access?.hasRole ?? false;
-}
-
 async function userIsSuperAdmin(userId: number): Promise<boolean> {
   const pool = getDbPool();
   const [rows] = await pool.execute<AccessCheckRow[]>(
