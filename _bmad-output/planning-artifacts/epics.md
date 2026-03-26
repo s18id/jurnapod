@@ -93,9 +93,10 @@ N/A - This is a backend infrastructure initiative with no UI changes.
 
 | ID | Description | Location | Priority | Status |
 |----|-------------|----------|----------|--------|
-| TD-001 | N+1 query pattern in COGS posting - item account lookup loop | `cogs-posting.ts:484-501` | P2 | Tracked |
-| TD-002 | N+1 query pattern in COGS calculation - per-item inventory lookup | `cogs-posting.ts:171-235` | P2 | Tracked |
-| TD-003 | N+1 query pattern in recipe composition - ingredient cost resolution | `recipe-composition.ts:532, 710` | P2 | Tracked |
+| TD-001 | N+1 query pattern in COGS posting - item account lookup loop | `cogs-posting.ts:484-501` | P2 | ✅ Resolved (Story 2.6) |
+| TD-002 | N+1 query pattern in COGS calculation - per-item inventory lookup | `cogs-posting.ts:171-235` | P2 | ✅ Resolved (Story 2.7) |
+| TD-003 | N+1 query pattern in recipe composition - ingredient cost resolution | `recipe-composition.ts:532, 710` | P2 | ✅ Resolved (Story 2.8) |
+| TD-004 | Master-data monolith (2829 lines) | `lib/master-data.ts` | P2 | Planned (Epic 3) |
 
 ## Epic List
 
@@ -111,6 +112,26 @@ N/A - This is a backend infrastructure initiative with no UI changes.
   - **Story 1.1: Journals Route Migration** - Migrate journals route to Kysely, preserve raw SQL for GL aggregations
   - **Story 1.2: Account Types Route Migration** - Migrate account-types route to Kysely
   - **Story 1.3: Epic 1 Documentation** - Update ADR-0009 with lessons learned from Epic 1
+
+- **Epic 2: Sync Routes & Reports Migration** - Migrate sync push/pull routes and reports routes to Kysely; resolve N+1 query patterns
+  - **Story 2.1: Sync Push Layered Architecture** - Extract sync push into layered modules (orchestrator, batch, idempotency)
+  - **Story 2.2: Sync Pull Layered Architecture** - Extract sync pull into layered modules
+  - **Story 2.3: Sync Push Orchestration + Route Wiring** - Wire routes to orchestrator; implement batch idempotency
+  - **Story 2.4: Sync Pull Kysely Migration** - Migrate sync pull to Kysely; add regression tests
+  - **Story 2.5: Reports Routes Migration** - Migrate reports routes to Kysely; preserve GL aggregation as raw SQL
+  - **Story 2.6: TD-001 COGS Posting N+1 Fix** - Batch item account lookup
+  - **Story 2.7: TD-002 COGS Calculation N+1 Fix** - Batch inventory and price lookup
+  - **Story 2.8: TD-003 Recipe Composition N+1 Fix** - Batch ingredient cost resolution
+  - **Story 2.9: Epic 2 Documentation** - Update ADR-0009 and epics.md with Epic 2 lessons
+
+- **Epic 3: Master Data Domain Extraction** - Split `lib/master-data.ts` into smaller domain modules with incremental, low-risk stories
+  - **Story 3.1: Item Groups Domain Extraction** - Move item-group CRUD and reads into `lib/item-groups/`
+  - **Story 3.2: Items Domain Extraction** - Move item CRUD and item variant stats into `lib/items/`
+  - **Story 3.3: Item Prices Domain Extraction** - Move item-price CRUD and shared outlet pricing reads into `lib/item-prices/`
+  - **Story 3.4: Supplies Domain Extraction** - Move supplies CRUD into `lib/supplies/`
+  - **Story 3.5: Fixed Assets Domain Extraction** - Move fixed-assets and fixed-asset-categories CRUD into `lib/fixed-assets/`
+  - **Story 3.6: Sync Master Data Finalization** - Repoint sync assembly, delete `lib/master-data.ts`, run full validation
+  - [Epic 3 Retrospective](./implementation-artifacts/epic-3-retro-2026-03-26.md)
 
 ---
 
@@ -611,7 +632,7 @@ const itemIds = this.saleDetail.items.map(i => i.itemId);
 const accounts = await getItemAccountsBatch(this.dbExecutor, itemIds);
 ```
 
-**Priority:** P2 (not urgent, track for future sprint)
+**Priority:** P2 — **Resolved in Story 2.6** ✅
 
 ---
 
@@ -631,7 +652,7 @@ WHERE company_id = ? AND product_id IN (?,?,?)
 GROUP BY product_id
 ```
 
-**Priority:** P2 (not urgent, track for future sprint)
+**Priority:** P2 — **Resolved in Story 2.7** ✅
 
 ---
 
@@ -649,7 +670,21 @@ const ingredientIds = rows.map(r => r.ingredient_item_id);
 const costs = await resolveIngredientUnitCostBatch(pool, companyId, ingredientIds);
 ```
 
-**Priority:** P2 (not urgent, track for future sprint)
+**Priority:** P2 — **Resolved in Story 2.8** ✅
+
+---
+
+### TD-004: Master-Data Monolith (2829 Lines)
+
+**Location:** `apps/api/src/lib/master-data.ts`
+
+**Description:** Monolithic file serving dual use cases: POS sync-pull (read-only assembly) and backoffice CRUD (item groups, items, item-prices, supplies, fixed assets). All 40+ exported functions live in one file.
+
+**Impact:** High coupling — Story 2.4 had to extract sync helpers just to migrate `buildSyncPullPayload`. Full DDD extraction was deferred.
+
+**Recommendation:** Extract by domain into `lib/item-groups/`, `lib/items/`, `lib/item-prices/`, `lib/supplies/`, `lib/fixed-assets/`. Keep sync-specific helpers in `lib/sync/master-data.ts`.
+
+**Priority:** P2 (planned for Epic 3)
 
 ---
 
@@ -934,6 +969,106 @@ So that **future developers can learn from the journals/account-types migration 
 - Additional accounting module services
 
 ---
+
+## Epic 2 Completion Summary (2026-03-26)
+
+**Status:** COMPLETED
+
+**Stories Completed:**
+- Story 2.1: Sync Push Layered Architecture ✅
+- Story 2.2: Sync Pull Layered Architecture ✅
+- Story 2.3: Sync Push Orchestration + Route Wiring ✅
+- Story 2.4: Sync Pull Kysely Migration + Regression Tests ✅
+- Story 2.5: Reports Routes Migration to Kysely ✅
+- Story 2.6: TD-001 COGS Posting N+1 Fix ✅
+- Story 2.7: TD-002 COGS Calculation N+1 Fix ✅
+- Story 2.8: TD-003 Recipe Composition N+1 Fix ✅
+- Story 2.9: Epic 2 Documentation ✅
+
+**What Was Migrated/Fixed:**
+- Sync push routes: layered architecture with orchestrator pattern
+- Sync pull routes: Kysely migration with batch idempotency pre-check
+- Reports routes: Kysely for data retrieval, raw SQL preserved for GL aggregations
+- TD-001: `getItemAccountsBatch()` — resolved N+1 in COGS posting
+- TD-002: `calculateSaleCogs` batch inventory lookup — resolved N+1 in COGS calculation
+- TD-003: `resolveIngredientUnitCosts()` batch query — resolved N+1 in recipe composition
+
+**Key Patterns Documented in ADR-0009:**
+- Idempotency via `client_tx_id` with Kysely (sync pre-check)
+- Offline-first batch upsert patterns (sync push orchestrator)
+- Kysely for retrieval + raw SQL for aggregation (reports)
+- Batch item account lookup (TD-001)
+- Batch COGS calculation (TD-002)
+- Batch ingredient cost resolution (TD-003)
+- Connection wrapper fixes for Kysely + mysql2/promise compatibility
+
+**Technical Debt Resolved:**
+| ID | Description | Status |
+|----|-------------|--------|
+| TD-001 | N+1 query in COGS posting | ✅ Resolved |
+| TD-002 | N+1 query in COGS calculation | ✅ Resolved |
+| TD-003 | N+1 query in recipe composition | ✅ Resolved |
+| TD-004 | Master-data monolith (2829 lines) | Planned for follow-up epic |
+
+**Next Targets for Epic 3:**
+- TD-004: Master-data domain extraction (`lib/master-data.ts` split)
+- POS variant-level sync (item variants, variant prices)
+- Advanced GL reports (consolidated financial statements)
+- Import/Export infrastructure
+- Additional accounting module services
+
+---
+
+## Epic 3: Master Data Domain Extraction
+
+**Goal:** Reduce coupling by splitting `apps/api/src/lib/master-data.ts` into domain-oriented modules that can be migrated, reviewed, and tested independently.
+
+**Business Value:**
+- Smaller review scope per domain
+- Lower regression risk for inventory/accounting routes
+- Cleaner ownership boundaries between sync reads and backoffice CRUD
+- Easier future Kysely migrations by domain
+
+**Decomposition Strategy:**
+1. Extract one domain at a time with caller updates in the same story.
+2. Keep `lib/sync/master-data.ts` as the sync-only assembly layer.
+3. Delete `lib/master-data.ts` only after all callers have moved.
+4. Run focused validation per story, then full API validation in the final story.
+
+### Story 3.1: Item Groups Domain Extraction
+- Move `listItemGroups`, `findItemGroupById`, `createItemGroup`, `createItemGroupsBulk`, `updateItemGroup`, `deleteItemGroup`
+- Create `apps/api/src/lib/item-groups/index.ts`
+- Update `routes/inventory.ts` imports and dynamic imports
+
+### Story 3.2: Items Domain Extraction
+- Move `listItems`, `findItemById`, `createItem`, `updateItem`, `deleteItem`, `getItemVariantStats`
+- Create `apps/api/src/lib/items/index.ts`
+- Update `routes/inventory.ts` and any non-route callers
+
+### Story 3.3: Item Prices Domain Extraction
+- Move `listItemPrices`, `listEffectiveItemPricesForOutlet`, `findItemPriceById`, `createItemPrice`, `updateItemPrice`, `deleteItemPrice`
+- Create `apps/api/src/lib/item-prices/index.ts`
+- Preserve shared-read usage by both inventory routes and sync pull
+
+### Story 3.4: Supplies Domain Extraction
+- Move `listSupplies`, `findSupplyById`, `createSupply`, `updateSupply`, `deleteSupply`
+- Create `apps/api/src/lib/supplies/index.ts`
+- Update `routes/supplies.ts`
+
+### Story 3.5: Fixed Assets Domain Extraction
+- Move `listFixedAssetCategories`, `findFixedAssetCategoryById`, `createFixedAssetCategory`, `updateFixedAssetCategory`, `deleteFixedAssetCategory`, `listFixedAssets`, `findFixedAssetById`, `createFixedAsset`, `updateFixedAsset`, `deleteFixedAsset`
+- Create `apps/api/src/lib/fixed-assets/index.ts`
+- Update `routes/accounts.ts`
+
+### Story 3.6: Sync Master Data Finalization
+- Repoint `lib/sync/master-data.ts` to extracted domain modules
+- Verify no remaining imports from `lib/master-data.ts`
+- Delete `apps/api/src/lib/master-data.ts`
+- Run `typecheck`, `lint`, and API unit tests
+
+---
+
+- [Epic 3 Retrospective](./implementation-artifacts/epic-3-retro-2026-03-26.md)
 
 ## References
 

@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent } from "../../tests/integration/integration-harness.mjs";
-import { createSupply, DatabaseConflictError, deleteSupply, findSupplyById, listSupplies, updateSupply } from "./master-data";
+import { createSupply, deleteSupply, findSupplyById, listSupplies, updateSupply } from "./supplies/index.js";
+import { DatabaseConflictError } from "./master-data-errors.js";
 import { closeDbPool, getDbPool } from "./db";
 import type { RowDataPacket } from "mysql2";
 

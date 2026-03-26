@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { buildSyncPullPayload } from "./master-data";
+import { buildSyncPullPayload } from "./sync/master-data";
 import { getItemThumbnailsBatch } from "./item-images";
 import { closeDbPool, getDbPool } from "./db";
 import type { RowDataPacket } from "mysql2";

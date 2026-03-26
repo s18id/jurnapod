@@ -21,12 +21,15 @@ import {
   listCompanyTaxRates,
   resolveCombinedTaxConfig
 } from "../taxes.js";
+import { listItems } from "../items/index.js";
+import { listItemGroups } from "../item-groups/index.js";
 import type { SyncPullPayload, SyncPullResponse } from "@jurnapod/shared";
 import { SyncPullConfigSchema } from "@jurnapod/shared";
 import { getDbPool } from "../db.js";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 import { getVariantsForSync } from "../item-variants.js";
 import { getItemThumbnailsBatch } from "../item-images.js";
+import { listEffectiveItemPricesForOutlet } from "../item-prices/index.js";
 import { newKyselyConnection } from "@jurnapod/db";
 
 // =============================================================================
@@ -55,18 +58,6 @@ type ItemGroupRow = RowDataPacket & {
   name: string;
   is_active: number;
   updated_at: string;
-};
-
-type ItemPriceRow = RowDataPacket & {
-  id: number;
-  company_id: number;
-  outlet_id: number | null;
-  item_id: number;
-  price: string | number;
-  is_active: number;
-  updated_at: string;
-  item_group_id?: number | null;
-  item_group_name?: string | null;
 };
 
 type OutletTableRow = RowDataPacket & {
@@ -224,20 +215,6 @@ function normalizeItemGroup(row: ItemGroupRow) {
   };
 }
 
-function normalizeItemPrice(row: ItemPriceRow) {
-  return {
-    id: Number(row.id),
-    company_id: Number(row.company_id),
-    outlet_id: row.outlet_id == null ? null : Number(row.outlet_id),
-    item_id: Number(row.item_id),
-    price: Number(row.price),
-    is_active: row.is_active === 1,
-    item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
-    item_group_name: row.item_group_name ?? null,
-    updated_at: toRfc3339Required(row.updated_at)
-  };
-}
-
 function normalizeOutletTable(row: OutletTableRow) {
   return {
     table_id: Number(row.id),
@@ -273,93 +250,8 @@ function normalizeReservation(row: ReservationRow) {
 // Query Functions (Kysely)
 // =============================================================================
 
-/**
- * List items for a company, optionally filtered by active status.
- * Uses Kysely for type-safe queries.
- */
-export async function listItems(companyId: number, filters?: { isActive?: boolean }) {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-
-  try {
-    const kysely = newKyselyConnection(connection);
-
-    let query = kysely
-      .selectFrom("items")
-      .where("company_id", "=", companyId)
-      .select([
-        "id",
-        "company_id",
-        "sku",
-        "name",
-        "item_type",
-        "item_group_id",
-        "barcode",
-        "cogs_account_id",
-        "inventory_asset_account_id",
-        "is_active",
-        "updated_at"
-      ])
-      .orderBy("id", "asc");
-
-    if (typeof filters?.isActive === "boolean") {
-      query = query.where("is_active", "=", filters.isActive ? 1 : 0);
-    }
-
-    const rows = await query.execute();
-    return rows.map((row) => ({
-      id: Number(row.id),
-      company_id: Number(row.company_id),
-      sku: row.sku,
-      name: row.name,
-      type: row.item_type as ItemRow["item_type"],
-      item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
-      barcode: row.barcode,
-      cogs_account_id: row.cogs_account_id == null ? null : Number(row.cogs_account_id),
-      inventory_asset_account_id: row.inventory_asset_account_id == null ? null : Number(row.inventory_asset_account_id),
-      is_active: row.is_active === 1,
-      updated_at: toRfc3339Required(row.updated_at)
-    }));
-  } finally {
-    connection.release();
-  }
-}
-
-/**
- * List item groups for a company, optionally filtered by active status.
- * Uses Kysely for type-safe queries.
- */
-export async function listItemGroups(companyId: number, filters?: { isActive?: boolean }) {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-
-  try {
-    const kysely = newKyselyConnection(connection);
-
-    let query = kysely
-      .selectFrom("item_groups")
-      .where("company_id", "=", companyId)
-      .select(["id", "company_id", "parent_id", "code", "name", "is_active", "updated_at"])
-      .orderBy("id", "asc");
-
-    if (typeof filters?.isActive === "boolean") {
-      query = query.where("is_active", "=", filters.isActive ? 1 : 0);
-    }
-
-    const rows = await query.execute();
-    return rows.map((row) => ({
-      id: Number(row.id),
-      company_id: Number(row.company_id),
-      parent_id: row.parent_id == null ? null : Number(row.parent_id),
-      code: row.code,
-      name: row.name,
-      is_active: row.is_active === 1,
-      updated_at: toRfc3339Required(row.updated_at)
-    }));
-  } finally {
-    connection.release();
-  }
-}
+export { listItems };
+export { listItemGroups };
 
 /**
  * List outlet tables for POS.
@@ -558,66 +450,6 @@ async function readSyncConfig(companyId: number): Promise<SyncPullResponse["data
   } finally {
     connection.release();
   }
-}
-
-/**
- * List effective item prices for an outlet.
- * Uses raw SQL due to complex LEFT JOIN + COALESCE logic.
- * 
- * Override takes precedence regardless of active state.
- * If override exists but is inactive, item is hidden from active prices.
- */
-export async function listEffectiveItemPricesForOutlet(
-  companyId: number,
-  outletId: number,
-  filters?: { isActive?: boolean }
-) {
-  const pool = getDbPool();
-  const values: Array<number> = [outletId, outletId, companyId];
-
-  let sql = `
-    SELECT 
-      COALESCE(override.id, def.id) AS id,
-      COALESCE(override.company_id, def.company_id) AS company_id,
-      COALESCE(override.outlet_id, ?) AS outlet_id,
-      COALESCE(override.item_id, def.item_id) AS item_id,
-      COALESCE(override.price, def.price) AS price,
-      COALESCE(override.is_active, def.is_active) AS is_active,
-      COALESCE(override.updated_at, def.updated_at) AS updated_at,
-      i.item_group_id,
-      ig.name AS item_group_name,
-      CASE WHEN override.id IS NOT NULL THEN 1 ELSE 0 END AS is_override
-    FROM items i
-    LEFT JOIN item_prices override ON override.item_id = i.id 
-      AND override.company_id = i.company_id 
-      AND override.outlet_id = ?
-    LEFT JOIN item_prices def ON def.item_id = i.id 
-      AND def.company_id = i.company_id 
-      AND def.outlet_id IS NULL
-    LEFT JOIN item_groups ig ON ig.id = i.item_group_id AND ig.company_id = i.company_id
-    WHERE i.company_id = ?
-      AND (override.id IS NOT NULL OR def.id IS NOT NULL)
-  `;
-
-  if (typeof filters?.isActive === "boolean") {
-    sql += " AND COALESCE(override.is_active, def.is_active) = ?";
-    values.push(filters.isActive ? 1 : 0);
-    // Also filter by item active status when filtering for active prices
-    sql += " AND i.is_active = ?";
-    values.push(filters.isActive ? 1 : 0);
-  }
-
-  sql += " ORDER BY i.id ASC";
-
-  const [rows] = await pool.execute<ItemPriceRow[]>(sql, values);
-  return rows.map((row) => {
-    const normalized = normalizeItemPrice(row);
-    return {
-      ...normalized,
-      outlet_id: normalized.outlet_id ?? outletId, // COALESCE ensures this is always outletId
-      is_override: (row as ItemPriceRow & { is_override: number }).is_override === 1
-    };
-  });
 }
 
 /**

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { listEffectiveItemPricesForOutlet } from "./master-data";
+import { listEffectiveItemPricesForOutlet } from "./item-prices/index.js";
 import { closeDbPool, getDbPool } from "./db";
 import type { RowDataPacket } from "mysql2";
 

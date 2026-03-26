@@ -71,7 +71,7 @@ import {
   updateFixedAsset,
   deleteFixedAsset,
   findFixedAssetById
-} from "../lib/master-data.js";
+} from "../lib/fixed-assets/index.js";
 import {
   createDepreciationPlan,
   updateDepreciationPlan,

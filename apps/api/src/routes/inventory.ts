@@ -34,20 +34,27 @@ import {
   listItems,
   getItemVariantStats,
   findItemById,
+} from "../lib/items/index.js";
+import {
   createItemPrice,
   updateItemPrice,
   deleteItemPrice,
   findItemPriceById,
   listItemPrices,
+  listEffectiveItemPricesForOutlet,
+} from "../lib/item-prices/index.js";
+import {
+  DatabaseConflictError,
+  DatabaseReferenceError,
+  DatabaseForbiddenError
+} from "../lib/master-data-errors.js";
+import {
   createItemGroup,
   createItemGroupsBulk,
   updateItemGroup,
   deleteItemGroup,
-  DatabaseConflictError,
-  DatabaseReferenceError,
-  DatabaseForbiddenError,
   ItemGroupBulkConflictError
-} from "../lib/master-data.js";
+} from "../lib/item-groups/index.js";
 import { checkUserAccess } from "../lib/auth.js";
 
 declare module "hono" {
@@ -442,7 +449,7 @@ inventoryRoutes.get("/item-groups", async (c) => {
   }
 
   try {
-    const { listItemGroups } = await import("../lib/master-data.js");
+    const { listItemGroups } = await import("../lib/item-groups/index.js");
     const groups = await listItemGroups(auth.companyId);
     return successResponse(groups);
   } catch (error) {
@@ -467,7 +474,7 @@ inventoryRoutes.get("/item-groups/:id", async (c) => {
 
   try {
     const groupId = NumericIdSchema.parse(c.req.param("id"));
-    const { findItemGroupById } = await import("../lib/master-data.js");
+    const { findItemGroupById } = await import("../lib/item-groups/index.js");
     const group = await findItemGroupById(auth.companyId, groupId);
 
     if (!group) {
@@ -719,7 +726,6 @@ inventoryRoutes.get("/item-prices/active", async (c) => {
     );
 
     // List effective prices
-    const { listEffectiveItemPricesForOutlet } = await import("../lib/master-data.js");
     const prices = await listEffectiveItemPricesForOutlet(auth.companyId, outletIdNum, { isActive: true });
 
     // Filter out company defaults if user doesn't have access to them

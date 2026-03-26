@@ -28,10 +28,12 @@ import {
   findSupplyById,
   createSupply,
   updateSupply,
-  deleteSupply,
+  deleteSupply
+} from "../lib/supplies/index.js";
+import {
   DatabaseConflictError,
   DatabaseReferenceError
-} from "../lib/master-data.js";
+} from "../lib/master-data-errors.js";
 
 declare module "hono" {
   interface ContextVariableMap {

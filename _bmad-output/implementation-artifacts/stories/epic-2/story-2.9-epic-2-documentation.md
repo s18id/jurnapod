@@ -1,6 +1,6 @@
 # Story 2.9: Epic 2 Documentation
 
-Status: backlog
+Status: done
 
 ## Story
 
@@ -25,27 +25,32 @@ So that **future developers can learn from the sync/reports migration and tech d
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Document Sync Routes Patterns (AC1)**
-  - [ ] 1.1 Document idempotency via client_tx_id with Kysely
-  - [ ] 1.2 Document offline-first batch upsert patterns
-  - [ ] 1.3 Note any differences from journals/account-types migration
+- [x] **Task 1: Document Sync Routes Patterns (AC1)**
+  - [x] 1.1 Document idempotency via client_tx_id with Kysely
+  - [x] 1.2 Document offline-first batch upsert patterns
+  - [x] 1.3 Note any differences from journals/account-types migration
 
-- [ ] **Task 2: Document Reports Routes Patterns (AC1)**
-  - [ ] 2.1 Document Kysely for data retrieval + raw SQL for aggregation pattern
-  - [ ] 2.2 Document performance considerations for GL reports
+- [x] **Task 2: Document Reports Routes Patterns (AC1)**
+  - [x] 2.1 Document Kysely for data retrieval + raw SQL for aggregation pattern
+  - [x] 2.2 Document performance considerations for GL reports
 
-- [ ] **Task 3: Document N+1 Batch Fetch Patterns (AC1)**
-  - [ ] 3.1 Document batch item account lookup pattern (TD-001)
-  - [ ] 3.2 Document batch inventory lookup pattern (TD-002)
-  - [ ] 3.3 Document batch ingredient cost resolution pattern (TD-003)
+- [x] **Task 3: Document N+1 Batch Fetch Patterns (AC1)**
+  - [x] 3.1 Document batch item account lookup pattern (TD-001)
+  - [x] 3.2 Document batch inventory lookup pattern (TD-002)
+  - [x] 3.3 Document batch ingredient cost resolution pattern (TD-003)
 
-- [ ] **Task 4: Update Epic 2 Summary (AC2)**
-  - [ ] 4.1 Update epics.md with Epic 2 completion summary
-  - [ ] 4.2 Identify next targets for Epic 3
+- [x] **Task 4: Update Epic 2 Summary (AC2)**
+  - [x] 4.1 Update epics.md with Epic 2 completion summary
+  - [x] 4.2 Identify next targets for Epic 3
 
-- [ ] **Task 5: Review and Finalize**
-  - [ ] 5.1 Review ADR-0009 for consistency
-  - [ ] 5.2 Ensure all patterns are documented with examples
+- [x] **Task 5: Review and Finalize**
+  - [x] 5.1 Review ADR-0009 for consistency
+  - [x] 5.2 Ensure all patterns are documented with examples
+
+## Dev Notes
+
+- ADR-0009 updated with Epic 2 lessons: sync idempotency, offline-first orchestration, reports raw-SQL boundary, and TD-001/TD-002/TD-003 batch-fetch patterns.
+- `epics.md` updated with Epic 2 completion summary and Epic 3 follow-up planning for TD-004 decomposition.
 
 ## Files to Modify
 
