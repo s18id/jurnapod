@@ -585,21 +585,58 @@ export async function createUser(params: {
       }
     }
 
+    // SELECT → INSERT pattern for global roles
     if (globalRoleCodes.length > 0) {
-      const roleValues = globalRoleCodes.map((code) => [userId, roleMap.get(code)?.id ?? 0, null]);
-      await connection.query(
-        `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES ${roleValues
-          .map(() => "(?, ?, ?)")
-          .join(", ")}`,
-        roleValues.flat()
+      // Get existing global role IDs for this user
+      const [existingRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT role_id 
+         FROM user_role_assignments 
+         WHERE user_id = ? AND outlet_id IS NULL`,
+        [userId]
       );
+      const existingRoleIds = new Set(existingRows.map((row) => Number(row.role_id)));
+
+      // Filter out roles that already exist
+      const newGlobalRoleCodes = globalRoleCodes.filter((code) => {
+        const roleId = roleMap.get(code)?.id ?? 0;
+        return !existingRoleIds.has(roleId);
+      });
+
+      // Only insert if there are new roles
+      if (newGlobalRoleCodes.length > 0) {
+        const roleValues = newGlobalRoleCodes.map((code) => [userId, roleMap.get(code)?.id ?? 0, null]);
+        await connection.query(
+          `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES ${roleValues
+            .map(() => "(?, ?, ?)")
+            .join(", ")}`,
+          roleValues.flat()
+        );
+      }
     }
 
+    // SELECT → INSERT pattern for outlet roles
     if (outletRoleAssignments.length > 0) {
       const assignmentOutletIds = outletRoleAssignments.map((assignment) => assignment.outletId);
       await ensureOutletIdsExist(connection, params.companyId, assignmentOutletIds);
 
-      const outletRoleValues: Array<Array<number>> = [];
+      // Get all existing outlet role assignments for this user
+      const allOutletIds = [...new Set(outletRoleAssignments.map(a => a.outletId))];
+      const outletPlaceholders = allOutletIds.map(() => "?").join(", ");
+
+      const [existingRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT outlet_id, role_id 
+         FROM user_role_assignments 
+         WHERE user_id = ? AND outlet_id IN (${outletPlaceholders})`,
+        [userId, ...allOutletIds]
+      );
+
+      // Build set of existing (outlet_id, role_id) pairs
+      const existingPairs = new Set(
+        existingRows.map((row) => `${Number(row.outlet_id)}:${Number(row.role_id)}`)
+      );
+
+      // Filter out assignments that already exist
+      const newOutletRoleValues: Array<Array<number>> = [];
       for (const assignment of outletRoleAssignments) {
         for (const roleCode of assignment.roleCodes) {
           const roleSnapshot = roleMap.get(roleCode);
@@ -609,16 +646,21 @@ export async function createUser(params: {
           if (roleSnapshot.is_global === 1) {
             throw new RoleScopeViolationError("Global roles cannot be assigned per outlet");
           }
-          outletRoleValues.push([userId, assignment.outletId, roleSnapshot.id]);
+
+          const pairKey = `${assignment.outletId}:${roleSnapshot.id}`;
+          if (!existingPairs.has(pairKey)) {
+            newOutletRoleValues.push([userId, assignment.outletId, roleSnapshot.id]);
+          }
         }
       }
 
-      if (outletRoleValues.length > 0) {
+      // Only insert if there are new assignments
+      if (newOutletRoleValues.length > 0) {
         await connection.query(
-          `INSERT INTO user_role_assignments (user_id, outlet_id, role_id) VALUES ${outletRoleValues
+          `INSERT INTO user_role_assignments (user_id, outlet_id, role_id) VALUES ${newOutletRoleValues
             .map(() => "(?, ?, ?)")
             .join(", ")}`,
-          outletRoleValues.flat()
+          newOutletRoleValues.flat()
         );
       }
     }

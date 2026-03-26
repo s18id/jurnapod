@@ -17,7 +17,8 @@
     "test:integration:verbose": "JP_INTEGRATION_VERBOSE=1 JP_HTTP_LOG=1 node --test --test-concurrency=1 \"tests/integration/*.integration.test.mjs\"",
     "test:all": "npm run test:unit && npm run test:integration",
     "test:ws": "node ../../scripts/websocket-test.js",
-    "test:phase3": "node --test --test-concurrency=1 --import tsx src/lib/phase3-batch.test.ts"
+    "test:phase3": "node --test --test-concurrency=1 --import tsx src/lib/phase3-batch.test.ts",
+    "fix:duplicate-roles": "tsx src/scripts/fix-duplicate-role-assignments.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "^0.14.8",

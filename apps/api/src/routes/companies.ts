@@ -93,7 +93,9 @@ companyRoutes.use("/*", async (c, next) => {
   await next();
 });
 
-// GET /companies - List companies (super admin only)
+// GET /companies - List companies
+// - SUPER_ADMIN: can see all companies
+// - Other roles: can only see their own company
 companyRoutes.get("/", async (c) => {
   try {
     const auth = c.get("auth");
@@ -109,12 +111,15 @@ companyRoutes.get("/", async (c) => {
     }
 
     const url = new URL(c.req.raw.url);
-    const limit = parseInt(url.searchParams.get("limit") || "50");
-    const offset = parseInt(url.searchParams.get("offset") || "0");
-    const search = url.searchParams.get("search") || undefined;
     const isActive = url.searchParams.get("is_active");
 
+    // TENANT ISOLATION: Only SUPER_ADMIN can see all companies
+    // Regular users can only see their own company
+    const isSuperAdmin = auth.role === "SUPER_ADMIN";
+    const companyIdFilter = isSuperAdmin ? undefined : auth.companyId;
+
     const companies = await listCompanies({
+      companyId: companyIdFilter,
       includeDeleted: isActive === "false" ? true : false
     });
 

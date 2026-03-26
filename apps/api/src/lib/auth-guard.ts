@@ -246,6 +246,10 @@ export function requireAccess(options: AccessGuardOptions): AuthenticatedRouteGu
       return createForbiddenResponse();
     }
 
+    if (access.isSuperAdmin) {
+      auth.role = "SUPER_ADMIN"
+    }
+
     return null;
   };
 }
