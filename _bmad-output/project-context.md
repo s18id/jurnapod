@@ -2,7 +2,7 @@
 project_name: 'jurnapod'
 user_name: 'Ahmad'
 date: '2026-03-27T00:00:00Z'
-sections_completed: ['technology_stack', 'language_specific_rules', 'framework_specific_rules', 'testing_rules', 'code_quality_rules', 'development_workflow_rules']
+sections_completed: ['technology_stack', 'language_specific_rules', 'framework_specific_rules', 'testing_rules', 'code_quality_rules', 'development_workflow_rules', 'lessons_learned']
 existing_patterns_found: 18
 status: 'complete'
 rule_count: 65
@@ -340,6 +340,38 @@ All stories require before marking DONE:
 - Sprint status in `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - Epic status transitions: `backlog → in-progress → done`
 - Story status transitions: `backlog → ready-for-dev → in-progress → review → done`
+
+---
+
+## Lessons Learned (Epic 6 & Prior)
+
+_This section captures key learnings to inform future development. AI agents should internalize these patterns._
+
+### Epic 6 Lessons (Technical Debt Consolidation)
+
+| Lesson | Evidence | Impact |
+|--------|----------|--------|
+| **Story completion = tests written, not deferred** | Integration tests retrofitted in 6.7 after original stories completed | Unit tests passing ≠ API-level validation; integration tests must be in original AC |
+| **Epic retro → next epic follow-up pattern works** | Epic 5 items addressed in Epic 6 kept user promises | Reduces backlog of known issues; should continue as standard practice |
+| **Documentation (ADRs) are essential** | TECHNICAL-DEBT.md registry created in 6.6 | First place to check when onboarding; future developers understand decisions |
+| **QA involvement needed from day one** | Technical debt stories impact existing behavior | Validate no regressions during story, not after |
+| **"No new TD without tracking" rule** | TD-009-012 created during Epic 6 | All technical debt must be added to registry immediately when created |
+
+### Prior Epic Lessons
+
+| Lesson | Source | Rule |
+|--------|--------|------|
+| **Infrastructure stories must include API endpoints** | Epic 5 | When story provides "API endpoint pattern," actual endpoint must be included |
+| **State management in hooks needs explicit patterns** | Epic 5 | `overrideFilters` pattern (pass parameters directly, not rely on state updates) for async form operations |
+| **Date/time handling requires explicit timezone strategy** | Epic 5 | User-selected dates are local; storage uses ISO 8601 with timezone; display formatting at presentation layer |
+| **Integration tests should be part of framework epics** | Epic 5 | Deferring creates gaps that compound; even basic API tests should be included |
+
+### Process Rules Derived from Lessons
+
+1. **Integration tests in original AC** - API-level integration tests (upload → validate → apply flow) must be part of acceptance criteria, not retrofitted
+2. **QA from day one** - For technical debt stories, QA validates regressions during story, not after
+3. **TD tracking mandatory** - Any technical debt created during a story must be added to `docs/adr/TECHNICAL-DEBT.md` immediately
+4. **Epic retro → next epic follow-up** - Address previous epic's retrospective items in current epic planning
 
 ---
 
