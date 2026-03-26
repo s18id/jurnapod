@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-25
-last_updated: 2026-03-26
+last_updated: 2026-03-28
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -116,3 +116,15 @@ development_status:
   6-6-adr-documentation: done
   6-7-epic-5-follow-up: done
   epic-6-retrospective: done
+
+  # Epic 7: Operational Hardening & Production Readiness
+  epic-7: done
+  7-1-tdb-registry-fix-health-check-template: done
+  7-2-import-session-persistence-mysql: done
+  7-3-batch-failure-recovery-session-hardening: done
+  7-4-fixed-assets-route-test-coverage: done
+  7-5-streaming-parser-optimization: done
+  7-6-fk-validation-batch-optimization: done
+  7-7-export-settings-route-test-coverage: done
+  7-8-export-large-dataset-protection: done
+  epic-7-retrospective: done
