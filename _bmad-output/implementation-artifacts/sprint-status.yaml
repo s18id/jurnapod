@@ -102,7 +102,10 @@ development_status:
   6-1c-order-types-extraction: done
   6-1d-credit-note-extraction: done
   6-1e-shared-utilities-consolidation: done
-  6-2-consolidate-service-sessions-module: backlog
+  6-2a-service-sessions-types: done
+  6-2b-service-sessions-lifecycle: done
+  6-2c-service-sessions-lines: done
+  6-2d-service-sessions-checkpoint: done
   6-3-type-safety-audit: backlog
   6-4-deprecation-cleanup: backlog
   6-5-reservations-domain-extraction: backlog
