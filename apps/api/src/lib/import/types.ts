@@ -349,9 +349,13 @@ export interface BatchProcessingResult<T = unknown> {
   failed: Array<{ item: T; error: ImportError }>;
   /** Total batches processed */
   totalBatches: number;
+  /** Batches that committed successfully */
+  batchesCompleted: number;
+  /** Batches that failed and were rolled back */
+  batchesFailed: number;
   /** Total rows processed */
   totalRows: number;
-  /** Total errors encountered */
+  /** Total rows that failed */
   totalErrors: number;
   /** Total processing duration in ms */
   totalDurationMs: number;
@@ -473,3 +477,32 @@ export interface ImportTemplate {
   /** Sample rows (optional) */
   sampleRows?: Record<string, unknown>[];
 }
+
+// ============================================================================
+// Batch FK Validation Types (TD-012)
+// ============================================================================
+
+/**
+ * Request for a single foreign key lookup batch.
+ * Groups IDs by table to enable single-query IN-clause lookups.
+ */
+export interface FkLookupRequest {
+  /** Target table name (e.g., 'item_groups', 'outlets') */
+  table: string;
+  /** Unique IDs to validate (deduplicated Set) */
+  ids: Set<number>;
+  /** Company ID for tenant isolation */
+  companyId: number;
+}
+
+/**
+ * Result of batch FK validation.
+ * Map structure: tableName -> id -> exists (boolean)
+ * 
+ * @example
+ * const exists = fkResults.get('item_groups')?.get(123);
+ * if (!exists) {
+ *   // FK validation failed
+ * }
+ */
+export type FkLookupResults = Map<string, Map<number, boolean>>;

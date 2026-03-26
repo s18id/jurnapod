@@ -33,6 +33,8 @@ export {
   type TemplateColumn,
   type ImportTemplate,
   type ImportParseResult,
+  type FkLookupRequest,
+  type FkLookupResults,
 } from './types.js';
 
 // Parsing
@@ -56,7 +58,18 @@ export {
   createValidationError,
   groupErrorsByField,
   formatValidationErrors,
+  batchValidateForeignKeys,
 } from './validator.js';
+
+// Session Store (MySQL-backed)
+export {
+  createSession,
+  getSession,
+  updateSession,
+  deleteSession,
+  cleanupExpiredSessions,
+  type StoredSession,
+} from './session-store.js';
 
 // Batch Processing
 export {

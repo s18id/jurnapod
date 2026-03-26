@@ -60,6 +60,7 @@ export {
   generateCSV,
   generateCSVBuffer,
   generateExcel,
+  generateExcelChunked,
   generateExport,
   detectFormatFromFilename,
   getContentType,

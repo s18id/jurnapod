@@ -65,6 +65,8 @@ export async function processBatches<T>(
   const totalBatches = Math.ceil(items.length / batchSize);
   
   let currentBatch = 0;
+  let batchesCompleted = 0;
+  let batchesFailed = 0;
   let errorsEncountered = 0;
   let aborted = false;
 
@@ -138,13 +140,14 @@ export async function processBatches<T>(
 
     // Handle batch result
     if (batchResult.committed) {
+      batchesCompleted++;
       processed.push(...batchResult.processed);
       await processor.onBatchSuccess?.(batchResult.processed);
     } else {
-      // Batch has failures but continueOnError might allow partial processing
+      batchesFailed++;
       // Add successful items to processed (they didn't error during processing)
       processed.push(...batchResult.processed);
-      
+
       // Add failed items to failed list
       for (const fail of batchResult.failed) {
         failed.push(fail);
@@ -170,6 +173,8 @@ export async function processBatches<T>(
     processed,
     failed,
     totalBatches: currentBatch,
+    batchesCompleted,
+    batchesFailed,
     totalRows: items.length,
     totalErrors: failed.length,
     totalDurationMs,
@@ -208,6 +213,8 @@ export async function processBatchesWithTransaction<T>(
   const totalBatches = Math.ceil(items.length / batchSize);
   
   let currentBatch = 0;
+  let batchesCompleted = 0;
+  let batchesFailed = 0;
   let errorsEncountered = 0;
   let aborted = false;
 
@@ -255,11 +262,13 @@ export async function processBatchesWithTransaction<T>(
       if (batchResult.committed) {
         // Commit transaction
         await connection.commit();
+        batchesCompleted++;
         processed.push(...batchResult.processed);
         await processor.onBatchSuccess?.(batchResult.processed);
       } else {
         // Rollback transaction
         await connection.rollback();
+        batchesFailed++;
 
         // Mark items as failed
         for (const fail of batchResult.failed) {
@@ -320,6 +329,8 @@ export async function processBatchesWithTransaction<T>(
     processed,
     failed,
     totalBatches: currentBatch,
+    batchesCompleted,
+    batchesFailed,
     totalRows: items.length,
     totalErrors: failed.length,
     totalDurationMs,
