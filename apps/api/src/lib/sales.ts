@@ -256,9 +256,7 @@ export type SalesPayment = {
 // Error Classes
 // =============================================================================
 
-export class DatabaseConflictError extends Error {}
-export class DatabaseReferenceError extends Error {}
-export class DatabaseForbiddenError extends Error {}
+export { DatabaseConflictError, DatabaseReferenceError, DatabaseForbiddenError } from "@/lib/shared/common-errors";
 export class InvoiceStatusError extends Error {}
 export class PaymentStatusError extends Error {}
 export class PaymentAllocationError extends Error {}

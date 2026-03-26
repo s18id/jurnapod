@@ -22,12 +22,12 @@ export {
   DatabaseConflictError,
   DatabaseReferenceError,
   DatabaseForbiddenError
-} from "@/lib/master-data-errors";
+} from "./common-errors";
 import {
   DatabaseConflictError,
   DatabaseReferenceError,
   DatabaseForbiddenError
-} from "@/lib/master-data-errors";
+} from "./common-errors";
 
 // =============================================================================
 // Types
