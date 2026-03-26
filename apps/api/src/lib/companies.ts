@@ -655,11 +655,11 @@ async function ensureNumberingTemplates(
   companyId: number
 ): Promise<void> {
   for (const template of DEFAULT_NUMBERING_TEMPLATES) {
-    const [existing] = await connection.execute(
+    const [existing] = await connection.execute<RowDataPacket[]>(
       `SELECT id FROM numbering_templates WHERE company_id = ? AND outlet_id IS NULL AND doc_type = ?`,
       [companyId, template.doc_type]
     );
-    if ((existing as any[]).length === 0) {
+    if (existing.length === 0) {
       await connection.execute(
         `INSERT INTO numbering_templates (company_id, outlet_id, scope_key, doc_type, pattern, reset_period, current_value, is_active)
          VALUES (?, NULL, 0, ?, ?, ?, 0, 1)`,

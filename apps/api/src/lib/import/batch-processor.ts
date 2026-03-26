@@ -249,8 +249,7 @@ export async function processBatchesWithTransaction<T>(
       await connection.beginTransaction();
 
       // Process batch with connection
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      batchResult = await processor.processBatch(batchItems, { ...context, connection } as any);
+      batchResult = await processor.processBatch(batchItems, { ...context, connection });
       batchResult.durationMs = Date.now() - batchStartTime;
 
       if (batchResult.committed) {

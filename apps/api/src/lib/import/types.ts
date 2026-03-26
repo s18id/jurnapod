@@ -319,6 +319,8 @@ export interface BatchContext {
   importSessionId?: string;
   /** Start time for timing */
   startTime: Date;
+  /** Database connection for transaction-scoped operations */
+  connection?: import("mysql2/promise").PoolConnection;
 }
 
 /**

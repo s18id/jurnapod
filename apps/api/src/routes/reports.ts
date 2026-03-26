@@ -35,6 +35,7 @@ import {
   classifyReportError,
   emitReportMetrics,
   QUERY_TIMEOUT_MS,
+  type ReportType,
 } from "@/lib/report-telemetry";
 import { resolveDefaultFiscalYearDateRange, FiscalYearSelectionError } from "@/lib/fiscal-years";
 import { authenticateRequest } from "@/lib/auth-guard";
@@ -124,7 +125,7 @@ function handleReportError(error: unknown, startTime: number, companyId: number,
 
   const bucket = getDatasetSizeBucket(0);
   emitReportMetrics(null, {
-    reportType: reportType as any,
+    reportType: reportType as ReportType,
     companyId,
     datasetSizeBucket: bucket,
     latencyMs,
@@ -230,7 +231,7 @@ reportRoutes.get("/trial-balance", async (c) => {
     const latencyMs = Date.now() - startTime;
     const bucket = getDatasetSizeBucket(rows.length);
     emitReportMetrics(null, {
-      reportType: REPORT_TYPE as any,
+      reportType: REPORT_TYPE as ReportType,
       companyId: auth.companyId,
       datasetSizeBucket: bucket,
       latencyMs,
@@ -308,7 +309,7 @@ reportRoutes.get("/profit-loss", async (c) => {
     const latencyMs = Date.now() - startTime;
     const bucket = getDatasetSizeBucket(result.rows.length);
     emitReportMetrics(null, {
-      reportType: REPORT_TYPE as any,
+      reportType: REPORT_TYPE as ReportType,
       companyId: auth.companyId,
       datasetSizeBucket: bucket,
       latencyMs,
@@ -402,7 +403,7 @@ reportRoutes.get("/pos-transactions", async (c) => {
     const latencyMs = Date.now() - startTime;
     const bucket = getDatasetSizeBucket(result.transactions.length);
     emitReportMetrics(null, {
-      reportType: REPORT_TYPE as any,
+      reportType: REPORT_TYPE as ReportType,
       companyId: auth.companyId,
       datasetSizeBucket: bucket,
       latencyMs,
@@ -503,7 +504,7 @@ reportRoutes.get("/journals", async (c) => {
     const latencyMs = Date.now() - startTime;
     const bucket = getDatasetSizeBucket(result.journals.length);
     emitReportMetrics(null, {
-      reportType: REPORT_TYPE as any,
+      reportType: REPORT_TYPE as ReportType,
       companyId: auth.companyId,
       datasetSizeBucket: bucket,
       latencyMs,

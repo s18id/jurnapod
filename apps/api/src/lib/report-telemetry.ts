@@ -17,7 +17,17 @@ import { logWithTelemetry } from "../middleware/telemetry";
 /**
  * Report types that have SLO targets
  */
-export type ReportType = "trial_balance" | "general_ledger" | "profit_loss" | "worksheet" | "other";
+export type ReportType = 
+  | "trial_balance" 
+  | "general_ledger" 
+  | "profit_loss" 
+  | "worksheet" 
+  | "pos_transactions"
+  | "journals"
+  | "daily_sales"
+  | "pos_payments"
+  | "receivables_ageing"
+  | "other";
 
 /**
  * Error classification for report failures

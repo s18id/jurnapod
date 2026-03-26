@@ -3,11 +3,56 @@
 // Description: Cost tracking engine with AVG/FIFO/LIFO strategies
 
 import type { PoolConnection } from "mysql2/promise";
+import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getDbPool } from "@/lib/db";
 
 // ============================================================================
 // Types
 // ============================================================================
+
+// Database Row Types for type-safe query results
+// These extend RowDataPacket to allow column access via dot notation
+interface CostSummaryRow extends RowDataPacket {
+  costing_method: string;
+  current_avg_cost: string | null;
+  total_layers_qty: number;
+  total_layers_cost: number;
+}
+
+interface InventoryLayerRow extends RowDataPacket {
+  id: number;
+  remaining_qty: number;
+  unit_cost: string;
+  company_id: number;
+  item_id: number;
+  transaction_id: number;
+  original_qty: number;
+  acquired_at: Date;
+  transaction_reference_id?: number | null;
+}
+
+interface SettingRow extends RowDataPacket {
+  value_json: string;
+  value_type: string;
+  key: string;
+}
+
+interface ConsumptionRow extends RowDataPacket {
+  layer_id: number;
+  transaction_id: number;
+  consumed_qty: number;
+  consumed_at: Date;
+}
+
+interface LayerStatsRow extends RowDataPacket {
+  layer_count: number;
+  oldest_acquired: Date | null;
+  newest_acquired: Date | null;
+}
+
+interface LayerCostRow extends RowDataPacket {
+  unit_cost: string;
+}
 
 export type CostingMethod = "AVG" | "FIFO" | "LIFO";
 
@@ -120,7 +165,7 @@ class AVGCostingStrategy implements CostingStrategy {
     conn: PoolConnection
   ): Promise<CostCalculationResult> {
     // Lock summary row to prevent concurrent updates
-    const [summaryRows] = await conn.execute(
+    const [summaryRows] = await conn.execute<CostSummaryRow[]>(
       `SELECT costing_method, current_avg_cost, total_layers_qty, total_layers_cost
        FROM inventory_item_costs
        WHERE company_id = ? AND item_id = ?
@@ -128,7 +173,7 @@ class AVGCostingStrategy implements CostingStrategy {
       [input.companyId, input.itemId]
     );
 
-    const summary = (summaryRows as any[])[0];
+    const summary = summaryRows[0];
     const avgCost = Number(summary?.current_avg_cost ?? 0);
     const availableQty = Number(summary?.total_layers_qty ?? 0);
     const totalLayersCost = Number(summary?.total_layers_cost ?? 0);
@@ -190,7 +235,7 @@ class FIFOCostingStrategy implements CostingStrategy {
     }
 
     // Lock available layers in chronological order
-    const [layerRows] = await conn.execute(
+    const [layerRows] = await conn.execute<InventoryLayerRow[]>(
       `SELECT id, remaining_qty, unit_cost
        FROM inventory_cost_layers
        WHERE company_id = ? AND item_id = ? AND remaining_qty > 0
@@ -199,7 +244,7 @@ class FIFOCostingStrategy implements CostingStrategy {
       [input.companyId, input.itemId]
     );
 
-    const layers = layerRows as any[];
+    const layers = layerRows;
 
     // PRE-CHECK: Calculate total available BEFORE any mutations
     const totalAvailable = layers.reduce(
@@ -277,7 +322,7 @@ class LIFOCostingStrategy implements CostingStrategy {
     }
 
     // Lock available layers in reverse chronological order (newest first)
-    const [layerRows] = await conn.execute(
+    const [layerRows] = await conn.execute<InventoryLayerRow[]>(
       `SELECT id, remaining_qty, unit_cost
        FROM inventory_cost_layers
        WHERE company_id = ? AND item_id = ? AND remaining_qty > 0
@@ -286,7 +331,7 @@ class LIFOCostingStrategy implements CostingStrategy {
       [input.companyId, input.itemId]
     );
 
-    const layers = layerRows as any[];
+    const layers = layerRows;
 
     // PRE-CHECK: Calculate total available BEFORE any mutations
     const totalAvailable = layers.reduce(
@@ -382,7 +427,7 @@ export async function getCompanyCostingMethod(
     // 1. 'inventory.costing_method' (canonical key used by settings system)
     // 2. 'inventory_costing_method' (legacy key for backward compatibility)
     // Default: 'AVG'
-    const [rows] = await connection.execute(
+    const [rows] = await connection.execute<SettingRow[]>(
       `SELECT value_json, value_type, \`key\`
        FROM company_settings 
        WHERE company_id = ? AND \`key\` IN (?, ?) AND outlet_id IS NULL
@@ -397,7 +442,7 @@ export async function getCompanyCostingMethod(
       ]
     );
 
-    const setting = (rows as any[])[0];
+    const setting = rows[0];
     
     if (!setting) {
       return "AVG"; // Default when not configured
@@ -463,10 +508,10 @@ export async function createCostLayer(
     ]
   );
 
-  const insertId = (result as any).insertId;
+  const insertId = (result as ResultSetHeader).insertId;
 
   // Update summary table for AVG calculation
-  const [existingSummary] = await conn.execute(
+  const [existingSummary] = await conn.execute<CostSummaryRow[]>(
     `SELECT costing_method, total_layers_qty, total_layers_cost 
      FROM inventory_item_costs 
      WHERE company_id = ? AND item_id = ?
@@ -474,7 +519,7 @@ export async function createCostLayer(
     [params.companyId, params.itemId]
   );
 
-  const summary = (existingSummary as any[])[0];
+  const summary = existingSummary[0];
   const summaryMethod = summary?.costing_method ? String(summary.costing_method) : null;
   const currentMethod: CostingMethod =
     summaryMethod === "AVG" || summaryMethod === "FIFO" || summaryMethod === "LIFO"
@@ -499,20 +544,20 @@ export async function createCostLayer(
   );
 
   // Return created layer
-  const [layerRows] = await conn.execute(
+  const [layerRows] = await conn.execute<InventoryLayerRow[]>(
     `SELECT * FROM inventory_cost_layers WHERE id = ?`,
     [insertId]
   );
 
-  const layer = (layerRows as any[])[0];
+  const layer = layerRows[0];
   return {
     id: layer.id,
     companyId: layer.company_id,
     itemId: layer.item_id,
     transactionId: layer.transaction_id,
-    unitCost: layer.unit_cost,
-    originalQty: layer.original_qty,
-    remainingQty: layer.remaining_qty,
+    unitCost: Number(layer.unit_cost),
+    originalQty: Number(layer.original_qty),
+    remainingQty: Number(layer.remaining_qty),
     acquiredAt: layer.acquired_at,
   };
 }
@@ -526,21 +571,21 @@ export async function getItemCostLayers(
   const connection = conn ?? (await getDbPool().getConnection());
 
   try {
-    const [rows] = await connection.execute(
+    const [rows] = await connection.execute<InventoryLayerRow[]>(
       `SELECT * FROM inventory_cost_layers 
        WHERE company_id = ? AND item_id = ?
        ORDER BY acquired_at ASC, id ASC`,
       [companyId, itemId]
     );
 
-    return (rows as any[]).map((layer) => ({
+    return rows.map((layer) => ({
       id: layer.id,
       companyId: layer.company_id,
       itemId: layer.item_id,
       transactionId: layer.transaction_id,
-      unitCost: layer.unit_cost,
-      originalQty: layer.original_qty,
-      remainingQty: layer.remaining_qty,
+      unitCost: Number(layer.unit_cost),
+      originalQty: Number(layer.original_qty),
+      remainingQty: Number(layer.remaining_qty),
       acquiredAt: layer.acquired_at,
     }));
   } finally {
@@ -559,19 +604,19 @@ export async function getItemCostSummary(
   const connection = conn ?? (await getDbPool().getConnection());
 
   try {
-    const [rows] = await connection.execute(
+    const [rows] = await connection.execute<CostSummaryRow[]>(
       `SELECT * FROM inventory_item_costs 
        WHERE company_id = ? AND item_id = ?`,
       [companyId, itemId]
     );
 
-    const summary = (rows as any[])[0];
+    const summary = rows[0];
     if (!summary) return null;
 
     return {
       companyId: summary.company_id,
       itemId: summary.item_id,
-      costingMethod: summary.costing_method,
+      costingMethod: summary.costing_method as CostingMethod,
       currentAvgCost: Number(summary.current_avg_cost),
       totalLayersQty: Number(summary.total_layers_qty),
       totalLayersCost: Number(summary.total_layers_cost),
@@ -630,7 +675,7 @@ export async function getItemCostLayersWithConsumption(
 
   try {
     // Get layers ordered by acquisition (FIFO order)
-    const [layerRows] = await connection.execute(
+    const [layerRows] = await connection.execute<InventoryLayerRow[]>(
       `SELECT
         l.id, l.company_id, l.item_id, l.transaction_id,
         l.unit_cost, l.original_qty, l.remaining_qty,
@@ -644,14 +689,14 @@ export async function getItemCostLayersWithConsumption(
       [companyId, itemId]
     );
 
-    const layers = layerRows as any[];
+    const layers = layerRows;
     if (layers.length === 0) return [];
 
     // Get consumption history for FIFO/LIFO layers
     const layerIds = layers.map((l) => l.id);
     const placeholders = layerIds.map(() => "?").join(", ");
 
-    const [consumptionRows] = await connection.execute(
+    const [consumptionRows] = await connection.execute<ConsumptionRow[]>(
       `SELECT
         layer_id, transaction_id, consumed_qty, consumed_at
        FROM cost_layer_consumption
@@ -661,7 +706,7 @@ export async function getItemCostLayersWithConsumption(
     );
 
     const consumptionMap = new Map<number, Array<{ transactionId: number; quantity: number; consumedAt: string }>>();
-    (consumptionRows as any[]).forEach((c) => {
+    consumptionRows.forEach((c) => {
       const list = consumptionMap.get(c.layer_id) ?? [];
       list.push({
         transactionId: c.transaction_id,
@@ -680,7 +725,7 @@ export async function getItemCostLayersWithConsumption(
       originalQty: Number(layer.original_qty),
       remainingQty: Number(layer.remaining_qty),
       acquiredAt: layer.acquired_at,
-      reference: layer.transaction_reference_id ?? null,
+      reference: layer.transaction_reference_id?.toString() ?? null,
       consumedBy: consumptionMap.get(layer.id),
     }));
   } finally {
@@ -710,7 +755,7 @@ export async function getItemCostSummaryExtended(
     const method = await getCompanyCostingMethod(companyId, connection);
 
     // Get layer statistics
-    const [layerStats] = await connection.execute(
+    const [layerStats] = await connection.execute<LayerStatsRow[]>(
       `SELECT 
         COUNT(*) as layer_count,
         MIN(acquired_at) as oldest_acquired,
@@ -720,7 +765,7 @@ export async function getItemCostSummaryExtended(
       [companyId, itemId]
     );
 
-    const stats = (layerStats as any[])[0];
+    const stats = layerStats[0];
     const layerCount = Number(stats?.layer_count ?? 0);
 
     // Build method-specific breakdown
@@ -734,7 +779,7 @@ export async function getItemCostSummaryExtended(
     } else if (layerCount > 0) {
       // Get edge layer costs for FIFO/LIFO
       if (method === "FIFO" && stats.oldest_acquired) {
-        const [oldestRows] = await connection.execute(
+        const [oldestRows] = await connection.execute<LayerCostRow[]>(
           `SELECT unit_cost 
            FROM inventory_cost_layers
            WHERE company_id = ? AND item_id = ? AND remaining_qty > 0
@@ -742,13 +787,13 @@ export async function getItemCostSummaryExtended(
            LIMIT 1`,
           [companyId, itemId]
         );
-        const oldest = (oldestRows as any[])[0];
+        const oldest = oldestRows[0];
         methodSpecific.fifo = {
           oldestLayerCost: Number(oldest?.unit_cost ?? 0),
           layerCount,
         };
       } else if (method === "LIFO" && stats.newest_acquired) {
-        const [newestRows] = await connection.execute(
+        const [newestRows] = await connection.execute<LayerCostRow[]>(
           `SELECT unit_cost 
            FROM inventory_cost_layers
            WHERE company_id = ? AND item_id = ? AND remaining_qty > 0
@@ -756,7 +801,7 @@ export async function getItemCostSummaryExtended(
            LIMIT 1`,
           [companyId, itemId]
         );
-        const newest = (newestRows as any[])[0];
+        const newest = newestRows[0];
         methodSpecific.lifo = {
           newestLayerCost: Number(newest?.unit_cost ?? 0),
           layerCount,
