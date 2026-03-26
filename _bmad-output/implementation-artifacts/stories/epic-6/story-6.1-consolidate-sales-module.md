@@ -1,6 +1,6 @@
 # Story 6.1: Consolidate Sales Module
 
-**Status:** backlog
+**Status:** in-progress
 
 ## Story
 
