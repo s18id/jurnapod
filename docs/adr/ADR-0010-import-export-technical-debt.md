@@ -58,11 +58,11 @@ const sheetJson = XLSX.utils.sheet_to_json<string[]>(sheet, {...});
 
 ---
 
-### TD-3: Excel Export Claims Streaming but Collects All Data
+### TD-3: Excel Export Claims Streaming but Collects All Data ✅ RESOLVED
 
 **Location**: `apps/api/src/lib/export/streaming.ts` (lines 78-88)
 
-**Issue**: The Excel streaming function collects all rows into an array before writing:
+**Issue**: The Excel streaming function collected all rows into an array before writing:
 
 ```typescript
 const allRows: T[] = [];
@@ -72,13 +72,15 @@ for await (const row of dataSource) {
 }
 ```
 
-**Impact**: Excel exports of large datasets will cause memory issues despite "streaming" API.
+**Impact**: Excel exports of large datasets caused memory issues.
 
-**Mitigation**: Currently mitigated by processing in the main thread with progress callbacks.
+**Resolution**: ✅ Fixed in commit `6b57fda` - Implemented chunked Excel generation:
+- Added `generateExcelChunked()` function that creates multiple sheets for large datasets
+- Process data in chunks of 10,000 rows per sheet
+- Limit Excel exports to 50,000 rows with warning (CSV recommended for larger)
+- Datasets > 10,000 rows automatically use chunked generation
 
-**Resolution**: Implement chunked Excel generation with the `xlsx` library's streaming workbook API, or use a streaming Excel library like `exceljs`.
-
-**Priority**: High (affects large exports)
+**Priority**: High (affects large exports) - **RESOLVED**
 
 ---
 

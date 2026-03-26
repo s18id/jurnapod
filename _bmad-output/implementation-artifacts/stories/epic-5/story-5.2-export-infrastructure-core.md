@@ -170,7 +170,7 @@ interface StreamingExport<T> {
 See [ADR-0010: Import/Export Framework Technical Debt](../../../docs/adr/ADR-0010-import-export-technical-debt.md) for full details.
 
 **Key Items:**
-- **TD-3**: Excel export streaming collects all data in memory before writing (use CSV for very large exports)
+- **TD-3**: ✅ **RESOLVED** - Excel export now uses chunked generation with multiple sheets for large datasets
 - **TD-7**: Export streaming lacks explicit backpressure handling (relies on Node.js streams)
 - **TD-8**: No progress persistence for long-running exports
 
