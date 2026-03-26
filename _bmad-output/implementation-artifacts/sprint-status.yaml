@@ -86,3 +86,10 @@ development_status:
   4-2-backfill-fixed-assets-route-tests: done
   4-3-document-epic-3-product-enablement: done
   4-4-update-story-template-and-sync-checklist: done
+
+  # Epic 5: Import/Export Infrastructure
+  epic-5: in-progress
+  5-1-import-infrastructure-core: done
+  5-2-export-infrastructure-core: done
+  5-3-item-price-import-ui: done
+  5-4-item-price-export-ui: ready-for-dev

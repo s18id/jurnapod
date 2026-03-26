@@ -139,6 +139,12 @@ N/A - This is a backend infrastructure initiative with no UI changes.
   - **Story 4.3: Document Epic 3 Product Enablement** - Create stakeholder-facing documentation
   - **Story 4.4: Update Story Template and Create Sync Checklist** - Improve templates and add sync validation checklist
 
+- **Epic 5: Import/Export Infrastructure** - Build robust import/export system leveraging clean domain modules from Epic 3
+  - **Story 5.1: Import Infrastructure Core** - Create CSV/Excel parsing, validation, and batch processing framework
+  - **Story 5.2: Export Infrastructure Core** - Create CSV/Excel generation and formatting framework
+  - **Story 5.3: Item/Price Import UI** - Build import wizard for items and prices with validation preview
+  - **Story 5.4: Item/Price Export UI** - Build export interface with filters and format options
+
 ---
 
 ## Epic 0: Infrastructure & Technical Debt
@@ -1297,6 +1303,268 @@ So that **future stories have explicit test coverage criteria and sync changes a
 **Estimated Effort:** 0.5 days
 
 **Risk Level:** None (process documentation)
+
+---
+
+## Epic 5: Import/Export Infrastructure
+
+**Goal:** Build a robust import/export system that leverages the clean domain module architecture from Epic 3, enabling bulk data operations for items, prices, and eventually other master data entities.
+
+**Business Value:**
+- Enable bulk onboarding of large product catalogs (hundreds/thousands of items)
+- Support price updates across multiple outlets efficiently
+- Facilitate data migration from legacy systems
+- Reduce manual data entry errors through validation and preview
+- Enable integrations with external systems via standardized import/export formats
+
+**Success Metrics:**
+- Import 1000+ items in under 30 seconds with validation
+- Export operations complete in under 10 seconds for typical datasets
+- Validation errors displayed with row-level precision
+- Support for both CSV and Excel (.xlsx) formats
+- Zero data integrity issues during import operations
+
+**Context from Epic 3 Enablement:**
+The domain module extraction in Epic 3 created clean boundaries around items, item-groups, item-prices, and supplies. This infrastructure is now ready to support bulk operations.
+
+---
+
+### Story 5.1: Import Infrastructure Core
+
+As a **Jurnapod developer**,  
+I want **a reusable import framework with CSV/Excel parsing, validation, and batch processing**,  
+So that **bulk import operations are consistent, safe, and performant across all domain modules**.
+
+**Acceptance Criteria:**
+
+**AC1: File Parsing Support**
+**Given** import files in various formats
+**When** parsing CSV or Excel files
+**Then** the system supports:
+- UTF-8 encoded CSV with configurable delimiters
+- Excel .xlsx files with multiple sheets
+- Automatic encoding detection for common formats
+- Streaming parsing for large files (no memory exhaustion)
+
+**AC2: Validation Framework**
+**Given** parsed import rows
+**When** validating data
+**Then** the system:
+- Validates required fields per entity type
+- Checks data types and formats (dates, numbers, enums)
+- Validates foreign key references (company_id, outlet_id, category_id)
+- Detects duplicates within the import batch
+- Returns row-level error messages with specific column references
+
+**AC3: Batch Processing**
+**Given** validated import data
+**When** processing batches
+**Then** the system:
+- Processes in configurable batch sizes (default 100 rows)
+- Uses database transactions per batch (all-or-nothing)
+- Provides progress tracking for large imports
+- Handles partial failures gracefully (continue after errors)
+- Creates audit log entries for imported records
+
+**AC4: API Endpoint Pattern**
+**Given** the import framework
+**When** exposing import endpoints
+**Then** each endpoint follows:
+- POST /api/import/{entity-type}/validate - Dry-run validation
+- POST /api/import/{entity-type}/apply - Execute import
+- GET /api/import/{entity-type}/template - Download template
+- All endpoints use multipart/form-data for file upload
+
+**Files to Create:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `apps/api/src/lib/import/parsers.ts` | Create | CSV/Excel parsing utilities |
+| `apps/api/src/lib/import/validator.ts` | Create | Validation framework with row-level error reporting |
+| `apps/api/src/lib/import/batch-processor.ts` | Create | Batch processing with transactions |
+| `apps/api/src/lib/import/types.ts` | Create | Shared import types and interfaces |
+| `apps/api/src/lib/import/index.ts` | Create | Public API exports |
+| `apps/api/src/lib/import/import.test.ts` | Create | Unit tests for import framework |
+
+**Estimated Effort:** 2 days
+
+**Risk Level:** Medium (new framework, foundational for future imports)
+
+---
+
+### Story 5.2: Export Infrastructure Core
+
+As a **Jurnapod developer**,  
+I want **a reusable export framework for CSV/Excel generation**,  
+So that **bulk export operations are consistent and performant across all domain modules**.
+
+**Acceptance Criteria:**
+
+**AC1: Export Generation**
+**Given** export requests
+**When** generating exports
+**Then** the system:
+- Generates CSV files with proper escaping and encoding
+- Generates Excel .xlsx files with formatting
+- Supports streaming for large datasets (no memory exhaustion)
+- Includes headers mapped to user-friendly column names
+
+**AC2: Column Selection & Mapping**
+**Given** export requests
+**When** configuring exports
+**Then** the system supports:
+- Selecting specific columns to export
+- Custom column ordering
+- Computed columns (e.g., full item name with variant)
+- Date/time formatting options
+- Money formatting with currency symbols
+
+**AC3: Filtering & Sorting**
+**Given** export data sources
+**When** exporting
+**Then** the system:
+- Applies the same filters as list endpoints (company_id, outlet_id scopes)
+- Supports date range filtering
+- Supports sorting by any exportable column
+- Respects tenant isolation (company_id, outlet_id)
+
+**AC4: API Endpoint Pattern**
+**Given** the export framework
+**When** exposing export endpoints
+**Then** each endpoint follows:
+- POST /api/export/{entity-type} - Generate export
+- GET /api/export/{entity-type}/columns - List available columns
+- Accepts format parameter (csv, xlsx)
+- Returns download URL or streams file directly
+
+**Files to Create:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `apps/api/src/lib/export/generators.ts` | Create | CSV/Excel generation utilities |
+| `apps/api/src/lib/export/formatter.ts` | Create | Data formatting and column mapping |
+| `apps/api/src/lib/export/streaming.ts` | Create | Streaming export for large datasets |
+| `apps/api/src/lib/export/types.ts` | Create | Shared export types and interfaces |
+| `apps/api/src/lib/export/index.ts` | Create | Public API exports |
+| `apps/api/src/lib/export/export.test.ts` | Create | Unit tests for export framework |
+
+**Estimated Effort:** 1.5 days
+
+**Risk Level:** Low-Medium (similar patterns to import, less complex)
+
+---
+
+### Story 5.3: Item/Price Import UI
+
+As a **Jurnapod backoffice user**,  
+I want **an import wizard for items and prices with validation preview**,  
+So that **I can bulk upload products and prices with confidence and correct errors before applying**.
+
+**Acceptance Criteria:**
+
+**AC1: Import Wizard Flow**
+**Given** the import wizard
+**When** importing items or prices
+**Then** the flow includes:
+1. Upload step - drag-and-drop or file select
+2. Mapping step - map columns to fields (with auto-detection)
+3. Validation step - preview errors before applying
+4. Apply step - execute import with progress
+5. Results step - summary of imported/failed rows
+
+**AC2: Column Auto-Detection**
+**Given** uploaded files
+**When** mapping columns
+**Then** the system:
+- Auto-detects columns based on header names
+- Suggests mappings for common patterns (SKU, Name, Price, etc.)
+- Allows manual override of auto-detected mappings
+- Shows sample data for each detected column
+
+**AC3: Validation Preview**
+**Given** mapped data
+**When** validating
+**Then** the UI displays:
+- Total rows, valid rows, error rows
+- Row-by-row error details with specific messages
+- Ability to download error report
+- Option to fix errors in UI or cancel and re-upload
+
+**AC4: Progress & Results**
+**Given** applying imports
+**When** processing
+**Then** the UI shows:
+- Real-time progress bar during import
+- Row-by-row success/failure as it processes
+- Final summary with counts and downloadable log
+- Deep links to imported items for verification
+
+**Files to Create:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `apps/backoffice/src/features/import-wizard.tsx` | Modify/Extend | Extend existing import wizard for items/prices |
+| `apps/backoffice/src/features/item-import-page.tsx` | Create | Item import page with wizard |
+| `apps/backoffice/src/features/price-import-page.tsx` | Create | Price import page with wizard |
+| `apps/backoffice/src/hooks/use-import.ts` | Create | Import API hooks |
+| `apps/backoffice/src/components/import-column-mapper.tsx` | Create | Column mapping UI component |
+| `apps/backoffice/src/components/import-validation-preview.tsx` | Create | Validation preview component |
+
+**Estimated Effort:** 2 days
+
+**Risk Level:** Medium (UI complexity, user-facing feature)
+
+---
+
+### Story 5.4: Item/Price Export UI
+
+As a **Jurnapod backoffice user**,  
+I want **to export items and prices with filters and format options**,  
+So that **I can download data for analysis, reporting, or bulk editing**.
+
+**Acceptance Criteria:**
+
+**AC1: Export Interface**
+**Given** the items or prices page
+**When** exporting
+**Then** the UI provides:
+- Export button with format selection (CSV, Excel)
+- Column selection (all, default, custom)
+- Filter application (current view filters apply)
+- Date range selection for prices
+- Preview of row count before export
+
+**AC2: Column Selection**
+**Given** export dialog
+**When** selecting columns
+**Then** the UI:
+- Shows all available columns with descriptions
+- Provides "Select All", "Select None", "Default Set" shortcuts
+- Allows reordering of columns
+- Remembers user preferences
+
+**AC3: Export Execution**
+**Given** export configuration
+**When** generating
+**Then** the UI:
+- Shows loading state for large exports
+- Streams/downloads file automatically
+- Handles errors gracefully with retry option
+- Names files with timestamp and filter info
+
+**Files to Create:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `apps/backoffice/src/components/export-dialog.tsx` | Create | Export configuration dialog |
+| `apps/backoffice/src/components/column-selector.tsx` | Create | Column selection component |
+| `apps/backoffice/src/hooks/use-export.ts` | Create | Export API hooks |
+| `apps/backoffice/src/features/items-export.ts` | Modify/Extend | Add export to items page |
+| `apps/backoffice/src/features/prices-export.ts` | Modify/Extend | Add export to prices page |
+
+**Estimated Effort:** 1.5 days
+
+**Risk Level:** Low (simpler than import, established patterns)
 
 ---
 
