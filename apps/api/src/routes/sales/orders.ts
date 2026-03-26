@@ -21,7 +21,7 @@ import {
   DatabaseForbiddenError,
   DatabaseReferenceError,
   listOrders
-} from "@/lib/sales";
+} from "@/lib/orders";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { getCompany } from "@/lib/companies";
 import { errorResponse, successResponse } from "@/lib/response";

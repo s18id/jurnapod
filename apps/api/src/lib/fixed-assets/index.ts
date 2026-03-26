@@ -11,13 +11,13 @@ import {
   DatabaseReferenceError
 } from "../master-data-errors.js";
 import {
-  ensureUserHasOutletAccess,
   isMysqlError,
   mysqlDuplicateErrorCode,
   mysqlForeignKeyErrorCode,
   recordMasterDataAuditLog,
   withTransaction
 } from "../shared/master-data-utils.js";
+import { ensureUserHasOutletAccess } from "../shared/common-utils.js";
 
 type FixedAssetRow = RowDataPacket & {
   id: number;
@@ -478,7 +478,7 @@ export async function createFixedAsset(
   return withTransaction(async (connection) => {
     if (typeof input.outlet_id === "number") {
       await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
-      if (actor) await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+      if (actor) await ensureUserHasOutletAccess(actor.userId, companyId, input.outlet_id);
     }
 
     if (typeof input.category_id === "number") {
@@ -575,13 +575,13 @@ export async function updateFixedAsset(
     if (!before) return null;
 
     if (actor && before.outlet_id != null) {
-      await ensureUserHasOutletAccess(connection, actor.userId, companyId, before.outlet_id);
+      await ensureUserHasOutletAccess(actor.userId, companyId, before.outlet_id);
     }
 
     if (Object.hasOwn(input, "outlet_id")) {
       if (typeof input.outlet_id === "number") {
         await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
-        if (actor) await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+if (actor) await ensureUserHasOutletAccess(actor.userId, companyId, input.outlet_id);
       }
       fields.push("outlet_id = ?");
       values.push(input.outlet_id ?? null);
@@ -642,7 +642,7 @@ export async function deleteFixedAsset(
     if (!before) return false;
 
     if (actor && before.outlet_id != null) {
-      await ensureUserHasOutletAccess(connection, actor.userId, companyId, before.outlet_id);
+      await ensureUserHasOutletAccess(actor.userId, companyId, before.outlet_id);
     }
 
     await connection.execute<ResultSetHeader>(

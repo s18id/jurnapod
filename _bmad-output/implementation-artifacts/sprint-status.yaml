@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-25
-last_updated: 2026-03-27
+last_updated: 2026-03-26
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -97,7 +97,11 @@ development_status:
 
   # Epic 6: Technical Debt Consolidation & Modernization
   epic-6: in-progress
-  6-1-consolidate-sales-module: in-progress
+  6-1a-invoice-types-extraction: done
+  6-1b-payment-types-extraction: done
+  6-1c-order-types-extraction: done
+  6-1d-credit-note-extraction: done
+  6-1e-shared-utilities-consolidation: done
   6-2-consolidate-service-sessions-module: backlog
   6-3-type-safety-audit: backlog
   6-4-deprecation-cleanup: backlog

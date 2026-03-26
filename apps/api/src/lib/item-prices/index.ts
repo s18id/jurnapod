@@ -11,13 +11,13 @@ import {
   DatabaseReferenceError
 } from "../master-data-errors.js";
 import {
-  ensureUserHasOutletAccess,
   isMysqlError,
   mysqlDuplicateErrorCode,
   mysqlForeignKeyErrorCode,
   recordMasterDataAuditLog,
   withTransaction
 } from "../shared/master-data-utils.js";
+import { ensureUserHasOutletAccess } from "../shared/common-utils.js";
 
 type ItemPriceRow = RowDataPacket & {
   id: number;
@@ -337,7 +337,7 @@ export async function updateItemPrice(
     }
 
     if (actor && before.outlet_id !== null) {
-      await ensureUserHasOutletAccess(connection, actor.userId, companyId, before.outlet_id);
+      await ensureUserHasOutletAccess(actor.userId, companyId, before.outlet_id);
     }
 
     if (actor && before.outlet_id === null && actor.canManageCompanyDefaults !== true) {
@@ -359,7 +359,7 @@ export async function updateItemPrice(
         values.push(null);
       } else if (typeof input.outlet_id === "number") {
         if (actor) {
-          await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.outlet_id);
+          await ensureUserHasOutletAccess(actor.userId, companyId, input.outlet_id);
         }
         await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
         fields.push("outlet_id = ?");
@@ -428,7 +428,7 @@ export async function deleteItemPrice(
     }
 
     if (actor && before.outlet_id !== null) {
-      await ensureUserHasOutletAccess(connection, actor.userId, companyId, before.outlet_id);
+      await ensureUserHasOutletAccess(actor.userId, companyId, before.outlet_id);
     }
 
     if (actor && before.outlet_id === null && actor.canManageCompanyDefaults !== true) {

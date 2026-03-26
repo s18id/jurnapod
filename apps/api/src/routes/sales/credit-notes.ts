@@ -24,7 +24,7 @@ import {
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError
-} from "@/lib/sales";
+} from "@/lib/credit-notes";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { errorResponse, successResponse } from "@/lib/response";
 import type { AuthContext } from "@/lib/auth-guard";

@@ -30,29 +30,19 @@
 - Credit/Debit notes
 - Split payments
 
-This file was the original monolith and has accumulated significant complexity.
+This file was the original monolith and has accumulated significant complexity. SPLIT into 5 sub-stories for delegatable work.
 
-**Acceptance Criteria:**
+**Sub-Stories:**
 
-**AC1: Module Boundary Extraction**
-- Extract invoice-specific logic into `lib/invoices/`
-- Extract payment processing into `lib/payments/`
-- Extract receipt generation into `lib/receipts/`
-- Each sub-module has clear public interface in `index.ts`
+| Story | Focus | Effort | Dependencies |
+|-------|-------|--------|--------------|
+| 6.1a | Invoice types and functions extraction | 1.5 days | None |
+| 6.1b | Payment types and functions extraction | 1.5 days | None |
+| 6.1c | Order types and functions extraction | 1.5 days | 6.1a |
+| 6.1d | Credit note types and functions extraction | 1 day | None |
+| 6.1e | Shared utilities and final consolidation | 1 day | 6.1a, 6.1b, 6.1c, 6.1d |
 
-**AC2: Type Safety Improvements**
-- Replace `as any` casts in `sales.ts` with proper typed queries
-- Use Kysely's typed query builders throughout
-- Add Zod schemas for all public function parameters
-
-**AC3: Test Coverage**
-- Add unit tests for extracted sub-modules
-- Maintain 100% passing tests throughout refactor
-- No regression in existing invoice/payment flows
-
-**Estimated Effort:** 4 days
-
-**Risk Level:** High (core financial module)
+**Total Estimated Effort:** 6.5 days
 
 ---
 

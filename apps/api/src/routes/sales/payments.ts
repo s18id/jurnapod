@@ -21,11 +21,13 @@ import {
   getPayment,
   updatePayment,
   postPayment,
-  DatabaseConflictError,
-  DatabaseForbiddenError,
-  DatabaseReferenceError,
   listPayments,
   PaymentAllocationError
+} from "@/lib/payments";
+import {
+  DatabaseConflictError,
+  DatabaseForbiddenError,
+  DatabaseReferenceError
 } from "@/lib/sales";
 import { PaymentVarianceConfigError } from "@/lib/sales-posting";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";

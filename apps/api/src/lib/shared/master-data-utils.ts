@@ -5,6 +5,10 @@ import type { RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "../db.js";
 import { DatabaseForbiddenError } from "../master-data-errors.js";
+import { ensureUserHasOutletAccess as commonUtilsEnsureUserHasOutletAccess } from "./common-utils.js";
+
+// Re-export for backward compatibility - prefer importing from common-utils directly
+export const ensureUserHasOutletAccess = commonUtilsEnsureUserHasOutletAccess;
 
 /**
  * MySQL duplicate entry error code (1062)
@@ -87,45 +91,4 @@ export async function recordMasterDataAuditLog(
   );
 }
 
-type AccessCheckRow = RowDataPacket & { id: number };
 
-/**
- * Validates that a user has access to a specific outlet
- * Checks both global roles and outlet-specific role assignments
- */
-export async function ensureUserHasOutletAccess(
-  executor: { execute: PoolConnection["execute"] },
-  userId: number,
-  companyId: number,
-  outletId: number
-): Promise<void> {
-  const [rows] = await executor.execute<AccessCheckRow[]>(
-    `SELECT 1
-     FROM users u
-     WHERE u.id = ?
-       AND u.company_id = ?
-       AND u.is_active = 1
-       AND (
-         EXISTS (
-           SELECT 1
-           FROM user_role_assignments ura
-           INNER JOIN roles r ON r.id = ura.role_id
-           WHERE ura.user_id = u.id
-             AND r.is_global = 1
-             AND ura.outlet_id IS NULL
-         )
-         OR EXISTS (
-           SELECT 1
-           FROM user_role_assignments ura
-           WHERE ura.user_id = u.id
-             AND ura.outlet_id = ?
-         )
-       )
-     LIMIT 1`,
-    [userId, companyId, outletId]
-  );
-
-  if (rows.length === 0) {
-    throw new DatabaseForbiddenError("User cannot access outlet");
-  }
-}
