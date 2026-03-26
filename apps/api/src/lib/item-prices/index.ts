@@ -10,6 +10,14 @@ import {
   DatabaseForbiddenError,
   DatabaseReferenceError
 } from "../master-data-errors.js";
+import {
+  ensureUserHasOutletAccess,
+  isMysqlError,
+  mysqlDuplicateErrorCode,
+  mysqlForeignKeyErrorCode,
+  recordMasterDataAuditLog,
+  withTransaction
+} from "../shared/master-data-utils.js";
 
 type ItemPriceRow = RowDataPacket & {
   id: number;
@@ -23,10 +31,6 @@ type ItemPriceRow = RowDataPacket & {
   item_group_name?: string | null;
 };
 
-type AccessCheckRow = RowDataPacket & {
-  id: number;
-};
-
 type QueryExecutor = {
   execute: PoolConnection["execute"];
 };
@@ -36,35 +40,11 @@ type MutationAuditActor = {
   canManageCompanyDefaults?: boolean;
 };
 
-const mysqlDuplicateErrorCode = 1062;
-const mysqlForeignKeyErrorCode = 1452;
-
 const itemPriceAuditActions = {
   create: "MASTER_DATA_ITEM_PRICE_CREATE",
   update: "MASTER_DATA_ITEM_PRICE_UPDATE",
   delete: "MASTER_DATA_ITEM_PRICE_DELETE"
 } as const;
-
-function isMysqlError(error: unknown): error is { errno?: number } {
-  return typeof error === "object" && error !== null && "errno" in error;
-}
-
-async function withTransaction<T>(operation: (connection: PoolConnection) => Promise<T>): Promise<T> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-    const result = await operation(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-}
 
 async function recordItemPriceAuditLog(
   executor: QueryExecutor,
@@ -76,19 +56,13 @@ async function recordItemPriceAuditLog(
     payload: Record<string, unknown>;
   }
 ): Promise<void> {
-  await executor.execute(
-    `INSERT INTO audit_logs (
-       company_id,
-       outlet_id,
-       user_id,
-       action,
-       result,
-       success,
-       ip_address,
-       payload_json
-     ) VALUES (?, ?, ?, ?, 'SUCCESS', 1, NULL, ?)`,
-    [input.companyId, input.outletId, input.actor?.userId ?? null, input.action, JSON.stringify(input.payload)]
-  );
+  await recordMasterDataAuditLog(executor, {
+    companyId: input.companyId,
+    outletId: input.outletId,
+    actor: input.actor,
+    action: input.action,
+    payload: input.payload
+  });
 }
 
 function normalizeItemPrice(row: ItemPriceRow) {
@@ -140,43 +114,6 @@ async function ensureCompanyOutletExists(
 
   if (rows.length === 0) {
     throw new DatabaseReferenceError("Outlet not found for company");
-  }
-}
-
-async function ensureUserHasOutletAccess(
-  executor: QueryExecutor,
-  userId: number,
-  companyId: number,
-  outletId: number
-): Promise<void> {
-  const [rows] = await executor.execute<AccessCheckRow[]>(
-    `SELECT 1
-     FROM users u
-     WHERE u.id = ?
-       AND u.company_id = ?
-       AND u.is_active = 1
-       AND (
-         EXISTS (
-           SELECT 1
-           FROM user_role_assignments ura
-           INNER JOIN roles r ON r.id = ura.role_id
-           WHERE ura.user_id = u.id
-             AND r.is_global = 1
-             AND ura.outlet_id IS NULL
-         )
-         OR EXISTS (
-           SELECT 1
-           FROM user_role_assignments ura
-           WHERE ura.user_id = u.id
-             AND ura.outlet_id = ?
-         )
-       )
-     LIMIT 1`,
-    [userId, companyId, outletId]
-  );
-
-  if (rows.length === 0) {
-    throw new DatabaseForbiddenError("User cannot access outlet");
   }
 }
 

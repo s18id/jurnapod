@@ -6,6 +6,12 @@ import type { PoolConnection } from "mysql2/promise";
 import { toRfc3339Required } from "@jurnapod/shared";
 import { getDbPool } from "../db.js";
 import { DatabaseConflictError } from "../master-data-errors.js";
+import {
+  isMysqlError,
+  mysqlDuplicateErrorCode,
+  recordMasterDataAuditLog,
+  withTransaction
+} from "../shared/master-data-utils.js";
 
 type SupplyRow = RowDataPacket & {
   id: number;
@@ -26,34 +32,11 @@ type MutationAuditActor = {
   canManageCompanyDefaults?: boolean;
 };
 
-const mysqlDuplicateErrorCode = 1062;
-
 const supplyAuditActions = {
   create: "MASTER_DATA_SUPPLY_CREATE",
   update: "MASTER_DATA_SUPPLY_UPDATE",
   delete: "MASTER_DATA_SUPPLY_DELETE"
 } as const;
-
-function isMysqlError(error: unknown): error is { errno?: number } {
-  return typeof error === "object" && error !== null && "errno" in error;
-}
-
-async function withTransaction<T>(operation: (connection: PoolConnection) => Promise<T>): Promise<T> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-    const result = await operation(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-}
 
 async function recordSupplyAuditLog(
   executor: QueryExecutor,
@@ -64,19 +47,13 @@ async function recordSupplyAuditLog(
     payload: Record<string, unknown>;
   }
 ): Promise<void> {
-  await executor.execute(
-    `INSERT INTO audit_logs (
-       company_id,
-       outlet_id,
-       user_id,
-       action,
-       result,
-       success,
-       ip_address,
-       payload_json
-     ) VALUES (?, NULL, ?, ?, 'SUCCESS', 1, NULL, ?)`,
-    [input.companyId, input.actor?.userId ?? null, input.action, JSON.stringify(input.payload)]
-  );
+  await recordMasterDataAuditLog(executor, {
+    companyId: input.companyId,
+    outletId: null,
+    actor: input.actor,
+    action: input.action,
+    payload: input.payload
+  });
 }
 
 function normalizeSupply(row: SupplyRow) {

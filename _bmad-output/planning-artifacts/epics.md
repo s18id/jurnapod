@@ -133,6 +133,12 @@ N/A - This is a backend infrastructure initiative with no UI changes.
   - **Story 3.6: Sync Master Data Finalization** - Repoint sync assembly, delete `lib/master-data.ts`, run full validation
   - [Epic 3 Retrospective](./implementation-artifacts/epic-3-retro-2026-03-26.md)
 
+- **Epic 4: Technical Debt Cleanup & Process Improvement** - Address P1/P2 follow-up actions from Epic 3 retrospective
+  - **Story 4.1: Extract Shared Master-Data Utilities** - Consolidate duplicated utilities across 5 domain modules
+  - **Story 4.2: Backfill Fixed-Assets Route Tests** - Add automated route-level tests for fixed-asset endpoints
+  - **Story 4.3: Document Epic 3 Product Enablement** - Create stakeholder-facing documentation
+  - **Story 4.4: Update Story Template and Create Sync Checklist** - Improve templates and add sync validation checklist
+
 ---
 
 ## Epic 0: Infrastructure & Technical Debt
@@ -1070,11 +1076,236 @@ So that **future developers can learn from the journals/account-types migration 
 
 - [Epic 3 Retrospective](./implementation-artifacts/epic-3-retro-2026-03-26.md)
 
+## Epic 4: Technical Debt Cleanup & Process Improvement
+
+**Goal:** Address P1/P2 follow-up actions from Epic 3 retrospective: extract shared utilities, backfill test coverage, document product enablement, and improve development process templates.
+
+**Business Value:**
+- Eliminate 80% code duplication across 5 domain modules (item-groups, items, item-prices, supplies, fixed-assets)
+- Ensure robust test coverage for fixed-assets domain
+- Enable stakeholder understanding of architecture investments
+- Prevent future coverage gaps and sync protocol issues through improved templates
+
+**Success Metrics:**
+- Zero helper duplication across domain modules
+- 80%+ route coverage for fixed-assets endpoints
+- Product enablement document published and stakeholder-approved
+- Story template includes explicit test coverage criteria
+- Sync protocol validation checklist created and referenced
+
+**Context from Epic 3 Retrospective:**
+- P1: Extract shared master-data utilities package
+- P1: Backfill fixed-assets route tests
+- P1: Document Epic 3 product enablement
+- P2: Add test-coverage gates to story template
+- P2: Create sync protocol validation checklist
+
+---
+
+### Story 4.1: Extract Shared Master-Data Utilities
+
+As a **Jurnapod developer**,  
+I want **shared utilities extracted from domain modules into a common location**,  
+So that **code duplication is eliminated and maintenance is simplified**.
+
+**Acceptance Criteria:**
+
+**AC1: Identify Duplicated Utilities**
+**Given** the five domain modules (item-groups, items, item-prices, supplies, fixed-assets)
+**When** reviewing their internal implementations
+**Then** identify all duplicated utilities: `withTransaction`, `isMysqlError`, `mysqlDuplicateErrorCode`, `mysqlForeignKeyErrorCode`, `ensureCompanyExists`, `ensureUserHasOutletAccess`, audit logging helpers
+
+**AC2: Create Shared Utilities Module**
+**Given** the identified duplicated utilities
+**When** creating `lib/shared/master-data-utils.ts`
+**Then** all utilities are consolidated in one location
+**And** proper TypeScript types are exported
+**And** the module is imported by all 5 domain modules
+
+**AC3: Update Domain Modules**
+**Given** the new shared utilities module
+**When** updating item-groups, items, item-prices, supplies, and fixed-assets
+**Then** each module imports from the shared location
+**And** internal duplicate implementations are removed
+
+**AC4: Preserve Existing Behavior**
+**Given** the refactored domain modules
+**When** running the test suite
+**Then** all 714 API unit tests pass
+**And** type checking passes with zero errors
+**And** no functional changes are introduced
+
+**Files to Modify:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `apps/api/src/lib/shared/master-data-utils.ts` | Create | Consolidated shared utilities |
+| `apps/api/src/lib/item-groups/index.ts` | Modify | Import from shared utilities |
+| `apps/api/src/lib/items/index.ts` | Modify | Import from shared utilities |
+| `apps/api/src/lib/item-prices/index.ts` | Modify | Import from shared utilities |
+| `apps/api/src/lib/supplies/index.ts` | Modify | Import from shared utilities |
+| `apps/api/src/lib/fixed-assets/index.ts` | Modify | Import from shared utilities |
+
+**Estimated Effort:** 1 day
+
+**Risk Level:** Low (refactoring only, no functional changes)
+
+---
+
+### Story 4.2: Backfill Fixed-Assets Route Tests
+
+As a **Jurnapod QA engineer**,  
+I want **automated route-level tests for fixed-asset and fixed-asset-category CRUD endpoints**,  
+So that **the fixed-assets domain has equivalent coverage to items and item-groups**.
+
+**Acceptance Criteria:**
+
+**AC1: Fixed Asset Category Tests**
+**Given** the fixed-asset-category endpoints (GET, POST, PUT, DELETE)
+**When** tests are implemented
+**Then** all CRUD operations have route-level coverage
+**And** error paths (validation, not found, conflicts) are tested
+**And** tenant isolation (company_id scoping) is verified
+
+**AC2: Fixed Asset Tests**
+**Given** the fixed-asset endpoints (GET, POST, PUT, DELETE)
+**When** tests are implemented
+**Then** all CRUD operations have route-level coverage
+**And** relationships with categories are tested
+**And** error paths are covered
+
+**AC3: Coverage Target**
+**Given** the fixed-assets test suite
+**When** coverage is measured
+**Then** minimum 80% route coverage is achieved
+**And** all critical paths (create, read, update, delete, error handling) are tested
+
+**AC4: Test Integration**
+**Given** the new tests
+**When** running the full API test suite
+**Then** all tests pass (714+)
+**And** tests follow existing patterns from items/item-groups
+
+**Files to Create:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `apps/api/src/routes/accounts.fixed-assets.test.ts` | Create | Route tests for fixed-asset endpoints |
+
+**Estimated Effort:** 1.5 days
+
+**Risk Level:** Low (tests only, no production code changes)
+
+---
+
+### Story 4.3: Document Epic 3 Product Enablement
+
+As a **Jurnapod product manager**,  
+I want **stakeholder-facing documentation explaining how Epic 3 enables future features**,  
+So that **architecture investments are understood and justified**.
+
+**Acceptance Criteria:**
+
+**AC1: Product Enablement Document**
+**Given** the Epic 3 retrospective learnings
+**When** creating the documentation
+**Then** it explains which features are now enabled:
+- Variant-level sync for POS (item variants, variant prices)
+- Advanced GL reports (consolidated financial statements)
+- Import/Export infrastructure
+- Future domain extractions
+
+**AC2: Technical Debt Impact**
+**Given** the master-data monolith extraction
+**When** documenting
+**Then** explain how domain isolation reduces:
+- Review scope per change
+- Regression risk for inventory/accounting routes
+- Time to implement new master-data features
+
+**AC3: Stakeholder Accessibility**
+**Given** the document audience
+**When** reviewing content
+**Then** technical concepts are explained in business terms
+**And** specific feature examples are provided
+**And** ROI of the refactoring is articulated
+
+**AC4: Document Location**
+**Given** the completed document
+**When** published
+**Then** it is located at `docs/product/epic-3-product-enablement.md`
+**And** it is referenced from the Epic 3 retrospective
+
+**Files to Create:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `docs/product/epic-3-product-enablement.md` | Create | Stakeholder-facing product enablement doc |
+
+**Estimated Effort:** 0.5 days
+
+**Risk Level:** None (documentation only)
+
+---
+
+### Story 4.4: Update Story Template and Create Sync Checklist
+
+As a **Jurnapod scrum master**,  
+I want **improved story templates and sync validation checklists**,  
+So that **future stories have explicit test coverage criteria and sync changes are properly validated**.
+
+**Acceptance Criteria:**
+
+**AC1: Story Template Update**
+**Given** the existing story spec template
+**When** updating it
+**Then** add mandatory section: "Test Coverage Criteria"
+**And** require explicit coverage percentage or "all paths" statement
+**And** require listing of error paths to be tested
+**And** apply to Epic 4 and future stories
+
+**AC2: Sync Protocol Validation Checklist**
+**Given** sync-related changes need validation
+**When** creating the checklist
+**Then** document mandatory validation steps:
+- Idempotency verification (client_tx_id handling)
+- Conflict resolution behavior
+- Offline-first guarantees
+- Regression test execution
+
+**AC3: Checklist Integration**
+**Given** the sync checklist
+**When** referenced in planning
+**Then** it is located at `docs/process/sync-protocol-checklist.md`
+**And** it is linked from Epic 4 planning
+**And** it is referenced in ADR-0009
+
+**AC4: Template Application**
+**Given** the updated templates
+**When** reviewing Epic 4 stories
+**Then** all stories include explicit test coverage criteria
+**And** sync-related stories reference the validation checklist
+
+**Files to Create/Modify:**
+
+| File | Action | Description |
+|------|--------|-------------|
+| `docs/templates/story-spec-template.md` | Modify | Add test coverage criteria section |
+| `docs/process/sync-protocol-checklist.md` | Create | Mandatory validation steps for sync changes |
+| `docs/adr/ADR-0009-kysely-type-safe-query-builder.md` | Modify | Reference sync checklist |
+
+**Estimated Effort:** 0.5 days
+
+**Risk Level:** None (process documentation)
+
+---
+
 ## References
 
 - [ADR-0007: MySQL2 Pool Singleton with Raw Parameterized SQL](../docs/adr/ADR-0007-mysql2-pool-singleton-raw-sql.md)
 - [ARCHITECTURE.md](../docs/ARCHITECTURE.md)
 - [AGENTS.md](../AGENTS.md)
+- [Epic 3 Retrospective](../_bmad-output/implementation-artifacts/epic-3-retro-2026-03-26.md)
 - [Kysely Documentation](https://kysely.dev/)
 - [Kysely GitHub](https://github.com/kysely-org/kysely)
 - [Epic 0: Kysely ORM Infrastructure](./epic-0/index.md)

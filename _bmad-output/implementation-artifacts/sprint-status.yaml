@@ -1,5 +1,5 @@
 # generated: 2026-03-25
-# last_updated: 2026-03-25
+# last_updated: 2026-03-27
 # project: Jurnapod
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-25
-last_updated: 2026-03-26
+last_updated: 2026-03-27
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -79,3 +79,10 @@ development_status:
   3-5-fixed-assets-domain-extraction: done
   3-6-sync-master-data-finalization: done
   epic-3-retrospective: done
+
+  # Epic 4: Technical Debt Cleanup & Process Improvement
+  epic-4: done
+  4-1-extract-shared-master-data-utilities: done
+  4-2-backfill-fixed-assets-route-tests: done
+  4-3-document-epic-3-product-enablement: done
+  4-4-update-story-template-and-sync-checklist: done

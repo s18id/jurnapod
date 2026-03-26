@@ -496,6 +496,14 @@ const [rows] = await pool.execute<ItemCostRow[]>(
 
 ---
 
+## Sync Protocol Validation
+
+For any sync-related changes, **always use the [Sync Protocol Validation Checklist](../../process/sync-protocol-checklist.md)** before implementation. This checklist is mandatory for:
+- POS sync push/pull changes
+- Offline-first behavior modifications
+- Conflict resolution logic changes
+- `client_tx_id` handling modifications
+
 ## References
 
 - `packages/db/src/pool.ts` — Pool singleton, `createDbPool()`, `closeDbPool()`
@@ -512,6 +520,7 @@ const [rows] = await pool.execute<ItemCostRow[]>(
 - `packages/modules/accounting/src/accounts-service.ts` — Example migrated service
 - `ADR-0007-mysql2-pool-singleton-raw-sql.md` — Raw SQL approach (still valid for complex queries)
 - [Kysely Documentation](https://kysely.dev/)
+- [Sync Protocol Validation Checklist](../../process/sync-protocol-checklist.md) — **Mandatory for sync changes**
 - Epic 0: Kysely ORM Infrastructure (Stories 0.1.1–0.1.6)
 - Epic 1: Continue Kysely Migration (Stories 1.1–1.3)
 - Epic 2: Sync Routes & Reports Migration (Stories 2.1–2.10)
