@@ -250,9 +250,9 @@ npm run qa:e2e -w @jurnapod/pos
 | **POS** | `npm run typecheck -w @jurnapod/pos` | `npm run build -w @jurnapod/pos` | `npm run lint -w @jurnapod/pos` | `npm run test -w @jurnapod/pos` | — | `npm run qa:e2e -w @jurnapod/pos` |
 
 **Current Status (as of last validation):**
-- **API**: ✅ All checks passing (TypeScript, Build, Lint, ~473 tests including sync routes, accounts, inventory, tax-rates, and roles routes)
-- **Backoffice**: ⚠️ Type check and lint have issues; tests passing (93 tests)
-- **POS**: ⚠️ Tests have some failures (60/72 passing); TypeScript and build passing
+- **API**: ✅ All checks passing (TypeScript, Build, Lint, 765 unit tests including auth, sync routes, accounts, inventory, tax-rates, and roles routes)
+- **Backoffice**: ✅ Type check, lint, and build passing; route screens lazy-loaded and vendor chunks split to avoid large-bundle warnings
+- **POS**: ⚠️ TypeScript, lint, and build passing; unit tests still need separate follow-up validation
 
 ### Test cleanup (CRITICAL)
 - **All unit tests using `getDbPool()` must close the pool after completion.**

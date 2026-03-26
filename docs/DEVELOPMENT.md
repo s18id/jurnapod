@@ -22,7 +22,7 @@ Complete guide for developing Jurnapod locally.
 
 ### Required Software
 
-- **Node.js**: v20.x (LTS recommended)
+- **Node.js**: v22.x
 - **npm**: v9.x or higher
 - **MySQL**: 8.0.44+ or MariaDB
 - **Git**: For version control
@@ -30,7 +30,7 @@ Complete guide for developing Jurnapod locally.
 ### Verify Installation
 
 ```bash
-node --version  # Should be v20.x
+node --version  # Should be v22.x
 npm --version   # Should be v9.x+
 mysql --version # Should be 8.0.44+
 ```
@@ -429,7 +429,7 @@ npm run db:migrate
 
 **Check Node version:**
 ```bash
-node --version  # Should be v20.x
+node --version  # Should be v22.x
 ```
 
 **Run migrations:**
@@ -501,4 +501,3 @@ See: [AGENTS.md § Test cleanup](../AGENTS.md#test-cleanup-critical)
 - [Architecture](ARCHITECTURE.md)
 - [Troubleshooting Guide](TROUBLESHOOTING.md)
 - [AGENTS.md](../AGENTS.md) - Development guidelines and invariants
-

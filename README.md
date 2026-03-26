@@ -81,7 +81,7 @@ npm run dev
 ### Technology Stack
 
 - **Frontend**: React, Vite, PWA (service workers)
-- **Backend**: Hono, Node.js 20.x
+- **Backend**: Hono, Node.js 22.x
 - **Database**: MySQL 8.0.44 / MariaDB (InnoDB)
 - **Validation**: Zod schemas
 - **Money**: `DECIMAL(18,2)` - never FLOAT/DOUBLE
@@ -171,4 +171,3 @@ Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 - **Issues**: Report bugs or request features via GitHub Issues
 - **Documentation**: Check [docs/](docs/) for detailed guides
 - **Architecture**: Review [AGENTS.md](AGENTS.md) for system invariants
-

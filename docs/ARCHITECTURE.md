@@ -118,7 +118,7 @@ DRAFT → POSTED → VOID
 
 ### Backend
 
-- **Runtime**: Node.js 20.x
+- **Runtime**: Node.js 22.x
 - **Framework**: Hono (replaces Next.js)
 - **Validation**: Zod schemas
 - **Database Driver**: mysql2

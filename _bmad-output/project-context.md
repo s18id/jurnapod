@@ -1,7 +1,7 @@
 ---
 project_name: 'jurnapod'
 user_name: 'Ahmad'
-date: '2026-03-26T00:00:00Z'
+date: '2026-03-27T00:00:00Z'
 sections_completed: ['technology_stack', 'language_specific_rules', 'framework_specific_rules', 'testing_rules', 'code_quality_rules', 'development_workflow_rules']
 existing_patterns_found: 18
 status: 'complete'
@@ -19,23 +19,24 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 ### Core Platform
 - **Monorepo**: npm workspaces, project `jurnapod` v0.2.2
-- **Runtime**: Node.js 20.x (engines-locked)
+- **Runtime**: Node.js >=22 (repository engines now require Node 22)
 - **Language**: TypeScript ^5.7.3 (consistent across all packages—flag and fix drift)
 - **Module System**: ESM only (`"type": "module"` in all packages)
 - **Base Config**: `tsconfig.base.json` with strict mode, ES2022 target, Bundler resolution
 
 ### API Layer
-- **Framework**: Hono ^4.x with `@hono/node-server` ^1.19.x
-- **Validation/OpenAPI**: Zod ^3.24.x, `@hono/zod-openapi` ^0.14.8
+- **Framework**: Hono ^4.0.0 with `@hono/node-server` ^1.19.11
+- **Validation/OpenAPI**: Zod ^3.24.1, `@hono/zod-openapi` ^0.14.8
 - **Database**: mysql2 ^3.15.x (promise API only)
 - **Date/Time**: `@js-temporal/polyfill` ^0.5.1 (business logic dates—never native Date)
 - **Auth**: `@node-rs/argon2` ^2.0.2 (password hashing), `jose` ^6.1.2 (JWT)
 - **Real-time**: `ws` ^8.19.0 (WebSocket support)
 
 ### Frontend Applications
-- **Backoffice**: React ^18.3.x, Vite ^5.4.x, Mantine ^7.17.x
-- **POS**: React ^18.3.x, Vite ^5.4.x, Ionic React ^8.8.x, Capacitor 8.x
-  - **CRITICAL**: `@capacitor/cli` must match core version (currently misaligned at ^7.6.0 vs ^8.2.0—fix required)
+- **Backoffice**: React ^18.3.1, Vite ^5.4.21, Mantine ^7.17.1
+  - **Build strategy**: Route-level lazy loading plus manual vendor chunks keep the main app bundle small and avoid Vite large-chunk warnings
+- **POS**: React ^18.3.1, Vite ^5.4.15, Ionic React ^8.8.1, Capacitor 8.0.1
+  - **CRITICAL**: Keep all Capacitor packages pinned to the same published version (`@capacitor/android`, `app`, `device`, `ios`, `network`, `cli`, `core` all at `8.0.1` today)
 - **Routing**: `react-router-dom` ^7.13.1 (POS only)
 
 ### Shared Infrastructure
@@ -66,7 +67,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Migrations**: Rerunnable/idempotent DDL only; use `information_schema` checks for portability (no `IF EXISTS` in ALTER)
 
 ### Critical Compatibility Rules for AI Agents
-1. Keep Capacitor CLI and core versions synchronized
+1. Keep all Capacitor packages synchronized to the same published version
 2. Use `@js-temporal/polyfill` for all business date logic
 3. DB pool cleanup is mandatory in API tests—tests hang without it
 4. Only sync-core uses Vitest; all other packages use Node test runner
@@ -82,6 +83,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Target: `ES2022`, Module: `ESNext`, Resolution: `Bundler`
 - All packages must compile without errors—CI blocks on type errors
 - **Boundary rule**: Re-validate all data at API boundaries with Zod; TypeScript types do not survive serialization
+- Keep workspace TypeScript versions aligned across packages
 
 #### Import/Export Conventions
 - **API imports**: Use `@/` path alias (e.g., `import { getDbPool } from "@/lib/db"`) — never relative paths like `../../../../lib/`
@@ -109,6 +111,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
   - `toFixed(2)` returns string—use only for display formatting
 - **SQL aggregation**: Cast results: `CAST(SUM(amount) AS DECIMAL(18,2))` to prevent float drift
 - **Test requirement**: Unit tests must verify monetary calculations round-trip correctly through database
+- Be explicit about rounding and avoid hidden drift
 
 #### Null Handling
 - Prefer `undefined` over `null` for optional fields in TypeScript
@@ -120,6 +123,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 #### Error Handling
 - Prefer `neverthrow` Result types for fallible operations; avoid throwing for expected failures
 - Use `ResultAsync` for async operations that may fail
+- Prefer precise typed guards over loose `unknown` checks
+- Keep duplicate-key, foreign-key, auth, and tenant-scope error mapping stable
 
 ### Framework-Specific Rules
 
@@ -131,6 +136,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Response envelope follows standardized format (see ADR-0006)
 - All mutations require `company_id` scoping; `outlet_id` scoping where applicable
 - Never bypass Zod validation for performance—profile first
+- Prefer shared contracts from `packages/shared`
+- Do not bypass auth or tenant guards for convenience
 
 #### React (apps/backoffice, apps/pos)
 - Use functional components with hooks only; class components are not used
@@ -139,6 +146,9 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **POS offline rule**: Never await network before writing local state—write to IndexedDB first
 - Data fetching: use React Query or similar for server state; Dexie for local state
 - Component files: co-locate tests (`Component.test.tsx`) alongside source
+- Prefer explicit, traceable financial UX over hidden behavior in backoffice workflows
+- Reporting should derive from journal/accounting logic, not duplicated ad hoc state
+- Be strict about company/outlet scoping in admin and reporting screens
 
 #### Dexie / IndexedDB (offline storage)
 - Schema version migrations must be additive only (add tables/columns; never remove)
@@ -153,6 +163,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - `/sync/push` must be fully transactional: business document + journal entry in same DB transaction
 - `/sync/pull` uses delta sync via `updated_after` timestamp parameter
 - Dine-in sessions: finalize checkpoints sync canonical state to `pos_order_snapshot_lines`
+- Outbox transitions must remain safe and understandable to operators
+- Do not allow direct mutation of finalized transactions; use VOID/REFUND style corrections
 
 #### Module System
 - Optional modules: `sales`, `pos`, `inventory`, `purchasing`
@@ -171,6 +183,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Test files live alongside source: `src/lib/feature.test.ts`
 - Use `test.describe()` for grouping; `test.it()` / `test("name", async () => {})` for cases
 - DB setup via factory functions; never make real HTTP calls for unit tests
+- Run from repo root and prefer single-file verification before full-suite execution
 
 #### API Integration Tests
 - **Fixture policy**: Create/mutate fixtures through API endpoints only
@@ -183,12 +196,14 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Retry handling**: Test `FAILED` → retry → `OK` flow
 - **Auth**: Test unauthenticated → 401, wrong company → 403
 - **Error path**: Malformed payload → `ERROR` with validation message
+- Sync changes must verify retries/conflicts and auth boundaries
 
 #### POS Offline Tests
 - Use `fake-indexeddb` for IndexedDB mocking
 - Test outbox transitions: `PENDING → SENT → OK/FAILED`
 - Test offline → online transition: queued items sync correctly
 - Test `client_tx_id` uniqueness enforcement
+- Cover duplicate-send safety explicitly for offline/sync changes
 
 #### Test Naming & Organization
 - File: `src/**/*.test.ts` (unit), `tests/integration/*.integration.test.mjs` (integration)
@@ -199,6 +214,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Critical paths require tests: auth, sync, posting, mutations, tenant scoping
 - Happy path + at least one error path per mutation
 - New financial logic requires COGS rounding, money round-trip tests
+- Changes in accounting, sync, auth, tenant scoping, migrations, and reports require focused tests
+- Do not mark stories done without passing-test evidence and review completion
 
 #### Running Tests
 - **Single file first**: Always run a single test file before running the full suite
@@ -228,11 +245,14 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - ESLint enforces code quality; CI fails on warnings (`--max-warnings=0`)
 - No enforced prettier config currently; use editor defaults matching project style
 - TypeScript strict mode required; do not disable strict checks without Arch/QA approval
+- Keep changes domain-focused; avoid broad cleanup unrelated to the story
+- Prefer correctness, auditability, and tenant isolation over cosmetic refactors
 
 #### Documentation
 - New route handlers require JSDoc or `@hono/zod-openapi` metadata
 - Complex business logic requires inline comments explaining the "why"
 - README files document setup and app-specific patterns (not repeated in project-context)
+- Avoid comments that restate obvious code; document the "why" for complex business logic
 
 #### API Response Patterns
 - Always use standardized response envelope (see ADR-0006)
@@ -244,6 +264,11 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Validate all external input with Zod before processing
 - Enforce `company_id` and `outlet_id` scoping on every data access
 - Use parameterized queries only (no string concatenation for SQL)
+- Do not introduce hidden financial behavior, silent mutation, or cross-tenant leakage risks
+
+#### Architectural Boundaries
+- Keep shared schemas/contracts in `packages/shared` and update all affected consumers together
+- Preserve existing architectural boundaries instead of rebuilding monolith-style utilities/routes
 
 ### Development Workflow & Critical Rules
 
@@ -252,6 +277,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Commit messages: concise, imperative mood, reference story IDs where applicable
 - PR titles must reference story IDs for traceability
 - **No commit unless explicitly requested by user**
+- Use hard timeouts on long-running validation commands
+- Run targeted checks first, then broader validation
 
 #### Definition of Done
 All stories require before marking DONE:
@@ -263,6 +290,9 @@ All stories require before marking DONE:
 - [ ] AI review conducted (bmad-code-review agent)
 - [ ] Feature is deployable (no feature flags hiding incomplete work)
 - [ ] No hardcoded values or secrets in code
+- Update both story files and `sprint-status.yaml` when statuses change
+- Fix P1/P2 review findings before moving work to done
+- Keep completion notes with files changed and validation evidence
 
 #### Repo-Wide Invariants (NEVER violate)
 1. **Accounting/GL at center**: All business documents must reconcile to journal effects
@@ -273,6 +303,7 @@ All stories require before marking DONE:
 6. **Immutable financial records**: Use VOID/REFUND correction flows; never edit finalized records
 7. **Audit logs**: `audit_logs.success` is canonical; filter by `success` not `result`. Non-success logs exist for forensics—never filter them from existence
 8. **Shared contracts**: TypeScript/Zod contracts in `packages/shared` must stay aligned across all apps/packages
+9. **Reservation timezone**: No UTC fallback; resolve timezone in order `outlet -> company`
 
 #### Critical Anti-Patterns
 - **Never** use `FLOAT`/`DOUBLE` for money (in code or DB)
@@ -292,6 +323,7 @@ All stories require before marking DONE:
 - Migrations must run on both MySQL 8.0+ and MariaDB
 - Additive changes only for schema migrations (never remove columns/indexes)
 - **Backfill strategy**: Legacy rows with incomplete data must be backfilled at migration time using effective defaults, then frozen historically
+- Avoid breaking shared payload/schema contracts across apps when migrations affect API shape
 
 #### Reservation Time Schema (canonical)
 - Canonical reservation time uses unix milliseconds in `BIGINT` columns:
@@ -300,6 +332,7 @@ All stories require before marking DONE:
 - Keep API compatibility field `reservation_at`, but derive it from `reservation_start_ts`
 - Overlap rule: `a_start < b_end && b_start < a_end`; `end == next start` is non-overlap
 - Query/index rule: never wrap indexed timestamp columns in SQL functions
+- No UTC fallback for missing reservation timezone resolution
 
 #### Story & Epic Tracking
 - Stories tracked in `_bmad-output/implementation-artifacts/stories/epic-{N}/story-{N}.{M}.md`
@@ -326,4 +359,4 @@ All stories require before marking DONE:
 
 ---
 
-_Last Updated: 2026-03-26_
+_Last Updated: 2026-03-27_

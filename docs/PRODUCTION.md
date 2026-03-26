@@ -28,7 +28,7 @@ Complete guide for deploying Jurnapod in production.
 ### Server Requirements
 
 - **OS**: Linux (Ubuntu 22.04+ recommended)
-- **Node.js**: v20.x LTS
+- **Node.js**: v22.x LTS
 - **npm**: v9.x or higher
 - **MySQL**: 8.0.44+ or MariaDB (InnoDB required)
 - **Nginx**: 1.18+ (reverse proxy + static files)
@@ -38,7 +38,7 @@ Complete guide for deploying Jurnapod in production.
 ### Verify Node.js
 
 ```bash
-node --version  # Must be v20.x
+node --version  # Must be v22.x
 npm --version   # Must be v9.x+
 ```
 
