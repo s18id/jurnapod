@@ -75,6 +75,19 @@ So that **{benefit}**.
 
 - {What other stories or work must be complete first}
 
+## Technical Debt Review
+
+Complete before marking story done. If any box is checked, add a TD item to [TECHNICAL-DEBT.md](../adr/TECHNICAL-DEBT.md) before closing.
+
+- [ ] No shortcuts taken that require follow-up
+- [ ] No `TODO`/`FIXME` comments left in production code without a linked TD item
+- [ ] No `as any` casts added without justification and TD item
+- [ ] No deprecated functions used without a migration plan
+- [ ] No N+1 query patterns introduced
+- [ ] No in-memory state introduced that won't survive restarts or multi-instance deployment
+- [ ] Integration tests included in this story's AC (not deferred)
+- [ ] All new debt items added to registry before story closes
+
 ## Notes
 
 {Additional context, retrospective learnings, caveats}

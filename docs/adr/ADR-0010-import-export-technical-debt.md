@@ -105,27 +105,32 @@ const context: BatchContext = {
 
 ---
 
-### TD-5: Foreign Key Validation May Cause N+1 Queries
+### TD-5: Foreign Key Validation May Cause N+1 Queries ✅ RESOLVED
 
-**Location**: `apps/api/src/lib/import/validator.ts` (lines 246-252 in types.ts)
+**Location**: `apps/api/src/lib/import/validator.ts`
 
-**Issue**: The `validateForeignKeys` interface accepts rows and returns Promise<ImportError[]>, but batch validation processes rows sequentially:
+**Issue**: The `validateForeignKeys` interface accepted rows and returned Promise<ImportError[]>, but batch validation processed rows sequentially. If FK validation queried the database per row, imports of 1000+ rows would generate 1000+ queries.
 
-```typescript
-for (const row of rows) {
-  const result = validator.validate(row, context);
-  // ...
-  if (validator.getDuplicateKey) { ... }
-}
-```
+**Status**: ✅ **RESOLVED in Story 7.6**
 
-**Impact**: If FK validation queries the database per row, imports of 1000+ rows will generate 1000+ queries.
+**Resolution**: Implemented `batchValidateForeignKeys()` helper function:
+- Groups FK lookups by target table
+- Executes single IN clause query per table: `SELECT id FROM table WHERE company_id = ? AND id IN (?)`
+- Returns `Map<string, Map<number, boolean>>` for O(1) per-row lookup
+- Handles large ID sets (>100) by chunking into batches of 100
+- Comprehensive JSDoc documentation warning against per-row DB calls
 
-**Mitigation**: Currently not implemented in any validator; template pattern allows batch queries.
+**Files Modified**:
+- `apps/api/src/lib/import/validator.ts` - Added batch validation helper
+- `apps/api/src/lib/import/types.ts` - Added FkLookupRequest/FkLookupResults types
+- `apps/api/src/routes/import.ts` - Refactored to use 3-phase batch approach
+- `apps/api/src/lib/import/validator.test.ts` - Added 9 unit tests
 
-**Resolution**: Add batch FK validation helper that groups by table and queries with IN clauses.
+**Performance Impact**: 
+- Before: 1000 rows with 2 FK types = 2000 queries
+- After: 1000 rows with 2 FK types = 2 queries
 
-**Priority**: Medium (only affects future validators)
+**Priority**: Medium - **RESOLVED**
 
 ---
 

@@ -62,11 +62,11 @@ This document serves as the central registry for all known technical debt in the
 | ID | Description | Priority | Status | ADR/Story |
 |----|-------------|----------|--------|-----------|
 | TD-005 | Helper duplication across domain modules | P2 | **RESOLVED** | Epic 3 Retro |
-| TD-006 | Fixed-assets route test coverage gap | P3 | Open | Epic 3 Retro |
+| TD-006 | Fixed-assets route test coverage gap | P3 | **RESOLVED** | Story 7.4 |
 
 **Resolution (TD-005):** Addressed in Epic 4 Story 4.1 - shared utilities extracted to `lib/shared/` and `lib/master-data-errors.ts`.
 
-**Notes (TD-006):** Fixed-assets CRUD endpoints have thin test coverage compared to items and item-groups. Should be backfilled.
+**Resolution (TD-006):** HTTP-level integration tests added in `tests/integration/fixed-assets.integration.test.mjs` (Story 7.4): 401 unauthorized, full CRUD lifecycle, 400 validation errors, 404 not-found for categories and assets.
 
 ---
 
@@ -84,22 +84,23 @@ This document serves as the central registry for all known technical debt in the
 
 | ID | Description | Priority | Status | ADR/Story |
 |----|-------------|----------|--------|-----------|
-| TD-008 | CSV parsing loads entire file into memory | P3 | Open | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
-| TD-009 | Excel parsing loads entire workbook into memory | P3 | Open | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
+| TD-008 | CSV parsing loads entire file into memory | P3 | **RESOLVED** | Story 7.5 |
+| TD-009 | Excel parsing loads entire workbook into memory | P3 | **RESOLVED** | Story 7.5 |
 | TD-010 | Excel export memory issues for large datasets | P1 | **RESOLVED** | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
 | TD-011 | Batch processor hardcoded companyId=0 | P1 | **RESOLVED** | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
-| TD-012 | FK validation may cause N+1 queries | P3 | Open | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
+| TD-012 | FK validation may cause N+1 queries | P3 | **RESOLVED** | Story 7.6 |
 | TD-013 | No resume/checkpoint for interrupted imports | P4 | Open | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
 | TD-014 | Export streaming lacks backpressure handling | P4 | Open | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
 | TD-015 | No progress persistence for long-running operations | P4 | Open | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
-| TD-016 | Integration tests deferred for import/export | P2 | Open | Epic 5 Retro |
-| TD-017 | Export UI missing column reordering | P2 | Open | Epic 5 Retro |
-| TD-018 | Export UI missing row count preview | P2 | Open | Epic 5 Retro |
-| TD-019 | Export UI missing retry on errors | P2 | Open | Epic 5 Retro |
+| TD-016 | Integration tests deferred for import/export | P2 | **RESOLVED** | Story 6.7 |
+| TD-017 | Export UI missing column reordering | P2 | **RESOLVED** | Story 6.7 |
+| TD-018 | Export UI missing row count preview | P2 | **RESOLVED** | Story 6.7 |
+| TD-019 | Export UI missing retry on errors | P2 | **RESOLVED** | Story 6.7 |
 
-**Notes:** 
+**Notes:**
+- TD-008 and TD-009 resolved in Story 7.5: Both CSV and Excel parsers now use streaming (memory <20MB for 50MB files)
 - TD-010 and TD-011 were resolved during Epic 5 development
-- TD-016-TD-019 are UI completeness items from Story 5.4
+- TD-016-TD-019 were resolved in Story 6.7 (Epic 6 follow-up)
 - Import/export framework is production-ready for current scale (files ≤50MB, exports ≤50K rows)
 
 ---
@@ -124,19 +125,52 @@ This document serves as the central registry for all known technical debt in the
 
 ---
 
+### Epic 7: Operational Hardening & Production Readiness
+
+| ID | Description | Priority | Status | ADR/Story |
+|----|-------------|----------|--------|-----------|
+| TD-026 | Import sessions stored in-memory `Map` — not multi-instance safe | P2 | **RESOLVED** | Story 7.2 |
+| TD-027 | Batch processing reliability — no partial-failure visibility | P2 | **RESOLVED** | Story 7.3 |
+| TD-028 | Session timeout handling edge cases | P2 | **RESOLVED** | Story 7.3 |
+| TD-029 | Batch failure recovery — no partial resume capability | P2 | **RESOLVED** | Story 7.3 |
+
+**Additional Items Resolved:**
+- TD-012: Batch FK validation implemented (Story 7.6)
+
+**Notes:**
+- TD-026 through TD-029 were created during Epic 6 and recorded in the Epic 6 retrospective under legacy labels TD-009 through TD-012 (numbering collision with registry — corrected here)
+- TD-026 is the highest-risk item: import sessions will not survive server restarts or scale beyond a single instance
+- Resolution approach: MySQL-backed session table with TTL and background cleanup (Redis deferred)
+
+---
+
 ## Summary Statistics
 
 | Priority | Open | Resolved | Total |
 |----------|------|---------|-------|
 | P1 | 0 | 2 | 2 |
-| P2 | 4 | 7 | 11 |
-| P3 | 4 | 3 | 7 |
+| P2 | 4 | 11 | 15 |
+| P3 | 0 | 7 | 7 |
 | P4 | 3 | 0 | 3 |
-| **Total** | **11** | **12** | **23** |
+| **Total** | **7** | **20** | **27** |
 
 ---
 
 ## Process for Adding New Debt Items
+
+### Rule: No New TD Without Tracking
+
+**If a story introduces technical debt, it must be added to this registry before the story is marked done.** No exceptions. The cost of tracking is 5 minutes. The cost of undocumented debt compounds every sprint.
+
+Triggers that require a registry entry:
+- Any shortcut taken to meet a deadline
+- Any `TODO`/`FIXME` comment left in production code
+- Any `as any` cast without a typed alternative immediately available
+- Any in-memory state that won't survive restarts or multi-instance deployment
+- Any integration tests deferred to a later story
+- Any N+1 query pattern knowingly left in place
+
+---
 
 ### When to Create a Debt Item
 
@@ -202,8 +236,15 @@ Add this checklist to story templates to prevent debt accumulation:
 
 ---
 
+## TD Health Check
+
+Run the [TD Health Check Template](./td-health-check-template.md) before every epic retrospective to keep this registry accurate.
+
+---
+
 ## Related Documentation
 
+- [TD Health Check Template](./td-health-check-template.md) — Per-epic debt audit checklist
 - [ADR-0009: Kysely Type-Safe Query Builder](./ADR-0009-kysely-type-safe-query-builder.md)
 - [ADR-0010: Import/Export Framework Technical Debt](./ADR-0010-import-export-technical-debt.md)
 - [Epic 0 Retrospective](../_bmad-output/implementation-artifacts/epic-0-retro-2026-03-26.md)
@@ -220,6 +261,12 @@ Add this checklist to story templates to prevent debt accumulation:
 |------|--------|--------|
 | 2026-03-26 | Initial creation - cataloged debt from Epics 0-6 | Story 6.6 |
 | 2026-03-26 | Marked Epic 6 debt items as resolved | Story 6.6 |
+| 2026-03-26 | Fixed TD-016-019 status to RESOLVED (completed in Story 6.7) | Epic 7 Planning |
+| 2026-03-26 | Added TD-026-029 from Epic 6 retro (corrected numbering collision) | Epic 7 Planning |
+| 2026-03-26 | Added "No New TD Without Tracking" rule and TD health check reference | Story 7.1 |
+| 2026-03-26 | Resolved TD-026–029 (Epic 7 Stories 7.2–7.3) and TD-006 (Story 7.4) | Epic 7 Sprint |
+| 2026-03-28 | Resolved TD-008 and TD-009 - streaming parsers for CSV and Excel (Story 7.5) | Story 7.5 |
+| 2026-03-28 | Resolved TD-012 - Batch FK validation with single IN clause queries (Story 7.6) | Epic 7 |
 
 ---
 
