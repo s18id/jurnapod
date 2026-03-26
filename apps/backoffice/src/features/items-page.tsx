@@ -427,6 +427,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
   const importConfig: ImportWizardConfig<ItemFormData> = useMemo(() => ({
     title: "Import Items",
     entityName: "items",
+    entityType: "items",
     csvTemplate: "sku,name,type,item_group_code,is_active\nSKU001,Product Name,PRODUCT,GROUP1,true",
     csvDescription: "CSV format: sku (optional), name (required), type (SERVICE/PRODUCT/INGREDIENT/RECIPE), item_group_code (optional), is_active (true/false)",
     columns: [
@@ -436,7 +437,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
       { key: "item_group_code", header: "Group Code", required: false },
       { key: "is_active", header: "Active", required: false },
     ],
-    parseRow: (row: Record<string, string>) => {
+    parseRow: (row: Record<string, string>, _columnMap: Record<string, string>) => {
       const type = (row.type?.toUpperCase() as ItemType) || "PRODUCT";
       if (!["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"].includes(type)) {
         return null;
@@ -455,7 +456,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
       return null;
     },
     importFn: async (rows: ImportPlanRow<ItemFormData>[]) => {
-      const results: ImportResult = { success: 0, failed: 0, errors: [] };
+      const results: ImportResult = { success: 0, failed: 0, created: 0, updated: 0, skipped: 0, errors: [] };
       
       for (const row of rows) {
         try {
@@ -468,6 +469,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
             accessToken
           );
           results.success++;
+          results.created++;
         } catch (err) {
           results.failed++;
           results.errors.push({
@@ -480,6 +482,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
       await refreshItems();
       return results;
     },
+    accessToken,
   }), [accessToken, refreshItems]);
 
   const handleImportComplete = () => {

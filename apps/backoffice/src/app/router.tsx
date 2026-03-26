@@ -92,6 +92,8 @@ const OutletTablesPage = lazyNamed(() => import("../features/outlet-tables-page"
 const ReservationsPage = lazyNamed(() => import("../features/reservations-page"), "ReservationsPage");
 const ReservationCalendarPage = lazyNamed(() => import("../features/reservation-calendar-page"), "ReservationCalendarPage");
 const TableBoardPage = lazyNamed(() => import("../features/table-board-page"), "TableBoardPage");
+const ItemImportPage = lazyNamed(() => import("../features/item-import-page"), "ItemImportPage");
+const PriceImportPage = lazyNamed(() => import("../features/price-import-page"), "PriceImportPage");
 
 function RouteLoadingFallback() {
   return <div style={{ padding: "1rem" }}>Loading…</div>;
@@ -191,8 +193,14 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   if (props.path === "/items") {
     return renderLazyPage(<ItemsPage user={props.user} accessToken={props.accessToken} />);
   }
+  if (props.path === "/items/import") {
+    return renderLazyPage(<ItemImportPage user={props.user} accessToken={props.accessToken} />);
+  }
   if (props.path === "/prices") {
     return renderLazyPage(<PricesPage user={props.user} accessToken={props.accessToken} />);
+  }
+  if (props.path === "/prices/import") {
+    return renderLazyPage(<PriceImportPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/item-groups") {
     return renderLazyPage(<ItemGroupsPage user={props.user} accessToken={props.accessToken} />);

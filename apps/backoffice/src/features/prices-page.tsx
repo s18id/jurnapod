@@ -408,6 +408,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
     return {
       title: "Import Prices",
       entityName: "prices",
+      entityType: "prices",
       csvTemplate: "item_sku,price,is_active,scope,outlet_id\nSKU001,25000,true,outlet,1\nSKU002,30000,true,default,",
       csvDescription: "Format: item_sku, price, is_active, scope (default/outlet), outlet_id",
       columns: [
@@ -417,7 +418,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
         { key: "scope", header: "Scope", required: true },
         { key: "outlet_id", header: "Outlet ID", required: false },
       ],
-      parseRow: (row: Record<string, string>) => {
+      parseRow: (row: Record<string, string>, _columnMap: Record<string, string>) => {
         return {
           item_sku: row.item_sku || "",
           price: Number(row.price) || 0,
@@ -436,7 +437,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
         return null;
       },
       importFn: async (rows) => {
-        const results: ImportResult = { success: 0, failed: 0, errors: [] };
+        const results: ImportResult = { success: 0, failed: 0, created: 0, updated: 0, skipped: 0, errors: [] };
         
         for (const row of rows) {
           try {
@@ -454,6 +455,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
               accessToken
             );
             results.success++;
+            results.created++;
           } catch (err) {
             results.failed++;
             results.errors.push({
@@ -465,6 +467,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
         
         return results;
       },
+      accessToken,
     };
   }, [items, accessToken]);
 
