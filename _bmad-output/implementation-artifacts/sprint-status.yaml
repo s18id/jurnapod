@@ -94,3 +94,13 @@ development_status:
   5-3-item-price-import-ui: done
   5-4-item-price-export-ui: done
   epic-5-retrospective: done
+
+  # Epic 6: Technical Debt Consolidation & Modernization
+  epic-6: backlog
+  6-1-consolidate-sales-module: backlog
+  6-2-consolidate-service-sessions-module: backlog
+  6-3-type-safety-audit: backlog
+  6-4-deprecation-cleanup: backlog
+  6-5-reservations-domain-extraction: backlog
+  6-6-adr-documentation: backlog
+  6-7-epic-5-follow-up: backlog
