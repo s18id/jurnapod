@@ -15,6 +15,8 @@ import {
   CogsAccountConfigError,
   __cogsPostingTestables
 } from "./cogs-posting";
+import { createItem } from "./items/index.js";
+import { createItemPrice } from "./item-prices/index.js";
 
 // Test data - use timestamp-based IDs to avoid conflicts with parallel/sequential runs
 const TEST_COMPANY_ID = 900000 + (Date.now() % 100000);
@@ -73,24 +75,6 @@ async function createTestAccount(
     `INSERT INTO accounts (company_id, code, name, account_type_id, normal_balance, is_active)
      VALUES (?, ?, ?, ?, ?, 1)`,
     [companyId, code, name, accountTypeId, normalBalance]
-  );
-  
-  return (result as any).insertId;
-}
-
-async function createTestItem(
-  conn: PoolConnection,
-  companyId: number,
-  name: string,
-  itemType: string,
-  trackStock: boolean = false,
-  cogsAccountId?: number,
-  inventoryAccountId?: number
-): Promise<number> {
-  const [result] = await conn.execute(
-    `INSERT INTO items (company_id, name, item_type, track_stock, cogs_account_id, inventory_asset_account_id, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, 1)`,
-    [companyId, name, itemType, trackStock ? 1 : 0, cogsAccountId ?? null, inventoryAccountId ?? null]
   );
   
   return (result as any).insertId;
@@ -237,7 +221,12 @@ test("calculateSaleCogs - should calculate COGS using inventory average cost", a
     return; // Skip
   }
 
-  testItemId = await createTestItem(conn, TEST_COMPANY_ID, 'Test Coffee', 'PRODUCT', true);
+  const coffeeItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Test Coffee',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  testItemId = coffeeItem.id;
   await createInventoryTransaction(conn, TEST_COMPANY_ID, testItemId, 10, 5.0);
   
   const saleItems = [{ itemId: testItemId, quantity: 3 }];
@@ -255,8 +244,18 @@ test("calculateSaleCogs - should calculate COGS for multiple items", async () =>
     return; // Skip
   }
 
-  const item1Id = await createTestItem(conn, TEST_COMPANY_ID, 'Coffee', 'PRODUCT', true);
-  const item2Id = await createTestItem(conn, TEST_COMPANY_ID, 'Sandwich', 'PRODUCT', true);
+  const coffeeItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Coffee',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  const item1Id = coffeeItem.id;
+  const sandwichItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Sandwich',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  const item2Id = sandwichItem.id;
   
   await createInventoryTransaction(conn, TEST_COMPANY_ID, item1Id, 10, 2.0);
   await createInventoryTransaction(conn, TEST_COMPANY_ID, item2Id, 5, 3.5);
@@ -274,7 +273,12 @@ test("calculateSaleCogs - should calculate COGS for multiple items", async () =>
 });
 
 test("calculateSaleCogs - should throw error when cost cannot be determined", async () => {
-  const itemId = await createTestItem(conn, TEST_COMPANY_ID, 'No Cost Item', 'PRODUCT', true);
+  const noCostItem = await createItem(TEST_COMPANY_ID, {
+    name: 'No Cost Item',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  const itemId = noCostItem.id;
   
   await assert.rejects(
     async () => await calculateSaleCogs(TEST_COMPANY_ID, [{ itemId, quantity: 1 }], conn),
@@ -283,13 +287,18 @@ test("calculateSaleCogs - should throw error when cost cannot be determined", as
 });
 
 test("calculateSaleCogs - should fall back to base_cost from item_prices", async () => {
-  const itemId = await createTestItem(conn, TEST_COMPANY_ID, 'Price Item', 'PRODUCT', true);
+  const priceItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Price Item',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  const itemId = priceItem.id;
   
-  await conn.execute(
-    `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
-     VALUES (?, ?, NULL, 7.5)`,
-    [TEST_COMPANY_ID, itemId]
-  );
+  await createItemPrice(TEST_COMPANY_ID, {
+    item_id: itemId,
+    outlet_id: null,
+    price: 7.5
+  });
   
   const saleItems = [{ itemId, quantity: 2 }];
   const cogsDetails = await calculateSaleCogs(TEST_COMPANY_ID, saleItems, conn);
@@ -299,24 +308,34 @@ test("calculateSaleCogs - should fall back to base_cost from item_prices", async
 });
 
 test("calculateSaleCogs - should batch mixed inventory and fallback price lookups", async () => {
-  const inventoryItemId = await createTestItem(conn, TEST_COMPANY_ID, 'Batch Inv Item', 'PRODUCT', true);
-  const fallbackPriceItemId = await createTestItem(conn, TEST_COMPANY_ID, 'Batch Price Item', 'PRODUCT', true);
+  const invItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Batch Inv Item',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  const inventoryItemId = invItem.id;
+  const priceItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Batch Price Item',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  const fallbackPriceItemId = priceItem.id;
 
   if (supportsUnitCost) {
     await createInventoryTransaction(conn, TEST_COMPANY_ID, inventoryItemId, 8, 2.5);
   } else {
-    await conn.execute(
-      `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
-       VALUES (?, ?, NULL, 2.5)`,
-      [TEST_COMPANY_ID, inventoryItemId]
-    );
+    await createItemPrice(TEST_COMPANY_ID, {
+      item_id: inventoryItemId,
+      outlet_id: null,
+      price: 2.5
+    });
   }
 
-  await conn.execute(
-    `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
-     VALUES (?, ?, NULL, 4.25)`,
-    [TEST_COMPANY_ID, fallbackPriceItemId]
-  );
+  await createItemPrice(TEST_COMPANY_ID, {
+    item_id: fallbackPriceItemId,
+    outlet_id: null,
+    price: 4.25
+  });
 
   const cogsDetails = await calculateSaleCogs(
     TEST_COMPANY_ID,
@@ -341,10 +360,14 @@ test("getItemAccounts - should return item-specific accounts when configured", a
   const itemCogsId = await createTestAccount(conn, TEST_COMPANY_ID, '6101-ITEM', 'Item COGS', 'EXPENSE', 'D');
   const itemInvId = await createTestAccount(conn, TEST_COMPANY_ID, '1101-ITEM', 'Item Inventory', 'ASSET', 'D');
   
-  const itemId = await createTestItem(
-    conn, TEST_COMPANY_ID, 'Accounted Item', 'PRODUCT', true,
-    itemCogsId, itemInvId
-  );
+  const accountedItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Accounted Item',
+    type: 'PRODUCT',
+    track_stock: true,
+    cogs_account_id: itemCogsId,
+    inventory_asset_account_id: itemInvId
+  });
+  const itemId = accountedItem.id;
   
   const accounts = await getItemAccounts(TEST_COMPANY_ID, itemId, conn);
   
@@ -353,7 +376,12 @@ test("getItemAccounts - should return item-specific accounts when configured", a
 });
 
 test("getItemAccounts - should fall back to company defaults when item accounts not set", async () => {
-  const itemId = await createTestItem(conn, TEST_COMPANY_ID, 'Default Account Item', 'PRODUCT', true);
+  const defaultAccountItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Default Account Item',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  const itemId = defaultAccountItem.id;
   
   const accounts = await getItemAccounts(TEST_COMPANY_ID, itemId, conn);
   
@@ -364,10 +392,14 @@ test("getItemAccounts - should fall back to company defaults when item accounts 
 test("getItemAccounts - should throw error when COGS account is not expense type", async () => {
   const wrongTypeAccount = await createTestAccount(conn, TEST_COMPANY_ID, '5100-WRONG', 'Wrong Type', 'REVENUE', 'C');
   
-  const itemId = await createTestItem(
-    conn, TEST_COMPANY_ID, 'Wrong Type Item', 'PRODUCT', true,
-    wrongTypeAccount, inventoryAccountId
-  );
+  const wrongTypeItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Wrong Type Item',
+    type: 'PRODUCT',
+    track_stock: true,
+    cogs_account_id: wrongTypeAccount,
+    inventory_asset_account_id: inventoryAccountId
+  });
+  const itemId = wrongTypeItem.id;
   
   await assert.rejects(
     async () => await getItemAccounts(TEST_COMPANY_ID, itemId, conn),
@@ -378,10 +410,14 @@ test("getItemAccounts - should throw error when COGS account is not expense type
 test("getItemAccounts - should throw error when inventory account is not asset type", async () => {
   const wrongTypeAccount = await createTestAccount(conn, TEST_COMPANY_ID, '2100-WRONG', 'Wrong Type', 'LIABILITY', 'C');
   
-  const itemId = await createTestItem(
-    conn, TEST_COMPANY_ID, 'Wrong Type Item', 'PRODUCT', true,
-    cogsAccountId, wrongTypeAccount
-  );
+  const wrongInvItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Wrong Type Item',
+    type: 'PRODUCT',
+    track_stock: true,
+    cogs_account_id: cogsAccountId,
+    inventory_asset_account_id: wrongTypeAccount
+  });
+  const itemId = wrongInvItem.id;
   
   await assert.rejects(
     async () => await getItemAccounts(TEST_COMPANY_ID, itemId, conn),
@@ -395,7 +431,12 @@ test("getItemAccounts - should throw error when no accounts are configured", asy
     [TEST_COMPANY_ID]
   );
   
-  const itemId = await createTestItem(conn, TEST_COMPANY_ID, 'No Account Item', 'PRODUCT', true);
+  const noAccountItem = await createItem(TEST_COMPANY_ID, {
+    name: 'No Account Item',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  const itemId = noAccountItem.id;
   
   await assert.rejects(
     async () => await getItemAccounts(TEST_COMPANY_ID, itemId, conn),
@@ -422,11 +463,20 @@ test("getItemAccountsBatch - should resolve mixed item-specific and default acco
   const itemSpecificCogsId = await createTestAccount(conn, TEST_COMPANY_ID, '6102-BATCH', 'Batch COGS', 'EXPENSE', 'D');
   const itemSpecificInvId = await createTestAccount(conn, TEST_COMPANY_ID, '1102-BATCH', 'Batch Inventory', 'ASSET', 'D');
 
-  const itemWithSpecificAccounts = await createTestItem(
-    conn, TEST_COMPANY_ID, 'Batch Specific Item', 'PRODUCT', true,
-    itemSpecificCogsId, itemSpecificInvId
-  );
-  const itemUsingDefaults = await createTestItem(conn, TEST_COMPANY_ID, 'Batch Default Item', 'PRODUCT', true);
+  const specificItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Batch Specific Item',
+    type: 'PRODUCT',
+    track_stock: true,
+    cogs_account_id: itemSpecificCogsId,
+    inventory_asset_account_id: itemSpecificInvId
+  });
+  const itemWithSpecificAccounts = specificItem.id;
+  const defaultItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Batch Default Item',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  const itemUsingDefaults = defaultItem.id;
 
   const accountsByItemId = await getItemAccountsBatch(
     TEST_COMPANY_ID,
@@ -447,15 +497,19 @@ test("getItemAccountsBatch - should resolve mixed item-specific and default acco
 test("postCogsForSale - should successfully post COGS journal for sale", async () => {
   const saleDate = new Date("2026-03-17T00:00:00.000Z");
 
-  const itemId = await createTestItem(
-    conn, TEST_COMPANY_ID, 'Sale Item', 'PRODUCT', true,
-    cogsAccountId, inventoryAccountId
-  );
+  const saleItem = await createItem(TEST_COMPANY_ID, {
+    name: 'Sale Item',
+    type: 'PRODUCT',
+    track_stock: true,
+    cogs_account_id: cogsAccountId,
+    inventory_asset_account_id: inventoryAccountId
+  });
+  const itemId = saleItem.id;
   if (supportsUnitCost) {
     await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 10, 5.0);
   }
   
-  const result = await postCogsForSale({
+  const cogsResult = await postCogsForSale({
     saleId: 'SALE-001',
     companyId: TEST_COMPANY_ID,
     outletId: TEST_OUTLET_ID,
@@ -466,11 +520,11 @@ test("postCogsForSale - should successfully post COGS journal for sale", async (
     postedBy: TEST_USER_ID
   }, conn);
   
-  assert.strictEqual(result.success, true, JSON.stringify(result.errors));
-  assert.strictEqual(result.totalCogs, 10.0);
-  assert.ok(result.journalBatchId);
+  assert.strictEqual(cogsResult.success, true, JSON.stringify(cogsResult.errors));
+  assert.strictEqual(cogsResult.totalCogs, 10.0);
+  assert.ok(cogsResult.journalBatchId);
   
-  const batchId = result.journalBatchId!;
+  const batchId = cogsResult.journalBatchId!;
   
   const [batchRows] = await conn.execute<RowDataPacket[]>(
     `SELECT * FROM journal_batches WHERE id = ?`,
@@ -497,18 +551,22 @@ test("postCogsForSale - should successfully post COGS journal for sale", async (
 });
 
 test("postCogsForSale - should calculate costs when not provided", async () => {
-  const itemId = await createTestItem(
-    conn, TEST_COMPANY_ID, 'Calc Item', 'PRODUCT', true,
-    cogsAccountId, inventoryAccountId
-  );
+  const item = await createItem(TEST_COMPANY_ID, {
+    name: 'Calc Item',
+    type: 'PRODUCT',
+    track_stock: true,
+    cogs_account_id: cogsAccountId,
+    inventory_asset_account_id: inventoryAccountId
+  });
+  const itemId = item.id;
   if (supportsUnitCost) {
     await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 10, 3.0);
   } else {
-    await conn.execute(
-      `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
-       VALUES (?, ?, NULL, 3.0)`,
-      [TEST_COMPANY_ID, itemId]
-    );
+    await createItemPrice(TEST_COMPANY_ID, {
+      item_id: itemId,
+      outlet_id: null,
+      price: 3.0
+    });
   }
   
   const result = await postCogsForSale({
@@ -540,7 +598,12 @@ test("postCogsForSale - should return success with zero COGS for empty items", a
 });
 
 test("postCogsForSale - should return failure when account config is missing", async () => {
-  const itemId = await createTestItem(conn, TEST_COMPANY_ID, 'No Config Item', 'PRODUCT', true);
+  const item = await createItem(TEST_COMPANY_ID, {
+    name: 'No Config Item',
+    type: 'PRODUCT',
+    track_stock: true
+  });
+  const itemId = item.id;
   
   const result = await postCogsForSale({
     saleId: 'SALE-004',
@@ -557,14 +620,22 @@ test("postCogsForSale - should return failure when account config is missing", a
 });
 
 test("postCogsForSale - should post COGS for multiple items", async () => {
-  const item1Id = await createTestItem(
-    conn, TEST_COMPANY_ID, 'Multi Item 1', 'PRODUCT', true,
-    cogsAccountId, inventoryAccountId
-  );
-  const item2Id = await createTestItem(
-    conn, TEST_COMPANY_ID, 'Multi Item 2', 'PRODUCT', true,
-    cogsAccountId, inventoryAccountId
-  );
+  const item1 = await createItem(TEST_COMPANY_ID, {
+    name: 'Multi Item 1',
+    type: 'PRODUCT',
+    track_stock: true,
+    cogs_account_id: cogsAccountId,
+    inventory_asset_account_id: inventoryAccountId
+  });
+  const item1Id = item1.id;
+  const item2 = await createItem(TEST_COMPANY_ID, {
+    name: 'Multi Item 2',
+    type: 'PRODUCT',
+    track_stock: true,
+    cogs_account_id: cogsAccountId,
+    inventory_asset_account_id: inventoryAccountId
+  });
+  const item2Id = item2.id;
   
   if (supportsUnitCost) {
     await createInventoryTransaction(conn, TEST_COMPANY_ID, item1Id, 10, 2.0);

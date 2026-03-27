@@ -143,3 +143,17 @@ development_status:
   8-8-variant-sync-push: done
   8-9-performance-monitoring: done
   8-10-load-testing-framework: deferred
+
+  # Epic 9: Use Library Functions in Tests
+  # Stories: 9 total
+  # Focus: Refactor tests to use existing library functions instead of direct SQL
+  epic-9: done
+  9-1-audit-library-functions: done
+  9-2-refactor-company-item-tests: done
+  9-3-refactor-import-progress-tests: done
+  9-4-refactor-variant-sync-tests: done
+  9-5-refactor-user-auth-tests: done
+  9-6-refactor-route-tests: done
+  9-7-batch-refactor-remaining: done
+  9-8-add-missing-library-functions: done
+  9-9-enforce-library-usage: done

@@ -22,6 +22,7 @@ import {
   AttributeNotFoundError,
   ItemNotFoundError
 } from "./item-variants";
+import { createItem } from "./items/index.js";
 import { closeDbPool, getDbPool } from "./db";
 import type { RowDataPacket } from "mysql2";
 
@@ -49,12 +50,13 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      // Create test item
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Test Item ${runId}`, `SKU-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      // Create test item using library function
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       // Create attribute with values
       const attribute = await createVariantAttribute(companyId, itemId, {
@@ -113,11 +115,12 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Test Item ${runId}`, `SKU-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       // Create first attribute
       const attr1 = await createVariantAttribute(companyId, itemId, {
@@ -199,11 +202,12 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Test Item ${runId}`, `SKU-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       // Create initial attribute
       const attr = await createVariantAttribute(companyId, itemId, {
@@ -265,11 +269,12 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Test Item ${runId}`, `SKU-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       const attr = await createVariantAttribute(companyId, itemId, {
         attribute_name: "Size",
@@ -322,11 +327,12 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Test Item ${runId}`, `SKU-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       const attr = await createVariantAttribute(companyId, itemId, {
         attribute_name: "Size",
@@ -378,11 +384,12 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Test Item ${runId}`, `SKU-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       const attr = await createVariantAttribute(companyId, itemId, {
         attribute_name: "Size",
@@ -432,11 +439,12 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Test Item ${runId}`, `SKU-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       const attr = await createVariantAttribute(companyId, itemId, {
         attribute_name: "Size",
@@ -488,11 +496,12 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Test Item ${runId}`, `SKU-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       const attr = await createVariantAttribute(companyId, itemId, {
         attribute_name: "Size",
@@ -535,11 +544,12 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Test Item ${runId}`, `SKU-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       const attr = await createVariantAttribute(companyId, itemId, {
         attribute_name: "Size",
@@ -601,11 +611,12 @@ test(
       assert.ok(outletRows.length > 0, "Outlet fixture not found");
       outletId = Number(outletRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Test Item ${runId}`, `SKU-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       // Set parent item price
       const [priceResult] = await pool.execute(
@@ -739,11 +750,12 @@ test(
       outletId = Number(outletRows[0].id);
 
       // Create test item
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Sync Test Item ${runId}`, `SKU-SYNC-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-${runId}`
+      });
+      itemId = item.id;
 
       // Create attribute with values
       const attr = await createVariantAttribute(companyId, itemId, {
@@ -802,11 +814,12 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-        [companyId, `Active Variant Test ${runId}`, `SKU-ACT-${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Active Variant Test ${runId}`,
+        type: "PRODUCT",
+        sku: `SKU-ACT-${runId}`
+      });
+      itemId = item.id;
 
       const attr = await createVariantAttribute(companyId, itemId, {
         attribute_name: "Size",

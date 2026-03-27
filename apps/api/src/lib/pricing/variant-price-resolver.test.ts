@@ -5,7 +5,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
 import { resolvePrice, resolvePricesBatch, clearPriceCache, getCacheSize } from "./variant-price-resolver.js";
+import { createItemPrice, deleteItemPrice, updateItemPrice } from "../item-prices/index.js";
 import { closeDbPool, getDbPool } from "../db.js";
+import { createCompanyBasic } from "../companies.js";
 import type { RowDataPacket, ResultSetHeader } from "mysql2";
 
 loadEnvIfPresent();
@@ -60,20 +62,24 @@ test(
       variantId = Number(variantResult.insertId);
 
       // Create item price (outlet override)
-      const [itemPriceResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, item_id, variant_id, outlet_id, price, is_active)
-         VALUES (?, ?, NULL, ?, ?, 1)`,
-        [companyId, itemId, outletId, 1000]
-      );
-      itemPriceId = Number(itemPriceResult.insertId);
+      const itemPrice = await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: outletId,
+        variant_id: null,
+        price: 1000,
+        is_active: true
+      });
+      itemPriceId = itemPrice.id;
 
       // Create variant price (higher priority)
-      const [variantPriceResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, item_id, variant_id, outlet_id, price, is_active)
-         VALUES (?, ?, ?, ?, ?, 1)`,
-        [companyId, itemId, variantId, outletId, 1500]
-      );
-      variantPriceId = Number(variantPriceResult.insertId);
+      const variantPrice = await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: outletId,
+        variant_id: variantId,
+        price: 1500,
+        is_active: true
+      });
+      variantPriceId = variantPrice.id;
 
       // Test: variant price should be used
       clearPriceCache(); // Clear cache before test
@@ -87,10 +93,10 @@ test(
     } finally {
       // Cleanup
       if (variantPriceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [variantPriceId]);
+        await deleteItemPrice(companyId, variantPriceId);
       }
       if (itemPriceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [itemPriceId]);
+        await deleteItemPrice(companyId, itemPriceId);
       }
       if (variantId) {
         await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
@@ -147,12 +153,14 @@ test(
       variantId = Number(variantResult.insertId);
 
       // Create item price only (no variant price)
-      const [itemPriceResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, item_id, variant_id, outlet_id, price, is_active)
-         VALUES (?, ?, NULL, ?, ?, 1)`,
-        [companyId, itemId, outletId, 1200]
-      );
-      itemPriceId = Number(itemPriceResult.insertId);
+      const itemPrice = await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: outletId,
+        variant_id: null,
+        price: 1200,
+        is_active: true
+      });
+      itemPriceId = itemPrice.id;
 
       // Test: should fall back to item price
       clearPriceCache();
@@ -164,7 +172,7 @@ test(
 
     } finally {
       if (itemPriceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [itemPriceId]);
+        await deleteItemPrice(companyId, itemPriceId);
       }
       if (variantId) {
         await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
@@ -211,11 +219,11 @@ test(
         company2Id = Number(allCompanies[0].id);
       } else {
         // Create second company for test
-        const [company2Result] = await pool.execute<ResultSetHeader>(
-          `INSERT INTO companies (code, name, status) VALUES (?, ?, 'ACTIVE')`,
-          [`TEST2-${runId}`, `Test Company 2 ${runId}`]
-        );
-        company2Id = Number(company2Result.insertId);
+        const company2 = await createCompanyBasic({
+          code: `TEST2-${runId}`,
+          name: `Test Company 2 ${runId}`
+        });
+        company2Id = company2.id;
       }
 
       // Create items for both companies
@@ -247,19 +255,23 @@ test(
       variant2Id = Number(variant2Result.insertId);
 
       // Create prices
-      const [price1Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, item_id, variant_id, price, is_active)
-         VALUES (?, ?, ?, ?, 1)`,
-        [company1Id, item1Id, variant1Id, 1000]
-      );
-      price1Id = Number(price1Result.insertId);
+      const price1 = await createItemPrice(company1Id, {
+        item_id: item1Id,
+        outlet_id: null,
+        variant_id: variant1Id,
+        price: 1000,
+        is_active: true
+      });
+      price1Id = price1.id;
 
-      const [price2Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, item_id, variant_id, price, is_active)
-         VALUES (?, ?, ?, ?, 1)`,
-        [company2Id, item2Id, variant2Id, 2000]
-      );
-      price2Id = Number(price2Result.insertId);
+      const price2 = await createItemPrice(company2Id, {
+        item_id: item2Id,
+        outlet_id: null,
+        variant_id: variant2Id,
+        price: 2000,
+        is_active: true
+      });
+      price2Id = price2.id;
 
       // Test: company 1 should see its price, not company 2's
       clearPriceCache();
@@ -282,10 +294,10 @@ test(
     } finally {
       // Cleanup - delete in correct order to handle FK constraints
       if (price2Id) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [price2Id]);
+        await deleteItemPrice(company2Id, price2Id);
       }
       if (price1Id) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [price1Id]);
+        await deleteItemPrice(company1Id, price1Id);
       }
       // Delete item_variant_combinations first ( FK to variants)
       if (variant2Id) {
@@ -347,12 +359,14 @@ test(
       variantId = Number(variantResult.insertId);
 
       // Create variant default price (no outlet)
-      const [priceResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, item_id, variant_id, outlet_id, price, is_active)
-         VALUES (?, ?, ?, NULL, ?, 1)`,
-        [companyId, itemId, variantId, 2500]
-      );
-      priceId = Number(priceResult.insertId);
+      const price = await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: null,
+        variant_id: variantId,
+        price: 2500,
+        is_active: true
+      });
+      priceId = price.id;
 
       // Test: should resolve variant default price without outlet
       clearPriceCache();
@@ -364,7 +378,7 @@ test(
 
     } finally {
       if (priceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [priceId]);
+        await deleteItemPrice(companyId, priceId);
       }
       if (variantId) {
         await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
@@ -429,19 +443,23 @@ test(
       variant2Id = Number(variant2Result.insertId);
 
       // Create prices
-      const [price1Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, item_id, variant_id, price, is_active)
-         VALUES (?, ?, ?, ?, 1)`,
-        [companyId, item1Id, variant1Id, 3000]
-      );
-      price1Id = Number(price1Result.insertId);
+      const price1 = await createItemPrice(companyId, {
+        item_id: item1Id,
+        outlet_id: null,
+        variant_id: variant1Id,
+        price: 3000,
+        is_active: true
+      });
+      price1Id = price1.id;
 
-      const [price2Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, item_id, variant_id, price, is_active)
-         VALUES (?, ?, ?, ?, 1)`,
-        [companyId, item2Id, variant2Id, 4000]
-      );
-      price2Id = Number(price2Result.insertId);
+      const price2 = await createItemPrice(companyId, {
+        item_id: item2Id,
+        outlet_id: null,
+        variant_id: variant2Id,
+        price: 4000,
+        is_active: true
+      });
+      price2Id = price2.id;
 
       // Test batch resolution
       clearPriceCache();
@@ -471,10 +489,10 @@ test(
 
     } finally {
       if (price2Id) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [price2Id]);
+        await deleteItemPrice(companyId, price2Id);
       }
       if (price1Id) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [price1Id]);
+        await deleteItemPrice(companyId, price1Id);
       }
       if (variant2Id) {
         await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variant2Id]);
@@ -518,12 +536,14 @@ test(
       );
       itemId = Number(itemResult.insertId);
 
-      const [priceResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, item_id, variant_id, price, is_active)
-         VALUES (?, ?, NULL, ?, 1)`,
-        [companyId, itemId, 5000]
-      );
-      priceId = Number(priceResult.insertId);
+      const price = await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: null,
+        variant_id: null,
+        price: 5000,
+        is_active: true
+      });
+      priceId = price.id;
 
       // Clear cache and resolve
       clearPriceCache();
@@ -541,12 +561,11 @@ test(
 
     } finally {
       if (priceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [priceId]);
+        await deleteItemPrice(companyId, priceId);
       }
       if (itemId) {
         await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
       }
-      clearPriceCache(); // Clear cache after test
     }
   }
 );
@@ -627,12 +646,14 @@ test(
       itemId = Number(itemResult.insertId);
 
       // Create item price
-      const [priceResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, item_id, variant_id, price, is_active)
-         VALUES (?, ?, NULL, ?, 1)`,
-        [companyId, itemId, 1000]
-      );
-      priceId = Number(priceResult.insertId);
+      const price = await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: null,
+        variant_id: null,
+        price: 1000,
+        is_active: true
+      });
+      priceId = price.id;
 
       // First resolution - should cache the price
       clearPriceCache();
@@ -653,12 +674,11 @@ test(
 
     } finally {
       if (priceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [priceId]);
+        await deleteItemPrice(companyId, priceId);
       }
       if (itemId) {
         await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
       }
-      clearPriceCache(); // Clear cache after test
     }
   }
 );

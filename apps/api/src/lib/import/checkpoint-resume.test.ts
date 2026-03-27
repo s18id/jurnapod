@@ -377,8 +377,8 @@ describe("Import Checkpoint/Resume - Session Store", () => {
       const retrieved = await getSession(pool, sessionId, COMPANY_ID);
       assert.equal(retrieved, null, "Expired session should not be retrievable");
 
-      // Cleanup (direct delete since getSession won't find it)
-      await pool.execute(`DELETE FROM import_sessions WHERE session_id = ?`, [sessionId]);
+      // Cleanup
+      await deleteSession(pool, sessionId, COMPANY_ID);
     });
 
     test("checkpoint with expired session is not retrievable", async () => {
@@ -401,7 +401,7 @@ describe("Import Checkpoint/Resume - Session Store", () => {
       assert.equal(retrieved, null, "Checkpoint in expired session should not be retrievable");
 
       // Cleanup
-      await pool.execute(`DELETE FROM import_sessions WHERE session_id = ?`, [sessionId]);
+      await deleteSession(pool, sessionId, COMPANY_ID);
     });
   });
 
@@ -713,7 +713,7 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
       assert.equal(stored, null, "Session should be expired");
 
       // Cleanup
-      await pool.execute(`DELETE FROM import_sessions WHERE session_id = ?`, [sessionId]);
+      await deleteSession(pool, sessionId, COMPANY_ID);
     });
   });
 });

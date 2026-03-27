@@ -18,7 +18,8 @@
     "test:all": "npm run test:unit && npm run test:integration",
     "test:ws": "node ../../scripts/websocket-test.js",
     "test:phase3": "node --test --test-concurrency=1 --import tsx src/lib/phase3-batch.test.ts",
-    "fix:duplicate-roles": "tsx src/scripts/fix-duplicate-role-assignments.ts"
+    "fix:duplicate-roles": "tsx src/scripts/fix-duplicate-role-assignments.ts",
+    "check:test-sql": "npx tsx scripts/check-test-sql.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "^0.14.8",

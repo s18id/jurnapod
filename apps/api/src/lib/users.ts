@@ -499,6 +499,49 @@ export async function findUserById(companyId: number, userId: number): Promise<U
   };
 }
 
+/**
+ * Create a user with minimal setup (no role assignments, no audit).
+ * Use this for testing - it only inserts the user row.
+ * For production use, use createUser() which includes roles and audit.
+ */
+export async function createUserBasic(params: {
+  companyId: number;
+  email: string;
+  password?: string;
+  name?: string;
+  isActive?: boolean;
+}): Promise<{ id: number; email: string }> {
+  const pool = getDbPool();
+
+  const emailNormalized = normalizeEmail(params.email);
+  const name = params.name?.trim() ?? null;
+  const isActive = params.isActive ?? false;
+
+  const [existingRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id FROM users WHERE company_id = ? AND email = ? LIMIT 1`,
+    [params.companyId, emailNormalized]
+  );
+
+  if (existingRows.length > 0) {
+    throw new UserEmailExistsError("Email already exists");
+  }
+
+  const policy = passwordHashPolicyFromEnv();
+  const passwordToHash = params.password ?? generateTempPassword();
+  const passwordHash = await hashPassword(passwordToHash, policy);
+
+  const [result] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO users (company_id, name, email, password_hash, is_active)
+     VALUES (?, ?, ?, ?, ?)`,
+    [params.companyId, name, emailNormalized, passwordHash, isActive ? 1 : 0]
+  );
+
+  return {
+    id: Number(result.insertId),
+    email: emailNormalized
+  };
+}
+
 export async function createUser(params: {
   companyId: number;
   name?: string;
@@ -517,29 +560,19 @@ export async function createUser(params: {
 
   try {
     await connection.beginTransaction();
-    const email = normalizeEmail(params.email);
-    const name = params.name?.trim() ?? null;
+
+    // Use createUserBasic to insert the user row
+    const created = await createUserBasic({
+      companyId: params.companyId,
+      email: params.email,
+      password: params.password,
+      name: params.name,
+      isActive: params.isActive
+    });
+
+    const userId = created.id;
+    const email = created.email;
     const isActive = params.isActive ?? false;
-
-    const [existingRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT id FROM users WHERE company_id = ? AND email = ? LIMIT 1`,
-      [params.companyId, email]
-    );
-
-    if (existingRows.length > 0) {
-      throw new UserEmailExistsError("Email already exists");
-    }
-
-    const policy = passwordHashPolicyFromEnv();
-    const passwordToHash = params.password ?? generateTempPassword();
-    const passwordHash = await hashPassword(passwordToHash, policy);
-    const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO users (company_id, name, email, password_hash, is_active)
-       VALUES (?, ?, ?, ?, ?)`,
-      [params.companyId, name, email, passwordHash, isActive ? 1 : 0]
-    );
-
-    const userId = Number(result.insertId);
     const roleCodes = (params.roleCodes ?? []).map((role) => RoleSchema.parse(role));
     const outletIds = (params.outletIds ?? []).map((outletId) => NumericIdSchema.parse(outletId));
     const outletRoleAssignments = (params.outletRoleAssignments ?? []).map((assignment) => ({
@@ -676,12 +709,12 @@ export async function createUser(params: {
 
     await connection.commit();
 
-    const created = await findUserById(params.companyId, userId);
-    if (!created) {
+    const user = await findUserById(params.companyId, userId);
+    if (!user) {
       throw new UserNotFoundError("User not found after creation");
     }
 
-    return created;
+    return user;
   } catch (error) {
     await connection.rollback();
     throw error;

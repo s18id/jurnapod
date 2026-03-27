@@ -170,6 +170,7 @@ export async function createItem(
     cogs_account_id?: number | null;
     inventory_asset_account_id?: number | null;
     is_active?: boolean;
+    track_stock?: boolean;
   },
   actor?: MutationAuditActor
 ) {
@@ -188,8 +189,8 @@ export async function createItem(
       }
 
       const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, sku, name, item_type, item_group_id, cogs_account_id, inventory_asset_account_id, is_active)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO items (company_id, sku, name, item_type, item_group_id, cogs_account_id, inventory_asset_account_id, is_active, track_stock)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           companyId,
           input.sku ?? null,
@@ -198,7 +199,8 @@ export async function createItem(
           input.item_group_id ?? null,
           input.cogs_account_id ?? null,
           input.inventory_asset_account_id ?? null,
-          input.is_active === false ? 0 : 1
+          input.is_active === false ? 0 : 1,
+          input.track_stock === true ? 1 : 0
         ]
       );
 

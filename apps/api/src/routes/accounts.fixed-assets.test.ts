@@ -49,6 +49,7 @@ import {
   findFixedAssetById
 } from "../lib/fixed-assets/index.js";
 import { DatabaseConflictError, DatabaseReferenceError } from "../lib/master-data-errors.js";
+import { createCompanyBasic } from "../lib/companies.js";
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
 
 loadEnvIfPresent();
@@ -98,11 +99,11 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
 
     // Create a second company for tenant isolation tests
     const runId = Date.now().toString(36);
-    const [company2Result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO companies (code, name) VALUES (?, ?)`,
-      [`TEST2-${runId}`.slice(0, 20), `Test Company 2 ${runId}`]
-    );
-    testCompany2Id = Number(company2Result.insertId);
+    const company2 = await createCompanyBasic({
+      code: `TEST2-${runId}`.slice(0, 20),
+      name: `Test Company 2 ${runId}`
+    });
+    testCompany2Id = company2.id;
 
     const [outlet2Result] = await connection.execute<ResultSetHeader>(
       `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,

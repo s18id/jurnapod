@@ -11,6 +11,8 @@ import { test } from "node:test";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import { closeDbPool, getDbPool } from "./db";
+import { createCompanyBasic } from "./companies";
+import { createItem } from "./items/index.js";
 import {
   getSession,
   listSessions,
@@ -88,8 +90,9 @@ async function createTestSession(pool: ReturnType<typeof getDbPool>, companyId: 
   return sessionId;
 }
 
-async function getOrCreateTestItem(pool: ReturnType<typeof getDbPool>, companyId: bigint): Promise<bigint> {
+async function getOrCreateTestItem(companyId: bigint): Promise<bigint> {
   // Try to find an existing item
+  const pool = getDbPool();
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT id FROM items WHERE company_id = ? LIMIT 1`,
     [companyId]
@@ -99,14 +102,16 @@ async function getOrCreateTestItem(pool: ReturnType<typeof getDbPool>, companyId
     return BigInt(rows[0].id);
   }
   
-  // Create a test item if none exists
-  const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, created_at, updated_at)
-     VALUES (?, 'TEST-ITEM', 'Test Item', 'PRODUCT', 1, 0, NOW(), NOW())`,
-    [companyId]
-  );
+  // Create a test item if none exists using library function
+  const item = await createItem(Number(companyId), {
+    sku: "TEST-ITEM",
+    name: "Test Item",
+    type: "PRODUCT",
+    is_active: true,
+    track_stock: false
+  });
   
-  return BigInt(result.insertId);
+  return BigInt(item.id);
 }
 
 async function cleanupTestData(pool: ReturnType<typeof getDbPool>, companyId: bigint, outletId: bigint, sessionIds: bigint[], tableIds: bigint[], itemIds: bigint[] = []) {
@@ -320,7 +325,7 @@ test(
       const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
-      const productId = await getOrCreateTestItem(pool, companyId);
+      const productId = await getOrCreateTestItem(companyId);
       if (productId > 0) {
         createdItemIds.push(productId);
       }
@@ -394,7 +399,7 @@ test(
       const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
-      const productId = await getOrCreateTestItem(pool, companyId);
+      const productId = await getOrCreateTestItem(companyId);
       if (productId > 0) {
         createdItemIds.push(productId);
       }
@@ -452,7 +457,7 @@ test(
       const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
-      const productId = await getOrCreateTestItem(pool, companyId);
+      const productId = await getOrCreateTestItem(companyId);
       if (productId > 0n) {
         createdItemIds.push(productId);
       }
@@ -528,7 +533,7 @@ test(
       const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
-      const productId = await getOrCreateTestItem(pool, companyId);
+      const productId = await getOrCreateTestItem(companyId);
       if (productId > 0) {
         createdItemIds.push(productId);
       }
@@ -588,7 +593,7 @@ test(
       const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
-      const productId = await getOrCreateTestItem(pool, companyId);
+      const productId = await getOrCreateTestItem(companyId);
       if (productId > 0) {
         createdItemIds.push(productId);
       }
@@ -916,7 +921,7 @@ test(
       );
 
       // Add a session line (this is what will be synced to snapshot lines)
-      const productId = await getOrCreateTestItem(pool, companyId);
+      const productId = await getOrCreateTestItem(companyId);
       const sourceLineUpdatedAt = new Date("2026-03-20T10:15:00.000Z");
       await pool.execute(
         `INSERT INTO table_service_session_lines
@@ -1269,12 +1274,11 @@ test(
       createdSessionIds.push(sessionId);
 
       // Create a product for a different company
-      const [differentCompanyResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO companies (code, name, created_at, updated_at)
-         VALUES (?, ?, NOW(), NOW())`,
-        [`DIFF-COMP-${runId}`, `Different Company ${runId}`]
-      );
-      const differentCompanyId = BigInt(differentCompanyResult.insertId);
+      const differentCompany = await createCompanyBasic({
+        code: `DIFF-COMP-${runId}`,
+        name: `Different Company ${runId}`
+      });
+      const differentCompanyId = BigInt(differentCompany.id);
 
       const [differentProductResult] = await pool.execute<ResultSetHeader>(
         `INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, created_at, updated_at)
@@ -1342,7 +1346,7 @@ test(
       const sessionId2 = await createTestSession(pool, companyId, outletId, tableId2, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId2);
 
-      const productId = await getOrCreateTestItem(pool, companyId);
+      const productId = await getOrCreateTestItem(companyId);
       const clientTxId = `scoped-${runId}`;
 
       // Add line to session 1

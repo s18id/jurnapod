@@ -16,6 +16,7 @@ import {
   InvalidCostingMethodError,
   CostTrackingError,
 } from "./cost-tracking";
+import { createItem } from "./items/index.js";
 
 // Test data - use unique IDs per run to avoid conflicts
 const RUN_ID = Date.now().toString(36);
@@ -24,20 +25,6 @@ const TEST_OUTLET_ID = 888002;
 const TEST_COMPANY_CODE = `TEST-COST-${RUN_ID}`;
 
 // Test helpers
-async function createTestItem(
-  conn: PoolConnection,
-  companyId: number,
-  name: string,
-  itemType: string = "PRODUCT"
-): Promise<number> {
-  const [result] = await conn.execute(
-    `INSERT INTO items (company_id, name, item_type, track_stock, is_active)
-     VALUES (?, ?, ?, 1, 1)`,
-    [companyId, name, itemType]
-  );
-  return (result as any).insertId;
-}
-
 async function createTestTransaction(
   conn: PoolConnection,
   companyId: number,
@@ -170,7 +157,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("FIFO: consumes oldest layers first", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `FIFO Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `FIFO Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Set method to FIFO
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "FIFO");
@@ -230,7 +218,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("LIFO: consumes newest layers first", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `LIFO Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `LIFO Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Set method to LIFO
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "LIFO");
@@ -286,7 +275,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("AVG: weighted average cost is correct", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `AVG Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `AVG Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Set method to AVG
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
@@ -344,7 +334,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("AVG: state depletes correctly on multiple consumes", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `AVG Depletion Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `AVG Depletion Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Set method to AVG
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
@@ -425,7 +416,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("AVG: insufficient inventory after depletion", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `AVG Insufficient Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `AVG Insufficient Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Set method to AVG
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
@@ -479,7 +471,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("FIFO insufficient: no partial writes", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `FIFO Insufficient Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `FIFO Insufficient Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Set method to FIFO
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "FIFO");
@@ -544,7 +537,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("LIFO insufficient: no partial writes", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `LIFO Insufficient Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `LIFO Insufficient Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Set method to LIFO
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "LIFO");
@@ -609,7 +603,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("Rejects non-positive quantity", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Non-positive Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `Non-positive Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Set method to AVG
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
@@ -643,7 +638,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("Method routing: AVG/FIFO/LIFO", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Routing Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `Routing Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Create layers: 50 @ 10 + 50 @ 12
     const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
@@ -794,7 +790,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("Invalid method setting throws", async () => {
     // Create a unique item for this test and add inventory
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Invalid Method Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `Invalid Method Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
     
     // Add some inventory so we don't get InsufficientInventoryError
     const txId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 100);
@@ -837,7 +834,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("Settings key priority: canonical key is preferred", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Canonical Key Priority Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `Canonical Key Priority Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Set up legacy key only first
     await conn.execute(
@@ -880,7 +878,8 @@ test("Cost Tracking Database Tests", async (t) => {
 
   await t.test("Default method when not configured is AVG", async () => {
     // Create a unique item for this test
-    const testItemId = await createTestItem(conn, TEST_COMPANY_ID, `Default Method Test ${RUN_ID}`);
+    const item = await createItem(TEST_COMPANY_ID, { name: `Default Method Test ${RUN_ID}`, type: "PRODUCT" });
+    const testItemId = item.id;
 
     // Clean settings - both canonical and legacy keys
     await conn.execute(

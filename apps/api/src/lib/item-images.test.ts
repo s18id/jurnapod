@@ -11,6 +11,7 @@ import {
   CrossTenantAccessError
 } from "./item-images";
 import { getDbPool, closeDbPool } from "./db";
+import { createCompanyBasic } from "./companies";
 
 describe("Image Upload Validation", () => {
   describe("validateImageUpload", () => {
@@ -160,17 +161,19 @@ describe("Tenant Scoping Security", () => {
       companyB = companyRows[1].id;
     } else {
       // Insert test companies
-      const [resultA] = await pool.execute(
-        "INSERT INTO companies (code, name, email) VALUES (?, ?, ?)",
-        [`TEST-COMPANY-A-${Date.now()}`, "Test Company A", "test-a@example.com"]
-      );
-      companyA = (resultA as { insertId: number }).insertId;
+      const companyAData = await createCompanyBasic({
+        code: `TEST-COMPANY-A-${Date.now()}`,
+        name: "Test Company A",
+        email: "test-a@example.com"
+      });
+      companyA = companyAData.id;
 
-      const [resultB] = await pool.execute(
-        "INSERT INTO companies (code, name, email) VALUES (?, ?, ?)",
-        [`TEST-COMPANY-B-${Date.now()}`, "Test Company B", "test-b@example.com"]
-      );
-      companyB = (resultB as { insertId: number }).insertId;
+      const companyBData = await createCompanyBasic({
+        code: `TEST-COMPANY-B-${Date.now()}`,
+        name: "Test Company B",
+        email: "test-b@example.com"
+      });
+      companyB = companyBData.id;
     }
 
     // Create a test item for company A

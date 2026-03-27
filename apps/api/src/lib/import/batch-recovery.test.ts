@@ -19,6 +19,7 @@ import {
   getSession,
   updateSession,
   deleteSession,
+  cleanupExpiredSessions,
 } from "./session-store.js";
 import type { Pool } from "mysql2/promise";
 
@@ -41,6 +42,8 @@ describe("Batch Failure Recovery & Session Hardening", () => {
   });
 
   after(async () => {
+    // Clean up any expired sessions created during testing
+    await cleanupExpiredSessions(pool);
     await closeDbPool();
   });
 
@@ -115,11 +118,8 @@ describe("Batch Failure Recovery & Session Hardening", () => {
       // Verify the apply guard condition: < 60s → reject
       assert.ok(expiresInMs < 60_000, "This session should trigger the expiry guard");
 
-      // Cleanup (direct delete since getSession already retrieved it)
-      await pool.execute(
-        `DELETE FROM import_sessions WHERE session_id = ?`,
-        [sessionId]
-      );
+      // Cleanup
+      await deleteSession(pool, sessionId, COMPANY_A);
     });
 
     test("expired session returns null from getSession", async () => {
@@ -136,7 +136,7 @@ describe("Batch Failure Recovery & Session Hardening", () => {
       assert.equal(session, null, "Expired session must return null");
 
       // Cleanup
-      await pool.execute(`DELETE FROM import_sessions WHERE session_id = ?`, [sessionId]);
+      await deleteSession(pool, sessionId, COMPANY_A);
     });
   });
 

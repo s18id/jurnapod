@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import { buildPermissionMask, checkUserAccess } from "./auth";
 import { closeDbPool, getDbPool } from "./db";
+import { createCompanyBasic } from "./companies";
 import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
@@ -160,12 +161,11 @@ test(
       ]);
 
       const deletedCompanyCode = `ACL-DEL-${runId}`.slice(0, 32).toUpperCase();
-      const [deletedCompanyInsert] = await pool.execute(
-        `INSERT INTO companies (code, name)
-         VALUES (?, ?)`,
-        [deletedCompanyCode, `ACL Deleted Company ${runId}`]
-      );
-      deletedCompanyId = Number((deletedCompanyInsert as { insertId: number }).insertId);
+      const deletedCompany = await createCompanyBasic({
+        code: deletedCompanyCode,
+        name: `ACL Deleted Company ${runId}`
+      });
+      deletedCompanyId = deletedCompany.id;
       createdCompanyIds.push(deletedCompanyId);
       await pool.execute(`UPDATE companies SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?`, [
         deletedCompanyId

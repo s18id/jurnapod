@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import { listEffectiveItemPricesForOutlet } from "./item-prices/index.js";
+import { createItem } from "./items/index.js";
+import { createItemPrice } from "./item-prices/index.js";
 import { closeDbPool, getDbPool } from "./db";
 import type { RowDataPacket } from "mysql2";
 
@@ -20,8 +22,6 @@ test(
     let companyId = 0;
     let outletId = 0;
     let itemId = 0;
-    let defaultPriceId = 0;
-    let overridePriceId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
     const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
@@ -42,26 +42,28 @@ test(
       assert.ok(outletRows.length > 0, "Outlet fixture not found");
       outletId = Number(outletRows[0].id);
 
-      // Create test item
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Test Item ${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      // Create test item using library function
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: "PRODUCT"
+      });
+      itemId = item.id;
 
       // Create company default price (active)
-      const [defaultResult] = await pool.execute(
-        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active) VALUES (?, NULL, ?, ?, 1)`,
-        [companyId, itemId, 1000]
-      );
-      defaultPriceId = Number((defaultResult as { insertId: number }).insertId);
+      const defaultPrice = await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: null,
+        price: 1000,
+        is_active: true
+      });
 
       // Create outlet override (inactive) - this should hide the item from active prices
-      const [overrideResult] = await pool.execute(
-        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active) VALUES (?, ?, ?, ?, 0)`,
-        [companyId, outletId, itemId, 1500]
-      );
-      overridePriceId = Number((overrideResult as { insertId: number }).insertId);
+      const overridePrice = await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: outletId,
+        price: 1500,
+        is_active: false
+      });
 
       // Test: active filter should exclude the item (inactive override takes precedence)
       const activePrices = await listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true });
@@ -75,13 +77,7 @@ test(
       assert.strictEqual(itemInAll!.is_active, false, "Item should be inactive");
 
     } finally {
-      // Cleanup
-      if (overridePriceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [overridePriceId]);
-      }
-      if (defaultPriceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [defaultPriceId]);
-      }
+      // Cleanup - use library function for items, direct SQL for prices (cascade handled)
       if (itemId) {
         await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
       }
@@ -99,8 +95,6 @@ test(
     let companyId = 0;
     let outletId = 0;
     let itemId = 0;
-    let defaultPriceId = 0;
-    let overridePriceId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
     const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
@@ -118,23 +112,25 @@ test(
       );
       outletId = Number(outletRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Test Item Override ${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item Override ${runId}`,
+        type: "PRODUCT"
+      });
+      itemId = item.id;
 
-      const [defaultResult] = await pool.execute(
-        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active) VALUES (?, NULL, ?, ?, 1)`,
-        [companyId, itemId, 1000]
-      );
-      defaultPriceId = Number((defaultResult as { insertId: number }).insertId);
+      await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: null,
+        price: 1000,
+        is_active: true
+      });
 
-      const [overrideResult] = await pool.execute(
-        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active) VALUES (?, ?, ?, ?, 1)`,
-        [companyId, outletId, itemId, 2000]
-      );
-      overridePriceId = Number((overrideResult as { insertId: number }).insertId);
+      await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: outletId,
+        price: 2000,
+        is_active: true
+      });
 
       const activePrices = await listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true });
       const itemInActive = activePrices.find(p => p.item_id === itemId);
@@ -144,12 +140,6 @@ test(
       assert.strictEqual(itemInActive!.is_override, true, "Should be marked as override");
 
     } finally {
-      if (overridePriceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [overridePriceId]);
-      }
-      if (defaultPriceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [defaultPriceId]);
-      }
       if (itemId) {
         await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
       }
@@ -167,7 +157,6 @@ test(
     let companyId = 0;
     let outletId = 0;
     let itemId = 0;
-    let defaultPriceId = 0;
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
     const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
@@ -185,17 +174,18 @@ test(
       );
       outletId = Number(outletRows[0].id);
 
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Test Item Default ${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item Default ${runId}`,
+        type: "PRODUCT"
+      });
+      itemId = item.id;
 
-      const [defaultResult] = await pool.execute(
-        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active) VALUES (?, NULL, ?, ?, 1)`,
-        [companyId, itemId, 1500]
-      );
-      defaultPriceId = Number((defaultResult as { insertId: number }).insertId);
+      await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: null,
+        price: 1500,
+        is_active: true
+      });
 
       const activePrices = await listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true });
       const itemInActive = activePrices.find(p => p.item_id === itemId);
@@ -205,9 +195,6 @@ test(
       assert.strictEqual(itemInActive!.is_override, false, "Should NOT be marked as override");
 
     } finally {
-      if (defaultPriceId) {
-        await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [defaultPriceId]);
-      }
       if (itemId) {
         await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
       }

@@ -11,26 +11,13 @@ import {
   getItemCostSummaryExtended,
   createCostLayer,
 } from "./cost-tracking";
+import { createItem } from "./items/index.js";
 
 const TEST_COMPANY_ID = 999991;
 const TEST_OUTLET_ID = 999990;
 const TEST_USER_ID = 999989;
 
 let conn: PoolConnection;
-
-// Helper to create test item
-async function createTestItem(
-  connection: PoolConnection,
-  companyId: number,
-  name: string
-): Promise<number> {
-  const [result] = await connection.execute(
-    `INSERT INTO items (company_id, sku, name, item_type, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, 'PRODUCT', 1, NOW(), NOW())`,
-    [companyId, `TEST-${name.slice(0, 20)}`, name]
-  );
-  return (result as any).insertId;
-}
 
 // Helper to create inventory transaction (needed for cost layer FK)
 async function createInventoryTransaction(
@@ -133,7 +120,8 @@ test("Cost Auditability API Layer Tests", async (t) => {
   await t.test("getItemCostLayersWithConsumption returns layers with consumption history", async () => {
     // Setup
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "FIFO");
-    const itemId = await createTestItem(conn, TEST_COMPANY_ID, "Layer Test");
+    const item = await createItem(TEST_COMPANY_ID, { name: "Layer Test", type: "PRODUCT" });
+    const itemId = item.id;
     const txId = await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 5);
     const layer = await createCostLayer(
       { companyId: TEST_COMPANY_ID, itemId, transactionId: txId, unitCost: 10000, quantity: 5 },
@@ -172,7 +160,8 @@ test("Cost Auditability API Layer Tests", async (t) => {
   await t.test("getItemCostSummaryExtended returns method-specific data for AVG", async () => {
     // Setup
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
-    const itemId = await createTestItem(conn, TEST_COMPANY_ID, "AVG Summary Test");
+    const item = await createItem(TEST_COMPANY_ID, { name: "AVG Summary Test", type: "PRODUCT" });
+    const itemId = item.id;
     const txId1 = await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 5);
     const txId2 = await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 5);
     await createCostLayer({ companyId: TEST_COMPANY_ID, itemId, transactionId: txId1, unitCost: 10000, quantity: 5 }, conn);
@@ -206,7 +195,8 @@ test("Cost Auditability API Layer Tests", async (t) => {
   await t.test("getItemCostSummaryExtended returns method-specific data for FIFO", async () => {
     // Setup
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "FIFO");
-    const itemId = await createTestItem(conn, TEST_COMPANY_ID, "FIFO Summary Test");
+    const item = await createItem(TEST_COMPANY_ID, { name: "FIFO Summary Test", type: "PRODUCT" });
+    const itemId = item.id;
     const txId1 = await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 5);
     const txId2 = await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 5);
     await createCostLayer({ companyId: TEST_COMPANY_ID, itemId, transactionId: txId1, unitCost: 10000, quantity: 5 }, conn);
@@ -240,7 +230,8 @@ test("Cost Auditability API Layer Tests", async (t) => {
   await t.test("getItemCostSummaryExtended returns method-specific data for LIFO", async () => {
     // Setup
     await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "LIFO");
-    const itemId = await createTestItem(conn, TEST_COMPANY_ID, "LIFO Summary Test");
+    const item = await createItem(TEST_COMPANY_ID, { name: "LIFO Summary Test", type: "PRODUCT" });
+    const itemId = item.id;
     const txId1 = await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 5);
     const txId2 = await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 5);
     await createCostLayer({ companyId: TEST_COMPANY_ID, itemId, transactionId: txId1, unitCost: 10000, quantity: 5 }, conn);
@@ -272,7 +263,8 @@ test("Cost Auditability API Layer Tests", async (t) => {
   });
 
   await t.test("getItemCostSummaryExtended returns null when no cost data", async () => {
-    const itemId = await createTestItem(conn, TEST_COMPANY_ID, "No Cost Test");
+    const item = await createItem(TEST_COMPANY_ID, { name: "No Cost Test", type: "PRODUCT" });
+    const itemId = item.id;
     const summary = await getItemCostSummaryExtended(TEST_COMPANY_ID, itemId, conn);
     assert.strictEqual(summary, null);
   });

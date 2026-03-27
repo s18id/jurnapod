@@ -42,17 +42,21 @@ test(
         otherCompanyId = Number(otherCompanyRows[0].id);
       }
 
-      const [supply1Result] = await pool.execute(
-        `INSERT INTO supplies (company_id, sku, name, unit, is_active) VALUES (?, ?, ?, ?, 1)`,
-        [companyId, `LIST-${runId}-1`, `Active Supply ${runId}`, "box"]
-      );
-      supplyId1 = Number((supply1Result as { insertId: number }).insertId);
+      const supply1 = await createSupply(companyId, {
+        sku: `LIST-${runId}-1`,
+        name: `Active Supply ${runId}`,
+        unit: "box",
+        is_active: true
+      });
+      supplyId1 = supply1.id;
 
-      const [supply2Result] = await pool.execute(
-        `INSERT INTO supplies (company_id, sku, name, unit, is_active) VALUES (?, ?, ?, ?, 0)`,
-        [companyId, `LIST-${runId}-2`, `Inactive Supply ${runId}`, "pack"]
-      );
-      supplyId2 = Number((supply2Result as { insertId: number }).insertId);
+      const supply2 = await createSupply(companyId, {
+        sku: `LIST-${runId}-2`,
+        name: `Inactive Supply ${runId}`,
+        unit: "pack",
+        is_active: false
+      });
+      supplyId2 = supply2.id;
 
       const allSupplies = await listSupplies(companyId);
       const found1 = allSupplies.some((s) => s.id === supplyId1);
@@ -73,11 +77,13 @@ test(
       assert.equal(inactive2, true, "Inactive filter should include inactive supply");
 
       if (otherCompanyId > 0) {
-        const [supply3Result] = await pool.execute(
-          `INSERT INTO supplies (company_id, sku, name, unit, is_active) VALUES (?, ?, ?, ?, 1)`,
-          [otherCompanyId, `LIST-${runId}-3`, `Other Company Supply ${runId}`, "unit"]
-        );
-        supplyId3 = Number((supply3Result as { insertId: number }).insertId);
+        const supply3 = await createSupply(otherCompanyId, {
+          sku: `LIST-${runId}-3`,
+          name: `Other Company Supply ${runId}`,
+          unit: "unit",
+          is_active: true
+        });
+        supplyId3 = supply3.id;
 
         const otherCompanySupplies = await listSupplies(otherCompanyId);
         const belongsToOther = otherCompanySupplies.some((s) => s.id === supplyId3);

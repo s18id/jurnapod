@@ -13,7 +13,8 @@ import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import { closeDbPool, getDbPool } from "../lib/db";
 import { buildLoginThrottleKeys, recordLoginFailure, recordLoginSuccess } from "../lib/auth-throttle";
-import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { createUser } from "../lib/users";
+import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 
 loadEnvIfPresent();
 
@@ -276,16 +277,15 @@ describe("Auth Routes", { concurrency: false }, () => {
       // Create a unique email for this test to track audit records
       const testEmail = `audit-test-${Date.now()}@example.com`;
 
-      // Insert test user with known password hash using bcryptjs
-      const bcrypt = await import("bcryptjs");
-      const tempPasswordHash = await bcrypt.hash("test-password-123", 10);
-
-      const [userResult] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO users (company_id, email, password_hash, is_active)
-         VALUES (?, ?, ?, 1)`,
-        [testCompanyId, testEmail, tempPasswordHash]
-      );
-      const tempUserId = Number(userResult.insertId);
+      // Use library function to create test user
+      const user = await createUser({
+        companyId: testCompanyId,
+        email: testEmail,
+        password: "test-password-123",
+        isActive: true,
+        actor: { userId: testUserId }
+      });
+      const tempUserId = user.id;
 
       try {
         // Verify no audit log exists yet

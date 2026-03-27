@@ -15,6 +15,10 @@ import {
   DatabaseReferenceError,
   DatabaseForbiddenError
 } from "./recipe-composition";
+import {
+  deleteRecipeIngredient,
+} from "./recipe-ingredients.js";
+import { createItem } from "./items/index.js";
 import { closeDbPool, getDbPool } from "./db";
 import type { RowDataPacket } from "mysql2";
 
@@ -44,18 +48,18 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create test recipe item (type = RECIPE)
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Test Recipe ${runId}`]
-      );
-      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+      const recipeItem = await createItem(companyId, {
+        name: `Test Recipe ${runId}`,
+        type: "RECIPE"
+      });
+      recipeItemId = recipeItem.id;
 
       // Create test ingredient item (type = INGREDIENT)
-      const [ingResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Test Ingredient ${runId}`]
-      );
-      ingredientItemId = Number((ingResult as { insertId: number }).insertId);
+      const ingredientItem = await createItem(companyId, {
+        name: `Test Ingredient ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId = ingredientItem.id;
 
       // Test: Add ingredient to recipe
       const result = await addIngredientToRecipe(
@@ -79,7 +83,7 @@ test(
     } finally {
       // Cleanup
       if (recipeIngredientId) {
-        await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId]);
+        await deleteRecipeIngredient(pool, recipeIngredientId, companyId);
       }
       if (ingredientItemId) {
         await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
@@ -112,18 +116,18 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create test recipe item
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Test Recipe ${runId}`]
-      );
-      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+      const recipeItem = await createItem(companyId, {
+        name: `Test Recipe ${runId}`,
+        type: "RECIPE"
+      });
+      recipeItemId = recipeItem.id;
 
       // Create test SERVICE item (should not be allowed as ingredient)
-      const [serviceResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'SERVICE')`,
-        [companyId, `Test Service ${runId}`]
-      );
-      serviceItemId = Number((serviceResult as { insertId: number }).insertId);
+      const serviceItem = await createItem(companyId, {
+        name: `Test Service ${runId}`,
+        type: "SERVICE"
+      });
+      serviceItemId = serviceItem.id;
 
       // Test: Should throw DatabaseForbiddenError
       await assert.rejects(
@@ -171,11 +175,11 @@ test(
       );
       const supportsUnitCost = Number(unitCostColumnRows[0]?.column_exists ?? 0) > 0;
 
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Recipe ${runId}`]
-      );
-      recipeId = Number((recipeResult as { insertId: number }).insertId);
+      const recipe = await createItem(companyId, {
+        name: `Recipe ${runId}`,
+        type: "RECIPE"
+      });
+      recipeId = recipe.id;
 
       // Try to add recipe itself as ingredient (circular)
       await assert.rejects(
@@ -214,17 +218,17 @@ test(
       );
       companyId = Number(companyRows[0].id);
 
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Recipe Main ${runId}`]
-      );
-      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+      const recipeMain = await createItem(companyId, {
+        name: `Recipe Main ${runId}`,
+        type: "RECIPE"
+      });
+      recipeItemId = recipeMain.id;
 
-      const [nestedRecipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Recipe Child ${runId}`]
-      );
-      recipeIngredientId = Number((nestedRecipeResult as { insertId: number }).insertId);
+      const recipeChild = await createItem(companyId, {
+        name: `Recipe Child ${runId}`,
+        type: "RECIPE"
+      });
+      recipeIngredientId = recipeChild.id;
 
       await assert.rejects(
         async () => {
@@ -264,17 +268,17 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create recipe and ingredient
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Test Recipe ${runId}`]
-      );
-      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+      const recipeItem = await createItem(companyId, {
+        name: `Test Recipe ${runId}`,
+        type: "RECIPE"
+      });
+      recipeItemId = recipeItem.id;
 
-      const [ingResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Test Ingredient ${runId}`]
-      );
-      ingredientItemId = Number((ingResult as { insertId: number }).insertId);
+      const ingredientItem = await createItem(companyId, {
+        name: `Test Ingredient ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId = ingredientItem.id;
 
       // Add ingredient first time
       const firstAdd = await addIngredientToRecipe(companyId, recipeItemId, {
@@ -295,7 +299,7 @@ test(
       );
 
     } finally {
-      if (recipeIngredientId) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId]);
+      if (recipeIngredientId) await deleteRecipeIngredient(pool, recipeIngredientId, companyId);
       if (ingredientItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
       if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
     }
@@ -323,18 +327,18 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create PRODUCT item (not RECIPE)
-      const [productResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Test Product ${runId}`]
-      );
-      productItemId = Number((productResult as { insertId: number }).insertId);
+      const productItem = await createItem(companyId, {
+        name: `Test Product ${runId}`,
+        type: "PRODUCT"
+      });
+      productItemId = productItem.id;
 
       // Create ingredient
-      const [ingResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Test Ingredient ${runId}`]
-      );
-      ingredientItemId = Number((ingResult as { insertId: number }).insertId);
+      const ingredientItem = await createItem(companyId, {
+        name: `Test Ingredient ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId = ingredientItem.id;
 
       // Try to add ingredient to non-recipe item
       await assert.rejects(
@@ -378,24 +382,24 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create recipe
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Test Recipe ${runId}`]
-      );
-      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+      const recipeItem = await createItem(companyId, {
+        name: `Test Recipe ${runId}`,
+        type: "RECIPE"
+      });
+      recipeItemId = recipeItem.id;
 
       // Create two ingredients
-      const [ing1Result] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Test Ingredient 1 ${runId}`]
-      );
-      ingredientItemId1 = Number((ing1Result as { insertId: number }).insertId);
+      const ing1Item = await createItem(companyId, {
+        name: `Test Ingredient 1 ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId1 = ing1Item.id;
 
-      const [ing2Result] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Test Ingredient 2 ${runId}`]
-      );
-      ingredientItemId2 = Number((ing2Result as { insertId: number }).insertId);
+      const ing2Item = await createItem(companyId, {
+        name: `Test Ingredient 2 ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId2 = ing2Item.id;
 
       // Add both ingredients
       const ing1 = await addIngredientToRecipe(companyId, recipeItemId, {
@@ -423,8 +427,8 @@ test(
       assert.strictEqual(firstIngredient.unit_of_measure, "kg");
 
     } finally {
-      if (recipeIngredientId1) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId1]);
-      if (recipeIngredientId2) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId2]);
+      if (recipeIngredientId1) await deleteRecipeIngredient(pool, recipeIngredientId1, companyId);
+      if (recipeIngredientId2) await deleteRecipeIngredient(pool, recipeIngredientId2, companyId);
       if (ingredientItemId1) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId1]);
       if (ingredientItemId2) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId2]);
       if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
@@ -454,17 +458,17 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create recipe and ingredient
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Test Recipe ${runId}`]
-      );
-      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+      const recipeItem = await createItem(companyId, {
+        name: `Test Recipe ${runId}`,
+        type: "RECIPE"
+      });
+      recipeItemId = recipeItem.id;
 
-      const [ingResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Test Ingredient ${runId}`]
-      );
-      ingredientItemId = Number((ingResult as { insertId: number }).insertId);
+      const ingredientItem = await createItem(companyId, {
+        name: `Test Ingredient ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId = ingredientItem.id;
 
       // Add ingredient
       const ingredient = await addIngredientToRecipe(companyId, recipeItemId, {
@@ -486,7 +490,7 @@ test(
       assert.strictEqual(updated.unit_of_measure, "unit"); // Unchanged
 
     } finally {
-      if (recipeIngredientId) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId]);
+      if (recipeIngredientId) await deleteRecipeIngredient(pool, recipeIngredientId, companyId);
       if (ingredientItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
       if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
     }
@@ -515,17 +519,17 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create recipe and ingredient
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Test Recipe ${runId}`]
-      );
-      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+      const recipeItem = await createItem(companyId, {
+        name: `Test Recipe ${runId}`,
+        type: "RECIPE"
+      });
+      recipeItemId = recipeItem.id;
 
-      const [ingResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Test Ingredient ${runId}`]
-      );
-      ingredientItemId = Number((ingResult as { insertId: number }).insertId);
+      const ingredientItem = await createItem(companyId, {
+        name: `Test Ingredient ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId = ingredientItem.id;
 
       // Add ingredient
       const ingredient = await addIngredientToRecipe(companyId, recipeItemId, {
@@ -547,7 +551,7 @@ test(
       assert.strictEqual(ingredients.length, 0);
 
     } finally {
-      if (recipeIngredientId) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId]);
+      if (recipeIngredientId) await deleteRecipeIngredient(pool, recipeIngredientId, companyId);
       if (ingredientItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
       if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
     }
@@ -586,24 +590,24 @@ test(
       outletId = Number(outletRows[0].id);
 
       // Create recipe
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Test Recipe ${runId}`]
-      );
-      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+      const recipeItem = await createItem(companyId, {
+        name: `Test Recipe ${runId}`,
+        type: "RECIPE"
+      });
+      recipeItemId = recipeItem.id;
 
       // Create ingredients
-      const [ing1Result] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Test Ingredient 1 ${runId}`]
-      );
-      ingredientItemId1 = Number((ing1Result as { insertId: number }).insertId);
+      const ing1Item = await createItem(companyId, {
+        name: `Test Ingredient 1 ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId1 = ing1Item.id;
 
-      const [ing2Result] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Test Ingredient 2 ${runId}`]
-      );
-      ingredientItemId2 = Number((ing2Result as { insertId: number }).insertId);
+      const ing2Item = await createItem(companyId, {
+        name: `Test Ingredient 2 ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId2 = ing2Item.id;
 
       // Add ingredients with different quantities
       const ing1 = await addIngredientToRecipe(companyId, recipeItemId, {
@@ -660,8 +664,8 @@ test(
     } finally {
       if (ingredientItemId1) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId1]);
       if (ingredientItemId2) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId2]);
-      if (recipeIngredientId1) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId1]);
-      if (recipeIngredientId2) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId2]);
+      if (recipeIngredientId1) await deleteRecipeIngredient(pool, recipeIngredientId1, companyId);
+      if (recipeIngredientId2) await deleteRecipeIngredient(pool, recipeIngredientId2, companyId);
       if (ingredientItemId1) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId1]);
       if (ingredientItemId2) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId2]);
       if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
@@ -692,23 +696,23 @@ test(
       );
       companyId = Number(companyRows[0].id);
 
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Batch Recipe ${runId}`]
-      );
-      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+      const recipeItem = await createItem(companyId, {
+        name: `Batch Recipe ${runId}`,
+        type: "RECIPE"
+      });
+      recipeItemId = recipeItem.id;
 
-      const [ing1Result] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Batch Ingredient Inv ${runId}`]
-      );
-      ingredientItemId1 = Number((ing1Result as { insertId: number }).insertId);
+      const ing1Item = await createItem(companyId, {
+        name: `Batch Ingredient Inv ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId1 = ing1Item.id;
 
-      const [ing2Result] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Batch Ingredient Price ${runId}`]
-      );
-      ingredientItemId2 = Number((ing2Result as { insertId: number }).insertId);
+      const ing2Item = await createItem(companyId, {
+        name: `Batch Ingredient Price ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId2 = ing2Item.id;
 
       const ing1 = await addIngredientToRecipe(companyId, recipeItemId, {
         ingredient_item_id: ingredientItemId1,
@@ -767,8 +771,8 @@ test(
       if (ingredientItemId1) await pool.execute(`DELETE FROM inventory_transactions WHERE company_id = ? AND product_id = ?`, [companyId, ingredientItemId1]);
       if (ingredientItemId1) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId1]);
       if (ingredientItemId2) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId2]);
-      if (recipeIngredientId1) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId1]);
-      if (recipeIngredientId2) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId2]);
+      if (recipeIngredientId1) await deleteRecipeIngredient(pool, recipeIngredientId1, companyId);
+      if (recipeIngredientId2) await deleteRecipeIngredient(pool, recipeIngredientId2, companyId);
       if (ingredientItemId1) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId1]);
       if (ingredientItemId2) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId2]);
       if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
@@ -799,25 +803,25 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create recipe
-      const [recipeResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'RECIPE')`,
-        [companyId, `Test Recipe ${runId}`]
-      );
-      recipeItemId = Number((recipeResult as { insertId: number }).insertId);
+      const recipeItem = await createItem(companyId, {
+        name: `Test Recipe ${runId}`,
+        type: "RECIPE"
+      });
+      recipeItemId = recipeItem.id;
 
       // Create ingredient
-      const [ingResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'INGREDIENT')`,
-        [companyId, `Test Ingredient ${runId}`]
-      );
-      ingredientItemId = Number((ingResult as { insertId: number }).insertId);
+      const ingredientItem = await createItem(companyId, {
+        name: `Test Ingredient ${runId}`,
+        type: "INGREDIENT"
+      });
+      ingredientItemId = ingredientItem.id;
 
       // Create service (invalid type)
-      const [svcResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'SERVICE')`,
-        [companyId, `Test Service ${runId}`]
-      );
-      serviceItemId = Number((svcResult as { insertId: number }).insertId);
+      const serviceItem = await createItem(companyId, {
+        name: `Test Service ${runId}`,
+        type: "SERVICE"
+      });
+      serviceItemId = serviceItem.id;
 
       // Test: Valid composition
       let validation = await validateRecipeComposition(companyId, recipeItemId, ingredientItemId);
@@ -846,7 +850,7 @@ test(
       assert.ok(validation.error?.includes("not found"));
 
     } finally {
-      if (recipeIngredientId) await pool.execute(`DELETE FROM recipe_ingredients WHERE id = ?`, [recipeIngredientId]);
+      if (recipeIngredientId) await deleteRecipeIngredient(pool, recipeIngredientId, companyId);
       if (serviceItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [serviceItemId]);
       if (ingredientItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
       if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);

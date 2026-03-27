@@ -706,7 +706,65 @@ async function ensureCompanyExists(
 }
 
 /**
- * Create a new company
+ * Create a company with minimal setup (no bootstrap defaults).
+ * Use this for testing - it only inserts the company row.
+ * For production use, use createCompany() which includes bootstrap.
+ */
+export async function createCompanyBasic(params: {
+  code: string;
+  name: string;
+  legal_name?: string | null;
+  tax_id?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  timezone?: string | null;
+  currency_code?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
+}): Promise<{ id: number; code: string; name: string }> {
+  const pool = getDbPool();
+
+  // Check if code already exists
+  const [existing] = await pool.execute<CompanyRow[]>(
+    `SELECT id FROM companies WHERE code = ?`,
+    [params.code]
+  );
+
+  if (existing.length > 0) {
+    throw new CompanyCodeExistsError(`Company with code ${params.code} already exists`);
+  }
+
+  const [result] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO companies (code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      params.code,
+      params.name,
+      params.legal_name ?? null,
+      params.tax_id ?? null,
+      params.email ?? null,
+      params.phone ?? null,
+      params.timezone ?? 'UTC',
+      params.currency_code ?? 'IDR',
+      params.address_line1 ?? null,
+      params.address_line2 ?? null,
+      params.city ?? null,
+      params.postal_code ?? null
+    ]
+  );
+
+  return {
+    id: Number(result.insertId),
+    code: params.code,
+    name: params.name
+  };
+}
+
+/**
+ * Create a new company with full bootstrap (for production use).
+ * For testing, use createCompanyBasic() instead.
  */
 export async function createCompany(params: {
   code: string;
@@ -730,37 +788,23 @@ export async function createCompany(params: {
   try {
     await connection.beginTransaction();
 
-    // Check if code already exists
-    const [existing] = await connection.execute<CompanyRow[]>(
-      `SELECT id FROM companies WHERE code = ?`,
-      [params.code]
-    );
+    // Use createCompanyBasic to insert the company row
+    const created = await createCompanyBasic({
+      code: params.code,
+      name: params.name,
+      legal_name: params.legal_name,
+      tax_id: params.tax_id,
+      email: params.email,
+      phone: params.phone,
+      timezone: params.timezone,
+      currency_code: params.currency_code,
+      address_line1: params.address_line1,
+      address_line2: params.address_line2,
+      city: params.city,
+      postal_code: params.postal_code
+    });
 
-    if (existing.length > 0) {
-      throw new CompanyCodeExistsError(`Company with code ${params.code} already exists`);
-    }
-
-    // Insert company with profile fields
-    const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO companies (code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        params.code,
-        params.name,
-        params.legal_name ?? null,
-        params.tax_id ?? null,
-        params.email ?? null,
-        params.phone ?? null,
-        params.timezone ?? 'UTC',
-        params.currency_code ?? 'IDR',
-        params.address_line1 ?? null,
-        params.address_line2 ?? null,
-        params.city ?? null,
-        params.postal_code ?? null
-      ]
-    );
-
-    const companyId = Number(result.insertId);
+    const companyId = created.id;
 
     await bootstrapCompanyDefaults(connection, {
       companyId,
