@@ -10,6 +10,7 @@ import { Button, ConfirmationModal } from "../shared/components/index.js";
 import { routes } from "../router/routes.js";
 import { usePosAppState } from "../router/pos-app-state.js";
 import { formatMoney } from "../shared/utils/money.js";
+import { getCartLineKey } from "../features/cart/useCart.js";
 
 interface CartPageProps {
   context: WebBootstrapContext;
@@ -42,6 +43,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
   const [transferInFlight, setTransferInFlight] = useState(false);
   const [transferMessage, setTransferMessage] = useState<string | null>(null);
   const [cancelLineItemId, setCancelLineItemId] = useState<string>("");
+  const [cancelLineVariantId, setCancelLineVariantId] = useState<number | undefined>(undefined);
   const [cancelQuantity, setCancelQuantity] = useState<string>("1");
   const [cancelReason, setCancelReason] = useState<string>("");
   const [cancelInFlight, setCancelInFlight] = useState(false);
@@ -142,25 +144,36 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
     if (!cancelLineItemId) {
       return null;
     }
-    return cancellableLines.find((line) => line.product.item_id === Number(cancelLineItemId)) ?? null;
-  }, [cancelLineItemId, cancellableLines]);
+    return cancellableLines.find(
+      (line) =>
+        line.product.item_id === Number(cancelLineItemId) &&
+        line.product.variant_id === cancelLineVariantId
+    ) ?? null;
+  }, [cancelLineItemId, cancelLineVariantId, cancellableLines]);
 
   const selectedCancelableMaxQty = selectedCancelableLine ? Math.max(1, selectedCancelableLine.kitchen_sent_qty) : 1;
 
   useEffect(() => {
     if (cancellableLines.length === 0) {
       setCancelLineItemId("");
+      setCancelLineVariantId(undefined);
       setCancelQuantity("1");
       setCancelReason("");
       return;
     }
 
-    const selectedExists = cancellableLines.some((line) => String(line.product.item_id) === cancelLineItemId);
+    const selectedExists = cancellableLines.some(
+      (line) =>
+        String(line.product.item_id) === cancelLineItemId &&
+        line.product.variant_id === cancelLineVariantId
+    );
     if (!cancelLineItemId || !selectedExists) {
-      setCancelLineItemId(String(cancellableLines[0].product.item_id));
+      const first = cancellableLines[0];
+      setCancelLineItemId(String(first.product.item_id));
+      setCancelLineVariantId(first.product.variant_id);
       setCancelQuantity("1");
     }
-  }, [cancelLineItemId, cancellableLines]);
+  }, [cancelLineItemId, cancelLineVariantId, cancellableLines]);
 
   const containerStyles: React.CSSProperties = {
     display: "flex",
@@ -412,9 +425,22 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                 name="cartCancelItemId"
                 value={cancelLineItemId}
                 onChange={(event) => {
-                  setCancelLineItemId(event.target.value);
+                  const newItemId = event.target.value;
+                  const selected = cancellableLines.find(
+                    (line) =>
+                      String(line.product.item_id) === newItemId &&
+                      line.product.variant_id === cancelLineVariantId
+                  );
+                  setCancelLineItemId(newItemId);
                   setCancelMessage(null);
                   setCancelQuantity("1");
+                  // If no matching line with same variant, reset variant
+                  if (!selected) {
+                    const firstMatch = cancellableLines.find(
+                      (line) => String(line.product.item_id) === newItemId
+                    );
+                    setCancelLineVariantId(firstMatch?.product.variant_id);
+                  }
                 }}
                 style={{
                   minWidth: 180,
@@ -425,11 +451,17 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                   background: "#ffffff"
                 }}
               >
-                {cancellableLines.map((line) => (
-                  <option key={line.product.item_id} value={String(line.product.item_id)}>
-                    {line.product.name} (committed: {line.kitchen_sent_qty})
-                  </option>
-                ))}
+                {cancellableLines.map((line) => {
+                  const lineKey = `${line.product.item_id}:${line.product.variant_id ?? "no-variant"}`;
+                  const displayName = line.product.variant_name
+                    ? `${line.product.name} (${line.product.variant_name})`
+                    : line.product.name;
+                  return (
+                    <option key={lineKey} value={String(line.product.item_id)}>
+                      {displayName} (committed: {line.kitchen_sent_qty})
+                    </option>
+                  );
+                })}
               </select>
               <input
                 id="cart-cancel-quantity"
@@ -507,6 +539,7 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
                         await context.runtime.cancelFinalizedOrderLine(scope, {
                           order_id: currentActiveOrderId,
                           item_id: selectedCancelableLine.product.item_id,
+                          variant_id: selectedCancelableLine.product.variant_id,
                           cancel_qty: cancelQty,
                           reason: cancelReason.trim()
                         });
@@ -536,8 +569,9 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
         ) : null}
         <CartList
           lines={cartLines}
-          onQuickReduceLine={(itemId) => {
-            const line = cart[itemId];
+          onQuickReduceLine={(itemId, variantId) => {
+            const lineKey = getCartLineKey(itemId, variantId);
+            const line = cart[lineKey];
             if (!line) {
               return;
             }
@@ -545,15 +579,16 @@ export function CartPage({ context }: CartPageProps): JSX.Element {
             const nextQty = Math.max(line.kitchen_sent_qty, line.qty - 1);
             upsertCartLine(line.product, { qty: nextQty });
           }}
-          onUpdateLine={(itemId, patch) => {
-            const line = cart[itemId];
+          onUpdateLine={(itemId, variantId, patch) => {
+            const lineKey = getCartLineKey(itemId, variantId);
+            const line = cart[lineKey];
             if (!line) {
               return;
             }
 
             upsertCartLine(line.product, {
-              qty: patch.qty,
-              discount_amount: patch.discount_amount
+              qty: patch?.qty,
+              discount_amount: patch?.discount_amount
             });
           }}
         />

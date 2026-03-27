@@ -20,7 +20,9 @@ import type {
   OrderUpdate,
   ItemCancellation,
   SyncPushTaxContext,
-  QueryExecutor
+  QueryExecutor,
+  VariantSaleResult,
+  VariantStockAdjustmentResult
 } from "./types.js";
 import { processSyncPushTransaction } from "./transactions.js";
 import {
@@ -29,6 +31,8 @@ import {
   processItemCancellations
 } from "./orders.js";
 import { resolveBatchIdempotencyCheck } from "./idempotency.js";
+import { processVariantSales } from "./variant-sales.js";
+import { processVariantStockAdjustments } from "./variant-stock-adjustments.js";
 
 /**
  * Indexed transaction for batch processing
@@ -108,6 +112,8 @@ export async function orchestrateSyncPush(
     active_orders,
     order_updates,
     item_cancellations,
+    variant_sales,
+    variant_stock_adjustments,
     inputOutletId,
     authCompanyId,
     authUserId,
@@ -122,6 +128,8 @@ export async function orchestrateSyncPush(
   const results: SyncPushResultItem[] = [];
   const orderUpdateResults: OrderUpdateResult[] = [];
   const itemCancellationResults: ItemCancellationResult[] = [];
+  const variantSaleResults: VariantSaleResult[] = [];
+  const variantStockAdjustmentResults: VariantStockAdjustmentResult[] = [];
 
   // Process transactions in batches with controlled concurrency
   // Each transaction gets its own connection from the pool
@@ -212,10 +220,46 @@ export async function orchestrateSyncPush(
     }
   }
 
+  // Process variant sync operations (Story 8.8) - share a connection
+  const postingMode = process.env.SYNC_PUSH_POSTING_MODE ?? "disabled";
+  
+  if (variant_sales && variant_sales.length > 0) {
+    const connection = await dbPool.getConnection();
+    try {
+      const salesResults = await processVariantSales({
+        dbConnection: connection,
+        companyId: authCompanyId,
+        outletId: inputOutletId,
+        correlationId,
+        postingMode
+      }, variant_sales);
+      variantSaleResults.push(...salesResults);
+    } finally {
+      connection.release();
+    }
+  }
+
+  if (variant_stock_adjustments && variant_stock_adjustments.length > 0) {
+    const connection = await dbPool.getConnection();
+    try {
+      const adjustmentResults = await processVariantStockAdjustments({
+        dbConnection: connection,
+        companyId: authCompanyId,
+        outletId: inputOutletId,
+        correlationId
+      }, variant_stock_adjustments);
+      variantStockAdjustmentResults.push(...adjustmentResults);
+    } finally {
+      connection.release();
+    }
+  }
+
   return {
     results,
     orderUpdateResults,
-    itemCancellationResults
+    itemCancellationResults,
+    ...(variantSaleResults.length > 0 && { variantSaleResults }),
+    ...(variantStockAdjustmentResults.length > 0 && { variantStockAdjustmentResults })
   };
 }
 

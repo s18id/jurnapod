@@ -81,4 +81,14 @@ export {
   estimateExportDuration,
   shouldUseStreaming,
   createExportError,
+  // Backpressure handling
+  createBackpressureWriter,
+  createBackpressureStream,
+  streamToResponse,
+  pipelineExport,
+  type BackpressureMetrics,
+  type BackpressureOptions,
+  type BackpressureEvent,
+  type BackpressureEventType,
+  type BackpressureStreamOptions,
 } from './streaming.js';

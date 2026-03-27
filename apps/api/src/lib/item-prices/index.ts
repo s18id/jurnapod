@@ -24,6 +24,7 @@ type ItemPriceRow = RowDataPacket & {
   company_id: number;
   outlet_id: number | null;
   item_id: number;
+  variant_id: number | null;
   price: string | number;
   is_active: number;
   updated_at: string;
@@ -71,6 +72,7 @@ function normalizeItemPrice(row: ItemPriceRow) {
     company_id: Number(row.company_id),
     outlet_id: row.outlet_id == null ? null : Number(row.outlet_id),
     item_id: Number(row.item_id),
+    variant_id: row.variant_id == null ? null : Number(row.variant_id),
     price: Number(row.price),
     is_active: row.is_active === 1,
     item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
@@ -125,7 +127,7 @@ async function findItemPriceByIdWithExecutor(
 ) {
   const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
   const [rows] = await executor.execute<ItemPriceRow[]>(
-    `SELECT id, company_id, outlet_id, item_id, price, is_active, updated_at
+    `SELECT id, company_id, outlet_id, item_id, variant_id, price, is_active, updated_at
      FROM item_prices
      WHERE company_id = ?
        AND id = ?
@@ -142,13 +144,13 @@ async function findItemPriceByIdWithExecutor(
 
 export async function listItemPrices(
   companyId: number,
-  filters?: { outletId?: number; outletIds?: readonly number[]; isActive?: boolean; includeDefaults?: boolean }
+  filters?: { outletId?: number; outletIds?: readonly number[]; isActive?: boolean; includeDefaults?: boolean; variantId?: number | null }
 ) {
   const pool = getDbPool();
-  const values: Array<number> = [companyId];
+  const values: Array<number | null> = [companyId];
 
   let sql =
-    "SELECT ip.id, ip.company_id, ip.outlet_id, ip.item_id, ip.price, ip.is_active, ip.updated_at, i.item_group_id, ig.name AS item_group_name " +
+    "SELECT ip.id, ip.company_id, ip.outlet_id, ip.item_id, ip.variant_id, ip.price, ip.is_active, ip.updated_at, i.item_group_id, ig.name AS item_group_name " +
     "FROM item_prices ip " +
     "INNER JOIN items i ON i.id = ip.item_id AND i.company_id = ip.company_id " +
     "LEFT JOIN item_groups ig ON ig.id = i.item_group_id AND ig.company_id = ip.company_id " +
@@ -180,6 +182,16 @@ export async function listItemPrices(
   if (typeof filters?.isActive === "boolean") {
     sql += " AND ip.is_active = ?";
     values.push(filters.isActive ? 1 : 0);
+  }
+
+  // Filter by variant_id
+  if (filters?.variantId !== undefined) {
+    if (filters.variantId === null) {
+      sql += " AND ip.variant_id IS NULL";
+    } else {
+      sql += " AND ip.variant_id = ?";
+      values.push(filters.variantId);
+    }
   }
 
   sql += " ORDER BY ip.outlet_id IS NULL ASC, ip.outlet_id DESC, ip.id ASC";
@@ -250,6 +262,7 @@ export async function createItemPrice(
   input: {
     item_id: number;
     outlet_id: number | null;
+    variant_id?: number | null;
     price: number;
     is_active?: boolean;
   },
@@ -266,11 +279,22 @@ export async function createItemPrice(
       await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
     }
 
+    // If variant_id is provided, validate it belongs to the item
+    if (input.variant_id != null) {
+      const [variantRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT id FROM item_variants WHERE id = ? AND item_id = ? AND company_id = ? LIMIT 1`,
+        [input.variant_id, input.item_id, companyId]
+      );
+      if (variantRows.length === 0) {
+        throw new DatabaseReferenceError("Variant not found for item");
+      }
+    }
+
     try {
       const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active)
-         VALUES (?, ?, ?, ?, ?)`,
-        [companyId, input.outlet_id, input.item_id, input.price, input.is_active === false ? 0 : 1]
+        `INSERT INTO item_prices (company_id, outlet_id, item_id, variant_id, price, is_active)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [companyId, input.outlet_id, input.item_id, input.variant_id ?? null, input.price, input.is_active === false ? 0 : 1]
       );
 
       const itemPrice = await findItemPriceByIdWithExecutor(connection, companyId, Number(result.insertId));
@@ -288,6 +312,10 @@ export async function createItemPrice(
           after: itemPrice
         }
       });
+
+      // Clear price cache when new price created
+      const { clearPriceCache } = await import("../pricing/variant-price-resolver.js");
+      clearPriceCache();
 
       return itemPrice;
     } catch (error) {
@@ -310,6 +338,7 @@ export async function updateItemPrice(
   input: {
     item_id?: number;
     outlet_id?: number | null;
+    variant_id?: number | null;
     price?: number;
     is_active?: boolean;
   },
@@ -367,6 +396,25 @@ export async function updateItemPrice(
       }
     }
 
+    if (Object.hasOwn(input, "variant_id")) {
+      if (input.variant_id === null) {
+        fields.push("variant_id = ?");
+        values.push(null);
+      } else if (typeof input.variant_id === "number") {
+        // Validate variant belongs to the item
+        const itemId = input.item_id ?? before.item_id;
+        const [variantRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT id FROM item_variants WHERE id = ? AND item_id = ? AND company_id = ? LIMIT 1`,
+          [input.variant_id, itemId, companyId]
+        );
+        if (variantRows.length === 0) {
+          throw new DatabaseReferenceError("Variant not found for item");
+        }
+        fields.push("variant_id = ?");
+        values.push(input.variant_id);
+      }
+    }
+
     if (fields.length === 0) {
       return before;
     }
@@ -398,6 +446,10 @@ export async function updateItemPrice(
           after: itemPrice
         }
       });
+
+      // Clear price cache when price updated
+      const { clearPriceCache } = await import("../pricing/variant-price-resolver.js");
+      clearPriceCache();
 
       return itemPrice;
     } catch (error) {
@@ -452,6 +504,10 @@ export async function deleteItemPrice(
         before
       }
     });
+
+    // Clear price cache when price deleted
+    const { clearPriceCache } = await import("../pricing/variant-price-resolver.js");
+    clearPriceCache();
 
     return true;
   });

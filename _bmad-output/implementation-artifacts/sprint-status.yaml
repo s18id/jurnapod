@@ -1,5 +1,5 @@
 # generated: 2026-03-25
-# last_updated: 2026-03-26
+# last_updated: 2026-03-28
 # project: Jurnapod
 # project_key: NOKEY
 # tracking_system: file-system
@@ -128,3 +128,18 @@ development_status:
   7-7-export-settings-route-test-coverage: done
   7-8-export-large-dataset-protection: done
   epic-7-retrospective: done
+
+  # Epic 8: Production Scale & POS Variant Sync
+  # Stories: 9 total (10 planned - 1 pre-deferred: 8.4 Redis Session → Epic 9)
+  # Completed: 8 (8.1, 8.2, 8.3, 8.5, 8.6, 8.7, 8.8, 8.9)
+  # Deferred: 1 (8.10 Load Testing → Epic 9)
+  epic-8: done
+  8-1-import-resume-checkpoint: done
+  8-2-export-backpressure-handling: done
+  8-3-progress-persistence: done
+  8-5-variant-price-sync: done
+  8-6-variant-selection-pos: done
+  8-7-variant-stock-tracking: done
+  8-8-variant-sync-push: done
+  8-9-performance-monitoring: done
+  8-10-load-testing-framework: deferred

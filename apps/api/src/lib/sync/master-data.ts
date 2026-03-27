@@ -23,7 +23,7 @@ import {
 } from "../taxes.js";
 import { listItems } from "../items/index.js";
 import { listItemGroups } from "../item-groups/index.js";
-import type { SyncPullPayload, SyncPullResponse } from "@jurnapod/shared";
+import type { SyncPullPayload, SyncPullResponse, SyncPullVariantPrice } from "@jurnapod/shared";
 import { SyncPullConfigSchema } from "@jurnapod/shared";
 import { getDbPool } from "../db.js";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
@@ -367,6 +367,56 @@ export async function getCompanyDataVersion(companyId: number): Promise<number> 
   }
 }
 
+/**
+ * Get variant prices for sync pull.
+ * Returns all active variant-specific prices for the company that are relevant to the outlet.
+ */
+async function getVariantPricesForSync(
+  companyId: number,
+  outletId: number
+): Promise<SyncPullVariantPrice[]> {
+  const pool = getDbPool();
+  
+  try {
+    // Get all variant prices:
+    // 1. Variant-specific prices for this outlet
+    // 2. Variant default prices (no outlet)
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT 
+        ip.id,
+        ip.item_id,
+        ip.variant_id,
+        COALESCE(ip.outlet_id, ?) AS outlet_id,
+        ip.price,
+        ip.is_active,
+        ip.updated_at
+       FROM item_prices ip
+       WHERE ip.company_id = ?
+         AND ip.variant_id IS NOT NULL
+         AND ip.is_active = 1
+         AND (ip.outlet_id = ? OR ip.outlet_id IS NULL)`,
+      [outletId, companyId, outletId]
+    );
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      item_id: Number(row.item_id),
+      variant_id: row.variant_id == null ? null : Number(row.variant_id),
+      outlet_id: row.outlet_id == null ? outletId : Number(row.outlet_id),
+      price: Number(row.price),
+      is_active: row.is_active === 1,
+      updated_at: toRfc3339Required(row.updated_at)
+    }));
+  } catch (error) {
+    // If variant_prices column doesn't exist yet (migration not run), return empty array
+    if (isMysqlError(error) && (error as { code?: string }).code === "ER_BAD_FIELD_ERROR") {
+      console.warn("variant_prices column not found - sync will not include variant prices");
+      return [];
+    }
+    throw error;
+  }
+}
+
 // =============================================================================
 // Complex Queries (raw SQL preserved)
 // =============================================================================
@@ -605,17 +655,19 @@ export async function buildSyncPullPayload(
   const config = await readSyncConfig(companyId);
 
   if (currentVersion <= sinceVersion) {
-    const [openOrderSync, tables, reservations, variants] = await Promise.all([
+    const [openOrderSync, tables, reservations, variants, variantPrices] = await Promise.all([
       readOpenOrderSyncPayload(companyId, outletId, ordersCursor),
       listOutletTables(companyId, outletId),
       listActiveReservations(companyId, outletId),
-      getVariantsForSync(companyId, outletId)
+      getVariantsForSync(companyId, outletId),
+      getVariantPricesForSync(companyId, outletId)
     ]);
     return {
       data_version: currentVersion,
       items: [],
       item_groups: [],
       prices: [],
+      variant_prices: variantPrices,
       config,
       open_orders: openOrderSync.open_orders,
       open_order_lines: openOrderSync.open_order_lines,
@@ -627,13 +679,14 @@ export async function buildSyncPullPayload(
     };
   }
 
-  const [items, effectivePrices, itemGroups, tables, reservations, variants] = await Promise.all([
+  const [items, effectivePrices, itemGroups, tables, reservations, variants, variantPrices] = await Promise.all([
     listItems(companyId, { isActive: true }),
     listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true }),
     listItemGroups(companyId),
     listOutletTables(companyId, outletId),
     listActiveReservations(companyId, outletId),
-    getVariantsForSync(companyId, outletId)
+    getVariantsForSync(companyId, outletId),
+    getVariantPricesForSync(companyId, outletId)
   ]);
 
   const [openOrderSync, thumbnailMap] = await Promise.all([
@@ -673,6 +726,7 @@ export async function buildSyncPullPayload(
       is_active: price.is_active,
       updated_at: price.updated_at
     })),
+    variant_prices: variantPrices,
     config,
     open_orders: openOrderSync.open_orders,
     open_order_lines: openOrderSync.open_order_lines,

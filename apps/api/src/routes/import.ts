@@ -36,6 +36,13 @@ import {
   updateSession,
   deleteSession,
   cleanupExpiredSessions,
+  updateCheckpoint,
+  clearCheckpoint,
+  updateFileHash,
+  computeFileHash,
+  getCheckpoint,
+  type CheckpointData,
+  SESSION_TTL_MS,
 } from "../lib/import/session-store.js";
 import { randomUUID } from "node:crypto";
 
@@ -47,6 +54,16 @@ declare module "hono" {
     auth: AuthContext;
   }
 }
+
+// =============================================================================
+// Session Configuration Constants
+// =============================================================================
+
+/**
+ * Story 8.1: Minimum time remaining before session expiry warning (60 seconds)
+ * If session expires within this window, reject resume to prevent mid-operation expiry
+ */
+const SESSION_EXPIRY_WARNING_THRESHOLD_MS = 60_000;
 
 // =============================================================================
 // Types
@@ -442,13 +459,17 @@ interface ApplyResult {
   batchesCompleted: number;
   batchesFailed: number;
   rowsProcessed: number;
+  /** Batch index (0-based) where failure occurred, if any */
+  failedAtBatch?: number;
+  /** Whether the import can be resumed */
+  canResume: boolean;
 }
 
 interface ApplyOptions {
   /** 0-based batch index to start from (for resume). Default: 0 */
   startBatch?: number;
   /** Called after each batch commits — use to persist checkpoint */
-  onBatchCommit?: (batchNumber: number) => Promise<void>;
+  onBatchCommit?: (batchNumber: number, rowsCommitted: number) => Promise<void>;
 }
 
 async function applyItemImport(
@@ -465,6 +486,7 @@ async function applyItemImport(
     batchesCompleted: 0,
     batchesFailed: 0,
     rowsProcessed: 0,
+    canResume: false, // Will be set based on failure status
   };
 
   const totalBatches = Math.ceil(rows.length / BATCH_SIZE);
@@ -545,10 +567,12 @@ async function applyItemImport(
       await connection.commit();
       result.batchesCompleted++;
       result.rowsProcessed += batch.length;
-      await onBatchCommit?.(batchIndex);
+      await onBatchCommit?.(batchIndex, result.rowsProcessed);
     } catch (error) {
       await connection.rollback();
       result.batchesFailed++;
+      result.failedAtBatch = batchIndex;
+      result.canResume = true; // Can resume from this batch
       result.errors.push({
         row: batchStart + 1,
         error: `Batch ${batchIndex + 1} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -556,6 +580,11 @@ async function applyItemImport(
     } finally {
       connection.release();
     }
+  }
+
+  // Set canResume based on whether there were failures
+  if (result.batchesFailed === 0) {
+    result.canResume = false;
   }
 
   return result;
@@ -575,6 +604,7 @@ async function applyPriceImport(
     batchesCompleted: 0,
     batchesFailed: 0,
     rowsProcessed: 0,
+    canResume: false, // Will be set based on failure status
   };
 
   const totalBatches = Math.ceil(rows.length / BATCH_SIZE);
@@ -666,10 +696,12 @@ async function applyPriceImport(
       await connection.commit();
       result.batchesCompleted++;
       result.rowsProcessed += batch.length;
-      await onBatchCommit?.(batchIndex);
+      await onBatchCommit?.(batchIndex, result.rowsProcessed);
     } catch (error) {
       await connection.rollback();
       result.batchesFailed++;
+      result.failedAtBatch = batchIndex;
+      result.canResume = true; // Can resume from this batch
       result.errors.push({
         row: batchStart + 1,
         error: `Batch ${batchIndex + 1} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -677,6 +709,11 @@ async function applyPriceImport(
     } finally {
       connection.release();
     }
+  }
+
+  // Set canResume based on whether there were failures
+  if (result.batchesFailed === 0) {
+    result.canResume = false;
   }
 
   return result;
@@ -776,6 +813,9 @@ importRoutes.post("/:entityType/upload", async (c) => {
     // Get columns from first row
     const columns = parseResult.rows.length > 0 ? Object.keys(parseResult.rows[0].data) : [];
 
+    // Compute file hash for resume integrity check (Story 8.1 AC3)
+    const fileHash = computeFileHash(buffer);
+
     // Persist session to database
     const pool = getDbPool();
     await createSession(pool, sessionId, auth.companyId, entityType, {
@@ -786,6 +826,9 @@ importRoutes.post("/:entityType/upload", async (c) => {
       sampleData,
       rows: parseResult.rows,
     });
+
+    // Store file hash for resume integrity verification
+    await updateFileHash(pool, sessionId, auth.companyId, fileHash);
 
     return successResponse({
       uploadId: sessionId,
@@ -999,9 +1042,9 @@ importRoutes.post("/:entityType/apply", async (c) => {
       return errorResponse("NOT_FOUND", "Upload session not found or expired", 404);
     }
 
-    // TD-028: Expiry guard — reject if session expires within 60 seconds
+    // TD-028: Expiry guard — reject if session expires within threshold
     const expiresInMs = stored.expiresAt.getTime() - Date.now();
-    if (expiresInMs < 60_000) {
+    if (expiresInMs < SESSION_EXPIRY_WARNING_THRESHOLD_MS) {
       return errorResponse(
         "SESSION_EXPIRED",
         "Upload session is expiring imminently. Please re-upload and try again.",
@@ -1009,14 +1052,40 @@ importRoutes.post("/:entityType/apply", async (c) => {
       );
     }
 
-    const session = stored.payload as unknown as UploadSession & {
-      lastSuccessfulBatch?: number;
-    };
+    const session = stored.payload as unknown as UploadSession;
 
-    // TD-029: Resume from checkpoint if a previous apply partially succeeded
-    const startBatch = (session.lastSuccessfulBatch !== undefined)
-      ? session.lastSuccessfulBatch + 1
-      : 0;
+    // Story 8.1 AC3: Verify file hash for resume validation
+    // If client provides a new file hash, verify it matches the stored hash
+    const clientFileHash = body.fileHash as string | undefined;
+    if (clientFileHash && stored.fileHash) {
+      if (clientFileHash !== stored.fileHash) {
+        return errorResponse(
+          "FILE_HASH_MISMATCH",
+          "File has been modified since upload. Please upload the original file again.",
+          409
+        );
+      }
+    }
+
+    // Story 8.1 AC2: Resume from checkpoint if a previous apply partially succeeded
+    let startBatch = 0;
+    let isResuming = false;
+
+    if (stored.checkpointData) {
+      // Check if checkpoint is within TTL window
+      const checkpointTime = new Date(stored.checkpointData.timestamp).getTime();
+      const now = Date.now();
+
+      if (now - checkpointTime <= SESSION_TTL_MS) {
+        startBatch = stored.checkpointData.lastSuccessfulBatchNumber + 1;
+        isResuming = true;
+        console.info(`[import] Resuming session ${uploadId} from batch ${startBatch} (checkpoint: ${JSON.stringify(stored.checkpointData)})`);
+      } else {
+        console.info(`[import] Session ${uploadId} checkpoint expired (checkpoint: ${stored.checkpointData.timestamp}, TTL: 30min)`);
+        // Checkpoint expired, start fresh
+        await clearCheckpoint(pool, uploadId, auth.companyId);
+      }
+    }
 
     // Map all rows
     const fieldDefs = getFieldDefinitions(entityType);
@@ -1026,18 +1095,25 @@ importRoutes.post("/:entityType/apply", async (c) => {
     const applyFn = entityType === "items" ? applyItemImport : applyPriceImport;
     const result = await applyFn(mappedRows, auth.companyId, pool, {
       startBatch,
-      onBatchCommit: async (batchIndex: number) => {
-        // Persist checkpoint so resume can skip committed batches
-        const updatedPayload = { ...session, lastSuccessfulBatch: batchIndex };
-        await updateSession(pool, uploadId, auth.companyId, updatedPayload as Record<string, unknown>);
+      onBatchCommit: async (batchIndex: number, rowsCommitted: number) => {
+        // Story 8.1 AC1: Persist checkpoint after each successful batch
+        const checkpoint: CheckpointData = {
+          lastSuccessfulBatchNumber: batchIndex,
+          rowsCommitted,
+          timestamp: new Date().toISOString(),
+        };
+        await updateCheckpoint(pool, uploadId, auth.companyId, checkpoint);
+        console.info(`[import] Checkpoint saved: batch ${batchIndex}, rows ${rowsCommitted}`);
       },
     });
 
-    // Only delete session when all batches completed without failure
+    // Only delete session and clear checkpoint when all batches completed without failure
     if (result.batchesFailed === 0) {
+      await clearCheckpoint(pool, uploadId, auth.companyId);
       await deleteSession(pool, uploadId, auth.companyId);
     }
 
+    // Story 8.1 AC4: Return structured error with partial failure info
     return successResponse({
       success: result.created + result.updated,
       failed: result.errors.length,
@@ -1046,8 +1122,14 @@ importRoutes.post("/:entityType/apply", async (c) => {
       batchesCompleted: result.batchesCompleted,
       batchesFailed: result.batchesFailed,
       rowsProcessed: result.rowsProcessed,
-      resumable: result.batchesFailed > 0,
-      skipped: startBatch * BATCH_SIZE,
+      // AC4: Structured partial failure response
+      failedAtBatch: result.failedAtBatch,
+      rowsCommitted: result.rowsProcessed,
+      canResume: result.canResume,
+      // Resume info
+      resumed: isResuming,
+      skippedBatches: startBatch,
+      skippedRows: startBatch * BATCH_SIZE,
       errors: result.errors,
     });
   } catch (error) {

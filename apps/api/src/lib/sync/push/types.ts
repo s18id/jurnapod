@@ -301,6 +301,22 @@ export type QueryExecutor = {
 };
 
 // ============================================================================
+// Variant Sync Types (Story 8.8)
+// ============================================================================
+
+export type VariantSaleResult = {
+  client_tx_id: string;
+  result: "OK" | "DUPLICATE" | "ERROR";
+  message?: string;
+};
+
+export type VariantStockAdjustmentResult = {
+  client_tx_id: string;
+  result: "OK" | "DUPLICATE" | "ERROR";
+  message?: string;
+};
+
+// ============================================================================
 // Orchestrator Types
 // ============================================================================
 
@@ -310,6 +326,29 @@ export type OrchestrateSyncPushParams = {
   active_orders?: ActiveOrder[];
   order_updates?: OrderUpdate[];
   item_cancellations?: ItemCancellation[];
+  // Variant sync types (Story 8.8)
+  variant_sales?: Array<{
+    client_tx_id: string;
+    company_id: number;
+    outlet_id: number;
+    variant_id: number;
+    item_id: number;
+    qty: number;
+    unit_price: number;
+    total_amount: number;
+    trx_at: string;
+  }>;
+  variant_stock_adjustments?: Array<{
+    client_tx_id: string;
+    company_id: number;
+    outlet_id: number;
+    variant_id: number;
+    adjustment_type: "INCREASE" | "DECREASE" | "SET";
+    quantity: number;
+    reason: string;
+    reference?: string | null;
+    adjusted_at: string;
+  }>;
   inputOutletId: number;
   authCompanyId: number;
   authUserId: number;
@@ -326,4 +365,7 @@ export type OrchestrateSyncPushResult = {
   results: SyncPushResultItem[];
   orderUpdateResults: OrderUpdateResult[];
   itemCancellationResults: ItemCancellationResult[];
+  // Variant sync results (Story 8.8)
+  variantSaleResults?: VariantSaleResult[];
+  variantStockAdjustmentResults?: VariantStockAdjustmentResult[];
 };

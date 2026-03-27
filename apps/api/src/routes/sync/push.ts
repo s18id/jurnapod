@@ -125,7 +125,7 @@ syncPushRoutes.post("/", async (c) => {
       return errorResponse("VALIDATION_ERROR", "Invalid request payload", 400);
     }
 
-    const { outlet_id, transactions, active_orders, order_updates, item_cancellations } = validationResult.data;
+    const { outlet_id, transactions, active_orders, order_updates, item_cancellations, variant_sales, variant_stock_adjustments } = validationResult.data;
 
     const outletAccessGuard = requireAccess({
       roles: ["OWNER", "ADMIN", "CASHIER"],
@@ -142,8 +142,10 @@ syncPushRoutes.post("/", async (c) => {
     const hasActiveOrders = Boolean(active_orders && active_orders.length > 0);
     const hasOrderUpdates = Boolean(order_updates && order_updates.length > 0);
     const hasItemCancellations = Boolean(item_cancellations && item_cancellations.length > 0);
+    const hasVariantSales = Boolean(variant_sales && variant_sales.length > 0);
+    const hasVariantStockAdjustments = Boolean(variant_stock_adjustments && variant_stock_adjustments.length > 0);
 
-    if (transactions.length === 0 && !hasActiveOrders && !hasOrderUpdates && !hasItemCancellations) {
+    if (transactions.length === 0 && !hasActiveOrders && !hasOrderUpdates && !hasItemCancellations && !hasVariantSales && !hasVariantStockAdjustments) {
       return successResponse({ results: [] });
     }
 
@@ -163,12 +165,14 @@ syncPushRoutes.post("/", async (c) => {
       connection.release();
     }
 
-    const { results, orderUpdateResults, itemCancellationResults } = await orchestrateSyncPush({
+    const { results, orderUpdateResults, itemCancellationResults, variantSaleResults, variantStockAdjustmentResults } = await orchestrateSyncPush({
       dbPool,
       transactions: transactions as SyncPushTransactionPayload[],
       active_orders: active_orders as ActiveOrder[] | undefined,
       order_updates: order_updates as OrderUpdate[] | undefined,
       item_cancellations: item_cancellations as ItemCancellation[] | undefined,
+      variant_sales: variant_sales as any,
+      variant_stock_adjustments: variant_stock_adjustments as any,
       inputOutletId: outlet_id,
       authCompanyId: auth.companyId,
       authUserId: auth.userId,
@@ -183,7 +187,9 @@ syncPushRoutes.post("/", async (c) => {
     const responsePayload = {
       results,
       ...(orderUpdateResults.length > 0 && { order_update_results: orderUpdateResults }),
-      ...(itemCancellationResults.length > 0 && { item_cancellation_results: itemCancellationResults })
+      ...(itemCancellationResults.length > 0 && { item_cancellation_results: itemCancellationResults }),
+      ...(variantSaleResults && variantSaleResults.length > 0 && { variant_sale_results: variantSaleResults }),
+      ...(variantStockAdjustmentResults && variantStockAdjustmentResults.length > 0 && { variant_stock_adjustment_results: variantStockAdjustmentResults })
     };
 
     console.info("POST /sync/push completed", {
@@ -195,7 +201,9 @@ syncPushRoutes.post("/", async (c) => {
       duplicate_count: results.filter((r) => r.result === "DUPLICATE").length,
       error_count: results.filter((r) => r.result === "ERROR").length,
       order_update_results_count: orderUpdateResults.length,
-      item_cancellation_results_count: itemCancellationResults.length
+      item_cancellation_results_count: itemCancellationResults.length,
+      variant_sale_results_count: variantSaleResults?.length ?? 0,
+      variant_stock_adjustment_results_count: variantStockAdjustmentResults?.length ?? 0
     });
 
     return successResponse(responsePayload);

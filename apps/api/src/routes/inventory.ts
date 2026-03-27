@@ -122,11 +122,13 @@ async function canManageCompanyDefaults(
 const ItemPriceCreateSchema = z.object({
   item_id: z.number().int().positive(),
   outlet_id: z.number().int().positive().nullable(),
+  variant_id: z.number().int().positive().nullable().optional(),
   price: z.number().positive(),
   is_active: z.boolean().optional().default(true)
 });
 
 const ItemPriceUpdateSchema = z.object({
+  variant_id: z.number().int().positive().nullable().optional(),
   price: z.number().positive().optional(),
   is_active: z.boolean().optional()
 });
@@ -778,6 +780,7 @@ inventoryRoutes.post("/item-prices", async (c) => {
     const price = await createItemPrice(auth.companyId, {
       item_id: input.item_id,
       outlet_id: input.outlet_id,
+      variant_id: input.variant_id ?? null,
       price: input.price,
       is_active: input.is_active
     }, {
@@ -956,6 +959,7 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
     }
 
     const updatedItemPrice = await updateItemPrice(auth.companyId, priceId, {
+      variant_id: input.variant_id,
       price: input.price,
       is_active: input.is_active
     }, {
@@ -1033,6 +1037,112 @@ inventoryRoutes.delete("/item-prices/:id", async (c) => {
 
     console.error("DELETE /inventory/item-prices/:id failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Item price deletion failed", 500);
+  }
+});
+
+// GET /inventory/items/:id/variants/:variantId/prices - List variant-specific prices
+inventoryRoutes.get("/items/:id/variants/:variantId/prices", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+    // Check access permission
+    const accessResult = await requireAccess({
+      module: "inventory",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const itemId = NumericIdSchema.parse(c.req.param("id"));
+    const variantId = NumericIdSchema.parse(c.req.param("variantId"));
+
+    const url = new URL(c.req.raw.url);
+    const outletIdParam = url.searchParams.get("outlet_id");
+    
+    // Check if user can access company defaults
+    const access = await checkUserAccess({
+      userId: auth.userId,
+      companyId: auth.companyId
+    });
+    const canAccessCompanyDefaults = access?.hasGlobalRole || access?.isSuperAdmin || false;
+
+    let variantPrices;
+    if (outletIdParam) {
+      const outletId = NumericIdSchema.parse(outletIdParam);
+      variantPrices = await listItemPrices(auth.companyId, {
+        outletId,
+        variantId,
+        includeDefaults: canAccessCompanyDefaults
+      });
+    } else {
+      variantPrices = await listItemPrices(auth.companyId, {
+        variantId
+      });
+    }
+
+    return successResponse(variantPrices);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
+    }
+
+    console.error("GET /inventory/items/:id/variants/:variantId/prices failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Variant prices request failed", 500);
+  }
+});
+
+// GET /inventory/items/:id/prices - List all prices for an item (including variant prices)
+inventoryRoutes.get("/items/:id/prices", async (c) => {
+  try {
+    const auth = c.get("auth");
+    
+    // Check access permission
+    const accessResult = await requireAccess({
+      module: "inventory",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const itemId = NumericIdSchema.parse(c.req.param("id"));
+
+    const url = new URL(c.req.raw.url);
+    const outletIdParam = url.searchParams.get("outlet_id");
+    
+    // Check if user can access company defaults
+    const access = await checkUserAccess({
+      userId: auth.userId,
+      companyId: auth.companyId
+    });
+    const canAccessCompanyDefaults = access?.hasGlobalRole || access?.isSuperAdmin || false;
+
+    let itemPrices;
+    if (outletIdParam) {
+      const outletId = NumericIdSchema.parse(outletIdParam);
+      itemPrices = await listItemPrices(auth.companyId, {
+        outletId,
+        includeDefaults: canAccessCompanyDefaults
+      });
+      // Filter for this item only
+      itemPrices = itemPrices.filter(p => p.item_id === itemId);
+    } else {
+      itemPrices = await listItemPrices(auth.companyId);
+      // Filter for this item only
+      itemPrices = itemPrices.filter(p => p.item_id === itemId);
+    }
+
+    return successResponse(itemPrices);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
+    }
+
+    console.error("GET /inventory/items/:id/prices failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
   }
 });
 

@@ -23,6 +23,53 @@ export const OrderUpdateEventTypeSchema = z.enum([
   "ORDER_CLOSED"
 ]);
 
+// ============================================================================
+// Variant Sync Types (Story 8.8)
+// ============================================================================
+
+// Use string with min length for client_tx_id to support various formats (UUID, custom IDs)
+const ClientTxIdSchema = z.string().min(1).max(255);
+
+export const VariantSaleSchema = z.object({
+  client_tx_id: ClientTxIdSchema,
+  company_id: NumericIdSchema,
+  outlet_id: NumericIdSchema,
+  variant_id: NumericIdSchema,
+  item_id: NumericIdSchema,
+  qty: z.number().positive(),
+  unit_price: z.number().nonnegative(),
+  total_amount: z.number().nonnegative(),
+  trx_at: z.string().datetime({ offset: true })
+});
+
+export const VariantStockAdjustmentSchema = z.object({
+  client_tx_id: ClientTxIdSchema,
+  company_id: NumericIdSchema,
+  outlet_id: NumericIdSchema,
+  variant_id: NumericIdSchema,
+  adjustment_type: z.enum(["INCREASE", "DECREASE", "SET"]),
+  quantity: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(500),
+  reference: z.string().nullable().optional(),
+  adjusted_at: z.string().datetime({ offset: true })
+});
+
+export const VariantSaleResultSchema = z.object({
+  client_tx_id: ClientTxIdSchema,
+  result: z.enum(["OK", "DUPLICATE", "ERROR"]),
+  message: z.string().optional()
+});
+
+export const VariantStockAdjustmentResultSchema = z.object({
+  client_tx_id: ClientTxIdSchema,
+  result: z.enum(["OK", "DUPLICATE", "ERROR"]),
+  message: z.string().optional()
+});
+
+// ============================================================================
+// Existing Types
+// ============================================================================
+
 export const PosItemSchema = z.object({
   item_id: NumericIdSchema,
   variant_id: NumericIdSchema.optional(),
@@ -140,7 +187,10 @@ export const SyncPushRequestSchema = z.object({
         cancelled_at: z.string().datetime({ offset: true })
       })
     )
-    .optional()
+    .optional(),
+  // Variant sync types (Story 8.8)
+  variant_sales: z.array(VariantSaleSchema).optional(),
+  variant_stock_adjustments: z.array(VariantStockAdjustmentSchema).optional()
 });
 
 export const SyncPushResultItemSchema = z.object({
@@ -168,7 +218,10 @@ export const SyncPushPayloadSchema = z.object({
         message: z.string().optional()
       })
     )
-    .optional()
+    .optional(),
+  // Variant sync results (Story 8.8)
+  variant_sale_results: z.array(VariantSaleResultSchema).optional(),
+  variant_stock_adjustment_results: z.array(VariantStockAdjustmentResultSchema).optional()
 });
 
 export const SyncPushResponseSchema = z.object({
@@ -186,3 +239,9 @@ export type SyncPushRequest = z.infer<typeof SyncPushRequestSchema>;
 export type SyncPushResultItem = z.infer<typeof SyncPushResultItemSchema>;
 export type SyncPushPayload = z.infer<typeof SyncPushPayloadSchema>;
 export type SyncPushResponse = z.infer<typeof SyncPushResponseSchema>;
+
+// Variant sync types (Story 8.8)
+export type VariantSale = z.infer<typeof VariantSaleSchema>;
+export type VariantStockAdjustment = z.infer<typeof VariantStockAdjustmentSchema>;
+export type VariantSaleResult = z.infer<typeof VariantSaleResultSchema>;
+export type VariantStockAdjustmentResult = z.infer<typeof VariantStockAdjustmentResultSchema>;

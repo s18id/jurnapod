@@ -5,10 +5,13 @@
  * Streaming Export for Large Datasets
  * 
  * Provides streaming export capabilities for handling large datasets without
- * memory exhaustion. Uses database cursors and response streaming.
+ * memory exhaustion. Uses database cursors and response streaming with
+ * proper backpressure handling.
  */
 
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
+import type { Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type {
   ExportColumn,
   ExportFormat,
@@ -36,12 +39,591 @@ const DEFAULT_STREAM_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const BUFFER_SIZE = 500;
 
 // ============================================================================
-// Streaming Export
+// Backpressure Handling Constants
 // ============================================================================
 
 /**
- * Create a streaming export from an async iterable data source
+ * Default maximum buffer size before pausing (10MB)
  */
+const DEFAULT_BUFFER_LIMIT = 10 * 1024 * 1024;
+
+/**
+ * Default timeout for drain event (30 seconds)
+ */
+const DEFAULT_DRAIN_TIMEOUT_MS = 30 * 1000;
+
+/**
+ * Time after which we start throttling if backpressure persists (60 seconds)
+ */
+const THROTTLE_THRESHOLD_MS = 60 * 1000;
+
+/**
+ * Maximum rows per second when throttling due to backpressure
+ */
+const THROTTLE_ROWS_PER_SECOND = 1000;
+
+/**
+ * Minimum delay between rows when throttled (1ms = 1000 rows/sec)
+ */
+const THROTTLE_MIN_DELAY_MS = 1;
+
+// ============================================================================
+// Backpressure Metrics
+// ============================================================================
+
+/**
+ * Metrics for monitoring backpressure events
+ */
+export interface BackpressureMetrics {
+  /** Total number of backpressure events triggered */
+  backpressureEventsTotal: number;
+  /** Total duration of all backpressure events in ms */
+  backpressureDurationMs: number;
+  /** Current backpressure state */
+  isBackpressured: boolean;
+  /** Number of rows streamed */
+  rowsStreamed: number;
+  /** Peak memory usage during export */
+  peakMemoryBytes: number;
+}
+
+/**
+ * Backpressure configuration options
+ */
+export interface BackpressureOptions {
+  /** Maximum buffer size before pausing (default: 10MB) */
+  bufferLimit?: number;
+  /** Timeout for drain event in ms (default: 30 seconds) */
+  drainTimeoutMs?: number;
+  /** Enable throttling after backpressure persists (default: true) */
+  enableThrottling?: boolean;
+  /** Throttle threshold in ms (default: 60 seconds) */
+  throttleThresholdMs?: number;
+  /** Rows per second when throttling (default: 1000) */
+  throttleRowsPerSecond?: number;
+  /** Callback for metrics updates */
+  onMetrics?: (metrics: BackpressureMetrics) => void;
+  /** Callback for backpressure events */
+  onBackpressureEvent?: (event: BackpressureEvent) => void;
+}
+
+/**
+ * Backpressure event types
+ */
+export type BackpressureEventType = 
+  | 'started'
+  | 'drained'
+  | 'memory_limit'
+  | 'timeout'
+  | 'throttle_started'
+  | 'throttle_ended'
+  | 'client_disconnect';
+
+/**
+ * Backpressure event details
+ */
+export interface BackpressureEvent {
+  type: BackpressureEventType;
+  timestamp: Date;
+  rowsStreamed: number;
+  memoryUsedBytes?: number;
+  durationMs?: number;
+  message?: string;
+}
+
+/**
+ * Internal state for backpressure handling
+ */
+interface BackpressureState {
+  isBackpressured: boolean;
+  backpressureStartTime: number | null;
+  currentBufferBytes: number;
+  lastDrainTime: number;
+  throttleStartTime: number | null;
+  totalBackpressureEvents: number;
+  totalBackpressureDurationMs: number;
+  peakMemoryBytes: number;
+}
+
+/**
+ * Create backpressure metrics from internal state
+ */
+function createMetrics(state: BackpressureState, rowsStreamed: number): BackpressureMetrics {
+  return {
+    backpressureEventsTotal: state.totalBackpressureEvents,
+    backpressureDurationMs: state.totalBackpressureDurationMs,
+    isBackpressured: state.isBackpressured,
+    rowsStreamed,
+    peakMemoryBytes: state.peakMemoryBytes,
+  };
+}
+
+/**
+ * Track export buffer size (actual bytes in export buffer, not process heap)
+ */
+function getExportBufferSize(state: BackpressureState): number {
+  return state.currentBufferBytes ?? 0;
+}
+
+// ============================================================================
+// Backpressure-Aware Stream Wrapper
+// ============================================================================
+
+/**
+ * Options for creating a backpressure-aware stream
+ */
+export interface BackpressureStreamOptions extends BackpressureOptions {
+  /** The destination writable stream */
+  destination: Writable;
+  /** High water mark for the internal buffer */
+  highWaterMark?: number;
+}
+
+/**
+ * Create a write function that handles backpressure properly
+ * 
+ * This function returns a write handler that monitors the writable.write()
+ * return value and pauses/resumes data generation based on backpressure.
+ */
+export function createBackpressureWriter<T>(
+  options: BackpressureStreamOptions
+): {
+  write: (chunk: Buffer) => Promise<boolean>;
+  waitForDrain: () => Promise<void>;
+  checkBufferLimit: (currentBufferSize: number) => boolean;
+  getMetrics: () => BackpressureMetrics;
+  abort: () => void;
+} {
+  const bufferLimit = options.bufferLimit ?? DEFAULT_BUFFER_LIMIT;
+  const drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
+  const enableThrottling = options.enableThrottling ?? true;
+  const throttleThresholdMs = options.throttleThresholdMs ?? THROTTLE_THRESHOLD_MS;
+  const throttleRowsPerSecond = options.throttleRowsPerSecond ?? THROTTLE_ROWS_PER_SECOND;
+  const throttleMinDelay = Math.ceil(1000 / throttleRowsPerSecond);
+
+  const destination = options.destination;
+  let rowsStreamed = 0;
+  
+  const state: BackpressureState = {
+    isBackpressured: false,
+    backpressureStartTime: null,
+    currentBufferBytes: 0,
+    lastDrainTime: Date.now(),
+    throttleStartTime: null,
+    totalBackpressureEvents: 0,
+    totalBackpressureDurationMs: 0,
+    peakMemoryBytes: 0,
+  };
+
+  let drainResolver: (() => void) | null = null;
+  let drainTimeout: NodeJS.Timeout | null = null;
+  let aborted = false;
+
+  // Track memory usage
+  function updateMemoryMetrics(): void {
+    const bufferBytes = getExportBufferSize(state);
+    if (bufferBytes > state.peakMemoryBytes) {
+      state.peakMemoryBytes = bufferBytes;
+    }
+  }
+
+  // Emit backpressure event
+  function emitEvent(type: BackpressureEventType, message?: string): void {
+    updateMemoryMetrics();
+    
+    const event: BackpressureEvent = {
+      type,
+      timestamp: new Date(),
+      rowsStreamed,
+      memoryUsedBytes: state.peakMemoryBytes,
+      durationMs: state.backpressureStartTime 
+        ? Date.now() - state.backpressureStartTime 
+        : undefined,
+      message,
+    };
+
+    options.onBackpressureEvent?.(event);
+
+    // Log at appropriate level
+    const logMessage = `[Backpressure] ${type}: ${message ?? ''} (rows: ${rowsStreamed}, memory: ${Math.round(state.peakMemoryBytes / 1024 / 1024)}MB)`;
+    
+    switch (type) {
+      case 'started':
+      case 'memory_limit':
+        console.warn(logMessage);
+        break;
+      case 'timeout':
+        console.error(logMessage);
+        break;
+      case 'client_disconnect':
+        console.info(logMessage);
+        break;
+      default:
+        console.debug(logMessage);
+    }
+  }
+
+  // Handle backpressure start
+  function startBackpressure(): void {
+    if (aborted) return;
+    
+    state.isBackpressured = true;
+    state.backpressureStartTime = Date.now();
+    state.totalBackpressureEvents++;
+    
+    emitEvent('started', 'Consumer slow - pausing data generation');
+  }
+
+  // Handle drain event
+  function handleDrain(): void {
+    if (aborted) return;
+    
+    const wasBackpressured = state.isBackpressured;
+    state.isBackpressured = false;
+    state.currentBufferBytes = 0; // Reset buffer tracking on drain
+    state.lastDrainTime = Date.now();
+    
+    if (wasBackpressured && state.backpressureStartTime) {
+      const duration = Date.now() - state.backpressureStartTime;
+      state.totalBackpressureDurationMs += duration;
+      
+      // Check if we were throttled
+      if (state.throttleStartTime) {
+        emitEvent('throttle_ended', `Throttling ended after ${Math.round(duration / 1000)}s`);
+        state.throttleStartTime = null;
+      }
+      
+      emitEvent('drained', `Resume data generation after ${Math.round(duration)}ms`);
+    }
+    
+    // Clear any pending drain timeout
+    if (drainTimeout) {
+      clearTimeout(drainTimeout);
+      drainTimeout = null;
+    }
+    
+    // Resolve any waiting drain promise
+    if (drainResolver) {
+      drainResolver();
+      drainResolver = null;
+    }
+  }
+
+  // Set up drain listener
+  destination.on('drain', handleDrain);
+
+  // Set up error handler
+  destination.on('error', (err) => {
+    console.error('[Backpressure] Destination error:', err.message);
+    aborted = true;
+  });
+
+  // Write chunk with backpressure handling
+  async function write(chunk: Buffer): Promise<boolean> {
+    if (aborted) return false;
+    
+    rowsStreamed++;
+    state.currentBufferBytes += chunk.length;
+    updateMemoryMetrics();
+    
+    const canContinue = destination.write(chunk);
+    
+    if (!canContinue) {
+      startBackpressure();
+      
+      // Start drain timeout
+      if (drainTimeoutMs > 0) {
+        drainTimeout = setTimeout(() => {
+          if (state.isBackpressured) {
+            emitEvent('timeout', `Drain timeout after ${drainTimeoutMs}ms - consumer stalled`);
+            aborted = true;
+            options.onBackpressureEvent?.({
+              type: 'timeout',
+              timestamp: new Date(),
+              rowsStreamed,
+              durationMs: drainTimeoutMs,
+              message: 'Consumer stalled - aborting export',
+            });
+          }
+        }, drainTimeoutMs);
+      }
+    }
+    
+    return canContinue;
+  }
+
+  // Wait for drain with optional throttling
+  async function waitForDrain(): Promise<void> {
+    if (aborted || !state.isBackpressured) return;
+    
+    // Reset throttle state if throttling was disabled
+    if (!enableThrottling && state.throttleStartTime) {
+      state.throttleStartTime = null;
+    }
+    
+    // Check if we should start throttling
+    if (enableThrottling && 
+        state.backpressureStartTime && 
+        Date.now() - state.backpressureStartTime > throttleThresholdMs &&
+        !state.throttleStartTime) {
+      state.throttleStartTime = Date.now();
+      emitEvent('throttle_started', `Starting throttle to ${throttleRowsPerSecond} rows/sec`);
+    }
+    
+    // If throttled, add delay between rows
+    if (state.throttleStartTime) {
+      await new Promise(resolve => setTimeout(resolve, throttleMinDelay));
+    }
+    
+    return new Promise<void>((resolve) => {
+      if (state.isBackpressured) {
+        drainResolver = resolve;
+      } else {
+        resolve();
+      }
+    });
+  }
+
+  // Check if buffer limit is exceeded
+  function checkBufferLimit(currentBufferSize: number): boolean {
+    updateMemoryMetrics();
+    
+    if (currentBufferSize > bufferLimit) {
+      if (!state.isBackpressured) {
+        startBackpressure();
+        emitEvent('memory_limit', `Buffer limit exceeded: ${currentBufferSize} > ${bufferLimit}`);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // Get current metrics
+  function getMetrics(): BackpressureMetrics {
+    updateMemoryMetrics();
+    return createMetrics(state, rowsStreamed);
+  }
+
+  // Abort operation
+  function abort(): void {
+    aborted = true;
+    state.isBackpressured = true; // Signal to stop processing
+    if (drainTimeout) {
+      clearTimeout(drainTimeout);
+    }
+    emitEvent('client_disconnect', 'Client disconnected - aborting export');
+  }
+
+  return {
+    write,
+    waitForDrain,
+    checkBufferLimit,
+    getMetrics,
+    abort,
+  };
+}
+
+/**
+ * Create a backpressure-aware async generator from a readable stream
+ */
+export async function* createBackpressureStream<T>(
+  readable: Readable,
+  options: BackpressureStreamOptions
+): AsyncGenerator<T> {
+  const writer = createBackpressureWriter<T>(options);
+  let bufferSize = 0;
+
+  const iterator = readable[Symbol.asyncIterator]
+    ? readable
+    : (async function* () {
+        for await (const chunk of readable) {
+          yield chunk;
+        }
+      })();
+
+  // Store reference to drain handler for proper cleanup
+  const drainHandler = () => {
+    // Drain is handled internally by writer
+  };
+  options.destination.on('drain', drainHandler);
+
+  try {
+    for await (const row of iterator) {
+      const chunk = Buffer.isBuffer(row) ? row : Buffer.from(String(row));
+      bufferSize += chunk.length;
+
+      // Check buffer limit before writing
+      if (writer.checkBufferLimit(bufferSize)) {
+        await writer.waitForDrain();
+        bufferSize = 0;
+      }
+
+      const canContinue = await writer.write(chunk);
+      if (!canContinue) {
+        await writer.waitForDrain();
+        bufferSize = 0;
+      }
+
+      yield row;
+    }
+  } finally {
+    // Report final metrics
+    const finalMetrics = writer.getMetrics();
+    options.onMetrics?.(finalMetrics);
+    
+    // Clean up - use stored handler reference
+    options.destination.removeListener('drain', drainHandler);
+  }
+}
+
+/**
+ * Stream data to HTTP response with proper backpressure handling
+ * 
+ * This function creates a pipeline that ensures:
+ * - Data generation pauses when HTTP client is slow
+ * - Memory is bounded to prevent buffer overflow
+ * - Connections are properly released on disconnect
+ * - Metrics are collected for monitoring
+ */
+export async function streamToResponse<T>(
+  dataSource: AsyncIterable<T>,
+  destination: Writable,
+  options: BackpressureStreamOptions,
+  onProgress?: ExportProgressCallback
+): Promise<{ metrics: BackpressureMetrics; rowsWritten: number }> {
+  const writer = createBackpressureWriter<T>(options);
+  let rowsWritten = 0;
+  let bytesWritten = 0;
+  const startTime = new Date();
+  let bufferSize = 0;
+  let aborted = false;
+
+  // Handle client disconnect
+  destination.on('close', () => {
+    if (!aborted) {
+      aborted = true;
+      writer.abort();
+      console.info(`[StreamToResponse] Client disconnected after ${rowsWritten} rows`);
+    }
+  });
+
+  try {
+    for await (const row of dataSource) {
+      if (aborted) break;
+
+      const chunk = Buffer.isBuffer(row) ? row : Buffer.from(String(row));
+      bufferSize += chunk.length;
+      bytesWritten += chunk.length;
+
+      // Check buffer limit before writing
+      if (writer.checkBufferLimit(bufferSize)) {
+        await writer.waitForDrain();
+        bufferSize = 0;
+      }
+
+      const canContinue = await writer.write(chunk);
+      rowsWritten++;
+
+      // Report progress periodically
+      if (rowsWritten % DEFAULT_CHUNK_SIZE === 0) {
+        onProgress?.({
+          processedRows: rowsWritten,
+          phase: 'streaming',
+          bytesWritten,
+          startTime,
+        });
+      }
+
+      if (!canContinue) {
+        await writer.waitForDrain();
+        bufferSize = 0;
+      }
+    }
+  } finally {
+    // Report final metrics
+    const finalMetrics = writer.getMetrics();
+    options.onMetrics?.(finalMetrics);
+  }
+
+  return { metrics: writer.getMetrics(), rowsWritten };
+}
+
+/**
+ * Create a pipeline-based export with backpressure handling
+ * 
+ * Uses node:stream/promises pipeline() for proper cleanup on errors
+ */
+export async function pipelineExport<T>(
+  source: Readable,
+  destination: Writable,
+  options: BackpressureStreamOptions
+): Promise<BackpressureMetrics> {
+  let metrics: BackpressureMetrics = {
+    backpressureEventsTotal: 0,
+    backpressureDurationMs: 0,
+    isBackpressured: false,
+    rowsStreamed: 0,
+    peakMemoryBytes: 0,
+  };
+
+  const writer = createBackpressureWriter<T>({
+    ...options,
+    onMetrics: (m) => { metrics = m; },
+  });
+
+  // Track bytes written through the pipeline
+  let bytesWritten = 0;
+  let rowsStreamed = 0;
+
+  // Wrap source to track rows and handle backpressure
+  const trackingSource = new Readable({
+    objectMode: true,
+    highWaterMark: options.highWaterMark ?? 16,
+    async read() {
+      // This is called when the source needs more data
+      // The actual data flow is handled by the pipeline
+    },
+  });
+
+  try {
+    await pipeline(source, async function* (readable) {
+      let bufferSize = 0;
+      
+      for await (const chunk of readable) {
+        if (options.destination.destroyed) {
+          writer.abort();
+          break;
+        }
+
+        const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+        bufferSize += data.length;
+        bytesWritten += data.length;
+        rowsStreamed++;
+
+        // Check backpressure before yielding
+        if (writer.checkBufferLimit(bufferSize)) {
+          await writer.waitForDrain();
+          bufferSize = 0;
+        }
+
+        yield chunk;
+
+        // Wait for drain if needed
+        if (!writer.getMetrics().isBackpressured) {
+          bufferSize = 0;
+        }
+      }
+    }, destination);
+
+    metrics = writer.getMetrics();
+    metrics.rowsStreamed = rowsStreamed;
+  } catch (error) {
+    writer.abort();
+    throw error;
+  }
+
+  return metrics;
+}
 export async function* streamExport<T>(
   dataSource: AsyncIterable<T>,
   columns: ExportColumn<T>[],

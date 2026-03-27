@@ -8,6 +8,7 @@ import type {
   ActiveOrderRow,
   ActiveOrderUpdateRow,
   ProductCacheRow,
+  VariantCacheRow,
   ReservationRow,
   SyncMetadataRow,
   SyncScopeConfigRow,
@@ -48,6 +49,28 @@ const SyncPullPriceSchema = z.object({
   price: z.number().finite().nonnegative(),
   is_active: z.boolean(),
   updated_at: z.string().datetime()
+});
+
+const SyncPullVariantPriceSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  item_id: z.coerce.number().int().positive(),
+  variant_id: z.number().int().positive().nullable().optional(),
+  outlet_id: z.coerce.number().int().positive(),
+  price: z.number().finite().nonnegative(),
+  is_active: z.boolean(),
+  updated_at: z.string().datetime()
+});
+
+const SyncPullVariantSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  item_id: z.coerce.number().int().positive(),
+  sku: z.string(),
+  variant_name: z.string(),
+  price: z.number(),
+  stock_quantity: z.number().default(0),
+  barcode: z.string().nullable(),
+  is_active: z.boolean(),
+  attributes: z.record(z.string(), z.string())
 });
 
 const SyncPullConfigSchema = z.object({
@@ -159,6 +182,7 @@ const SyncPullResponseSchema = z.object({
   items: z.array(SyncPullItemSchema),
   item_groups: z.array(SyncPullItemGroupSchema),
   prices: z.array(SyncPullPriceSchema),
+  variant_prices: z.array(SyncPullVariantPriceSchema).default([]),
   config: SyncPullConfigSchema,
   open_orders: z.array(SyncPullOpenOrderSchema).default([]),
   open_order_lines: z.array(SyncPullOpenOrderLineSchema).default([]),
@@ -166,7 +190,8 @@ const SyncPullResponseSchema = z.object({
   orders_cursor: z.coerce.number().int().min(0).default(0),
   tables: z.array(SyncPullTableSchema).default([]),
   reservations: z.array(SyncPullReservationSchema).default([]),
-  stock_levels: z.array(SyncPullStockSchema).default([])
+  stock_levels: z.array(SyncPullStockSchema).default([]),
+  variants: z.array(SyncPullVariantSchema).default([])
 });
 
 type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;
@@ -499,6 +524,49 @@ function mapSyncPullToStockRows(
     }));
 }
 
+function mapSyncPullToVariantRows(
+  payload: SyncPullResponse,
+  scope: { company_id: number; outlet_id: number },
+  pulledAt: string
+): VariantCacheRow[] {
+  // Build price map for variant-specific prices
+  const variantPriceMap = new Map<number, number>();
+  for (const vp of payload.variant_prices ?? []) {
+    if (vp.variant_id !== null && vp.variant_id !== undefined) {
+      // Only use prices for this outlet or default prices (no outlet)
+      if (vp.outlet_id === scope.outlet_id) {
+        const existing = variantPriceMap.get(vp.variant_id);
+        // Prefer outlet-specific prices over default prices
+        if (existing === undefined || vp.outlet_id === scope.outlet_id) {
+          variantPriceMap.set(vp.variant_id, vp.price);
+        }
+      }
+    }
+  }
+
+  return payload.variants.map((variant) => {
+    // Use variant-specific price from variant_prices if available, else fall back to variant.price
+    const effectivePrice = variantPriceMap.get(variant.id) ?? variant.price;
+
+    return {
+      pk: `${scope.company_id}:${scope.outlet_id}:${variant.item_id}:${variant.id}`,
+      company_id: scope.company_id,
+      outlet_id: scope.outlet_id,
+      item_id: variant.item_id,
+      variant_id: variant.id,
+      sku: variant.sku,
+      variant_name: variant.variant_name,
+      price: effectivePrice,
+      barcode: variant.barcode ?? null,
+      is_active: variant.is_active,
+      attributes: variant.attributes ?? {},
+      data_version: payload.data_version,
+      pulled_at: pulledAt,
+      stock_quantity: variant.stock_quantity ?? 0
+    };
+  });
+}
+
 export async function readSyncPullDataVersion(
   scope: { company_id: number; outlet_id: number },
   db: PosOfflineDb = posDb
@@ -592,6 +660,7 @@ async function applySyncPullRows(
     tables: OutletTableRow[];
     reservations: ReservationRow[];
     stock_levels: InventoryStockRow[];
+    variants: VariantCacheRow[];
   },
   db: PosOfflineDb
 ): Promise<{ applied: boolean; previous_data_version: number; data_version: number }> {
@@ -606,7 +675,8 @@ async function applySyncPullRows(
       db.active_order_updates,
       db.outlet_tables,
       db.reservations,
-      db.inventory_stock
+      db.inventory_stock,
+      db.variants_cache
     ],
     async () => {
       const metadataPk = resolveScopePk(input.company_id, input.outlet_id);
@@ -673,6 +743,49 @@ async function applySyncPullRows(
 
       if (input.order_updates.length > 0) {
         await db.active_order_updates.bulkPut(input.order_updates);
+      }
+
+      // Update variants cache from server (server wins on conflicts)
+      if (input.variants.length > 0) {
+        // Mark active items as needing has_variants = true
+        const incomingVariantItemIds = new Set(input.variants.map((v) => v.item_id));
+        const existingProducts = await db.products_cache
+          .toCollection()
+          .filter((row) => row.company_id === input.company_id && row.outlet_id === input.outlet_id)
+          .toArray();
+
+        const productsToUpdate = existingProducts
+          .filter((row) => incomingVariantItemIds.has(row.item_id))
+          .map((row) => ({
+            ...row,
+            has_variants: true,
+            pulled_at: input.pulled_at
+          }));
+
+        if (productsToUpdate.length > 0) {
+          await db.products_cache.bulkPut(productsToUpdate);
+        }
+
+        // Update variants cache
+        await db.variants_cache.bulkPut(input.variants);
+
+        // Deactivate stale variants (not in incoming payload)
+        const incomingVariantIds = new Set(input.variants.map((v) => v.variant_id));
+        const existingVariants = await db.variants_cache
+          .toCollection()
+          .filter((row) => row.company_id === input.company_id && row.outlet_id === input.outlet_id && row.is_active)
+          .toArray();
+
+        const staleVariants = existingVariants
+          .filter((row) => !incomingVariantIds.has(row.variant_id))
+          .map((row) => ({
+            ...row,
+            is_active: false
+          }));
+
+        if (staleVariants.length > 0) {
+          await db.variants_cache.bulkPut(staleVariants);
+        }
       }
 
       const currentTables = await db.outlet_tables
@@ -794,6 +907,11 @@ export async function ingestSyncPullIntoProductsCache(
       outlet_id: input.outlet_id
     });
 
+    const variantRows = mapSyncPullToVariantRows(payload, {
+      company_id: input.company_id,
+      outlet_id: input.outlet_id
+    }, pulledAt);
+
     const applyResult = await applySyncPullRows(
       {
         company_id: input.company_id,
@@ -808,7 +926,8 @@ export async function ingestSyncPullIntoProductsCache(
         orders_cursor: payload.orders_cursor,
         tables,
         reservations,
-        stock_levels: stockLevels
+        stock_levels: stockLevels,
+        variants: variantRows
       },
       db
     );

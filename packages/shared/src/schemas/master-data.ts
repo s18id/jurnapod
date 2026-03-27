@@ -370,6 +370,20 @@ export const SyncPullPriceSchema = z.object({
   updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 });
 
+/**
+ * Variant price schema for sync pull
+ * Supports variant-level pricing with optional variant_id
+ */
+export const SyncPullVariantPriceSchema = z.object({
+  id: NumericIdSchema,
+  item_id: NumericIdSchema,
+  variant_id: NumericIdSchema.nullable().optional(),
+  outlet_id: NumericIdSchema,
+  price: z.number().finite().nonnegative(),
+  is_active: z.boolean(),
+  updated_at: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
+});
+
 export const PaymentMethodConfigSchema = z.object({
   code: z.string().trim().min(1),
   label: z.string().trim().min(1),
@@ -445,6 +459,7 @@ export const SyncPullPayloadSchema = z.object({
   items: z.array(SyncPullItemSchema),
   item_groups: z.array(SyncPullItemGroupSchema),
   prices: z.array(SyncPullPriceSchema),
+  variant_prices: z.array(SyncPullVariantPriceSchema).default([]),
   config: SyncPullConfigSchema,
   open_orders: z.array(SyncPullOpenOrderSchema).default([]),
   open_order_lines: z.array(SyncPullOpenOrderLineSchema).default([]),
@@ -463,6 +478,7 @@ export const SyncPullResponseSchema = z.object({
 export type ItemType = z.infer<typeof ItemTypeSchema>;
 export type SyncPullPayload = z.infer<typeof SyncPullPayloadSchema>;
 export type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;
+export type SyncPullVariantPrice = z.infer<typeof SyncPullVariantPriceSchema>;
 
 // Recipe Ingredient Types
 export type CreateRecipeIngredientRequest = z.infer<typeof CreateRecipeIngredientSchema>;

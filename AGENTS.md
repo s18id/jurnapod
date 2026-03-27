@@ -309,7 +309,7 @@ Story completion notes MUST include:
 ## AI Model Configuration
 
 BMAD uses the following model strategy:
-- **Primary**: `opencode-go/minimax-m2.5` (your OpenCode Go subscription) - 75% of agents
+- **Primary**: `minimax-coding-plan/MiniMax-M2.7` (your MiniMax.io subscription) - 75% of agents
 - **Context-critical**: `opencode-go/kimi-k2.5` (integration, orchestration, review, architecture) - 25% of agents
 - **Code tasks**: `openai/gpt-5.1-codex-mini` (when available - currently exhausted)
 

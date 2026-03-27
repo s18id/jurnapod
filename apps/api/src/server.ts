@@ -35,8 +35,15 @@ import { recipesRoutes } from "./routes/recipes.js";
 import { cashBankTransactionsRoutes } from "./routes/cash-bank-transactions.js";
 import { suppliesRoutes } from "./routes/supplies.js";
 import { printRoutes } from "./lib/routes.js";
+import { posItemVariantsRoutes } from "./routes/pos-items.js";
+import { posCartRoutes } from "./routes/pos-cart.js";
 import { exportRoutes } from "./routes/export.js";
 import { importRoutes } from "./routes/import.js";
+import { progressRoutes } from "./routes/progress.js";
+import { setProgressPool, cleanupStaleOperations } from "./lib/progress/progress-store.js";
+import { getDbPool } from "./lib/db.js";
+import { initializeDefaultMetrics, getMetricsOutput, getMetricsContentType } from "./lib/metrics/index.js";
+import { alertManager } from "./lib/alerts/alert-manager.js";
 
 // Validate environment configuration before starting server
 assertAppEnvReady();
@@ -145,6 +152,13 @@ app.route("/api/sales", salesRoutes);
 // Register health routes (no auth required)
 app.route("/api/health", healthRoutes);
 
+// Register metrics endpoint (no auth required for Prometheus scraping)
+app.get("/metrics", async (c) => {
+  const metrics = await getMetricsOutput();
+  c.header("Content-Type", getMetricsContentType());
+  return c.body(metrics);
+});
+
 // Register auth routes (special handling - no auth for login)
 app.route("/api/auth", authRoutes);
 
@@ -173,6 +187,12 @@ app.route("/api/pages", publicPagesRoutes);
 // Register outlets routes
 app.route("/api/outlets", outletsRoutes);
 
+// Register POS items routes (for variant listing)
+app.route("/api/pos/items", posItemVariantsRoutes);
+
+// Register POS cart routes
+app.route("/api/pos/cart", posCartRoutes);
+
 // Register recipe routes under inventory
 app.route("/api/inventory/recipes", recipesRoutes);
 
@@ -188,11 +208,25 @@ app.route("/api/export", exportRoutes);
 // Register import routes
 app.route("/api/import", importRoutes);
 
+// Register progress routes
+app.route("/api/operations", progressRoutes);
+
 // Initialize sync modules after routes are registered
 try {
   await initializeSyncModules();
 } catch (error) {
   console.error("Failed to initialize sync modules. Server will continue without modular sync.", error);
+}
+
+// Initialize progress tracking pool and cleanup stale operations
+try {
+  setProgressPool(getDbPool());
+  const staleCount = await cleanupStaleOperations();
+  if (staleCount > 0) {
+    console.info(`[progress] Cleaned up ${staleCount} stale operation(s) on startup`);
+  }
+} catch (error) {
+  console.error("Failed to initialize progress tracking. Server will continue.", error);
 }
 
 app.notFound(() => {
@@ -317,6 +351,11 @@ wsManager.start();
 server.listen(PORT, HOST, () => {
   console.log(`API server running on http://${HOST}:${PORT}`);
   console.log(`WebSocket server running on ws://${HOST}:${PORT}/ws`);
+  console.log(`Metrics available at http://${HOST}:${PORT}/metrics`);
+  
+  // Initialize metrics collection
+  initializeDefaultMetrics();
+  console.log("[metrics] Prometheus metrics initialized");
   
   // Print registered routes in development
   if (process.env.NODE_ENV !== "production") {

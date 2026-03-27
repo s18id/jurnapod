@@ -1,0 +1,127 @@
+# Alert Rules Specification
+# Jurnapod Production Monitoring
+# Version: 1.0.0
+# Generated: 2026-03-28
+
+# These are reference alert rules that can be imported into:
+# - Prometheus Alertmanager
+# - Grafana Alerting
+# - PagerDuty
+# - Opsgenie
+
+groups:
+  - name: jurnapod_import_alerts
+    rules:
+      # Import Failure Rate Alert (P2)
+      - alert: JurnapodImportFailureRateHigh
+        expr: |
+          (
+            rate(import_batches_total{status="failed"}[5m]) /
+            (rate(import_batches_total{status="success"}[5m]) + rate(import_batches_total{status="failed"}[5m]))
+          ) * 100 > 5
+        for: 5m
+        labels:
+          severity: P2
+          service: jurnapod-api
+          component: import
+        annotations:
+          summary: "Import failure rate exceeds 5%"
+          description: "Import failure rate has been above 5% for the last 5 minutes. Current rate: {{ $value | printf \"%.2f\" }}%"
+          runbook_url: "https://docs.jurnapod.com/runbooks/import-failures"
+
+  - name: jurnapod_export_alerts
+    rules:
+      # Export Duration Alert (P2)
+      - alert: JurnapodExportDurationHigh
+        expr: |
+          histogram_quantile(0.95, rate(export_duration_seconds_bucket[10m])) > 30
+        for: 10m
+        labels:
+          severity: P2
+          service: jurnapod-api
+          component: export
+        annotations:
+          summary: "Export p95 duration exceeds 30 seconds"
+          description: "Export operation p95 latency has been above 30 seconds for the last 10 minutes. Current p95: {{ $value | printf \"%.2f\" }}s"
+          runbook_url: "https://docs.jurnapod.com/runbooks/export-slow"
+
+  - name: jurnapod_sync_alerts
+    rules:
+      # Sync Conflict Rate Alert (P1)
+      - alert: JurnapodSyncConflictRateHigh
+        expr: |
+          (
+            rate(sync_conflicts_total[5m]) /
+            sum(rate(sync_push_duration_seconds_count[5m]) + rate(sync_pull_duration_seconds_count[5m]))
+          ) * 100 > 1
+        for: 5m
+        labels:
+          severity: P1
+          service: jurnapod-api
+          component: sync
+        annotations:
+          summary: "Sync conflict rate exceeds 1% (P1)"
+          description: "Sync conflict rate has been above 1% for the last 5 minutes. Current rate: {{ $value | printf \"%.2f\" }}%"
+          runbook_url: "https://docs.jurnapod.com/runbooks/sync-conflicts"
+
+  - name: jurnapod_backpressure_alerts
+    rules:
+      # Backpressure Events Alert (P2)
+      - alert: JurnapodBackpressureEventsHigh
+        expr: |
+          rate(export_backpressure_events_total[1m]) > 10
+        for: 1m
+        labels:
+          severity: P2
+          service: jurnapod-api
+          component: export
+        annotations:
+          summary: "Export backpressure events exceed 10/minute"
+          description: "Export backpressure events have been occurring at more than 10 per minute for the last minute. Current rate: {{ $value | printf \"%.2f\" }}/min"
+          runbook_url: "https://docs.jurnapod.com/runbooks/backpressure"
+
+  - name: jurnapod_resource_alerts
+    rules:
+      # Memory Usage Alert (P1)
+      - alert: JurnapodMemoryUsageHigh
+        expr: |
+          process_resident_memory_bytes{service="jurnapod-api"} / 1024 / 1024 > 500
+        for: 1m
+        labels:
+          severity: P1
+          service: jurnapod-api
+          component: system
+        annotations:
+          summary: "Process memory usage exceeds 500MB (P1)"
+          description: "Process memory usage has been above 500MB for the last minute. Current usage: {{ $value | printf \"%.0f\" }}MB"
+          runbook_url: "https://docs.jurnapod.com/runbooks/memory-high"
+
+      # Node.js Event Loop Lag Alert (P2)
+      - alert: JurnapodEventLoopLag
+        expr: |
+          nodejs_eventloop_lag_seconds > 0.1
+        for: 2m
+        labels:
+          severity: P2
+          service: jurnapod-api
+          component: system
+        annotations:
+          summary: "Node.js event loop lag is high"
+          description: "Event loop lag has been above 100ms for the last 2 minutes. Current lag: {{ $value | printf \"%.3f\" }}s"
+          runbook_url: "https://docs.jurnapod.com/runbooks/event-loop"
+
+  - name: jurnapod_business_alerts
+    rules:
+      # Import Resume Rate Alert (P2)
+      - alert: JurnapodImportResumeRateHigh
+        expr: |
+          rate(import_resumes_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: P2
+          service: jurnapod-api
+          component: import
+        annotations:
+          summary: "High import resume rate detected"
+          description: "Imports are being resumed at a rate above 0.5 per minute. This may indicate session timeout issues."
+          runbook_url: "https://docs.jurnapod.com/runbooks/import-resumes"

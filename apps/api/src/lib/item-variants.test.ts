@@ -16,6 +16,7 @@ import {
   adjustVariantStock,
   validateVariantSku,
   getVariantEffectivePrice,
+  getVariantsForSync,
   DuplicateSkuError,
   VariantNotFoundError,
   AttributeNotFoundError,
@@ -703,6 +704,135 @@ test(
       },
       AttributeNotFoundError
     );
+  }
+);
+
+test(
+  "getVariantsForSync - returns active variants with attributes and effective prices",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+
+    let companyId = 0;
+    let itemId = 0;
+    let outletId = 0;
+    let attributeId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+    const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
+
+    try {
+      // Get company and outlet
+      const [companyRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
+        [companyCode]
+      );
+      assert.ok(companyRows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows[0].id);
+
+      const [outletRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT id FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
+        [companyId, outletCode]
+      );
+      assert.ok(outletRows.length > 0, "Outlet fixture not found");
+      outletId = Number(outletRows[0].id);
+
+      // Create test item
+      const [itemResult] = await pool.execute(
+        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
+        [companyId, `Sync Test Item ${runId}`, `SKU-SYNC-${runId}`]
+      );
+      itemId = Number((itemResult as { insertId: number }).insertId);
+
+      // Create attribute with values
+      const attr = await createVariantAttribute(companyId, itemId, {
+        attribute_name: "Size",
+        values: ["Large", "Medium"]
+      });
+      attributeId = attr.id;
+
+      // Get generated variants
+      const variants = await getItemVariants(companyId, itemId);
+      assert.ok(variants.length >= 2, "Should have at least 2 variants");
+
+      const largeVariant = variants.find(v => v.variant_name.includes("Large"));
+      assert.ok(largeVariant, "Should have Large variant");
+      assert.ok(largeVariant!.attributes.length > 0, "Large variant should have attributes");
+      assert.strictEqual(largeVariant!.attributes[0].attribute_name, "Size");
+      assert.strictEqual(largeVariant!.attributes[0].value, "Large");
+
+      // Get variants for sync
+      const syncVariants = await getVariantsForSync(companyId, outletId);
+      const syncItemVariants = syncVariants.filter(v => v.item_id === itemId);
+      assert.ok(syncItemVariants.length >= 2, "Sync should return at least 2 variants");
+
+      // Verify sync variant structure
+      const syncLarge = syncItemVariants.find(v => v.variant_name.includes("Large"));
+      assert.ok(syncLarge, "Sync should include Large variant");
+      assert.strictEqual(typeof syncLarge!.price, "number", "Sync variant should have price");
+      assert.strictEqual(typeof syncLarge!.attributes, "object", "Sync variant should have attributes object");
+      assert.strictEqual(syncLarge!.attributes["Size"], "Large", "Attributes should map size to Large");
+
+    } finally {
+      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
+      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+    }
+  }
+);
+
+test(
+  "getVariantsForSync - excludes inactive and archived variants",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const pool = getDbPool();
+    const runId = Date.now().toString(36);
+
+    let companyId = 0;
+    let itemId = 0;
+    let attributeId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+
+    try {
+      const [companyRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
+        [companyCode]
+      );
+      assert.ok(companyRows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows[0].id);
+
+      const [itemResult] = await pool.execute(
+        `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
+        [companyId, `Active Variant Test ${runId}`, `SKU-ACT-${runId}`]
+      );
+      itemId = Number((itemResult as { insertId: number }).insertId);
+
+      const attr = await createVariantAttribute(companyId, itemId, {
+        attribute_name: "Size",
+        values: ["Active", "Inactive"]
+      });
+      attributeId = attr.id;
+
+      // Deactivate one variant
+      const allVariants = await getItemVariants(companyId, itemId);
+      const inactiveVariant = allVariants.find(v => v.variant_name.includes("Inactive"));
+      if (inactiveVariant) {
+        await updateVariant(companyId, inactiveVariant.id, { is_active: false });
+      }
+
+      // Get variants for sync
+      const syncVariants = await getVariantsForSync(companyId, undefined);
+      const syncItemVariants = syncVariants.filter(v => v.item_id === itemId);
+
+      // Should only include active variant
+      assert.ok(syncItemVariants.length >= 1, "Should include at least 1 active variant");
+      assert.ok(syncItemVariants.every(v => v.is_active), "All sync variants should be active");
+
+    } finally {
+      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
+      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+    }
   }
 );
 

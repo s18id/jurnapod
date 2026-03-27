@@ -983,9 +983,9 @@ export async function getVariantsForSync(
      FROM item_variant_combinations ivc
      JOIN item_variant_attributes iva ON iva.id = ivc.attribute_id
      JOIN item_variant_attribute_values ivav ON ivav.id = ivc.value_id
-     WHERE ivc.variant_id IN (?) AND ivc.company_id = ?
-     ORDER BY iva.sort_order, ivav.sort_order`,
-    [variantIds, companyId]
+      WHERE ivc.variant_id IN (${variantIds.map(() => '?').join(',')}) AND ivc.company_id = ?
+      ORDER BY iva.sort_order, ivav.sort_order`,
+    [...variantIds, companyId]
   );
 
   // Group combinations by variant_id in memory
