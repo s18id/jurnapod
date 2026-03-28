@@ -218,16 +218,17 @@ development_status:
 
   # Epic 15: Foundation Hardening & TD Resolution
   # Focus: Resolve TD-030, connection safety, test-fixtures
-  epic-15: in-progress
-  15-1-connection-guard: review
-  15-2-test-fixtures-unique-naming: in-progress
-  15-3-td-030-effective-date-filtering: review
-  15-4-epic-15-documentation: review
-  15-5-td-031-spike: review
+  epic-15: done
+  15-1-connection-guard: done
+  15-2-test-fixtures-unique-naming: done
+  15-3-td-030-effective-date-filtering: done
+  15-4-epic-15-documentation: done
+  15-5-td-031-spike: done
 
   # Epic 16: Alert System Hardening & Batch Processing
   # Focus: Address TD-031 (alert retry) and TD-032 (batch processing backfills)
   epic-16: done
-  16-1-alert-retry-exponential-backoff: review
-  16-2-batch-processing-backfills: review
-  16-3-epic-16-documentation: review
+  16-1-alert-retry-exponential-backoff: done
+  16-2-batch-processing-backfills: done
+  16-3-epic-16-documentation: done
+  epic-16-retrospective: done
