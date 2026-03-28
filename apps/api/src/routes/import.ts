@@ -31,6 +31,22 @@ import {
   batchValidateForeignKeys,
 } from "../lib/import/index.js";
 import {
+  checkSkuExists,
+  checkItemExistsBySku,
+} from "../lib/import/validation.js";
+import {
+  batchFindItemsBySkus,
+  batchFindPricesByItemIds,
+  batchUpdateItems,
+  batchInsertItems,
+  batchUpdatePrices,
+  batchInsertPrices,
+  type BatchItemInsert,
+  type BatchItemUpdate,
+  type BatchPriceInsert,
+  type BatchPriceUpdate,
+} from "../lib/import/batch-operations.js";
+import {
   createSession,
   getSession,
   updateSession,
@@ -396,11 +412,8 @@ async function validateItemRow(
 
   // Check SKU uniqueness within company (requires per-row DB query)
   if (row.sku) {
-    const [existing] = await pool.execute<RowDataPacket[]>(
-      "SELECT id FROM items WHERE company_id = ? AND sku = ? LIMIT 1",
-      [companyId, row.sku]
-    );
-    if (existing.length > 0) {
+    const skuCheck = await checkSkuExists(companyId, String(row.sku));
+    if (skuCheck.exists) {
       errors.push({ field: "sku", message: `SKU '${row.sku}' already exists` });
     }
   }
@@ -431,11 +444,8 @@ async function validatePriceRow(
 
   // Check item exists by SKU (requires per-row DB query)
   if (row.item_sku) {
-    const [items] = await pool.execute<RowDataPacket[]>(
-      "SELECT id FROM items WHERE company_id = ? AND sku = ? LIMIT 1",
-      [companyId, row.item_sku]
-    );
-    if (items.length === 0) {
+    const itemCheck = await checkItemExistsBySku(companyId, String(row.item_sku));
+    if (!itemCheck.exists) {
       errors.push({ field: "item_sku", message: `Item with SKU '${row.item_sku}' does not exist` });
     }
   }
@@ -506,18 +516,11 @@ async function applyItemImport(
 
       // Batch existence check — O(1) lookup with Map
       const skus = batch.map(r => String(r.sku || "")).filter(s => s.length > 0);
-      const skuToIdMap = new Map<string, number>();
+      const skuToIdMap = await batchFindItemsBySkus(companyId, skus, connection);
 
-      if (skus.length > 0) {
-        const placeholders = skus.map(() => "?").join(",");
-        const [existingItems] = await connection.execute<RowDataPacket[]>(
-          `SELECT sku, id FROM items WHERE company_id = ? AND sku IN (${placeholders})`,
-          [companyId, ...skus]
-        );
-        for (const item of existingItems) {
-          skuToIdMap.set(String(item.sku), Number(item.id));
-        }
-      }
+      // Prepare batch update/insert arrays
+      const updates: BatchItemUpdate[] = [];
+      const inserts: BatchItemInsert[] = [];
 
       // Process each row in the batch
       for (let i = 0; i < batch.length; i++) {
@@ -534,34 +537,45 @@ async function applyItemImport(
         const groupId = row.item_group_id ? parseInt(String(row.item_group_id), 10) || null : null;
         const cogsAccountId = row.cogs_account_id ? parseInt(String(row.cogs_account_id), 10) || null : null;
         const invAccountId = row.inventory_asset_account_id ? parseInt(String(row.inventory_asset_account_id), 10) || null : null;
-        const isActive = row.is_active !== false ? 1 : 0;
+        const isActive = row.is_active !== false;
 
         try {
           if (existingId !== undefined) {
-            await connection.execute(
-              `UPDATE items SET
-                name = ?, item_type = ?, barcode = ?, item_group_id = ?,
-                cogs_account_id = ?, inventory_asset_account_id = ?, is_active = ?,
-                updated_at = NOW()
-              WHERE id = ?`,
-              [String(row.name || ""), String(row.item_type || ""), row.barcode ? String(row.barcode) : null,
-               groupId, cogsAccountId, invAccountId, isActive, existingId]
-            );
+            updates.push({
+              id: existingId,
+              name: String(row.name || ""),
+              item_type: String(row.item_type || ""),
+              barcode: row.barcode ? String(row.barcode) : null,
+              item_group_id: groupId,
+              cogs_account_id: cogsAccountId,
+              inventory_asset_account_id: invAccountId,
+              is_active: isActive,
+            });
             result.updated++;
           } else {
-            await connection.execute(
-              `INSERT INTO items (
-                company_id, sku, name, item_type, barcode, item_group_id,
-                cogs_account_id, inventory_asset_account_id, is_active, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-              [companyId, sku, String(row.name || ""), String(row.item_type || ""),
-               row.barcode ? String(row.barcode) : null, groupId, cogsAccountId, invAccountId, isActive]
-            );
+            inserts.push({
+              sku,
+              name: String(row.name || ""),
+              item_type: String(row.item_type || ""),
+              barcode: row.barcode ? String(row.barcode) : null,
+              item_group_id: groupId,
+              cogs_account_id: cogsAccountId,
+              inventory_asset_account_id: invAccountId,
+              is_active: isActive,
+            });
             result.created++;
           }
         } catch (error) {
           result.errors.push({ row: rowIndex + 1, error: error instanceof Error ? error.message : "Unknown error" });
         }
+      }
+
+      // Execute batch operations
+      if (updates.length > 0) {
+        await batchUpdateItems(updates, connection);
+      }
+      if (inserts.length > 0) {
+        await batchInsertItems(companyId, inserts, connection);
       }
 
       await connection.commit();
@@ -624,32 +638,15 @@ async function applyPriceImport(
 
       // Batch item lookup — O(1) lookup with Map
       const itemSkus = batch.map(r => String(r.item_sku || "")).filter(s => s.length > 0);
-      const skuToItemIdMap = new Map<string, number>();
-
-      if (itemSkus.length > 0) {
-        const placeholders = itemSkus.map(() => "?").join(",");
-        const [items] = await connection.execute<RowDataPacket[]>(
-          `SELECT sku, id FROM items WHERE company_id = ? AND sku IN (${placeholders})`,
-          [companyId, ...itemSkus]
-        );
-        for (const item of items) {
-          skuToItemIdMap.set(String(item.sku), Number(item.id));
-        }
-      }
+      const skuToItemIdMap = await batchFindItemsBySkus(companyId, itemSkus, connection);
 
       // Batch existing prices lookup
       const itemIds = [...skuToItemIdMap.values()];
-      const existingPricesMap = new Map<string, number>();
+      const existingPricesMap = await batchFindPricesByItemIds(companyId, itemIds, connection);
 
-      if (itemIds.length > 0) {
-        const [existingPrices] = await connection.execute<RowDataPacket[]>(
-          `SELECT item_id, outlet_id, id FROM item_prices WHERE company_id = ? AND item_id IN (${itemIds.map(() => "?").join(",")})`,
-          [companyId, ...itemIds]
-        );
-        for (const price of existingPrices) {
-          existingPricesMap.set(`${price.item_id}:${price.outlet_id ?? "null"}`, Number(price.id));
-        }
-      }
+      // Prepare batch update/insert arrays
+      const updates: BatchPriceUpdate[] = [];
+      const inserts: BatchPriceInsert[] = [];
 
       // Process each row in the batch
       for (let i = 0; i < batch.length; i++) {
@@ -670,27 +667,37 @@ async function applyPriceImport(
 
         const outletId = row.outlet_id ? parseInt(String(row.outlet_id), 10) || null : null;
         const price = parseFloat(String(row.price));
-        const isActive = row.is_active !== false ? 1 : 0;
+        const isActive = row.is_active !== false;
         const existingPriceId = existingPricesMap.get(`${itemId}:${outletId ?? "null"}`);
 
         try {
           if (existingPriceId !== undefined) {
-            await connection.execute(
-              `UPDATE item_prices SET price = ?, is_active = ?, updated_at = NOW() WHERE id = ?`,
-              [price, isActive, existingPriceId]
-            );
+            updates.push({
+              id: existingPriceId,
+              price,
+              is_active: isActive,
+            });
             result.updated++;
           } else {
-            await connection.execute(
-              `INSERT INTO item_prices (item_id, company_id, outlet_id, price, is_active, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
-              [itemId, companyId, outletId, price, isActive]
-            );
+            inserts.push({
+              item_id: itemId,
+              outlet_id: outletId,
+              price,
+              is_active: isActive,
+            });
             result.created++;
           }
         } catch (error) {
           result.errors.push({ row: rowIndex + 1, error: error instanceof Error ? error.message : "Unknown error" });
         }
+      }
+
+      // Execute batch operations
+      if (updates.length > 0) {
+        await batchUpdatePrices(updates, connection);
+      }
+      if (inserts.length > 0) {
+        await batchInsertPrices(companyId, inserts, connection);
       }
 
       await connection.commit();

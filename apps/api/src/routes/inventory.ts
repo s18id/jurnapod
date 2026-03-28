@@ -14,7 +14,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
+import type { ResultSetHeader } from "mysql2";
 import {
   ItemCreateRequestSchema,
   NumericIdSchema
@@ -24,9 +24,8 @@ import {
   requireAccess,
   type AuthContext
 } from "../lib/auth-guard.js";
-import { userHasOutletAccess, MODULE_PERMISSION_BITS } from "../lib/auth.js";
+import { userHasOutletAccess } from "../lib/auth.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import { getDbPool } from "../lib/db.js";
 import {
   createItem,
   updateItem,
@@ -56,63 +55,12 @@ import {
   ItemGroupBulkConflictError
 } from "../lib/item-groups/index.js";
 import { checkUserAccess } from "../lib/auth.js";
+import { canManageCompanyDefaults } from "../lib/auth/permissions.js";
 
 declare module "hono" {
   interface ContextVariableMap {
     auth: AuthContext;
   }
-}
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-// Note: We use module permissions (bitmask) for access control
-// Permission bitmask: create=1, read=2, update=4, delete=8
-
-type AccessCheckRow = RowDataPacket & {
-  id: number;
-};
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/**
- * Check if user can manage company defaults using bitmask permission system.
- * Company defaults require:
- * 1. A global role assignment (outlet_id IS NULL)
- * 2. The appropriate permission bit set in module_roles.permission_mask
- * 
- * @param userId - User ID
- * @param companyId - Company ID
- * @param permission - Required permission (create, read, update, delete)
- * @returns true if user can manage company defaults
- */
-async function canManageCompanyDefaults(
-  userId: number,
-  companyId: number,
-  permission: "create" | "read" | "update" | "delete" = "create"
-): Promise<boolean> {
-  const pool = getDbPool();
-  const permissionBit = MODULE_PERMISSION_BITS[permission];
-
-  const [rows] = await pool.execute<AccessCheckRow[]>(
-    `SELECT 1
-     FROM user_role_assignments ura
-     INNER JOIN roles r ON r.id = ura.role_id
-     INNER JOIN module_roles mr ON mr.role_id = r.id
-     WHERE ura.user_id = ?
-       AND r.is_global = 1
-       AND ura.outlet_id IS NULL
-       AND mr.module = 'inventory'
-       AND mr.company_id = ?
-       AND (mr.permission_mask & ?) <> 0
-     LIMIT 1`,
-    [userId, companyId, permissionBit]
-  );
-
-  return rows.length > 0;
 }
 
 // =============================================================================
@@ -724,6 +672,7 @@ inventoryRoutes.get("/item-prices/active", async (c) => {
     const userCanSeeCompanyDefaults = await canManageCompanyDefaults(
       auth.userId,
       auth.companyId,
+      "inventory",
       "read"
     );
 
@@ -769,6 +718,7 @@ inventoryRoutes.post("/item-prices", async (c) => {
     const userCanManageCompanyDefaults = await canManageCompanyDefaults(
       auth.userId,
       auth.companyId,
+      "inventory",
       "create"
     );
 
