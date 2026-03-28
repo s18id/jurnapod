@@ -30,6 +30,7 @@ import {
 import { createCompanyBasic } from "../lib/companies.js";
 import { createOutletBasic } from "../lib/outlets.js";
 import { createItem } from "../lib/items/index.js";
+import { createTestCompanyMinimal, createTestOutletMinimal, createTestItem, cleanupTestFixtures } from "./test-fixtures";
 
 describe("Stock Service", { concurrency: false }, () => {
   let connection: PoolConnection;
@@ -41,28 +42,26 @@ describe("Stock Service", { concurrency: false }, () => {
   async function setupTestData(connection: PoolConnection): Promise<void> {
     const runId = Date.now().toString(36);
 
-    // Create test company dynamically
-    const company = await createCompanyBasic({
+    // Create test company dynamically using shared fixtures
+    const company = await createTestCompanyMinimal({
       code: `TESTSTK-${runId}`,
       name: `Test Company Stock ${runId}`
     });
     TEST_COMPANY_ID = company.id;
 
-    // Create test outlet dynamically
-    const outlet = await createOutletBasic({
-      company_id: TEST_COMPANY_ID,
+    // Create test outlet dynamically using shared fixtures
+    const outlet = await createTestOutletMinimal(TEST_COMPANY_ID, {
       code: `TESTOUT-${runId}`,
       name: `Test Outlet Stock ${runId}`
     });
     TEST_OUTLET_ID = outlet.id;
 
-    // Create test products with stock tracking
-    const product1 = await createItem(TEST_COMPANY_ID, {
+    // Create test products with stock tracking using shared fixtures
+    const product1 = await createTestItem(TEST_COMPANY_ID, {
       sku: 'TEST-SKU-001',
       name: 'Test Product 1',
       type: 'PRODUCT',
-      is_active: true,
-      track_stock: true
+      isActive: true
     });
     TEST_PRODUCT_ID = product1.id;
 
@@ -72,12 +71,11 @@ describe("Stock Service", { concurrency: false }, () => {
       [TEST_PRODUCT_ID]
     );
 
-    const product2 = await createItem(TEST_COMPANY_ID, {
+    const product2 = await createTestItem(TEST_COMPANY_ID, {
       sku: 'TEST-SKU-002',
       name: 'Test Product 2',
       type: 'PRODUCT',
-      is_active: true,
-      track_stock: true
+      isActive: true
     });
     TEST_PRODUCT_ID_2 = product2.id;
 

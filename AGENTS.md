@@ -134,6 +134,23 @@ npm run test:unit:single -w @jurnapod/api src/routes/sync/sync.test.ts
 npm run test:unit:single -w @jurnapod/api "src/lib/a.test.ts" "src/lib/b.test.ts" "src/lib/c.test.ts"
 ```
 
+**Scoped Test Runs (faster feedback during development):**
+```bash
+# Run only route tests (~25 files)
+npm run test:unit:routes -w @jurnapod/api
+
+# Run only lib tests (~75 files)
+npm run test:unit:lib -w @jurnapod/api
+
+# Run critical path only (auth, sync, posting) - recommended for PR gates
+npm run test:unit:critical -w @jurnapod/api
+
+# Run domain-specific tests
+npm run test:unit:sales -w @jurnapod/api      # orders, payments, invoices
+npm run test:unit:sync -w @jurnapod/api        # push, pull sync
+npm run test:unit:import -w @jurnapod/api      # import route + lib
+```
+
 **API Type Check:**
 ```bash
 cd /home/ahmad/jurnapod
@@ -257,6 +274,14 @@ npm run qa:e2e -w @jurnapod/pos
 | **API** | `npm run typecheck -w @jurnapod/api` | `npm run build -w @jurnapod/api` | `npm run lint -w @jurnapod/api` | `npm run test:unit -w @jurnapod/api` | `npm run test:unit:single -w @jurnapod/api <file>` | — |
 | **Backoffice** | `npm run typecheck -w @jurnapod/backoffice` | `npm run build -w @jurnapod/backoffice` | `npm run lint -w @jurnapod/backoffice` | `npm run test -w @jurnapod/backoffice` | — | — |
 | **POS** | `npm run typecheck -w @jurnapod/pos` | `npm run build -w @jurnapod/pos` | `npm run lint -w @jurnapod/pos` | `npm run test -w @jurnapod/pos` | — | `npm run qa:e2e -w @jurnapod/pos` |
+
+**API Scoped Unit Tests:**
+- `test:unit:routes` — route tests (~25 files)
+- `test:unit:lib` — lib tests (~75 files)
+- `test:unit:critical` — auth, sync, posting (PR gate candidate)
+- `test:unit:sales` — orders, payments, invoices
+- `test:unit:sync` — push, pull sync
+- `test:unit:import` — import route + lib
 
 **Current Status (as of last validation):**
 - **API**: ✅ All checks passing (TypeScript, Build, Lint, 765 unit tests including auth, sync routes, accounts, inventory, tax-rates, and roles routes)

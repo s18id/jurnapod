@@ -15,6 +15,7 @@ import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/prom
 import { createCompanyBasic } from "../lib/companies.js";
 import { createOutletBasic } from "../lib/outlets.js";
 import { createItem } from "../lib/items/index.js";
+import { createTestCompanyMinimal, createTestOutletMinimal, createTestItem } from "../lib/test-fixtures";
 
 describe("Stock Routes", { concurrency: false }, () => {
   let connection: PoolConnection;
@@ -25,28 +26,26 @@ describe("Stock Routes", { concurrency: false }, () => {
   async function setupTestData(connection: PoolConnection): Promise<void> {
     const runId = Date.now().toString(36);
 
-    // Create test company dynamically
-    const company = await createCompanyBasic({
+    // Create test company dynamically using shared fixtures
+    const company = await createTestCompanyMinimal({
       code: `TESTROUTE-${runId}`,
       name: `Test Company Routes ${runId}`
     });
     TEST_COMPANY_ID = company.id;
 
-    // Create test outlet dynamically
-    const outlet = await createOutletBasic({
-      company_id: TEST_COMPANY_ID,
+    // Create test outlet dynamically using shared fixtures
+    const outlet = await createTestOutletMinimal(TEST_COMPANY_ID, {
       code: `TESTOUT-${runId}`,
       name: `Test Outlet Routes ${runId}`
     });
     TEST_OUTLET_ID = outlet.id;
 
-    // Create test product with stock tracking
-    const product = await createItem(TEST_COMPANY_ID, {
+    // Create test product with stock tracking using shared fixtures
+    const product = await createTestItem(TEST_COMPANY_ID, {
       sku: 'ROUTE-SKU-001',
       name: 'Route Test Product',
       type: 'PRODUCT',
-      is_active: true,
-      track_stock: true
+      isActive: true
     });
     TEST_PRODUCT_ID = product.id;
 

@@ -22,8 +22,8 @@ import {
   AttributeNotFoundError,
   ItemNotFoundError
 } from "./item-variants";
-import { createItem } from "./items/index.js";
 import { closeDbPool, getDbPool } from "./db";
+import { createTestItem, createTestCompanyMinimal, cleanupTestFixtures } from "./test-fixtures";
 import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
@@ -42,16 +42,12 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      // Get company from fixtures
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      // Get or create company from shared fixtures
+      const company = await createTestCompanyMinimal({ code: companyCode });
+      companyId = company.id;
 
-      // Create test item using library function
-      const item = await createItem(companyId, {
+      // Create test item using shared fixtures
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -115,7 +111,7 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -202,7 +198,7 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -269,7 +265,7 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -327,7 +323,7 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -384,7 +380,7 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -439,7 +435,7 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -496,7 +492,7 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -544,7 +540,7 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -611,7 +607,7 @@ test(
       assert.ok(outletRows.length > 0, "Outlet fixture not found");
       outletId = Number(outletRows[0].id);
 
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -750,7 +746,7 @@ test(
       outletId = Number(outletRows[0].id);
 
       // Create test item
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
         type: "PRODUCT",
         sku: `SKU-${runId}`
@@ -814,7 +810,7 @@ test(
       assert.ok(companyRows.length > 0, "Company fixture not found");
       companyId = Number(companyRows[0].id);
 
-      const item = await createItem(companyId, {
+      const item = await createTestItem(companyId, {
         name: `Active Variant Test ${runId}`,
         type: "PRODUCT",
         sku: `SKU-ACT-${runId}`
@@ -850,5 +846,6 @@ test(
 );
 
 test.after(async () => {
+  await cleanupTestFixtures();
   await closeDbPool();
 });

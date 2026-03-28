@@ -20,7 +20,7 @@ import {
   SuperAdminProtectionError,
   CrossCompanyAccessError
 } from "./users";
-import { createOutletBasic } from "./outlets.js";
+import { createTestOutletMinimal, cleanupTestFixtures } from "./test-fixtures";
 import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
@@ -311,9 +311,8 @@ test(
       companyId = companyRows[0].id;
       ownerUserId = companyRows[0].owner_id;
 
-      // Create a test outlet
-      const outlet = await createOutletBasic({
-        company_id: companyId,
+      // Create a test outlet using shared fixtures
+      const outlet = await createTestOutletMinimal(companyId, {
         code: `TEST_OUTLET_${runId}`.slice(0, 20),
         name: `Test Outlet ${runId}`
       });

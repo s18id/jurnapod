@@ -231,6 +231,15 @@ _This file contains critical rules and patterns that AI agents must follow when 
   npm run test:unit:shuffle -w @jurnapod/api
   npm run test:unit:single:shuffle -w @jurnapod/api "src/lib/a.test.ts"
   ```
+- **Scoped runs** (faster feedback during development):
+  ```bash
+  npm run test:unit:routes -w @jurnapod/api      # route tests (~25 files)
+  npm run test:unit:lib -w @jurnapod/api         # lib tests (~75 files)
+  npm run test:unit:critical -w @jurnapod/api    # auth, sync, posting (PR gate)
+  npm run test:unit:sales -w @jurnapod/api       # orders, payments, invoices
+  npm run test:unit:sync -w @jurnapod/api        # push, pull sync
+  npm run test:unit:import -w @jurnapod/api      # import route + lib
+  ```
 - **Filter output**: Use `tail` / `grep` on test output to isolate failures
 - **Full suite**: Run full test only after single-file verification passes
 
