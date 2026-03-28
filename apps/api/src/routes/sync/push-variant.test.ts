@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
 import { closeDbPool, getDbPool } from "../../lib/db";
+import { createItem } from "../../lib/items/index.js";
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
 import { randomUUID } from "node:crypto";
 
@@ -72,12 +73,14 @@ describe("Sync Push Variant Routes", { concurrency: false }, () => {
       testItemId = Number(itemRows[0].id);
     } else {
       // Create test item
-      const [insertResult] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, sku, type, is_active, track_stock, created_at, updated_at)
-         VALUES (?, 'Test Item for Variant Sync', 'TEST-VARIANT-SYNC-ITEM', 'PRODUCT', 1, 1, NOW(), NOW())`,
-        [testCompanyId]
-      );
-      testItemId = Number(insertResult.insertId);
+      const newItem = await createItem(testCompanyId, {
+        name: 'Test Item for Variant Sync',
+        sku: 'TEST-VARIANT-SYNC-ITEM',
+        type: 'PRODUCT',
+        is_active: true,
+        track_stock: true
+      });
+      testItemId = newItem.id;
     }
 
     // Find or create test variant

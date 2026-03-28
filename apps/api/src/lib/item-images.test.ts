@@ -12,6 +12,7 @@ import {
 } from "./item-images";
 import { getDbPool, closeDbPool } from "./db";
 import { createCompanyBasic } from "./companies";
+import { createItem } from "./items/index.js";
 
 describe("Image Upload Validation", () => {
   describe("validateImageUpload", () => {
@@ -185,11 +186,12 @@ describe("Tenant Scoping Security", () => {
     if (itemRows.length > 0) {
       itemA = itemRows[0].id;
     } else {
-      const [itemResult] = await pool.execute(
-        "INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)",
-        [companyA, "Tenant Test Item", `TENANT_TEST_${Date.now()}`]
-      );
-      itemA = (itemResult as { insertId: number }).insertId;
+      const newItem = await createItem(companyA, {
+        name: "Tenant Test Item",
+        type: 'PRODUCT',
+        sku: `TENANT_TEST_${Date.now()}`
+      });
+      itemA = newItem.id;
     }
   });
 

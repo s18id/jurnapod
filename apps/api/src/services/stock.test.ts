@@ -29,6 +29,7 @@ import {
 } from "../services/stock.js";
 import { createCompanyBasic } from "../lib/companies.js";
 import { createOutletBasic } from "../lib/outlets.js";
+import { createItem } from "../lib/items/index.js";
 
 describe("Stock Service", { concurrency: false }, () => {
   let connection: PoolConnection;
@@ -56,19 +57,35 @@ describe("Stock Service", { concurrency: false }, () => {
     TEST_OUTLET_ID = outlet.id;
 
     // Create test products with stock tracking
-    const [product1Result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, low_stock_threshold, created_at, updated_at)
-       VALUES (?, 'TEST-SKU-001', 'Test Product 1', 'PRODUCT', 1, 1, 10.0000, NOW(), NOW())`,
-      [TEST_COMPANY_ID]
-    );
-    TEST_PRODUCT_ID = Number(product1Result.insertId);
+    const product1 = await createItem(TEST_COMPANY_ID, {
+      sku: 'TEST-SKU-001',
+      name: 'Test Product 1',
+      type: 'PRODUCT',
+      is_active: true,
+      track_stock: true
+    });
+    TEST_PRODUCT_ID = product1.id;
 
-    const [product2Result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, low_stock_threshold, created_at, updated_at)
-       VALUES (?, 'TEST-SKU-002', 'Test Product 2', 'PRODUCT', 1, 1, 5.0000, NOW(), NOW())`,
-      [TEST_COMPANY_ID]
+    // Set low_stock_threshold via direct update (not supported by createItem)
+    await connection.execute(
+      `UPDATE items SET low_stock_threshold = 10.0000 WHERE id = ?`,
+      [TEST_PRODUCT_ID]
     );
-    TEST_PRODUCT_ID_2 = Number(product2Result.insertId);
+
+    const product2 = await createItem(TEST_COMPANY_ID, {
+      sku: 'TEST-SKU-002',
+      name: 'Test Product 2',
+      type: 'PRODUCT',
+      is_active: true,
+      track_stock: true
+    });
+    TEST_PRODUCT_ID_2 = product2.id;
+
+    // Set low_stock_threshold via direct update (not supported by createItem)
+    await connection.execute(
+      `UPDATE items SET low_stock_threshold = 5.0000 WHERE id = ?`,
+      [TEST_PRODUCT_ID_2]
+    );
 
     // Create test stock records
     await connection.execute(

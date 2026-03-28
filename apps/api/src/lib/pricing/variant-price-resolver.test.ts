@@ -8,6 +8,7 @@ import { resolvePrice, resolvePricesBatch, clearPriceCache, getCacheSize } from 
 import { createItemPrice, deleteItemPrice, updateItemPrice } from "../item-prices/index.js";
 import { closeDbPool, getDbPool } from "../db.js";
 import { createCompanyBasic } from "../companies.js";
+import { createItem } from "../items/index.js";
 import type { RowDataPacket, ResultSetHeader } from "mysql2";
 
 loadEnvIfPresent();
@@ -47,11 +48,11 @@ test(
       outletId = Number(outletRows[0].id);
 
       // Create test item
-      const [itemResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Variant Test Item ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(companyId, {
+        name: `Variant Test Item ${runId}`,
+        type: 'PRODUCT'
+      });
+      itemId = item.id;
 
       // Create variant
       const [variantResult] = await pool.execute<ResultSetHeader>(
@@ -138,11 +139,11 @@ test(
       outletId = Number(outletRows[0].id);
 
       // Create test item
-      const [itemResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Fallback Test Item ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(companyId, {
+        name: `Fallback Test Item ${runId}`,
+        type: 'PRODUCT'
+      });
+      itemId = item.id;
 
       // Create variant
       const [variantResult] = await pool.execute<ResultSetHeader>(
@@ -227,17 +228,17 @@ test(
       }
 
       // Create items for both companies
-      const [item1Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [company1Id, `Company1 Item ${runId}`]
-      );
-      item1Id = Number(item1Result.insertId);
+      const item1 = await createItem(company1Id, {
+        name: `Company1 Item ${runId}`,
+        type: 'PRODUCT'
+      });
+      item1Id = item1.id;
 
-      const [item2Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [company2Id, `Company2 Item ${runId}`]
-      );
-      item2Id = Number(item2Result.insertId);
+      const item2 = await createItem(company2Id, {
+        name: `Company2 Item ${runId}`,
+        type: 'PRODUCT'
+      });
+      item2Id = item2.id;
 
       // Create variants
       const [variant1Result] = await pool.execute<ResultSetHeader>(
@@ -345,11 +346,11 @@ test(
       );
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Variant Default Test ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(companyId, {
+        name: `Variant Default Test ${runId}`,
+        type: 'PRODUCT'
+      });
+      itemId = item.id;
 
       const [variantResult] = await pool.execute<ResultSetHeader>(
         `INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
@@ -415,17 +416,17 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create items
-      const [item1Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Batch Item 1 ${runId}`]
-      );
-      item1Id = Number(item1Result.insertId);
+      const item1 = await createItem(companyId, {
+        name: `Batch Item 1 ${runId}`,
+        type: 'PRODUCT'
+      });
+      item1Id = item1.id;
 
-      const [item2Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Batch Item 2 ${runId}`]
-      );
-      item2Id = Number(item2Result.insertId);
+      const item2 = await createItem(companyId, {
+        name: `Batch Item 2 ${runId}`,
+        type: 'PRODUCT'
+      });
+      item2Id = item2.id;
 
       // Create variants
       const [variant1Result] = await pool.execute<ResultSetHeader>(
@@ -530,11 +531,11 @@ test(
       );
       companyId = Number(companyRows[0].id);
 
-      const [itemResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Cache Test Item ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(companyId, {
+        name: `Cache Test Item ${runId}`,
+        type: 'PRODUCT'
+      });
+      itemId = item.id;
 
       const price = await createItemPrice(companyId, {
         item_id: itemId,
@@ -590,11 +591,11 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create item WITHOUT any prices
-      const [itemResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `No Price Item ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(companyId, {
+        name: `No Price Item ${runId}`,
+        type: 'PRODUCT'
+      });
+      itemId = item.id;
 
       // Test: should return global default (0) when no price exists
       clearPriceCache();
@@ -639,11 +640,11 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create test item
-      const [itemResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Cache Invalidation Test ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(companyId, {
+        name: `Cache Invalidation Test ${runId}`,
+        type: 'PRODUCT'
+      });
+      itemId = item.id;
 
       // Create item price
       const price = await createItemPrice(companyId, {

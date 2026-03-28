@@ -176,11 +176,12 @@ test(
 
       if (!productId) {
         // Create a test product if none exists
-        const [itemResult] = await pool.execute<ResultSetHeader>(
-          `INSERT INTO items (company_id, name, item_type, sku) VALUES (?, ?, 'PRODUCT', ?)`,
-          [companyId, `Test Product ${runId}`, `TEST-${runId}`]
-        );
-        createdItemIds.push(BigInt(itemResult.insertId));
+        const newItem = await createItem(Number(companyId), {
+          name: `Test Product ${runId}`,
+          type: 'PRODUCT',
+          sku: `TEST-${runId}`
+        });
+        createdItemIds.push(BigInt(newItem.id));
       }
 
       const tableId = await createTestTable(pool, companyId, outletId, runId);
@@ -1280,12 +1281,14 @@ test(
       });
       const differentCompanyId = BigInt(differentCompany.id);
 
-      const [differentProductResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, created_at, updated_at)
-         VALUES (?, ?, 'Other Company Product', 'PRODUCT', 1, 0, NOW(), NOW())`,
-        [differentCompanyId, `DIFF-PROD-${runId}`]
-      );
-      const differentProductId = BigInt(differentProductResult.insertId);
+      const differentProduct = await createItem(Number(differentCompanyId), {
+        sku: `DIFF-PROD-${runId}`,
+        name: `Other Company Product`,
+        type: 'PRODUCT',
+        is_active: true,
+        track_stock: false
+      });
+      const differentProductId = BigInt(differentProduct.id);
 
       try {
         await assert.rejects(

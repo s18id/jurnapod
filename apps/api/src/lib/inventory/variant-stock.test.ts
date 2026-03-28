@@ -21,6 +21,7 @@ import {
 } from "./variant-stock.js";
 import { createCompanyBasic } from "../companies.js";
 import { createOutletBasic } from "../outlets.js";
+import { createItem } from "../items/index.js";
 
 describe("Variant Stock Operations", () => {
   let pool: ReturnType<typeof getDbPool>;
@@ -72,12 +73,13 @@ describe("Variant Stock Operations", () => {
     
     try {
       // Create test item
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test VS 1 ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test VS 1 ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create variant with 100 stock
       const [variantResult] = await conn.execute<ResultSetHeader>(
@@ -123,12 +125,13 @@ describe("Variant Stock Operations", () => {
     let variantId = 0;
     
     try {
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test VS 2 ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test VS 2 ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create variant with 5 stock
       const [variantResult] = await conn.execute<ResultSetHeader>(
@@ -200,12 +203,13 @@ describe("Variant Stock Operations", () => {
     let variantId = 0;
     
     try {
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test VS 3 ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test VS 3 ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create variant with stock_quantity = 50
       const [variantResult] = await conn.execute<ResultSetHeader>(
@@ -261,12 +265,13 @@ describe("Variant Stock Operations", () => {
     
     try {
       // Create test item
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test VS 4 ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test VS 4 ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create variant with 100 stock
       const [variantResult] = await conn.execute<ResultSetHeader>(
@@ -341,12 +346,13 @@ describe("Variant Stock Operations", () => {
     let variantId = 0;
     
     try {
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test VS 5 ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test VS 5 ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create variant with 5 stock
       const [variantResult] = await conn.execute<ResultSetHeader>(
@@ -399,12 +405,13 @@ describe("Variant Stock Operations", () => {
     let variantId = 0;
     
     try {
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test VS 7 ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test VS 7 ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create variant with 3 stock
       const [variantResult] = await conn.execute<ResultSetHeader>(
@@ -459,12 +466,13 @@ describe("Variant Stock Operations", () => {
     
     try {
       // Create test item
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test VS 6 ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test VS 6 ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create variant with 50 stock
       const [variantResult] = await conn.execute<ResultSetHeader>(
@@ -535,12 +543,13 @@ describe("Variant Stock Operations", () => {
     
     try {
       // Create test item
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test VS 9 ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test VS 9 ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create variant with 100 stock
       const [variantResult] = await conn.execute<ResultSetHeader>(
@@ -635,12 +644,13 @@ describe("Variant Stock Operations", () => {
     let v2Id = 0;
     
     try {
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test VS 8 ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test VS 8 ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create base stock (no variant)
       await conn.execute(
@@ -716,12 +726,13 @@ describe("POS Cart Variant Stock Integration", () => {
     let variantId = 0;
     
     try {
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test POS ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test POS ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create variant with 2 stock
       const [variantResult] = await conn.execute<ResultSetHeader>(
@@ -785,12 +796,13 @@ describe("Variant Stock Concurrency", () => {
     
     try {
       // Create test item
-      const [itemResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, name, item_type, track_stock, is_active) 
-         VALUES (?, ?, 'PRODUCT', 1, 1)`,
-        [company.id, `Test CONCUR ${runId}`]
-      );
-      itemId = Number(itemResult.insertId);
+      const item = await createItem(company.id, {
+        name: `Test CONCUR ${runId}`,
+        type: 'PRODUCT',
+        track_stock: true,
+        is_active: true
+      });
+      itemId = item.id;
 
       // Create variant with 10 stock
       const [variantResult] = await conn.execute<ResultSetHeader>(

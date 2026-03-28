@@ -7,6 +7,7 @@ import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-h
 import { buildSyncPullPayload } from "./sync/master-data";
 import { getItemThumbnailsBatch } from "./item-images";
 import { closeDbPool, getDbPool } from "./db";
+import { createItem } from "./items/index.js";
 import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
@@ -45,17 +46,17 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create test items
-      const [itemResult1] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Test Item 1 ${runId}`]
-      );
-      itemId1 = Number((itemResult1 as { insertId: number }).insertId);
+      const item1 = await createItem(companyId, {
+        name: `Test Item 1 ${runId}`,
+        type: 'PRODUCT'
+      });
+      itemId1 = item1.id;
 
-      const [itemResult2] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Test Item 2 ${runId}`]
-      );
-      itemId2 = Number((itemResult2 as { insertId: number }).insertId);
+      const item2 = await createItem(companyId, {
+        name: `Test Item 2 ${runId}`,
+        type: 'PRODUCT'
+      });
+      itemId2 = item2.id;
 
       // Get a valid user ID for uploaded_by
       const [userRows] = await pool.execute<RowDataPacket[]>(
@@ -130,11 +131,11 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create test item
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Test Item ${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item ${runId}`,
+        type: 'PRODUCT'
+      });
+      itemId = item.id;
 
       // Get a valid user ID for uploaded_by
       const [userRows] = await pool.execute<RowDataPacket[]>(
@@ -204,11 +205,11 @@ test(
       companyId = Number(companyRows[0].id);
 
       // Create test item WITHOUT image
-      const [itemResult] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type) VALUES (?, ?, 'PRODUCT')`,
-        [companyId, `Test Item No Image ${runId}`]
-      );
-      itemId = Number((itemResult as { insertId: number }).insertId);
+      const item = await createItem(companyId, {
+        name: `Test Item No Image ${runId}`,
+        type: 'PRODUCT'
+      });
+      itemId = item.id;
 
       // Test batch fetch - should return empty map
       const thumbnailMap = await getItemThumbnailsBatch(companyId, [itemId]);
@@ -258,18 +259,20 @@ test(
       outletId = Number(outletRows[0].id);
 
       // Create test item WITH image
-      const [itemResult1] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, is_active) VALUES (?, ?, 'PRODUCT', TRUE)`,
-        [companyId, `Test Item With Image ${runId}`]
-      );
-      itemIdWithImage = Number((itemResult1 as { insertId: number }).insertId);
+      const newItemWithImage = await createItem(companyId, {
+        name: `Test Item With Image ${runId}`,
+        type: 'PRODUCT',
+        is_active: true
+      });
+      itemIdWithImage = newItemWithImage.id;
 
       // Create test item WITHOUT image
-      const [itemResult2] = await pool.execute(
-        `INSERT INTO items (company_id, name, item_type, is_active) VALUES (?, ?, 'PRODUCT', TRUE)`,
-        [companyId, `Test Item Without Image ${runId}`]
-      );
-      itemIdWithoutImage = Number((itemResult2 as { insertId: number }).insertId);
+      const newItemWithoutImage = await createItem(companyId, {
+        name: `Test Item Without Image ${runId}`,
+        type: 'PRODUCT',
+        is_active: true
+      });
+      itemIdWithoutImage = newItemWithoutImage.id;
 
       // Get a valid user ID for uploaded_by
       const [userRows] = await pool.execute<RowDataPacket[]>(

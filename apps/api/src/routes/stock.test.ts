@@ -14,6 +14,7 @@ import { getDbPool, closeDbPool } from "../lib/db";
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
 import { createCompanyBasic } from "../lib/companies.js";
 import { createOutletBasic } from "../lib/outlets.js";
+import { createItem } from "../lib/items/index.js";
 
 describe("Stock Routes", { concurrency: false }, () => {
   let connection: PoolConnection;
@@ -40,12 +41,20 @@ describe("Stock Routes", { concurrency: false }, () => {
     TEST_OUTLET_ID = outlet.id;
 
     // Create test product with stock tracking
-    const [productResult] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, low_stock_threshold, created_at, updated_at)
-       VALUES (?, 'ROUTE-SKU-001', 'Route Test Product', 'PRODUCT', 1, 1, 10.0000, NOW(), NOW())`,
-      [TEST_COMPANY_ID]
+    const product = await createItem(TEST_COMPANY_ID, {
+      sku: 'ROUTE-SKU-001',
+      name: 'Route Test Product',
+      type: 'PRODUCT',
+      is_active: true,
+      track_stock: true
+    });
+    TEST_PRODUCT_ID = product.id;
+
+    // Set low_stock_threshold via direct update (not supported by createItem)
+    await connection.execute(
+      `UPDATE items SET low_stock_threshold = 10.0000 WHERE id = ?`,
+      [TEST_PRODUCT_ID]
     );
-    TEST_PRODUCT_ID = Number(productResult.insertId);
 
     // Create test stock record
     await connection.execute(
