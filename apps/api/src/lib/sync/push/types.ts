@@ -9,7 +9,7 @@
  */
 
 import type { TaxRateRecord } from "../../../lib/taxes.js";
-import type { StockDeductResult } from "../../../services/stock.js";
+import type { StockDeductResult } from "../../stock.js";
 import type { CogsPostingResult } from "../../../lib/cogs-posting.js";
 import type { RowDataPacket, ResultSetHeader } from "mysql2";
 import type { PoolConnection, Pool } from "mysql2/promise";

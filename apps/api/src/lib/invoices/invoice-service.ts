@@ -13,7 +13,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDbPool } from "@/lib/db";
 import { calculateTaxLines, listCompanyDefaultTaxRates } from "@/lib/taxes";
 import { postSalesInvoiceToJournal } from "@/lib/sales-posting";
-import { deductStockForSaleWithCogs } from "@/services/stock";
+import { deductStockForSaleWithCogs } from "@/lib/stock";
 import {
   DOCUMENT_TYPES,
   type DocumentType

@@ -26,7 +26,7 @@ import {
   getLowStockAlerts,
   getProductStock,
   type StockItem
-} from "../services/stock.js";
+} from "./stock.js";
 import { createCompanyBasic } from "../lib/companies.js";
 import { createOutletBasic } from "../lib/outlets.js";
 import { createItem } from "../lib/items/index.js";
@@ -406,7 +406,7 @@ describe("Stock Service", { concurrency: false }, () => {
       );
 
       // Import the function
-      const { deductStockWithCost } = await import("../services/stock.js");
+      const { deductStockWithCost } = await import("./stock.js");
       const result = await deductStockWithCost(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, connection);
 
       assert.equal(result.length, 1);
@@ -451,7 +451,7 @@ describe("Stock Service", { concurrency: false }, () => {
       ];
       const referenceId = `test-deduct-cost-fail-${Date.now()}`;
 
-      const { deductStockWithCost } = await import("../services/stock.js");
+      const { deductStockWithCost } = await import("./stock.js");
 
       await assert.rejects(
         async () => {
@@ -475,7 +475,7 @@ describe("Stock Service", { concurrency: false }, () => {
       ];
       const referenceId = `test-deduct-cost-notfound-${Date.now()}`;
 
-      const { deductStockWithCost } = await import("../services/stock.js");
+      const { deductStockWithCost } = await import("./stock.js");
 
       await assert.rejects(
         async () => {

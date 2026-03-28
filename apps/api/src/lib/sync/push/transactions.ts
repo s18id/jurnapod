@@ -39,7 +39,7 @@ import {
 } from "./types.js";
 import { readExistingIdempotencyRecordByClientTxId } from "./idempotency.js";
 import { resolveAndDeductStockForTransaction } from "./stock.js";
-import type { StockDeductResult } from "../../../services/stock.js";
+import type { StockDeductResult } from "../../stock.js";
 import {
   SyncPushPostingHookError,
   type SyncPushPostingHookResult,

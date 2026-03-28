@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import type { Context } from "hono";
-import { checkAvailability, getStockConflicts, type StockItem } from "../services/stock.js";
+import { checkAvailability, getStockConflicts, type StockItem } from "../lib/stock.js";
 
 // Schema for stock validation in request body
 export const StockValidationBodySchema = z.object({

@@ -21,7 +21,7 @@ import {
   getLowStockAlerts,
   adjustStock,
   type StockAdjustmentInput
-} from "../services/stock.js";
+} from "../lib/stock.js";
 import { getDbPool } from "../lib/db.js";
 import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
 import { type RoleCode } from "../lib/auth.js";

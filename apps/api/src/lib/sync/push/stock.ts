@@ -10,8 +10,8 @@
 
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
 import type { SyncPushTransactionPayload } from "./types.js";
-import { deductStockWithCost } from "../../../services/stock.js";
-import type { StockDeductResult } from "../../../services/stock.js";
+import { deductStockWithCost } from "../../stock.js";
+import type { StockDeductResult } from "../../stock.js";
 
 /**
  * Deduct stock for a single variant using inventory_stock if available
