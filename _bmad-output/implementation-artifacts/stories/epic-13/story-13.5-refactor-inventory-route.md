@@ -1,6 +1,6 @@
 # Story 13.5: Refactor inventory.ts Route
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 13: Complete Library Migration for Deferred Routes  
 **Story ID:** 13-5-refactor-inventory-route  
 **Estimated Effort:** 2 hours  

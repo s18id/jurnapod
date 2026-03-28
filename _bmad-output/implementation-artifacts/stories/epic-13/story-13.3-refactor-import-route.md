@@ -1,6 +1,6 @@
 # Story 13.3: Refactor import.ts Route
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 13: Complete Library Migration for Deferred Routes  
 **Story ID:** 13-3-refactor-import-route  
 **Estimated Effort:** 4 hours  

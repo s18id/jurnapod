@@ -1,6 +1,6 @@
 # Story 13.1: Create lib/import/batch-operations.ts
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 13: Complete Library Migration for Deferred Routes  
 **Story ID:** 13-1-create-import-batch-library  
 **Estimated Effort:** 6 hours

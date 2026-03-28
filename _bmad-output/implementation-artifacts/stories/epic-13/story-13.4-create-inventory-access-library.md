@@ -1,6 +1,6 @@
 # Story 13.4: Create lib/inventory/access-check.ts
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 13: Complete Library Migration for Deferred Routes  
 **Story ID:** 13-4-create-inventory-access-library  
 **Estimated Effort:** 2 hours
