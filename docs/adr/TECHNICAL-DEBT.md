@@ -168,12 +168,13 @@ This document serves as the central registry for all known technical debt in the
 
 | ID | Description | Priority | Status | ADR/Story |
 |----|-------------|----------|--------|-----------|
-| TD-030 | Effective date filtering - requires migration to add effective_from/to columns | P1 | Open | Epic 8 |
+| TD-030 | Effective date filtering - requires migration to add effective_from/to columns | P1 | **RESOLVED** | Story 15.3 |
 | TD-031 | Alert retry logic - webhook dispatch lacks exponential backoff | P2 | Open | Epic 8 |
 | TD-032 | Batch processing - large table backfills could be batched | P2 | Open | Epic 8 |
 
+**Resolution (TD-030):** Schema migration added `effective_from` and `effective_to` columns with backfill of historical data. Date filtering now uses these columns instead of computed logic.
+
 **Notes:**
-- TD-030 was identified during Epic 8 as a gap in date-range filtering
 - TD-031 identified in Epic 8: current webhook delivery has no retry strategy
 - TD-032: Large backfill operations could benefit from batching to reduce lock contention
 
@@ -183,11 +184,11 @@ This document serves as the central registry for all known technical debt in the
 
 | Priority | Open | Resolved | Total |
 |----------|------|---------|-------|
-| P1 | 1 | 2 | 3 |
+| P1 | 0 | 3 | 3 |
 | P2 | 2 | 16 | 18 |
 | P3 | 0 | 9 | 9 |
 | P4 | 0 | 3 | 3 |
-| **Total** | **3** | **30** | **33** |
+| **Total** | **2** | **31** | **33** |
 
 ---
 
@@ -308,6 +309,7 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 | 2026-03-28 | Added TD-030 - Effective date filtering (P1), TD-031 - Alert retry logic (P2), TD-032 - Batch processing backfills (P2) | Epic 8 |
 | 2026-03-28 | Fixed summary statistics: P2 total corrected to 18 (was 15), P4 total corrected to 3 (was 3) | Documentation fix |
 | 2026-03-28 | Added TD-033, TD-034 - Epic 13/14 confirmation entries; updated P3 resolved count to 9 | Story 14.5 |
+| 2026-03-28 | Resolved TD-030 - Effective date filtering migration (Story 15.3) | Story 15.4 |
 
 ---
 

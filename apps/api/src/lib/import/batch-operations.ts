@@ -294,7 +294,9 @@ export async function batchInsertPrices(
         company_id: companyId,
         outlet_id: price.outlet_id ?? null,
         price: price.price,
-        is_active: price.is_active ? 1 : 0
+        is_active: price.is_active ? 1 : 0,
+        effective_from: 0, // 0 = always effective from beginning
+        effective_to: 0 // 0 = no expiration
       })
       .executeTakeFirst();
 

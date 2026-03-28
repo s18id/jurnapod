@@ -254,6 +254,18 @@ Resolve TD-030 while hardening foundation with connection safety and test-fixtur
 
 ---
 
-**Total: 15 epics | ~116 stories | 14 done, 1 planned**
+## Epic 16: Alert System Hardening & Batch Processing
+
+Address TD-031 (alert retry logic) and TD-032 (batch processing backfills).
+
+### Story 16.1: Alert Retry with Exponential Backoff
+### Story 16.2: Batch Processing for Backfills
+### Story 16.3: Epic 16 Documentation
+
+**Path:** [epic-16](./epic-16.md)
+
+---
+
+**Total: 16 epics | ~119 stories | 14 done, 2 planned**
 
 _Last Updated: 2026-03-28_

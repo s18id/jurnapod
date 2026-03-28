@@ -45,14 +45,23 @@ const priceCache = new Map<string, CacheEntry>();
 const DEFAULT_TTL_MS = 60_000;
 
 // Flag to enable effective date filtering (requires effective_from/effective_to columns)
+// Migration 0128 adds these columns to item_prices
+// Filter is disabled by default - call enableEffectiveDateFilter() after migration runs
 let effectiveDateFilterEnabled = false;
 
 /**
  * Enable effective date filtering.
- * Call this after ensuring the item_prices table has effective_from and effective_to columns.
+ * Call this after migration 0128 has been applied to add effective_from/effective_to columns.
  */
 export function enableEffectiveDateFilter(): void {
   effectiveDateFilterEnabled = true;
+}
+
+/**
+ * Disable effective date filtering (for testing or migration rollback).
+ */
+export function disableEffectiveDateFilter(): void {
+  effectiveDateFilterEnabled = false;
 }
 
 /**
@@ -387,9 +396,9 @@ async function findVariantOutletPrice(
   const params: (string | number)[] = [companyId, itemId, variantId, outletId];
 
   if (effectiveDateFilterEnabled) {
-    const dateStr = date.toISOString().slice(0, 19).replace('T', ' ');
-    sql += ` AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)`;
-    params.push(dateStr, dateStr);
+    const now = date.getTime();
+    sql += ` AND effective_from <= ? AND (effective_to = 0 OR effective_to >= ?)`;
+    params.push(now, now);
   }
 
   sql += ` LIMIT 1`;
@@ -425,9 +434,9 @@ async function findItemOutletPrice(
   const params: (string | number)[] = [companyId, itemId, outletId];
 
   if (effectiveDateFilterEnabled) {
-    const dateStr = date.toISOString().slice(0, 19).replace('T', ' ');
-    sql += ` AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)`;
-    params.push(dateStr, dateStr);
+    const now = date.getTime();
+    sql += ` AND effective_from <= ? AND (effective_to = 0 OR effective_to >= ?)`;
+    params.push(now, now);
   }
 
   sql += ` LIMIT 1`;
@@ -463,9 +472,9 @@ async function findVariantDefaultPrice(
   const params: (string | number)[] = [companyId, itemId, variantId];
 
   if (effectiveDateFilterEnabled) {
-    const dateStr = date.toISOString().slice(0, 19).replace('T', ' ');
-    sql += ` AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)`;
-    params.push(dateStr, dateStr);
+    const now = date.getTime();
+    sql += ` AND effective_from <= ? AND (effective_to = 0 OR effective_to >= ?)`;
+    params.push(now, now);
   }
 
   sql += ` LIMIT 1`;
@@ -500,9 +509,9 @@ async function findItemDefaultPrice(
   const params: (string | number)[] = [companyId, itemId];
 
   if (effectiveDateFilterEnabled) {
-    const dateStr = date.toISOString().slice(0, 19).replace('T', ' ');
-    sql += ` AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)`;
-    params.push(dateStr, dateStr);
+    const now = date.getTime();
+    sql += ` AND effective_from <= ? AND (effective_to = 0 OR effective_to >= ?)`;
+    params.push(now, now);
   }
 
   sql += ` LIMIT 1`;
@@ -552,11 +561,11 @@ async function findPricesBatch(
 
   // Date filter clause (only applied if effectiveDateFilterEnabled)
   let dateFilterClause = "";
-  let dateParams: string[] = [];
+  let dateParams: number[] = [];
   if (effectiveDateFilterEnabled) {
-    const dateStr = date.toISOString().slice(0, 19).replace('T', ' ');
-    dateFilterClause = " AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)";
-    dateParams = [dateStr, dateStr];
+    const now = date.getTime();
+    dateFilterClause = " AND effective_from <= ? AND (effective_to = 0 OR effective_to >= ?)";
+    dateParams = [now, now];
   }
 
   for (const req of requests) {

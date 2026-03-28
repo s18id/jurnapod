@@ -218,9 +218,9 @@ development_status:
 
   # Epic 15: Foundation Hardening & TD Resolution
   # Focus: Resolve TD-030, connection safety, test-fixtures
-  epic-15: backlog
-  15-1-connection-guard: backlog
-  15-2-test-fixtures-unique-naming: backlog
-  15-3-td-030-effective-date-filtering: backlog
-  15-4-epic-15-documentation: backlog
-  15-5-td-031-spike: backlog
+  epic-15: in-progress
+  15-1-connection-guard: review
+  15-2-test-fixtures-unique-naming: in-progress
+  15-3-td-030-effective-date-filtering: review
+  15-4-epic-15-documentation: review
+  15-5-td-031-spike: review

@@ -114,7 +114,7 @@ export async function createTestCompanyMinimal(
   }>
 ): Promise<CompanyFixture> {
   const pool = getDbPool();
-  const runId = Date.now().toString(36);
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   
   const code = options?.code ?? `TEST-CO-${runId}`.slice(0, 20).toUpperCase();
   const name = options?.name ?? `Test Company ${runId}`;
@@ -192,7 +192,7 @@ export async function createTestOutletMinimal(
   }>
 ): Promise<OutletFixture> {
   const pool = getDbPool();
-  const runId = Date.now().toString(36);
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   
   const code = options?.code ?? `TEST-OL-${runId}`.slice(0, 20).toUpperCase();
   const name = options?.name ?? `Test Outlet ${runId}`;
@@ -271,7 +271,7 @@ export async function createTestUser(
   }>
 ): Promise<UserFixture> {
   const pool = getDbPool();
-  const runId = Date.now().toString(36);
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   
   const email = options?.email ?? `test-user-${runId}@example.com`;
   
@@ -342,7 +342,7 @@ export async function createTestItem(
   }>
 ): Promise<ItemFixture> {
   const pool = getDbPool();
-  const runId = Date.now().toString(36);
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   
   const sku = options?.sku ?? `TEST-SKU-${runId}`.slice(0, 30);
   const name = options?.name ?? `Test Item ${runId}`;

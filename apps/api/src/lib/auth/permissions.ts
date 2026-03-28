@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { getDbPool } from "../db.js";
-import { newKyselyConnection } from "@jurnapod/db";
+import { withKysely } from "../db.js";
 import { sql } from "kysely";
 import type { PoolConnection } from "mysql2/promise";
 import { MODULE_PERMISSION_BITS, type ModulePermission } from "../auth.js";
@@ -27,17 +26,7 @@ export async function canManageCompanyDefaults(
   permission: ModulePermission = "create",
   connection?: PoolConnection
 ): Promise<boolean> {
-  let needsToRelease = false;
-  let db;
-
-  if (connection) {
-    db = newKyselyConnection(connection);
-  } else {
-    db = newKyselyConnection(await getDbPool().getConnection());
-    needsToRelease = true;
-  }
-
-  try {
+  return withKysely(async (db) => {
     const permissionBit = MODULE_PERMISSION_BITS[permission];
 
     const row = await db
@@ -54,9 +43,5 @@ export async function canManageCompanyDefaults(
       .executeTakeFirst();
 
     return row !== undefined;
-  } finally {
-    if (needsToRelease) {
-      await db.destroy();
-    }
-  }
+  }, connection);
 }

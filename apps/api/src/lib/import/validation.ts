@@ -8,8 +8,7 @@
  * Separates validation concerns from import route.
  */
 
-import { getDbPool } from "../db.js";
-import { newKyselyConnection } from "@jurnapod/db";
+import { withKysely } from "../db.js";
 import type { PoolConnection } from "mysql2/promise";
 
 // ============================================================================
@@ -50,17 +49,7 @@ export async function checkSkuExists(
   sku: string,
   connection?: PoolConnection
 ): Promise<SkuCheckResult> {
-  let needsToRelease = false;
-  let db;
-
-  if (connection) {
-    db = newKyselyConnection(connection);
-  } else {
-    db = newKyselyConnection(await getDbPool().getConnection());
-    needsToRelease = true;
-  }
-
-  try {
+  return withKysely(async (db) => {
     const row = await db
       .selectFrom("items")
       .select(["id"])
@@ -76,11 +65,7 @@ export async function checkSkuExists(
       exists: true,
       itemId: row.id
     };
-  } finally {
-    if (needsToRelease) {
-      await db.destroy();
-    }
-  }
+  }, connection);
 }
 
 // ============================================================================
@@ -127,19 +112,9 @@ export async function batchCheckSkusExist(
   skus: string[],
   connection?: PoolConnection
 ): Promise<Map<string, number>> {
-  let needsToRelease = false;
-  let db;
+  return withKysely(async (db) => {
+    const result = new Map<string, number>();
 
-  if (connection) {
-    db = newKyselyConnection(connection);
-  } else {
-    db = newKyselyConnection(await getDbPool().getConnection());
-    needsToRelease = true;
-  }
-
-  const result = new Map<string, number>();
-
-  try {
     if (skus.length === 0) {
       return result;
     }
@@ -158,9 +133,5 @@ export async function batchCheckSkusExist(
     }
 
     return result;
-  } finally {
-    if (needsToRelease) {
-      await db.destroy();
-    }
-  }
+  }, connection);
 }

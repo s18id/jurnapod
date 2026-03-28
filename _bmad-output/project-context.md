@@ -242,6 +242,44 @@ await batchInsertItems(companyId, inserts, connection);
 
 ---
 
+## Epic 15: Connection Guard Pattern
+
+**5. Connection Guard (`withKysely()`)**: Use wrapper to prevent connection leaks in library functions
+
+```typescript
+import { withKysely } from "@/lib/db";
+
+export async function myQuery(companyId: number) {
+  return withKysely(async (db) => {
+    return db
+      .selectFrom("items")
+      .where("company_id", "=", companyId)
+      .execute();
+  });
+}
+```
+
+| Pattern | Use Case |
+|---------|----------|
+| `withKysely()` | Simple read/write operations, single query functions |
+| `newKyselyConnection()` | Multi-statement transactions requiring explicit control |
+
+**1. Batch Operations**: Collect changes → execute bulk
+```typescript
+const updates = [], inserts = [];
+for (const row of rows) { exists ? updates.push({...}) : inserts.push({...}); }
+await batchUpdateItems(updates, connection);
+await batchInsertItems(companyId, inserts, connection);
+```
+
+**2. Validation Separation**: Sync (no DB) vs Async (requires DB) validation
+
+**3. Adapter Pattern**: Bridge external interface to internal types
+
+**4. Permission Utility**: Reusable `canManageCompanyDefaults(userId, companyId, module, permission)` function
+
+---
+
 ## Lessons Learned
 
 | Lesson | Rule |

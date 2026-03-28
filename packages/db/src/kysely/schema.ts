@@ -534,6 +534,8 @@ export interface ItemImages {
 export interface ItemPrices {
   company_id: number;
   created_at: Generated<Date>;
+  effective_from: number; // BIGINT unix milliseconds - 0 means always effective
+  effective_to: number; // BIGINT unix milliseconds - 0 means no expiration
   id: Generated<number>;
   is_active: Generated<number>;
   item_id: number;
@@ -541,6 +543,7 @@ export interface ItemPrices {
   price: Decimal;
   scope_key: Generated<string | null>;
   updated_at: Generated<Date>;
+  variant_id: Generated<number | null>; // Added in migration 0122
 }
 
 export interface Items {

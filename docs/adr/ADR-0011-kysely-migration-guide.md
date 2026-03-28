@@ -452,6 +452,40 @@ const row = await db
   .executeTakeFirst();
 ```
 
+## Connection Guard Pattern (Epic 15)
+
+Use `withKysely()` wrapper to prevent connection leaks in library functions:
+
+```typescript
+import { withKysely } from "@/lib/db";
+
+export async function myQuery(companyId: number) {
+  return withKysely(async (db) => {
+    return db
+      .selectFrom("items")
+      .where("company_id", "=", companyId)
+      .execute();
+  });
+}
+```
+
+The wrapper automatically handles connection acquisition and release. This pattern is **mandatory** for all new library functions.
+
+### When to Use withKysely vs newKyselyConnection
+
+| Pattern | Use Case |
+|---------|----------|
+| `withKysely()` | Simple read/write operations, single query functions |
+| `newKyselyConnection()` | Multi-statement transactions requiring explicit control |
+
+### Implementation Notes
+
+- `withKysely()` handles pool acquisition and release automatically
+- Connection is released even if the callback throws
+- Works with both Kysely query builder and raw SQL via the db connection
+
+---
+
 ## Epic 14 Migration Checklist
 
 - [ ] Replace direct `pool.execute()` calls with `DbConn` wrapper

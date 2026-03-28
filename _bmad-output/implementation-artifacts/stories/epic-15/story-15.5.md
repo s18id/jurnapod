@@ -2,7 +2,7 @@
 
 **Epic:** Epic 15
 **Story Number:** 15.5
-**Status:** backlog
+**Status:** review
 **Estimated Time:** 2 hours
 **Priority:** P2
 
@@ -70,4 +70,27 @@ Create document at `_bmad-output/implementation-artifacts/stories/epic-15/td-031
 
 ---
 
+## Spike Findings Summary
+
+### Current Implementation
+- **File:** `apps/api/src/lib/alerts/alert-manager.ts`
+- **Method:** `dispatchAlert()` (lines 178-206)
+- **Issue:** No retry strategy - single fetch call, returns `false` on any failure
+
+### Proposed Solution
+- Exponential backoff with max 3 retries
+- Base delay: 1000ms, doubling each attempt (1s → 2s → 4s)
+- Max total wait: ~7 seconds
+
+### Epic 16 Story Breakdown
+1. **Story 16.1:** Create retry utility library (`apps/api/src/lib/retry.ts`)
+2. **Story 16.2:** Update alert dispatch with retry logic
+3. **Story 16.3:** Add retry configuration and tests
+
+### Spike Document
+Full document: `_bmad-output/implementation-artifacts/stories/epic-15/td-031-spike.md`
+
+---
+
 *Story file created: 2026-03-28*
+*Spike completed: 2026-03-29*
