@@ -2,7 +2,8 @@
 
 **Epic:** Epic 14  
 **Story Number:** 14.3  
-**Status:** done  
+**Status:** done
+**Completed:** 2026-03-28
 **Estimated Time:** 2 hours  
 **Priority:** P1
 
