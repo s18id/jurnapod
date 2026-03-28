@@ -24,7 +24,7 @@ import { buildSyncPullPayload } from "../../lib/sync/master-data.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { getDbPool } from "../../lib/db.js";
-import { SyncAuditService, type AuditDbClient } from "@jurnapod/modules-platform/sync";
+import { createSyncAuditService } from "../../lib/sync/audit-adapter.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -49,39 +49,6 @@ type SyncPullRequest = z.infer<typeof syncPullRequestSchema>;
 // =============================================================================
 // Helper Functions
 // =============================================================================
-
-function createSyncAuditService(dbPool: ReturnType<typeof getDbPool>): SyncAuditService {
-  const client: AuditDbClient = {
-    query: async <T = unknown>(sql: string, params?: unknown[]): Promise<T[]> => {
-      const [rows] = await dbPool.query(sql, params as (string | number | Date | null)[]);
-      return rows as T[];
-    },
-    execute: async (sql: string, params?: unknown[]) => {
-      const [result] = await dbPool.execute(sql, params as (string | number | Date | null)[]);
-      return {
-        affectedRows: (result as { affectedRows: number }).affectedRows,
-        insertId: (result as { insertId?: number }).insertId,
-      };
-    },
-    getConnection: async () => {
-      const conn = await dbPool.getConnection();
-      return {
-        beginTransaction: () => conn.beginTransaction(),
-        commit: () => conn.commit(),
-        rollback: () => conn.rollback(),
-        execute: async (sql: string, params?: unknown[]) => {
-          const [result] = await conn.execute(sql, params as (string | number | Date | null)[]);
-          return {
-            affectedRows: (result as { affectedRows: number }).affectedRows,
-            insertId: (result as { insertId?: number }).insertId,
-          };
-        },
-        release: () => conn.release(),
-      };
-    },
-  };
-  return new SyncAuditService(client);
-}
 
 function getTierFromRequest(request: Request): string {
   const tier = request.headers.get("x-sync-tier");
@@ -213,4 +180,3 @@ syncPullRoutes.get("/", async (c) => {
 });
 
 export { syncPullRoutes };
-export { createSyncAuditService };

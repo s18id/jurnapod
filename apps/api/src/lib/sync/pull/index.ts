@@ -14,7 +14,8 @@ import type {
   OrchestrateSyncPullResult
 } from "./types.js";
 import { buildSyncPullPayload } from "../master-data.js";
-import type { SyncAuditService, AuditDbClient } from "@jurnapod/modules-platform/sync";
+import { createSyncAuditService } from "../audit-adapter.js";
+import type { SyncAuditService } from "@jurnapod/modules-platform/sync";
 
 // Re-export types
 export type { OrchestrateSyncPullParams, OrchestrateSyncPullResult } from "./types.js";
@@ -96,43 +97,4 @@ export async function orchestrateSyncPull(
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DbPool = any;
 
-/**
- * Create audit service for sync pull operations
- */
-export function createSyncAuditService(dbPool: DbPool): SyncAuditService {
-  const { SyncAuditService } = require("@jurnapod/modules-platform/sync");
-  
-  const client: AuditDbClient = {
-    query: async <T = unknown>(sql: string, params?: unknown[]): Promise<T[]> => {
-      const [rows] = await dbPool.query(sql, params as (string | number | Date | null)[]);
-      return rows as T[];
-    },
-    execute: async (sql: string, params?: unknown[]) => {
-      const [result] = await dbPool.execute(sql, params as (string | number | Date | null)[]);
-      return {
-        affectedRows: (result as { affectedRows: number }).affectedRows,
-        insertId: (result as { insertId?: number }).insertId,
-      };
-    },
-    getConnection: async () => {
-      const conn = await dbPool.getConnection();
-      return {
-        beginTransaction: () => conn.beginTransaction(),
-        commit: () => conn.commit(),
-        rollback: () => conn.rollback(),
-        execute: async (sql: string, params?: unknown[]) => {
-          const [result] = await conn.execute(sql, params as (string | number | Date | null)[]);
-          return {
-            affectedRows: (result as { affectedRows: number }).affectedRows,
-            insertId: (result as { insertId?: number }).insertId,
-          };
-        },
-        release: () => conn.release(),
-      };
-    },
-  };
-  return new SyncAuditService(client);
-}

@@ -202,6 +202,6 @@ development_status:
   13-4-create-inventory-access-library: done
   13-5-refactor-inventory-route: done
   13-6-analyze-sync-pull-architecture: done
-  13-7-create-sync-pull-adapter: backlog
+  13-7-create-sync-pull-adapter: done
   13-8-epic-13-documentation: backlog
   epic-13-retrospective: backlog
