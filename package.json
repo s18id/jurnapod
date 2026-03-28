@@ -55,7 +55,7 @@
     "db:audit:system-roles": "npm run db:audit:system-roles -w @jurnapod/db",
     "db:consolidate:system-roles": "npm run db:consolidate:system-roles -w @jurnapod/db",
     "test:scripts": "node --test scripts/tests/*.test.mjs",
-    "test:single": "node --test --test-concurrency=1 --import tsx",
+    "test:single": "npm run test:unit:single -w @jurnapod/api --",
     "auth:secret:generate": "node ./scripts/auth-secret-generate.mjs",
     "auth:secret:regenerate": "node ./scripts/auth-secret-regenerate.mjs",
     "auth:refresh-secret:generate": "node ./scripts/auth-refresh-secret-generate.mjs",
