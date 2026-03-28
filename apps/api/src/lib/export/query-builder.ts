@@ -144,16 +144,6 @@ const ACCOUNT_COLUMNS = {
 } as const;
 
 /**
- * All column definitions by entity
- */
-const COLUMN_DEFINITIONS: Record<ExportableEntity, Readonly<Record<string, string>>> = {
-  items: ITEM_COLUMNS,
-  item_prices: ITEM_PRICE_COLUMNS,
-  item_groups: ITEM_GROUP_COLUMNS,
-  accounts: ACCOUNT_COLUMNS,
-};
-
-/**
  * Valid columns per entity
  */
 const VALID_COLUMNS: Record<ExportableEntity, readonly string[]> = {

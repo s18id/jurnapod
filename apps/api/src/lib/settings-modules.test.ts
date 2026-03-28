@@ -10,10 +10,9 @@ import {
   getModuleIdByCode,
   updateCompanyModule,
   isModuleEnabled,
-  ModuleNotFoundError,
-  type ModuleSettings
+  ModuleNotFoundError
 } from "./settings-modules";
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
+import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
 

@@ -3,7 +3,12 @@
 
 /**
  * Query Builder Unit Tests
+ *
+ * Note: These are pure unit tests for SQL query building (no DB access).
+ * Hardcoded IDs are safe here as they're just test data for query generation.
  */
+
+/* eslint-disable jurnapod-test-rules/no-hardcoded-ids */
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
