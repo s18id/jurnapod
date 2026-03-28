@@ -67,37 +67,37 @@ export class DbConn implements JurnapodDbClient {
 
 ### Pool Singleton
 
-Kysely reuses the existing mysql2 pool singleton:
+Kysely reuses the existing mysql2 pool singleton. The pool factory accepts a config object:
 
 ```typescript
 // packages/db/src/pool.ts
-import { createPool } from 'mysql2/promise';
-import { DbConn } from './mysql-client';
+import { createDbPool, closeDbPool } from '@jurnapod/db';
+import type { DbPoolConfig } from '@jurnapod/db';
 
-const globalForDb = globalThis as typeof globalThis & {
-  __jurnapodApiDbPool?: Pool;
+const config: DbPoolConfig = {
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  charset: 'utf8mb4',
+  connectionLimit: 10,
+  dateStrings: true  // ← preserve date strings, not Date objects
 };
 
-export function createDbPool(): Pool {
-  if (globalForDb.__jurnapodApiDbPool) {
-    return globalForDb.__jurnapodApiDbPool;
-  }
-  const pool = createPool({
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    dateStrings: true,  // ← preserve date strings, not Date objects
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-  });
-  globalForDb.__jurnapodApiDbPool = pool;
-  return pool;
-}
+const pool = createDbPool(config);
+// Use pool for raw SQL queries or pass to DbConn/JurnapodMySQLDb
 
-export function closeDbPool(): Promise<void> { ... }
+// When shutting down:
+await closeDbPool(pool);
+```
+
+**API-specific pool** (apps/api/src/lib/db.ts):
+```typescript
+// API uses getDbPool() wrapper that reads from app environment
+import { getDbPool, closeDbPool } from '@/lib/db';
+
+const pool = getDbPool();  // Reads from app env via getAppEnv()
 ```
 
 ### Incremental Migration Strategy
@@ -171,16 +171,33 @@ const result = await db.kysely
 const deleted = Number(result?.numDeletedRows ?? 0);
 ```
 
-**Transaction:**
+**Transaction (mysql2 native + newKyselyConnection):**
 ```typescript
-await db.kysely.startTransaction();
+// Get connection from pool
+const pool = getDbPool();
+const connection = await pool.getConnection();
+
 try {
-  await db.kysely.insertInto('journal_batches').values({ ... }).execute();
-  await db.kysely.insertInto('journal_lines').values({ ... }).execute();
-  await db.kysely.commitTransaction();
+  // Begin mysql2 transaction
+  await connection.beginTransaction();
+
+  // Create Kysely instance bound to the connection
+  const kysely = newKyselyConnection(connection);
+
+  // Use Kysely for type-safe queries within the transaction
+  await kysely.insertInto('journal_batches').values({ ... }).execute();
+  await kysely.insertInto('journal_lines').values({ ... }).execute();
+
+  // Or use raw SQL for complex financial queries
+  // await connection.execute('INSERT INTO ...', [...]);
+
+  // Commit the transaction
+  await connection.commit();
 } catch (err) {
-  await db.kysely.rollbackTransaction();
+  await connection.rollback();
   throw err;
+} finally {
+  connection.release();
 }
 ```
 

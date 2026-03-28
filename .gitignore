@@ -25,6 +25,6 @@ e2e-tests/screenshots/
 apps/pos/android/
 apps/pos/ios/
 
-# BMAD configuration - ignore everything except _config
-_bmad/*
-!_bmad/_config
+# BMAD configuration
+_bmad
+.ignore

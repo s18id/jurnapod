@@ -1,6 +1,6 @@
 # Story 12.1: Create `lib/settings-modules.ts` Library
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 12: Standardize Library Usage for All Routes  
 **Story ID:** 12-1-create-settings-modules-library  
 **Estimated Effort:** 4 hours
@@ -169,4 +169,50 @@ Create `apps/api/src/lib/settings-modules.test.ts` with:
 
 ---
 
-*Ready for implementation.*
+## Completion Notes
+
+**Completed by:** bmad-dev (delegated agent)
+**Completion Date:** 2026-03-28
+**Actual Effort:** ~4 hours
+
+### Files Created
+
+1. `apps/api/src/lib/settings-modules.ts` (163 lines)
+   - `listCompanyModules()` - List all modules for company
+   - `getModuleIdByCode()` - Get module ID by code
+   - `updateCompanyModule()` - Update/insert company module settings
+   - `isModuleEnabled()` - Check if module is enabled
+   - `ModuleNotFoundError` - Error class for missing modules
+
+2. `apps/api/src/lib/settings-modules.test.ts` (409 lines)
+   - 6 comprehensive tests covering all functions
+
+### Implementation Details
+
+- Full TypeScript types with interfaces
+- Optional `PoolConnection` parameter for transaction support
+- Error handling with `ModuleNotFoundError`
+- Proper JSDoc documentation
+
+### Test Results
+
+```
+✓ 6 tests passed
+- listCompanyModules returns modules for company
+- getModuleIdByCode returns correct ID or null
+- updateCompanyModule creates new record
+- updateCompanyModule updates existing record
+- isModuleEnabled returns correct boolean
+- ModuleNotFoundError thrown when module doesn't exist
+```
+
+### Acceptance Criteria
+
+- [x] Library file created with all functions
+- [x] Type definitions exported
+- [x] Error class exported
+- [x] Test file created with comprehensive coverage
+- [x] All tests pass
+- [x] TypeScript compilation passes
+
+*Story completed successfully.*

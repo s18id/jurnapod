@@ -1,6 +1,6 @@
 # Story 12.5: Extend `lib/export/` for Route Queries
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 12: Standardize Library Usage for All Routes  
 **Story ID:** 12-5-extend-export-library  
 **Estimated Effort:** 6 hours
@@ -223,4 +223,64 @@ Create tests for:
 
 ---
 
-*Complex story - requires careful implementation.*
+## Completion Notes
+
+**Completed by:** bmad-dev (delegated agent)
+**Completion Date:** 2026-03-28
+**Actual Effort:** ~6 hours
+
+### Files Created
+
+1. `apps/api/src/lib/export/query-builder.ts` (590 lines)
+   - `buildExportQuery()` - Build parameterized export queries
+   - `executeExportQuery()` - Execute export queries
+   - `executeExportQueryWithTransform()` - Execute with row transformation
+   - `getAvailableColumns()` - Get valid columns for entity
+   - `validateExportColumns()` - Validate column selection
+
+2. `apps/api/src/lib/export/query-builder.test.ts` (482 lines)
+   - 41 comprehensive tests
+
+### Files Modified
+
+1. `apps/api/src/lib/export/index.ts` (13 lines added)
+   - Exported new query builder functions
+
+### Implementation Details
+
+**Supported Entities:**
+- `items` - Products/services
+- `item_prices` - Price lists
+- `item_groups` - Categories
+- `accounts` - Chart of accounts
+
+**Query Features:**
+- Dynamic column selection
+- Company/outlet scoping
+- Search filtering
+- Date range filtering
+- Active status filtering
+- Group/parent filtering
+
+### Test Results
+
+```
+✓ 41 tests passed
+- buildExportQuery: 28 tests (all entities, filters, error handling)
+- getAvailableColumns: 5 tests
+- validateExportColumns: 5 tests
+- SQL injection prevention: 3 tests
+```
+
+### Acceptance Criteria
+
+- [x] Query builder module created
+- [x] All exportable entities supported
+- [x] Dynamic column selection works
+- [x] All filter types handled
+- [x] Integration with existing streaming
+- [x] Test coverage for query building
+- [x] TypeScript compilation passes
+- [x] No breaking changes to existing exports
+
+*Story completed successfully.*

@@ -1,6 +1,6 @@
 # Story 12.2: Refactor `settings-modules.ts` Route
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 12: Standardize Library Usage for All Routes  
 **Story ID:** 12-2-refactor-settings-modules-route  
 **Estimated Effort:** 2 hours  
@@ -161,4 +161,58 @@ Remove unused imports:
 
 ---
 
-*Ready for implementation after Story 12.1.*
+## Completion Notes
+
+**Completed by:** bmad-dev (delegated agent)
+**Completion Date:** 2026-03-28
+**Actual Effort:** ~2 hours
+**Depends on:** Story 12.1 (completed)
+
+### Files Modified
+
+1. `apps/api/src/routes/settings-modules.ts` (58 lines changed)
+   - Removed 3 direct SQL queries
+   - Migrated to library functions
+
+### Changes Made
+
+**Imports:**
+```typescript
+import {
+  listCompanyModules,
+  updateCompanyModule,
+  ModuleNotFoundError
+} from "../lib/settings-modules.js";
+```
+
+**GET Handler:**
+- Before: `pool.execute("SELECT...")` + row mapping
+- After: `await listCompanyModules(auth.companyId)`
+
+**PUT Handler:**
+- Before: Manual module lookup + INSERT/UPDATE SQL
+- After: `await updateCompanyModule(...)` with try/catch
+
+### Verification Results
+
+```bash
+# TypeScript compilation
+npm run typecheck -w @jurnapod/api
+# Result: PASS
+
+# Tests
+npm run test:unit:single -w @jurnapod/api "src/routes/settings-modules.test.ts"
+# Result: 58 tests PASS
+```
+
+### Acceptance Criteria
+
+- [x] Route imports from library
+- [x] GET handler uses `listCompanyModules()`
+- [x] PUT handler uses `updateCompanyModule()`
+- [x] Error handling catches `ModuleNotFoundError`
+- [x] No direct SQL in route file
+- [x] All tests pass
+- [x] TypeScript compilation passes
+
+*Story completed successfully.*

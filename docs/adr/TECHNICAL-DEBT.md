@@ -1,7 +1,7 @@
 # Technical Debt Registry
 
 **Status:** Living Document  
-**Last Updated:** 2026-03-26  
+**Last Updated:** 2026-03-28  
 **Review Cadence:** Per-epic (before closing epic retrospective)
 
 ---
@@ -89,9 +89,9 @@ This document serves as the central registry for all known technical debt in the
 | TD-010 | Excel export memory issues for large datasets | P1 | **RESOLVED** | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
 | TD-011 | Batch processor hardcoded companyId=0 | P1 | **RESOLVED** | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
 | TD-012 | FK validation may cause N+1 queries | P3 | **RESOLVED** | Story 7.6 |
-| TD-013 | No resume/checkpoint for interrupted imports | P4 | Open | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
-| TD-014 | Export streaming lacks backpressure handling | P4 | Open | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
-| TD-015 | No progress persistence for long-running operations | P4 | Open | [ADR-0010](./ADR-0010-import-export-technical-debt.md) |
+| TD-013 | No resume/checkpoint for interrupted imports | P4 | **RESOLVED** | Story 8.1 - Checkpoint persistence with file hash validation |
+| TD-014 | Export streaming lacks backpressure handling | P4 | **RESOLVED** | Story 8.2 - Backpressure detection, 10MB buffer, throttle |
+| TD-015 | No progress persistence for long-running operations | P4 | **RESOLVED** | Story 8.3 - Database-backed progress tracking with SSE |
 | TD-016 | Integration tests deferred for import/export | P2 | **RESOLVED** | Story 6.7 |
 | TD-017 | Export UI missing column reordering | P2 | **RESOLVED** | Story 6.7 |
 | TD-018 | Export UI missing row count preview | P2 | **RESOLVED** | Story 6.7 |
@@ -144,15 +144,30 @@ This document serves as the central registry for all known technical debt in the
 
 ---
 
+### Epic 8: Production Scale & POS Variant Sync
+
+| ID | Description | Priority | Status | ADR/Story |
+|----|-------------|----------|--------|-----------|
+| TD-030 | Effective date filtering - requires migration to add effective_from/to columns | P1 | Open | Epic 8 |
+| TD-031 | Alert retry logic - webhook dispatch lacks exponential backoff | P2 | Open | Epic 8 |
+| TD-032 | Batch processing - large table backfills could be batched | P2 | Open | Epic 8 |
+
+**Notes:**
+- TD-030 was identified during Epic 8 as a gap in date-range filtering
+- TD-031 identified in Epic 8: current webhook delivery has no retry strategy
+- TD-032: Large backfill operations could benefit from batching to reduce lock contention
+
+---
+
 ## Summary Statistics
 
 | Priority | Open | Resolved | Total |
 |----------|------|---------|-------|
-| P1 | 0 | 2 | 2 |
-| P2 | 4 | 11 | 15 |
+| P1 | 1 | 2 | 3 |
+| P2 | 2 | 16 | 18 |
 | P3 | 0 | 7 | 7 |
-| P4 | 3 | 0 | 3 |
-| **Total** | **7** | **20** | **27** |
+| P4 | 0 | 3 | 3 |
+| **Total** | **3** | **28** | **31** |
 
 ---
 
@@ -267,6 +282,11 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 | 2026-03-26 | Resolved TD-026–029 (Epic 7 Stories 7.2–7.3) and TD-006 (Story 7.4) | Epic 7 Sprint |
 | 2026-03-28 | Resolved TD-008 and TD-009 - streaming parsers for CSV and Excel (Story 7.5) | Story 7.5 |
 | 2026-03-28 | Resolved TD-012 - Batch FK validation with single IN clause queries (Story 7.6) | Epic 7 |
+| 2026-03-28 | Resolved TD-013 - Import resume/checkpoint (Story 8.1) | Story 8.1 |
+| 2026-03-28 | Resolved TD-014 - Export backpressure handling (Story 8.2) | Story 8.2 |
+| 2026-03-28 | Resolved TD-015 - Progress persistence (Story 8.3) | Story 8.3 |
+| 2026-03-28 | Added TD-030 - Effective date filtering (P1), TD-031 - Alert retry logic (P2), TD-032 - Batch processing backfills (P2) | Epic 8 |
+| 2026-03-28 | Fixed summary statistics: P2 total corrected to 18 (was 15), P4 total corrected to 3 (was 3) | Documentation fix |
 
 ---
 

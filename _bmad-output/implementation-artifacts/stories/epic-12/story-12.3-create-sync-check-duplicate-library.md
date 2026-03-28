@@ -1,6 +1,6 @@
 # Story 12.3: Create `lib/sync/check-duplicate.ts` Library
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 12: Standardize Library Usage for All Routes  
 **Story ID:** 12-3-create-sync-check-duplicate-library  
 **Estimated Effort:** 3 hours
@@ -180,4 +180,48 @@ Create `apps/api/src/lib/sync/check-duplicate.test.ts` with:
 
 ---
 
-*Ready for implementation.*
+## Completion Notes
+
+**Completed by:** bmad-dev (delegated agent)
+**Completion Date:** 2026-03-28
+**Actual Effort:** ~3 hours
+
+### Files Created
+
+1. `apps/api/src/lib/sync/check-duplicate.ts` (82 lines)
+   - `checkDuplicateClientTx()` - Check for duplicate transactions
+   - Returns `DuplicateCheckResult` with isDuplicate, existingId, createdAt
+
+2. `apps/api/src/lib/sync/check-duplicate.test.ts` (244 lines)
+   - 7 comprehensive tests
+
+### Implementation Details
+
+- Query `pos_transactions` table for duplicates
+- Match by `company_id` and `client_tx_id`
+- Optional outlet scoping
+- Returns first match (LIMIT 1)
+- Proper date conversion (MySQL → JavaScript Date)
+
+### Test Results
+
+```
+✓ 7 tests passed
+- No duplicate found
+- Duplicate found with outlet
+- Duplicate found without outlet
+- Cross-outlet duplicate (edge case)
+- Transaction support
+- Interface contract
+```
+
+### Acceptance Criteria
+
+- [x] Library function created
+- [x] Type interface exported
+- [x] Test file created with all test cases
+- [x] All tests pass
+- [x] TypeScript compilation passes
+- [x] Function handles null/undefined outletId correctly
+
+*Story completed successfully.*

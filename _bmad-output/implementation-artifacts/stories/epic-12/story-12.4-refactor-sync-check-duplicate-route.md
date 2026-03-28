@@ -1,6 +1,6 @@
 # Story 12.4: Refactor `sync/check-duplicate.ts` Route
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 12: Standardize Library Usage for All Routes  
 **Story ID:** 12-4-refactor-sync-check-duplicate-route  
 **Estimated Effort:** 2 hours  
@@ -162,4 +162,50 @@ Keep existing error handling:
 
 ---
 
-*Ready for implementation after Story 12.3.*
+## Completion Notes
+
+**Completed by:** bmad-dev (delegated agent)
+**Completion Date:** 2026-03-28
+**Actual Effort:** ~2 hours
+**Depends on:** Story 12.3 (completed)
+
+### Files Modified
+
+1. `apps/api/src/routes/sync/check-duplicate.ts` (35 lines changed)
+   - Removed local SQL function
+   - Simplified to use library
+
+### Changes Made
+
+**Before:**
+- Manual connection: `pool.getConnection()` / `connection.release()`
+- Direct SQL: `connection.execute("SELECT...")`
+- 90 lines total
+
+**After:**
+- Library import: `checkDuplicateClientTx`
+- Single function call
+- 77 lines total
+
+### Verification Results
+
+```bash
+# TypeScript compilation
+npm run typecheck -w @jurnapod/api
+# Result: PASS
+
+# Lint
+npm run lint -w @jurnapod/api
+# Result: PASS (no new errors)
+```
+
+### Acceptance Criteria
+
+- [x] Route imports from library
+- [x] Handler uses `checkDuplicateClientTx()`
+- [x] No manual connection management
+- [x] Response format unchanged
+- [x] No direct SQL in route file
+- [x] TypeScript compilation passes
+
+*Story completed successfully.*

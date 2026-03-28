@@ -1,6 +1,6 @@
 # Story 12.6: Refactor `export.ts` Route
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 12: Standardize Library Usage for All Routes  
 **Story ID:** 12-6-refactor-export-route  
 **Estimated Effort:** 4 hours  
@@ -166,4 +166,59 @@ Verify no SQL in route:
 
 ---
 
-*Ready for implementation after Story 12.5.*
+## Completion Notes
+
+**Completed by:** bmad-dev (delegated agent)
+**Completion Date:** 2026-03-28
+**Actual Effort:** ~4 hours
+**Depends on:** Story 12.5 (completed)
+
+### Files Modified
+
+1. `apps/api/src/routes/export.ts` (179 lines changed)
+   - Removed 2 complex SQL query builders
+   - Migrated to library functions
+
+### Changes Made
+
+**Imports:**
+```typescript
+import {
+  buildExportQuery,      // NEW
+  executeExportQuery,    // NEW
+} from "../lib/export/index.js";
+```
+
+**fetchItemsForExport():**
+- Before: Inline SQL building with conditions
+- After: `buildExportQuery("items", filters, options)`
+
+**fetchPricesForExport():**
+- Before: Complex SQL with COALESCE for outlet prices
+- After: `buildExportQuery("item_prices", filters, options)`
+
+### Verification Results
+
+```bash
+# TypeScript compilation
+npm run typecheck -w @jurnapod/api
+# Result: PASS
+
+# Tests
+npm run test:unit:single -w @jurnapod/api "src/routes/export.test.ts"
+# Result: 66 tests PASS
+```
+
+### Acceptance Criteria
+
+- [x] Route uses library for query building
+- [x] Route uses library for query execution
+- [x] All export formats work (CSV, XLSX, JSON)
+- [x] Column customization works
+- [x] All filters work
+- [x] Streaming for large datasets works
+- [x] No direct SQL in route file
+- [x] All existing tests pass
+- [x] TypeScript compilation passes
+
+*Story completed successfully.*
