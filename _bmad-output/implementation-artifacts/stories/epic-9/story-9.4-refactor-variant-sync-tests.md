@@ -1,6 +1,6 @@
 # Story 9.4: Refactor Variant Sync Tests
 
-**Status:** backlog
+**Status:** done
 **Epic:** Epic 9: Use Library Functions in Tests
 **Story ID:** 9-4-refactor-variant-sync-tests
 

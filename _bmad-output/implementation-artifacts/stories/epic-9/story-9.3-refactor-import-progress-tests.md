@@ -1,6 +1,6 @@
 # Story 9.3: Refactor Import & Progress Tests
 
-**Status:** backlog
+**Status:** done
 **Epic:** Epic 9: Use Library Functions in Tests
 **Story ID:** 9-3-refactor-import-progress-tests
 

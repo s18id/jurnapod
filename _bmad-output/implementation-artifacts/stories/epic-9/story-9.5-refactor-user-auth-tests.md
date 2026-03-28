@@ -1,6 +1,6 @@
 # Story 9.5: Refactor User & Auth Tests
 
-**Status:** backlog
+**Status:** done
 **Epic:** Epic 9: Use Library Functions in Tests
 **Story ID:** 9-5-refactor-user-auth-tests
 

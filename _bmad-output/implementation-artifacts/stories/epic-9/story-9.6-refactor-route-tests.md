@@ -1,6 +1,6 @@
 # Story 9.6: Refactor Route Tests
 
-**Status:** backlog
+**Status:** done
 **Epic:** Epic 9: Use Library Functions in Tests
 **Story ID:** 9-6-refactor-route-tests
 

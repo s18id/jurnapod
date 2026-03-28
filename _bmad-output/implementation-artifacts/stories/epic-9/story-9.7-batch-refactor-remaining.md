@@ -1,6 +1,6 @@
 # Story 9.7: Batch Refactor Remaining Tests
 
-**Status:** backlog
+**Status:** done
 **Epic:** Epic 9: Use Library Functions in Tests
 **Story ID:** 9-7-batch-refactor-remaining
 

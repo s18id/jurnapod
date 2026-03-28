@@ -1,6 +1,6 @@
 # Story 9.1: Audit Library Functions for Test Use
 
-**Status:** backlog
+**Status:** done
 **Epic:** Epic 9: Use Library Functions in Tests
 **Story ID:** 9-1-audit-library-functions
 

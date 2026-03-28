@@ -1,6 +1,6 @@
 # Story 9.9: Enforce Library Usage in Tests
 
-**Status:** backlog
+**Status:** done
 **Epic:** Epic 9: Use Library Functions in Tests
 **Story ID:** 9-9-enforce-library-usage
 

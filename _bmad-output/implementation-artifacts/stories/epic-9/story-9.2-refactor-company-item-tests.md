@@ -1,6 +1,6 @@
 # Story 9.2: Refactor Company & Item Tests
 
-**Status:** backlog
+**Status:** done
 **Epic:** Epic 9: Use Library Functions in Tests
 **Story ID:** 9-2-refactor-company-item-tests
 

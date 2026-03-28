@@ -1,6 +1,6 @@
 # Story 9.8: Add Missing Library Functions
 
-**Status:** backlog
+**Status:** done
 **Epic:** Epic 9: Use Library Functions in Tests
 **Story ID:** 9-8-add-missing-library-functions
 
