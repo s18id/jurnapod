@@ -169,14 +169,14 @@ This document serves as the central registry for all known technical debt in the
 | ID | Description | Priority | Status | ADR/Story |
 |----|-------------|----------|--------|-----------|
 | TD-030 | Effective date filtering - requires migration to add effective_from/to columns | P1 | **RESOLVED** | Story 15.3 |
-| TD-031 | Alert retry logic - webhook dispatch lacks exponential backoff | P2 | Open | Epic 8 |
-| TD-032 | Batch processing - large table backfills could be batched | P2 | Open | Epic 8 |
+| TD-031 | Alert retry logic - webhook dispatch lacks exponential backoff | P2 | **RESOLVED** | Story 16.1 |
+| TD-032 | Batch processing - large table backfills could be batched | P2 | **RESOLVED** | Story 16.2 |
 
 **Resolution (TD-030):** Schema migration added `effective_from` and `effective_to` columns with backfill of historical data. Date filtering now uses these columns instead of computed logic.
 
-**Notes:**
-- TD-031 identified in Epic 8: current webhook delivery has no retry strategy
-- TD-032: Large backfill operations could benefit from batching to reduce lock contention
+**Resolution (TD-031):** Created `lib/retry.ts` with `withRetry()` function implementing exponential backoff. Updated `dispatchAlert()` in `alert-manager.ts` to use retry with max 3 retries, base delay 1000ms (1s → 2s → 4s).
+
+**Resolution (TD-032):** Created `lib/batch.ts` with `withBatchProcessing()` function for batch operations with configurable delay between batches to reduce lock contention.
 
 ---
 
@@ -185,10 +185,10 @@ This document serves as the central registry for all known technical debt in the
 | Priority | Open | Resolved | Total |
 |----------|------|---------|-------|
 | P1 | 0 | 3 | 3 |
-| P2 | 2 | 16 | 18 |
+| P2 | 0 | 18 | 18 |
 | P3 | 0 | 9 | 9 |
 | P4 | 0 | 3 | 3 |
-| **Total** | **2** | **31** | **33** |
+| **Total** | **0** | **33** | **33** |
 
 ---
 
@@ -310,6 +310,8 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 | 2026-03-28 | Fixed summary statistics: P2 total corrected to 18 (was 15), P4 total corrected to 3 (was 3) | Documentation fix |
 | 2026-03-28 | Added TD-033, TD-034 - Epic 13/14 confirmation entries; updated P3 resolved count to 9 | Story 14.5 |
 | 2026-03-28 | Resolved TD-030 - Effective date filtering migration (Story 15.3) | Story 15.4 |
+| 2026-03-29 | Resolved TD-031 - Alert retry with exponential backoff (Story 16.1) | Story 16.1 |
+| 2026-03-29 | Resolved TD-032 - Batch processing utility with delays (Story 16.2) | Story 16.2 |
 
 ---
 

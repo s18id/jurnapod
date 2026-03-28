@@ -224,3 +224,10 @@ development_status:
   15-3-td-030-effective-date-filtering: review
   15-4-epic-15-documentation: review
   15-5-td-031-spike: review
+
+  # Epic 16: Alert System Hardening & Batch Processing
+  # Focus: Address TD-031 (alert retry) and TD-032 (batch processing backfills)
+  epic-16: done
+  16-1-alert-retry-exponential-backoff: review
+  16-2-batch-processing-backfills: review
+  16-3-epic-16-documentation: review

@@ -15,8 +15,9 @@ import {
   getWebhookConfig,
   type AlertType,
   type AlertSeverity,
-  type WebhookConfig,
 } from "./alert-rules";
+
+import { withRetry } from "../retry";
 
 /**
  * Alert event structure
@@ -173,7 +174,7 @@ export class AlertManager {
   }
 
   /**
-   * Dispatch alert to webhook
+   * Dispatch alert to webhook with exponential backoff retry
    */
   async dispatchAlert(event: AlertEvent): Promise<boolean> {
     const config = getWebhookConfig();
@@ -184,24 +185,35 @@ export class AlertManager {
       return false;
     }
 
-    try {
-      const payload = this.formatWebhookPayload(event);
-      const response = await fetch(config.url, {
-        method: config.method,
-        headers: config.headers,
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(config.timeout ?? 5000),
-      });
+    const payload = this.formatWebhookPayload(event);
 
-      if (!response.ok) {
-        console.error(`[alert] Webhook failed: ${response.status} ${response.statusText}`);
-        return false;
-      }
+    try {
+      await withRetry(
+        async () => {
+          const response = await fetch(config.url, {
+            method: config.method,
+            headers: config.headers,
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(config.timeout ?? 5000),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Webhook failed: ${response.status} ${response.statusText}`);
+          }
+        },
+        {
+          maxRetries: 3,
+          baseDelay: 1000,
+          onRetry: (attempt, error, delay) => {
+            console.warn(`[alert] Retry ${attempt}/3 in ${delay}ms: ${error.message}`);
+          },
+        }
+      );
 
       console.info(`[alert] Alert dispatched: ${event.name} (${event.severity})`);
       return true;
     } catch (error) {
-      console.error(`[alert] Webhook error: ${error instanceof Error ? error.message : "Unknown error"}`);
+      console.error(`[alert] Webhook error after retries: ${error instanceof Error ? error.message : "Unknown error"}`);
       return false;
     }
   }
