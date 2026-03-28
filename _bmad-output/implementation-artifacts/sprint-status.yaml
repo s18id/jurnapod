@@ -180,3 +180,15 @@ development_status:
   11-4-refactor-remaining-tests: done
   11-5-replace-insert-items-with-createItem: done
   epic-11-retrospective: done
+
+  # Epic 12: Standardize Library Usage for All Routes
+  # Focus: Move all direct SQL from routes to library modules
+  epic-12: done
+  12-1-create-settings-modules-library: done
+  12-2-refactor-settings-modules-route: done
+  12-3-create-sync-check-duplicate-library: done
+  12-4-refactor-sync-check-duplicate-route: done
+  12-5-extend-export-library: done
+  12-6-refactor-export-route: done
+  12-7-epic-12-documentation: done
+  epic-12-retrospective: backlog

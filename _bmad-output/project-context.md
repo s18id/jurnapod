@@ -383,6 +383,53 @@ All stories require before marking DONE:
 
 **Note:** `epics.md` is intentionally minimal (titles only) for plugin parsing. Full epic details live in individual `epic-{N}.md` files.
 
+#### Route Library Pattern
+
+All API routes must follow the library-first architecture:
+
+**Rule: Routes delegate to libraries**
+- Routes must NOT contain direct SQL queries
+- Routes import database operations from `lib/` modules
+- Routes are thin HTTP handlers (validation → library → response)
+
+**Directory Responsibilities:**
+| Directory | Responsibility |
+|-----------|---------------|
+| `routes/` | HTTP handling, auth, validation, response formatting |
+| `lib/` | Database operations, business logic, domain rules |
+
+**Example:**
+```typescript
+// routes/settings-modules.ts - HTTP layer
+import { listCompanyModules } from "../lib/settings-modules.js";
+
+modulesRoutes.get("/", async (c) => {
+  const auth = c.get("auth");
+  const modules = await listCompanyModules(auth.companyId);
+  return successResponse(modules);
+});
+
+// lib/settings-modules.ts - Business logic
+export async function listCompanyModules(companyId: number) {
+  const pool = getDbPool();
+  const [rows] = await pool.execute(
+    `SELECT ... FROM modules WHERE company_id = ?`,
+    [companyId]
+  );
+  return rows.map(transform);
+}
+```
+
+**Anti-patterns:**
+- ❌ SQL queries in route files
+- ❌ `pool.execute()` in routes
+- ❌ Business logic mixed with HTTP handling
+
+**Enforcement:**
+- ESLint rules detect direct SQL in routes
+- Code review checklist includes library usage
+- Epic 12 completion means zero exceptions
+
 #### Directory Paths
 
 ```

@@ -11,14 +11,12 @@
  */
 
 import { Hono } from "hono";
-import type { RowDataPacket } from "mysql2";
 import {
   authenticateRequest,
   requireAccess,
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse } from "../lib/response.js";
-import { getDbPool } from "../lib/db.js";
 import {
   generateCSVBuffer,
   generateExcel,
@@ -27,6 +25,8 @@ import {
   createReadableStream,
   getContentType,
   getFileExtension,
+  buildExportQuery,
+  executeExportQuery,
   type ExportColumn,
   type ExportFormat
 } from "../lib/export/index.js";
@@ -182,54 +182,17 @@ async function fetchItemsForExport(
   companyId: number,
   params: ExportQueryParams
 ): Promise<Record<string, unknown>[]> {
-  const pool = getDbPool();
-  const values: Array<number | string | boolean> = [companyId];
+  const { sql, values } = buildExportQuery("items", {
+    company_id: companyId,
+    search: params.search,
+    is_active: params.status,
+    type: params.type,
+    group_id: params.groupId
+  }, { format: params.format, columns: params.columns.length > 0 ? params.columns : undefined });
 
-  let sql = `
-    SELECT 
-      i.id,
-      i.sku,
-      i.name,
-      i.item_type,
-      i.barcode,
-      i.item_group_id,
-      ig.name AS item_group_name,
-      i.cogs_account_id,
-      i.inventory_asset_account_id,
-      i.is_active,
-      i.created_at,
-      i.updated_at
-    FROM items i
-    LEFT JOIN item_groups ig ON ig.id = i.item_group_id AND ig.company_id = i.company_id
-    WHERE i.company_id = ?
-  `;
+  const rows = await executeExportQuery(sql, values);
 
-  if (typeof params.status === "boolean") {
-    sql += " AND i.is_active = ?";
-    values.push(params.status ? 1 : 0);
-  }
-
-  if (params.type) {
-    sql += " AND i.item_type = ?";
-    values.push(params.type);
-  }
-
-  if (params.groupId) {
-    sql += " AND i.item_group_id = ?";
-    values.push(params.groupId);
-  }
-
-  if (params.search) {
-    sql += " AND (i.name LIKE ? OR i.sku LIKE ?)";
-    const searchPattern = `%${params.search}%`;
-    values.push(searchPattern, searchPattern);
-  }
-
-  sql += " ORDER BY i.id ASC";
-
-  const [rows] = await pool.execute<RowDataPacket[]>(sql, values);
-
-  return rows.map((row) => ({
+  return rows.map((row: Record<string, unknown>) => ({
     id: Number(row.id),
     sku: row.sku,
     name: row.name,
@@ -251,113 +214,19 @@ async function fetchPricesForExport(
   companyId: number,
   params: ExportQueryParams
 ): Promise<Record<string, unknown>[]> {
-  const pool = getDbPool();
-  const values: Array<number | string | boolean> = [companyId];
+  const { sql, values } = buildExportQuery("item_prices", {
+    company_id: companyId,
+    outlet_id: params.outletId,
+    search: params.search,
+    is_active: params.status,
+    scope_filter: params.scopeFilter,
+    date_from: params.dateFrom,
+    date_to: params.dateTo
+  }, { format: params.format, columns: params.columns.length > 0 ? params.columns : undefined });
 
-  // Build query based on view mode
-  let sql: string;
+  const rows = await executeExportQuery(sql, values);
 
-  if (params.outletId) {
-    // Outlet-specific view with override information
-    sql = `
-      SELECT 
-        COALESCE(override.id, def.id) AS id,
-        COALESCE(override.item_id, def.item_id) AS item_id,
-        i.sku AS item_sku,
-        i.name AS item_name,
-        ? AS outlet_id,
-        o.name AS outlet_name,
-        COALESCE(override.price, def.price) AS price,
-        COALESCE(override.is_active, def.is_active) AS is_active,
-        CASE WHEN override.id IS NOT NULL THEN 1 ELSE 0 END AS is_override,
-        COALESCE(override.updated_at, def.updated_at) AS updated_at,
-        COALESCE(override.created_at, def.created_at) AS created_at
-      FROM items i
-      LEFT JOIN item_prices override ON override.item_id = i.id 
-        AND override.company_id = i.company_id 
-        AND override.outlet_id = ?
-      LEFT JOIN item_prices def ON def.item_id = i.id 
-        AND def.company_id = i.company_id 
-        AND def.outlet_id IS NULL
-      LEFT JOIN outlets o ON o.id = ? AND o.company_id = i.company_id
-      WHERE i.company_id = ?
-        AND (override.id IS NOT NULL OR def.id IS NOT NULL)
-    `;
-    values.unshift(params.outletId); // Add outlet_id at the beginning for outlet_name join
-    values.unshift(params.outletId); // Add outlet_id at the beginning for override join
-    values.push(params.outletId); // Add outlet_id for outlet_name join at the end
-  } else {
-    // Company-wide view (all prices)
-    sql = `
-      SELECT 
-        ip.id,
-        ip.item_id,
-        i.sku AS item_sku,
-        i.name AS item_name,
-        ip.outlet_id,
-        o.name AS outlet_name,
-        ip.price,
-        ip.is_active,
-        CASE WHEN ip.outlet_id IS NOT NULL THEN 1 ELSE 0 END AS is_override,
-        ip.created_at,
-        ip.updated_at
-      FROM item_prices ip
-      INNER JOIN items i ON i.id = ip.item_id AND i.company_id = ip.company_id
-      LEFT JOIN outlets o ON o.id = ip.outlet_id AND o.company_id = ip.company_id
-      WHERE ip.company_id = ?
-    `;
-  }
-
-  if (typeof params.status === "boolean") {
-    if (params.outletId) {
-      sql += " AND COALESCE(override.is_active, def.is_active) = ?";
-    } else {
-      sql += " AND ip.is_active = ?";
-    }
-    values.push(params.status ? 1 : 0);
-  }
-
-  if (params.search) {
-    if (params.outletId) {
-      sql += " AND (i.name LIKE ? OR i.sku LIKE ?)";
-    } else {
-      sql += " AND (i.name LIKE ? OR i.sku LIKE ?)";
-    }
-    const searchPattern = `%${params.search}%`;
-    values.push(searchPattern, searchPattern);
-  }
-
-  // Scope filter for prices
-  if (params.scopeFilter === "override" && !params.outletId) {
-    sql += " AND ip.outlet_id IS NOT NULL";
-  } else if (params.scopeFilter === "default" && !params.outletId) {
-    sql += " AND ip.outlet_id IS NULL";
-  }
-
-  // Date range filter for prices
-  if (params.dateFrom) {
-    if (params.outletId) {
-      sql += " AND COALESCE(override.updated_at, def.updated_at) >= ?";
-    } else {
-      sql += " AND ip.updated_at >= ?";
-    }
-    values.push(params.dateFrom);
-  }
-
-  if (params.dateTo) {
-    if (params.outletId) {
-      sql += " AND COALESCE(override.updated_at, def.updated_at) <= ?";
-    } else {
-      sql += " AND ip.updated_at <= ?";
-    }
-    values.push(params.dateTo);
-  }
-
-  sql += " ORDER BY i.id ASC, ip.outlet_id IS NULL DESC, ip.outlet_id ASC";
-
-  const [rows] = await pool.execute<RowDataPacket[]>(sql, values);
-
-  return rows.map((row) => ({
+  return rows.map((row: Record<string, unknown>) => ({
     id: Number(row.id),
     item_id: Number(row.item_id),
     item_sku: row.item_sku,

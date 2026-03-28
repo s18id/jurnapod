@@ -9,10 +9,10 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
-import { getDbPool } from "../../lib/db.js";
-import { errorResponse, successResponse } from "../../lib/response.js";
+import { authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
+import { errorResponse } from "../../lib/response.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
+import { checkDuplicateClientTx } from "../../lib/sync/check-duplicate.js";
 
 // Extend Hono context with auth
 declare module "hono" {
@@ -25,23 +25,6 @@ const CheckDuplicateRequestSchema = z.object({
   client_tx_id: z.string().uuid(),
   company_id: z.number().int().positive()
 });
-
-type PosTransactionRow = { id: number; created_at: string };
-
-async function checkDuplicateTransaction(clientTxId: string, companyId: number): Promise<{ id: number; created_at: string } | null> {
-  const dbPool = getDbPool();
-  const connection = await dbPool.getConnection();
-  try {
-    const [rows] = await connection.execute(
-      `SELECT id, created_at FROM pos_transactions WHERE company_id = ? AND client_tx_id = ? LIMIT 1`,
-      [companyId, clientTxId]
-    );
-    const row = (rows as PosTransactionRow[])[0];
-    return row ? { id: row.id, created_at: row.created_at } : null;
-  } finally {
-    connection.release();
-  }
-}
 
 const checkDuplicateRoutes = new Hono();
 
@@ -74,13 +57,17 @@ checkDuplicateRoutes.post("/", async (c) => {
       return errorResponse("FORBIDDEN", "Cannot check duplicates for other companies", 403);
     }
 
-    const existing = await checkDuplicateTransaction(client_tx_id, company_id);
+    const result = await checkDuplicateClientTx(company_id, client_tx_id);
 
-    if (existing) {
-      return successResponse({ exists: true, transaction_id: existing.id, created_at: existing.created_at });
+    if (result.isDuplicate) {
+      return c.json({
+        is_duplicate: true,
+        existing_id: result.existingId,
+        created_at: result.createdAt?.toISOString()
+      });
     }
 
-    return successResponse({ exists: false });
+    return c.json({ is_duplicate: false });
   } catch (error) {
     console.error("POST /sync/check-duplicate failed", { correlation_id: correlationId, error });
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to check duplicate", 500);

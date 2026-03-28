@@ -18,7 +18,11 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import { getDbPool } from "../lib/db.js";
+import {
+  listCompanyModules,
+  updateCompanyModule,
+  ModuleNotFoundError
+} from "../lib/settings-modules.js";
 import { setModuleRolePermission } from "../lib/users.js";
 import { readClientIp } from "../lib/request-meta.js";
 
@@ -74,22 +78,7 @@ modulesRoutes.get("/", async (c) => {
       return accessResult;
     }
 
-    const pool = getDbPool();
-    const [rows] = await pool.execute<any[]>(
-      `SELECT m.code, m.name, cm.enabled, cm.config_json
-       FROM modules m
-       INNER JOIN company_modules cm ON cm.module_id = m.id
-       WHERE cm.company_id = ?
-       ORDER BY m.code ASC`,
-      [auth.companyId]
-    );
-
-    const modules = rows.map((row) => ({
-      code: row.code,
-      name: row.name,
-      enabled: Boolean(row.enabled),
-      config_json: row.config_json
-    }));
+    const modules = await listCompanyModules(auth.companyId);
 
     return successResponse(modules);
   } catch (error) {
@@ -116,31 +105,20 @@ modulesRoutes.put("/", async (c) => {
     const payload = await c.req.json();
     const input = ModulesUpdateSchema.parse(payload);
 
-    const pool = getDbPool();
-
     for (const module of input.modules) {
-      // Get module_id from code
-      const [moduleRows] = await pool.execute<any[]>(
-        `SELECT id FROM modules WHERE code = ? LIMIT 1`,
-        [module.code]
-      );
-
-      if (moduleRows.length === 0) {
-        return errorResponse("NOT_FOUND", `Module ${module.code} not found`, 404);
+      try {
+        await updateCompanyModule(
+          auth.companyId,
+          module.code,
+          module.enabled,
+          module.config_json || null
+        );
+      } catch (error) {
+        if (error instanceof ModuleNotFoundError) {
+          return errorResponse("NOT_FOUND", error.message, 404);
+        }
+        throw error;
       }
-
-      const moduleId = moduleRows[0].id;
-
-      // Update or insert company_module
-      await pool.execute(
-        `INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at)
-         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-         ON DUPLICATE KEY UPDATE
-           enabled = VALUES(enabled),
-           config_json = VALUES(config_json),
-           updated_at = CURRENT_TIMESTAMP`,
-        [auth.companyId, moduleId, module.enabled ? 1 : 0, module.config_json || null]
-      );
     }
 
     return successResponse({ success: true });

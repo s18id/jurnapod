@@ -71,3 +71,35 @@ API server rules for auth, validation, posting triggers, persistence safety, and
 - `audit_logs.result` is compatibility/display only.
 - New queries must filter by `success` (`1` / `0`) instead of string `result`.
 - Migrations and tests must preserve this invariant.
+
+### Library Usage Rule
+
+Routes must delegate database operations to library modules:
+
+**Correct:**
+```typescript
+// routes/example.ts
+import { listItems } from "../lib/items.js";
+
+route.get("/", async (c) => {
+  const items = await listItems(companyId);
+  return c.json({ items });
+});
+```
+
+**Incorrect:**
+```typescript
+// routes/example.ts
+import { getDbPool } from "../lib/db.js";
+
+route.get("/", async (c) => {
+  const pool = getDbPool();
+  const [rows] = await pool.execute("SELECT * FROM items");  // ❌ No!
+  return c.json({ items: rows });
+});
+```
+
+**Flag in code review:**
+- Any `pool.execute()` in route files
+- Any SQL strings in routes
+- Routes importing `getDbPool` directly

@@ -92,3 +92,16 @@ export {
   type BackpressureEventType,
   type BackpressureStreamOptions,
 } from './streaming.js';
+
+// Query Builder
+export {
+  buildExportQuery,
+  executeExportQuery,
+  executeExportQueryWithTransform,
+  getAvailableColumns,
+  validateExportColumns,
+  type ExportableEntity,
+  type ExportFilters,
+  type ExportBuildOptions,
+  type BuiltQuery,
+} from './query-builder.js';

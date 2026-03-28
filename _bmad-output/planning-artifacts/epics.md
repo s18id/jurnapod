@@ -193,6 +193,22 @@ Replace direct INSERT statements with library functions.
 
 ---
 
-**Total: 11 epics | ~91 stories | All done**
+## Epic 12: Standardize Library Usage for All Routes
+
+Establish library-first architecture by moving all database operations from routes to library modules.
+
+### Story 12.1: Create lib/settings-modules.ts Library
+### Story 12.2: Refactor settings-modules.ts Route
+### Story 12.3: Create lib/sync/check-duplicate.ts Library
+### Story 12.4: Refactor sync/check-duplicate.ts Route
+### Story 12.5: Extend lib/export/ for Route Queries
+### Story 12.6: Refactor export.ts Route
+### Story 12.7: Epic 12 Documentation & ADR Update
+
+**Path:** [epic-12](../implementation-artifacts/stories/epic-12/epic-12.md)
+
+---
+
+**Total: 12 epics | ~98 stories | 11 done, 1 backlog**
 
 _Last Updated: 2026-03-28_
