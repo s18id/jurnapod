@@ -9,6 +9,7 @@ import {
 } from "../../tests/integration/integration-harness.mjs";
 import { getDbPool, closeDbPool } from "./db";
 import { createPayment, DatabaseConflictError, PaymentAllocationError } from "./sales";
+import { createAccount } from "./accounts.js";
 import type { RowDataPacket } from "mysql2";
 import { randomUUID } from "node:crypto";
 
@@ -59,20 +60,26 @@ test(
       userId = Number(ownerRows[0].user_id);
 
       // Create two payable accounts for split tests
-      const [accountAResult] = await pool.execute(
-        `INSERT INTO accounts (company_id, code, name, is_payable)
-         VALUES (?, ?, ?, 1)`,
-        [companyId, `PAY-${runId}-A`, `Payable Account A ${runId}`]
-      );
-      accountAId = Number((accountAResult as { insertId: number }).insertId);
+      const accountA = await createAccount({
+        company_id: companyId,
+        code: `PAY-${runId}-A`,
+        name: `Payable Account A ${runId}`,
+        is_group: false,
+        is_payable: true,
+        is_active: true
+      });
+      accountAId = accountA.id;
       createdAccountIds.push(accountAId);
 
-      const [accountBResult] = await pool.execute(
-        `INSERT INTO accounts (company_id, code, name, is_payable)
-         VALUES (?, ?, ?, 1)`,
-        [companyId, `PAY-${runId}-B`, `Payable Account B ${runId}`]
-      );
-      accountBId = Number((accountBResult as { insertId: number }).insertId);
+      const accountB = await createAccount({
+        company_id: companyId,
+        code: `PAY-${runId}-B`,
+        name: `Payable Account B ${runId}`,
+        is_group: false,
+        is_payable: true,
+        is_active: true
+      });
+      accountBId = accountB.id;
       createdAccountIds.push(accountBId);
 
       // Create an invoice (POSTED status required for payment)
@@ -319,12 +326,15 @@ test(
       userId = Number(ownerRows[0].user_id);
 
       // Create payable account
-      const [accountResult] = await pool.execute(
-        `INSERT INTO accounts (company_id, code, name, is_payable)
-         VALUES (?, ?, ?, 1)`,
-        [companyId, `PAY-${runId}`, `Payable Account ${runId}`]
-      );
-      accountId = Number((accountResult as { insertId: number }).insertId);
+      const account = await createAccount({
+        company_id: companyId,
+        code: `PAY-${runId}`,
+        name: `Payable Account ${runId}`,
+        is_group: false,
+        is_payable: true,
+        is_active: true
+      });
+      accountId = account.id;
       createdAccountIds.push(accountId);
 
       // Create an invoice

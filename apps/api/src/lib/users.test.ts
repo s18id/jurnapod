@@ -20,6 +20,7 @@ import {
   SuperAdminProtectionError,
   CrossCompanyAccessError
 } from "./users";
+import { createOutletBasic } from "./outlets.js";
 import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
@@ -311,12 +312,12 @@ test(
       ownerUserId = companyRows[0].owner_id;
 
       // Create a test outlet
-      const [outletResult] = await pool.execute<RowDataPacket[]>(
-        `INSERT INTO outlets (company_id, code, name, created_at, updated_at)
-         VALUES (?, ?, ?, NOW(), NOW())`,
-        [companyId, `TEST_OUTLET_${runId}`, `Test Outlet ${runId}`]
-      );
-      testOutletId = (outletResult as any).insertId;
+      const outlet = await createOutletBasic({
+        company_id: companyId,
+        code: `TEST_OUTLET_${runId}`.slice(0, 20),
+        name: `Test Outlet ${runId}`
+      });
+      testOutletId = outlet.id;
 
       // Test that owner has access to the new outlet using role-based logic
       const { userHasOutletAccess } = await import("./auth.js");

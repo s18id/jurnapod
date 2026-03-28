@@ -20,6 +20,7 @@ import { createItemPrice } from "./item-prices/index.js";
 import { createCompanyBasic } from "./companies.js";
 import { createOutletBasic } from "./outlets.js";
 import { createUserBasic } from "./users.js";
+import { createAccount } from "./accounts.js";
 
 // Dynamic IDs - created in before() hook
 let TEST_COMPANY_ID: number;
@@ -75,13 +76,22 @@ async function createTestAccount(
   
   const accountTypeId = (typeRows as any[])[0].id;
   
-  const [result] = await conn.execute(
-    `INSERT INTO accounts (company_id, code, name, account_type_id, normal_balance, is_active)
-     VALUES (?, ?, ?, ?, ?, 1)`,
-    [companyId, code, name, accountTypeId, normalBalance]
-  );
+  // Map 'C' to 'K' for schema compatibility (schema uses 'K' for Kredit/Credit)
+  const mappedNormalBalance = normalBalance === 'C' ? 'K' : normalBalance;
   
-  return (result as any).insertId;
+  // Use library function instead of direct INSERT
+  const account = await createAccount({
+    company_id: companyId,
+    code: code,
+    name: name,
+    account_type_id: accountTypeId,
+    normal_balance: mappedNormalBalance,
+    is_group: false,
+    is_payable: false,
+    is_active: true
+  });
+  
+  return account.id;
 }
 
 async function createInventoryTransaction(

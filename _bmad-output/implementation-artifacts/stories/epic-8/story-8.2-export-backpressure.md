@@ -1,6 +1,6 @@
 # Story 8.2: Export Streaming Backpressure Handling
 
-**Status:** ready-for-dev
+**Status:** done
 **Epic:** Epic 8: Production Scale & POS Variant Sync
 **Story ID:** 8-2-export-backpressure-handling
 

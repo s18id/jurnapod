@@ -129,6 +129,9 @@ npm run test:unit:single -w @jurnapod/api "src/lib/*.test.ts"
 
 # Run a specific test file
 npm run test:unit:single -w @jurnapod/api src/routes/sync/sync.test.ts
+
+# Run multiple specific test files (space-delimited, each quoted)
+npm run test:unit:single -w @jurnapod/api "src/lib/a.test.ts" "src/lib/b.test.ts" "src/lib/c.test.ts"
 ```
 
 **API Type Check:**
@@ -316,7 +319,7 @@ Story completion notes MUST include:
 
 BMAD uses the following model strategy:
 - **Primary**: `minimax-coding-plan/MiniMax-M2.7` (your MiniMax.io subscription) - 75% of agents
-- **Context-critical**: `opencode-go/kimi-k2.5` (integration, orchestration, review, architecture) - 25% of agents
+- **Context-critical**: `kimi-for-coding/k2p5` (integration, orchestration, review, architecture) - 25% of agents
 - **Code tasks**: `openai/gpt-5.1-codex-mini` (when available - currently exhausted)
 
 **Current Week Status**: Codex tokens exhausted. All code tasks using kimi-k2.5 with decomposition pattern.

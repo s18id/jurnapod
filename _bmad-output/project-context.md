@@ -1,7 +1,7 @@
 ---
 project_name: 'jurnapod'
 user_name: 'Ahmad'
-date: '2026-03-27T00:00:00Z'
+date: '2026-03-28T00:00:00Z'
 sections_completed: ['technology_stack', 'language_specific_rules', 'framework_specific_rules', 'testing_rules', 'code_quality_rules', 'development_workflow_rules', 'lessons_learned']
 existing_patterns_found: 18
 status: 'complete'
@@ -220,10 +220,42 @@ _This file contains critical rules and patterns that AI agents must follow when 
 #### Running Tests
 - **Single file first**: Always run a single test file before running the full suite
   ```bash
-  npm run test:single <path-to-test-file>
+  npm run test:unit:single -w @jurnapod/api <path-to-test-file>
+  ```
+- **Multiple files**: Run several specific test files (space-delimited, each quoted)
+  ```bash
+  npm run test:unit:single -w @jurnapod/api "src/lib/a.test.ts" "src/lib/b.test.ts" "src/lib/c.test.ts"
+  ```
+- **Shuffle test order**: Detect hidden test dependencies
+  ```bash
+  npm run test:unit:shuffle -w @jurnapod/api
+  npm run test:unit:single:shuffle -w @jurnapod/api "src/lib/a.test.ts"
   ```
 - **Filter output**: Use `tail` / `grep` on test output to isolate failures
 - **Full suite**: Run full test only after single-file verification passes
+
+#### ESLint Test Rules (apps/api)
+Custom ESLint rules enforce test code quality:
+
+| Rule | Purpose | Severity |
+|------|---------|----------|
+| `jurnapod-test-rules/no-hardcoded-ids` | Ban `company_id=1`, `companyId: 1` patterns | Error |
+| `jurnapod-test-rules/no-raw-sql-insert-items` | Ban `INSERT INTO items` - use `createItem()` | Error |
+
+**Rule Location**: `eslint-plugin-jurnapod-test-rules.mjs` (repo root)
+
+**Example violations caught**:
+```typescript
+// ❌ Hardcoded ID - use createCompanyBasic() instead
+await pool.execute(`SELECT * FROM items WHERE company_id = 1`);
+
+// ❌ Raw INSERT - use createItem() instead
+await pool.execute(`INSERT INTO items (company_id, name) VALUES (?, ?)`, [companyId, name]);
+
+// ✅ Correct - library functions
+const company = await createCompanyBasic({ code: `TEST-${runId}`, name: "Test" });
+const item = await createItem(company.id, { name: "Test Item", type: "PRODUCT" });
+```
 
 ### Code Quality & Style Rules
 
@@ -341,6 +373,60 @@ All stories require before marking DONE:
 - Epic status transitions: `backlog → in-progress → done`
 - Story status transitions: `backlog → ready-for-dev → in-progress → review → done`
 
+#### Epic Documentation Structure
+
+| File | Purpose | Content |
+|------|---------|---------|
+| `epics.md` | Central index | Epic titles, story titles (for plugin parsing) |
+| `epic-{N}.md` | Full definition | Goals, context, detailed stories, success criteria, outcomes |
+| `epic-{N}.retrospective.md` | Lessons learned | What went well, improvements, action items |
+
+**Note:** `epics.md` is intentionally minimal (titles only) for plugin parsing. Full epic details live in individual `epic-{N}.md` files.
+
+#### Directory Paths
+
+```
+_bmad-output/
+├── planning-artifacts/
+│   └── epics.md                    # Central index (epic/story titles only)
+│
+└── implementation-artifacts/
+    ├── sprint-status.yaml          # Story status tracking
+    │
+    └── stories/
+        └── epic-{N}/               # One folder per epic
+            ├── epic-{N}.md         # Full epic definition
+            ├── epic-{N}.retrospective.md
+            ├── story-{N}.{M}.md    # Story files
+            └── story-{N}.{M}.completion.md
+```
+
+**Quick Reference:**
+- **Index**: `_bmad-output/planning-artifacts/epics.md`
+- **Epic Definitions**: `_bmad-output/implementation-artifacts/stories/epic-{N}/epic-{N}.md`
+- **Story Files**: `_bmad-output/implementation-artifacts/stories/epic-{N}/story-{N}.{M}.md`
+
+#### Epic Naming Guidelines
+Epic names should clearly communicate purpose and scope:
+
+| Epic Type | Naming Pattern | Example |
+|-----------|---------------|---------|
+| **Feature** | `{Feature Area} {Action}` | "Sync Routes & POS Offline-First" |
+| **Refactoring** | `{Action} {Target}` | "Refactor Remaining Test Files" |
+| **Infrastructure** | `{Scope} {Goal}` | "Import/Export Infrastructure" |
+| **Follow-up/Cleanup** | `{Action} {Epic N} {Item}` | "Epic 5 Follow-up: Integration Tests" |
+
+**Anti-patterns to avoid:**
+- ❌ "Continue X" (implies incompleteness, use specific goal instead)
+- ❌ "Fix Tests" (too vague, specify what kind of fixes)
+- ❌ Generic verbs like "Improve" or "Update" without scope
+
+**Epic Definition Requirements:**
+Every epic MUST have:
+1. `epic-{N}.md` - Definition file with goals, stories, success criteria
+2. `epic-{N}.retrospective.md` - Retrospective with lessons learned
+3. All stories tracked in sprint-status.yaml with completion status
+
 ---
 
 ## Lessons Learned (Epic 6 & Prior)
@@ -373,6 +459,29 @@ _This section captures key learnings to inform future development. AI agents sho
 3. **TD tracking mandatory** - Any technical debt created during a story must be added to `docs/adr/TECHNICAL-DEBT.md` immediately
 4. **Epic retro → next epic follow-up** - Address previous epic's retrospective items in current epic planning
 
+### Epic 11 Lessons (Test Refactoring & Library Consolidation)
+
+| Lesson | Evidence | Impact |
+|--------|----------|--------|
+| **Use library functions over raw SQL in tests** | Story 11.5 replaced 34 `INSERT INTO items` with `createItem()` | Centralizes schema changes; tests break less when columns are added |
+| **Test factory functions must support common fields** | `low_stock_threshold` required follow-up UPDATE after `createItem()` | Library functions should expose all commonly-used fields to avoid workarounds |
+
+### Epic Numbering Note
+
+**Epic 1 is a merged epic**: Originally "Epic 0: Infrastructure" and "Epic 1: Continue Kysely Migration" were separate. They have been merged into **Epic 1: Kysely ORM Migration** to maintain 1-based numbering for plugin compatibility. All stories from the original Epic 0 are now numbered 1.1-1.6, and original Epic 1 stories are 1.7-1.9.
+
+### Test Library Patterns (Established)
+
+#### Item Creation in Tests
+- **Use**: `createItem(companyId, { name, type, sku?, ... })` from `"@/lib/items/index.js"`
+- **Don't**: Raw `INSERT INTO items` statements
+- **Rationale**: Centralizes default value handling, makes schema changes transparent to tests
+- **Workaround pattern**: For fields not in `createItem()` signature, use follow-up UPDATE:
+  ```typescript
+  const item = await createItem(companyId, { name: "Test", type: "PRODUCT" });
+  await pool.execute(`UPDATE items SET low_stock_threshold = ? WHERE id = ?`, [10, item.id]);
+  ```
+
 ---
 
 ## Usage Guidelines
@@ -391,4 +500,4 @@ _This section captures key learnings to inform future development. AI agents sho
 
 ---
 
-_Last Updated: 2026-03-27_
+_Last Updated: 2026-03-28

@@ -1,306 +1,198 @@
-# Epic 6: Technical Debt Consolidation & Modernization
+# Epics Index
 
-**Goal:** Address accumulated technical debt from Epics 0-5, reduce code complexity, improve type safety, and establish sustainable patterns for future development.
-
-**Business Value:**
-- Faster feature development as codebase becomes more maintainable
-- Reduced bug surface area from type-unsafe code paths
-- Better performance from optimized data access patterns
-- Improved developer experience with cleaner architecture
-- Lower technical risk for future scaling
-
-**Success Metrics:**
-- Reduce `as any` casts in production code by 80%
-- Extract monolith files (>2000 lines) into focused domain modules
-- All critical paths have route-level test coverage
-- Zero deprecated public APIs in use
-- MySQL/MariaDB compatibility verified across all schema changes
+Central index for all Jurnapod epics.
 
 ---
 
-## Story 6.1: Consolidate Sales Module (4000+ lines monolith)
+## Epic List
 
-**Context:**
-
-`apps/api/src/lib/sales.ts` is 4,120 lines handling:
-- Invoice creation and validation
-- Payment processing
-- Journal posting
-- Receipt generation
-- Credit/Debit notes
-- Split payments
-
-This file was the original monolith and has accumulated significant complexity. SPLIT into 5 sub-stories for delegatable work.
-
-**Sub-Stories:**
-
-| Story | Focus | Effort | Dependencies |
-|-------|-------|--------|--------------|
-| 6.1a | Invoice types and functions extraction | 1.5 days | None |
-| 6.1b | Payment types and functions extraction | 1.5 days | None |
-| 6.1c | Order types and functions extraction | 1.5 days | 6.1a |
-| 6.1d | Credit note types and functions extraction | 1 day | None |
-| 6.1e | Shared utilities and final consolidation | 1 day | 6.1a, 6.1b, 6.1c, 6.1d |
-
-**Total Estimated Effort:** 6.5 days
+Epics 1-11 (11 total, all completed)
 
 ---
 
-## Story 6.2: Consolidate Service Sessions Module (2000+ lines)
+## Epic 1: Kysely ORM Migration
 
-**Context:**
+Setup Kysely ORM infrastructure, migrate initial routes, and continue with complex financial and relational data patterns.
 
-`apps/api/src/lib/service-sessions.ts` is 2,051 lines handling dine-in service sessions with multi-cashier support.
+### Story 1.1: Kysely Setup and Type Generation
+### Story 1.2: DbClient Integration
+### Story 1.3: Tax Rates Route Migration
+### Story 1.4: Roles Route Migration
+### Story 1.5: Accounts Route Migration
+### Story 1.6: ADR Update and Documentation
+### Story 1.7: Journals Route Migration
+### Story 1.8: Account Types Route Migration
+### Story 1.9: Epic 1 Documentation
 
-**Acceptance Criteria:**
-
-**AC1: Sub-module Extraction**
-- Extract session lifecycle into `lib/service-sessions/lifecycle.ts`
-- Extract line management into `lib/service-sessions/lines.ts`
-- Extract checkpoint/finalize logic into `lib/service-sessions/checkpoint.ts`
-- Clear `index.ts` public interface
-
-**AC2: Type Safety**
-- Replace `as any` casts with typed queries
-- Add runtime validation for session state transitions
-
-**Estimated Effort:** 3 days
-
-**Risk Level:** Medium (POS-facing but isolated)
+**Path:** [epic-1](../implementation-artifacts/stories/epic-1/epic-1.md)
 
 ---
 
-## Story 6.3: Type Safety Audit - Remove `as any` Casts
+## Epic 2: Sync Routes & POS Offline-First
 
-**Context:**
+Implement sync push/pull with layered architecture and offline-first guarantees.
 
-67 instances of `as any` found across codebase. While some are acceptable in test files, production code casts represent type safety debt that can hide bugs.
+### Story 2.1: Sync Push Layered Architecture
+### Story 2.2: Sync Pull Layered Architecture
+### Story 2.3: Sync Push Kysely Migration
+### Story 2.4: Sync Pull Kysely Migration
+### Story 2.5: Reports Routes Migration
+### Story 2.6: TD-001 COGS Posting N+1 Fix
+### Story 2.7: TD-002 COGS Calculation N+1 Fix
+### Story 2.8: TD-003 Recipe Composition N+1 Fix
+### Story 2.9: Epic 2 Documentation
 
-**Acceptance Criteria:**
-
-**AC1: Production Code Audit**
-- Review all `as any` casts in production code (not tests)
-- Categorize: necessary (library interop), should fix, can defer
-- Fix "should fix" items with proper types
-
-**AC2: Priority Fixes**
-- `batch-processor.ts` connection cast
-- `recipe-composition.ts` execute cast
-- `cost-tracking.ts` multiple casts
-- `reports.ts` report type casts
-
-**AC3: Pattern Documentation**
-- Document when `as any` is acceptable
-- Add ESLint rule to prevent new `as any` in production
-
-**Estimated Effort:** 2 days
-
-**Risk Level:** Low (type safety improvement)
+**Path:** [epic-2](../implementation-artifacts/stories/epic-2/epic-2.md)
 
 ---
 
-## Story 6.4: Deprecation Cleanup
+## Epic 3: Master Data Domain Extraction
 
-**Context:**
+Extract master data modules from monolith into focused domain modules.
 
-Two deprecated items identified:
-1. `date-helpers.ts` - `toLocalDate()` deprecated in favor of `toUtcInstant()`
-2. `auth.ts` - `checkUserAccess` deprecated in favor of `checkAccess`
+### Story 3.1: Item Groups Domain Extraction
+### Story 3.2: Items Domain Extraction
+### Story 3.3: Item Prices Domain Extraction
+### Story 3.4: Supplies Domain Extraction
+### Story 3.5: Fixed Assets Domain Extraction
+### Story 3.6: Sync Master Data Finalization
 
-**Acceptance Criteria:**
-
-**AC1: Date Helper Migration**
-- Update all callers to use `toUtcInstant()`
-- Remove deprecated `toLocalDate()` function
-- Update ADR-0007 if needed
-
-**AC2: Auth Helper Migration**
-- Update all callers to use `checkAccess()`
-- Remove deprecated `checkUserAccess()` function
-- Update AGENTS.md auth section if needed
-
-**AC3: Documentation**
-- Search codebase for any remaining references to deprecated functions
-- Update any docs referencing deprecated functions
-
-**Estimated Effort:** 1 day
-
-**Risk Level:** Low (straightforward replacement)
+**Path:** [epic-3](../implementation-artifacts/stories/epic-3/epic-3.md)
 
 ---
 
-## Story 6.5: Reservation System Domain Extraction
+## Epic 4: Technical Debt Cleanup & Process Improvement
 
-**Context:**
+Address retro action items and improve development processes.
 
-`apps/api/src/lib/reservations.ts` is 1,849 lines handling:
-- Reservation CRUD
-- Table assignment
-- Availability checking
-- Large party support (groups)
-- Walk-in management
+### Story 4.1: Extract Shared Master Data Utilities
+### Story 4.2: Backfill Fixed Assets Route Tests
+### Story 4.3: Document Epic 3 Product Enablement
+### Story 4.4: Update Story Template and Sync Checklist
 
-This is a candidate for domain extraction similar to Epic 3's items/prices extraction.
-
-**Acceptance Criteria:**
-
-**AC1: Module Extraction**
-- Extract reservations into `lib/reservations/` domain module
-- Clear `index.ts` public interface
-- Maintain all existing functionality
-
-**AC2: Route Migration**
-- Update routes to use new domain module
-- Maintain API compatibility
-
-**AC3: Test Coverage**
-- Add unit tests for reservation domain
-- Maintain 100% passing tests
-
-**Estimated Effort:** 3 days
-
-**Risk Level:** Medium (user-facing feature)
+**Path:** [epic-4](../implementation-artifacts/stories/epic-4/epic-4.md)
 
 ---
 
-## Story 6.6: ADR Documentation & Debt Registry
+## Epic 5: Import/Export Infrastructure
 
-**Context:**
+Build reusable import/export frameworks with UI components.
 
-As the codebase matures, technical debt needs active tracking. ADR-0010 was created for Epic 5 but there's no systematic approach to tracking debt.
+### Story 5.1: Import Infrastructure Core
+### Story 5.2: Export Infrastructure Core
+### Story 5.3: Item Price Import UI
+### Story 5.4: Item Price Export UI
 
-**Acceptance Criteria:**
-
-**AC1: Debt Registry**
-- Create `docs/adr/TECHNICAL-DEBT.md` as living debt registry
-- Catalog all known debt items across epics
-- Link to specific ADRs for detailed tracking
-
-**AC2: Review Process**
-- Document process for adding new debt items
-- Define priority levels (P1/P2/P3)
-- Set review cadence (per-epic or quarterly)
-
-**AC3: Debt Prevention**
-- Add debt items to story templates as checkboxes
-- Require debt review before closing epics
-
-**Estimated Effort:** 1 day
-
-**Risk Level:** None (process improvement)
+**Path:** [epic-5](../implementation-artifacts/stories/epic-5/epic-5.md)
 
 ---
 
-## Story 6.7: Epic 5 Follow-Up Actions
+## Epic 6: Technical Debt Consolidation & Modernization
 
-**Context:**
+Address accumulated debt, extract monoliths, improve type safety.
 
-Epic 5 retrospective identified specific follow-up actions that weren't completed:
+### Story 6.1a: Invoice Types Extraction
+### Story 6.1b: Payment Types Extraction
+### Story 6.1c: Order Types Extraction
+### Story 6.1d: Credit Note Extraction
+### Story 6.1e: Shared Utilities Consolidation
+### Story 6.2a: Service Sessions Types
+### Story 6.2b: Service Sessions Lifecycle
+### Story 6.2c: Service Sessions Lines
+### Story 6.2d: Service Sessions Checkpoint
+### Story 6.3: Type Safety Audit
+### Story 6.4: Deprecation Cleanup
+### Story 6.5a: Reservations Types
+### Story 6.5b: Reservations CRUD
+### Story 6.5c: Reservations Utils Availability
+### Story 6.5d: Reservations Status
+### Story 6.6: ADR Documentation
+### Story 6.7: Epic 5 Follow-Up
 
-**Acceptance Criteria:**
-
-**AC1: Integration Tests (P1)**
-- Add API-level integration tests for import/export endpoints
-- Cover: upload → validate → apply flow
-- Cover: export with filters
-
-**AC2: UI Completeness (P2)**
-- Add column reordering in export UI
-- Add row count preview before export
-- Add retry option on export errors
-
-**AC3: Epic 5 ADR Update**
-- Mark completed follow-ups in ADR-0010
-- Update status of remaining debt items
-
-**Estimated Effort:** 2 days
-
-**Risk Level:** Low (feature completion)
+**Path:** [epic-6](../implementation-artifacts/stories/epic-6/epic-6.md)
 
 ---
 
-## Technical Debt Items to Address
+## Epic 7: Operational Hardening & Production Readiness
 
-### From Previous Epics
+Production reliability improvements and comprehensive test coverage.
 
-| TD | Description | Priority | Epic |
-|----|-------------|----------|------|
-| TD-1 | CSV parsing loads entire file | Medium | Epic 5 |
-| TD-2 | Excel parsing loads entire workbook | Medium | Epic 5 |
-| TD-5 | FK validation may cause N+1 | Medium | Epic 5 |
-| TD-6 | No import checkpoint/resume | Low | Epic 5 |
-| TD-7 | Export streaming backpressure | Low | Epic 5 |
-| TD-8 | No progress persistence | Low | Epic 5 |
+### Story 7.1: TDB Registry Fix Health Check Template
+### Story 7.2: Import Session Persistence MySQL
+### Story 7.3: Batch Failure Recovery Session Hardening
+### Story 7.4: Fixed Assets Route Test Coverage
+### Story 7.5: Streaming Parser Optimization
+### Story 7.6: FK Validation Batch Optimization
+### Story 7.7: Export Settings Route Test Coverage
+### Story 7.8: Export Large Dataset Protection
 
-### From This Epic
-
-| TD | Description | Priority |
-|----|-------------|----------|
-| TD-9 | `sales.ts` monolith (4120 lines) | High |
-| TD-10 | `service-sessions.ts` monolith (2051 lines) | Medium |
-| TD-11 | `reservations.ts` monolith (1849 lines) | Medium |
-| TD-12 | `as any` casts in production code | Medium |
-| TD-13 | Deprecated date-helpers functions | Low |
-| TD-14 | Deprecated auth functions | Low |
+**Path:** [epic-7](../implementation-artifacts/stories/epic-7/epic-7.md)
 
 ---
 
-## Estimated Timeline
+## Epic 8: Production Scale & POS Variant Sync
 
-| Story | Effort | Dependencies |
-|-------|--------|--------------|
-| 6.1 | 4 days | None |
-| 6.2 | 3 days | None |
-| 6.3 | 2 days | None |
-| 6.4 | 1 day | None |
-| 6.5 | 3 days | None |
-| 6.6 | 1 day | None |
-| 6.7 | 2 days | 6.1, 6.2, 6.5 |
+Scale improvements and POS variant synchronization capabilities.
 
-**Total Estimated Effort:** 16 days (4 weeks)
+### Story 8.1: Import Resume Checkpoint
+### Story 8.2: Export Streaming Backpressure Handling
+### Story 8.3: Progress Persistence
+### Story 8.5: Variant Price Sync
+### Story 8.6: Variant Selection POS
+### Story 8.7: Variant Stock Tracking
+### Story 8.8: Variant Sync Push
+### Story 8.9: Performance Monitoring
+### Story 8.10: Load Testing Framework (deferred)
 
----
-
-## Files to Create/Modify
-
-### New Files
-- `apps/api/src/lib/invoices/` - Invoice domain module
-- `apps/api/src/lib/payments/` - Payment domain module
-- `apps/api/src/lib/receipts/` - Receipt domain module
-- `apps/api/src/lib/service-sessions/lifecycle.ts`
-- `apps/api/src/lib/service-sessions/lines.ts`
-- `apps/api/src/lib/service-sessions/checkpoint.ts`
-- `apps/api/src/lib/reservations/` - Reservations domain module
-- `docs/adr/TECHNICAL-DEBT.md` - Debt registry
-
-### Files to Modify
-- `apps/api/src/lib/sales.ts` - Extract sub-modules
-- `apps/api/src/lib/service-sessions.ts` - Extract sub-modules
-- `apps/api/src/lib/reservations.ts` - Extract domain
-- `apps/api/src/lib/date-helpers.ts` - Remove deprecated
-- `apps/api/src/lib/auth.ts` - Remove deprecated
-- `apps/api/src/lib/batch-processor.ts` - Type fixes
-- `apps/api/src/lib/recipe-composition.ts` - Type fixes
-- `apps/api/src/lib/cost-tracking.ts` - Type fixes
-- `apps/api/src/routes/reports.ts` - Type fixes
-- `docs/adr/ADR-0010.md` - Update Epic 5 debt
-- `docs/adr/TECHNICAL-DEBT.md` - New debt registry
+**Path:** [epic-8](../implementation-artifacts/stories/epic-8/epic-8.md)
 
 ---
 
-## Risks & Mitigations
+## Epic 9: Use Library Functions in Tests
 
-| Risk | Mitigation |
-|------|------------|
-| Refactoring sales module introduces bugs | Comprehensive test suite; incremental extraction |
-| Breaking changes to invoice API | Maintain backward compatibility; version if needed |
-| Scope creep on "type safety" | Strict AC definitions; defer if needed |
-| Developer fatigue from debt work | Rotate between debt and features |
+Refactor tests to use library functions instead of direct SQL.
+
+### Story 9.1: Audit Library Functions
+### Story 9.2: Refactor Company Item Tests
+### Story 9.3: Refactor Import Progress Tests
+### Story 9.4: Refactor Variant Sync Tests
+### Story 9.5: Refactor User Auth Tests
+### Story 9.6: Refactor Route Tests
+### Story 9.7: Batch Refactor Remaining
+### Story 9.8: Add Missing Library Functions
+### Story 9.9: Enforce Library Usage
+
+**Path:** [epic-9](../implementation-artifacts/stories/epic-9/epic-9.md)
 
 ---
 
-## Related Documentation
+## Epic 10: Fix Critical Hardcoded ID Tests
 
-- [Epic 3 Retrospective](../_bmad-output/implementation-artifacts/epic-3-retro-2026-03-26.md) - Pattern for domain extraction
-- [Epic 5 Retrospective](./epic-5-retro-2026-03-26.md) - Follow-up actions
-- [ADR-0010: Import/Export Technical Debt](../docs/adr/ADR-0010-import-export-technical-debt.md)
+Fix brittle tests using hardcoded IDs with dynamic fixture creation.
+
+### Story 10.1: Add createOutletBasic
+### Story 10.2: Refactor Variant Stock Tests
+### Story 10.3: Refactor Services Stock Tests
+### Story 10.4: Refactor Routes Stock Tests
+
+**Path:** [epic-10](../implementation-artifacts/stories/epic-10/epic-10.md)
+
+---
+
+## Epic 11: Refactor Remaining Test Files
+
+Replace direct INSERT statements with library functions.
+
+### Story 11.1: Refactor Cost Tracking Tests
+### Story 11.2: Refactor COGS Posting Tests
+### Story 11.3: Refactor Users Auth Tests
+### Story 11.4: Refactor Remaining Tests
+### Story 11.5: Replace INSERT items with createItem()
+
+**Path:** [epic-11](../implementation-artifacts/stories/epic-11/epic-11.md)
+
+---
+
+**Total: 11 epics | ~91 stories | All done**
+
+_Last Updated: 2026-03-28_

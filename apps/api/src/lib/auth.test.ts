@@ -7,6 +7,7 @@ import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-h
 import { buildPermissionMask, checkUserAccess } from "./auth";
 import { closeDbPool, getDbPool } from "./db";
 import { createCompanyBasic } from "./companies";
+import { createOutletBasic } from "./outlets.js";
 import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
@@ -92,20 +93,20 @@ test(
       const outletACode = `ACL-A-${runId}`.slice(0, 32).toUpperCase();
       const outletBCode = `ACL-B-${runId}`.slice(0, 32).toUpperCase();
 
-      const [outletAResult] = await pool.execute(
-        `INSERT INTO outlets (company_id, code, name)
-         VALUES (?, ?, ?)`,
-        [companyId, outletACode, `ACL Outlet A ${runId}`]
-      );
-      outletAId = Number((outletAResult as { insertId: number }).insertId);
+      const outletA = await createOutletBasic({
+        company_id: companyId,
+        code: outletACode,
+        name: `ACL Outlet A ${runId}`
+      });
+      outletAId = outletA.id;
       createdOutletIds.push(outletAId);
 
-      const [outletBResult] = await pool.execute(
-        `INSERT INTO outlets (company_id, code, name)
-         VALUES (?, ?, ?)`,
-        [companyId, outletBCode, `ACL Outlet B ${runId}`]
-      );
-      outletBId = Number((outletBResult as { insertId: number }).insertId);
+      const outletB = await createOutletBasic({
+        company_id: companyId,
+        code: outletBCode,
+        name: `ACL Outlet B ${runId}`
+      });
+      outletBId = outletB.id;
       createdOutletIds.push(outletBId);
 
       const [globalOwnerInsert] = await pool.execute(

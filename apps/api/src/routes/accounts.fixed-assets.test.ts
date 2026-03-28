@@ -50,6 +50,7 @@ import {
 } from "../lib/fixed-assets/index.js";
 import { DatabaseConflictError, DatabaseReferenceError } from "../lib/master-data-errors.js";
 import { createCompanyBasic } from "../lib/companies.js";
+import { createOutletBasic } from "../lib/outlets.js";
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
 
 loadEnvIfPresent();
@@ -105,11 +106,12 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
     });
     testCompany2Id = company2.id;
 
-    const [outlet2Result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO outlets (company_id, code, name) VALUES (?, ?, ?)`,
-      [testCompany2Id, `T2OUT-${runId}`.slice(0, 20), `Test Outlet 2 ${runId}`]
-    );
-    testOutlet2Id = Number(outlet2Result.insertId);
+    const outlet2 = await createOutletBasic({
+      company_id: testCompany2Id,
+      code: `T2OUT-${runId}`.slice(0, 20),
+      name: `Test Outlet 2 ${runId}`
+    });
+    testOutlet2Id = outlet2.id;
 
     const apiPort = await getFreePort();
     baseUrl = `http://127.0.0.1:${apiPort}`;
