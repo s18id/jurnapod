@@ -107,22 +107,28 @@ npm run test:unit -w @jurnapod/api
 **Run a Single Test File (recommended for development):**
 ```bash
 cd /home/ahmad/jurnapod
-npm run test:single <path-to-test-file>
+npm run test:unit:single -w @jurnapod/api <path-to-test-file-or-directory>
 ```
 
 **Examples:**
 ```bash
 # Run sync push tests
-npm run test:single apps/api/src/routes/sync/push.test.ts
+npm run test:unit:single -w @jurnapod/api src/routes/sync/push.test.ts
 
 # Run sync pull tests
-npm run test:single apps/api/src/routes/sync/pull.test.ts
+npm run test:unit:single -w @jurnapod/api src/routes/sync/pull.test.ts
 
 # Run auth tests
-npm run test:single apps/api/src/routes/auth.test.ts
+npm run test:unit:single -w @jurnapod/api src/lib/auth.test.ts
+
+# Run all tests in a directory
+npm run test:unit:single -w @jurnapod/api src/routes/sync/
+
+# Run tests matching a glob pattern
+npm run test:unit:single -w @jurnapod/api "src/lib/*.test.ts"
 
 # Run a specific test file
-npm run test:single apps/api/src/routes/sync/sync.test.ts
+npm run test:unit:single -w @jurnapod/api src/routes/sync/sync.test.ts
 ```
 
 **API Type Check:**
@@ -245,7 +251,7 @@ npm run qa:e2e -w @jurnapod/pos
 
 | Workspace | Type Check | Build | Lint | Unit Tests | Single Test | E2E Tests |
 |-----------|------------|-------|------|------------|-------------|-----------|
-| **API** | `npm run typecheck -w @jurnapod/api` | `npm run build -w @jurnapod/api` | `npm run lint -w @jurnapod/api` | `npm run test:unit -w @jurnapod/api` | `npm run test:single <file>` | — |
+| **API** | `npm run typecheck -w @jurnapod/api` | `npm run build -w @jurnapod/api` | `npm run lint -w @jurnapod/api` | `npm run test:unit -w @jurnapod/api` | `npm run test:unit:single -w @jurnapod/api <file>` | — |
 | **Backoffice** | `npm run typecheck -w @jurnapod/backoffice` | `npm run build -w @jurnapod/backoffice` | `npm run lint -w @jurnapod/backoffice` | `npm run test -w @jurnapod/backoffice` | — | — |
 | **POS** | `npm run typecheck -w @jurnapod/pos` | `npm run build -w @jurnapod/pos` | `npm run lint -w @jurnapod/pos` | `npm run test -w @jurnapod/pos` | — | `npm run qa:e2e -w @jurnapod/pos` |
 
