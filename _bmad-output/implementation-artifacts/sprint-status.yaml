@@ -169,9 +169,10 @@ development_status:
 
   # Epic 11: Refactor Remaining Test Files
   # Stories: 4 total
-  # Verified: All remaining files already refactored in Epic 10
+  # Focus: Replace 34 direct INSERT INTO items with createItem()
   epic-11: done
   11-1-refactor-cost-tracking-tests: done
   11-2-refactor-cogs-posting-tests: done
   11-3-refactor-users-auth-tests: done
   11-4-refactor-remaining-tests: done
+  11-5-replace-insert-items-with-createItem: done
