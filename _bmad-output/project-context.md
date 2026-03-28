@@ -430,6 +430,69 @@ export async function listCompanyModules(companyId: number) {
 - Code review checklist includes library usage
 - Epic 12 completion means zero exceptions
 
+#### Epic 13: Library Migration Patterns (Completed)
+
+Epic 13 established patterns for migrating complex routes to libraries:
+
+**1. Batch Operations Pattern**
+```typescript
+// Collect changes, execute in bulk
+const updates: BatchItemUpdate[] = [];
+const inserts: BatchItemInsert[] = [];
+
+// Process rows
+for (const row of rows) {
+  if (exists) updates.push({...});
+  else inserts.push({...});
+}
+
+// Execute batches
+await batchUpdateItems(updates, connection);
+await batchInsertItems(companyId, inserts, connection);
+```
+
+**2. Validation Separation Pattern**
+```typescript
+// Sync validation (no DB)
+function preValidateItems(items: ImportItem[]): ValidationResult;
+
+// Async validation (requires DB)
+async function validateImportItems(
+  companyId: number,
+  items: ImportItem[]
+): Promise<ValidationResult>;
+```
+
+**3. Adapter Pattern (for external interfaces)**
+```typescript
+// Bridge external interface to internal types
+export function createSyncAuditService(dbPool: Pool): SyncAuditService {
+  const client: AuditDbClient = {
+    query: async (sql, params) => { ... },
+    execute: async (sql, params) => { ... },
+    getConnection: async () => { ... },
+  };
+  return new SyncAuditService(client);
+}
+```
+
+**4. Permission Utility Pattern**
+```typescript
+// Reusable permission check across modules
+export async function canManageCompanyDefaults(
+  userId: number,
+  companyId: number,
+  module: string,  // "inventory", "settings", etc.
+  permission: "create" | "read" | "update" | "delete"
+): Promise<boolean>
+```
+
+**Epic 13 Deliverables:**
+- 4 new library modules
+- 3 routes refactored (zero SQL)
+- 24 new tests
+- 50% code duplication reduction
+
 #### Directory Paths
 
 ```

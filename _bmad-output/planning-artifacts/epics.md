@@ -226,6 +226,6 @@ Finish Epic 12 deferred work - migrate import.ts, inventory.ts, and sync/pull.ts
 
 ---
 
-**Total: 13 epics | ~106 stories | 11 done, 2 backlog**
+**Total: 13 epics | ~106 stories | 12 done, 1 backlog**
 
 _Last Updated: 2026-03-28_

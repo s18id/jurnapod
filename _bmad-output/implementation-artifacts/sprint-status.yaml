@@ -195,7 +195,7 @@ development_status:
 
   # Epic 13: Complete Library Migration for Deferred Routes
   # Focus: Migrate import.ts, inventory.ts, sync/pull.ts to libraries
-  epic-13: backlog
+  epic-13: done
   13-1-create-import-batch-library: done
   13-2-create-import-validation-library: done
   13-3-refactor-import-route: done
@@ -203,5 +203,5 @@ development_status:
   13-5-refactor-inventory-route: done
   13-6-analyze-sync-pull-architecture: done
   13-7-create-sync-pull-adapter: done
-  13-8-epic-13-documentation: backlog
-  epic-13-retrospective: backlog
+  13-8-epic-13-documentation: in-progress
+  epic-13-retrospective: done
