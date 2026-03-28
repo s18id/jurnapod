@@ -19,6 +19,7 @@ import { createItem } from "./items/index.js";
 import { createItemPrice } from "./item-prices/index.js";
 import { createCompanyBasic } from "./companies.js";
 import { createOutletBasic } from "./outlets.js";
+import { createUserBasic } from "./users.js";
 
 // Dynamic IDs - created in before() hook
 let TEST_COMPANY_ID: number;
@@ -154,6 +155,7 @@ async function cleanupTestData(conn: PoolConnection, companyId: number): Promise
   }
   
   await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [companyId]);
+  await conn.execute(`DELETE FROM users WHERE company_id = ?`, [companyId]);
   await conn.execute(`DELETE FROM companies WHERE id = ?`, [companyId]);
 }
 
@@ -197,8 +199,14 @@ before(async () => {
   });
   TEST_OUTLET_ID = outlet.id;
 
-  // TEST_USER_ID is used as postedBy in postCogsForSale - use 1 as system admin
-  TEST_USER_ID = 1;
+  // Create test user dynamically for postedBy
+  const user = await createUserBasic({
+    companyId: TEST_COMPANY_ID,
+    email: `cogs-test-${RUN_ID}@example.com`,
+    password: 'test-password',
+    name: `COGS Test User ${RUN_ID}`
+  });
+  TEST_USER_ID = user.id;
 
   cogsAccountId = await createTestAccount(conn, TEST_COMPANY_ID, '6100-TEST', 'Test COGS', 'EXPENSE', 'D');
   inventoryAccountId = await createTestAccount(conn, TEST_COMPANY_ID, '1100-TEST', 'Test Inventory', 'ASSET', 'D');
