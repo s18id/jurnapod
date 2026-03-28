@@ -8,7 +8,8 @@
  * All functions require a connection for transaction support.
  */
 
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
+import type { PoolConnection } from "mysql2/promise";
+import { newKyselyConnection } from "@jurnapod/db";
 
 // ============================================================================
 // Types
@@ -93,11 +94,13 @@ export async function batchFindItemsBySkus(
     return result;
   }
 
-  const placeholders = skus.map(() => "?").join(",");
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT sku, id FROM items WHERE company_id = ? AND sku IN (${placeholders})`,
-    [companyId, ...skus]
-  );
+  const kysely = newKyselyConnection(connection);
+  const rows = await kysely
+    .selectFrom("items")
+    .select(["sku", "id"])
+    .where("company_id", "=", companyId)
+    .where("sku", "in", skus)
+    .execute();
 
   for (const row of rows) {
     result.set(String(row.sku), Number(row.id));
@@ -124,25 +127,25 @@ export async function batchUpdateItems(
 ): Promise<number> {
   let updated = 0;
 
+  const kysely = newKyselyConnection(connection);
+
   for (const item of updates) {
-    const [result] = await connection.execute(
-      `UPDATE items SET
-        name = ?, item_type = ?, barcode = ?, item_group_id = ?,
-        cogs_account_id = ?, inventory_asset_account_id = ?, is_active = ?,
-        updated_at = NOW()
-      WHERE id = ?`,
-      [
-        item.name,
-        item.item_type,
-        item.barcode ?? null,
-        item.item_group_id ?? null,
-        item.cogs_account_id ?? null,
-        item.inventory_asset_account_id ?? null,
-        item.is_active ? 1 : 0,
-        item.id
-      ]
-    );
-    updated += (result as { affectedRows: number }).affectedRows || 0;
+    const result = await kysely
+      .updateTable("items")
+      .set({
+        name: item.name,
+        item_type: item.item_type,
+        barcode: item.barcode ?? null,
+        item_group_id: item.item_group_id ?? null,
+        cogs_account_id: item.cogs_account_id ?? null,
+        inventory_asset_account_id: item.inventory_asset_account_id ?? null,
+        is_active: item.is_active ? 1 : 0,
+        updated_at: new Date()
+      })
+      .where("id", "=", item.id)
+      .executeTakeFirst();
+
+    updated += Number(result?.numUpdatedRows ?? 0);
   }
 
   return updated;
@@ -164,25 +167,25 @@ export async function batchInsertItems(
 ): Promise<number[]> {
   const ids: number[] = [];
 
+  const kysely = newKyselyConnection(connection);
+
   for (const item of items) {
-    const [result] = await connection.execute(
-      `INSERT INTO items (
-        company_id, sku, name, item_type, barcode, item_group_id,
-        cogs_account_id = ?, inventory_asset_account_id = ?, is_active = ?, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [
-        companyId,
-        item.sku,
-        item.name,
-        item.item_type,
-        item.barcode ?? null,
-        item.item_group_id ?? null,
-        item.cogs_account_id ?? null,
-        item.inventory_asset_account_id ?? null,
-        item.is_active ? 1 : 0
-      ]
-    );
-    ids.push((result as { insertId: number }).insertId);
+    const result = await kysely
+      .insertInto("items")
+      .values({
+        company_id: companyId,
+        sku: item.sku,
+        name: item.name,
+        item_type: item.item_type,
+        barcode: item.barcode ?? null,
+        item_group_id: item.item_group_id ?? null,
+        cogs_account_id: item.cogs_account_id ?? null,
+        inventory_asset_account_id: item.inventory_asset_account_id ?? null,
+        is_active: item.is_active ? 1 : 0
+      })
+      .executeTakeFirst();
+
+    ids.push(Number(result.insertId));
   }
 
   return ids;
@@ -212,11 +215,13 @@ export async function batchFindPricesByItemIds(
     return result;
   }
 
-  const placeholders = itemIds.map(() => "?").join(",");
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT item_id, outlet_id, id FROM item_prices WHERE company_id = ? AND item_id IN (${placeholders})`,
-    [companyId, ...itemIds]
-  );
+  const kysely = newKyselyConnection(connection);
+  const rows = await kysely
+    .selectFrom("item_prices")
+    .select(["item_id", "outlet_id", "id"])
+    .where("company_id", "=", companyId)
+    .where("item_id", "in", itemIds)
+    .execute();
 
   for (const row of rows) {
     const key = `${row.item_id}:${row.outlet_id ?? "null"}`;
@@ -244,12 +249,20 @@ export async function batchUpdatePrices(
 ): Promise<number> {
   let updated = 0;
 
+  const kysely = newKyselyConnection(connection);
+
   for (const price of updates) {
-    const [result] = await connection.execute(
-      `UPDATE item_prices SET price = ?, is_active = ?, updated_at = NOW() WHERE id = ?`,
-      [price.price, price.is_active ? 1 : 0, price.id]
-    );
-    updated += (result as { affectedRows: number }).affectedRows || 0;
+    const result = await kysely
+      .updateTable("item_prices")
+      .set({
+        price: price.price,
+        is_active: price.is_active ? 1 : 0,
+        updated_at: new Date()
+      })
+      .where("id", "=", price.id)
+      .executeTakeFirst();
+
+    updated += Number(result?.numUpdatedRows ?? 0);
   }
 
   return updated;
@@ -271,19 +284,21 @@ export async function batchInsertPrices(
 ): Promise<number[]> {
   const ids: number[] = [];
 
+  const kysely = newKyselyConnection(connection);
+
   for (const price of prices) {
-    const [result] = await connection.execute(
-      `INSERT INTO item_prices (item_id, company_id, outlet_id, price, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
-      [
-        price.item_id,
-        companyId,
-        price.outlet_id ?? null,
-        price.price,
-        price.is_active ? 1 : 0
-      ]
-    );
-    ids.push((result as { insertId: number }).insertId);
+    const result = await kysely
+      .insertInto("item_prices")
+      .values({
+        item_id: price.item_id,
+        company_id: companyId,
+        outlet_id: price.outlet_id ?? null,
+        price: price.price,
+        is_active: price.is_active ? 1 : 0
+      })
+      .executeTakeFirst();
+
+    ids.push(Number(result.insertId));
   }
 
   return ids;

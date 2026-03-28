@@ -2,12 +2,10 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { getDbPool } from "../db.js";
-import type { RowDataPacket, PoolConnection } from "mysql2/promise";
+import { newKyselyConnection } from "@jurnapod/db";
+import { sql } from "kysely";
+import type { PoolConnection } from "mysql2/promise";
 import { MODULE_PERMISSION_BITS, type ModulePermission } from "../auth.js";
-
-type AccessCheckRow = RowDataPacket & {
-  id: number;
-};
 
 /**
  * Check if user can manage company defaults for a module using bitmask permission system.
@@ -29,23 +27,36 @@ export async function canManageCompanyDefaults(
   permission: ModulePermission = "create",
   connection?: PoolConnection
 ): Promise<boolean> {
-  const pool = connection ?? getDbPool();
-  const permissionBit = MODULE_PERMISSION_BITS[permission];
+  let needsToRelease = false;
+  let db;
 
-  const [rows] = await pool.execute<AccessCheckRow[]>(
-    `SELECT 1
-     FROM user_role_assignments ura
-     INNER JOIN roles r ON r.id = ura.role_id
-     INNER JOIN module_roles mr ON mr.role_id = r.id
-     WHERE ura.user_id = ?
-       AND r.is_global = 1
-       AND ura.outlet_id IS NULL
-       AND mr.module = ?
-       AND mr.company_id = ?
-       AND (mr.permission_mask & ?) <> 0
-     LIMIT 1`,
-    [userId, module, companyId, permissionBit]
-  );
+  if (connection) {
+    db = newKyselyConnection(connection);
+  } else {
+    db = newKyselyConnection(await getDbPool().getConnection());
+    needsToRelease = true;
+  }
 
-  return rows.length > 0;
+  try {
+    const permissionBit = MODULE_PERMISSION_BITS[permission];
+
+    const row = await db
+      .selectFrom("user_role_assignments as ura")
+      .innerJoin("roles as r", "r.id", "ura.role_id")
+      .innerJoin("module_roles as mr", "mr.role_id", "r.id")
+      .where("ura.user_id", "=", userId)
+      .where("r.is_global", "=", 1)
+      .where("ura.outlet_id", "is", null)
+      .where("mr.module", "=", module)
+      .where("mr.company_id", "=", companyId)
+      .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, "<>", 0)
+      .select(["ura.id"])
+      .executeTakeFirst();
+
+    return row !== undefined;
+  } finally {
+    if (needsToRelease) {
+      await db.destroy();
+    }
+  }
 }

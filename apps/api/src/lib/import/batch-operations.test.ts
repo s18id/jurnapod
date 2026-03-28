@@ -11,10 +11,6 @@ import { closeDbPool, getDbPool } from "../db.js";
 import {
   batchFindItemsBySkus,
   batchFindPricesByItemIds,
-  type BatchItemInsert,
-  type BatchItemUpdate,
-  type BatchPriceInsert,
-  type BatchPriceUpdate,
 } from "./batch-operations.js";
 
 test.after(async () => {

@@ -9,7 +9,8 @@
  */
 
 import { getDbPool } from "../db.js";
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
+import { newKyselyConnection } from "@jurnapod/db";
+import type { PoolConnection } from "mysql2/promise";
 
 // ============================================================================
 // Types
@@ -49,21 +50,37 @@ export async function checkSkuExists(
   sku: string,
   connection?: PoolConnection
 ): Promise<SkuCheckResult> {
-  const db = connection || getDbPool();
+  let needsToRelease = false;
+  let db;
 
-  const [rows] = await db.execute<RowDataPacket[]>(
-    "SELECT id FROM items WHERE company_id = ? AND sku = ? LIMIT 1",
-    [companyId, sku]
-  );
-
-  if (rows.length === 0) {
-    return { exists: false };
+  if (connection) {
+    db = newKyselyConnection(connection);
+  } else {
+    db = newKyselyConnection(await getDbPool().getConnection());
+    needsToRelease = true;
   }
 
-  return {
-    exists: true,
-    itemId: rows[0].id
-  };
+  try {
+    const row = await db
+      .selectFrom("items")
+      .select(["id"])
+      .where("company_id", "=", companyId)
+      .where("sku", "=", sku)
+      .executeTakeFirst();
+
+    if (!row) {
+      return { exists: false };
+    }
+
+    return {
+      exists: true,
+      itemId: row.id
+    };
+  } finally {
+    if (needsToRelease) {
+      await db.destroy();
+    }
+  }
 }
 
 // ============================================================================
@@ -110,22 +127,40 @@ export async function batchCheckSkusExist(
   skus: string[],
   connection?: PoolConnection
 ): Promise<Map<string, number>> {
-  const db = connection || getDbPool();
+  let needsToRelease = false;
+  let db;
+
+  if (connection) {
+    db = newKyselyConnection(connection);
+  } else {
+    db = newKyselyConnection(await getDbPool().getConnection());
+    needsToRelease = true;
+  }
+
   const result = new Map<string, number>();
 
-  if (skus.length === 0) {
+  try {
+    if (skus.length === 0) {
+      return result;
+    }
+
+    const rows = await db
+      .selectFrom("items")
+      .select(["sku", "id"])
+      .where("company_id", "=", companyId)
+      .where("sku", "in", skus)
+      .execute();
+
+    for (const row of rows) {
+      if (row.sku !== null) {
+        result.set(row.sku, row.id);
+      }
+    }
+
     return result;
+  } finally {
+    if (needsToRelease) {
+      await db.destroy();
+    }
   }
-
-  const placeholders = skus.map(() => "?").join(",");
-  const [rows] = await db.execute<RowDataPacket[]>(
-    `SELECT sku, id FROM items WHERE company_id = ? AND sku IN (${placeholders})`,
-    [companyId, ...skus]
-  );
-
-  for (const row of rows) {
-    result.set(String(row.sku), Number(row.id));
-  }
-
-  return result;
 }

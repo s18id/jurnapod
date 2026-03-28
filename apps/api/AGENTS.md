@@ -3,11 +3,13 @@
 ## Scope
 API server rules for auth, validation, posting triggers, persistence safety, and sync endpoints.
 
-## Review guidelines
+---
+
+## Review Guidelines
 
 ### Priority
 - Be strict on correctness, validation, authorization, idempotency, and transaction boundaries.
-- Be light on naming or formatting unless they obscure business rules.
+- Be light on naming or formatting unless it obscures business rules.
 
 ### Auth and access control
 - Flag any route or mutation that does not enforce authentication correctly.
@@ -46,17 +48,16 @@ API server rules for auth, validation, posting triggers, persistence safety, and
   - settings/config endpoints
   - report query logic
 
+---
+
+## Critical Rules
+
 ### Unit test database cleanup
 - **CRITICAL**: All unit tests that use `getDbPool()` **must** close the pool after tests complete.
-- Add cleanup hook at the end of test files:
   ```typescript
-  // Close database pool after all tests
-  test.after(async () => {
-    await closeDbPool();
-  });
+  test.after(async () => { await closeDbPool(); });
   ```
 - Without this cleanup, tests will hang indefinitely after completion.
-- Flag any new or modified test file that uses database connections but lacks cleanup.
 
 ### Integration test fixture policy
 - HTTP integration tests must create/mutate fixtures through API endpoints.
@@ -70,9 +71,12 @@ API server rules for auth, validation, posting triggers, persistence safety, and
 - `audit_logs.success` is canonical for logic/filtering.
 - `audit_logs.result` is compatibility/display only.
 - New queries must filter by `success` (`1` / `0`) instead of string `result`.
-- Migrations and tests must preserve this invariant.
 
-### Library Usage Rule
+---
+
+## Library Usage Rules
+
+### Routes: Library-First Architecture
 
 Routes must delegate database operations to library modules:
 
@@ -89,12 +93,10 @@ route.get("/", async (c) => {
 
 **Incorrect:**
 ```typescript
-// routes/example.ts
-import { getDbPool } from "../lib/db.js";
-
+// routes/example.ts - ❌ pool.execute() in routes
 route.get("/", async (c) => {
   const pool = getDbPool();
-  const [rows] = await pool.execute("SELECT * FROM items");  // ❌ No!
+  const [rows] = await pool.execute("SELECT * FROM items");
   return c.json({ items: rows });
 });
 ```
@@ -103,3 +105,58 @@ route.get("/", async (c) => {
 - Any `pool.execute()` in route files
 - Any SQL strings in routes
 - Routes importing `getDbPool` directly
+
+### Test Files: Use test-fixtures.ts
+
+Test files must use library functions for test data setup instead of ad-hoc SQL queries:
+
+**Correct:**
+```typescript
+import { createTestUser, setupUserPermission } from "../test-fixtures";
+
+test("permission check", async () => {
+  const user = await createTestUser(company.id);
+  await setupUserPermission({
+    userId: user.id,
+    companyId: company.id,
+    roleCode: "OWNER",
+    module: "inventory",
+    permission: "create",
+  });
+  // test assertions...
+});
+```
+
+**Incorrect:**
+```typescript
+// ❌ Ad-hoc SQL for test setup
+await pool.execute(
+  `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, NULL)`,
+  [userId, roleId]
+);
+```
+
+**Exception:** Ad-hoc SQL is allowed only for:
+1. Teardown/cleanup operations
+2. Read-only verifications when no library function exists
+3. Schema introspection
+
+---
+
+## test-fixtures.ts Library
+
+**Location**: `apps/api/src/lib/test-fixtures.ts`
+
+| Function | Purpose |
+|----------|---------|
+| `createTestCompanyMinimal()` | Create company with unique code |
+| `createTestOutletMinimal(companyId)` | Create outlet for company |
+| `createTestUser(companyId)` | Create user for company |
+| `createTestItem(companyId)` | Create item for company |
+| `getRoleIdByCode(roleCode)` | Get system role ID ("OWNER", "ADMIN", etc.) |
+| `assignUserGlobalRole(userId, roleId)` | Assign global role to user |
+| `assignUserOutletRole(userId, roleId, outletId)` | Assign outlet-scoped role |
+| `setModulePermission(companyId, roleId, module, mask)` | Set module permission |
+| `setupUserPermission({...})` | Complete permission setup in one call |
+| `cleanupTestFixtures()` | Clean up all created fixtures |
+| `resetFixtureRegistry()` | Reset registry without deleting records |

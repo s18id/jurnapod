@@ -2,621 +2,273 @@
 project_name: 'jurnapod'
 user_name: 'Ahmad'
 date: '2026-03-28T00:00:00Z'
-sections_completed: ['technology_stack', 'language_specific_rules', 'framework_specific_rules', 'testing_rules', 'code_quality_rules', 'development_workflow_rules', 'lessons_learned']
-existing_patterns_found: 18
+sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'code_quality', 'workflow', 'lessons_learned']
 status: 'complete'
-rule_count: 65
 optimized_for_llm: true
 ---
 
 # Project Context for AI Agents
 
-_This file contains critical rules and patterns that AI agents must follow when implementing code in this project. Focus on unobvious details that agents might otherwise miss._
+_Critical rules and patterns. Read before implementing. Follow ALL rules exactly._
 
 ---
 
 ## Technology Stack & Versions
 
-### Core Platform
-- **Monorepo**: npm workspaces, project `jurnapod` v0.2.2
-- **Runtime**: Node.js >=22 (repository engines now require Node 22)
-- **Language**: TypeScript ^5.7.3 (consistent across all packages—flag and fix drift)
-- **Module System**: ESM only (`"type": "module"` in all packages)
-- **Base Config**: `tsconfig.base.json` with strict mode, ES2022 target, Bundler resolution
+| Component | Tech | Notes |
+|-----------|------|-------|
+| Monorepo | npm workspaces | v0.2.2 |
+| Runtime | Node.js >=22 | Repository requires Node 22 |
+| Language | TypeScript ^5.7.3 | Strict mode, ESM only |
+| API | Hono ^4.0.0, `@hono/node-server` ^1.19.11 | |
+| Validation | Zod ^3.24.1, `@hono/zod-openapi` ^0.14.8 | |
+| Database | mysql2 ^3.15.x | Promise API only |
+| Date/Time | `@js-temporal/polyfill` ^0.5.1 | Never native Date for business logic |
+| Auth | `@node-rs/argon2` ^2.0.2, `jose` ^6.1.2 | |
+| Offline | Dexie ^4.x, IndexedDB | POS offline-first |
+| Sync | Outbox pattern | Idempotent via `client_tx_id` |
+| Capacitor | 8.0.1 (all packages pinned) | POS only |
 
-### API Layer
-- **Framework**: Hono ^4.0.0 with `@hono/node-server` ^1.19.11
-- **Validation/OpenAPI**: Zod ^3.24.1, `@hono/zod-openapi` ^0.14.8
-- **Database**: mysql2 ^3.15.x (promise API only)
-- **Date/Time**: `@js-temporal/polyfill` ^0.5.1 (business logic dates—never native Date)
-- **Auth**: `@node-rs/argon2` ^2.0.2 (password hashing), `jose` ^6.1.2 (JWT)
-- **Real-time**: `ws` ^8.19.0 (WebSocket support)
+### Path Aliases
+- API imports: `@/` (e.g., `@/lib/db`) — never relative paths
+- Cross-package: `@jurnapod/*` (e.g., `@jurnapod/shared`)
+- Build order: `@jurnapod/offline-db` before POS/Backoffice
 
-### Frontend Applications
-- **Backoffice**: React ^18.3.1, Vite ^5.4.21, Mantine ^7.17.1
-  - **Build strategy**: Route-level lazy loading plus manual vendor chunks keep the main app bundle small and avoid Vite large-chunk warnings
-- **POS**: React ^18.3.1, Vite ^5.4.15, Ionic React ^8.8.1, Capacitor 8.0.1
-  - **CRITICAL**: Keep all Capacitor packages pinned to the same published version (`@capacitor/android`, `app`, `device`, `ios`, `network`, `cli`, `core` all at `8.0.1` today)
-- **Routing**: `react-router-dom` ^7.13.1 (POS only)
+---
 
-### Shared Infrastructure
-- **Contracts**: `packages/shared` exports Zod schemas used across all apps
-- **Path Aliases**:
-  - `@/lib/*` and `@/services/*` for API (enforced—no relative paths like `../../../`)
-  - `@jurnapod/*` for cross-package imports (mapped in `tsconfig.base.json`)
-- **Build Order**: `@jurnapod/offline-db` must build before POS/Backoffice dev/build
+## Language-Specific Rules
 
-### Offline & Sync
-- **Client Storage**: Dexie ^4.x with IndexedDB
-- **Outbox Pattern**: Local-first writes, sync via queue
-- **Sync Core**: Vitest ^1.6.1 (this package only—do not introduce Vitest elsewhere)
+### TypeScript
+- Strict mode enabled; all packages compile without errors
+- **Boundary rule**: Re-validate all data at API boundaries with Zod; TypeScript types don't survive serialization
+- Keep workspace TypeScript versions aligned
 
-### Testing
-| Scope | Runner | Notes |
-|-------|--------|-------|
-| API Unit | Node test runner + tsx | Must close DB pool in `test.after()` |
-| API Integration | Node test runner | API-driven setup only; no direct DB writes for fixtures |
-| Backoffice/POS E2E | Playwright ^1.55.x | `@playwright/experimental-ct-react` for component tests |
-| POS Unit | Node test runner + tsx | `fake-indexeddb` ^6.2.5 for IndexedDB mocking |
-| sync-core | Vitest ^1.6.1 | Exception to Node runner rule |
+### Date/Time
+- **CRITICAL**: Never use native `Date` for business logic; use `@js-temporal/polyfill`
+- MySQL → Temporal: `Temporal.Instant.fromEpochMilliseconds(row.ts)`
+- Temporal → MySQL: `instant.epochMilliseconds` (BIGINT)
+- BigInt → JSON: `BigInt(val).toString()`
 
-### Database & Persistence
-- **Engines**: MySQL 8.0.44+ and MariaDB (dual compatibility required)
-- **Storage Engine**: InnoDB required
-- **Money**: `DECIMAL(18,2)` columns only—never `FLOAT`/`DOUBLE`
-- **Migrations**: Rerunnable/idempotent DDL only; use `information_schema` checks for portability (no `IF EXISTS` in ALTER)
+### Money
+- Never use `FLOAT`/`DOUBLE`; use `DECIMAL(18,2)` in SQL, `number` in TS
+- Calculation: `Math.round((a + b) * 100) / 100`; never raw arithmetic
+- SQL aggregation: `CAST(SUM(amount) AS DECIMAL(18,2))`
 
-### Critical Compatibility Rules for AI Agents
-1. Keep all Capacitor packages synchronized to the same published version
-2. Use `@js-temporal/polyfill` for all business date logic
-3. DB pool cleanup is mandatory in API tests—tests hang without it
-4. Only sync-core uses Vitest; all other packages use Node test runner
-5. Maintain TypeScript version consistency across all packages
-6. POS/Backoffice pre-build depends on offline-db—respect the dependency chain
+### Null Handling
+- Prefer `undefined` over `null` in TypeScript
+- Repository functions return `undefined`, never `null`
+- Zod nullable pattern: `z.string().nullable().transform(v => v ?? undefined)`
 
-## Critical Implementation Rules
+---
 
-### Language-Specific Rules
+## Framework-Specific Rules
 
-#### TypeScript Configuration
-- Strict mode enabled via `tsconfig.base.json` (`"strict": true`)
-- Target: `ES2022`, Module: `ESNext`, Resolution: `Bundler`
-- All packages must compile without errors—CI blocks on type errors
-- **Boundary rule**: Re-validate all data at API boundaries with Zod; TypeScript types do not survive serialization
-- Keep workspace TypeScript versions aligned across packages
+### Hono API (apps/api)
+- All routes use Zod validation on bodies/params/queries
+- Auth guard: `app.use("/route", authGuard, ...handlers)`
+- All mutations require `company_id` scoping; `outlet_id` where applicable
+- Never bypass Zod validation for performance without profiling
 
-#### Import/Export Conventions
-- **API imports**: Use `@/` path alias (e.g., `import { getDbPool } from "@/lib/db"`) — never relative paths like `../../../../lib/`
-  - *Note*: `@/` requires explicit path mapping; some test contexts need `tsconfig-paths/register`
-- **POS/Backoffice imports**: Use workspace-relative paths or `@jurnapod/*` aliases—**do not use `@/`**
-- **Cross-package imports**: Use `@jurnapod/*` workspace aliases (e.g., `import { z } from "@jurnapod/shared"`)
-- **Default exports avoided** in shared contracts; prefer named exports for Zod schemas
-- **Enforcement**: ESLint `@typescript-eslint/no-restricted-imports` blocks relative imports in API package
+### React (apps/backoffice, apps/pos)
+- Functional components with hooks only
+- **POS offline rule**: Never await network before writing to IndexedDB
+- Mantine for backoffice, Ionic for POS
+- Be strict about company/outlet scoping in admin/reporting screens
 
-#### Date/Time Handling
-- **CRITICAL**: Never use native `Date` for business logic; use `@js-temporal/polyfill` (server-side)
-  - *Client-side*: Use native `Date` with `date-fns` unless Temporal polyfill is explicitly loaded
-- **Interoperability pattern**:
-  - MySQL → Temporal: `Temporal.Instant.fromEpochMilliseconds(row.reservation_start_ts)`
-  - Temporal → MySQL: `instant.epochMilliseconds` (store as BIGINT)
-- Canonical reservation time: unix milliseconds in `BIGINT` columns (`reservation_start_ts`, `reservation_end_ts`)
-- **Validation rule**: Always enforce `reservation_end_ts > reservation_start_ts` before persistence
-- **BigInt JSON gotcha**: BigInt cannot serialize to JSON; convert to string: `BigInt(val).toString()`
-- Date-only filtering must resolve timezone in order `outlet -> company`; no UTC fallback
+### Sync Patterns
+- `/sync/push`: Fully transactional (doc + journal in same tx)
+- `/sync/pull`: Delta sync via `updated_after` timestamp
+- `client_tx_id` idempotency; returns `OK`/`DUPLICATE`/`ERROR`
+- Max 3 retries with exponential backoff, then `FAILED`
+- Do not mutate finalized transactions; use VOID/REFUND
 
-#### Money Handling
-- Never use `FLOAT` or `DOUBLE` for monetary values
-- Use `DECIMAL(18,2)` in SQL; use `number` in TypeScript (no custom money wrapper needed)
-- **Calculation rule**: Never do raw arithmetic on money. Use: `Math.round((a + b) * 100) / 100`
-  - `toFixed(2)` returns string—use only for display formatting
-- **SQL aggregation**: Cast results: `CAST(SUM(amount) AS DECIMAL(18,2))` to prevent float drift
-- **Test requirement**: Unit tests must verify monetary calculations round-trip correctly through database
-- Be explicit about rounding and avoid hidden drift
+### Module System
+- Optional: `sales`, `pos`, `inventory`, `purchasing`; Required: `platform`, `accounting`
+- Check module enablement before exposing features
 
-#### Null Handling
-- Prefer `undefined` over `null` for optional fields in TypeScript
-- **Repository rule**: All repository layer functions must return `undefined`, never `null`
-- `NULL` in MySQL maps to `null` in query results (mysql2 returns `null`, not `undefined`)
-- **Zod pattern for nullable DB columns**: `z.string().nullable().transform(v => v ?? undefined)`
-- Coalesce `NULL` to `undefined` at the boundary before returning from repositories
+---
 
-#### Error Handling
-- Prefer `neverthrow` Result types for fallible operations; avoid throwing for expected failures
-- Use `ResultAsync` for async operations that may fail
-- Prefer precise typed guards over loose `unknown` checks
-- Keep duplicate-key, foreign-key, auth, and tenant-scope error mapping stable
+## Testing Rules
 
-### Framework-Specific Rules
-
-#### Hono API (apps/api)
-- Route handlers use `c.json()` / `c.jsonT()` for typed JSON responses
-- All routes must have Zod validation on request bodies, params, and query strings
-- Use `@hono/zod-openapi` for OpenAPI contract generation
-- Auth guard middleware composes on routes: `app.use("/route", authGuard, ...handlers)`
-- Response envelope follows standardized format (see ADR-0006)
-- All mutations require `company_id` scoping; `outlet_id` scoping where applicable
-- Never bypass Zod validation for performance—profile first
-- Prefer shared contracts from `packages/shared`
-- Do not bypass auth or tenant guards for convenience
-
-#### React (apps/backoffice, apps/pos)
-- Use functional components with hooks only; class components are not used
-- Mantine UI components preferred in backoffice; Ionic components in POS
-- State: prefer local `useState`/`useReducer` over global stores; context for cross-cutting concerns only
-- **POS offline rule**: Never await network before writing local state—write to IndexedDB first
-- Data fetching: use React Query or similar for server state; Dexie for local state
-- Component files: co-locate tests (`Component.test.tsx`) alongside source
-- Prefer explicit, traceable financial UX over hidden behavior in backoffice workflows
-- Reporting should derive from journal/accounting logic, not duplicated ad hoc state
-- Be strict about company/outlet scoping in admin and reporting screens
-
-#### Dexie / IndexedDB (offline storage)
-- Schema version migrations must be additive only (add tables/columns; never remove)
-- All POS tables must have `companyId` + `outletId` index for tenant isolation
-- Use Dexie transactions for multi-record writes
-- **Outbox table**: `sync_outbox` with `id`, `client_tx_id`, `payload`, `status`, `attempts`, `last_error`
-- Outbox status transitions: `PENDING → SENT → (OK | FAILED)` — never regress
-
-#### Sync Patterns
-- POS sync is idempotent via `client_tx_id` (UUID v4); server returns `OK`, `DUPLICATE`, or `ERROR`
-- Never retry sync indefinitely—max 3 attempts with exponential backoff; then mark `FAILED`
-- `/sync/push` must be fully transactional: business document + journal entry in same DB transaction
-- `/sync/pull` uses delta sync via `updated_after` timestamp parameter
-- Dine-in sessions: finalize checkpoints sync canonical state to `pos_order_snapshot_lines`
-- Outbox transitions must remain safe and understandable to operators
-- Do not allow direct mutation of finalized transactions; use VOID/REFUND style corrections
-
-#### Module System
-- Optional modules: `sales`, `pos`, `inventory`, `purchasing`
-- Required modules: `platform`, `accounting`
-- Always check module enablement before exposing features (guard routes and UI)
-- Company-specific module configs cascade: company → outlet
-
-### Testing Rules
-
-#### API Unit Tests (Node test runner + tsx)
-- **CRITICAL**: All tests using `getDbPool()` must close the pool in `test.after()`:
+### Unit Tests (Node test runner + tsx)
+- **CRITICAL**: Tests using `getDbPool()` must close pool in `test.after()`
   ```typescript
   test.after(async () => { await closeDbPool(); });
   ```
-  Without this, tests hang indefinitely after completion.
-- Test files live alongside source: `src/lib/feature.test.ts`
-- Use `test.describe()` for grouping; `test.it()` / `test("name", async () => {})` for cases
-- DB setup via factory functions; never make real HTTP calls for unit tests
-- Run from repo root and prefer single-file verification before full-suite execution
+- Without this, tests hang indefinitely
+- Use `test-fixtures.ts` library functions for test data setup
 
-#### API Integration Tests
-- **Fixture policy**: Create/mutate fixtures through API endpoints only
-- Direct DB writes are **allowed only** for teardown cleanup and read-only verification
-- No hardcoded IDs; use unique per-run identifiers
-- Use `finally` blocks for deterministic cleanup
+### test-fixtures.ts Library
+**Location**: `apps/api/src/lib/test-fixtures.ts`
 
-#### Sync Route Tests (push, pull)
-- **Idempotency**: Must test `client_tx_id` deduplication (send same payload twice → second returns `DUPLICATE`)
-- **Retry handling**: Test `FAILED` → retry → `OK` flow
-- **Auth**: Test unauthenticated → 401, wrong company → 403
-- **Error path**: Malformed payload → `ERROR` with validation message
-- Sync changes must verify retries/conflicts and auth boundaries
+| Function | Purpose |
+|----------|---------|
+| `createTestCompanyMinimal()` | Company with unique code |
+| `createTestOutletMinimal(companyId)` | Outlet for company |
+| `createTestUser(companyId)` | User for company |
+| `createTestItem(companyId)` | Item for company |
+| `createTestVariant(itemId)` | Variant for item |
+| `getRoleIdByCode(roleCode)` | System role ID by code |
+| `assignUserGlobalRole(userId, roleId)` | Global role assignment |
+| `assignUserOutletRole(userId, roleId, outletId)` | Outlet-scoped role |
+| `setModulePermission(companyId, roleId, module, mask)` | Module permission |
+| `setupUserPermission({userId, companyId, roleCode, module, permission})` | Complete setup |
+| `cleanupTestFixtures()` | Clean up all fixtures |
+| `resetFixtureRegistry()` | Reset registry without deleting |
 
-#### POS Offline Tests
-- Use `fake-indexeddb` for IndexedDB mocking
-- Test outbox transitions: `PENDING → SENT → OK/FAILED`
-- Test offline → online transition: queued items sync correctly
-- Test `client_tx_id` uniqueness enforcement
-- Cover duplicate-send safety explicitly for offline/sync changes
-
-#### Test Naming & Organization
-- File: `src/**/*.test.ts` (unit), `tests/integration/*.integration.test.mjs` (integration)
-- Use descriptive names: `test("rejects negative quantity", ...)`
-- Group related cases: `test.describe("validation", () => { ... })`
-
-#### Coverage Expectations
-- Critical paths require tests: auth, sync, posting, mutations, tenant scoping
-- Happy path + at least one error path per mutation
-- New financial logic requires COGS rounding, money round-trip tests
-- Changes in accounting, sync, auth, tenant scoping, migrations, and reports require focused tests
-- Do not mark stories done without passing-test evidence and review completion
-
-#### Running Tests
-- **Single file first**: Always run a single test file before running the full suite
-  ```bash
-  npm run test:unit:single -w @jurnapod/api <path-to-test-file>
-  ```
-- **Multiple files**: Run several specific test files (space-delimited, each quoted)
-  ```bash
-  npm run test:unit:single -w @jurnapod/api "src/lib/a.test.ts" "src/lib/b.test.ts" "src/lib/c.test.ts"
-  ```
-- **Shuffle test order**: Detect hidden test dependencies
-  ```bash
-  npm run test:unit:shuffle -w @jurnapod/api
-  npm run test:unit:single:shuffle -w @jurnapod/api "src/lib/a.test.ts"
-  ```
-- **Scoped runs** (faster feedback during development):
-  ```bash
-  npm run test:unit:routes -w @jurnapod/api      # route tests (~25 files)
-  npm run test:unit:lib -w @jurnapod/api         # lib tests (~75 files)
-  npm run test:unit:critical -w @jurnapod/api    # auth, sync, posting (PR gate)
-  npm run test:unit:sales -w @jurnapod/api       # orders, payments, invoices
-  npm run test:unit:sync -w @jurnapod/api        # push, pull sync
-  npm run test:unit:import -w @jurnapod/api      # import route + lib
-  ```
-- **Filter output**: Use `tail` / `grep` on test output to isolate failures
-- **Full suite**: Run full test only after single-file verification passes
-
-#### ESLint Test Rules (apps/api)
-Custom ESLint rules enforce test code quality:
-
-| Rule | Purpose | Severity |
-|------|---------|----------|
-| `jurnapod-test-rules/no-hardcoded-ids` | Ban `company_id=1`, `companyId: 1` patterns | Error |
-| `jurnapod-test-rules/no-raw-sql-insert-items` | Ban `INSERT INTO items` - use `createItem()` | Error |
-
-**Rule Location**: `eslint-plugin-jurnapod-test-rules.mjs` (repo root)
-
-**Example violations caught**:
 ```typescript
-// ❌ Hardcoded ID - use createCompanyBasic() instead
-await pool.execute(`SELECT * FROM items WHERE company_id = 1`);
-
-// ❌ Raw INSERT - use createItem() instead
-await pool.execute(`INSERT INTO items (company_id, name) VALUES (?, ?)`, [companyId, name]);
-
 // ✅ Correct - library functions
-const company = await createCompanyBasic({ code: `TEST-${runId}`, name: "Test" });
-const item = await createItem(company.id, { name: "Test Item", type: "PRODUCT" });
+const company = await createTestCompanyMinimal();
+await setupUserPermission({userId, companyId, roleCode: "OWNER", module: "inventory", permission: "create"});
+
+// ❌ Incorrect - ad-hoc SQL for setup
+await pool.execute(`INSERT INTO user_role_assignments...`);
 ```
 
-### Code Quality & Style Rules
+### Integration Tests
+- Create fixtures through API endpoints only
+- Ad-hoc SQL allowed only for teardown, read-only verification
 
-#### Naming Conventions
-- **Files**: kebab-case for utilities/scripts, PascalCase for React components
-- **Functions/variables**: camelCase
-- **Types/classes/interfaces**: PascalCase
-- **Constants**: SCREAMING_SNAKE_CASE
-- **Database columns**: snake_case
-- **Test files**: `*.test.ts` (unit), `*.integration.test.mjs` (integration)
+### ESLint Test Rules
+| Rule | Purpose |
+|------|---------|
+| `no-hardcoded-ids` | Ban `company_id=1` patterns |
+| `no-raw-sql-insert-items` | Ban `INSERT INTO items`; use `createItem()` |
 
-#### File Organization
-- **API**: Routes in `src/routes/`, services in `src/services/`, lib utilities in `src/lib/`
-- **React**: Components in `src/components/`, hooks in `src/hooks/`, pages in `src/pages/`
-- **Shared packages**: Flat structure with domain-named subdirectories in `src/`
+---
+
+## Code Quality Rules
+
+### Naming
+- Files: kebab-case (utilities), PascalCase (React components)
+- Functions/variables: camelCase; Types/classes: PascalCase; Constants: SCREAMING_SNAKE_CASE
+- Database columns: snake_case
+
+### Security & Validation
+- Never log passwords, tokens, PII
+- Validate all external input with Zod
+- Enforce `company_id` and `outlet_id` scoping on every data access
+- Use parameterized queries only
+
+### File Organization
+- API: `routes/` (HTTP), `services/`, `lib/` (DB/logic)
+- React: `components/`, `hooks/`, `pages/`
 - Co-locate tests next to source files
 
-#### Linting & Formatting
-- ESLint enforces code quality; CI fails on warnings (`--max-warnings=0`)
-- No enforced prettier config currently; use editor defaults matching project style
-- TypeScript strict mode required; do not disable strict checks without Arch/QA approval
-- Keep changes domain-focused; avoid broad cleanup unrelated to the story
-- Prefer correctness, auditability, and tenant isolation over cosmetic refactors
+### API Response Patterns
+- Standardized envelope (ADR-0006)
+- Status codes: 200/201/400/401/403/404/500
+- Error responses: machine-readable `code` + human-readable `message`
 
-#### Documentation
-- New route handlers require JSDoc or `@hono/zod-openapi` metadata
-- Complex business logic requires inline comments explaining the "why"
-- README files document setup and app-specific patterns (not repeated in project-context)
-- Avoid comments that restate obvious code; document the "why" for complex business logic
+---
 
-#### API Response Patterns
-- Always use standardized response envelope (see ADR-0006)
-- HTTP status codes: 200 success, 201 created, 400 validation error, 401 unauthenticated, 403 forbidden, 404 not found, 500 server error
-- Error responses include machine-readable `code` and human-readable `message`
+## Development Workflow
 
-#### Security & Validation
-- Never log sensitive data (passwords, tokens, PII)
-- Validate all external input with Zod before processing
-- Enforce `company_id` and `outlet_id` scoping on every data access
-- Use parameterized queries only (no string concatenation for SQL)
-- Do not introduce hidden financial behavior, silent mutation, or cross-tenant leakage risks
-
-#### Architectural Boundaries
-- Keep shared schemas/contracts in `packages/shared` and update all affected consumers together
-- Preserve existing architectural boundaries instead of rebuilding monolith-style utilities/routes
-
-### Development Workflow & Critical Rules
-
-#### Branch & Commit Conventions
-- Branch naming: `feature/description`, `fix/description`, `chore/description`, `epic-N/description`
-- Commit messages: concise, imperative mood, reference story IDs where applicable
-- PR titles must reference story IDs for traceability
-- **No commit unless explicitly requested by user**
-- Use hard timeouts on long-running validation commands
-- Run targeted checks first, then broader validation
-
-#### Definition of Done
-All stories require before marking DONE:
+### Definition of Done
 - [ ] All acceptance criteria implemented with evidence
 - [ ] Unit tests written and passing
-- [ ] No known technical debt (or debt items formally created in sprint-status.yaml)
-- [ ] No breaking changes without cross-package alignment
-- [ ] Code review completed with no blockers
-- [ ] AI review conducted (bmad-code-review agent)
-- [ ] Feature is deployable (no feature flags hiding incomplete work)
-- [ ] No hardcoded values or secrets in code
-- Update both story files and `sprint-status.yaml` when statuses change
-- Fix P1/P2 review findings before moving work to done
-- Keep completion notes with files changed and validation evidence
+- [ ] No known technical debt (or tracked in sprint-status.yaml)
+- [ ] Code review + AI review with no blockers
+- [ ] Feature deployable (no feature flags hiding incomplete work)
 
-#### Repo-Wide Invariants (NEVER violate)
-1. **Accounting/GL at center**: All business documents must reconcile to journal effects
-2. **Financial writes**: Must be transactionally safe and auditable
-3. **POS offline-first**: Write locally first, then sync via outbox
-4. **POS sync idempotent**: via `client_tx_id`; duplicate payloads cannot create duplicate financial effects
-5. **Tenant isolation**: All data must enforce `company_id`; `outlet_id` where applicable
-6. **Immutable financial records**: Use VOID/REFUND correction flows; never edit finalized records
-7. **Audit logs**: `audit_logs.success` is canonical; filter by `success` not `result`. Non-success logs exist for forensics—never filter them from existence
-8. **Shared contracts**: TypeScript/Zod contracts in `packages/shared` must stay aligned across all apps/packages
-9. **Reservation timezone**: No UTC fallback; resolve timezone in order `outlet -> company`
+### Branch & Commit
+- Naming: `feature/`, `fix/`, `chore/`, `epic-N/`
+- PR titles reference story IDs for traceability
+- **No commit unless explicitly requested by user**
 
-#### Critical Anti-Patterns
-- **Never** use `FLOAT`/`DOUBLE` for money (in code or DB)
-- **Never** use native `Date` for business logic
-- **Never** bypass Zod validation for performance without profiling evidence
-- **Never** mutate a `POSTED` or `COMPLETED` record—use correction flows
-- **Never** mix outlets or companies in queries—always scope by `company_id` + `outlet_id`
-- **Never** retry sync indefinitely—max 3 attempts, then mark `FAILED` and surface to operator
-- **Never** log passwords, tokens, or PII
-- **Never** wrap indexed timestamp columns in SQL functions; apply functions only on constants
-- **Never** use UTC fallback for timezone resolution; resolve in order: outlet → company
-- **Never** use relative import paths (`../../../../lib/`); use `@/` alias exclusively
+---
 
-#### Migration Rules
-- All migrations must be rerunnable/idempotent (no `IF NOT EXISTS` in `ALTER TABLE ADD COLUMN`)
-- Use `information_schema` existence checks before DDL
-- Migrations must run on both MySQL 8.0+ and MariaDB
-- Additive changes only for schema migrations (never remove columns/indexes)
-- **Backfill strategy**: Legacy rows with incomplete data must be backfilled at migration time using effective defaults, then frozen historically
-- Avoid breaking shared payload/schema contracts across apps when migrations affect API shape
+## Repo-Wide Invariants (NEVER Violate)
 
-#### Reservation Time Schema (canonical)
-- Canonical reservation time uses unix milliseconds in `BIGINT` columns:
-  - `reservation_start_ts` (source of truth for reporting and date-range filtering)
-  - `reservation_end_ts` (source of truth for calendar windows and overlap checks)
-- Keep API compatibility field `reservation_at`, but derive it from `reservation_start_ts`
-- Overlap rule: `a_start < b_end && b_start < a_end`; `end == next start` is non-overlap
-- Query/index rule: never wrap indexed timestamp columns in SQL functions
-- No UTC fallback for missing reservation timezone resolution
+1. **Accounting/GL at center**: All business documents reconcile to journal effects
+2. **Financial writes**: Transactionally safe and auditable
+3. **POS offline-first**: Write locally, sync via outbox
+4. **POS sync idempotent**: via `client_tx_id`; duplicate ≠ duplicate financial effects
+5. **Tenant isolation**: All data enforces `company_id`; `outlet_id` where applicable
+6. **Immutable financial records**: Use VOID/REFUND, never edit finalized records
+7. **Audit logs canonical**: Filter by `success` not `result`
+8. **Shared contracts**: TS/Zod contracts in `packages/shared` must stay aligned
+9. **Reservation timezone**: No UTC fallback; resolve in order: outlet → company
 
-#### Story & Epic Tracking
-- Stories tracked in `_bmad-output/implementation-artifacts/stories/epic-{N}/story-{N}.{M}.md`
-- Completion notes required: `_bmad-output/implementation-artifacts/stories/epic-{N}/story-{N}.{M}.completion.md`
-- Sprint status in `_bmad-output/implementation-artifacts/sprint-status.yaml`
-- Epic status transitions: `backlog → in-progress → done`
-- Story status transitions: `backlog → ready-for-dev → in-progress → review → done`
+### Critical Anti-Patterns
+- **Never** `FLOAT`/`DOUBLE` for money
+- **Never** native `Date` for business logic
+- **Never** bypass Zod validation
+- **Never** mutate `POSTED`/`COMPLETED` records
+- **Never** use hardcoded IDs (`company_id=1`)
+- **Never** ad-hoc SQL in tests for setup
+- **Never** relative import paths
+- **Never** UTC fallback for timezone
+- **Never** retry sync indefinitely (max 3)
 
-#### Epic Documentation Structure
+---
 
-| File | Purpose | Content |
-|------|---------|---------|
-| `epics.md` | Central index | Epic titles, story titles (for plugin parsing) |
-| `epic-{N}.md` | Full definition | Goals, context, detailed stories, success criteria, outcomes |
-| `epic-{N}.retrospective.md` | Lessons learned | What went well, improvements, action items |
+## Migration Rules
+- Rerunnable/idempotent DDL only; use `information_schema` checks (no `IF EXISTS` in ALTER)
+- Run on MySQL 8.0+ AND MariaDB
+- Additive changes only (never remove columns/indexes)
 
-**Note:** `epics.md` is intentionally minimal (titles only) for plugin parsing. Full epic details live in individual `epic-{N}.md` files.
+---
 
-#### Route Library Pattern
+## Story & Epic Tracking
 
-All API routes must follow the library-first architecture:
+| File | Purpose |
+|------|---------|
+| `epics.md` | Central index (titles only for plugin parsing) |
+| `epic-{N}.md` | Full definition with goals, stories, success criteria |
+| `epic-{N}.retrospective.md` | Lessons learned |
+| `sprint-status.yaml` | Story status tracking |
 
-**Rule: Routes delegate to libraries**
-- Routes must NOT contain direct SQL queries
-- Routes import database operations from `lib/` modules
-- Routes are thin HTTP handlers (validation → library → response)
+### Epic Documentation Requirements
+Every epic MUST have: definition, retrospective, story tracking in sprint-status.yaml
 
-**Directory Responsibilities:**
-| Directory | Responsibility |
-|-----------|---------------|
-| `routes/` | HTTP handling, auth, validation, response formatting |
-| `lib/` | Database operations, business logic, domain rules |
+---
 
-**Example:**
+## Epic 13: Library Migration Patterns
+
+**1. Batch Operations**: Collect changes → execute bulk
 ```typescript
-// routes/settings-modules.ts - HTTP layer
-import { listCompanyModules } from "../lib/settings-modules.js";
-
-modulesRoutes.get("/", async (c) => {
-  const auth = c.get("auth");
-  const modules = await listCompanyModules(auth.companyId);
-  return successResponse(modules);
-});
-
-// lib/settings-modules.ts - Business logic
-export async function listCompanyModules(companyId: number) {
-  const pool = getDbPool();
-  const [rows] = await pool.execute(
-    `SELECT ... FROM modules WHERE company_id = ?`,
-    [companyId]
-  );
-  return rows.map(transform);
-}
-```
-
-**Anti-patterns:**
-- ❌ SQL queries in route files
-- ❌ `pool.execute()` in routes
-- ❌ Business logic mixed with HTTP handling
-
-**Enforcement:**
-- ESLint rules detect direct SQL in routes
-- Code review checklist includes library usage
-- Epic 12 completion means zero exceptions
-
-#### Epic 13: Library Migration Patterns (Completed)
-
-Epic 13 established patterns for migrating complex routes to libraries:
-
-**1. Batch Operations Pattern**
-```typescript
-// Collect changes, execute in bulk
-const updates: BatchItemUpdate[] = [];
-const inserts: BatchItemInsert[] = [];
-
-// Process rows
-for (const row of rows) {
-  if (exists) updates.push({...});
-  else inserts.push({...});
-}
-
-// Execute batches
+const updates = [], inserts = [];
+for (const row of rows) { exists ? updates.push({...}) : inserts.push({...}); }
 await batchUpdateItems(updates, connection);
 await batchInsertItems(companyId, inserts, connection);
 ```
 
-**2. Validation Separation Pattern**
-```typescript
-// Sync validation (no DB)
-function preValidateItems(items: ImportItem[]): ValidationResult;
+**2. Validation Separation**: Sync (no DB) vs Async (requires DB) validation
 
-// Async validation (requires DB)
-async function validateImportItems(
-  companyId: number,
-  items: ImportItem[]
-): Promise<ValidationResult>;
-```
+**3. Adapter Pattern**: Bridge external interface to internal types
 
-**3. Adapter Pattern (for external interfaces)**
-```typescript
-// Bridge external interface to internal types
-export function createSyncAuditService(dbPool: Pool): SyncAuditService {
-  const client: AuditDbClient = {
-    query: async (sql, params) => { ... },
-    execute: async (sql, params) => { ... },
-    getConnection: async () => { ... },
-  };
-  return new SyncAuditService(client);
-}
-```
+**4. Permission Utility**: Reusable `canManageCompanyDefaults(userId, companyId, module, permission)` function
 
-**4. Permission Utility Pattern**
-```typescript
-// Reusable permission check across modules
-export async function canManageCompanyDefaults(
-  userId: number,
-  companyId: number,
-  module: string,  // "inventory", "settings", etc.
-  permission: "create" | "read" | "update" | "delete"
-): Promise<boolean>
-```
+---
 
-**Epic 13 Deliverables:**
-- 4 new library modules
-- 3 routes refactored (zero SQL)
-- 24 new tests
-- 50% code duplication reduction
+## Lessons Learned
 
-#### Directory Paths
+| Lesson | Rule |
+|--------|------|
+| **Story completion = tests written, not deferred** | Integration tests must be in original AC |
+| **Epic retro → next epic follow-up** | Address previous retro items in current planning |
+| **TD tracking mandatory** | Add to TECHNICAL-DEBT.md immediately when created |
+| **Use library functions in tests** | Centralizes schema changes; tests break less |
+| **DB pool cleanup mandatory** | Tests hang without it |
+| **QA from day one** | Validate regressions during story, not after |
+
+---
+
+## Directory Paths
 
 ```
 _bmad-output/
 ├── planning-artifacts/
-│   └── epics.md                    # Central index (epic/story titles only)
-│
+│   └── epics.md                    # Central index (titles only)
 └── implementation-artifacts/
-    ├── sprint-status.yaml          # Story status tracking
-    │
-    └── stories/
-        └── epic-{N}/               # One folder per epic
-            ├── epic-{N}.md         # Full epic definition
-            ├── epic-{N}.retrospective.md
-            ├── story-{N}.{M}.md    # Story files
-            └── story-{N}.{M}.completion.md
+    ├── sprint-status.yaml          # Story tracking
+    └── stories/epic-{N}/
+        ├── epic-{N}.md            # Definition
+        ├── epic-{N}.retrospective.md
+        └── story-{N}.{M}.md      # Story files
 ```
 
-**Quick Reference:**
-- **Index**: `_bmad-output/planning-artifacts/epics.md`
-- **Epic Definitions**: `_bmad-output/implementation-artifacts/stories/epic-{N}/epic-{N}.md`
-- **Story Files**: `_bmad-output/implementation-artifacts/stories/epic-{N}/story-{N}.{M}.md`
-
-#### Epic Naming Guidelines
-Epic names should clearly communicate purpose and scope:
-
-| Epic Type | Naming Pattern | Example |
-|-----------|---------------|---------|
-| **Feature** | `{Feature Area} {Action}` | "Sync Routes & POS Offline-First" |
-| **Refactoring** | `{Action} {Target}` | "Refactor Remaining Test Files" |
-| **Infrastructure** | `{Scope} {Goal}` | "Import/Export Infrastructure" |
-| **Follow-up/Cleanup** | `{Action} {Epic N} {Item}` | "Epic 5 Follow-up: Integration Tests" |
-
-**Anti-patterns to avoid:**
-- ❌ "Continue X" (implies incompleteness, use specific goal instead)
-- ❌ "Fix Tests" (too vague, specify what kind of fixes)
-- ❌ Generic verbs like "Improve" or "Update" without scope
-
-**Epic Definition Requirements:**
-Every epic MUST have:
-1. `epic-{N}.md` - Definition file with goals, stories, success criteria
-2. `epic-{N}.retrospective.md` - Retrospective with lessons learned
-3. All stories tracked in sprint-status.yaml with completion status
-
 ---
 
-## Lessons Learned (Epic 6 & Prior)
-
-_This section captures key learnings to inform future development. AI agents should internalize these patterns._
-
-### Epic 6 Lessons (Technical Debt Consolidation)
-
-| Lesson | Evidence | Impact |
-|--------|----------|--------|
-| **Story completion = tests written, not deferred** | Integration tests retrofitted in 6.7 after original stories completed | Unit tests passing ≠ API-level validation; integration tests must be in original AC |
-| **Epic retro → next epic follow-up pattern works** | Epic 5 items addressed in Epic 6 kept user promises | Reduces backlog of known issues; should continue as standard practice |
-| **Documentation (ADRs) are essential** | TECHNICAL-DEBT.md registry created in 6.6 | First place to check when onboarding; future developers understand decisions |
-| **QA involvement needed from day one** | Technical debt stories impact existing behavior | Validate no regressions during story, not after |
-| **"No new TD without tracking" rule** | TD-009-012 created during Epic 6 | All technical debt must be added to registry immediately when created |
-
-### Prior Epic Lessons
-
-| Lesson | Source | Rule |
-|--------|--------|------|
-| **Infrastructure stories must include API endpoints** | Epic 5 | When story provides "API endpoint pattern," actual endpoint must be included |
-| **State management in hooks needs explicit patterns** | Epic 5 | `overrideFilters` pattern (pass parameters directly, not rely on state updates) for async form operations |
-| **Date/time handling requires explicit timezone strategy** | Epic 5 | User-selected dates are local; storage uses ISO 8601 with timezone; display formatting at presentation layer |
-| **Integration tests should be part of framework epics** | Epic 5 | Deferring creates gaps that compound; even basic API tests should be included |
-
-### Process Rules Derived from Lessons
-
-1. **Integration tests in original AC** - API-level integration tests (upload → validate → apply flow) must be part of acceptance criteria, not retrofitted
-2. **QA from day one** - For technical debt stories, QA validates regressions during story, not after
-3. **TD tracking mandatory** - Any technical debt created during a story must be added to `docs/adr/TECHNICAL-DEBT.md` immediately
-4. **Epic retro → next epic follow-up** - Address previous epic's retrospective items in current epic planning
-
-### Epic 11 Lessons (Test Refactoring & Library Consolidation)
-
-| Lesson | Evidence | Impact |
-|--------|----------|--------|
-| **Use library functions over raw SQL in tests** | Story 11.5 replaced 34 `INSERT INTO items` with `createItem()` | Centralizes schema changes; tests break less when columns are added |
-| **Test factory functions must support common fields** | `low_stock_threshold` required follow-up UPDATE after `createItem()` | Library functions should expose all commonly-used fields to avoid workarounds |
-
-### Epic Numbering Note
-
-**Epic 1 is a merged epic**: Originally "Epic 0: Infrastructure" and "Epic 1: Continue Kysely Migration" were separate. They have been merged into **Epic 1: Kysely ORM Migration** to maintain 1-based numbering for plugin compatibility. All stories from the original Epic 0 are now numbered 1.1-1.6, and original Epic 1 stories are 1.7-1.9.
-
-### Test Library Patterns (Established)
-
-#### Item Creation in Tests
-- **Use**: `createItem(companyId, { name, type, sku?, ... })` from `"@/lib/items/index.js"`
-- **Don't**: Raw `INSERT INTO items` statements
-- **Rationale**: Centralizes default value handling, makes schema changes transparent to tests
-- **Workaround pattern**: For fields not in `createItem()` signature, use follow-up UPDATE:
-  ```typescript
-  const item = await createItem(companyId, { name: "Test", type: "PRODUCT" });
-  await pool.execute(`UPDATE items SET low_stock_threshold = ? WHERE id = ?`, [10, item.id]);
-  ```
-
----
-
-## Usage Guidelines
-
-**For AI Agents:**
-- Read this file before implementing any code
-- Follow ALL rules exactly as documented
-- When in doubt, prefer the more restrictive option
-- Update this file if new patterns emerge
-
-**For Humans:**
-- Keep this file lean and focused on agent needs
-- Update when technology stack changes
-- Review quarterly for outdated rules
-- Remove rules that become obvious over time
-
----
-
-_Last Updated: 2026-03-28
+_Last Updated: 2026-03-28_

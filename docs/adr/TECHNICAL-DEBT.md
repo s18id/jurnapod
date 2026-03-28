@@ -144,6 +144,26 @@ This document serves as the central registry for all known technical debt in the
 
 ---
 
+### Epic 13: Complete Library Migration for Deferred Routes
+
+| ID | Description | Priority | Status | ADR/Story |
+|----|-------------|----------|--------|-----------|
+| TD-033 | Epic 13 libraries (import, inventory, sync-pull) required verification of Kysely compatibility | P3 | **RESOLVED** | Epic 14 |
+
+**Resolution:** Epic 14 migrated Epic 13 libraries to Kysely ORM, ensuring consistency across all database access patterns.
+
+---
+
+### Epic 14: Kysely ORM Migration for Epic 13 Libraries
+
+| ID | Description | Priority | Status | ADR/Story |
+|----|-------------|----------|--------|-----------|
+| TD-034 | Epic 14 migration introduced no new technical debt | — | **CONFIRMED** | Story 14.5 |
+
+**Resolution:** All Epic 14 migration work followed existing patterns documented in ADR-0011. No shortcuts, no deprecated functions, no N+1 patterns introduced.
+
+---
+
 ### Epic 8: Production Scale & POS Variant Sync
 
 | ID | Description | Priority | Status | ADR/Story |
@@ -165,9 +185,9 @@ This document serves as the central registry for all known technical debt in the
 |----------|------|---------|-------|
 | P1 | 1 | 2 | 3 |
 | P2 | 2 | 16 | 18 |
-| P3 | 0 | 7 | 7 |
+| P3 | 0 | 9 | 9 |
 | P4 | 0 | 3 | 3 |
-| **Total** | **3** | **28** | **31** |
+| **Total** | **3** | **30** | **33** |
 
 ---
 
@@ -287,6 +307,7 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 | 2026-03-28 | Resolved TD-015 - Progress persistence (Story 8.3) | Story 8.3 |
 | 2026-03-28 | Added TD-030 - Effective date filtering (P1), TD-031 - Alert retry logic (P2), TD-032 - Batch processing backfills (P2) | Epic 8 |
 | 2026-03-28 | Fixed summary statistics: P2 total corrected to 18 (was 15), P4 total corrected to 3 (was 3) | Documentation fix |
+| 2026-03-28 | Added TD-033, TD-034 - Epic 13/14 confirmation entries; updated P3 resolved count to 9 | Story 14.5 |
 
 ---
 

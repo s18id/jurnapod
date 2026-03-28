@@ -6,7 +6,7 @@ Central index for all Jurnapod epics.
 
 ## Epic List
 
-Epics 1-11 (11 total, all completed)
+Epics 1-14 (14 total, 13 completed, 1 planned)
 
 ---
 
@@ -226,6 +226,20 @@ Finish Epic 12 deferred work - migrate import.ts, inventory.ts, and sync/pull.ts
 
 ---
 
-**Total: 13 epics | ~106 stories | 12 done, 1 backlog**
+## Epic 14: Kysely ORM Migration for Epic 13 Libraries
+
+Migrate Epic 13 library modules from raw SQL to Kysely ORM.
+
+### Story 14.1: Migrate import/validation.ts to Kysely
+### Story 14.2: Migrate auth/permissions.ts to Kysely
+### Story 14.3: Migrate import/batch-operations.ts - SELECT Operations
+### Story 14.4: Migrate import/batch-operations.ts - WRITE Operations
+### Story 14.5: Epic 14 Documentation
+
+**Path:** [epic-14](./epic-14.md)
+
+---
+
+**Total: 14 epics | ~111 stories | 13 done, 1 planned**
 
 _Last Updated: 2026-03-28_

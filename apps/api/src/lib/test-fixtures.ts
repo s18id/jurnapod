@@ -32,6 +32,7 @@ import { createUserBasic, UserEmailExistsError } from "./users";
 import { createItem } from "./items/index.js";
 import { DatabaseConflictError } from "./master-data-errors.js";
 import { createVariantAttribute } from "./item-variants";
+import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } from "./auth.js";
 
 // ============================================================================
 // Types
@@ -595,4 +596,118 @@ export async function createFullTestFixtureSet(options?: {
   const variant = await createTestVariant(item.id, options?.variant);
   
   return { company, outlet, user, item, variant };
+}
+
+// ============================================================================
+// Permission Fixtures
+// ============================================================================
+
+/**
+ * Get a role ID by its code (e.g., 'OWNER', 'ADMIN', 'CASHIER').
+ * These are system-wide roles available in all companies.
+ * 
+ * @param roleCode - Role code to look up
+ * @returns Role ID
+ */
+export async function getRoleIdByCode(roleCode: string): Promise<number> {
+  const pool = getDbPool();
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id FROM roles WHERE code = ? LIMIT 1`,
+    [roleCode]
+  );
+  if (rows.length === 0) {
+    throw new Error(`Role '${roleCode}' not found in database`);
+  }
+  return Number(rows[0].id);
+}
+
+/**
+ * Assign a global role to a user (outlet_id = NULL).
+ * Use this for setting up test users with specific roles.
+ * 
+ * @param userId - User ID
+ * @param roleId - Role ID
+ */
+export async function assignUserGlobalRole(
+  userId: number,
+  roleId: number
+): Promise<void> {
+  const pool = getDbPool();
+  await pool.execute(
+    `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, NULL)`,
+    [userId, roleId]
+  );
+}
+
+/**
+ * Assign an outlet-scoped role to a user.
+ * Use this for setting up test users with outlet-specific roles.
+ * 
+ * @param userId - User ID
+ * @param roleId - Role ID
+ * @param outletId - Outlet ID
+ */
+export async function assignUserOutletRole(
+  userId: number,
+  roleId: number,
+  outletId: number
+): Promise<void> {
+  const pool = getDbPool();
+  await pool.execute(
+    `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`,
+    [userId, roleId, outletId]
+  );
+}
+
+/**
+ * Set module-level permissions for a role in a company.
+ * Use this for setting up test data with specific permission masks.
+ * 
+ * @param companyId - Company ID
+ * @param roleId - Role ID
+ * @param module - Module name (e.g., 'inventory', 'sales')
+ * @param permissionMask - Permission mask (use MODULE_PERMISSION_BITS or buildPermissionMask)
+ */
+export async function setModulePermission(
+  companyId: number,
+  roleId: number,
+  module: string,
+  permissionMask: number
+): Promise<void> {
+  const pool = getDbPool();
+  await pool.execute(
+    `INSERT INTO module_roles (company_id, role_id, module, permission_mask) VALUES (?, ?, ?, ?)`,
+    [companyId, roleId, module, permissionMask]
+  );
+}
+
+/**
+ * Create a complete permission setup for testing canManageCompanyDefaults.
+ * This combines: get role ID, assign role to user, set module permission.
+ * 
+ * @param params - Permission setup parameters
+ * @returns void
+ */
+export async function setupUserPermission(params: {
+  userId: number;
+  companyId: number;
+  roleCode: string;
+  module: string;
+  permission: ModulePermission | "all";
+  isGlobal?: boolean;
+  outletId?: number;
+}): Promise<void> {
+  const roleId = await getRoleIdByCode(params.roleCode);
+  
+  if (params.isGlobal === false && params.outletId) {
+    await assignUserOutletRole(params.userId, roleId, params.outletId);
+  } else {
+    await assignUserGlobalRole(params.userId, roleId);
+  }
+  
+  const mask = params.permission === "all" 
+    ? buildPermissionMask({ canCreate: true, canRead: true, canUpdate: true, canDelete: true })
+    : MODULE_PERMISSION_BITS[params.permission];
+  
+  await setModulePermission(params.companyId, roleId, params.module, mask);
 }

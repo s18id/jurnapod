@@ -400,6 +400,58 @@ const updated = Number(result.numUpdatedRows ?? 0n); // Convert bigint to number
 
 ---
 
+## Batch Operations Pattern (Epic 14)
+
+For batch UPDATE/INSERT in MySQL with Kysely:
+
+### UPDATE Loop
+
+```typescript
+for (const item of updates) {
+  await kysely
+    .updateTable('items')
+    .set({
+      sku: item.sku,
+      name: item.name,
+      item_type: item.itemType
+    })
+    .where('id', '=', item.id)
+    .execute();
+}
+```
+
+### INSERT Loop
+
+```typescript
+for (const item of inserts) {
+  await kysely
+    .insertInto('items')
+    .values({
+      company_id: companyId,
+      sku: item.sku,
+      name: item.name
+    })
+    .execute();
+}
+```
+
+**Note:** Kysely's batch operations are PostgreSQL-optimized. For MySQL, loop-based approach with individual statements is acceptable.
+
+## Bitwise Permission Check Pattern (Epic 14)
+
+For complex JOINs with bitwise operations:
+
+```typescript
+import { sql } from 'kysely';
+
+const row = await db
+  .selectFrom('user_role_assignments as ura')
+  .innerJoin('roles as r', 'r.id', 'ura.role_id')
+  .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
+  .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
+  .executeTakeFirst();
+```
+
 ## Epic 14 Migration Checklist
 
 - [ ] Replace direct `pool.execute()` calls with `DbConn` wrapper

@@ -205,3 +205,12 @@ development_status:
   13-7-create-sync-pull-adapter: done
   13-8-epic-13-documentation: done
   epic-13-retrospective: done
+
+  # Epic 14: Kysely ORM Migration for Epic 13 Libraries
+  # Focus: Migrate Epic 13 library modules from raw SQL to Kysely ORM
+  epic-14: done
+  14-1-migrate-validation-to-kysely: done
+  14-2-migrate-permissions-to-kysely: done
+  14-3-migrate-batch-operations-select: done
+  14-4-migrate-batch-operations-write: done
+  14-5-epic-14-documentation: done
