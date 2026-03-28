@@ -128,4 +128,45 @@ export interface ValidationOptions {
 
 ---
 
-*Ready for implementation.*
+## Completion Notes
+
+**Completed by:** bmad-dev (delegated agent)  
+**Completion Date:** 2026-03-28  
+**Actual Effort:** ~3 hours
+
+### Files Created
+
+1. `apps/api/src/lib/import/validation.ts` (131 lines)
+   - `checkSkuExists()` - Check if SKU exists in company
+   - `checkItemExistsBySku()` - Check item existence by SKU
+   - `batchCheckSkusExist()` - Batch check multiple SKUs
+
+2. `apps/api/src/lib/import/validation.test.ts` (52 lines)
+   - Tests for SKU validation functions
+
+### Implementation Details
+
+- Returns `SkuCheckResult` with `exists` boolean and optional `itemId`
+- Uses parameterized queries for security
+- `batchCheckSkusExist()` returns Map for O(1) lookup
+- All functions accept optional `PoolConnection`
+
+### Test Results
+
+```
+✓ 4 tests passed
+- checkSkuExists (non-existent SKU)
+- checkItemExistsBySku (non-existent SKU)
+- batchCheckSkusExist (empty array)
+- batchCheckSkusExist (non-existent SKUs)
+```
+
+### Acceptance Criteria
+
+- [x] SKU validation implemented
+- [x] Item validation implemented
+- [x] Batch validation working
+- [x] TypeScript compilation passes
+- [x] Unit tests passing
+
+*Story completed successfully.*

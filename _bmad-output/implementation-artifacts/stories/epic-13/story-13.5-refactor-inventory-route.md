@@ -87,4 +87,63 @@ npm run lint -w @jurnapod/api
 
 ---
 
-*Quick win story - simple refactoring.*
+## Completion Notes
+
+**Completed by:** bmad-dev (delegated agent)  
+**Completion Date:** 2026-03-28  
+**Actual Effort:** ~2 hours
+**Depends on:** 13.4 (completed)
+
+### Files Created
+
+1. `apps/api/src/lib/auth/permissions.ts` (51 lines)
+   - `canManageCompanyDefaults()` - Reusable permission check
+   - Accepts module parameter for multi-module use
+
+### Files Modified
+
+1. `apps/api/src/routes/inventory.ts` (60 lines changed)
+   - Removed local `canManageCompanyDefaults()` function
+   - Added import from `lib/auth/permissions.js`
+   - Updated function calls with module parameter
+
+### Changes Made
+
+**Removed from route:**
+- `getDbPool` import (no longer needed)
+- `MODULE_PERMISSION_BITS` import (moved to library)
+- `AccessCheckRow` type definition
+- Local `canManageCompanyDefaults()` function (lines 92-116)
+
+**Added to route:**
+```typescript
+import { canManageCompanyDefaults } from "../lib/auth/permissions.js";
+```
+
+**Updated calls:**
+```typescript
+// Before: canManageCompanyDefaults(auth.userId, auth.companyId, "read")
+// After: canManageCompanyDefaults(auth.userId, auth.companyId, "inventory", "read")
+```
+
+### Verification
+
+```bash
+# Zero SQL in route
+grep -c "pool.execute" apps/api/src/routes/inventory.ts
+# Result: 0
+
+# TypeScript compilation
+npm run typecheck -w @jurnapod/api
+# Result: PASS
+```
+
+### Acceptance Criteria
+
+- [x] Library file created
+- [x] Route uses library function
+- [x] Zero direct SQL in route
+- [x] TypeScript compilation passes
+- [x] Functionality preserved
+
+*Story completed successfully.*

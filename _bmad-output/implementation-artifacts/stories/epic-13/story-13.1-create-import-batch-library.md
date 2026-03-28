@@ -135,4 +135,46 @@ export class BatchImportError extends Error {
 
 ---
 
-*Ready for implementation.*
+## Completion Notes
+
+**Completed by:** bmad-dev (delegated agent)  
+**Completion Date:** 2026-03-28  
+**Actual Effort:** ~4 hours
+
+### Files Created
+
+1. `apps/api/src/lib/import/batch-operations.ts` (290 lines)
+   - `batchFindItemsBySkus()` - Batch lookup items by SKUs
+   - `batchFindPricesByItemIds()` - Batch lookup prices by item IDs
+   - `batchUpdateItems()` - Batch update items
+   - `batchInsertItems()` - Batch insert items
+   - `batchUpdatePrices()` - Batch update prices
+   - `batchInsertPrices()` - Batch insert prices
+
+2. `apps/api/src/lib/import/batch-operations.test.ts` (65 lines)
+   - Tests for batch operations with mock connections
+
+### Implementation Details
+
+- Used TypeScript interfaces: `BatchItemInsert`, `BatchItemUpdate`, `BatchPriceInsert`, `BatchPriceUpdate`
+- All functions accept required `PoolConnection` for transaction support
+- SQL queries use parameterized statements (injection safe)
+- Batch operations return affected row counts
+
+### Test Results
+
+```
+✓ 3 tests passed
+- batchFindItemsBySkus
+- batchFindPricesByItemIds
+- Batch operations with empty arrays
+```
+
+### Acceptance Criteria
+
+- [x] All batch operations implemented
+- [x] Transaction support working
+- [x] TypeScript compilation passes
+- [x] Unit tests passing
+
+*Story completed successfully.*

@@ -114,4 +114,60 @@ npm run lint -w @jurnapod/api
 
 ---
 
-*Ready for implementation after 13.1 and 13.2.*
+## Completion Notes
+
+**Completed by:** bmad-dev (delegated agent)  
+**Completion Date:** 2026-03-28  
+**Actual Effort:** ~4 hours
+**Depends on:** 13.1, 13.2 (completed)
+
+### Files Modified
+
+1. `apps/api/src/routes/import.ts` (149 lines changed)
+   - Removed 9 direct SQL queries
+   - Migrated to library functions
+   - Preserved transaction handling
+   - Preserved batch processing logic
+
+### Changes Made
+
+**Imports Added:**
+```typescript
+import { checkSkuExists, checkItemExistsBySku } from "../lib/import/validation.js";
+import { batchFindItemsBySkus, batchUpdateItems, batchInsertItems, ... } from "../lib/import/batch-operations.js";
+```
+
+**Validation Functions:**
+- `validateItemRow()`: Now uses `checkSkuExists()` instead of `pool.execute()`
+- `validatePriceRow()`: Now uses `checkItemExistsBySku()` instead of `pool.execute()`
+
+**Batch Operations:**
+- `applyItemImport()`: Uses `batchFindItemsBySkus()`, `batchUpdateItems()`, `batchInsertItems()`
+- `applyPriceImport()`: Uses `batchFindPricesByItemIds()`, `batchUpdatePrices()`, `batchInsertPrices()`
+
+### Verification
+
+```bash
+# Zero SQL remaining in route
+grep -c "pool.execute\|connection.execute" apps/api/src/routes/import.ts
+# Result: 0
+
+# TypeScript compilation
+npm run typecheck -w @jurnapod/api
+# Result: PASS
+
+# Tests
+npm run test:unit:single -w @jurnapod/api "src/routes/import.test.ts"
+# Result: PASS
+```
+
+### Acceptance Criteria
+
+- [x] Route imports from libraries
+- [x] Zero direct SQL in route
+- [x] Transaction handling preserved
+- [x] Error handling preserved
+- [x] TypeScript compilation passes
+- [x] All tests pass
+
+*Story completed successfully.*
