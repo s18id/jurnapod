@@ -487,3 +487,60 @@ export async function deactivateOutlet(params: {
     actor: params.actor
   });
 }
+
+/**
+ * Create an outlet with minimal setup (no audit logging).
+ * Use this for testing - it only inserts the outlet row.
+ * For production use, use createOutlet() which includes audit.
+ */
+export async function createOutletBasic(params: {
+  company_id: number;
+  code: string;
+  name: string;
+  city?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  postal_code?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  timezone?: string | null;
+}): Promise<{ id: number; company_id: number; code: string; name: string }> {
+  const pool = getDbPool();
+
+  // Check for duplicate company_id + code combination
+  const [existing] = await pool.execute<OutletRow[]>(
+    `SELECT id FROM outlets WHERE company_id = ? AND code = ?`,
+    [params.company_id, params.code]
+  );
+
+  if (existing.length > 0) {
+    throw new OutletCodeExistsError(
+      `Outlet with code ${params.code} already exists for this company`
+    );
+  }
+
+  const [result] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO outlets (company_id, code, name, city, address_line1, address_line2, 
+      postal_code, phone, email, timezone, is_active) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    [
+      params.company_id,
+      params.code,
+      params.name,
+      params.city ?? null,
+      params.address_line1 ?? null,
+      params.address_line2 ?? null,
+      params.postal_code ?? null,
+      params.phone ?? null,
+      params.email ?? null,
+      params.timezone ?? null
+    ]
+  );
+
+  return {
+    id: Number(result.insertId),
+    company_id: params.company_id,
+    code: params.code,
+    name: params.name
+  };
+}

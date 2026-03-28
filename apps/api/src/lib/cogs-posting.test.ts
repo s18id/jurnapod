@@ -17,11 +17,14 @@ import {
 } from "./cogs-posting";
 import { createItem } from "./items/index.js";
 import { createItemPrice } from "./item-prices/index.js";
+import { createCompanyBasic } from "./companies.js";
+import { createOutletBasic } from "./outlets.js";
 
-// Test data - use timestamp-based IDs to avoid conflicts with parallel/sequential runs
-const TEST_COMPANY_ID = 900000 + (Date.now() % 100000);
-const TEST_OUTLET_ID = TEST_COMPANY_ID + 1;
-const TEST_USER_ID = TEST_COMPANY_ID + 2;
+// Dynamic IDs - created in before() hook
+let TEST_COMPANY_ID: number;
+let TEST_OUTLET_ID: number;
+let TEST_USER_ID: number;
+const RUN_ID = Date.now().toString(36);
 
 // Shared state
 let pool: ReturnType<typeof getDbPool>;
@@ -113,40 +116,45 @@ async function createInventoryTransaction(
   return (result as any).insertId;
 }
 
-async function cleanupTestData(conn: PoolConnection): Promise<void> {
+async function cleanupTestData(conn: PoolConnection, companyId: number): Promise<void> {
   // Note: journal_lines and journal_batches are immutable - they use VOID patterns
   // So we only clean up the mutable tables
   
   try {
-    await conn.execute(`DELETE FROM inventory_transactions WHERE company_id = ?`, [TEST_COMPANY_ID]);
+    await conn.execute(`DELETE FROM inventory_transactions WHERE company_id = ?`, [companyId]);
   } catch (e) {
     // May fail if table doesn't exist or has constraints
   }
   
   try {
-    await conn.execute(`DELETE FROM item_prices WHERE company_id = ?`, [TEST_COMPANY_ID]);
+    await conn.execute(`DELETE FROM item_prices WHERE company_id = ?`, [companyId]);
   } catch (e) {
     // May fail if table doesn't exist
   }
   
-  await conn.execute(`DELETE FROM items WHERE company_id = ?`, [TEST_COMPANY_ID]);
+  await conn.execute(`DELETE FROM items WHERE company_id = ?`, [companyId]);
   
   try {
-    await conn.execute(`DELETE FROM company_account_mappings WHERE company_id = ?`, [TEST_COMPANY_ID]);
+    await conn.execute(`DELETE FROM company_account_mappings WHERE company_id = ?`, [companyId]);
   } catch (e) {
     // May fail if table doesn't exist
   }
   
-  await conn.execute(`DELETE FROM accounts WHERE company_id = ?`, [TEST_COMPANY_ID]);
+  // Accounts may have journal_lines referencing them - use try/catch
+  try {
+    await conn.execute(`DELETE FROM accounts WHERE company_id = ?`, [companyId]);
+  } catch (e) {
+    // May fail if journal_lines reference these accounts
+  }
   
   try {
-    await conn.execute(`DELETE FROM account_types WHERE company_id = ?`, [TEST_COMPANY_ID]);
+    await conn.execute(`DELETE FROM account_types WHERE company_id = ?`, [companyId]);
   } catch (e) {
     // May fail if table doesn't exist
   }
   
-  await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [TEST_COMPANY_ID]);
-  await conn.execute(`DELETE FROM companies WHERE id = ?`, [TEST_COMPANY_ID]);
+  await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [companyId]);
+  await conn.execute(`DELETE FROM companies WHERE id = ?`, [companyId]);
 }
 
 // Setup
@@ -172,22 +180,25 @@ before(async () => {
   );
   supportsMappingTypeId = Number(mappingTypeColumnRows[0]?.column_exists ?? 0) > 0;
 
-  // Use unique codes to avoid conflicts
-  const runId = Date.now().toString(36);
+  await cleanupTestData(conn, 0);
 
-  await cleanupTestData(conn);
+  // Create company dynamically
+  const company = await createCompanyBasic({
+    code: `TEST-COGS-${RUN_ID}`,
+    name: `Test COGS Company ${RUN_ID}`
+  });
+  TEST_COMPANY_ID = company.id;
 
-  await conn.execute(
-    `INSERT INTO companies (id, code, name, timezone, currency_code)
-     VALUES (?, ?, ?, 'UTC', 'IDR')`,
-    [TEST_COMPANY_ID, `TEST-COGS-${runId}`, `Test COGS Company ${runId}`]
-  );
+  // Create outlet dynamically
+  const outlet = await createOutletBasic({
+    company_id: TEST_COMPANY_ID,
+    code: `OUTLET-${RUN_ID}`,
+    name: `Outlet ${RUN_ID}`
+  });
+  TEST_OUTLET_ID = outlet.id;
 
-  await conn.execute(
-    `INSERT INTO outlets (id, company_id, code, name, timezone, is_active)
-     VALUES (?, ?, ?, ?, 'UTC', 1)`,
-    [TEST_OUTLET_ID, TEST_COMPANY_ID, `TEST-OUTLET-${runId}`, `Test Outlet ${runId}`]
-  );
+  // TEST_USER_ID is used as postedBy in postCogsForSale - use 1 as system admin
+  TEST_USER_ID = 1;
 
   cogsAccountId = await createTestAccount(conn, TEST_COMPANY_ID, '6100-TEST', 'Test COGS', 'EXPENSE', 'D');
   inventoryAccountId = await createTestAccount(conn, TEST_COMPANY_ID, '1100-TEST', 'Test Inventory', 'ASSET', 'D');

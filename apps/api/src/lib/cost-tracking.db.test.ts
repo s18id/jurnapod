@@ -17,12 +17,15 @@ import {
   CostTrackingError,
 } from "./cost-tracking";
 import { createItem } from "./items/index.js";
+import { createCompanyBasic } from "./companies.js";
+import { createOutletBasic } from "./outlets.js";
 
 // Test data - use unique IDs per run to avoid conflicts
 const RUN_ID = Date.now().toString(36);
-const TEST_COMPANY_ID = 888001;
-const TEST_OUTLET_ID = 888002;
-const TEST_COMPANY_CODE = `TEST-COST-${RUN_ID}`;
+
+// Dynamic IDs - created in before() hook
+let TEST_COMPANY_ID: number;
+let TEST_OUTLET_ID: number;
 
 // Test helpers
 async function createTestTransaction(
@@ -60,39 +63,39 @@ async function setCompanyCostingMethod(
   );
 }
 
-async function cleanupTestData(conn: PoolConnection): Promise<void> {
+async function cleanupTestData(conn: PoolConnection, companyId: number): Promise<void> {
   // Delete in reverse dependency order
   await conn.execute(
     `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
+    [companyId]
   );
   await conn.execute(
     `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
+    [companyId]
   );
   await conn.execute(
     `DELETE FROM inventory_item_costs WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
+    [companyId]
   );
   await conn.execute(
     `DELETE FROM inventory_transactions WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
+    [companyId]
   );
   await conn.execute(
     `DELETE FROM items WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
+    [companyId]
   );
   await conn.execute(
     `DELETE FROM company_settings WHERE company_id = ? AND \`key\` IN (?, ?)`,
-    [TEST_COMPANY_ID, "inventory_costing_method", "inventory.costing_method"]
+    [companyId, "inventory_costing_method", "inventory.costing_method"]
   );
   await conn.execute(
     `DELETE FROM outlets WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
+    [companyId]
   );
   await conn.execute(
     `DELETE FROM companies WHERE id = ?`,
-    [TEST_COMPANY_ID]
+    [companyId]
   );
 }
 
@@ -133,24 +136,27 @@ test("Cost Tracking Database Tests", async (t) => {
   const conn = await pool.getConnection();
 
   before(async () => {
-    // Clean up any existing test data
-    await cleanupTestData(conn);
+    // Clean up any existing test data (pass dummy ID for cleanup before company is created)
+    await cleanupTestData(conn, 0);
 
-    await conn.execute(
-      `INSERT INTO companies (id, code, name, timezone, currency_code)
-       VALUES (?, ?, ?, 'UTC', 'IDR')`,
-      [TEST_COMPANY_ID, TEST_COMPANY_CODE, 'Test Cost Company']
-    );
+    // Create company dynamically
+    const company = await createCompanyBasic({
+      code: `TEST-COST-${RUN_ID}`,
+      name: `Test Cost Company ${RUN_ID}`
+    });
+    TEST_COMPANY_ID = company.id;
 
-    await conn.execute(
-      `INSERT INTO outlets (id, company_id, code, name, timezone, is_active)
-       VALUES (?, ?, ?, ?, 'UTC', 1)`,
-      [TEST_OUTLET_ID, TEST_COMPANY_ID, 'TEST-OUTLET', 'Test Outlet']
-    );
+    // Create outlet dynamically
+    const outlet = await createOutletBasic({
+      company_id: TEST_COMPANY_ID,
+      code: `OUTLET-${RUN_ID}`,
+      name: `Outlet ${RUN_ID}`
+    });
+    TEST_OUTLET_ID = outlet.id;
   });
 
   after(async () => {
-    await cleanupTestData(conn);
+    await cleanupTestData(conn, TEST_COMPANY_ID);
     conn.release();
     await closeDbPool();
   });

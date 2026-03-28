@@ -11,75 +11,76 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { getDbPool, closeDbPool } from "../lib/db";
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
-
-const TEST_COMPANY_ID = 999999;
-const TEST_OUTLET_ID = 999998;
-const TEST_PRODUCT_ID = 999997;
-
-async function setupTestData(connection: PoolConnection): Promise<void> {
-  // Create test company
-  await connection.execute(
-    `INSERT INTO companies (id, name, code, currency_code, created_at, updated_at)
-     VALUES (?, 'Test Company Routes', 'TESTROUTE', 'IDR', NOW(), NOW())
-     ON DUPLICATE KEY UPDATE name = 'Test Company Routes'`,
-    [TEST_COMPANY_ID]
-  );
-
-  // Create test outlet
-  await connection.execute(
-    `INSERT INTO outlets (id, company_id, name, code, created_at, updated_at)
-     VALUES (?, ?, 'Test Outlet Routes', 'TESTOUT', NOW(), NOW())
-     ON DUPLICATE KEY UPDATE name = 'Test Outlet Routes'`,
-    [TEST_OUTLET_ID, TEST_COMPANY_ID]
-  );
-
-  // Create test product with stock tracking
-  await connection.execute(
-    `INSERT INTO items (id, company_id, sku, name, item_type, is_active, track_stock, low_stock_threshold, created_at, updated_at)
-     VALUES (?, ?, 'ROUTE-SKU-001', 'Route Test Product', 'PRODUCT', 1, 1, 10.0000, NOW(), NOW())
-     ON DUPLICATE KEY UPDATE name = 'Route Test Product', track_stock = 1, low_stock_threshold = 10.0000`,
-    [TEST_PRODUCT_ID, TEST_COMPANY_ID]
-  );
-
-  // Create test stock record
-  await connection.execute(
-    `INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-     VALUES (?, ?, ?, 100.0000, 0.0000, 100.0000, NOW(), NOW())
-     ON DUPLICATE KEY UPDATE quantity = 100.0000, reserved_quantity = 0.0000, available_quantity = 100.0000`,
-    [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
-  );
-}
-
-async function cleanupTestData(connection: PoolConnection): Promise<void> {
-  await connection.execute(
-    `DELETE FROM inventory_transactions WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
-  );
-  await connection.execute(
-    `DELETE FROM inventory_stock WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
-  );
-  await connection.execute(
-    `DELETE FROM item_prices WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
-  );
-  await connection.execute(
-    `DELETE FROM items WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
-  );
-  await connection.execute(
-    `DELETE FROM outlets WHERE company_id = ? AND id = ?`,
-    [TEST_COMPANY_ID, TEST_OUTLET_ID]
-  );
-  await connection.execute(
-    `DELETE FROM companies WHERE id = ?`,
-    [TEST_COMPANY_ID]
-  );
-}
+import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { createCompanyBasic } from "../lib/companies.js";
+import { createOutletBasic } from "../lib/outlets.js";
 
 describe("Stock Routes", { concurrency: false }, () => {
   let connection: PoolConnection;
+  let TEST_COMPANY_ID: number;
+  let TEST_OUTLET_ID: number;
+  let TEST_PRODUCT_ID: number;
+
+  async function setupTestData(connection: PoolConnection): Promise<void> {
+    const runId = Date.now().toString(36);
+
+    // Create test company dynamically
+    const company = await createCompanyBasic({
+      code: `TESTROUTE-${runId}`,
+      name: `Test Company Routes ${runId}`
+    });
+    TEST_COMPANY_ID = company.id;
+
+    // Create test outlet dynamically
+    const outlet = await createOutletBasic({
+      company_id: TEST_COMPANY_ID,
+      code: `TESTOUT-${runId}`,
+      name: `Test Outlet Routes ${runId}`
+    });
+    TEST_OUTLET_ID = outlet.id;
+
+    // Create test product with stock tracking
+    const [productResult] = await connection.execute<ResultSetHeader>(
+      `INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, low_stock_threshold, created_at, updated_at)
+       VALUES (?, 'ROUTE-SKU-001', 'Route Test Product', 'PRODUCT', 1, 1, 10.0000, NOW(), NOW())`,
+      [TEST_COMPANY_ID]
+    );
+    TEST_PRODUCT_ID = Number(productResult.insertId);
+
+    // Create test stock record
+    await connection.execute(
+      `INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
+       VALUES (?, ?, ?, 100.0000, 0.0000, 100.0000, NOW(), NOW())`,
+      [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
+    );
+  }
+
+  async function cleanupTestData(connection: PoolConnection): Promise<void> {
+    await connection.execute(
+      `DELETE FROM inventory_transactions WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await connection.execute(
+      `DELETE FROM inventory_stock WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await connection.execute(
+      `DELETE FROM item_prices WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await connection.execute(
+      `DELETE FROM items WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await connection.execute(
+      `DELETE FROM outlets WHERE company_id = ?`,
+      [TEST_COMPANY_ID]
+    );
+    await connection.execute(
+      `DELETE FROM companies WHERE id = ?`,
+      [TEST_COMPANY_ID]
+    );
+  }
 
   before(async () => {
     const dbPool = getDbPool();
