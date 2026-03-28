@@ -192,3 +192,16 @@ development_status:
   12-6-refactor-export-route: done
   12-7-epic-12-documentation: done
   epic-12-retrospective: backlog
+
+  # Epic 13: Complete Library Migration for Deferred Routes
+  # Focus: Migrate import.ts, inventory.ts, sync/pull.ts to libraries
+  epic-13: backlog
+  13-1-create-import-batch-library: backlog
+  13-2-create-import-validation-library: backlog
+  13-3-refactor-import-route: backlog
+  13-4-create-inventory-access-library: backlog
+  13-5-refactor-inventory-route: backlog
+  13-6-analyze-sync-pull-architecture: backlog
+  13-7-create-sync-pull-adapter: backlog
+  13-8-epic-13-documentation: backlog
+  epic-13-retrospective: backlog

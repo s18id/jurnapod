@@ -209,6 +209,23 @@ Establish library-first architecture by moving all database operations from rout
 
 ---
 
-**Total: 12 epics | ~98 stories | 11 done, 1 backlog**
+## Epic 13: Complete Library Migration for Deferred Routes
+
+Finish Epic 12 deferred work - migrate import.ts, inventory.ts, and sync/pull.ts routes to use libraries.
+
+### Story 13.1: Create lib/import/batch-operations.ts
+### Story 13.2: Create lib/import/validation.ts
+### Story 13.3: Refactor import.ts Route
+### Story 13.4: Create lib/inventory/access-check.ts
+### Story 13.5: Refactor inventory.ts Route
+### Story 13.6: Analyze sync/pull.ts Architecture
+### Story 13.7: Create lib/sync/pull/adapter.ts
+### Story 13.8: Epic 13 Documentation
+
+**Path:** [epic-13](../implementation-artifacts/stories/epic-13/epic-13.md)
+
+---
+
+**Total: 13 epics | ~106 stories | 11 done, 2 backlog**
 
 _Last Updated: 2026-03-28_
