@@ -240,6 +240,20 @@ Migrate Epic 13 library modules from raw SQL to Kysely ORM.
 
 ---
 
-**Total: 14 epics | ~111 stories | 13 done, 1 planned**
+## Epic 15: Foundation Hardening & TD Resolution
+
+Resolve TD-030 while hardening foundation with connection safety and test-fixture improvements.
+
+### Story 15.1: Connection Guard for Library Template
+### Story 15.2: test-fixtures Unique Naming
+### Story 15.3: TD-030 Effective Date Filtering - Migration
+### Story 15.4: Epic 15 Documentation + Epic 16 Planning
+### Story 15.5: TD-031 Alert Retry Spike (if time permits)
+
+**Path:** [epic-15](./epic-15.md)
+
+---
+
+**Total: 15 epics | ~116 stories | 14 done, 1 planned**
 
 _Last Updated: 2026-03-28_
