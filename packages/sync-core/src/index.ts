@@ -60,7 +60,7 @@ export {
   DataRetentionJob,
   runDataRetentionJob,
   getDataRetentionJob,
-  setDataRetentionJobPool,
+  setDataRetentionJobDb,
   DEFAULT_RETENTION_POLICIES,
 } from "./jobs/data-retention.job.js";
 export type {

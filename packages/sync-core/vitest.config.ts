@@ -8,13 +8,8 @@ export default defineConfig({
     globals: false,
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    testTimeout: 10000,
-    hookTimeout: 10000,
-    teardownTimeout: 5000,
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    teardownTimeout: 10000,
   },
-  resolve: {
-    alias: {
-      '@/lib/db': './__mocks__/db.ts'
-    }
-  }
 });

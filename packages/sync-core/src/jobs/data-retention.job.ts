@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { Pool, Connection } from "mysql2/promise";
+import type { DbConn } from "@jurnapod/db";
 
 /**
  * Retention policy configuration for a table
@@ -71,13 +71,15 @@ export const DEFAULT_RETENTION_POLICIES: RetentionPolicy[] = [
 /**
  * Data retention job that purges old data from sync tables
  * based on configured retention policies.
+ * 
+ * Uses DbConn from @jurnapod/db for all database operations.
  */
 export class DataRetentionJob {
-  private pool: Pool;
+  private db: DbConn;
   private policies: RetentionPolicy[];
 
-  constructor(pool: Pool, policies: RetentionPolicy[] = DEFAULT_RETENTION_POLICIES) {
-    this.pool = pool;
+  constructor(db: DbConn, policies: RetentionPolicy[] = DEFAULT_RETENTION_POLICIES) {
+    this.db = db;
     this.policies = policies;
   }
 
@@ -94,8 +96,9 @@ export class DataRetentionJob {
 
     for (const policy of this.policies) {
       try {
-        const recordsAffected = await this.purgeTable(policy);
-        totalRecordsAffected += recordsAffected;
+        const purgeResult = await this.purgeTable(policy);
+        totalRecordsAffected += purgeResult.recordsAffected;
+        results.push(purgeResult);
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
@@ -103,6 +106,15 @@ export class DataRetentionJob {
         this.logActivity(
           `ERROR: Failed to purge ${policy.table}: ${errorMessage}`
         );
+        // Push a failed result entry
+        results.push({
+          table: policy.table,
+          recordsAffected: 0,
+          dateRange: { from: new Date(), to: new Date() },
+          archived: !!policy.archiveTable,
+          archiveTable: policy.archiveTable,
+          error: errorMessage,
+        });
       }
     }
 
@@ -124,8 +136,9 @@ export class DataRetentionJob {
   /**
    * Purge records from a single table based on retention policy
    */
-  private async purgeTable(policy: RetentionPolicy): Promise<number> {
-    const cutoffDate = new Date();
+  private async purgeTable(policy: RetentionPolicy): Promise<PurgeResult> {
+    const now = new Date();
+    const cutoffDate = new Date(now);
     cutoffDate.setDate(cutoffDate.getDate() - policy.retentionDays);
 
     this.logActivity(
@@ -135,10 +148,10 @@ export class DataRetentionJob {
     try {
       if (policy.archiveTable) {
         // Archive then delete
-        return await this.archiveAndDelete(policy, cutoffDate);
+        return await this.archiveAndDelete(policy, cutoffDate, now);
       } else {
         // Just delete
-        return await this.deleteOnly(policy, cutoffDate);
+        return await this.deleteOnly(policy, cutoffDate, now);
       }
     } catch (error) {
       const errorMessage =
@@ -154,13 +167,12 @@ export class DataRetentionJob {
    */
   private async archiveAndDelete(
     policy: RetentionPolicy,
-    cutoffDate: Date
-  ): Promise<number> {
-    const connection = await this.pool.getConnection();
+    cutoffDate: Date,
+    now: Date
+  ): Promise<PurgeResult> {
+    await this.db.beginTransaction();
 
     try {
-      await connection.beginTransaction();
-
       // First, insert into archive table
       const insertSql = `
         INSERT INTO ${policy.archiveTable}
@@ -170,8 +182,8 @@ export class DataRetentionJob {
         ${policy.additionalWhere || ""}
       `;
 
-      const [insertResult] = await connection.execute(insertSql, [cutoffDate]);
-      const insertedCount = (insertResult as { affectedRows: number }).affectedRows || 0;
+      const insertResult = await this.db.execute(insertSql, [cutoffDate]);
+      const insertedCount = insertResult.affectedRows || 0;
 
       if (insertedCount > 0) {
         // Then delete from main table
@@ -181,25 +193,35 @@ export class DataRetentionJob {
           ${policy.additionalWhere || ""}
         `;
 
-        const [deleteResult] = await connection.execute(deleteSql, [cutoffDate]);
-        const deletedCount = (deleteResult as { affectedRows: number }).affectedRows || 0;
+        const deleteResult = await this.db.execute(deleteSql, [cutoffDate]);
+        const deletedCount = deleteResult.affectedRows || 0;
 
-        await connection.commit();
+        await this.db.commit();
 
         this.logActivity(
           `Archived ${insertedCount} and deleted ${deletedCount} records from ${policy.table}`
         );
 
-        return deletedCount;
+        return {
+          table: policy.table,
+          recordsAffected: deletedCount,
+          dateRange: { from: cutoffDate, to: now },
+          archived: true,
+          archiveTable: policy.archiveTable,
+        };
       } else {
-        await connection.commit();
-        return 0;
+        await this.db.commit();
+        return {
+          table: policy.table,
+          recordsAffected: 0,
+          dateRange: { from: cutoffDate, to: now },
+          archived: true,
+          archiveTable: policy.archiveTable,
+        };
       }
     } catch (error) {
-      await connection.rollback();
+      await this.db.rollback();
       throw error;
-    } finally {
-      connection.release();
     }
   }
 
@@ -208,31 +230,36 @@ export class DataRetentionJob {
    */
   private async deleteOnly(
     policy: RetentionPolicy,
-    cutoffDate: Date
-  ): Promise<number> {
+    cutoffDate: Date,
+    now: Date
+  ): Promise<PurgeResult> {
     const sql = `
       DELETE FROM ${policy.table}
       WHERE ${policy.dateColumn} < ?
       ${policy.additionalWhere || ""}
     `;
 
-    const [result] = await this.pool.execute(sql, [cutoffDate]);
-    const info = result as { affectedRows: number };
-    const deletedCount = info.affectedRows || 0;
+    const result = await this.db.execute(sql, [cutoffDate]);
+    const deletedCount = result.affectedRows || 0;
 
     this.logActivity(
       `Deleted ${deletedCount} records from ${policy.table}`
     );
 
-    return deletedCount;
+    return {
+      table: policy.table,
+      recordsAffected: deletedCount,
+      dateRange: { from: cutoffDate, to: now },
+      archived: false,
+    };
   }
 
   /**
    * Archive events older than the specified number of days
    * @param olderThanDays - Archive events older than this many days
-   * @returns Number of events archived
+   * @returns PurgeResult with count of events archived
    */
-  async archiveEvents(olderThanDays: number): Promise<number> {
+  async archiveEvents(olderThanDays: number): Promise<PurgeResult> {
     const policy: RetentionPolicy = {
       table: "sync_audit_events",
       retentionDays: olderThanDays,
@@ -255,38 +282,38 @@ export class DataRetentionJob {
 
 /**
  * Convenience function to run the data retention job
- * @param pool - Database pool to use
+ * @param db - Database connection (DbConn) to use
  * @param policies - Optional custom retention policies
  * @returns Retention result summary
  */
 export async function runDataRetentionJob(
-  pool: Pool,
+  db: DbConn,
   policies?: RetentionPolicy[]
 ): Promise<RetentionResult> {
-  const job = new DataRetentionJob(pool, policies);
+  const job = new DataRetentionJob(db, policies);
   return job.run();
 }
 
-// Singleton instance - will be initialized with pool by the API
+// Singleton instance - will be initialized with db by the API
 let _dataRetentionJob: DataRetentionJob | null = null;
 
 /**
  * Get or create the singleton DataRetentionJob instance
- * Must be initialized with setDataRetentionJobPool before use
+ * Must be initialized with setDataRetentionJobDb before use
  */
 export function getDataRetentionJob(): DataRetentionJob {
   if (!_dataRetentionJob) {
     throw new Error(
-      "DataRetentionJob not initialized. Call setDataRetentionJobPool(pool) first."
+      "DataRetentionJob not initialized. Call setDataRetentionJobDb(db) first."
     );
   }
   return _dataRetentionJob;
 }
 
 /**
- * Initialize the DataRetentionJob singleton with a database pool
+ * Initialize the DataRetentionJob singleton with a database connection
  * Should be called once during application startup
  */
-export function setDataRetentionJobPool(pool: Pool): void {
-  _dataRetentionJob = new DataRetentionJob(pool);
+export function setDataRetentionJobDb(db: DbConn): void {
+  _dataRetentionJob = new DataRetentionJob(db);
 }

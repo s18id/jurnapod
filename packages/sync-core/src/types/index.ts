@@ -26,6 +26,15 @@ export const SyncStatusSchema = z.enum([
   "CANCELLED"
 ]);
 
+// Sync endpoint tier types (formerly used for routing/rate-limiting)
+export const SyncEndpointTypeSchema = z.enum([
+  "REALTIME",
+  "OPERATIONAL",
+  "MASTER",
+  "ADMIN",
+  "ANALYTICS"
+]);
+
 // Context passed to sync modules
 export const SyncContextSchema = z.object({
   company_id: z.number().int().positive(),
@@ -80,6 +89,7 @@ export type * from "./services.js";
 export type SyncClientType = z.infer<typeof SyncClientTypeSchema>;
 export type SyncOperationType = z.infer<typeof SyncOperationTypeSchema>;
 export type SyncStatus = z.infer<typeof SyncStatusSchema>;
+export type SyncEndpointType = z.infer<typeof SyncEndpointTypeSchema>;
 export type SyncContext = z.infer<typeof SyncContextSchema>;
 export type SyncRequest = z.infer<typeof SyncRequestSchema>;
 export type SyncResponse = z.infer<typeof SyncResponseSchema>;

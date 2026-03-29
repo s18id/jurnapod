@@ -1,215 +1,280 @@
-# Jurnapod Sync Core
+# @jurnapod/sync-core
 
-A modular, tier-based sync architecture for differentiating between POS and backoffice sync requirements.
+Shared sync infrastructure for Jurnapod ERP - provides the module registry, authentication, audit logging, transport, and idempotency services.
 
 ## Overview
 
-The `@jurnapod/sync-core` package provides the foundational infrastructure for Jurnapod's modular sync system. It supports:
+The `@jurnapod/sync-core` package provides:
 
-- **Tier-based sync**: Different data types sync at different frequencies
-- **Modular architecture**: Pluggable sync modules for POS and backoffice
-- **Shared infrastructure**: Common auth, audit, versioning, and transport
-- **Backward compatibility**: Works alongside existing sync systems
+- **SyncModuleRegistry**: Central registry for sync modules with factory pattern
+- **SyncAuthenticator**: Token validation and role-based access
+- **SyncAuditor**: Audit logging for all sync operations
+- **RetryTransport**: HTTP client with exponential backoff
+- **SyncIdempotencyService**: Duplicate detection and prevention
+- **Tier-based versioning**: MASTER/OPERATIONAL/REALTIME tier sync
+- **WebSocket support**: Event publishing for real-time notifications
+- **Data retention jobs**: Automatic cleanup of old sync data
+- **Shared data queries**: SQL queries used by pos-sync and backoffice-sync
+
+## Installation
+
+```bash
+npm install @jurnapod/sync-core
+```
+
+## Quick Start
+
+### Creating a Sync Module
+
+```typescript
+import type { SyncModule, SyncModuleConfig, SyncModuleInitContext } from "@jurnapod/sync-core";
+import type { PullSyncParams, PullSyncResult } from "./pull/types.js";
+import type { PushSyncParams, PushSyncResult } from "./push/types.js";
+
+export class MySyncModule implements SyncModule {
+  readonly moduleId = "my-module";
+  readonly clientType = "POS";
+  readonly endpoints = [];
+  
+  constructor(public config: SyncModuleConfig) {}
+
+  async initialize(context: SyncModuleInitContext): Promise<void> {
+    // Set up database connection, cache, etc.
+  }
+
+  async handlePullSync(params: PullSyncParams): Promise<PullSyncResult> {
+    // Fetch data for POS
+  }
+
+  async handlePushSync(params: PushSyncParams): Promise<PushSyncResult> {
+    // Receive data from POS
+  }
+
+  async healthCheck(): Promise<{ healthy: boolean; message?: string }> {
+    return { healthy: true };
+  }
+
+  async cleanup(): Promise<void> {
+    // Release resources
+  }
+}
+```
+
+### Registering Modules
+
+```typescript
+import { syncModuleRegistry } from "@jurnapod/sync-core";
+import { MySyncModule } from "./my-sync-module.js";
+
+// Register with factory (recommended for lazy loading)
+syncModuleRegistry.registerFactory('my-module', (config) => new MySyncModule(config));
+
+// Create and initialize module
+const module = await syncModuleRegistry.createModule('my-module', {
+  module_id: 'my-module',
+  client_type: 'POS',
+  enabled: true,
+});
+
+// Initialize all registered modules at once
+await syncModuleRegistry.initialize({
+  database: dbConn,
+  logger: console,
+  config: { env: 'production' }
+});
+
+// Health check all modules
+const health = await syncModuleRegistry.healthCheck();
+```
 
 ## Architecture
 
 ### Sync Tiers
 
-| Tier | Description | Frequency | Data Types |
-|------|-------------|-----------|------------|
-| **REALTIME** | Critical operations | WebSocket/SSE | Active orders, table status, payments |
-| **OPERATIONAL** | High-frequency data | 30s-2min | Reservations, item availability, price changes |
-| **MASTER** | Core reference data | 5-10min | Items, tax rates, payment methods |
-| **ADMIN** | Configuration data | 30min-daily | User permissions, outlet settings |
-| **ANALYTICS** | Reporting data | Hourly-daily | Financial reports, audit logs |
+Data syncs at different frequencies based on change rate:
+
+| Tier | Description | Typical Frequency |
+|------|-------------|------------------|
+| **REALTIME** | Critical operations | WebSocket/SSE |
+| **OPERATIONAL** | High-frequency data | 30s-2min |
+| **MASTER** | Core reference data | 5-10min |
+| **ADMIN** | Configuration | 30min-daily |
+| **ANALYTICS** | Reporting | Hourly-daily |
 
 ### Client Types
 
 - **POS**: Lightweight, operation-focused, offline-first
 - **BACKOFFICE**: Comprehensive, audit-focused, rich metadata
 
-## Usage
+## Core Components
 
-### 1. Creating a Sync Module
-
-```typescript
-import { SyncModule, type SyncModuleConfig } from "@jurnapod/sync-core";
-
-export class MyCustomSyncModule implements SyncModule {
-  readonly moduleId = "my-module";
-  readonly clientType = "POS";
-  readonly endpoints = [];
-
-  constructor(public config: SyncModuleConfig) {}
-
-  async initialize(context: SyncModuleInitContext): Promise<void> {
-    // Initialize your module
-  }
-
-  async handleSync(request: SyncRequest): Promise<SyncResponse> {
-    // Handle sync requests by tier
-    switch (request.tier) {
-      case 'OPERATIONAL':
-        return this.handleOperationalSync(request);
-      case 'MASTER':
-        return this.handleMasterSync(request);
-      default:
-        throw new Error(`Unsupported tier: ${request.tier}`);
-    }
-  }
-
-  getSupportedTiers() {
-    return ['OPERATIONAL', 'MASTER'] as const;
-  }
-}
-```
-
-### 2. Registering Modules
+### Module Registry
 
 ```typescript
+// Singleton instance
 import { syncModuleRegistry } from "@jurnapod/sync-core";
-import { PosSyncModule } from "@jurnapod/pos-sync";
 
 // Register module factory
 syncModuleRegistry.registerFactory('pos', (config) => new PosSyncModule(config));
 
-// Create module instance with configuration
-const posModule = await syncModuleRegistry.createModule('pos', {
-  module_id: 'pos',
-  client_type: 'POS',
-  enabled: true,
-  frequencies: {
-    operational: 30_000,  // 30 seconds
-    master: 300_000,      // 5 minutes
-    admin: 'startup'      // On app start
-  }
-});
+// Create module instance
+const posModule = await syncModuleRegistry.createModule('pos', config);
+
+// List all modules
+const moduleIds = syncModuleRegistry.listModuleIds();
+
+// Get all endpoints
+const endpoints = syncModuleRegistry.getAllEndpoints();
+
+// Health check
+const health = await syncModuleRegistry.healthCheck();
 ```
 
-### 3. API Integration
+### Authentication
 
 ```typescript
-import { syncModuleRegistry } from "@jurnapod/sync-core";
+import { syncAuthenticator } from "@jurnapod/sync-core";
 
-// Register endpoints for all modules
-const modules = syncModuleRegistry.listModuleIds();
-for (const moduleId of modules) {
-  const module = syncModuleRegistry.getModule(moduleId);
-  const tiers = module.getSupportedTiers();
-  
-  for (const tier of tiers) {
-    app.get(`/api/sync/${moduleId}/${tier.toLowerCase()}`, async (req, res) => {
-      const result = await module.handleSync(createSyncRequest(tier, req));
-      res.json(result);
-    });
-  }
+const authResult = await syncAuthenticator.authenticate({
+  token: 'jwt-token',
+  requiredRole: 'cashier'
+});
+
+if (!authResult.valid) {
+  throw new UnauthorizedError(authResult.reason);
 }
 ```
 
-## Core Components
-
-### Module Registry
-- **`SyncModuleRegistry`**: Central registry for sync modules
-- **Factories**: Register module factories for lazy loading
-- **Health checks**: Monitor module health across the system
-
-### Authentication
-- **`SyncAuthenticator`**: Validates tokens and permissions
-- **Role-based access**: Support for roles and permissions
-- **Outlet scoping**: Tenant and outlet isolation
-
 ### Audit Logging
-- **`SyncAuditor`**: Tracks all sync operations
-- **Performance metrics**: Duration, records processed, errors
-- **Compliance**: Full audit trail for financial operations
 
-### Version Management
-- **`SyncVersionManager`**: Manages tier-based versioning
-- **Incremental sync**: Efficient updates using version tracking
-- **Multi-tier updates**: Bump multiple tiers atomically
+```typescript
+import { syncAuditor } from "@jurnapod/sync-core";
 
-### Transport Layer
-- **`RetryTransport`**: HTTP client with exponential backoff
-- **Error classification**: Retryable vs non-retryable errors
-- **Configurable policies**: Per-module retry configurations
-
-## Database Schema
-
-The sync architecture adds these new tables:
-
-### `sync_tier_versions`
-```sql
-CREATE TABLE sync_tier_versions (
-    company_id BIGINT UNSIGNED NOT NULL,
-    tier ENUM('REALTIME', 'OPERATIONAL', 'MASTER', 'ADMIN', 'ANALYTICS') NOT NULL,
-    current_version INT UNSIGNED NOT NULL DEFAULT 0,
-    last_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (company_id, tier)
-);
+await syncAuditor.logEvent({
+  company_id: 1,
+  outlet_id: 1,
+  user_id: 5,
+  module_id: 'pos',
+  tier: 'MASTER',
+  operation: 'PULL',
+  request_id: 'uuid',
+  status: 'SUCCESS',
+  metadata: { duration_ms: 45, records_affected: 120 }
+});
 ```
 
-### `pos_sync_metadata`
-```sql
-CREATE TABLE pos_sync_metadata (
-    company_id BIGINT UNSIGNED NOT NULL,
-    outlet_id BIGINT UNSIGNED NOT NULL,
-    tier ENUM('REALTIME', 'OPERATIONAL', 'MASTER', 'ADMIN') NOT NULL,
-    last_sync_at DATETIME NULL,
-    last_version INT UNSIGNED NULL,
-    sync_status ENUM('OK', 'ERROR', 'STALE') NOT NULL DEFAULT 'OK',
-    PRIMARY KEY (company_id, outlet_id, tier)
-);
+### Idempotency Service
+
+```typescript
+import { syncIdempotencyService, ERROR_CLASSIFICATION } from "@jurnapod/sync-core";
+
+// Check if operation was already processed
+const check = await syncIdempotencyService.checkAndRecord({
+  operationId: 'tx-123',
+  companyId: 1,
+  operation: 'PUSH',
+  payload: JSON.stringify(data)
+});
+
+if (check.alreadyProcessed) {
+  return check.existingResult;
+}
+
+// Classify errors for retry decisions
+const classification = ERROR_CLASSIFICATION.classify(error);
+if (classification.retryable) {
+  // Retry with backoff
+}
 ```
 
-### `backoffice_sync_queue`
-```sql
-CREATE TABLE backoffice_sync_queue (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    company_id BIGINT UNSIGNED NOT NULL,
-    document_type ENUM('INVOICE', 'PAYMENT', 'JOURNAL', 'REPORT', 'RECONCILIATION') NOT NULL,
-    tier ENUM('OPERATIONAL', 'MASTER', 'ADMIN', 'ANALYTICS') NOT NULL,
-    sync_status ENUM('PENDING', 'PROCESSING', 'SUCCESS', 'FAILED') NOT NULL DEFAULT 'PENDING',
-    PRIMARY KEY (id)
-);
+### Retry Transport
+
+```typescript
+import { defaultRetryTransport } from "@jurnapod/sync-core";
+
+const response = await defaultRetryTransport.execute({
+  url: 'https://api.example.com/sync',
+  method: 'POST',
+  body: JSON.stringify(data),
+  timeout: 30000
+}, {
+  maxRetries: 3,
+  initialDelayMs: 1000,
+  backoffMultiplier: 2
+});
 ```
 
-## Migration Path
+## Data Queries
 
-1. **Phase 1**: Deploy core infrastructure (completed)
-2. **Phase 2**: Create POS sync module
-3. **Phase 3**: Create backoffice sync module  
-4. **Phase 4**: Add real-time features (WebSocket)
-5. **Phase 5**: Performance optimization
+Shared SQL queries for sync operations:
 
-## Backward Compatibility
+```typescript
+import { getVariantsForSync, getVariantPricesForOutlet } from "@jurnapod/sync-core";
 
-- Legacy `/api/sync/push` and `/api/sync/pull` endpoints remain functional
-- `sync_data_versions` table continues to be updated
-- Existing POS clients work without changes during migration
-- Feature flags control rollout to production
+// Get all variants for a company
+const variants = await getVariantsForSync(db, companyId);
 
-## Performance Benefits
+// Get variant prices for a specific outlet
+const prices = await getVariantPricesForOutlet(db, companyId, outletId);
+```
 
-- **50% reduction** in POS sync time through tier-based data filtering
-- **40% reduction** in bandwidth usage through selective data transmission
-- **< 1 second** real-time updates for critical operations
-- **99.9% reliability** maintained for offline POS operations
+Available query functions:
+- `getVariantsForSync`, `getVariantsChangedSince`
+- `getVariantPricesForOutlet`
+- `getItemsForSync`, `getItemsChangedSince`
+- `getOrdersForSync`, `getOrderUpdatesForSync`
+- `getTransactionsForSync`
+- And more in `src/data/`
 
-## Development
+## SyncContext
+
+Every sync request carries context:
+
+```typescript
+interface SyncContext {
+  company_id: number;
+  outlet_id?: number;
+  user_id?: number;
+  client_type: 'POS' | 'BACKOFFICE';
+  request_id: string;  // UUID
+  timestamp: string;   // ISO 8601
+}
+```
+
+## File Structure
+
+```
+packages/sync-core/
+├── src/
+│   ├── index.ts                    # Main exports
+│   ├── registry/                   # Module registry
+│   ├── auth/                       # Authentication
+│   ├── audit/                      # Audit logging
+│   ├── transport/                  # HTTP transport with retry
+│   ├── idempotency/                 # Idempotency service
+│   ├── data/                       # Shared SQL queries
+│   ├── websocket/                  # WebSocket support
+│   ├── jobs/                       # Background jobs
+│   └── types/                      # TypeScript types
+├── package.json
+├── tsconfig.json
+├── README.md
+└── AGENTS.md
+```
+
+## Testing
 
 ```bash
-# Build the package
-npm run build -w @jurnapod/sync-core
-
-# Type check
-npm run typecheck -w @jurnapod/sync-core
-
-# Run tests (when added)
+# Run all tests
 npm test -w @jurnapod/sync-core
+
+# Run once (CI mode)
+npm run test:run -w @jurnapod/sync-core
 ```
 
 ## Related Packages
 
-- **`@jurnapod/pos-sync`**: POS-specific sync module implementation
-- **`@jurnapod/backoffice-sync`**: Backoffice sync module (coming soon)
-- **`@jurnapod/shared`**: Common schemas and types
+- [@jurnapod/pos-sync](../pos-sync) - POS-specific sync module
+- [@jurnapod/db](../db) - Database connectivity
+- [@jurnapod/api](../../apps/api) - HTTP API using this package
+- [@jurnapod/shared](../shared) - Shared utilities

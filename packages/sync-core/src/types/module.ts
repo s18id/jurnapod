@@ -5,6 +5,7 @@ import type {
   SyncRequest, 
   SyncResponse, 
   SyncEndpointConfig, 
+  SyncEndpointType,
   SyncContext,
   SyncModuleConfig
 } from "./index.js";
@@ -25,6 +26,8 @@ export interface AuthConfig {
 
 // Sync endpoint with handler
 export interface SyncEndpoint {
+  readonly type: SyncEndpointType;
+  readonly supportsBatch: boolean;
   readonly config: SyncEndpointConfig;
   readonly handler: SyncHandler;
   readonly auth: AuthConfig;

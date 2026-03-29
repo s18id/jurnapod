@@ -86,29 +86,31 @@ export type VariantPriceQueryResult = {
 
 /**
  * Get variant prices for a specific outlet (outlet-specific + company defaults).
+ * Uses item_prices table with variant_id IS NOT NULL filter.
+ * Returns outlet-specific prices first, then company-default prices (no outlet).
  */
 export async function getVariantPricesForOutlet(
   db: DbConn,
   companyId: number,
   outletId: number
 ): Promise<VariantPriceQueryResult[]> {
+  // Get all variant prices: outlet-specific and company defaults (no outlet)
   const rows = await db.queryAll<RowDataPacket>(
-    `SELECT DISTINCT
-       COALESCE(vp.id, dp.id) AS id,
-       COALESCE(vp.item_id, dp.item_id) AS item_id,
-       COALESCE(vp.variant_id, dp.variant_id) AS variant_id,
-       COALESCE(vp.outlet_id, ?) AS outlet_id,
-       COALESCE(vp.price, dp.price) AS price,
-       COALESCE(vp.is_active, dp.is_active) AS is_active,
-       GREATEST(COALESCE(vp.updated_at, '1970-01-01'), COALESCE(dp.updated_at, '1970-01-01')) AS updated_at
-     FROM items i
-     LEFT JOIN variant_prices vp ON vp.item_id = i.id AND vp.outlet_id = ?
-     LEFT JOIN variant_prices dp ON dp.item_id = i.id AND dp.outlet_id IS NULL AND dp.company_id = ?
-     WHERE i.company_id = ?
-       AND i.is_active = 1
-       AND (vp.is_active = 1 OR (vp.id IS NULL AND dp.is_active = 1))
-     ORDER BY i.id, variant_id`,
-    [outletId, outletId, companyId, companyId]
+    `SELECT 
+       ip.id,
+       ip.item_id,
+       ip.variant_id,
+       COALESCE(ip.outlet_id, ?) AS outlet_id,
+       ip.price,
+       ip.is_active,
+       ip.updated_at
+     FROM item_prices ip
+     WHERE ip.company_id = ?
+       AND ip.variant_id IS NOT NULL
+       AND ip.is_active = 1
+       AND (ip.outlet_id = ? OR ip.outlet_id IS NULL)
+     ORDER BY ip.item_id, ip.variant_id, outlet_id DESC`,
+    [outletId, companyId, outletId]
   );
   
   return rows.map((row) => ({
