@@ -1,0 +1,62 @@
+{
+  "name": "@jurnapod/auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tokens": {
+      "types": "./dist/tokens/index.d.ts",
+      "default": "./dist/tokens/index.js"
+    },
+    "./passwords": {
+      "types": "./dist/passwords/index.d.ts",
+      "default": "./dist/passwords/index.js"
+    },
+    "./rbac": {
+      "types": "./dist/rbac/index.d.ts",
+      "default": "./dist/rbac/index.js"
+    },
+    "./oauth": {
+      "types": "./dist/oauth/index.d.ts",
+      "default": "./dist/oauth/index.js"
+    },
+    "./throttle": {
+      "types": "./dist/throttle/index.d.ts",
+      "default": "./dist/throttle/index.js"
+    },
+    "./email": {
+      "types": "./dist/email/index.d.ts",
+      "default": "./dist/email/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo 'lint not configured yet for @jurnapod/auth'",
+    "test": "node --test --import tsx 'src/**/*.test.ts'",
+    "test:unit": "node --test --import tsx 'src/**/*.test.ts' | grep -v '.integration.test.ts'",
+    "test:db": "AUTH_TEST_USE_DB=1 node --test --import tsx 'src/**/*.integration.test.ts'",
+    "test:all": "npm run test && npm run test:db",
+    "test:single": "node --test --import tsx ",
+    "test:oauth": "TEST_OAUTH=1 node --test --import tsx 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "jose": "^5.9.6",
+    "bcryptjs": "^3.0.2",
+    "@node-rs/argon2": "^2.0.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@jurnapod/db": "workspace:*",
+    "dotenv": "^16.4.7",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.3"
+  }
+}
