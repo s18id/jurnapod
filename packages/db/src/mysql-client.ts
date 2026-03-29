@@ -18,7 +18,7 @@
  * const db = new DbConn(pool);
  * 
  * // Raw SQL
- * const rows = await db.query('SELECT * FROM accounts WHERE company_id = ?', [companyId]);
+ * const rows = await db.queryAll('SELECT * FROM accounts WHERE company_id = ?', [companyId]);
  * 
  * // Kysely (type-safe)
  * const accounts = await db.kysely
@@ -28,7 +28,7 @@
  *   .execute();
  * 
  * // Transactions
- * await db.begin();
+ * await db.beginTransaction();
  * try {
  *   await db.execute('INSERT INTO accounts ...', [...]);
  *   await db.commit();
@@ -152,7 +152,21 @@ export class DbConn implements JurnapodDbClient {
    * Execute a raw SQL query and return results.
    * Uses transaction connection if in a transaction, otherwise uses pool.
    */
-  async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
+  async query<T = any>(sql: string, params?: any[]): Promise<T | null> {
+    return new Promise((resolve, reject) => {
+      const conn = this.connection || this.pool;
+      conn.query(sql, params, (err, rows: RowDataPacket[]) => {
+        if (err) reject(err);
+        else resolve(rows as T);
+      });
+    });
+  }
+
+  /**
+   * Execute a raw SQL query and return array as results.
+   * Uses transaction connection if in a transaction, otherwise uses pool.
+   */
+  async queryAll<T = any>(sql: string, params?: any[]): Promise<T[]> {
     return new Promise((resolve, reject) => {
       const conn = this.connection || this.pool;
       conn.query(sql, params, (err, rows: RowDataPacket[]) => {
@@ -165,8 +179,8 @@ export class DbConn implements JurnapodDbClient {
   /**
    * Execute a raw SQL query and return a single result or null.
    */
-  async querySingle<T = any>(sql: string, params?: any[]): Promise<T | null> {
-    const rows = await this.query<T>(sql, params);
+  async queryOne<T = any>(sql: string, params?: any[]): Promise<T | null> {
+    const rows = await this.queryAll<T>(sql, params);
     return rows[0] || null;
   }
 
@@ -187,7 +201,7 @@ export class DbConn implements JurnapodDbClient {
   /**
    * Begin a transaction.
    */
-  async begin(): Promise<void> {
+  async beginTransaction(): Promise<void> {
     if (this.connection) {
       throw new Error('Transaction already in progress');
     }
@@ -198,6 +212,13 @@ export class DbConn implements JurnapodDbClient {
         else resolve();
       });
     });
+  }
+
+  /**
+   * @deprecated Use beginTransaction() instead. This alias will be removed in a future version.
+   */
+  async begin(): Promise<void> {
+    return this.beginTransaction();
   }
 
   /**

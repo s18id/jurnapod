@@ -41,19 +41,19 @@ describe('DbConn', () => {
     }
   });
 
-  test('query() - SELECT returns rows', async () => {
-    const rows = await db.query<{ value: number }>('SELECT 1 as value');
+  test('queryAll() - SELECT returns rows', async () => {
+    const rows = await db.queryAll<{ value: number }>('SELECT 1 as value');
     assert.strictEqual(rows.length, 1);
     assert.strictEqual(rows[0].value, 1);
   });
 
-  test('querySingle() - returns first row or null', async () => {
+  test('queryOne() - returns first row or null', async () => {
     // Returns null when no rows
-    const nullResult = await db.querySingle<{ value: number }>('SELECT 1 as value WHERE 1 = 0');
+    const nullResult = await db.queryOne<{ value: number }>('SELECT 1 as value WHERE 1 = 0');
     assert.strictEqual(nullResult, null);
 
     // Returns first row when rows exist
-    const result = await db.querySingle<{ value: number }>('SELECT 1 as value UNION SELECT 2 as value');
+    const result = await db.queryOne<{ value: number }>('SELECT 1 as value UNION SELECT 2 as value');
     assert.ok(result !== null);
     assert.strictEqual(result.value, 1);
   });
@@ -88,8 +88,8 @@ describe('DbConn', () => {
     assert.ok(updateResult.affectedRows >= 1);
   });
 
-  test('begin()/commit() - transaction commits successfully', async () => {
-    await db.begin();
+  test('beginTransaction()/commit() - transaction commits successfully', async () => {
+    await db.beginTransaction();
     try {
       await db.execute(
         'INSERT INTO companies (code, name) VALUES (?, ?)',
@@ -102,18 +102,18 @@ describe('DbConn', () => {
     }
 
     // Verify the insert was committed
-    const rows = await db.query<{ id: number }>(
+    const rows = await db.queryAll<{ id: number }>(
       'SELECT id FROM companies WHERE code LIKE ? ORDER BY id DESC LIMIT 1',
       ['TEST_COMMIT_%']
     );
     assert.ok(rows.length > 0);
   });
 
-  test('begin()/rollback() - transaction rolls back successfully', async () => {
+  test('beginTransaction()/rollback() - transaction rolls back successfully', async () => {
     // Use unique identifier for this test run (keep under 32 chars for companies.code)
     const uniqueCode = 'RB_' + Date.now().toString(36).toUpperCase();
 
-    await db.begin();
+    await db.beginTransaction();
     try {
       await db.execute(
         'INSERT INTO companies (code, name) VALUES (?, ?)',
@@ -126,19 +126,19 @@ describe('DbConn', () => {
     }
 
     // Verify the specific insert was rolled back - record should not exist
-    const result = await db.querySingle<{ count: number }>(
+    const result = await db.queryOne<{ count: number }>(
       'SELECT COUNT(*) as count FROM companies WHERE code = ?',
       [uniqueCode]
     );
     assert.strictEqual(result?.count, 0);
   });
 
-  test('begin() - transaction already in progress error', async () => {
-    await db.begin();
+  test('beginTransaction() - transaction already in progress error', async () => {
+    await db.beginTransaction();
     try {
       await assert.rejects(
         async () => {
-          await db.begin();
+          await db.beginTransaction();
         },
         {
           message: 'Transaction already in progress'
@@ -182,7 +182,7 @@ describe('DbConn', () => {
 
   test('withTransaction() - rolls back on SQL error', async () => {
     // Get initial count
-    const initialRows = await db.query<{ count: number }>(
+    const initialRows = await db.queryAll<{ count: number }>(
       'SELECT COUNT(*) as count FROM companies WHERE code LIKE ?',
       ['TEST_WTX_%']
     );
@@ -199,7 +199,7 @@ describe('DbConn', () => {
     );
 
     // Verify nothing was inserted
-    const finalRows = await db.query<{ count: number }>(
+    const finalRows = await db.queryAll<{ count: number }>(
       'SELECT COUNT(*) as count FROM companies WHERE code LIKE ?',
       ['TEST_WTX_%']
     );
@@ -229,7 +229,7 @@ describe('DbConn', () => {
     }
 
     // Verify the insert was committed
-    const rows = await db.query(
+    const rows = await db.queryAll(
       'SELECT id FROM companies WHERE code LIKE ? ORDER BY id DESC LIMIT 1',
       ['TEST_TRX_%']
     );

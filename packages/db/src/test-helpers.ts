@@ -83,7 +83,7 @@ export async function withTestTransaction<T>(
   callback: (conn: DbConn) => Promise<T>
 ): Promise<T> {
   const conn = new DbConn(pool);
-  await conn.begin();
+  await conn.beginTransaction();
   try {
     return await callback(conn);
   } finally {

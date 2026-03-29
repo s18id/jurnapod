@@ -16,7 +16,7 @@
  * const db = new DbConn(pool);
  * 
  * // Raw SQL queries
- * const rows = await db.query('SELECT * FROM accounts WHERE company_id = ?', [companyId]);
+ * const rows = await db.queryAll('SELECT * FROM accounts WHERE company_id = ?', [companyId]);
  * const result = await db.execute('INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)', [companyId, code, name]);
  * 
  * // Kysely (type-safe)
@@ -27,7 +27,7 @@
  *   .execute();
  * 
  * // Transactions
- * await db.begin();
+ * await db.beginTransaction();
  * try {
  *   await db.execute('INSERT INTO accounts ...', [...]);
  *   await db.commit();
@@ -57,12 +57,12 @@ export interface SqlExecuteResult {
  * All DbClient interfaces in modules should extend this.
  */
 export interface JurnapodDbClient {
-  /**
+/**
    * Execute a raw SQL query and return results.
    * 
    * @param sql - Parameterized SQL query (SELECT)
    * @param params - Query parameters
-   * @returns Array of result rows
+   * @returns result or null
    * 
    * @example
    * ```typescript
@@ -72,7 +72,24 @@ export interface JurnapodDbClient {
    * );
    * ```
    */
-  query<T = any>(sql: string, params?: any[]): Promise<T[]>;
+  query<T = any>(sql: string, params?: any[]): Promise<T|null>;
+
+  /**
+   * Execute a raw SQL query and return results.
+   * 
+   * @param sql - Parameterized SQL query (SELECT)
+   * @param params - Query parameters
+   * @returns Array of result rows
+   * 
+   * @example
+   * ```typescript
+   * const rows = await db.queryAll<RowDataPacket>(
+   *   'SELECT * FROM accounts WHERE company_id = ?',
+   *   [companyId]
+   * );
+   * ```
+   */
+  queryAll<T = any>(sql: string, params?: any[]): Promise<T[]>;
   
   /**
    * Execute a raw SQL statement that modifies data.
@@ -97,7 +114,7 @@ export interface JurnapodDbClient {
    * 
    * @example
    * ```typescript
-   * await db.begin();
+   * await db.beginTransaction();
    * try {
    *   await db.execute('INSERT INTO ...', [...]);
    *   await db.commit();
@@ -106,7 +123,7 @@ export interface JurnapodDbClient {
    * }
    * ```
    */
-  begin(): Promise<void>;
+  beginTransaction(): Promise<void>;
   
   /**
    * Commit the current transaction.
