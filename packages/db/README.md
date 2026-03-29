@@ -2,6 +2,38 @@
 
 This package provides database connectivity using **mysql2** (callback-based) with **Kysely** for type-safe queries.
 
+## ⚠️ CRITICAL: DbConn-Only Standard (MANDATORY)
+
+**ALL database access MUST use `DbConn`. Direct `mysql2/promise` usage is FORBIDDEN.**
+
+### ✅ CORRECT - Use DbConn
+```typescript
+import { createDbPool, DbConn } from '@jurnapod/db';
+
+const pool = createDbPool({ uri: 'mysql://...' });
+const db = new DbConn(pool);
+
+// Use db.query(), db.execute(), db.kysely
+const rows = await db.query('SELECT * FROM accounts WHERE company_id = ?', [companyId]);
+```
+
+### ❌ FORBIDDEN - Never use mysql2/promise directly
+```typescript
+// ABSOLUTELY FORBIDDEN - will fail code review
+import type { Pool } from 'mysql2/promise';  // ❌ NEVER
+import type { RowDataPacket } from 'mysql2/promise';  // ❌ NEVER
+
+// Use mysql2 (not /promise) for types only when needed
+import type { RowDataPacket } from 'mysql2';  // ✅ ALLOWED for type assertions
+```
+
+### Why DbConn-Only?
+- **Unified interface** - All database operations through one consistent API
+- **Transaction safety** - Proper transaction management with `begin()/commit()/rollback()`
+- **Type safety** - Kysely integration for compile-time query validation
+- **Testability** - Easy to mock and test
+- **Migration path** - Future database changes only need updates in one place
+
 ## Package Exports
 
 ```typescript

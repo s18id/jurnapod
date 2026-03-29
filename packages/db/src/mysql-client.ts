@@ -150,10 +150,12 @@ export class DbConn implements JurnapodDbClient {
 
   /**
    * Execute a raw SQL query and return results.
+   * Uses transaction connection if in a transaction, otherwise uses pool.
    */
   async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
     return new Promise((resolve, reject) => {
-      this.pool.query(sql, params, (err, rows: RowDataPacket[]) => {
+      const conn = this.connection || this.pool;
+      conn.query(sql, params, (err, rows: RowDataPacket[]) => {
         if (err) reject(err);
         else resolve(rows as T[]);
       });
@@ -170,10 +172,12 @@ export class DbConn implements JurnapodDbClient {
 
   /**
    * Execute a raw SQL statement that modifies data.
+   * Uses transaction connection if in a transaction, otherwise uses pool.
    */
   async execute(sql: string, params?: any[]): Promise<SqlExecuteResult> {
     return new Promise((resolve, reject) => {
-      this.pool.query(sql, params, (err, result: ResultSetHeader) => {
+      const conn = this.connection || this.pool;
+      conn.query(sql, params, (err, result: ResultSetHeader) => {
         if (err) reject(err);
         else resolve({ affectedRows: result.affectedRows, insertId: result.insertId });
       });

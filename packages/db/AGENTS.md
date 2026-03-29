@@ -9,6 +9,64 @@ Database connectivity and schema management layer for Jurnapod ERP.
 
 ---
 
+## ⚠️ MANDATORY: DbConn-Only Standard
+
+**ALL database access MUST use `DbConn`. Direct `mysql2/promise` usage is STRICTLY FORBIDDEN.**
+
+### Enforcement Rules
+
+| Pattern | Status |
+|---------|--------|
+| `import { DbConn } from '@jurnapod/db'` | ✅ **REQUIRED** |
+| `const db = new DbConn(pool)` | ✅ **REQUIRED** |
+| `db.query()`, `db.execute()`, `db.kysely` | ✅ **REQUIRED** |
+| `import ... from 'mysql2/promise'` | ❌ **ABSOLUTELY FORBIDDEN** |
+| `import type { Pool } from 'mysql2/promise'` | ❌ **ABSOLUTELY FORBIDDEN** |
+| `import type { RowDataPacket } from 'mysql2/promise'` | ❌ **ABSOLUTELY FORBIDDEN** |
+| `import type { RowDataPacket } from 'mysql2'` | ✅ **ALLOWED for type assertions** |
+| `import type { ResultSetHeader } from 'mysql2'` | ✅ **ALLOWED for type assertions** |
+
+### Correct Usage
+
+```typescript
+// ✅ CORRECT - Use DbConn
+import { createDbPool, DbConn } from '@jurnapod/db';
+import type { RowDataPacket } from 'mysql2';  // Type assertions only
+
+const pool = createDbPool({ uri: 'mysql://...' });
+const db = new DbConn(pool);
+
+// Raw SQL
+const rows = await db.query<RowDataPacket>('SELECT * FROM accounts WHERE company_id = ?', [companyId]);
+
+// Type-safe Kysely
+const accounts = await db.kysely
+  .selectFrom('accounts')
+  .where('company_id', '=', companyId)
+  .selectAll()
+  .execute();
+```
+
+### Forbidden Usage
+
+```typescript
+// ❌ FORBIDDEN - will fail code review
+import type { Pool, RowDataPacket } from 'mysql2/promise';
+import { createKysely } from '@jurnapod/db/kysely';  // Legacy - use DbConn.kysely instead
+
+// ❌ FORBIDDEN - direct pool usage
+const pool = createDbPool({...});
+const [rows] = await pool.execute('SELECT ...');  // NEVER
+```
+
+### Review Checklist Addition
+
+- [ ] **NO imports from `mysql2/promise`** anywhere in the codebase
+- [ ] All database operations go through `DbConn`
+- [ ] Type imports only from `mysql2` (not `/promise`) for assertions
+
+---
+
 ## Quick Commands
 
 | Command | Purpose |
