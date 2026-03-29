@@ -235,12 +235,16 @@ development_status:
 
   # Epic 17: Resurrect Sync-Core (Sync Module Architecture)
   # Focus: Make PosSyncModule and BackofficeSyncModule the canonical sync engines
+  # Phase 1 (date-helpers, service interfaces, cleanup): ✅ COMPLETED
+  # Phase 2 (sync-core/data layer): ✅ COMPLETED  
+  # Phase 3 (pos-sync pull): 🔄 IN PROGRESS
+  # Phase 4-8: ⏳ TODO
   epic-17: in-progress
-  17-1-extract-date-helpers-to-shared: backlog
-  17-2-define-service-interfaces-sync-core: backlog
-  17-3-cleanup-sync-core-dead-code: backlog
-  17-4-move-pull-logic-to-pos-sync: backlog
+  17-1-extract-date-helpers-to-shared: done
+  17-2-define-service-interfaces-sync-core: done
+  17-3-cleanup-sync-core-dead-code: done
+  17-4-move-pull-logic-to-pos-sync: done
   17-5-move-push-logic-to-pos-sync: backlog
   17-6-refactor-api-routes-thin-adapters: backlog
   17-7-delete-lib-sync-and-tests: backlog
-  17-8-apply-backoffice-sync-pattern: backlog
+  17-8-apply-backoffice-sync-pattern: done
