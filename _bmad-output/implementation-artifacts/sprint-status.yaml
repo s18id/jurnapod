@@ -37,9 +37,10 @@
 generated: 2026-03-25
 last_updated: 2026-03-28
 project: Jurnapod
-project_key: NOKEY
-tracking_system: file-system
-story_location: _bmad-output/implementation-artifacts/stories
+  project_key: NOKEY
+  tracking_system: file-system
+  story_location: _bmad-output/implementation-artifacts/stories
+  last_updated: 2026-03-30
 
 development_status:
   # Epic 1: Kysely ORM Migration (merged Epic 0 + Epic 1)
@@ -248,3 +249,35 @@ development_status:
   17-6-refactor-api-routes-thin-adapters: backlog
   17-7-delete-lib-sync-and-tests: backlog
   17-8-apply-backoffice-sync-pattern: done
+
+  # Epic 18: DbConn-Only Sync Architecture Migration - Phase 1
+  # Focus: Foundation - Fix pool passing to use DbConn exclusively
+  # ✅ COMPLETE - All packages use DbConn exclusively, all tests passing
+  # 
+  # Package updates:
+  #   - sync-core: Updated types to accept DbConn
+  #   - pos-sync: Removed dead createDbPool import
+  #   - backoffice-sync: Full DbConn migration, all data services updated
+  #   - api: sync-modules.ts now passes real DbConn to registry
+  #
+  # SQL fixes (revealed by integration tests):
+  #   - pos_transaction_items: transaction_id → pos_transaction_id
+  #   - pos_transaction_payments: transaction_id → pos_transaction_id
+  #   - companies: c.address → c.address_line1, c.tax_number → c.tax_id
+  #   - pos_order_snapshots: pos.id → pos.order_id
+  #   - analytics: Fixed invalid SUM(SELECT) syntax with proper JOIN
+  #   - audit_logs: user_agent→null, metadata→payload_json
+  #   - user_outlet_roles → user_role_assignments (role architecture)
+  #   - outlets: manager_user_id → NULL (column doesn't exist)
+  #   - users: phone, last_login_at → NULL (columns don't exist)
+  #   - items: description → NULL, type → item_type
+  #   - accounts: parent_id → parent_account_id, current_balance → NULL
+  #
+  # ⚠️ KNOWN LIMITATIONS (placeholders with TODO):
+  #   - suppliers: Empty array (vendor table needs to be created)
+  #   - Balance: NULL for chart_of_accounts (should join account_balances_current)
+  epic-18: done
+  18-1-update-sync-core-types-accept-dbconn: done
+  18-2-fix-api-sync-modules-pass-real-dbconn: done
+  18-3-cleanup-pos-sync-dead-import: done
+  18-4-verify-backoffice-sync-dbconn-usage: done
