@@ -9,10 +9,22 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { LoginThrottle } from './login-throttle.js';
-import { createRealDbAdapter, closeTestPool } from '../test-utils/real-adapter.js';
-import { useRealDb } from '../test-utils/test-adapter.js';
-import type { AuthConfig } from '../types.js';
+import { LoginThrottle } from '../../src/throttle/login-throttle.js';
+import { createRealDbAdapter, closeTestPool } from '../../src/test-utils/real-adapter.js';
+import { useRealDb } from '../../src/test-utils/test-adapter.js';
+import type { AuthConfig } from '../../src/types.js';
+
+// ---------------------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------------------
+
+test.after(async () => {
+  await closeTestPool();
+});
+
+// ---------------------------------------------------------------------------
+// Test config
+// ---------------------------------------------------------------------------
 
 // Custom config for integration tests with smaller delays for faster testing
 const integrationConfig: AuthConfig = {
@@ -36,10 +48,11 @@ const integrationConfig: AuthConfig = {
   },
 };
 
-// Skip integration tests if real DB is not enabled
-const testSuite = useRealDb ? test : test.skip;
+// ---------------------------------------------------------------------------
+// Test 1: recordFailure() creates throttle record
+// ---------------------------------------------------------------------------
 
-testSuite('LoginThrottle Integration - recordFailure() creates throttle record', async () => {
+test('LoginThrottle Integration - recordFailure() creates throttle record', { skip: !useRealDb }, async () => {
   const adapter = createRealDbAdapter();
   const throttle = new LoginThrottle(adapter, integrationConfig);
 
@@ -56,7 +69,7 @@ testSuite('LoginThrottle Integration - recordFailure() creates throttle record',
   });
 
   // Verify record exists in auth_login_throttles table
-  const rows = await adapter.query<{
+  const rows = await adapter.queryAll<{
     key_hash: string;
     failure_count: number;
     last_ip: string | null;
@@ -81,7 +94,11 @@ testSuite('LoginThrottle Integration - recordFailure() creates throttle record',
   await throttle.recordSuccess(keys);
 });
 
-testSuite('LoginThrottle Integration - recordFailure() increments failure count', async () => {
+// ---------------------------------------------------------------------------
+// Test 2: recordFailure() increments failure count
+// ---------------------------------------------------------------------------
+
+test('LoginThrottle Integration - recordFailure() increments failure count', { skip: !useRealDb }, async () => {
   const adapter = createRealDbAdapter();
   const throttle = new LoginThrottle(adapter, integrationConfig);
 
@@ -101,7 +118,7 @@ testSuite('LoginThrottle Integration - recordFailure() increments failure count'
   }
 
   // Verify failure_count = 3 in database
-  const rows = await adapter.query<{ key_hash: string; failure_count: number }>(
+  const rows = await adapter.queryAll<{ key_hash: string; failure_count: number }>(
     `SELECT key_hash, failure_count
      FROM auth_login_throttles
      WHERE key_hash IN (?, ?)`,
@@ -122,7 +139,11 @@ testSuite('LoginThrottle Integration - recordFailure() increments failure count'
   await throttle.recordSuccess(keys);
 });
 
-testSuite('LoginThrottle Integration - getDelay() calculates exponential backoff', async () => {
+// ---------------------------------------------------------------------------
+// Test 3: getDelay() calculates exponential backoff
+// ---------------------------------------------------------------------------
+
+test('LoginThrottle Integration - getDelay() calculates exponential backoff', { skip: !useRealDb }, async () => {
   const adapter = createRealDbAdapter();
   const throttle = new LoginThrottle(adapter, integrationConfig);
 
@@ -156,7 +177,11 @@ testSuite('LoginThrottle Integration - getDelay() calculates exponential backoff
   await throttle.recordSuccess(keys);
 });
 
-testSuite('LoginThrottle Integration - getDelay() caps at max delay', async () => {
+// ---------------------------------------------------------------------------
+// Test 4: getDelay() caps at max delay
+// ---------------------------------------------------------------------------
+
+test('LoginThrottle Integration - getDelay() caps at max delay', { skip: !useRealDb }, async () => {
   const adapter = createRealDbAdapter();
   const throttle = new LoginThrottle(adapter, integrationConfig);
 
@@ -187,7 +212,11 @@ testSuite('LoginThrottle Integration - getDelay() caps at max delay', async () =
   await throttle.recordSuccess(keys);
 });
 
-testSuite('LoginThrottle Integration - recordSuccess() clears throttle entries', async () => {
+// ---------------------------------------------------------------------------
+// Test 5: recordSuccess() clears throttle entries
+// ---------------------------------------------------------------------------
+
+test('LoginThrottle Integration - recordSuccess() clears throttle entries', { skip: !useRealDb }, async () => {
   const adapter = createRealDbAdapter();
   const throttle = new LoginThrottle(adapter, integrationConfig);
 
@@ -203,7 +232,7 @@ testSuite('LoginThrottle Integration - recordSuccess() clears throttle entries',
   }
 
   // Verify we have records
-  let rows = await adapter.query<{ key_hash: string }>(
+  let rows = await adapter.queryAll<{ key_hash: string }>(
     `SELECT key_hash FROM auth_login_throttles WHERE key_hash IN (?, ?)`,
     keys.map(k => k.hash)
   );
@@ -213,7 +242,7 @@ testSuite('LoginThrottle Integration - recordSuccess() clears throttle entries',
   await throttle.recordSuccess(keys);
 
   // Verify entries deleted from database
-  rows = await adapter.query<{ key_hash: string }>(
+  rows = await adapter.queryAll<{ key_hash: string }>(
     `SELECT key_hash FROM auth_login_throttles WHERE key_hash IN (?, ?)`,
     keys.map(k => k.hash)
   );
@@ -222,25 +251,4 @@ testSuite('LoginThrottle Integration - recordSuccess() clears throttle entries',
   // Verify getDelay returns 0
   const delay = await throttle.getDelay(keys);
   assert.strictEqual(delay, 0, 'getDelay should return 0 after recordSuccess');
-});
-
-testSuite('LoginThrottle Integration - Cleanup', async () => {
-  // This test ensures database pool is properly closed
-  // It runs last due to test.after
-  const adapter = createRealDbAdapter();
-  const throttle = new LoginThrottle(adapter, integrationConfig);
-
-  const keys = throttle.buildKeys({
-    companyCode: 'CLEANUP',
-    email: 'cleanup@example.com',
-    ipAddress: '10.0.0.1'
-  });
-
-  // Ensure no leftover throttle entries from previous tests
-  await throttle.recordSuccess(keys);
-
-  // Close the database pool
-  await closeTestPool();
-  
-  assert.ok(true, 'Database pool should be closed without errors');
 });

@@ -16,8 +16,8 @@ export async function createOutlet(
   const name = overrides.name || `Test Outlet ${code}`;
   
   const result = await adapter.execute(
-    `INSERT INTO outlets (company_id, code, name, created_at, updated_at)
-     VALUES (?, ?, ?, NOW(), NOW())`,
+    `INSERT INTO outlets (company_id, code, name, created_at)
+     VALUES (?, ?, ?, NOW())`,
     [companyId, code, name]
   );
   

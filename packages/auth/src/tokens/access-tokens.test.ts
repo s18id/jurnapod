@@ -109,14 +109,16 @@ test('AccessTokenManager - reject invalid sub claim', async () => {
   
   const invalidToken = await new SignJWT({
     email: 'test@example.com',
-    company_id: 1
+    company_id: 1,
+    iss: testConfig.tokens.issuer,
+    aud: testConfig.tokens.audience
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject('not-a-number') // Invalid sub
     .setIssuedAt()
     .setExpirationTime(Math.floor(Date.now() / 1000) + 900)
     .sign(secret);
-  
+
   await assert.rejects(
     async () => manager.verify(invalidToken),
     /invalid|Invalid/i,
@@ -133,14 +135,16 @@ test('AccessTokenManager - reject zero or negative user id', async () => {
   
   const invalidToken = await new SignJWT({
     email: 'test@example.com',
-    company_id: 1
+    company_id: 1,
+    iss: testConfig.tokens.issuer,
+    aud: testConfig.tokens.audience
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject('0') // Invalid - zero
     .setIssuedAt()
     .setExpirationTime(Math.floor(Date.now() / 1000) + 900)
     .sign(secret);
-  
+
   await assert.rejects(
     async () => manager.verify(invalidToken),
     /invalid|Invalid/i,

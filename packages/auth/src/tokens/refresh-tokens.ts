@@ -91,7 +91,7 @@ export class RefreshTokenManager {
 
     return this.adapter.transaction(async (tx) => {
       // Find existing token with FOR UPDATE lock
-      const rows = await tx.query<
+      const rows = await tx.queryAll<
         {
           id: number;
           user_id: number;

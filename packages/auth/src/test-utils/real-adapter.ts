@@ -26,7 +26,6 @@ export function getTestPool(): Pool {
       password: dbConfig.password,
       database: dbConfig.database,
       connectionLimit: dbConfig.connectionLimit,
-      dateStrings: true,
     });
   }
   return pool;
@@ -63,6 +62,40 @@ export async function closeTestPool(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// AuthDbConnection wrapper for DbConn
+// ---------------------------------------------------------------------------
+
+import type { AuthDbConnection } from '../types.js';
+
+/**
+ * Creates an AuthDbConnection wrapper around a DbConn instance.
+ * This maps beginTransaction() → begin() since DbConn uses begin().
+ */
+export function createAuthDbConnection(db: DbConn): AuthDbConnection {
+  return {
+    queryAll<T>(sql: string, params: unknown[]): Promise<T[]> {
+      return db.queryAll<T>(sql, params);
+    },
+    execute(sql: string, params: unknown[]) {
+      return db.execute(sql, params);
+    },
+    async beginTransaction(): Promise<void> {
+      await db.beginTransaction();
+    },
+    async commit(): Promise<void> {
+      await db.commit();
+    },
+    async rollback(): Promise<void> {
+      await db.rollback();
+    },
+    async release(): Promise<void> {
+      // DbConn manages its own connection pool, release is no-op for transaction connections
+      // The connection is released in commit()/rollback()
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main Adapter Factory
 // ---------------------------------------------------------------------------
 
@@ -70,8 +103,8 @@ export function createRealDbAdapter(): AuthDbAdapter {
   const db = getTestDb();
 
   return {
-    async query<T>(sql: string, params: unknown[]): Promise<T[]> {
-      return db.query<T>(sql, params);
+    async queryAll<T>(sql: string, params: unknown[]): Promise<T[]> {
+      return db.queryAll<T>(sql, params);
     },
 
     async execute(sql: string, params: unknown[]) {
@@ -83,10 +116,10 @@ export function createRealDbAdapter(): AuthDbAdapter {
     },
 
     async transaction<T>(fn: (adapter: AuthDbAdapter) => Promise<T>): Promise<T> {
-      await db.begin();
+      await db.beginTransaction();
 
       const txAdapter: AuthDbAdapter = {
-        query: async (sql, params) => db.query(sql, params),
+        queryAll: async (sql: string, params: unknown[]) => db.queryAll(sql, params),
         execute: async (sql, params) => {
           const result = await db.execute(sql, params);
           return { insertId: result.insertId, affectedRows: result.affectedRows };

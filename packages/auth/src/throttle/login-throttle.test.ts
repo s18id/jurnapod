@@ -72,7 +72,7 @@ test('LoginThrottle - getDelay() returns 0 for 1 failure (no delay on first atte
   assert.strictEqual(delay, 0, '1 failure should return 0ms delay');
 });
 
-test('LoginThrottle - getDelay() exponential backoff: 2 failures = baseDelayMs (1000ms)', async () => {
+test('LoginThrottle - getDelay() exponential backoff: 2 failures = baseDelayMs (100ms)', async () => {
   const adapter = createMockAdapter();
   const throttle = new LoginThrottle(adapter, testConfig);
 
@@ -86,10 +86,10 @@ test('LoginThrottle - getDelay() exponential backoff: 2 failures = baseDelayMs (
   await throttle.recordFailure({ keys, ipAddress: '192.168.1.1', userAgent: 'test-agent' });
 
   const delay = await throttle.getDelay(keys);
-  assert.strictEqual(delay, 1000, '2 failures should return baseDelayMs (1000ms)');
+  assert.strictEqual(delay, 100, '2 failures should return baseDelayMs (100ms)');
 });
 
-test('LoginThrottle - getDelay() exponential backoff: 3 failures = 2000ms', async () => {
+test('LoginThrottle - getDelay() exponential backoff: 3 failures = 200ms', async () => {
   const adapter = createMockAdapter();
   const throttle = new LoginThrottle(adapter, testConfig);
 
@@ -104,10 +104,10 @@ test('LoginThrottle - getDelay() exponential backoff: 3 failures = 2000ms', asyn
   await throttle.recordFailure({ keys, ipAddress: '192.168.1.1', userAgent: 'test-agent' });
 
   const delay = await throttle.getDelay(keys);
-  assert.strictEqual(delay, 2000, '3 failures should return 2000ms');
+  assert.strictEqual(delay, 200, '3 failures should return 200ms');
 });
 
-test('LoginThrottle - getDelay() exponential backoff: 4 failures = 4000ms', async () => {
+test('LoginThrottle - getDelay() exponential backoff: 4 failures = 400ms', async () => {
   const adapter = createMockAdapter();
   const throttle = new LoginThrottle(adapter, testConfig);
 
@@ -122,10 +122,10 @@ test('LoginThrottle - getDelay() exponential backoff: 4 failures = 4000ms', asyn
   }
 
   const delay = await throttle.getDelay(keys);
-  assert.strictEqual(delay, 4000, '4 failures should return 4000ms');
+  assert.strictEqual(delay, 400, '4 failures should return 400ms');
 });
 
-test('LoginThrottle - getDelay() caps delay at maxDelayMs (30000ms)', async () => {
+test('LoginThrottle - getDelay() caps delay at maxDelayMs (5000ms)', async () => {
   const adapter = createMockAdapter();
   const throttle = new LoginThrottle(adapter, testConfig);
 
@@ -141,7 +141,7 @@ test('LoginThrottle - getDelay() caps delay at maxDelayMs (30000ms)', async () =
   }
 
   const delay = await throttle.getDelay(keys);
-  assert.strictEqual(delay, 30000, 'Delay should be capped at maxDelayMs (30000ms)');
+  assert.strictEqual(delay, 5000, 'Delay should be capped at maxDelayMs (5000ms)');
 });
 
 test('LoginThrottle - recordFailure() increments failure count on repeated calls', async () => {
@@ -162,12 +162,12 @@ test('LoginThrottle - recordFailure() increments failure count on repeated calls
   // Record second failure
   await throttle.recordFailure({ keys, ipAddress: '192.168.1.1', userAgent: 'test-agent' });
   delay = await throttle.getDelay(keys);
-  assert.strictEqual(delay, 1000, '2 failures should give 1000ms delay');
+  assert.strictEqual(delay, 100, '2 failures should give 100ms delay');
 
   // Record third failure
   await throttle.recordFailure({ keys, ipAddress: '192.168.1.1', userAgent: 'test-agent' });
   delay = await throttle.getDelay(keys);
-  assert.strictEqual(delay, 2000, '3 failures should give 2000ms delay');
+  assert.strictEqual(delay, 200, '3 failures should give 200ms delay');
 });
 
 test('LoginThrottle - recordFailure() records failure for both primary and IP keys', async () => {
@@ -190,7 +190,7 @@ test('LoginThrottle - recordFailure() records failure for both primary and IP ke
   // Record second failure - should now have delay
   await throttle.recordFailure({ keys, ipAddress: '192.168.1.1', userAgent: 'test-agent' });
   delay = await throttle.getDelay(keys);
-  assert.strictEqual(delay, 1000, 'Second failure should give 1000ms delay');
+  assert.strictEqual(delay, 100, 'Second failure should give 100ms delay');
   
   // Verify both keys are tracked by recording success
   // If only one key was tracked, the delay would be different

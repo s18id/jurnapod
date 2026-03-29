@@ -115,7 +115,7 @@ export class GoogleOAuthProvider {
   ): Promise<{ userId: number; companyId: number; email: string } | null> {
     const normalizedEmail = email.trim().toLowerCase();
 
-    const rows = await this.adapter.query<{
+    const rows = await this.adapter.queryAll<{
       id: number;
       company_id: number;
       email: string;
@@ -153,7 +153,7 @@ export class GoogleOAuthProvider {
     const normalizedEmail = params.emailSnapshot.trim().toLowerCase();
 
     // Check for existing link
-    const existingRows = await this.adapter.query<{
+    const existingRows = await this.adapter.queryAll<{
       id: number;
       user_id: number;
     }>(

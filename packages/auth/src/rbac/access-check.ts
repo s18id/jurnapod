@@ -163,7 +163,7 @@ export class RBACManager {
       params.push(outletId);
     }
 
-    const rows = await this.adapter.query<{
+    const rows = await this.adapter.queryAll<{
       is_super_admin: number;
       has_global_role?: number | null;
       has_role?: number | null;
@@ -199,7 +199,7 @@ export class RBACManager {
    */
   async getUserWithRoles(userId: number, companyId: number): Promise<AuthenticatedUser | null> {
     // Get user basic info
-    const userRows = await this.adapter.query<{
+    const userRows = await this.adapter.queryAll<{
       id: number;
       company_id: number;
       email: string;
@@ -220,7 +220,7 @@ export class RBACManager {
     const userRow = userRows[0];
 
     // Get global roles (outlet_id IS NULL, is_global = 1)
-    const globalRoleRows = await this.adapter.query<{ code: string }>(
+    const globalRoleRows = await this.adapter.queryAll<{ code: string }>(
       `SELECT r.code
        FROM user_role_assignments ura
        INNER JOIN roles r ON r.id = ura.role_id
@@ -230,7 +230,7 @@ export class RBACManager {
     const global_roles = globalRoleRows.map((r) => r.code as RoleCode);
 
     // Get outlet-specific roles
-    const outletRoleRows = await this.adapter.query<{
+    const outletRoleRows = await this.adapter.queryAll<{
       outlet_id: number;
       outlet_code: string;
       outlet_name: string;
@@ -293,7 +293,7 @@ export class RBACManager {
    * Returns null if user doesn't exist or is inactive.
    */
   async getUserForTokenVerification(userId: number, companyId: number): Promise<AccessTokenUser | null> {
-    const rows = await this.adapter.query<{
+    const rows = await this.adapter.queryAll<{
       id: number;
       company_id: number;
       email: string;
@@ -323,7 +323,7 @@ export class RBACManager {
    * Returns true if user is SUPER_ADMIN, has global role, or has outlet-specific assignment.
    */
   async hasOutletAccess(userId: number, companyId: number, outletId: number): Promise<boolean> {
-    const rows = await this.adapter.query<{ count: number }>(
+    const rows = await this.adapter.queryAll<{ count: number }>(
       `SELECT COUNT(*) AS count
        FROM users u
        INNER JOIN companies c ON c.id = u.company_id
@@ -348,7 +348,7 @@ export class RBACManager {
    * Does not include global access (SUPER_ADMIN should check differently).
    */
   async listUserOutletIds(userId: number, companyId: number): Promise<number[]> {
-    const rows = await this.adapter.query<{ outlet_id: number }>(
+    const rows = await this.adapter.queryAll<{ outlet_id: number }>(
       `SELECT DISTINCT ura.outlet_id
        FROM user_role_assignments ura
        INNER JOIN outlets o ON o.id = ura.outlet_id
@@ -371,7 +371,7 @@ export class RBACManager {
     permission?: ModulePermission
   ): Promise<boolean> {
     // First check if user is SUPER_ADMIN (bypasses all checks)
-    const superAdminRows = await this.adapter.query<{ count: number }>(
+    const superAdminRows = await this.adapter.queryAll<{ count: number }>(
       `SELECT COUNT(*) AS count
        FROM user_role_assignments ura
        INNER JOIN roles r ON r.id = ura.role_id
@@ -387,7 +387,7 @@ export class RBACManager {
 
     // If no specific permission required, just check for any global role with module access
     if (!permission) {
-      const rows = await this.adapter.query<{ count: number }>(
+      const rows = await this.adapter.queryAll<{ count: number }>(
         `SELECT COUNT(*) AS count
          FROM user_role_assignments ura
          INNER JOIN roles r ON r.id = ura.role_id
@@ -402,7 +402,7 @@ export class RBACManager {
 
     // Check for specific permission bit
     const permissionBit = MODULE_PERMISSION_BITS[permission];
-    const rows = await this.adapter.query<{ count: number }>(
+    const rows = await this.adapter.queryAll<{ count: number }>(
       `SELECT COUNT(*) AS count
        FROM user_role_assignments ura
        INNER JOIN roles r ON r.id = ura.role_id

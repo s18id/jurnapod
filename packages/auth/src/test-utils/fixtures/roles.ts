@@ -10,7 +10,7 @@ export async function getRoleIdByCode(
   adapter: AuthDbAdapter,
   code: string
 ): Promise<number | null> {
-  const rows = await adapter.query<{ id: number }>(
+  const rows = await adapter.queryAll<{ id: number }>(
     'SELECT id FROM roles WHERE code = ? LIMIT 1',
     [code]
   );
@@ -22,8 +22,8 @@ export async function assignUserRole(
   assignment: RoleAssignment
 ): Promise<void> {
   await adapter.execute(
-    `INSERT INTO user_role_assignments (user_id, role_id, outlet_id, created_at, updated_at)
-     VALUES (?, ?, ?, NOW(), NOW())`,
+    `INSERT INTO user_role_assignments (user_id, role_id, outlet_id, created_at)
+     VALUES (?, ?, ?, NOW())`,
     [assignment.userId, assignment.roleId, assignment.outletId ?? null]
   );
 }

@@ -15,8 +15,8 @@ export async function createCompany(
   const name = overrides.name || `Test Company ${code}`;
   
   const result = await adapter.execute(
-    `INSERT INTO companies (code, name, timezone, created_at, updated_at) 
-     VALUES (?, ?, ?, NOW(), NOW())`,
+    `INSERT INTO companies (code, name, timezone, created_at) 
+     VALUES (?, ?, ?, NOW())`,
     [code, name, overrides.timezone || 'UTC']
   );
   

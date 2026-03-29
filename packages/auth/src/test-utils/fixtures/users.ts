@@ -21,8 +21,8 @@ export async function createUser(
   const email = overrides.email || `test${Date.now()}@example.com`;
   
   const result = await adapter.execute(
-    `INSERT INTO users (company_id, email, password_hash, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, NOW(), NOW())`,
+    `INSERT INTO users (company_id, email, password_hash, is_active, created_at)
+     VALUES (?, ?, ?, ?, NOW())`,
     [companyId, email, passwordHash, overrides.is_active ?? 1]
   );
   

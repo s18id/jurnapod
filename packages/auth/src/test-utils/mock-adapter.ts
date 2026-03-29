@@ -192,7 +192,7 @@ export function createMockAdapter(data: MockData = {}): MockAdapter {
       resetSequenceCounter('audit_logs');
     },
     
-    async query<T>(sql: string, params: unknown[]): Promise<T[]> {
+    async queryAll<T>(sql: string, params: unknown[]): Promise<T[]> {
       const sqlLower = sql.toLowerCase();
       const tableName = extractTableName(sql);
       

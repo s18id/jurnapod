@@ -17,7 +17,7 @@ export interface AuthDbAdapter {
    * @param params - Query parameters
    * @returns Array of row objects
    */
-  query<T>(sql: string, params: unknown[]): Promise<T[]>;
+  queryAll<T>(sql: string, params: unknown[]): Promise<T[]>;
 
   /**
    * Execute an INSERT/UPDATE/DELETE query.
@@ -48,7 +48,7 @@ export interface AuthDbAdapterWithConnection extends AuthDbAdapter {
 }
 
 export interface AuthDbConnection {
-  query<T>(sql: string, params: unknown[]): Promise<T[]>;
+  queryAll<T>(sql: string, params: unknown[]): Promise<T[]>;
   execute(sql: string, params: unknown[]): Promise<{ insertId?: number | bigint; affectedRows?: number }>;
   beginTransaction(): Promise<void>;
   commit(): Promise<void>;

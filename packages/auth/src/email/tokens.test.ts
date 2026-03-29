@@ -76,9 +76,10 @@ test("EmailTokenManager.create() - calculates correct expiry for PASSWORD_RESET"
   });
   const afterCreate = Date.now();
 
-  // passwordResetTtlMinutes is 60 (from testConfig)
-  const expectedMinExpiry = beforeCreate + 60 * 60 * 1000;
-  const expectedMaxExpiry = afterCreate + 60 * 60 * 1000;
+  // passwordResetTtlMinutes from testConfig (10 minutes from .env.test)
+  const ttlMs = testConfig.emailTokens!.passwordResetTtlMinutes * 60 * 1000;
+  const expectedMinExpiry = beforeCreate + ttlMs;
+  const expectedMaxExpiry = afterCreate + ttlMs;
 
   assert.ok(
     result.expiresAt.getTime() >= expectedMinExpiry &&
@@ -102,9 +103,10 @@ test("EmailTokenManager.create() - uses inviteTtlMinutes for INVITE type", async
   });
   const afterCreate = Date.now();
 
-  // inviteTtlMinutes is 1440 (from testConfig) = 24 hours
-  const expectedMinExpiry = beforeCreate + 1440 * 60 * 1000;
-  const expectedMaxExpiry = afterCreate + 1440 * 60 * 1000;
+  // inviteTtlMinutes from testConfig (30 minutes from .env.test)
+  const ttlMs = testConfig.emailTokens!.inviteTtlMinutes * 60 * 1000;
+  const expectedMinExpiry = beforeCreate + ttlMs;
+  const expectedMaxExpiry = afterCreate + ttlMs;
 
   assert.ok(
     result.expiresAt.getTime() >= expectedMinExpiry &&
@@ -128,9 +130,10 @@ test("EmailTokenManager.create() - uses verifyEmailTtlMinutes for VERIFY_EMAIL t
   });
   const afterCreate = Date.now();
 
-  // verifyEmailTtlMinutes is 60 (from testConfig)
-  const expectedMinExpiry = beforeCreate + 60 * 60 * 1000;
-  const expectedMaxExpiry = afterCreate + 60 * 60 * 1000;
+  // verifyEmailTtlMinutes from testConfig (10 minutes from .env.test)
+  const ttlMs = testConfig.emailTokens!.verifyEmailTtlMinutes * 60 * 1000;
+  const expectedMinExpiry = beforeCreate + ttlMs;
+  const expectedMaxExpiry = afterCreate + ttlMs;
 
   assert.ok(
     result.expiresAt.getTime() >= expectedMinExpiry &&

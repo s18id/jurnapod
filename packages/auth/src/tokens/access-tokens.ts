@@ -9,7 +9,7 @@ import type { AuthConfig, AccessTokenUser } from "../types.js";
 const accessTokenClaimsSchema = z.object({
   sub: z.string().trim().min(1),
   company_id: z.coerce.number().int().positive(),
-  email: z.string().trim().email().optional()
+  email: z.string().trim().email().or(z.literal('')).optional()
 });
 
 export class AccessTokenManager {

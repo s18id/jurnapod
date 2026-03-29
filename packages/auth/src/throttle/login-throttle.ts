@@ -43,7 +43,7 @@ export class LoginThrottle {
     if (keys.length === 0) return 0;
 
     const placeholders = keys.map(() => "?").join(", ");
-    const rows = await this.adapter.query<{ key_hash: string; failure_count: number }>(
+    const rows = await this.adapter.queryAll<{ key_hash: string; failure_count: number }>(
       `SELECT key_hash, failure_count
        FROM auth_login_throttles
        WHERE key_hash IN (${placeholders})`,

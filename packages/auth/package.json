@@ -40,12 +40,12 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'lint not configured yet for @jurnapod/auth'",
-    "test": "node --test --import tsx 'src/**/*.test.ts'",
-    "test:unit": "node --test --import tsx 'src/**/*.test.ts' | grep -v '.integration.test.ts'",
-    "test:db": "AUTH_TEST_USE_DB=1 node --test --import tsx 'src/**/*.integration.test.ts'",
-    "test:all": "npm run test && npm run test:db",
-    "test:single": "node --test --import tsx ",
-    "test:oauth": "TEST_OAUTH=1 node --test --import tsx 'src/**/*.test.ts'"
+    "test": "node --test --import tsx 'src/**/*.test.ts' '!src/**/*.*.integration.test.ts'",
+    "test:unit": "node --test --import tsx 'src/**/*.test.ts' '!src/**/*.*.integration.test.ts'",
+    "test:db": "AUTH_TEST_USE_DB=1 node --test --import tsx 'integration/**/*.test.ts'",
+    "test:all": "npm run test:unit && npm run test:db",
+    "test:single": "node --test --import tsx",
+    "test:oauth": "TEST_OAUTH=1 node --test --import tsx 'src/**/*.test.ts' '!src/**/*.*.integration.test.ts'"
   },
   "dependencies": {
     "jose": "^5.9.6",

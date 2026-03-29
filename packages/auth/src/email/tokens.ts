@@ -92,7 +92,7 @@ export class EmailTokenManager {
   ): Promise<{ userId: number; companyId: number; email: string }> {
     const tokenHash = this.hashToken(token);
 
-    const rows = await this.adapter.query<EmailTokenRow>(
+    const rows = await this.adapter.queryAll<EmailTokenRow>(
       `SELECT user_id, company_id, email, used_at, expires_at
        FROM email_tokens
        WHERE token_hash = ? AND type = ?
@@ -143,7 +143,7 @@ export class EmailTokenManager {
 
     if (updateResult.affectedRows === 0) {
       // Determine specific error
-      const rows = await connection.query<EmailTokenRow>(
+      const rows = await connection.queryAll<EmailTokenRow>(
         `SELECT user_id, company_id, email, used_at, expires_at
          FROM email_tokens
          WHERE token_hash = ? AND type = ?
@@ -173,7 +173,7 @@ export class EmailTokenManager {
     }
 
     // Get consumed token details
-    const rows = await connection.query<{ user_id: number; company_id: number; email: string }>(
+    const rows = await connection.queryAll<{ user_id: number; company_id: number; email: string }>(
       `SELECT user_id, company_id, email
        FROM email_tokens
        WHERE token_hash = ? AND type = ?
@@ -209,7 +209,7 @@ export class EmailTokenManager {
   } | null> {
     const tokenHash = this.hashToken(token);
 
-    const rows = await this.adapter.query<EmailTokenRowWithoutUsed>(
+    const rows = await this.adapter.queryAll<EmailTokenRowWithoutUsed>(
       `SELECT user_id, company_id, email, expires_at
        FROM email_tokens
        WHERE token_hash = ? AND type = ?

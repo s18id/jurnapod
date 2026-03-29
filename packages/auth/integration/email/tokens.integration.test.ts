@@ -5,16 +5,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { createHash, randomBytes } from 'node:crypto';
-import { EmailTokenManager } from './tokens.js';
-import { createRealDbAdapter, getTestDb, closeTestPool } from '../test-utils/real-adapter.js';
-import { useRealDb } from '../test-utils/test-adapter.js';
-import { testConfig } from '../test-utils/mock-adapter.js';
-import { createCompany, cleanupCompanies } from '../test-utils/fixtures/companies.js';
-import { createUser, cleanupUsers } from '../test-utils/fixtures/users.js';
+import { EmailTokenManager } from '../../src/email/tokens.js';
+import { createRealDbAdapter, getTestDb, createAuthDbConnection, closeTestPool } from '../../src/test-utils/real-adapter.js';
+import { useRealDb } from '../../src/test-utils/test-adapter.js';
+import { testConfig } from '../../src/test-utils/mock-adapter.js';
+import { createCompany, cleanupCompanies } from '../../src/test-utils/fixtures/companies.js';
+import { createUser, cleanupUsers } from '../../src/test-utils/fixtures/users.js';
 import {
   EmailTokenExpiredError,
-} from '../errors.js';
-import type { EmailTokenType, AuthDbConnection } from '../types.js';
+} from '../../src/errors.js';
+import type { EmailTokenType } from '../../src/types.js';
+
+// ---------------------------------------------------------------------------
+// Skip if not using real DB
+// ---------------------------------------------------------------------------
+
+const testOrSkip = useRealDb ? test : test.skip;
 
 // ---------------------------------------------------------------------------
 // Token hash helper (must match tokens.ts implementation)
@@ -23,12 +29,6 @@ import type { EmailTokenType, AuthDbConnection } from '../types.js';
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
-
-// ---------------------------------------------------------------------------
-// Skip if not using real DB
-// ---------------------------------------------------------------------------
-
-const testOrSkip = useRealDb ? test : test.skip;
 
 // ---------------------------------------------------------------------------
 // Cleanup
@@ -67,10 +67,10 @@ testOrSkip('EmailTokenManager.create() stores hashed token in database', async (
     assert.notStrictEqual(token, tokenHash, 'Token should differ from its hash');
 
     // Verify database has the hash, not the raw token
-    const rows = await adapter.query<{
+    const rows = await adapter.queryAll<{
       token_hash: string;
       email: string;
-      expires_at: Date;
+      expires_at: number | Date | string;
     }>(
       `SELECT token_hash, email, expires_at FROM email_tokens WHERE token_hash = ? LIMIT 1`,
       [tokenHash]
@@ -79,7 +79,13 @@ testOrSkip('EmailTokenManager.create() stores hashed token in database', async (
     assert.strictEqual(rows.length, 1, 'Should find exactly one token row');
     assert.strictEqual(rows[0].token_hash, tokenHash, 'Stored hash should match');
     assert.strictEqual(rows[0].email, user.email, 'Email should match');
-    assert.ok(rows[0].expires_at instanceof Date, 'expires_at should be a Date');
+    // expires_at is datetime (with dateStrings: true it comes as string) or BIGINT unix ms (as number)
+    assert.ok(
+      typeof rows[0].expires_at === 'string' || 
+      typeof rows[0].expires_at === 'number' || 
+      rows[0].expires_at instanceof Date,
+      `expires_at should be string (datetime), number (BIGINT unix ms), or Date but got ${typeof rows[0].expires_at}`
+    );
 
     // Verify expires_at is in the future and approximately correct
     const now = Date.now();
@@ -87,9 +93,19 @@ testOrSkip('EmailTokenManager.create() stores hashed token in database', async (
     const expectedMinExpiry = now + ttlMs;
     const expectedMaxExpiry = now + ttlMs + 1000; // 1s tolerance
 
+    // Handle string (datetime), number (BIGINT unix ms), or Date types
+    let expiresAtMs: number;
+    if (typeof rows[0].expires_at === 'string') {
+      expiresAtMs = new Date(rows[0].expires_at).getTime();
+    } else if (rows[0].expires_at instanceof Date) {
+      expiresAtMs = rows[0].expires_at.getTime();
+    } else {
+      expiresAtMs = rows[0].expires_at as number;
+    }
+
     assert.ok(
-      rows[0].expires_at.getTime() >= expectedMinExpiry - 1000 && // 1s tolerance for timing
-      rows[0].expires_at.getTime() <= expectedMaxExpiry,
+      expiresAtMs >= expectedMinExpiry - 1000 && // 1s tolerance for timing
+      expiresAtMs <= expectedMaxExpiry,
       'expires_at should be approximately now + TTL'
     );
   } finally {
@@ -191,10 +207,10 @@ testOrSkip('EmailTokenManager.validateAndConsume() atomically consumes token', a
 
     // Get a real DB connection for transaction
     const db = getTestDb();
-    await db.begin();
+    await db.beginTransaction();
 
-    // Cast to AuthDbConnection - DbConn has query/execute but uses begin() instead of beginTransaction()
-    const conn = db as unknown as AuthDbConnection;
+    // Create proper AuthDbConnection wrapper that maps beginTransaction → begin
+    const conn = createAuthDbConnection(db);
 
     let result: { userId: number; companyId: number; email: string } | null = null;
     try {
@@ -214,7 +230,7 @@ testOrSkip('EmailTokenManager.validateAndConsume() atomically consumes token', a
     });
 
     // Verify used_at is set in database
-    const rows = await adapter.query<{ used_at: Date | null }>(
+    const rows = await adapter.queryAll<{ used_at: Date | null }>(
       `SELECT used_at FROM email_tokens WHERE token_hash = ? LIMIT 1`,
       [tokenHash]
     );
@@ -250,7 +266,7 @@ testOrSkip('EmailTokenManager.invalidate() marks token as used', async () => {
     const tokenHash = hashToken(token);
 
     // Initially used_at should be null
-    let rows = await adapter.query<{ used_at: Date | null }>(
+    let rows = await adapter.queryAll<{ used_at: Date | null }>(
       `SELECT used_at FROM email_tokens WHERE token_hash = ? LIMIT 1`,
       [tokenHash]
     );
@@ -260,7 +276,7 @@ testOrSkip('EmailTokenManager.invalidate() marks token as used', async () => {
     await manager.invalidate(token, 'PASSWORD_RESET');
 
     // Verify used_at is now set
-    rows = await adapter.query<{ used_at: Date | null }>(
+    rows = await adapter.queryAll<{ used_at: Date | null }>(
       `SELECT used_at FROM email_tokens WHERE token_hash = ? LIMIT 1`,
       [tokenHash]
     );
