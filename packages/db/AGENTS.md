@@ -106,6 +106,12 @@ const rows = await db.query<RowDataPacket>(
   [companyId]
 );
 
+// SELECT single row - returns one row or null
+const account = await db.querySingle<RowDataPacket>(
+  'SELECT * FROM accounts WHERE company_id = ? AND id = ?',
+  [companyId, accountId]
+);
+
 // INSERT/UPDATE/DELETE - returns result with insertId/affectedRows
 const result = await db.execute(
   'INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)',
