@@ -14,6 +14,7 @@ import { PosDataService, type DatabaseConnection } from "./core/pos-data-service
 import { createPosSyncEndpoints } from "./endpoints/pos-sync-endpoints.js";
 import { createDbPool, DbConn } from "@jurnapod/db";
 import { handlePullSync, type PullSyncParams, type PullSyncResult } from "./pull/index.js";
+import { handlePushSync, type PushSyncParams, type PushSyncResult } from "./push/index.js";
 
 export class PosSyncModule implements SyncModule {
   readonly moduleId = "pos";
@@ -26,7 +27,8 @@ export class PosSyncModule implements SyncModule {
 
   constructor(public readonly config: SyncModuleConfig) {
     // Initialize endpoints - endpoints call handleSync which delegates to handlePullSync
-    this.endpoints = createPosSyncEndpoints(this.handleSync.bind(this));
+    // Also pass handlePushSync for the PUSH endpoint
+    this.endpoints = createPosSyncEndpoints(this.handleSync.bind(this), this.handlePushSync.bind(this));
   }
 
   async initialize(context: SyncModuleInitContext): Promise<void> {
@@ -57,6 +59,21 @@ export class PosSyncModule implements SyncModule {
     }
 
     return await handlePullSync(this.dbConn, params);
+  }
+
+  /**
+   * Canonical entry point for POS push sync.
+   * Accepts PushSyncParams and returns PushSyncResult.
+   */
+  async handlePushSync(params: PushSyncParams): Promise<PushSyncResult> {
+    if (!this.dbConn) {
+      throw new Error("POS sync module not initialized - database connection not available");
+    }
+
+    return await handlePushSync({
+      ...params,
+      db: this.dbConn,
+    });
   }
 
   /**

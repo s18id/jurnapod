@@ -4,12 +4,14 @@
 import type { 
   SyncEndpoint, 
   SyncHandler, 
+  SyncEndpointType,
   AuthConfig, 
   SyncRequest,
   SyncResponse,
   SyncContext
 } from "@jurnapod/sync-core";
 import { z } from "zod";
+import type { PushSyncParams, PushSyncResult } from "../push/index.js";
 
 // Request validation schemas
 const PosRealtimeSyncParamsSchema = z.object({
@@ -54,13 +56,26 @@ export function createPosSyncHandler(handleSyncFn: (request: SyncRequest) => Pro
  * Create POS sync endpoints
  */
 export function createPosSyncEndpoints(
-  handleSync: (request: SyncRequest) => Promise<SyncResponse>
+  handleSync: (request: SyncRequest) => Promise<SyncResponse>,
+  handlePushSync: (params: PushSyncParams) => Promise<PushSyncResult>
 ): SyncEndpoint[] {
   const syncHandler = createPosSyncHandler(handleSync);
+
+  // Push request validation schema
+  const PushSyncRequestSchema = z.object({
+    transactions: z.array(z.any()).default([]),
+    active_orders: z.array(z.any()).default([]),
+    order_updates: z.array(z.any()).default([]),
+    item_cancellations: z.array(z.any()).default([]),
+    variant_sales: z.array(z.any()).default([]),
+    variant_stock_adjustments: z.array(z.any()).default([])
+  });
 
   return [
     // REALTIME tier endpoint
     {
+      type: "REALTIME" as SyncEndpointType,
+      supportsBatch: false,
       config: {
         path: "/realtime",
         method: "GET",
@@ -94,6 +109,8 @@ export function createPosSyncEndpoints(
 
     // OPERATIONAL tier endpoint  
     {
+      type: "OPERATIONAL" as SyncEndpointType,
+      supportsBatch: false,
       config: {
         path: "/operational",
         method: "GET", 
@@ -131,6 +148,8 @@ export function createPosSyncEndpoints(
 
     // MASTER tier endpoint
     {
+      type: "MASTER" as SyncEndpointType,
+      supportsBatch: false,
       config: {
         path: "/master",
         method: "GET",
@@ -167,6 +186,8 @@ export function createPosSyncEndpoints(
 
     // ADMIN tier endpoint
     {
+      type: "ADMIN" as SyncEndpointType,
+      supportsBatch: false,
       config: {
         path: "/admin",
         method: "GET",
@@ -193,6 +214,65 @@ export function createPosSyncEndpoints(
         };
 
         return await syncHandler(syncRequest, context);
+      },
+      auth: posAuthConfig
+    },
+
+    // PUSH endpoint (REALTIME tier, batch capable)
+    {
+      type: "REALTIME" as SyncEndpointType,
+      supportsBatch: true,
+      config: {
+        path: "/push",
+        method: "POST",
+        auth_required: true,
+        rate_limit: {
+          requests: 120, // 120 requests per minute for push
+          window_ms: 60_000
+        }
+      },
+      handler: async (request, context) => {
+        try {
+          // Validate and extract push params from request body
+          // Use type casting since SyncRequest doesn't have body but runtime has access to HTTP request
+          const rawBody = (request as any).body ?? {};
+          const pushData = PushSyncRequestSchema.parse(rawBody);
+
+          const pushParams = {
+            companyId: context.company_id,
+            outletId: context.outlet_id ?? 0,
+            transactions: pushData.transactions,
+            activeOrders: pushData.active_orders,
+            orderUpdates: pushData.order_updates,
+            itemCancellations: pushData.item_cancellations,
+            variantSales: pushData.variant_sales,
+            variantStockAdjustments: pushData.variant_stock_adjustments,
+          };
+
+          // The module's handlePushSync wrapper adds db internally
+          const result = await (handlePushSync as any)(pushParams);
+
+          // Transform PushSyncResult into SyncResponse
+          const hasErrors = result.results.some((r: any) => r.result === "ERROR") ||
+            result.orderUpdateResults.some((r: any) => r.result === "ERROR") ||
+            result.itemCancellationResults.some((r: any) => r.result === "ERROR") ||
+            result.variantSaleResults?.some((r: any) => r.result === "ERROR") ||
+            result.variantStockAdjustmentResults?.some((r: any) => r.result === "ERROR");
+
+          return {
+            success: !hasErrors,
+            timestamp: new Date().toISOString(),
+            has_more: false,
+            error_message: hasErrors ? "Some push operations failed" : undefined
+          };
+        } catch (error) {
+          return {
+            success: false,
+            timestamp: new Date().toISOString(),
+            has_more: false,
+            error_message: error instanceof Error ? error.message : "Push sync failed"
+          };
+        }
       },
       auth: posAuthConfig
     }
