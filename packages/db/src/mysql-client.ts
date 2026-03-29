@@ -161,6 +161,14 @@ export class DbConn implements JurnapodDbClient {
   }
 
   /**
+   * Execute a raw SQL query and return a single result or null.
+   */
+  async querySingle<T = any>(sql: string, params?: any[]): Promise<T | null> {
+    const rows = await this.query<T>(sql, params);
+    return rows[0] || null;
+  }
+
+  /**
    * Execute a raw SQL statement that modifies data.
    */
   async execute(sql: string, params?: any[]): Promise<SqlExecuteResult> {
