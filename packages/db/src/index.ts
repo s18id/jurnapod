@@ -16,8 +16,5 @@ export * from './jurnapod-client.js';
 // Unified MySQL client
 export * from './mysql-client.js';
 
-// Connection-based Kysely helper
-export * from './connection-kysely.js';
-
 // Pool factory
 export * from './pool.js';

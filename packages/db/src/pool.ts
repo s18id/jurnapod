@@ -4,26 +4,28 @@
 /**
  * Database pool factory for Jurnapod.
  * 
- * This module provides the MySQL connection pool creation.
- * Use createDbPool() to create a new pool, or pass config
- * to DbConn constructor.
+ * This module provides the MySQL connection pool creation using callback-based mysql2.
+ * Use createDbPool() to create a new pool.
  */
 
-import mysql from "mysql2/promise";
-import type { Pool } from "mysql2/promise";
+import mysql from "mysql2";
+import type { Pool } from "mysql2";
 
 /**
  * Configuration for creating a database pool
  */
 export interface DbPoolConfig {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  database: string;
+  uri?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  password?: string;
+  database?: string;
   charset?: string;
   connectionLimit?: number;
   dateStrings?: boolean;
+  enableKeepAlive?: boolean;
+  keepAliveInitialDelay?: number;
 }
 
 /**
@@ -62,6 +64,21 @@ function normalizeDbCharset(collation: string | null | undefined): string | unde
  * ```
  */
 export function createDbPool(config: DbPoolConfig): Pool {
+  const poolOptions = {
+    waitForConnections: true,
+    connectionLimit: config.connectionLimit ?? 10,
+    queueLimit: 0,
+    enableKeepAlive: config.enableKeepAlive ?? true,
+    keepAliveInitialDelay: config.keepAliveInitialDelay ?? 10000,
+    dateStrings: config.dateStrings ?? true
+  };
+
+  if (config.uri) {
+    // URI mode: mysql2 parses host, port, user, password, database from URI
+    return mysql.createPool(config.uri);
+  }
+
+  // Individual params mode
   return mysql.createPool({
     host: config.host,
     port: config.port,
@@ -69,18 +86,6 @@ export function createDbPool(config: DbPoolConfig): Pool {
     password: config.password,
     database: config.database,
     charset: normalizeDbCharset(config.charset),
-    waitForConnections: true,
-    connectionLimit: config.connectionLimit ?? 10,
-    queueLimit: 0,
-    dateStrings: config.dateStrings ?? true
+    ...poolOptions
   });
-}
-
-/**
- * Closes a database pool.
- * 
- * @param pool - The pool to close
- */
-export async function closeDbPool(pool: Pool): Promise<void> {
-  await pool.end();
 }
