@@ -274,6 +274,34 @@ npm run qa:e2e -w @jurnapod/pos
 | **API** | `npm run typecheck -w @jurnapod/api` | `npm run build -w @jurnapod/api` | `npm run lint -w @jurnapod/api` | `npm run test:unit -w @jurnapod/api` | `npm run test:unit:single -w @jurnapod/api <file>` | — |
 | **Backoffice** | `npm run typecheck -w @jurnapod/backoffice` | `npm run build -w @jurnapod/backoffice` | `npm run lint -w @jurnapod/backoffice` | `npm run test -w @jurnapod/backoffice` | — | — |
 | **POS** | `npm run typecheck -w @jurnapod/pos` | `npm run build -w @jurnapod/pos` | `npm run lint -w @jurnapod/pos` | `npm run test -w @jurnapod/pos` | — | `npm run qa:e2e -w @jurnapod/pos` |
+| **@jurnapod/sync-core** | `npm run typecheck -w @jurnapod/sync-core` | `npm run build -w @jurnapod/sync-core` | — | — | — | — |
+| **@jurnapod/pos-sync** | `npm run typecheck -w @jurnapod/pos-sync` | `npm run build -w @jurnapod/pos-sync` | — | `npm run test:run -w @jurnapod/pos-sync` | — | — |
+| **@jurnapod/backoffice-sync** | `npm run typecheck -w @jurnapod/backoffice-sync` | `npm run build -w @jurnapod/backoffice-sync` | — | `npm run test:run -w @jurnapod/backoffice-sync` | — | — |
+
+### Sync Packages Testing Commands
+
+**POS Sync Package:**
+```bash
+cd /home/ahmad/jurnapod
+npm run typecheck -w @jurnapod/pos-sync
+npm run build -w @jurnapod/pos-sync
+npm run test:run -w @jurnapod/pos-sync
+```
+
+**Backoffice Sync Package:**
+```bash
+cd /home/ahmad/jurnapod
+npm run typecheck -w @jurnapod/backoffice-sync
+npm run build -w @jurnapod/backoffice-sync
+npm run test:run -w @jurnapod/backoffice-sync
+```
+
+**Sync Core Package (types only):**
+```bash
+cd /home/ahmad/jurnapod
+npm run typecheck -w @jurnapod/sync-core
+npm run build -w @jurnapod/sync-core
+```
 
 **API Scoped Unit Tests:**
 - `test:unit:routes` — route tests (~25 files)
