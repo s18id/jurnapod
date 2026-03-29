@@ -185,6 +185,15 @@ export class DbConn implements JurnapodDbClient {
   }
 
   /**
+   * Alias for queryOne — provided for compatibility with DatabaseConnection interface
+   * used by sync data services (PosDataService, BackofficeDataService).
+   */
+  async querySingle<T = any>(sql: string, params?: any[]): Promise<T | null> {
+    const rows = await this.queryAll<T>(sql, params);
+    return rows[0] || null;
+  }
+
+  /**
    * Execute a raw SQL statement that modifies data.
    * Uses transaction connection if in a transaction, otherwise uses pool.
    */
