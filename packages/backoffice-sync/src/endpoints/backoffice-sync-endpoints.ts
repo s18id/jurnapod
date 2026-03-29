@@ -7,7 +7,8 @@ import type {
   AuthConfig, 
   SyncRequest,
   SyncResponse,
-  SyncContext
+  SyncContext,
+  SyncEndpointType
 } from "@jurnapod/sync-core";
 import { z } from "zod";
 
@@ -71,6 +72,8 @@ export function createBackofficeSyncEndpoints(
   return [
     // REALTIME tier endpoint - Dashboard data
     {
+      type: "REALTIME" as SyncEndpointType,
+      supportsBatch: false,
       config: {
         path: "/realtime",
         method: "GET",
@@ -97,6 +100,8 @@ export function createBackofficeSyncEndpoints(
 
     // OPERATIONAL tier endpoint - Recent business activity
     {
+      type: "OPERATIONAL" as SyncEndpointType,
+      supportsBatch: false,
       config: {
         path: "/operational",
         method: "GET",
@@ -123,6 +128,8 @@ export function createBackofficeSyncEndpoints(
 
     // MASTER tier endpoint - Comprehensive catalog
     {
+      type: "MASTER" as SyncEndpointType,
+      supportsBatch: false,
       config: {
         path: "/master",
         method: "GET",
@@ -149,6 +156,8 @@ export function createBackofficeSyncEndpoints(
 
     // ADMIN tier endpoint - System administration
     {
+      type: "ADMIN" as SyncEndpointType,
+      supportsBatch: false,
       config: {
         path: "/admin",
         method: "GET",
@@ -175,6 +184,8 @@ export function createBackofficeSyncEndpoints(
 
     // ANALYTICS tier endpoint - Reports and business intelligence
     {
+      type: "ANALYTICS" as SyncEndpointType,
+      supportsBatch: false,
       config: {
         path: "/analytics",
         method: "GET",

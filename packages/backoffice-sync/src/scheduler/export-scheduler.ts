@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { DatabaseConnection } from "../core/backoffice-data-service.js";
+import type { DbConn } from "@jurnapod/db";
 
 export interface ScheduledExport {
   id: number;
@@ -34,7 +34,7 @@ export class ExportScheduler {
   private batchProcessor: any;
 
   constructor(
-    private db: DatabaseConnection,
+    private db: DbConn,
     private config: ExportSchedulerConfig = {
       pollIntervalMs: 60_000 // 1 minute
     }

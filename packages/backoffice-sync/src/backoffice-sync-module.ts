@@ -9,7 +9,7 @@ import type {
   SyncRequest,
   SyncResponse
 } from "@jurnapod/sync-core";
-import { BackofficeDataService, type DatabaseConnection } from "./core/backoffice-data-service.js";
+import { BackofficeDataService } from "./core/backoffice-data-service.js";
 import { createBackofficeSyncEndpoints } from "./endpoints/backoffice-sync-endpoints.js";
 import { BatchProcessor, type BatchProcessorConfig } from "./batch/batch-processor.js";
 import { ExportScheduler } from "./scheduler/export-scheduler.js";

@@ -9,14 +9,10 @@ import type {
   BackofficeAnalyticsData
 } from "../types/backoffice-data.js";
 import type { SyncContext } from "@jurnapod/sync-core";
-
-export interface DatabaseConnection {
-  query(sql: string, params?: any[]): Promise<any[]>;
-  querySingle(sql: string, params?: any[]): Promise<any | null>;
-}
+import type { DbConn } from "@jurnapod/db";
 
 export class BackofficeDataService {
-  constructor(private db: DatabaseConnection) {}
+  constructor(private db: DbConn) {}
 
   /**
    * Get realtime dashboard data for backoffice
@@ -28,25 +24,26 @@ export class BackofficeDataService {
     const salesMetrics = await this.db.querySingle(`
       SELECT 
         COALESCE(SUM(
-          CASE WHEN DATE(trx_at) = CURDATE() THEN 
-            (SELECT SUM(qty * price_snapshot) FROM pos_transaction_items pti WHERE pti.transaction_id = pt.id)
-          ELSE 0 END
+          CASE WHEN DATE(pt.trx_at) = CURDATE() THEN pti.item_total ELSE 0 END
         ), 0) AS total_sales_today,
-        COUNT(CASE WHEN DATE(trx_at) = CURDATE() AND status = 'COMPLETED' THEN 1 END) AS transaction_count_today,
+        COUNT(CASE WHEN DATE(pt.trx_at) = CURDATE() AND pt.status = 'COMPLETED' THEN 1 END) AS transaction_count_today,
         COALESCE(SUM(
-          CASE WHEN HOUR(trx_at) = HOUR(NOW()) AND DATE(trx_at) = CURDATE() THEN
-            (SELECT SUM(qty * price_snapshot) FROM pos_transaction_items pti WHERE pti.transaction_id = pt.id)
-          ELSE 0 END
+          CASE WHEN HOUR(pt.trx_at) = HOUR(NOW()) AND DATE(pt.trx_at) = CURDATE() THEN pti.item_total ELSE 0 END
         ), 0) AS revenue_this_hour
       FROM pos_transactions pt
-      WHERE company_id = ?
-        AND trx_at >= CURDATE() - INTERVAL 1 DAY
+      LEFT JOIN (
+        SELECT pos_transaction_id, SUM(qty * price_snapshot) AS item_total
+        FROM pos_transaction_items
+        GROUP BY pos_transaction_id
+      ) pti ON pti.pos_transaction_id = pt.id
+      WHERE pt.company_id = ?
+        AND pt.trx_at >= CURDATE() - INTERVAL 1 DAY
     `, [company_id]);
 
     // Get active orders and table counts
     const activityMetrics = await this.db.querySingle(`
       SELECT 
-        COUNT(DISTINCT pos.id) AS active_orders_count,
+        COUNT(DISTINCT pos.order_id) AS active_orders_count,
         COUNT(DISTINCT ot.id) AS occupied_tables_count
       FROM pos_order_snapshots pos
       LEFT JOIN outlet_tables ot ON ot.id = pos.table_id AND ot.status = 'OCCUPIED'
@@ -61,7 +58,7 @@ export class BackofficeDataService {
       : 0;
 
     // Get system alerts (last 24 hours)
-    const systemAlerts = await this.db.query(`
+    const systemAlerts = await this.db.queryAll(`
       SELECT 
         UUID() AS id,
         'ERROR' AS type,
@@ -78,11 +75,11 @@ export class BackofficeDataService {
     `, [company_id]);
 
     // Get staff activity
-    const staffActivity = await this.db.query(`
+    const staffActivity = await this.db.queryAll(`
       SELECT DISTINCT
         u.id AS user_id,
         u.name AS user_name,
-        uor.outlet_id,
+        ura.outlet_id,
         al.action AS last_action,
         al.created_at AS last_seen,
         CASE 
@@ -91,11 +88,11 @@ export class BackofficeDataService {
           ELSE 'OFFLINE'
         END AS status
       FROM users u
-      JOIN user_outlet_roles uor ON uor.user_id = u.id
+      JOIN user_role_assignments ura ON ura.user_id = u.id
       LEFT JOIN audit_logs al ON al.user_id = u.id
-      WHERE uor.company_id = ?
+      WHERE u.company_id = ?
         AND u.is_active = 1
-      GROUP BY u.id, uor.outlet_id
+      GROUP BY u.id, ura.outlet_id
       HAVING MAX(al.created_at) IS NOT NULL
       ORDER BY last_seen DESC
       LIMIT 20
@@ -137,7 +134,7 @@ export class BackofficeDataService {
     const { company_id } = context;
 
     // Get recent transactions (last 24 hours)
-    const recentTransactions = await this.db.query(`
+    const recentTransactions = await this.db.queryAll(`
       SELECT 
         pt.client_tx_id AS transaction_id,
         pt.outlet_id,
@@ -146,12 +143,12 @@ export class BackofficeDataService {
         (
           SELECT SUM(qty * price_snapshot) 
           FROM pos_transaction_items pti 
-          WHERE pti.transaction_id = pt.id
+          WHERE pti.pos_transaction_id = pt.id
         ) AS total_amount,
         (
           SELECT GROUP_CONCAT(DISTINCT method)
           FROM pos_transaction_payments ptp
-          WHERE ptp.transaction_id = pt.id
+          WHERE ptp.pos_transaction_id = pt.id
         ) AS payment_methods,
         pt.trx_at AS transaction_at,
         pt.status,
@@ -167,7 +164,7 @@ export class BackofficeDataService {
     `, sinceVersion ? [company_id, company_id] : [company_id]);
 
     // Get payment reconciliation status
-    const paymentReconciliation = await this.db.query(`
+    const paymentReconciliation = await this.db.queryAll(`
       SELECT 
         o.id AS outlet_id,
         pm.method AS payment_method,
@@ -179,13 +176,13 @@ export class BackofficeDataService {
       FROM outlets o
       CROSS JOIN (
         SELECT DISTINCT method FROM pos_transaction_payments 
-        WHERE transaction_id IN (
+        WHERE pos_transaction_id IN (
           SELECT id FROM pos_transactions 
           WHERE company_id = ? AND DATE(trx_at) = CURDATE()
         )
       ) pm
       LEFT JOIN pos_transactions pt ON pt.outlet_id = o.id AND DATE(pt.trx_at) = CURDATE()
-      LEFT JOIN pos_transaction_payments ptp ON ptp.transaction_id = pt.id AND ptp.method = pm.method
+      LEFT JOIN pos_transaction_payments ptp ON ptp.pos_transaction_id = pt.id AND ptp.method = pm.method
       WHERE o.company_id = ?
         AND o.is_active = 1
       GROUP BY o.id, pm.method
@@ -238,21 +235,22 @@ export class BackofficeDataService {
     const versionParams = sinceVersion && sinceVersion < dataVersion ? [company_id] : [];
 
     // Get comprehensive item data
-    const items = await this.db.query(`
+    // TODO: When suppliers table is created, add LEFT JOIN to get supplier_name
+    const items = await this.db.queryAll(`
       SELECT 
         i.id,
         i.sku,
         i.name,
-        i.description,
-        i.type,
+        NULL AS description,
+        i.item_type AS type,
         i.item_group_id,
-        COALESCE(i.cost_price, 0) AS cost_price,
+        NULL AS cost_price,
         COALESCE(
           (SELECT price FROM item_prices ip WHERE ip.item_id = i.id AND ip.outlet_id IS NULL LIMIT 1),
           0
         ) AS selling_price,
-        i.supplier_id,
-        s.name AS supplier_name,
+        NULL AS supplier_id,
+        NULL AS supplier_name,
         i.barcode,
         '[]' AS images, -- TODO: Implement image storage
         i.is_active,
@@ -264,14 +262,13 @@ export class BackofficeDataService {
         'system' AS created_by, -- TODO: Get actual user
         'system' AS modified_by
       FROM items i
-      LEFT JOIN suppliers s ON s.id = i.supplier_id
       WHERE i.company_id = ?
         ${versionFilter}
       ORDER BY i.name
     `, [company_id, ...versionParams]);
 
     // Get customers (if customer management is implemented)
-    const customers = await this.db.query(`
+    const customers = await this.db.queryAll(`
       SELECT 
         1 AS id,
         'Walk-in Customer' AS name,
@@ -287,34 +284,21 @@ export class BackofficeDataService {
       WHERE 1 = 0 -- Placeholder - customers not yet implemented
     `);
 
-    // Get suppliers
-    const suppliers = await this.db.query(`
-      SELECT 
-        id,
-        name,
-        contact_name,
-        email,
-        phone,
-        address,
-        payment_terms,
-        is_active,
-        created_at
-      FROM suppliers
-      WHERE company_id = ?
-        ${versionFilter}
-      ORDER BY name
-    `, [company_id, ...versionParams]);
+    // Get suppliers - placeholder until suppliers table is created
+    // TODO: Create suppliers table with columns: id, company_id, name, contact_name, email, phone, address, payment_terms, is_active, created_at
+    const suppliers: any[] = [];
 
     // Get chart of accounts
-    const chartOfAccounts = await this.db.query(`
+    // TODO: Balance should come from account_balances_current table
+    const chartOfAccounts = await this.db.queryAll(`
       SELECT 
         a.id,
         a.code,
         a.name,
         at.name AS account_type,
-        a.parent_id,
+        a.parent_account_id,
         a.is_active,
-        COALESCE(a.current_balance, 0) AS balance
+        NULL AS balance
       FROM accounts a
       JOIN account_types at ON at.id = a.account_type_id
       WHERE a.company_id = ?
@@ -363,11 +347,12 @@ export class BackofficeDataService {
       suppliers: suppliers.map(supplier => ({
         id: supplier.id,
         name: supplier.name,
-        contact_name: supplier.contact_name,
-        email: supplier.email,
-        phone: supplier.phone,
-        address: supplier.address,
-        payment_terms: supplier.payment_terms,
+        // TODO: suppliers table needs contact_name, email, phone, address, payment_terms columns
+        contact_name: null,
+        email: null,
+        phone: null,
+        address: null,
+        payment_terms: null,
         is_active: Boolean(supplier.is_active),
         created_at: supplier.created_at
       })),
@@ -376,7 +361,7 @@ export class BackofficeDataService {
         code: account.code,
         name: account.name,
         account_type: account.account_type,
-        parent_id: account.parent_id,
+        parent_id: account.parent_account_id,
         is_active: Boolean(account.is_active),
         balance: Number(account.balance)
       }))
@@ -396,8 +381,8 @@ export class BackofficeDataService {
         c.name,
         c.email,
         c.phone,
-        c.address,
-        c.tax_number,
+        COALESCE(c.address_line1, '') AS address,
+        c.tax_id,
         c.currency_code,
         c.timezone,
         COALESCE(fy.start_date, CONCAT(YEAR(NOW()), '-01-01')) AS fiscal_year_start,
@@ -410,44 +395,43 @@ export class BackofficeDataService {
     `, [company_id]);
 
     // Get outlets
-    const outlets = await this.db.query(`
+    const outlets = await this.db.queryAll(`
       SELECT 
         o.id,
         o.name,
         o.code,
-        o.address,
+        COALESCE(o.address_line1, '') AS address,
         o.phone,
-        o.manager_user_id,
-        u.name AS manager_name,
+        NULL AS manager_user_id,
+        NULL AS manager_name,
         o.is_active,
         o.created_at,
         (SELECT COUNT(*) FROM outlet_tables WHERE outlet_id = o.id AND is_active = 1) AS table_count,
-        (SELECT COUNT(DISTINCT user_id) FROM user_outlet_roles WHERE outlet_id = o.id) AS staff_count
+        (SELECT COUNT(DISTINCT user_id) FROM user_role_assignments WHERE outlet_id = o.id) AS staff_count
       FROM outlets o
-      LEFT JOIN users u ON u.id = o.manager_user_id
       WHERE o.company_id = ?
         AND o.deleted_at IS NULL
       ORDER BY o.name
     `, [company_id]);
 
     // Get users with roles
-    const users = await this.db.query(`
+    const users = await this.db.queryAll(`
       SELECT 
         u.id,
         u.name,
         u.email,
-        u.phone,
+        NULL AS phone,
         u.is_active,
         u.email_verified_at,
         u.created_at,
-        u.last_login_at,
+        NULL AS last_login_at,
         GROUP_CONCAT(DISTINCT
-          CONCAT(COALESCE(uor.outlet_id, 'NULL'), ':', mr.scope_level, ':', mr.permission_mask)
+          CONCAT(COALESCE(ura.outlet_id, 'NULL'), ':', mr.module, ':', mr.permission_mask)
           SEPARATOR '|'
         ) AS roles_data
       FROM users u
-      LEFT JOIN user_outlet_roles uor ON uor.user_id = u.id
-      LEFT JOIN module_roles mr ON mr.id = uor.role_id
+      LEFT JOIN user_role_assignments ura ON ura.user_id = u.id
+      LEFT JOIN module_roles mr ON mr.role_id = ura.role_id AND mr.company_id = u.company_id
       WHERE u.company_id = ?
         AND u.is_active = 1
       GROUP BY u.id
@@ -455,7 +439,7 @@ export class BackofficeDataService {
     `, [company_id]);
 
     // Get tax settings
-    const taxSettings = await this.db.query(`
+    const taxSettings = await this.db.queryAll(`
       SELECT 
         tr.id,
         tr.code,
@@ -473,7 +457,7 @@ export class BackofficeDataService {
     `, [company_id]);
 
     // Get feature flags
-    const featureFlags = await this.db.query(`
+    const featureFlags = await this.db.queryAll(`
       SELECT \`key\`, enabled
       FROM feature_flags
       WHERE company_id = ?
@@ -515,7 +499,7 @@ export class BackofficeDataService {
         email: companySettings.email,
         phone: companySettings.phone,
         address: companySettings.address,
-        tax_number: companySettings.tax_number,
+        tax_number: companySettings.tax_id,
         currency_code: companySettings.currency_code,
         timezone: companySettings.timezone,
         fiscal_year_start: companySettings.fiscal_year_start,
@@ -562,31 +546,28 @@ export class BackofficeDataService {
     const { company_id } = context;
 
     // Get daily sales analytics (last 30 days)
-    const dailySales = await this.db.query(`
+    const dailySales = await this.db.queryAll(`
       SELECT 
         DATE(pt.trx_at) as date,
         pt.outlet_id,
-        SUM(
-          SELECT SUM(qty * price_snapshot) 
-          FROM pos_transaction_items pti 
-          WHERE pti.transaction_id = pt.id
-        ) AS total_sales,
+        COALESCE(pti.total, 0) AS total_sales,
         COUNT(*) AS transaction_count,
-        AVG(
-          SELECT SUM(qty * price_snapshot) 
-          FROM pos_transaction_items pti 
-          WHERE pti.transaction_id = pt.id
-        ) AS avg_ticket_size
+        CASE WHEN COUNT(*) > 0 THEN COALESCE(pti.total, 0) / COUNT(*) ELSE 0 END AS avg_ticket_size
       FROM pos_transactions pt
+      LEFT JOIN (
+        SELECT pos_transaction_id, SUM(qty * price_snapshot) AS total
+        FROM pos_transaction_items
+        GROUP BY pos_transaction_id
+      ) pti ON pti.pos_transaction_id = pt.id
       WHERE pt.company_id = ?
         AND pt.status = 'COMPLETED'
         AND pt.trx_at >= CURDATE() - INTERVAL 30 DAY
-      GROUP BY DATE(pt.trx_at), pt.outlet_id
+      GROUP BY DATE(pt.trx_at), pt.outlet_id, pti.total
       ORDER BY date DESC, pt.outlet_id
     `, [company_id]);
 
     // Get top selling items for each day
-    const topSellingItems = await this.db.query(`
+    const topSellingItems = await this.db.queryAll(`
       SELECT 
         DATE(pt.trx_at) as date,
         pt.outlet_id,
@@ -595,7 +576,7 @@ export class BackofficeDataService {
         SUM(pti.qty) as quantity_sold,
         SUM(pti.qty * pti.price_snapshot) as revenue
       FROM pos_transactions pt
-      JOIN pos_transaction_items pti ON pti.transaction_id = pt.id
+      JOIN pos_transaction_items pti ON pti.pos_transaction_id = pt.id
       WHERE pt.company_id = ?
         AND pt.status = 'COMPLETED'
         AND pt.trx_at >= CURDATE() - INTERVAL 30 DAY
@@ -632,16 +613,13 @@ export class BackofficeDataService {
     });
 
     // Get monthly trends (last 12 months)
-    const monthlyTrends = await this.db.query(`
+    const monthlyTrends = await this.db.queryAll(`
       SELECT 
         DATE_FORMAT(pt.trx_at, '%Y-%m') as month,
-        SUM(
-          SELECT SUM(qty * price_snapshot) 
-          FROM pos_transaction_items pti 
-          WHERE pti.transaction_id = pt.id
-        ) AS revenue,
+        COALESCE(SUM(pti.qty * pti.price_snapshot), 0) AS revenue,
         COUNT(DISTINCT pt.id) AS customer_count
       FROM pos_transactions pt
+      LEFT JOIN pos_transaction_items pti ON pti.pos_transaction_id = pt.id
       WHERE pt.company_id = ?
         AND pt.status = 'COMPLETED'
         AND pt.trx_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
@@ -668,7 +646,7 @@ export class BackofficeDataService {
     });
 
     // Get audit logs (last 1000 entries)
-    const auditLogs = await this.db.query(`
+    const auditLogs = await this.db.queryAll(`
       SELECT 
         id,
         company_id,
@@ -677,11 +655,11 @@ export class BackofficeDataService {
         action,
         entity_type,
         entity_id,
+        result,
         success,
         ip_address,
-        user_agent,
-        created_at,
-        metadata
+        payload_json,
+        created_at
       FROM audit_logs
       WHERE company_id = ?
       ORDER BY created_at DESC
@@ -704,9 +682,9 @@ export class BackofficeDataService {
         entity_id: log.entity_id,
         success: Boolean(log.success),
         ip_address: log.ip_address,
-        user_agent: log.user_agent,
+        user_agent: null, // Not available in audit_logs table
         created_at: log.created_at,
-        metadata: log.metadata ? JSON.parse(log.metadata) : null
+        metadata: log.payload_json ? JSON.parse(log.payload_json) : null
       })),
       reconciliation_data: [] // TODO: Implement reconciliation data
     };

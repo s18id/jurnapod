@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { DatabaseConnection } from "../core/backoffice-data-service.js";
+import type { DbConn } from "@jurnapod/db";
 
 export interface BatchJob {
   id: string;
@@ -30,7 +30,7 @@ export class BatchProcessor {
   private cleanupTimer?: NodeJS.Timeout;
 
   constructor(
-    private db: DatabaseConnection,
+    private db: DbConn,
     private config: BatchProcessorConfig = {
       maxConcurrentJobs: 3,
       pollIntervalMs: 30_000, // 30 seconds
