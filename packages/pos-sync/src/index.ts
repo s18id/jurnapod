@@ -3,6 +3,5 @@
 
 export { PosSyncModule } from "./pos-sync-module.js";
 export { PosDataService } from "./core/pos-data-service.js";
-export type { DatabaseConnection } from "./core/pos-data-service.js";
 export * from "./types/pos-data.js";
 export * from "./endpoints/pos-sync-endpoints.js";

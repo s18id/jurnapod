@@ -8,27 +8,41 @@
 
 import { PosSyncModule } from "./pos-sync-module.js";
 import { syncModuleRegistry } from "@jurnapod/sync-core";
-import type { DatabaseConnection } from "./core/pos-data-service.js";
+import type { DbConn } from "@jurnapod/db";
 
 // Mock database adapter (replace with actual implementation)
-class MockDatabaseConnection implements DatabaseConnection {
-  async query(sql: string, params?: any[]): Promise<any[]> {
-    console.log('Executing query:', sql, params);
-    return [];
-  }
-
-  async querySingle(sql: string, params?: any[]): Promise<any | null> {
-    const results = await this.query(sql, params);
-    return results[0] || null;
-  }
-}
+// Uses type assertion since DbConn has private fields that prevent direct implementation
+const createMockDbConn = (): DbConn => {
+  const mock: Partial<DbConn> = {
+    pool: {} as any,
+    kysely: {} as any,
+    query: async <T = any>(_sql: string, _params?: any[]): Promise<T | null> => null,
+    queryAll: async <T = any>(_sql: string, _params?: any[]): Promise<T[]> => [],
+    queryOne: async <T = any>(sql: string, params?: any[]): Promise<T | null> => {
+      const results = await mock.queryAll!(<any>sql, params);
+      return results[0] || null;
+    },
+    querySingle: async <T = any>(sql: string, params?: any[]): Promise<T | null> => {
+      return mock.queryOne!(<any>sql, params);
+    },
+    execute: async (_sql: string, _params?: any[]) => ({ affectedRows: 0, insertId: 0 }),
+    beginTransaction: async () => {},
+    begin: async () => {},
+    commit: async () => {},
+    rollback: async () => {},
+    startTransaction: () => { return {} as any; },
+    withTransaction: async <T>(_sql: string, _params?: any[]) => ({}) as T,
+    getConnection: async () => ({} as any),
+  };
+  return mock as DbConn;
+};
 
 /**
  * Initialize POS sync module and register with API
  */
 export async function initializePosSyncAPI() {
   // Create database connection (replace with actual implementation)
-  const database = new MockDatabaseConnection();
+  const database = createMockDbConn();
 
   // Initialize sync module registry
   await syncModuleRegistry.initialize({

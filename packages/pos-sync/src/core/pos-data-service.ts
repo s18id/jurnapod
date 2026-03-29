@@ -8,14 +8,10 @@ import type {
   PosAdminData 
 } from "../types/pos-data.js";
 import type { SyncContext } from "@jurnapod/sync-core";
-
-export interface DatabaseConnection {
-  query(sql: string, params?: any[]): Promise<any[]>;
-  querySingle(sql: string, params?: any[]): Promise<any | null>;
-}
+import type { DbConn } from "@jurnapod/db";
 
 export class PosDataService {
-  constructor(private db: DatabaseConnection) {}
+  constructor(private db: DbConn) {}
 
   /**
    * Get realtime data for POS (active orders, table status)
@@ -24,7 +20,7 @@ export class PosDataService {
     const { company_id, outlet_id } = context;
 
     // Get active orders
-    const activeOrders = await this.db.query(`
+    const activeOrders = await this.db.queryAll(`
       SELECT 
         order_id,
         table_id,
@@ -48,7 +44,7 @@ export class PosDataService {
     `, [company_id, outlet_id]);
 
     // Get recent table status updates
-    const tableStatusUpdates = await this.db.query(`
+    const tableStatusUpdates = await this.db.queryAll(`
       SELECT DISTINCT
         ot.id AS table_id,
         ot.status,
@@ -91,7 +87,7 @@ export class PosDataService {
     const { company_id, outlet_id } = context;
 
     // Get all tables for the outlet
-    const tables = await this.db.query(`
+    const tables = await this.db.queryAll(`
       SELECT 
         id AS table_id,
         code,
@@ -108,7 +104,7 @@ export class PosDataService {
     `, [company_id, outlet_id]);
 
     // Get active reservations for today and tomorrow
-    const reservations = await this.db.query(`
+    const reservations = await this.db.queryAll(`
       SELECT 
         id AS reservation_id,
         table_id,
@@ -177,7 +173,7 @@ export class PosDataService {
     const { company_id, outlet_id } = context;
 
     // Get items
-    const items = await this.db.query(`
+    const items = await this.db.queryAll(`
       SELECT 
         id,
         sku,
@@ -193,7 +189,7 @@ export class PosDataService {
     `, [company_id]);
 
     // Get item groups
-    const itemGroups = await this.db.query(`
+    const itemGroups = await this.db.queryAll(`
       SELECT 
         id,
         parent_id,
@@ -208,7 +204,7 @@ export class PosDataService {
     `, [company_id]);
 
     // Get outlet-specific prices with company defaults
-    const prices = await this.db.query(`
+    const prices = await this.db.queryAll(`
       SELECT DISTINCT
         COALESCE(op.id, dp.id) AS id,
         i.id AS item_id,
@@ -226,7 +222,7 @@ export class PosDataService {
     `, [outlet_id, outlet_id, company_id, company_id]);
 
     // Get tax rates
-    const taxRates = await this.db.query(`
+    const taxRates = await this.db.queryAll(`
       SELECT 
         id,
         code,
@@ -241,14 +237,14 @@ export class PosDataService {
     `, [company_id]);
 
     // Get default tax rate IDs
-    const defaultTaxRates = await this.db.query(`
+    const defaultTaxRates = await this.db.queryAll(`
       SELECT tax_rate_id
       FROM company_tax_defaults
       WHERE company_id = ?
     `, [company_id]);
 
     // Get payment methods
-    const paymentMethods = await this.db.query(`
+    const paymentMethods = await this.db.queryAll(`
       SELECT 
         pm.code,
         COALESCE(opm.label, pm.code) AS label,
@@ -344,7 +340,7 @@ export class PosDataService {
     }
 
     // Get user permissions for this outlet
-    const userPermissions = await this.db.query(`
+    const userPermissions = await this.db.queryAll(`
       SELECT DISTINCT
         u.id AS user_id,
         uor.outlet_id,
@@ -361,7 +357,7 @@ export class PosDataService {
     `, [outlet_id, company_id]);
 
     // Get POS-specific feature flags
-    const featureFlags = await this.db.query(`
+    const featureFlags = await this.db.queryAll(`
       SELECT 
         \`key\`,
         enabled

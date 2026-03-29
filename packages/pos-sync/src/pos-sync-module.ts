@@ -10,9 +10,9 @@ import type {
   SyncResponse,
 } from "@jurnapod/sync-core";
 import { syncAuditor } from "@jurnapod/sync-core";
-import { PosDataService, type DatabaseConnection } from "./core/pos-data-service.js";
+import { PosDataService } from "./core/pos-data-service.js";
 import { createPosSyncEndpoints } from "./endpoints/pos-sync-endpoints.js";
-import { createDbPool, DbConn } from "@jurnapod/db";
+import { DbConn } from "@jurnapod/db";
 import { handlePullSync, type PullSyncParams, type PullSyncResult } from "./pull/index.js";
 import { handlePushSync, type PushSyncParams, type PushSyncResult } from "./push/index.js";
 
