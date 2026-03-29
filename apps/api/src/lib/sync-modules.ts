@@ -5,6 +5,7 @@ import { syncModuleRegistry } from "@jurnapod/sync-core";
 import { PosSyncModule } from "@jurnapod/pos-sync";
 import { BackofficeSyncModule } from "@jurnapod/backoffice-sync";
 import { getDbPool } from "./db";
+import { DbConn } from "@jurnapod/db";
 
 // Store reference to backoffice module for batch processor access
 let backofficeModuleInstance: BackofficeSyncModule | null = null;
@@ -17,27 +18,13 @@ export async function initializeSyncModules(): Promise<void> {
     // Get database pool
     const dbPool = getDbPool();
 
-    // Create database adapter for sync modules
-    const databaseAdapter = {
-      async query(sql: string, params?: any[]): Promise<any[]> {
-        const connection = await dbPool.getConnection();
-        try {
-          const [rows] = await connection.execute(sql, params);
-          return Array.isArray(rows) ? rows : [];
-        } finally {
-          connection.release();
-        }
-      },
-
-      async querySingle(sql: string, params?: any[]): Promise<any | null> {
-        const results = await this.query(sql, params);
-        return results[0] || null;
-      }
-    };
+    // Create DbConn for sync modules
+    // Cast to Pool type expected by DbConn (mysql2/promise.Pool → mysql2.Pool)
+    const dbConn = new DbConn(dbPool as any);
 
     // Initialize the sync module registry
     await syncModuleRegistry.initialize({
-      database: databaseAdapter,
+      database: dbConn,
       logger: console,
       config: {
         enableAuditLogging: true,
