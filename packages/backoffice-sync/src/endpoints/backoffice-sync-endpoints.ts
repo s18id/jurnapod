@@ -74,7 +74,6 @@ export function createBackofficeSyncEndpoints(
       config: {
         path: "/realtime",
         method: "GET",
-        tier: "REALTIME",
         auth_required: true,
         rate_limit: {
           requests: 30,  // Lower rate for dashboard updates
@@ -83,7 +82,6 @@ export function createBackofficeSyncEndpoints(
       },
       handler: async (request, context) => {
         const syncRequest: SyncRequest = {
-          tier: "REALTIME",
           operation: "PULL",
           limit: 100,
           context: {
@@ -102,7 +100,6 @@ export function createBackofficeSyncEndpoints(
       config: {
         path: "/operational",
         method: "GET",
-        tier: "OPERATIONAL",
         auth_required: true,
         rate_limit: {
           requests: 60,
@@ -111,7 +108,6 @@ export function createBackofficeSyncEndpoints(
       },
       handler: async (request, context) => {
         const syncRequest: SyncRequest = {
-          tier: "OPERATIONAL",
           operation: "PULL",
           limit: 200,
           context: {
@@ -130,7 +126,6 @@ export function createBackofficeSyncEndpoints(
       config: {
         path: "/master",
         method: "GET",
-        tier: "MASTER",
         auth_required: true,
         rate_limit: {
           requests: 30,
@@ -139,7 +134,6 @@ export function createBackofficeSyncEndpoints(
       },
       handler: async (request, context) => {
         const syncRequest: SyncRequest = {
-          tier: "MASTER",
           operation: "PULL",
           limit: 2000,
           context: {
@@ -158,7 +152,6 @@ export function createBackofficeSyncEndpoints(
       config: {
         path: "/admin",
         method: "GET",
-        tier: "ADMIN",
         auth_required: true,
         rate_limit: {
           requests: 20,
@@ -167,7 +160,6 @@ export function createBackofficeSyncEndpoints(
       },
       handler: async (request, context) => {
         const syncRequest: SyncRequest = {
-          tier: "ADMIN",
           operation: "PULL",
           limit: 500,
           context: {
@@ -186,7 +178,6 @@ export function createBackofficeSyncEndpoints(
       config: {
         path: "/analytics",
         method: "GET",
-        tier: "ANALYTICS",
         auth_required: true,
         rate_limit: {
           requests: 10,
@@ -195,7 +186,6 @@ export function createBackofficeSyncEndpoints(
       },
       handler: async (request, context) => {
         const syncRequest: SyncRequest = {
-          tier: "ANALYTICS",
           operation: "PULL",
           limit: 1000,
           context: {

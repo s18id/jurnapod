@@ -1,7 +1,12 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { SyncContext, SyncTier, SyncOperationType } from "../types/index.js";
+import type { SyncContext, SyncOperationType } from "../types/index.js";
+
+// Sync tier is used for audit tracking (not routing) - local definition to keep audit self-contained
+// Tier-based routing has been removed, but audit legitimately tracks which tier an operation was for
+const SyncTierSchema = ["REALTIME", "OPERATIONAL", "MASTER", "ADMIN", "ANALYTICS"] as const;
+type SyncTier = typeof SyncTierSchema[number];
 
 export interface SyncAuditEvent {
   id?: string;

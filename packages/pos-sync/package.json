@@ -18,6 +18,7 @@
     "lint": "echo 'lint not configured yet for @jurnapod/pos-sync'"
   },
   "dependencies": {
+    "@jurnapod/db": "0.1.0",
     "@jurnapod/shared": "0.1.0",
     "@jurnapod/sync-core": "0.1.0",
     "zod": "^3.24.1"

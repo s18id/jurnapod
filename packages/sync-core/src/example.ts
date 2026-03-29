@@ -31,12 +31,7 @@ export async function demonstrateModularSync() {
   //   module_id: 'pos',
   //   client_type: 'POS',
   //   enabled: true,
-  //   frequencies: {
-  //     realtime: 'websocket',
-  //     operational: 30_000,    // 30 seconds
-  //     master: 300_000,        // 5 minutes
-  //     admin: 'startup'        // On app start only
-  //   }
+  //   poll_interval_ms: 30_000  // 30 seconds operational polling
   // });
 
   // 5. Health check all modules
@@ -49,73 +44,4 @@ export async function demonstrateModularSync() {
 
   // 7. Cleanup when done
   await syncModuleRegistry.cleanup();
-}
-
-// Example sync request handler that would be used in API routes
-export async function handleSyncRequest(
-  moduleId: string,
-  tierParam: string,
-  requestData: any
-) {
-  const module = syncModuleRegistry.getModule(moduleId);
-  if (!module) {
-    throw new Error(`Module '${moduleId}' not found`);
-  }
-
-  // Validate tier parameter
-  const validTiers = ['REALTIME', 'OPERATIONAL', 'MASTER', 'ADMIN', 'ANALYTICS'];
-  if (!validTiers.includes(tierParam)) {
-    throw new Error(`Invalid tier: ${tierParam}`);
-  }
-
-  // Create sync request
-  const syncRequest = {
-    tier: tierParam as any,
-    operation: 'PULL' as const,
-    since_version: requestData.since_version,
-    limit: requestData.limit || 100,
-    context: {
-      company_id: requestData.company_id,
-      outlet_id: requestData.outlet_id,
-      user_id: requestData.user_id,
-      client_type: module.clientType,
-      request_id: crypto.randomUUID(),
-      timestamp: new Date().toISOString()
-    }
-  };
-
-  // Handle the sync request
-  return await module.handleSync(syncRequest);
-}
-
-// Example of tier-based endpoint registration
-export function registerModularSyncEndpoints(app: any) {
-  // Get all registered modules
-  const modules = syncModuleRegistry.listModuleIds();
-  
-  for (const moduleId of modules) {
-    const module = syncModuleRegistry.getModule(moduleId);
-    if (!module) continue;
-
-    const supportedTiers = module.getSupportedTiers();
-
-    // Register tier-specific endpoints
-    for (const tier of supportedTiers) {
-      const path = `/api/sync/${moduleId}/${tier.toLowerCase()}`;
-      
-      app.get(path, async (req: any, res: any) => {
-        try {
-          const result = await handleSyncRequest(moduleId, tier, req.query);
-          res.json(result);
-        } catch (error) {
-          res.status(400).json({ 
-            success: false, 
-            error: error instanceof Error ? error.message : 'Unknown error' 
-          });
-        }
-      });
-      
-      console.log(`Registered sync endpoint: ${path}`);
-    }
-  }
 }

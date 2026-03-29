@@ -7,7 +7,7 @@ import type {
   SyncModuleInitContext,
   SyncModuleFactory
 } from "../types/module.js";
-import type { SyncTier, SyncClientType } from "../types/index.js";
+import type { SyncClientType } from "../types/index.js";
 
 export class SyncModuleRegistry {
   private modules = new Map<string, SyncModule>();
@@ -78,15 +78,6 @@ export class SyncModuleRegistry {
   getModulesByClientType(clientType: SyncClientType): SyncModule[] {
     return Array.from(this.modules.values()).filter(
       module => module.clientType === clientType
-    );
-  }
-
-  /**
-   * Get modules supporting a specific tier
-   */
-  getModulesByTier(tier: SyncTier): SyncModule[] {
-    return Array.from(this.modules.values()).filter(
-      module => module.getSupportedTiers().includes(tier)
     );
   }
 

@@ -1,6 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+// Export data access functions (shared between pos-sync and backoffice-sync)
+export * from "./data/index.js";
+
 // Export types
 export type * from "./types/index.js";
 export type * from "./types/module.js";
@@ -11,8 +14,6 @@ export { SyncAuthenticator, syncAuthenticator } from "./auth/sync-auth.js";
 export type { AuthUser, AuthResult } from "./auth/sync-auth.js";
 export { SyncAuditor, syncAuditor } from "./audit/sync-audit.js";
 export type { SyncAuditEvent } from "./audit/sync-audit.js";
-export { SyncVersionManager, syncVersionManager, getSyncVersionManager, setSyncVersionManagerPool } from "./versioning/version-manager.js";
-export type { VersionInfo } from "./versioning/version-manager.js";
 export { RetryTransport, defaultRetryTransport } from "./transport/retry-transport.js";
 export type { 
   RetryConfig, 
@@ -68,24 +69,3 @@ export type {
   RetentionResult,
 } from "./jobs/data-retention.job.js";
 
-// Export rate limiting middleware
-export {
-  createRateLimitMiddleware,
-  withRateLimit,
-  createExpressRateLimitMiddleware,
-  getRateLimitStatus,
-  resetRateLimit,
-  getRateLimitStoreSize,
-  clearRateLimitStore,
-  defaultAuthContextExtractor,
-  rateLimitStore,
-  RATE_LIMITS,
-  RATE_LIMIT_HEADERS,
-} from "./middleware/rate-limit.js";
-export type {
-  RateLimitConfig,
-  RateLimitInfo,
-  RateLimitTier,
-  RateLimitAuthContext,
-  AuthContextExtractor,
-} from "./middleware/rate-limit.js";

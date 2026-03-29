@@ -3,15 +3,6 @@
 
 import { z } from "zod";
 
-// Sync tier definitions
-export const SyncTierSchema = z.enum([
-  "REALTIME",     // WebSocket/SSE - immediate updates
-  "OPERATIONAL",  // High-frequency polling (30s-2min)
-  "MASTER",       // Medium-frequency polling (5-10min)
-  "ADMIN",        // Low-frequency polling (30min-daily)
-  "ANALYTICS"     // Batch processing (hourly-daily)
-]);
-
 // Client types
 export const SyncClientTypeSchema = z.enum([
   "POS",
@@ -47,7 +38,6 @@ export const SyncContextSchema = z.object({
 
 // Base sync request
 export const SyncRequestSchema = z.object({
-  tier: SyncTierSchema,
   operation: SyncOperationTypeSchema,
   since_version: z.number().int().nonnegative().optional(),
   limit: z.number().int().positive().max(1000).default(100),
@@ -68,7 +58,6 @@ export const SyncResponseSchema = z.object({
 export const SyncEndpointConfigSchema = z.object({
   path: z.string().min(1),
   method: z.enum(["GET", "POST", "PUT", "DELETE"]),
-  tier: SyncTierSchema,
   auth_required: z.boolean().default(true),
   rate_limit: z.object({
     requests: z.number().int().positive(),
@@ -81,17 +70,13 @@ export const SyncModuleConfigSchema = z.object({
   module_id: z.string().min(1),
   client_type: SyncClientTypeSchema,
   enabled: z.boolean().default(true),
-  frequencies: z.object({
-    realtime: z.union([z.literal("websocket"), z.literal("sse")]).optional(),
-    operational: z.number().int().positive().optional(), // milliseconds
-    master: z.number().int().positive().optional(),
-    admin: z.union([z.number().int().positive(), z.literal("startup")]).optional(),
-    analytics: z.union([z.number().int().positive(), z.literal("batch")]).optional()
-  })
+  poll_interval_ms: z.number().int().positive().optional() // operational polling interval in milliseconds
 });
 
+// Service interface types
+export type * from "./services.js";
+
 // Type exports
-export type SyncTier = z.infer<typeof SyncTierSchema>;
 export type SyncClientType = z.infer<typeof SyncClientTypeSchema>;
 export type SyncOperationType = z.infer<typeof SyncOperationTypeSchema>;
 export type SyncStatus = z.infer<typeof SyncStatusSchema>;

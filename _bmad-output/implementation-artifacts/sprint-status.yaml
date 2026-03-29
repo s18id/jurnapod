@@ -232,3 +232,15 @@ development_status:
   16-2-batch-processing-backfills: done
   16-3-epic-16-documentation: done
   epic-16-retrospective: done
+
+  # Epic 17: Resurrect Sync-Core (Sync Module Architecture)
+  # Focus: Make PosSyncModule and BackofficeSyncModule the canonical sync engines
+  epic-17: in-progress
+  17-1-extract-date-helpers-to-shared: backlog
+  17-2-define-service-interfaces-sync-core: backlog
+  17-3-cleanup-sync-core-dead-code: backlog
+  17-4-move-pull-logic-to-pos-sync: backlog
+  17-5-move-push-logic-to-pos-sync: backlog
+  17-6-refactor-api-routes-thin-adapters: backlog
+  17-7-delete-lib-sync-and-tests: backlog
+  17-8-apply-backoffice-sync-pattern: backlog

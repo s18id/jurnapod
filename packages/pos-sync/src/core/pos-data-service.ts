@@ -104,9 +104,8 @@ export class PosDataService {
       WHERE company_id = ? 
         AND outlet_id = ?
         AND is_active = 1
-        ${sinceVersion ? 'AND updated_at >= (SELECT last_updated_at FROM sync_tier_versions WHERE company_id = ? AND tier = "OPERATIONAL")' : ''}
       ORDER BY zone, name
-    `, sinceVersion ? [company_id, outlet_id, company_id] : [company_id, outlet_id]);
+    `, [company_id, outlet_id]);
 
     // Get active reservations for today and tomorrow
     const reservations = await this.db.query(`
@@ -139,9 +138,8 @@ export class PosDataService {
             AND reservation_at < DATE_ADD(CURDATE(), INTERVAL 2 DAY)
           )
         )
-        ${sinceVersion ? 'AND updated_at >= (SELECT last_updated_at FROM sync_tier_versions WHERE company_id = ? AND tier = "OPERATIONAL")' : ''}
       ORDER BY reservation_start_ts IS NULL ASC, reservation_start_ts ASC, reservation_at ASC
-    `, sinceVersion ? [company_id, outlet_id, company_id] : [company_id, outlet_id]);
+    `, [company_id, outlet_id]);
 
     return {
       tables: tables.map(table => ({
@@ -178,19 +176,6 @@ export class PosDataService {
   async getMasterData(context: SyncContext, sinceVersion?: number): Promise<PosMasterData> {
     const { company_id, outlet_id } = context;
 
-    // Get current data version
-    const versionResult = await this.db.querySingle(`
-      SELECT current_version FROM sync_tier_versions 
-      WHERE company_id = ? AND tier = 'MASTER'
-    `, [company_id]);
-    const dataVersion = versionResult?.current_version || 0;
-
-    // Build WHERE clause for incremental sync
-    const versionFilter = sinceVersion && sinceVersion < dataVersion
-      ? 'AND updated_at >= (SELECT last_updated_at FROM sync_tier_versions WHERE company_id = ? AND tier = "MASTER")'
-      : '';
-    const versionParams = sinceVersion && sinceVersion < dataVersion ? [company_id] : [];
-
     // Get items
     const items = await this.db.query(`
       SELECT 
@@ -204,9 +189,8 @@ export class PosDataService {
       FROM items
       WHERE company_id = ?
         AND is_active = 1
-        ${versionFilter}
       ORDER BY name
-    `, [company_id, ...versionParams]);
+    `, [company_id]);
 
     // Get item groups
     const itemGroups = await this.db.query(`
@@ -220,9 +204,8 @@ export class PosDataService {
       FROM item_groups
       WHERE company_id = ?
         AND is_active = 1
-        ${versionFilter}
       ORDER BY name
-    `, [company_id, ...versionParams]);
+    `, [company_id]);
 
     // Get outlet-specific prices with company defaults
     const prices = await this.db.query(`
@@ -239,9 +222,8 @@ export class PosDataService {
       WHERE i.company_id = ?
         AND i.is_active = 1
         AND (op.is_active = 1 OR (op.id IS NULL AND dp.is_active = 1))
-        ${versionFilter}
       ORDER BY i.name
-    `, [outlet_id, outlet_id, company_id, company_id, ...versionParams]);
+    `, [outlet_id, outlet_id, company_id, company_id]);
 
     // Get tax rates
     const taxRates = await this.db.query(`
@@ -255,9 +237,8 @@ export class PosDataService {
       FROM tax_rates
       WHERE company_id = ?
         AND is_active = 1
-        ${versionFilter}
       ORDER BY code
-    `, [company_id, ...versionParams]);
+    `, [company_id]);
 
     // Get default tax rate IDs
     const defaultTaxRates = await this.db.query(`
@@ -282,7 +263,7 @@ export class PosDataService {
     `, [company_id, outlet_id]);
 
     return {
-      data_version: dataVersion,
+      data_version: 0, // Version tracking moved to sync-core
       items: items.map(item => ({
         id: item.id,
         sku: item.sku,

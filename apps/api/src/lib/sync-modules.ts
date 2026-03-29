@@ -51,12 +51,7 @@ export async function initializeSyncModules(): Promise<void> {
     module_id: "pos",
     client_type: "POS",
     enabled: true,
-    frequencies: {
-      realtime: "websocket",
-      operational: 30_000,  // 30 seconds
-      master: 300_000,      // 5 minutes
-      admin: "startup"      // On app start
-    }
+    poll_interval_ms: 30_000  // 30 seconds - operational polling interval
   });
 
   // Create and register Backoffice sync module
@@ -64,13 +59,7 @@ export async function initializeSyncModules(): Promise<void> {
     module_id: "backoffice",
     client_type: "BACKOFFICE",
     enabled: true,
-    frequencies: {
-      realtime: "websocket",
-      operational: 120_000,  // 2 minutes
-      master: 600_000,       // 10 minutes
-      admin: 1_800_000,      // 30 minutes
-      analytics: "batch"     // Hourly/daily
-    }
+    poll_interval_ms: 120_000  // 2 minutes - operational polling interval
   });
   
   // Store reference for batch processor access
@@ -85,8 +74,8 @@ export async function initializeSyncModules(): Promise<void> {
   await backofficeModule.startExportScheduler();
 
   console.log("✅ Sync modules initialized successfully");
-  console.log(`   - POS sync module: ${posModule.getSupportedTiers().join(', ')} tiers`);
-  console.log(`   - Backoffice sync module: ${backofficeModule.getSupportedTiers().join(', ')} tiers`);
+  console.log(`   - POS sync module: registered`);
+  console.log(`   - Backoffice sync module: registered`);
   console.log(`   - Batch processor: RUNNING`);
   console.log(`   - Export scheduler: RUNNING`);
 

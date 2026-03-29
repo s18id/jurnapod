@@ -44,13 +44,7 @@ export async function initializePosSyncAPI() {
   const posModule = new PosSyncModule({
     module_id: "pos",
     client_type: "POS",
-    enabled: true,
-    frequencies: {
-      realtime: "websocket",
-      operational: 30_000,  // 30 seconds
-      master: 300_000,      // 5 minutes
-      admin: "startup"      // On app start
-    }
+    enabled: true
   });
 
   // Register the module
@@ -62,7 +56,7 @@ export async function initializePosSyncAPI() {
   console.log(`Registered POS sync module with ${endpoints.length} endpoints:`);
   endpoints.forEach(endpoint => {
     const fullPath = `/api/sync/${posModule.moduleId}${endpoint.config.path}`;
-    console.log(`  ${endpoint.config.method} ${fullPath} (tier: ${endpoint.config.tier})`);
+    console.log(`  ${endpoint.config.method} ${fullPath}`);
   });
 
   return {

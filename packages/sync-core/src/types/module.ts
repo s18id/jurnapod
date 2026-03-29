@@ -6,8 +6,7 @@ import type {
   SyncResponse, 
   SyncEndpointConfig, 
   SyncContext,
-  SyncModuleConfig,
-  SyncTier
+  SyncModuleConfig
 } from "./index.js";
 
 // Sync handler function type
@@ -42,16 +41,6 @@ export interface SyncModule {
    * Initialize the module with context
    */
   initialize(context: SyncModuleInitContext): Promise<void>;
-
-  /**
-   * Handle sync request for a specific tier
-   */
-  handleSync(request: SyncRequest): Promise<SyncResponse>;
-
-  /**
-   * Get supported tiers for this module
-   */
-  getSupportedTiers(): ReadonlyArray<SyncTier>;
 
   /**
    * Health check for the module

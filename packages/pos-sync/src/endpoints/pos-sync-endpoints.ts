@@ -64,7 +64,6 @@ export function createPosSyncEndpoints(
       config: {
         path: "/realtime",
         method: "GET",
-        tier: "REALTIME",
         auth_required: true,
         rate_limit: {
           requests: 120,  // 120 requests per minute for realtime
@@ -79,7 +78,6 @@ export function createPosSyncEndpoints(
         });
 
         const syncRequest: SyncRequest = {
-          tier: "REALTIME",
           operation: "PULL",
           limit: 50, // Reasonable limit for realtime data
           context: {
@@ -99,7 +97,6 @@ export function createPosSyncEndpoints(
       config: {
         path: "/operational",
         method: "GET", 
-        tier: "OPERATIONAL",
         auth_required: true,
         rate_limit: {
           requests: 60, // 60 requests per minute for operational
@@ -117,7 +114,6 @@ export function createPosSyncEndpoints(
         });
 
         const syncRequest: SyncRequest = {
-          tier: "OPERATIONAL",
           operation: "PULL",
           limit: 100, // Reasonable limit for operational data
           since_version: params.since_version,
@@ -138,7 +134,6 @@ export function createPosSyncEndpoints(
       config: {
         path: "/master",
         method: "GET",
-        tier: "MASTER", 
         auth_required: true,
         rate_limit: {
           requests: 30, // 30 requests per minute for master data
@@ -155,7 +150,6 @@ export function createPosSyncEndpoints(
         });
 
         const syncRequest: SyncRequest = {
-          tier: "MASTER",
           operation: "PULL",
           limit: 1000, // Higher limit for master data
           since_version: params.since_version,
@@ -176,7 +170,6 @@ export function createPosSyncEndpoints(
       config: {
         path: "/admin",
         method: "GET",
-        tier: "ADMIN",
         auth_required: true,
         rate_limit: {
           requests: 10, // 10 requests per minute for admin data
@@ -190,7 +183,6 @@ export function createPosSyncEndpoints(
         });
 
         const syncRequest: SyncRequest = {
-          tier: "ADMIN",
           operation: "PULL",
           limit: 50, // Lower limit for admin data
           context: {
