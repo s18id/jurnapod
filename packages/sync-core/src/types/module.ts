@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { 
-  SyncRequest, 
-  SyncResponse, 
-  SyncEndpointConfig, 
+import type { DbConn } from "@jurnapod/db";
+import type {
+  SyncRequest,
+  SyncResponse,
+  SyncEndpointConfig,
   SyncEndpointType,
   SyncContext,
   SyncModuleConfig
@@ -58,7 +59,7 @@ export interface SyncModule {
 
 // Module initialization context
 export interface SyncModuleInitContext {
-  database: any; // Database connection pool
+  database: DbConn;
   logger: any;   // Logger instance
   config: Record<string, any>; // Environment config
   cache?: any;   // Optional cache instance

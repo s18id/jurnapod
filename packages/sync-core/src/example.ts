@@ -10,8 +10,13 @@ import { syncModuleRegistry, type SyncModuleInitContext } from "./index.js";
 // Example of how to register and use sync modules
 export async function demonstrateModularSync() {
   // 1. Create initialization context
+  // NOTE: In production, pass a real DbConn instance:
+  //   import { createDbPool, DbConn } from '@jurnapod/db';
+  //   const pool = createDbPool({ host: '...', port: 3306, user: '...', password: '...', database: '...' });
+  //   const dbConn = new DbConn(pool);
+  // For this example, we use a placeholder that satisfies the type
   const initContext: SyncModuleInitContext = {
-    database: {}, // Database connection pool
+    database: null as any, // Replace with real DbConn in production
     logger: console, // Logger instance
     config: { // Environment configuration
       enableAuditLogging: true,
