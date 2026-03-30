@@ -48,13 +48,14 @@
     "test:oauth": "TEST_OAUTH=1 node --test --import tsx 'src/**/*.test.ts' '!src/**/*.*.integration.test.ts'"
   },
   "dependencies": {
-    "jose": "^5.9.6",
+    "@jurnapod/db": "workspace:*",
     "bcryptjs": "^3.0.2",
     "@node-rs/argon2": "^2.0.0",
+    "jose": "^5.9.6",
+    "kysely": "^0.28.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@jurnapod/db": "workspace:*",
     "dotenv": "^16.4.7",
     "tsx": "^4.19.0",
     "typescript": "^5.7.3"

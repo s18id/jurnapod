@@ -32,7 +32,7 @@ import { createUserBasic, UserEmailExistsError } from "./users";
 import { createItem } from "./items/index.js";
 import { DatabaseConflictError } from "./master-data-errors.js";
 import { createVariantAttribute } from "./item-variants";
-import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } from "./auth.js";
+import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } from "@jurnapod/auth";
 
 // ============================================================================
 // Types

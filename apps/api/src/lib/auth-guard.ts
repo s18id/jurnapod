@@ -3,7 +3,8 @@
 
 import { jwtVerify } from "jose";
 import { z } from "zod";
-import { ROLE_CODES, checkUserAccess, type RoleCode, type ModulePermission } from "./auth";
+import { ROLE_CODES, type RoleCode, type ModulePermission } from "@jurnapod/auth";
+import { checkUserAccess } from "./auth";
 import { getAppEnv } from "./env";
 import type { TelemetryContext } from "../middleware/telemetry.js";
 

@@ -17,7 +17,7 @@ import {
   resetFixtureRegistry,
 } from "../test-fixtures";
 import { closeDbPool } from "../db";
-import { MODULE_PERMISSION_BITS, buildPermissionMask } from "../auth";
+import { MODULE_PERMISSION_BITS, buildPermissionMask } from "@jurnapod/auth";
 
 describe("canManageCompanyDefaults", { concurrency: false }, () => {
   before(async () => {

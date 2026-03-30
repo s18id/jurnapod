@@ -12,7 +12,8 @@ import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import { closeDbPool, getDbPool } from "../lib/db";
-import { checkUserAccess, MODULE_PERMISSION_BITS } from "../lib/auth";
+import { MODULE_PERMISSION_BITS } from "@jurnapod/auth";
+import { checkUserAccess } from "../lib/auth";
 import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 
 loadEnvIfPresent();

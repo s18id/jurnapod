@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { buildPermissionMask, checkUserAccess } from "./auth";
+import { buildPermissionMask } from "@jurnapod/auth";
+import { checkUserAccess } from "./auth";
 import { closeDbPool, getDbPool } from "./db";
 import { createTestCompanyMinimal, createTestOutletMinimal, cleanupTestFixtures } from "./test-fixtures";
 import type { RowDataPacket } from "mysql2";

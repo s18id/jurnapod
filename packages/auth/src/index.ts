@@ -28,6 +28,9 @@ export {
   MODULE_PERMISSION_BITS,
 } from './types.js';
 
+// Re-export rbac utilities
+export { buildPermissionMask, hasPermissionBit } from './rbac/permissions.js';
+
 // Re-export all errors
 export {
   AuthError,
