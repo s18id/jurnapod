@@ -1173,6 +1173,172 @@ export async function processSyncPushTransaction(
   }
 }
 
+// ============================================================================
+// Phase 2: Post-Persistence Business Logic
+// ============================================================================
+
+/**
+ * Parameters for Phase 2 processing (COGS + stock + table release + reservation update + posting hook)
+ */
+export type ProcessTransactionPhase2Params = {
+  dbConnection: PoolConnection;
+  tx: SyncPushTransactionPayload;
+  posTransactionId: number;
+  authUserId: number;
+  correlationId: string;
+  taxContext: SyncPushTaxContext;
+};
+
+/**
+ * Result from Phase 2 processing.
+ * Phase 2 processes COGS posting and stock deduction after successful persistence.
+ */
+export type ProcessTransactionPhase2Result =
+  | { success: true }
+  | { success: false; result: "PERSISTED_POSTING_PENDING"; message: string };
+
+/**
+ * Process Phase 2 business logic after successful persistence.
+ * 
+ * This function handles:
+ * - Stock deduction for COMPLETED transactions
+ * - COGS posting
+ * - Table release for DINE_IN
+ * - Reservation update
+ * - Posting hook
+ * 
+ * If Phase 2 fails (e.g., COGS/stock), it returns { success: false, result: "PERSISTED_POSTING_PENDING" }
+ * instead of throwing, to allow the API layer to return an appropriate result to the client.
+ * Phase 1 data is already persisted and should not be rolled back.
+ * 
+ * @param params - Phase 2 parameters
+ */
+export async function processSyncPushTransactionPhase2(
+  params: ProcessTransactionPhase2Params
+): Promise<ProcessTransactionPhase2Result> {
+  const {
+    dbConnection,
+    tx,
+    posTransactionId,
+    authUserId,
+    correlationId,
+    taxContext
+  } = params;
+
+  const acceptedContext: AcceptedSyncPushContext = {
+    correlationId,
+    companyId: tx.company_id,
+    outletId: tx.outlet_id,
+    userId: authUserId,
+    clientTxId: tx.client_tx_id,
+    status: tx.status,
+    trxAt: tx.trx_at,
+    posTransactionId
+  };
+
+  try {
+    // Deduct stock for COMPLETED transactions
+    let stockDeductResults: StockDeductResult[] | null = null;
+    if (tx.status === "COMPLETED") {
+      stockDeductResults = await resolveAndDeductStockForTransaction(
+        dbConnection,
+        tx,
+        posTransactionId
+      );
+    }
+
+    // Post COGS journal entries
+    const postingMode = process.env.SYNC_PUSH_POSTING_MODE ?? "disabled";
+    if (stockDeductResults && stockDeductResults.length > 0) {
+      await postCogsFromStockResults(
+        dbConnection,
+        tx,
+        posTransactionId,
+        stockDeductResults,
+        postingMode
+      );
+    }
+
+    // Release table for DINE_IN
+    if ((tx.service_type ?? "TAKEAWAY") === "DINE_IN" && tx.table_id) {
+      await dbConnection.execute(
+        `UPDATE outlet_tables
+         SET status = 'AVAILABLE', status_id = 1, updated_at = CURRENT_TIMESTAMP
+         WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+        [tx.company_id, tx.outlet_id, tx.table_id]
+      );
+    }
+
+    // Update reservation if linked
+    if (tx.reservation_id) {
+      await dbConnection.execute(
+        `UPDATE reservations
+         SET linked_order_id = ?,
+             status = CASE
+               WHEN status IN ('CANCELLED', 'NO_SHOW', 'COMPLETED') THEN status
+               ELSE 'COMPLETED'
+             END,
+             status_id = CASE
+               WHEN status IN ('CANCELLED', 'NO_SHOW', 'COMPLETED') THEN status_id
+               ELSE 6
+             END,
+             seated_at = COALESCE(seated_at, CURRENT_TIMESTAMP),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE company_id = ? AND outlet_id = ? AND id = ?`,
+        [tx.client_tx_id, tx.company_id, tx.outlet_id, tx.reservation_id]
+      );
+    }
+
+    // Run posting hook
+    let postingResult: SyncPushPostingHookResult;
+    try {
+      postingResult = await runSyncPushPostingHook(
+        { execute: dbConnection.execute.bind(dbConnection) },
+        acceptedContext
+      );
+    } catch (postingHookError) {
+      if (
+        postingHookError instanceof SyncPushPostingHookError
+        && postingHookError.mode === "shadow"
+      ) {
+        await recordSyncPushPostingHookFailure(dbConnection, acceptedContext, postingHookError);
+        postingResult = {
+          mode: postingHookError.mode,
+          journalBatchId: null,
+          balanceOk: false,
+          reason: postingHookError.message
+        };
+      } else {
+        throw postingHookError;
+      }
+    }
+
+    await runAcceptedSyncPushHook(
+      dbConnection,
+      acceptedContext,
+      postingResult
+    );
+
+    return { success: true };
+  } catch (error) {
+    // Phase 2 failed but Phase 1 data is already persisted.
+    // Return PERSISTED_POSTING_PENDING so the client knows Phase 1 succeeded but Phase 2 needs retry.
+    // Do NOT rollback Phase 1 - the data is already committed.
+    console.error("Phase 2 processing failed", {
+      correlation_id: correlationId,
+      client_tx_id: tx.client_tx_id,
+      pos_transaction_id: posTransactionId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    return {
+      success: false,
+      result: "PERSISTED_POSTING_PENDING",
+      message: error instanceof Error ? error.message : "Phase 2 failed"
+    };
+  }
+}
+
 // Re-export types
 export type {
   ProcessTransactionParams,

@@ -23,6 +23,8 @@ export type SyncPushResultItem = {
   client_tx_id: string;
   result: SyncPushResultCode;
   message?: string;
+  /** POS transaction ID - available after successful persistence (Phase 1) */
+  posTransactionId?: number;
 };
 
 export type OrderUpdateResult = {

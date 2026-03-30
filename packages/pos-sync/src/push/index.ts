@@ -384,7 +384,7 @@ async function processTransaction(
       pos_transaction_id: posTransactionId,
     });
 
-    return { client_tx_id: tx.client_tx_id, result: "OK" };
+    return { client_tx_id: tx.client_tx_id, result: "OK", posTransactionId };
   } catch (error) {
     console.error("pos_sync_push_transaction_failed", {
       correlation_id: correlationId,
@@ -912,6 +912,147 @@ async function processVariantStockAdjustments(
   }
 
   return results;
+}
+
+// ============================================================================
+// Batch Processing
+// ============================================================================
+
+/**
+ * Build transaction batches for controlled concurrency
+ * 
+ * Split semantics:
+ * - New batch starts when current batch is full (>= maxConcurrency)
+ * - OR when the next transaction has a client_tx_id already seen in current batch
+ *   (duplicate client_tx_id values must not be processed in the same batch to avoid
+ *    race-condition idempotency conflicts)
+ */
+function buildTransactionBatches(
+  transactions: TransactionPush[],
+  maxConcurrency: number
+): TransactionPush[][] {
+  const batches: TransactionPush[][] = [];
+  let current: TransactionPush[] = [];
+  let seenClientTxIds = new Set<string>();
+
+  for (let i = 0; i < transactions.length; i++) {
+    const tx = transactions[i];
+    const isChunkFull = current.length >= maxConcurrency;
+    const hasDuplicateInChunk = seenClientTxIds.has(tx.client_tx_id);
+
+    if ((isChunkFull || hasDuplicateInChunk) && current.length > 0) {
+      batches.push(current);
+      current = [];
+      seenClientTxIds = new Set<string>();
+    }
+
+    current.push(tx);
+    seenClientTxIds.add(tx.client_tx_id);
+  }
+
+  if (current.length > 0) {
+    batches.push(current);
+  }
+
+  return batches;
+}
+
+/**
+ * Persist a batch of transactions with controlled concurrency.
+ * 
+ * This function processes transactions in batches with:
+ * - Configurable concurrency (default 3, max 5)
+ * - Idempotency via client_tx_id
+ * - Individual transaction error handling (failures don't fail entire batch)
+ * 
+ * @param db - Database connection
+ * @param transactions - Array of transactions to persist
+ * @param companyId - Company ID for tenant isolation
+ * @param outletId - Outlet ID for tenant isolation
+ * @param correlationId - Correlation ID for logging/tracing
+ * @param options - Optional configuration
+ * @param options.maxConcurrency - Maximum concurrent transactions (default 3, max 5)
+ * @param options.metricsCollector - Optional metrics collector
+ * @param options.injectFailureAfterPersist - Test hook: when true, throws after successful persistence
+ * @returns Array of results per transaction (one per transaction: OK/DUPLICATE/ERROR)
+ */
+export async function persistPushBatch(
+  db: DbConn,
+  transactions: TransactionPush[],
+  companyId: number,
+  outletId: number,
+  correlationId: string,
+  options?: {
+    maxConcurrency?: number;
+    metricsCollector?: SyncIdempotencyMetricsCollector;
+    /** Test hook: when true, throws after successful persistence to simulate failure between phases */
+    injectFailureAfterPersist?: boolean;
+  }
+): Promise<SyncPushResultItem[]> {
+  const maxConcurrency = Math.min(options?.maxConcurrency ?? 3, 5);
+
+  // Handle empty batch
+  if (transactions.length === 0) {
+    return [];
+  }
+
+  // Filter to eligible transactions (company_id + outlet_id match)
+  const eligibleTransactions = transactions.filter(
+    (tx) => tx.company_id === companyId && tx.outlet_id === outletId
+  );
+
+  // Batch check idempotency for all transactions
+  const { newTransactions, duplicateResults } = await filterNewTransactions(
+    db,
+    eligibleTransactions,
+    companyId,
+    outletId
+  );
+
+  // Build batches with controlled concurrency
+  const batches = buildTransactionBatches(newTransactions, maxConcurrency);
+
+  // Process batches with controlled concurrency
+  const newTransactionResults: SyncPushResultItem[] = [];
+
+  for (const batch of batches) {
+    const batchPromises = batch.map((tx) =>
+      processTransaction(db, tx, companyId, outletId, correlationId, options?.metricsCollector)
+    );
+    const batchResults = await Promise.all(batchPromises);
+    newTransactionResults.push(...batchResults);
+  }
+
+  // Test hook: inject failure after successful persistence
+  // This simulates the scenario where Phase 1 succeeds but something fails before Phase 2
+  if (options?.injectFailureAfterPersist) {
+    throw new Error("SYNC_PUSH_TEST_FAIL_AFTER_PERSIST");
+  }
+
+  // Combine duplicate results (already processed) with new transaction results
+  // Results are returned in original transaction order
+  const allResults: SyncPushResultItem[] = [];
+  
+  // Build a map of results by client_tx_id for efficient lookup
+  const resultMap = new Map<string, SyncPushResultItem>();
+  for (const result of duplicateResults) {
+    resultMap.set(result.client_tx_id, result);
+  }
+  for (const result of newTransactionResults) {
+    resultMap.set(result.client_tx_id, result);
+  }
+  
+  // Return results in same order as input transactions
+  for (const tx of transactions) {
+    const result = resultMap.get(tx.client_tx_id);
+    if (result) {
+      allResults.push(result);
+    }
+    // Note: transactions not matching company_id/outlet_id are not included in results
+    // (they are filtered out before processing)
+  }
+
+  return allResults;
 }
 
 // ============================================================================

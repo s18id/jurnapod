@@ -5,3 +5,10 @@ export { PosSyncModule } from "./pos-sync-module.js";
 export { PosDataService } from "./core/pos-data-service.js";
 export * from "./types/pos-data.js";
 export * from "./endpoints/pos-sync-endpoints.js";
+
+// Export persistPushBatch for API layer usage (Phase 2 of Story 17-5)
+export { persistPushBatch } from "./push/index.js";
+export type {
+  TransactionPush,
+  SyncPushResultItem
+} from "./push/types.js";

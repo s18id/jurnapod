@@ -101,14 +101,22 @@ export function toRetryableDbErrorMessage(error: MysqlError): string {
 
 export type SyncPushResultCode = "OK" | "DUPLICATE" | "ERROR";
 
+/**
+ * Result codes for Phase 2 processing (COGS posting and stock deduction).
+ * PERSISTED_POSTING_PENDING indicates Phase 1 succeeded but Phase 2 needs retry.
+ */
+export type SyncPushResultCodePhase2 = "OK" | "DUPLICATE" | "ERROR" | "PERSISTED_POSTING_PENDING";
+
 export type IdempotencyReplayOutcome =
   | { client_tx_id: string; result: "DUPLICATE" }
   | { client_tx_id: string; result: "ERROR"; message: string };
 
 export type SyncPushResultItem = {
   client_tx_id: string;
-  result: SyncPushResultCode;
+  result: SyncPushResultCode | SyncPushResultCodePhase2;
   message?: string;
+  /** POS transaction ID - available after successful persistence (Phase 1) */
+  posTransactionId?: number;
 };
 
 export function toErrorResult(clientTxId: string, message: string): SyncPushResultItem {
