@@ -12,10 +12,10 @@
  *   test('name', { skip: !useRealDb }, async () => { ... });
  */
 
-import { createMockAdapter } from './mock-adapter.js';
 import { createRealDbAdapter } from './real-adapter.js';
 import { useRealDb } from './db-config.js';
-import type { AuthDbAdapter } from '../types.js';
+import type { AuthConfig, AuthDbAdapter } from '../types.js';
+import { testEnv } from './env.js';
 
 export { useRealDb };
 
@@ -27,6 +27,13 @@ export function createTestAdapter(): AuthDbAdapter {
     return createRealDbAdapter();
   }
   return createMockAdapter();
+}
+
+/**
+ * Create a mock adapter
+ */
+export function createMockAdapter(): AuthDbAdapter {
+  return null as unknown as AuthDbAdapter
 }
 
 /**
@@ -42,3 +49,35 @@ export function requireRealAdapter(): AuthDbAdapter {
   }
   return createRealDbAdapter();
 }
+
+
+/**
+ * Test configuration for @jurnapod/auth
+ */
+export const testConfig: AuthConfig = {
+  tokens: {
+    accessTokenSecret: testEnv.tokens.accessTokenSecret,
+    accessTokenTtlSeconds: testEnv.tokens.accessTokenTtlSeconds,
+    refreshTokenSecret: testEnv.tokens.refreshTokenSecret,
+    refreshTokenTtlSeconds: testEnv.tokens.refreshTokenTtlSeconds,
+    issuer: testEnv.tokens.issuer || undefined,
+    audience: testEnv.tokens.audience || undefined,
+  },
+  password: {
+    defaultAlgorithm: testEnv.password.defaultAlgorithm,
+    bcryptRounds: testEnv.password.bcryptRounds,
+    argon2MemoryKb: testEnv.password.argon2MemoryKb,
+    argon2TimeCost: testEnv.password.argon2TimeCost,
+    argon2Parallelism: testEnv.password.argon2Parallelism,
+    rehashOnLogin: testEnv.password.rehashOnLogin,
+  },
+  throttle: {
+    baseDelayMs: testEnv.throttle.baseDelayMs,
+    maxDelayMs: testEnv.throttle.maxDelayMs,
+  },
+  emailTokens: {
+    passwordResetTtlMinutes: testEnv.emailTokens.passwordResetTtlMinutes,
+    inviteTtlMinutes: testEnv.emailTokens.inviteTtlMinutes,
+    verifyEmailTtlMinutes: testEnv.emailTokens.verifyEmailTtlMinutes,
+  },
+};

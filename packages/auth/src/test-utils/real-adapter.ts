@@ -1,25 +1,25 @@
 /**
  * Real database adapter for integration tests.
  * 
- * Provides an AuthDbAdapter implementation using @jurnapod/db (DbConn)
+ * Provides an AuthDbAdapter implementation using Kysely
  * for real database integration testing.
  */
 
-import { createDbPool, DbConn } from '@jurnapod/db';
-import type { Pool } from 'mysql2';
+import { getKysely, type KyselySchema } from '@jurnapod/db';
+import type { Kysely } from 'kysely';
 
 import { dbConfig } from './db-config.js';
 import type { AuthDbAdapter } from '../types.js';
 
 // ---------------------------------------------------------------------------
-// Singleton Pool Pattern
+// Singleton Kysely Instance
 // ---------------------------------------------------------------------------
 
-let pool: Pool | null = null;
+let db: KyselySchema | null = null;
 
-export function getTestPool(): Pool {
-  if (!pool) {
-    pool = createDbPool({
+export function getTestDb(): KyselySchema {
+  if (!db) {
+    db = getKysely({
       host: dbConfig.host,
       port: dbConfig.port,
       user: dbConfig.user,
@@ -28,113 +28,41 @@ export function getTestPool(): Pool {
       connectionLimit: dbConfig.connectionLimit,
     });
   }
-  return pool;
-}
-
-// ---------------------------------------------------------------------------
-// Singleton DbConn
-// ---------------------------------------------------------------------------
-
-let connection: DbConn | null = null;
-
-export function getTestDb(): DbConn {
-  if (!connection) {
-    connection = new DbConn(getTestPool());
-  }
-  return connection;
+  return db;
 }
 
 // ---------------------------------------------------------------------------
 // Cleanup Function
 // ---------------------------------------------------------------------------
 
-export async function closeTestPool(): Promise<void> {
-  if (pool) {
-    await new Promise<void>((resolve, reject) => {
-      pool!.end((err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-    pool = null;
-    connection = null;
+export async function closeTestDb(): Promise<void> {
+  if (db) {
+    await db.destroy();
+    db = null;
   }
 }
 
-// ---------------------------------------------------------------------------
-// AuthDbConnection wrapper for DbConn
-// ---------------------------------------------------------------------------
-
-import type { AuthDbConnection } from '../types.js';
-
-/**
- * Creates an AuthDbConnection wrapper around a DbConn instance.
- * This maps beginTransaction() → begin() since DbConn uses begin().
- */
-export function createAuthDbConnection(db: DbConn): AuthDbConnection {
-  return {
-    queryAll<T>(sql: string, params: unknown[]): Promise<T[]> {
-      return db.queryAll<T>(sql, params);
-    },
-    execute(sql: string, params: unknown[]) {
-      return db.execute(sql, params);
-    },
-    async beginTransaction(): Promise<void> {
-      await db.beginTransaction();
-    },
-    async commit(): Promise<void> {
-      await db.commit();
-    },
-    async rollback(): Promise<void> {
-      await db.rollback();
-    },
-    async release(): Promise<void> {
-      // DbConn manages its own connection pool, release is no-op for transaction connections
-      // The connection is released in commit()/rollback()
-    },
-  };
-}
+// Alias for compatibility with existing integration tests
+export { closeTestDb as closeTestPool };
 
 // ---------------------------------------------------------------------------
 // Main Adapter Factory
 // ---------------------------------------------------------------------------
 
 export function createRealDbAdapter(): AuthDbAdapter {
-  const db = getTestDb();
+  const testDb = getTestDb();
 
   return {
-    async queryAll<T>(sql: string, params: unknown[]): Promise<T[]> {
-      return db.queryAll<T>(sql, params);
-    },
-
-    async execute(sql: string, params: unknown[]) {
-      const result = await db.execute(sql, params);
-      return {
-        insertId: result.insertId,
-        affectedRows: result.affectedRows,
-      };
-    },
+    db: testDb,
 
     async transaction<T>(fn: (adapter: AuthDbAdapter) => Promise<T>): Promise<T> {
-      await db.beginTransaction();
-
-      const txAdapter: AuthDbAdapter = {
-        queryAll: async (sql: string, params: unknown[]) => db.queryAll(sql, params),
-        execute: async (sql, params) => {
-          const result = await db.execute(sql, params);
-          return { insertId: result.insertId, affectedRows: result.affectedRows };
-        },
-        transaction: async (innerFn) => innerFn(txAdapter),
-      };
-
-      try {
-        const result = await fn(txAdapter);
-        await db.commit();
-        return result;
-      } catch (error) {
-        await db.rollback();
-        throw error;
-      }
+      return await testDb.transaction().execute(async (trx) => {
+        const txAdapter: AuthDbAdapter = {
+          db: trx as Kysely<any>,
+          transaction: async (innerFn) => innerFn(txAdapter),
+        };
+        return await fn(txAdapter);
+      });
     },
   };
 }

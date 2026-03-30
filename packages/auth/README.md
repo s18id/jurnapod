@@ -23,10 +23,9 @@ This package extracts authentication logic from `apps/api/src/lib/` into a reusa
 import { createAuthClient } from '@jurnapod/auth';
 import type { AuthDbAdapter, AuthConfig } from '@jurnapod/auth';
 
-// Implement your database adapter
+// Implement your database adapter (Kysely-based)
 const adapter: AuthDbAdapter = {
-  query: async (sql, params) => { /* ... */ },
-  execute: async (sql, params) => { /* ... */ },
+  db: kyselyInstance,  // Kysely instance for query building
   transaction: async (fn) => { /* ... */ },
 };
 
@@ -142,31 +141,48 @@ const ROLE_CODES = [
 
 ## Database Adapter
 
-Consumers must implement `AuthDbAdapter`:
+Consumers must implement `AuthDbAdapter` using Kysely:
 
 ```typescript
 interface AuthDbAdapter {
-  query<T>(sql: string, params: unknown[]): Promise<T[]>;
-  execute(sql: string, params: unknown[]): Promise<{ insertId?: number | bigint; affectedRows?: number }>;
-  transaction<T>(fn: (adapter: AuthDbAdapter) => Promise<T>): Promise<T>;
+  db: Kysely<DB>;  // Kysely instance for type-safe query building
+  transaction<T>(fn: (trx: AuthDbAdapter) => Promise<T>): Promise<T>;
 }
 ```
 
-For atomic email token consumption, implement `AuthDbAdapterWithConnection`:
+Example implementation:
 
 ```typescript
-interface AuthDbAdapterWithConnection extends AuthDbAdapter {
-  getConnection(): Promise<AuthDbConnection>;
-}
+import { createKysely } from '@jurnapod/db';
+import type { AuthDbAdapter } from '@jurnapod/auth';
 
-interface AuthDbConnection {
-  query<T>(sql: string, params: unknown[]): Promise<T[]>;
-  execute(sql: string, params: unknown[]): Promise<{ insertId?: number | bigint; affectedRows?: number }>;
-  beginTransaction(): Promise<void>;
-  commit(): Promise<void>;
-  rollback(): Promise<void>;
-  release(): Promise<void>;
-}
+const adapter: AuthDbAdapter = {
+  db: createKysely({ host, port, user, password, database }),
+  async transaction(fn) {
+    return await this.db.transaction().execute(fn);
+  }
+};
+```
+
+**All modules use Kysely query builder exclusively:**
+```typescript
+// SELECT
+const user = await adapter.db.selectFrom('users').where('id', '=', userId).executeTakeFirst();
+
+// INSERT
+await adapter.db.insertInto('auth_refresh_tokens').values({...}).execute();
+
+// UPDATE
+await adapter.db.updateTable('users').set({name: 'new'}).where('id', '=', id).execute();
+
+// DELETE
+await adapter.db.deleteFrom('users').where('id', '=', id).execute();
+
+// FOR UPDATE lock (in transaction)
+const token = await trx.db.selectFrom('auth_refresh_tokens')
+  .where('token_hash', '=', hash)
+  .forUpdate()
+  .executeTakeFirst();
 ```
 
 ## Security Notes

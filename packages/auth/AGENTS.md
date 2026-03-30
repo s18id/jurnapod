@@ -50,25 +50,8 @@ const auth = createAuthClient(adapter, config);
 **Adapter interface** (`src/types.ts`):
 ```typescript
 export interface AuthDbAdapter {
-  query<T>(sql: string, params: unknown[]): Promise<T[]>;
-  execute(sql: string, params: unknown[]): Promise<{ insertId?: number | bigint; affectedRows?: number }>;
-  transaction<T>(fn: (adapter: AuthDbAdapter) => Promise<T>): Promise<T>;
-}
-```
-
-**Extended adapter with connection** (for atomic email token consumption):
-```typescript
-export interface AuthDbAdapterWithConnection extends AuthDbAdapter {
-  getConnection(): Promise<AuthDbConnection>;
-}
-
-export interface AuthDbConnection {
-  query<T>(sql: string, params: unknown[]): Promise<T[]>;
-  execute(sql: string, params: unknown[]): Promise<{ insertId?: number | bigint; affectedRows?: number }>;
-  beginTransaction(): Promise<void>;
-  commit(): Promise<void>;
-  rollback(): Promise<void>;
-  release(): Promise<void>;
+  db: Kysely<DB>;
+  transaction<T>(fn: (trx: AuthDbAdapter) => Promise<T>): Promise<T>;
 }
 ```
 
@@ -198,27 +181,42 @@ packages/auth/
 
 1. **Use snake_case for SQL column names** (MySQL/MariaDB compatibility)
 
-2. **Always use parameterized queries** — never string concatenation:
+2. **Use Kysely query builder exclusively** — no raw SQL except for MySQL-specific syntax:
    ```typescript
-   // CORRECT
-   await adapter.query('SELECT * FROM users WHERE id = ?', [userId]);
+   // CORRECT - Kysely query builder
+   const user = await adapter.db.selectFrom('users').where('id', '=', userId).executeTakeFirst();
    
-   // WRONG
-   await adapter.query(`SELECT * FROM users WHERE id = ${userId}`);
+   // WRONG - raw SQL
+   await adapter.query('SELECT * FROM users WHERE id = ?', [userId]);
    ```
 
 3. **Always use transactions** for multi-step operations:
    ```typescript
-   await adapter.transaction(async (tx) => {
+   await adapter.db.transaction().execute(async (trx) => {
      // Step 1: revoke old token
-     await tx.execute('UPDATE auth_refresh_tokens SET revoked_at = NOW() WHERE id = ?', [oldId]);
+     await trx.updateTable('auth_refresh_tokens').set({revoked_at: new Date()}).where('id', '=', oldId).execute();
      // Step 2: issue new token
-     const result = await tx.execute('INSERT INTO auth_refresh_tokens ...', [...]);
-     return result;
+     await trx.insertInto('auth_refresh_tokens').values({...}).execute();
    });
    ```
 
-4. **Use `FOR UPDATE` locks** when rotating tokens to prevent race conditions
+4. **Use `.forUpdate()` for row locking** when rotating tokens to prevent race conditions:
+   ```typescript
+   const token = await trx.selectFrom('auth_refresh_tokens')
+     .where('token_hash', '=', tokenHash)
+     .forUpdate()
+     .executeTakeFirst();
+   ```
+
+5. **Use `sql` template tag only for MySQL-specific syntax** (e.g., `ON DUPLICATE KEY UPDATE`):
+   ```typescript
+   import { sql } from 'kysely';
+   
+   await adapter.db.insertInto('table').values({...})
+     .onDuplicateKeyUpdate({
+       counter: sql`counter + 1`
+     });
+   ```
 
 ### Naming Conventions
 
@@ -234,39 +232,101 @@ packages/auth/
 
 ## Testing Approach
 
-### Mock Adapter Pattern
+### Rule: NO Mock Adapter for DB-Related Tests
 
-Always test with a mock adapter — never hit a real database:
+**Mock adapter is forbidden for database-related tests.** DB operations must be tested with real database using integration tests.
+
+**Why?** Mock adapters don't catch:
+- SQL syntax errors
+- Schema mismatches
+- Transaction isolation bugs
+- Foreign key constraint issues
+- Index performance problems
+
+### What Gets Integration Tests vs Unit Tests
+
+| Category | Testing Method | Location |
+|----------|---------------|----------|
+| **DB operations** (tokens, throttle, RBAC, email tokens) | Integration tests with real DB | `integration/**/*.integration.test.ts` |
+| **Business logic** (password hashing, JWT signing, permission bitmasks) | Unit tests with no mocks needed | `src/**/*.test.ts` |
+| **Configuration validation** | Unit tests | `src/**/*.test.ts` |
+
+### Integration Tests (Real Database)
+
+DB-related tests MUST use integration tests with real database:
 
 ```typescript
-import { createAuthClient, InvalidCredentialsError } from '@jurnapod/auth';
-import { createMockAdapter } from './test-utils.js';
+// integration/tokens/refresh-tokens.integration.test.ts
+import { createAuthClient } from '@jurnapod/auth';
+import { createRealDbAdapter, closeTestPool } from '../../test-utils/real-adapter.js';
 
-describe('RBACManager', () => {
-  it('should return null for non-existent user', async () => {
-    const adapter = createMockAdapter({ users: [] });
+describe('RefreshTokenManager', () => {
+  let adapter: AuthDbAdapter;
+  
+  beforeEach(() => {
+    adapter = createRealDbAdapter();
+  });
+  
+  afterEach(async () => {
+    await closeTestPool();
+  });
+  
+  it('should issue and verify refresh token', async () => {
     const auth = createAuthClient(adapter, config);
-    
-    const result = await auth.rbac.checkAccess({
-      userId: 999,
-      companyId: 1
-    });
-    
-    expect(result).toBeNull();
+    const result = await auth.tokens.issueRefreshToken({...});
+    expect(result.token).toBeDefined();
+  });
+});
+```
+
+Run integration tests:
+```bash
+npm run test:db    # Run integration tests with real DB
+```
+
+### Unit Tests (Non-DB Logic)
+
+Only non-DB logic runs without database:
+
+```typescript
+// src/passwords/hash.test.ts - Unit test (no DB)
+import { PasswordHasher } from './hash.js';
+
+describe('PasswordHasher', () => {
+  it('should hash and verify password', async () => {
+    const hasher = new PasswordHasher(config);
+    const hash = await hasher.hash('password123');
+    const valid = await hasher.verify('password123', hash);
+    expect(valid).toBe(true);
   });
 });
 ```
 
 ### Test File Naming
 
-- Unit tests: `src/**/*.test.ts` (co-located with source)
-- Integration tests: `src/**/*.integration.test.ts`
+- Unit tests: `src/**/*.test.ts` (co-located with source, for non-DB logic only)
+- Integration tests: `integration/**/*.integration.test.ts` (for DB-related operations)
 
-### Testing Boundaries
+### Test Categories
 
-- **Unit test file location**: Co-locate with source (`src/rbac/access-check.test.ts`)
-- **Mock data**: Keep minimal — only data needed for the test
-- **Coverage target**: Auth-critical paths (token rotation, password verification, RBAC checks)
+| Module | Type | Why |
+|--------|------|-----|
+| `passwords/hash.ts` | Unit (mock) | Pure computation, no DB |
+| `tokens/access-tokens.ts` | Unit (mock) | JWT signing, no DB |
+| `tokens/refresh-tokens.ts` | **Integration** | DB operations |
+| `rbac/access-check.ts` | **Integration** | DB operations |
+| `throttle/login-throttle.ts` | **Integration** | DB operations |
+| `email/tokens.ts` | **Integration** | DB operations |
+| `oauth/google.ts` | **Integration** | DB operations |
+| `lib/client.ts` | **Integration** | DB operations |
+
+### Running Tests
+
+```bash
+npm run test       # Unit tests only (no mock DB)
+npm run test:db   # Integration tests with real database
+npm run test:unit  # Alias for npm run test
+```
 
 ---
 
@@ -334,12 +394,12 @@ When modifying this package:
 
 - [ ] No `process.env` access — all config via `AuthConfig`
 - [ ] No `@jurnapod/db` imports — use `AuthDbAdapter`
-- [ ] All SQL uses parameterized queries
-- [ ] Token rotation uses transactions with proper locking
+- [ ] All database operations use Kysely query builder (no raw SQL unless MySQL-specific syntax required)
+- [ ] Token rotation uses transactions with `.forUpdate()` locking
 - [ ] Password verification uses library functions (bcrypt/Argon2)
 - [ ] No secrets or tokens in log statements
 - [ ] OAuth redirect URIs validated against allowlist
-- [ ] Unit tests use mock adapters (not real DB)
+- [ ] DB operations tested with real database in integration tests
 - [ ] Tests cover happy path AND error/revoked/expired cases
 - [ ] New features exported from `index.ts` submodule entry points
 

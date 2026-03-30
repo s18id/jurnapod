@@ -8,8 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { RefreshTokenManager } from '../../src/tokens/refresh-tokens.js';
 import { createRealDbAdapter, getTestDb, closeTestPool } from '../../src/test-utils/real-adapter.js';
-import { useRealDb } from '../../src/test-utils/test-adapter.js';
-import { testConfig } from '../../src/test-utils/mock-adapter.js';
+import { useRealDb, testConfig } from '../../src/test-utils/test-adapter.js';
 import { createCompany, cleanupCompanies } from '../../src/test-utils/fixtures/companies.js';
 import { createUser, cleanupUsers } from '../../src/test-utils/fixtures/users.js';
 import type { AuthDbAdapter, RefreshTokenRotateResult } from '../../src/types.js';
@@ -63,13 +62,12 @@ test('RefreshTokenManager: issue() creates token in database', { skip: !useRealD
     assert.ok(result.expiresAt, 'ExpiresAt should be set');
 
     // Verify token in database
-    const rows = await db.queryAll<RefreshTokenRow>(
-      `SELECT * FROM auth_refresh_tokens WHERE id = ?`,
-      [result.tokenId]
-    );
+    const rows = await db.selectFrom("auth_refresh_tokens").selectAll()
+      .where('id', '=', result.tokenId)
+      .execute();
     assert.strictEqual(rows.length, 1, 'Token should exist in database');
 
-    const row = rows[0];
+    const row = rows[0] as RefreshTokenRow;
     assert.strictEqual(row.company_id, company.id, 'Company ID should match');
     assert.strictEqual(row.user_id, user.id, 'User ID should match');
     assert.ok(row.token_hash !== result.token, 'Token hash should not equal raw token');
@@ -133,7 +131,11 @@ test('RefreshTokenManager: rotate() revokes old and creates new', { skip: !useRe
       userAgent: 'Rotated Browser'
     });
 
-    assert.ok(rotated.success, 'Rotation should succeed');
+    if(!rotated.success) {
+      const rotatedFailed = rotated as { success:boolean, reason: "not_found" | "revoked" | "expired" }
+      assert.ok(rotated.success, 'Rotation should succeed, got:'+rotatedFailed.reason);
+    }
+
     const rotatedSuccess = rotated as { success: true; token: string; expiresAt: Date; tokenId: number; userId: number; companyId: number; rotatedFromId: number };
     assert.ok(rotatedSuccess.token, 'New token should be returned');
     assert.ok(rotatedSuccess.tokenId, 'New tokenId should be set');
@@ -142,18 +144,21 @@ test('RefreshTokenManager: rotate() revokes old and creates new', { skip: !useRe
     assert.strictEqual(rotatedSuccess.companyId, company.id, 'CompanyId should match');
 
     // Verify old token is revoked
-    const oldRows = await db.queryAll<RefreshTokenRow>(
-      `SELECT * FROM auth_refresh_tokens WHERE id = ?`,
-      [original.tokenId]
-    );
+    const oldRows = await db
+      .selectFrom('auth_refresh_tokens')
+      .selectAll()
+      .where('id', '=', original.tokenId)
+      .execute();
     assert.strictEqual(oldRows.length, 1, 'Old token should still exist');
-    assert.ok(oldRows[0].revoked_at !== null, 'Old token should be revoked');
+    const oldRow = oldRows[0] as RefreshTokenRow
+    assert.ok(oldRow.revoked_at !== null, 'Old token should be revoked');
 
     // Verify new token exists with rotated_from_id
-    const newRows = await db.queryAll<RefreshTokenRow>(
-      `SELECT * FROM auth_refresh_tokens WHERE id = ?`,
-      [rotatedSuccess.tokenId]
-    );
+    const newRows = await db
+      .selectFrom('auth_refresh_tokens')
+      .selectAll()
+      .where('id', '=', rotatedSuccess.tokenId)
+      .execute() as unknown as RefreshTokenRow[];
     assert.strictEqual(newRows.length, 1, 'New token should exist');
     assert.strictEqual(newRows[0].rotated_from_id, original.tokenId, 'rotated_from_id should reference old token');
     assert.strictEqual(newRows[0].ip_address, '10.0.0.2', 'New IP should be set');
@@ -246,11 +251,16 @@ test('RefreshTokenManager: rotate() returns expired for expired token', { skip: 
       .update(fakeToken)
       .digest('hex');
     
-    await db.execute(
-      `INSERT INTO auth_refresh_tokens (company_id, user_id, token_hash, expires_at, ip_address, user_agent)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [company.id, user.id, tokenHash, pastExpiry, '127.0.0.1', 'Test']
-    );
+    await db.insertInto('auth_refresh_tokens')
+      .values({
+        company_id: company.id,
+        user_id: user.id,
+        token_hash: tokenHash,
+        expires_at: pastExpiry,
+        ip_address: '127.0.0.1',
+        user_agent: 'Test',
+      })
+      .execute();
 
     // Create manager and try to rotate the expired token
     const manager = new RefreshTokenManager(adapter, testConfig);
@@ -296,10 +306,11 @@ test('RefreshTokenManager: revoke() marks token as revoked', { skip: !useRealDb 
     assert.strictEqual(revoked, true, 'Revoke should return true');
 
     // Verify token is revoked in database
-    const rows = await db.queryAll<RefreshTokenRow>(
-      `SELECT * FROM auth_refresh_tokens WHERE id = ?`,
-      [result.tokenId]
-    );
+    const rows = await db
+      .selectFrom('auth_refresh_tokens')
+      .selectAll()
+      .where('id', '=', result.tokenId)
+      .execute() as unknown as RefreshTokenRow[];
     assert.strictEqual(rows.length, 1, 'Token should still exist');
     assert.ok(rows[0].revoked_at !== null, 'Token should have revoked_at set');
 
@@ -327,19 +338,27 @@ test('RefreshTokenManager: Transaction rollback on failure', { skip: !useRealDb 
     userIds.push(user.id);
 
     // Count tokens before
-    const beforeCount = await db.queryAll<{ count: number }>(
-      `SELECT COUNT(*) as count FROM auth_refresh_tokens`
-    );
+    const beforeCountResult = await db
+      .selectFrom('auth_refresh_tokens')
+      .select(['id'])
+      .execute();
+    const beforeCount = beforeCountResult.length;
 
     // Use transaction directly to test rollback
     try {
-      await adapter.transaction(async (tx) => {
+      await adapter.db.transaction().execute(async (trx) => {
         // Insert a token
-        await tx.execute(
-          `INSERT INTO auth_refresh_tokens (company_id, user_id, token_hash, expires_at, ip_address, user_agent)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [company.id, user.id, 'test-hash', new Date(Date.now() + 60000), '127.0.0.1', 'Test']
-        );
+        await trx
+          .insertInto('auth_refresh_tokens')
+          .values({
+            company_id: company.id,
+            user_id: user.id,
+            token_hash: 'test-hash',
+            expires_at: new Date(Date.now() + 60000),
+            ip_address: '127.0.0.1',
+            user_agent: 'Test'
+          })
+          .execute();
         // Throw error to trigger rollback
         throw new Error('Intentional failure for testing rollback');
       });
@@ -350,10 +369,12 @@ test('RefreshTokenManager: Transaction rollback on failure', { skip: !useRealDb 
     }
 
     // Verify no token was inserted (rollback worked)
-    const afterCount = await db.queryAll<{ count: number }>(
-      `SELECT COUNT(*) as count FROM auth_refresh_tokens`
-    );
-    assert.strictEqual(afterCount[0].count, beforeCount[0].count, 'Token count should be unchanged after rollback');
+    const afterCountResult = await db
+      .selectFrom('auth_refresh_tokens')
+      .select(['id'])
+      .execute();
+    const afterCount = afterCountResult.length;
+    assert.strictEqual(afterCount, beforeCount, 'Token count should be unchanged after rollback');
   } finally {
     await cleanupUsers(adapter, userIds);
     await cleanupCompanies(adapter, companyIds);

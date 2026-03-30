@@ -12,8 +12,7 @@ import assert from 'node:assert';
 
 import { RBACManager } from '../../src/rbac/access-check.js';
 import { createRealDbAdapter, closeTestPool } from '../../src/test-utils/real-adapter.js';
-import { useRealDb } from '../../src/test-utils/test-adapter.js';
-import { testConfig } from '../../src/test-utils/mock-adapter.js';
+import { useRealDb, testConfig } from '../../src/test-utils/test-adapter.js';
 import { createCompany, cleanupCompanies } from '../../src/test-utils/fixtures/companies.js';
 import { createUser, cleanupUsers } from '../../src/test-utils/fixtures/users.js';
 import { createOutlet, cleanupOutlets } from '../../src/test-utils/fixtures/outlets.js';
@@ -50,7 +49,7 @@ test('getUserWithRoles() returns full profile with SUPER_ADMIN role', { skip: !u
     const superAdminRoleId = await getRoleIdByCode(adapter, 'SUPER_ADMIN');
     assert.ok(superAdminRoleId, 'SUPER_ADMIN role should exist in database');
 
-    await assignUserRole(adapter, { userId: user.id, roleId: superAdminRoleId });
+    await assignUserRole(adapter, { userId: user.id, roleId: superAdminRoleId, companyId: company.id });
 
     const rbac = new RBACManager(adapter, testConfig);
     const result = await rbac.getUserWithRoles(user.id, company.id);
@@ -95,7 +94,7 @@ test('getUserWithRoles() with outlet assignments', { skip: !useRealDb }, async (
     const cashierRoleId = await getRoleIdByCode(adapter, 'CASHIER');
     assert.ok(cashierRoleId, 'CASHIER role should exist in database');
 
-    await assignUserRole(adapter, { userId: user.id, roleId: cashierRoleId, outletId: outlet.id });
+    await assignUserRole(adapter, { userId: user.id, roleId: cashierRoleId, companyId: company.id, outletId: outlet.id });
 
     const rbac = new RBACManager(adapter, testConfig);
     const result = await rbac.getUserWithRoles(user.id, company.id);
@@ -138,7 +137,7 @@ test('hasOutletAccess() returns true for SUPER_ADMIN', { skip: !useRealDb }, asy
     const superAdminRoleId = await getRoleIdByCode(adapter, 'SUPER_ADMIN');
     assert.ok(superAdminRoleId, 'SUPER_ADMIN role should exist in database');
 
-    await assignUserRole(adapter, { userId: user.id, roleId: superAdminRoleId });
+    await assignUserRole(adapter, { userId: user.id, roleId: superAdminRoleId, companyId: company.id });
 
     // Create outlet
     const outlet = await createOutlet(adapter, company.id);
@@ -178,7 +177,7 @@ test('hasOutletAccess() returns true for global role (OWNER)', { skip: !useRealD
     const ownerRoleId = await getRoleIdByCode(adapter, 'OWNER');
     assert.ok(ownerRoleId, 'OWNER role should exist in database');
 
-    await assignUserRole(adapter, { userId: ownerUser.id, roleId: ownerRoleId });
+    await assignUserRole(adapter, { userId: ownerUser.id, companyId:company.id, roleId: ownerRoleId });
 
     const outlet = await createOutlet(adapter, company.id);
     outletIdsToCleanup.push(outlet.id);
@@ -220,7 +219,7 @@ test('hasOutletAccess() returns true for outlet-specific assignment', { skip: !u
     assert.ok(cashierRoleId, 'CASHIER role should exist');
 
     // Assign CASHIER only for specific outlet
-    await assignUserRole(adapter, { userId: cashierUser.id, roleId: cashierRoleId, outletId: outlet.id });
+    await assignUserRole(adapter, { userId: cashierUser.id, roleId: cashierRoleId, companyId:company.id, outletId: outlet.id });
 
     const rbac = new RBACManager(adapter, testConfig);
     const hasAccess = await rbac.hasOutletAccess(cashierUser.id, company.id, outlet.id);
@@ -297,7 +296,7 @@ test('checkAccess() detects SUPER_ADMIN', { skip: !useRealDb }, async () => {
     const superAdminRoleId = await getRoleIdByCode(adapter, 'SUPER_ADMIN');
     assert.ok(superAdminRoleId, 'SUPER_ADMIN role should exist in database');
 
-    await assignUserRole(adapter, { userId: user.id, roleId: superAdminRoleId });
+    await assignUserRole(adapter, { userId: user.id,companyId:company.id,  roleId: superAdminRoleId });
 
     const rbac = new RBACManager(adapter, testConfig);
     const result = await rbac.checkAccess({ userId: user.id, companyId: company.id });
@@ -335,7 +334,7 @@ test('checkAccess() validates allowedRoles correctly', { skip: !useRealDb }, asy
     const ownerRoleId = await getRoleIdByCode(adapter, 'OWNER');
     assert.ok(ownerRoleId, 'OWNER role should exist');
 
-    await assignUserRole(adapter, { userId: ownerUser.id, roleId: ownerRoleId });
+    await assignUserRole(adapter, { userId: ownerUser.id, companyId:company.id, roleId: ownerRoleId });
 
     const rbac = new RBACManager(adapter, testConfig);
 
@@ -393,8 +392,8 @@ test('listUserOutletIds() returns correct outlets', { skip: !useRealDb }, async 
     assert.ok(cashierRoleId, 'CASHIER role should exist');
 
     // Assign user to both outlets
-    await assignUserRole(adapter, { userId: multiOutletUser.id, roleId: cashierRoleId, outletId: outlet1.id });
-    await assignUserRole(adapter, { userId: multiOutletUser.id, roleId: cashierRoleId, outletId: outlet2.id });
+    await assignUserRole(adapter, { userId: multiOutletUser.id,companyId:company.id,  roleId: cashierRoleId, outletId: outlet1.id });
+    await assignUserRole(adapter, { userId: multiOutletUser.id,companyId:company.id,  roleId: cashierRoleId, outletId: outlet2.id });
 
     const rbac = new RBACManager(adapter, testConfig);
     const userOutletIds = await rbac.listUserOutletIds(multiOutletUser.id, company.id);
@@ -434,7 +433,7 @@ test('checkAccess() with outlet-specific role and outletId parameter', { skip: !
     const adminRoleId = await getRoleIdByCode(adapter, 'ADMIN');
     assert.ok(adminRoleId, 'ADMIN role should exist');
 
-    await assignUserRole(adapter, { userId: adminUser.id, roleId: adminRoleId, outletId: outlet.id });
+    await assignUserRole(adapter, { userId: adminUser.id,companyId:company.id,  roleId: adminRoleId, outletId: outlet.id });
 
     const rbac = new RBACManager(adapter, testConfig);
 

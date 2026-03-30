@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { PasswordHasher } from './hash.js';
-import { testConfig } from '../test-utils/mock-adapter.js';
+import { testConfig } from '../test-utils/test-adapter.js';
 
 test('PasswordHasher - hash password with Argon2id (default)', async () => {
   const hasher = new PasswordHasher(testConfig);

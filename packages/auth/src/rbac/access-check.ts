@@ -1,5 +1,5 @@
 /**
- * RBAC access check implementation
+ * RBAC access check implementation using Kysely query builder
  */
 import type {
   AuthDbAdapter,
@@ -22,174 +22,164 @@ export class RBACManager {
   ) {}
 
   /**
-   * Main access check - evaluates role, permission, and outlet access in a single query.
+   * Main access check - evaluates role, permission, and outlet access.
    * Returns null if user doesn't exist or is inactive.
    */
   async checkAccess(options: AccessCheckOptions): Promise<AccessCheckResult | null> {
     const { userId, companyId, allowedRoles, module, permission, outletId } = options;
 
-    const selectParts: string[] = [
-      `EXISTS(
-         SELECT 1
-         FROM user_role_assignments ura
-         INNER JOIN roles r ON r.id = ura.role_id
-         WHERE ura.user_id = u.id
-           AND r.code = "SUPER_ADMIN"
-           AND ura.outlet_id IS NULL
-       ) AS is_super_admin`
-    ];
+    // First, check if user exists and is active
+    const userExists = await this.adapter.db
+      .selectFrom('users as u')
+      .innerJoin('companies as c', 'c.id', 'u.company_id')
+      .where('u.id', '=', userId)
+      .where('u.company_id', '=', companyId)
+      .where('u.is_active', '=', 1)
+      .where('c.deleted_at', 'is', null)
+      .select(['u.id'])
+      .executeTakeFirst();
 
-    selectParts.push(
-      `EXISTS(
-         SELECT 1
-         FROM user_role_assignments ura
-         INNER JOIN roles r ON r.id = ura.role_id
-         WHERE ura.user_id = u.id
-           AND r.is_global = 1
-           AND ura.outlet_id IS NULL
-       ) AS has_global_role`
-    );
+    if (!userExists) {
+      return null;
+    }
 
-    const params: Array<string | number> = [];
+    // Check SUPER_ADMIN (use company_id for tenant scoping)
+    const isSuperAdmin = await this.adapter.db
+      .selectFrom('user_role_assignments as ura')
+      .innerJoin('roles as r', 'r.id', 'ura.role_id')
+      .where('ura.user_id', '=', userId)
+      .where('ura.company_id', '=', companyId)
+      .where('r.code', '=', 'SUPER_ADMIN')
+      .where('ura.outlet_id', 'is', null)
+      .select(['ura.id'])
+      .executeTakeFirst();
 
-    // Role check
+    // Check has global role
+    const hasGlobalRole = await this.adapter.db
+      .selectFrom('user_role_assignments as ura')
+      .innerJoin('roles as r', 'r.id', 'ura.role_id')
+      .where('ura.user_id', '=', userId)
+      .where('ura.company_id', '=', companyId)
+      .where('r.is_global', '=', 1)
+      .where('ura.outlet_id', 'is', null)
+      .select(['ura.id'])
+      .executeTakeFirst();
+
+    let hasRole = false;
+    let hasPermission = false;
+    let hasOutletAccess = false;
+
+    // Role check if allowedRoles specified
     if (allowedRoles && allowedRoles.length > 0) {
-      const rolePlaceholders = allowedRoles.map(() => "?").join(", ");
-      if (typeof outletId === "number") {
-        selectParts.push(
-          `(
-             EXISTS(
-               SELECT 1 FROM user_role_assignments ura
-               INNER JOIN roles r ON r.id = ura.role_id
-               WHERE ura.user_id = u.id
-                 AND r.is_global = 1 AND ura.outlet_id IS NULL
-                 AND r.code IN (${rolePlaceholders})
-             ) OR EXISTS(
-               SELECT 1 FROM user_role_assignments ura
-               INNER JOIN roles r ON r.id = ura.role_id
-               INNER JOIN outlets o ON o.id = ura.outlet_id
-               WHERE ura.user_id = u.id AND ura.outlet_id = ?
-                 AND o.company_id = u.company_id
-                 AND r.code IN (${rolePlaceholders})
-             )
-           ) AS has_role`
-        );
-        params.push(...allowedRoles, outletId, ...allowedRoles);
+      if (typeof outletId === 'number') {
+        // Check global role match
+        const globalRoleMatch = await this.adapter.db
+          .selectFrom('user_role_assignments as ura')
+          .innerJoin('roles as r', 'r.id', 'ura.role_id')
+          .where('ura.user_id', '=', userId)
+          .where('ura.company_id', '=', companyId)
+          .where('r.is_global', '=', 1)
+          .where('ura.outlet_id', 'is', null)
+          .where('r.code', 'in', allowedRoles)
+          .select(['ura.id'])
+          .executeTakeFirst();
+
+        // Check outlet-specific role match
+        const outletRoleMatch = await this.adapter.db
+          .selectFrom('user_role_assignments as ura')
+          .innerJoin('roles as r', 'r.id', 'ura.role_id')
+          .where('ura.user_id', '=', userId)
+          .where('ura.company_id', '=', companyId)
+          .where('ura.outlet_id', '=', outletId)
+          .where('r.code', 'in', allowedRoles)
+          .select(['ura.id'])
+          .executeTakeFirst();
+
+        hasRole = Boolean(globalRoleMatch) || Boolean(outletRoleMatch);
       } else {
-        selectParts.push(
-          `(
-             EXISTS(
-               SELECT 1 FROM user_role_assignments ura
-               INNER JOIN roles r ON r.id = ura.role_id
-               WHERE ura.user_id = u.id
-                 AND r.is_global = 1 AND ura.outlet_id IS NULL
-                 AND r.code IN (${rolePlaceholders})
-             ) OR EXISTS(
-               SELECT 1 FROM user_role_assignments ura
-               INNER JOIN roles r ON r.id = ura.role_id
-               INNER JOIN outlets o ON o.id = ura.outlet_id
-               WHERE ura.user_id = u.id AND o.company_id = u.company_id
-                 AND r.code IN (${rolePlaceholders})
-             )
-           ) AS has_role`
-        );
-        params.push(...allowedRoles, ...allowedRoles);
+        // No outletId - check global roles across user's outlets
+        const globalRoleMatch = await this.adapter.db
+          .selectFrom('user_role_assignments as ura')
+          .innerJoin('roles as r', 'r.id', 'ura.role_id')
+          .where('ura.user_id', '=', userId)
+          .where('ura.company_id', '=', companyId)
+          .where('r.code', 'in', allowedRoles)
+          .select(['ura.id'])
+          .executeTakeFirst();
+
+        hasRole = Boolean(globalRoleMatch);
       }
     }
 
     // Permission check
     if (module && permission) {
       const permissionBit = MODULE_PERMISSION_BITS[permission];
-      if (typeof outletId === "number") {
-        selectParts.push(
-          `(
-             EXISTS(
-               SELECT 1 FROM user_role_assignments ura
-               INNER JOIN roles r ON r.id = ura.role_id
-               INNER JOIN module_roles mr ON mr.role_id = r.id
-               WHERE ura.user_id = u.id AND r.is_global = 1
-                 AND ura.outlet_id IS NULL AND mr.module = ?
-                 AND mr.company_id = u.company_id
-                 AND (mr.permission_mask & ?) <> 0
-             ) OR EXISTS(
-               SELECT 1 FROM user_role_assignments ura
-               INNER JOIN roles r ON r.id = ura.role_id
-               INNER JOIN module_roles mr ON mr.role_id = r.id
-               INNER JOIN outlets o ON o.id = ura.outlet_id
-               WHERE ura.user_id = u.id AND ura.outlet_id = ?
-                 AND o.company_id = u.company_id AND mr.module = ?
-                 AND mr.company_id = u.company_id
-                 AND (mr.permission_mask & ?) <> 0
-             )
-           ) AS has_permission`
-        );
-        params.push(module, permissionBit, outletId, module, permissionBit);
+      
+      if (typeof outletId === 'number') {
+        // Check global permission
+        const globalPermMatch = await this.adapter.db
+          .selectFrom('user_role_assignments as ura')
+          .innerJoin('roles as r', 'r.id', 'ura.role_id')
+          .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
+          .where('ura.user_id', '=', userId)
+          .where('ura.company_id', '=', companyId)
+          .where('r.is_global', '=', 1)
+          .where('ura.outlet_id', 'is', null)
+          .where('mr.module', '=', module)
+          .where('mr.company_id', '=', companyId)
+          .select(['mr.id'])
+          .executeTakeFirst();
+
+        // Check outlet permission
+        const outletPermMatch = await this.adapter.db
+          .selectFrom('user_role_assignments as ura')
+          .innerJoin('roles as r', 'r.id', 'ura.role_id')
+          .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
+          .where('ura.user_id', '=', userId)
+          .where('ura.company_id', '=', companyId)
+          .where('ura.outlet_id', '=', outletId)
+          .where('mr.module', '=', module)
+          .where('mr.company_id', '=', companyId)
+          .select(['mr.id'])
+          .executeTakeFirst();
+
+        hasPermission = Boolean(globalPermMatch) || Boolean(outletPermMatch);
       } else {
-        selectParts.push(
-          `(
-             EXISTS(
-               SELECT 1 FROM user_role_assignments ura
-               INNER JOIN roles r ON r.id = ura.role_id
-               INNER JOIN module_roles mr ON mr.role_id = r.id
-               WHERE ura.user_id = u.id AND r.is_global = 1
-                 AND ura.outlet_id IS NULL AND mr.module = ?
-                 AND mr.company_id = u.company_id
-                 AND (mr.permission_mask & ?) <> 0
-             ) OR EXISTS(
-               SELECT 1 FROM user_role_assignments ura
-               INNER JOIN roles r ON r.id = ura.role_id
-               INNER JOIN module_roles mr ON mr.role_id = r.id
-               INNER JOIN outlets o ON o.id = ura.outlet_id
-               WHERE ura.user_id = u.id AND o.company_id = u.company_id
-                 AND mr.module = ? AND mr.company_id = u.company_id
-                 AND (mr.permission_mask & ?) <> 0
-             )
-           ) AS has_permission`
-        );
-        params.push(module, permissionBit, module, permissionBit);
+        // No outletId - check global permissions
+        const globalPermMatch = await this.adapter.db
+          .selectFrom('user_role_assignments as ura')
+          .innerJoin('roles as r', 'r.id', 'ura.role_id')
+          .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
+          .where('ura.user_id', '=', userId)
+          .where('ura.company_id', '=', companyId)
+          .where('mr.module', '=', module)
+          .where('mr.company_id', '=', companyId)
+          .select(['mr.id'])
+          .executeTakeFirst();
+
+        hasPermission = Boolean(globalPermMatch);
       }
     }
 
     // Outlet access check
-    if (typeof outletId === "number") {
-      selectParts.push(
-        `EXISTS(
-           SELECT 1 FROM user_role_assignments ura
-           INNER JOIN outlets o ON o.id = ura.outlet_id
-           WHERE ura.user_id = u.id AND ura.outlet_id = ?
-             AND o.company_id = u.company_id
-         ) AS has_outlet_access`
-      );
-      params.push(outletId);
-    }
+    if (typeof outletId === 'number') {
+      const outletAccess = await this.adapter.db
+        .selectFrom('user_role_assignments as ura')
+        .where('ura.user_id', '=', userId)
+        .where('ura.company_id', '=', companyId)
+        .where('ura.outlet_id', '=', outletId)
+        .select(['ura.id'])
+        .executeTakeFirst();
 
-    const rows = await this.adapter.queryAll<{
-      is_super_admin: number;
-      has_global_role?: number | null;
-      has_role?: number | null;
-      has_permission?: number | null;
-      has_outlet_access?: number | null;
-    }>(
-      `SELECT ${selectParts.join(", ")}
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       WHERE u.id = ? AND u.company_id = ?
-         AND u.is_active = 1 AND c.deleted_at IS NULL
-       LIMIT 1`,
-      [...params, userId, companyId]
-    );
-
-    const row = rows[0];
-    if (!row) {
-      return null;
+      hasOutletAccess = Boolean(outletAccess);
     }
 
     return {
-      isSuperAdmin: Boolean(row.is_super_admin),
-      hasGlobalRole: Boolean(row.has_global_role),
-      hasRole: Boolean(row.has_role),
-      hasPermission: Boolean(row.has_permission),
-      hasOutletAccess: Boolean(row.has_outlet_access)
+      isSuperAdmin: Boolean(isSuperAdmin),
+      hasGlobalRole: Boolean(hasGlobalRole),
+      hasRole,
+      hasPermission,
+      hasOutletAccess
     };
   }
 
@@ -198,63 +188,68 @@ export class RBACManager {
    * Returns null if user doesn't exist or is inactive.
    */
   async getUserWithRoles(userId: number, companyId: number): Promise<AuthenticatedUser | null> {
-    // Get user basic info
-    const userRows = await this.adapter.queryAll<{
-      id: number;
-      company_id: number;
-      email: string;
-      company_timezone: string | null;
-    }>(
-      `SELECT u.id, u.company_id, u.email, c.timezone AS company_timezone
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       WHERE u.id = ? AND u.company_id = ? AND u.is_active = 1 AND c.deleted_at IS NULL
-       LIMIT 1`,
-      [userId, companyId]
-    );
+    // Get user basic info using query builder
+    const userRow = await this.adapter.db
+      .selectFrom('users as u')
+      .innerJoin('companies as c', 'c.id', 'u.company_id')
+      .where('u.id', '=', userId)
+      .where('u.company_id', '=', companyId)
+      .where('u.is_active', '=', 1)
+      .where('c.deleted_at', 'is', null)
+      .select(['u.id', 'u.company_id', 'u.email', 'c.timezone as company_timezone'])
+      .executeTakeFirst();
 
-    if (userRows.length === 0) {
+    if (!userRow) {
       return null;
     }
 
-    const userRow = userRows[0];
-
     // Get global roles (outlet_id IS NULL, is_global = 1)
-    const globalRoleRows = await this.adapter.queryAll<{ code: string }>(
-      `SELECT r.code
-       FROM user_role_assignments ura
-       INNER JOIN roles r ON r.id = ura.role_id
-       WHERE ura.user_id = ? AND ura.outlet_id IS NULL AND r.is_global = 1`,
-      [userId]
-    );
+    const globalRoleRows = await this.adapter.db
+      .selectFrom('user_role_assignments as ura')
+      .innerJoin('roles as r', 'r.id', 'ura.role_id')
+      .where('ura.user_id', '=', userId)
+      .where('ura.company_id', '=', companyId)
+      .where('ura.outlet_id', 'is', null)
+      .where('r.is_global', '=', 1)
+      .select(['r.code'])
+      .execute();
+
     const global_roles = globalRoleRows.map((r) => r.code as RoleCode);
 
-    // Get outlet-specific roles
-    const outletRoleRows = await this.adapter.queryAll<{
-      outlet_id: number;
-      outlet_code: string;
-      outlet_name: string;
-      role_codes: string;
-    }>(
-      `SELECT
-         o.id AS outlet_id,
-         o.code AS outlet_code,
-         o.name AS outlet_name,
-         GROUP_CONCAT(DISTINCT r.code ORDER BY r.code SEPARATOR ',') AS role_codes
-       FROM user_role_assignments ura
-       INNER JOIN outlets o ON o.id = ura.outlet_id
-       INNER JOIN roles r ON r.id = ura.role_id
-       WHERE ura.user_id = ? AND o.company_id = ? AND ura.outlet_id IS NOT NULL
-       GROUP BY o.id, o.code, o.name`,
-      [userId, companyId]
-    );
+    // Get outlet-specific roles - use ura.company_id for tenant scoping
+    const outletRoleRows = await this.adapter.db
+      .selectFrom('user_role_assignments as ura')
+      .innerJoin('outlets as o', 'o.id', 'ura.outlet_id')
+      .where('ura.user_id', '=', userId)
+      .where('ura.company_id', '=', companyId)
+      .where('ura.outlet_id', 'is not', null)
+      .groupBy(['o.id', 'o.code', 'o.name'])
+      .select([
+        'o.id as outlet_id',
+        'o.code as outlet_code',
+        'o.name as outlet_name',
+      ])
+      .execute();
 
-    const outlet_role_assignments = outletRoleRows.map((row) => ({
-      outlet_id: row.outlet_id,
-      outlet_code: row.outlet_code,
-      outlet_name: row.outlet_name,
-      role_codes: row.role_codes ? (row.role_codes.split(',') as RoleCode[]) : [],
-    }));
+    // For each outlet, get roles separately
+    const outlet_role_assignments = await Promise.all(
+      outletRoleRows.map(async (row) => {
+        const roles = await this.adapter.db
+          .selectFrom('user_role_assignments as ura')
+          .innerJoin('roles as r', 'r.id', 'ura.role_id')
+          .where('ura.user_id', '=', userId)
+          .where('ura.outlet_id', '=', row.outlet_id)
+          .select(['r.code'])
+          .execute();
+
+        return {
+          outlet_id: row.outlet_id,
+          outlet_code: row.outlet_code,
+          outlet_name: row.outlet_name,
+          role_codes: roles.map((r) => r.code as RoleCode),
+        };
+      })
+    );
 
     // Collect all unique roles (global + outlet-specific)
     const allRoleCodes = new Set<RoleCode>([
@@ -293,24 +288,20 @@ export class RBACManager {
    * Returns null if user doesn't exist or is inactive.
    */
   async getUserForTokenVerification(userId: number, companyId: number): Promise<AccessTokenUser | null> {
-    const rows = await this.adapter.queryAll<{
-      id: number;
-      company_id: number;
-      email: string;
-    }>(
-      `SELECT u.id, u.company_id, u.email
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       WHERE u.id = ? AND u.company_id = ? AND u.is_active = 1 AND c.deleted_at IS NULL
-       LIMIT 1`,
-      [userId, companyId]
-    );
+    const row = await this.adapter.db
+      .selectFrom('users as u')
+      .innerJoin('companies as c', 'c.id', 'u.company_id')
+      .where('u.id', '=', userId)
+      .where('u.company_id', '=', companyId)
+      .where('u.is_active', '=', 1)
+      .where('c.deleted_at', 'is', null)
+      .select(['u.id', 'u.company_id', 'u.email'])
+      .executeTakeFirst();
 
-    if (rows.length === 0) {
+    if (!row) {
       return null;
     }
 
-    const row = rows[0];
     return {
       id: row.id,
       company_id: row.company_id,
@@ -323,23 +314,46 @@ export class RBACManager {
    * Returns true if user is SUPER_ADMIN, has global role, or has outlet-specific assignment.
    */
   async hasOutletAccess(userId: number, companyId: number, outletId: number): Promise<boolean> {
-    const rows = await this.adapter.queryAll<{ count: number }>(
-      `SELECT COUNT(*) AS count
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       LEFT JOIN user_role_assignments ura ON ura.user_id = u.id
-       LEFT JOIN roles r ON r.id = ura.role_id
-       LEFT JOIN outlets o ON o.id = ura.outlet_id
-       WHERE u.id = ? AND u.company_id = ? AND u.is_active = 1 AND c.deleted_at IS NULL
-         AND (
-           r.code = "SUPER_ADMIN"
-           OR (r.is_global = 1 AND ura.outlet_id IS NULL)
-           OR (ura.outlet_id = ? AND o.company_id = ?)
-         )`,
-      [userId, companyId, outletId, companyId]
-    );
+    // Check if user is SUPER_ADMIN (use company_id for tenant scoping)
+    const superAdmin = await this.adapter.db
+      .selectFrom('user_role_assignments as ura')
+      .innerJoin('roles as r', 'r.id', 'ura.role_id')
+      .where('ura.user_id', '=', userId)
+      .where('ura.company_id', '=', companyId)
+      .where('r.code', '=', 'SUPER_ADMIN')
+      .where('ura.outlet_id', 'is', null)
+      .select(['ura.id'])
+      .executeTakeFirst();
 
-    return rows.length > 0 && rows[0].count > 0;
+    if (superAdmin) {
+      return true;
+    }
+
+    // Check if user has global role
+    const globalRole = await this.adapter.db
+      .selectFrom('user_role_assignments as ura')
+      .innerJoin('roles as r', 'r.id', 'ura.role_id')
+      .where('ura.user_id', '=', userId)
+      .where('ura.company_id', '=', companyId)
+      .where('r.is_global', '=', 1)
+      .where('ura.outlet_id', 'is', null)
+      .select(['ura.id'])
+      .executeTakeFirst();
+
+    if (globalRole) {
+      return true;
+    }
+
+    // Check if user has outlet-specific assignment
+    const outletAssignment = await this.adapter.db
+      .selectFrom('user_role_assignments as ura')
+      .where('ura.user_id', '=', userId)
+      .where('ura.company_id', '=', companyId)
+      .where('ura.outlet_id', '=', outletId)
+      .select(['ura.id'])
+      .executeTakeFirst();
+
+    return Boolean(outletAssignment);
   }
 
   /**
@@ -348,15 +362,17 @@ export class RBACManager {
    * Does not include global access (SUPER_ADMIN should check differently).
    */
   async listUserOutletIds(userId: number, companyId: number): Promise<number[]> {
-    const rows = await this.adapter.queryAll<{ outlet_id: number }>(
-      `SELECT DISTINCT ura.outlet_id
-       FROM user_role_assignments ura
-       INNER JOIN outlets o ON o.id = ura.outlet_id
-       WHERE ura.user_id = ? AND o.company_id = ? AND ura.outlet_id IS NOT NULL`,
-      [userId, companyId]
-    );
+    // Use company_id for tenant scoping
+    const rows = await this.adapter.db
+      .selectFrom('user_role_assignments as ura')
+      .where('ura.user_id', '=', userId)
+      .where('ura.company_id', '=', companyId)
+      .where('ura.outlet_id', 'is not', null)
+      .groupBy('ura.outlet_id')
+      .select(['ura.outlet_id'])
+      .execute();
 
-    return rows.map((r) => r.outlet_id);
+    return rows.map((r) => r.outlet_id as number);
   }
 
   /**
@@ -371,49 +387,61 @@ export class RBACManager {
     permission?: ModulePermission
   ): Promise<boolean> {
     // First check if user is SUPER_ADMIN (bypasses all checks)
-    const superAdminRows = await this.adapter.queryAll<{ count: number }>(
-      `SELECT COUNT(*) AS count
-       FROM user_role_assignments ura
-       INNER JOIN roles r ON r.id = ura.role_id
-       WHERE ura.user_id = ?
-         AND r.code = "SUPER_ADMIN"
-         AND ura.outlet_id IS NULL`,
-      [userId]
-    );
+    const superAdmin = await this.adapter.db
+      .selectFrom('user_role_assignments as ura')
+      .innerJoin('roles as r', 'r.id', 'ura.role_id')
+      .where('ura.user_id', '=', userId)
+      .where('ura.company_id', '=', companyId)
+      .where('r.code', '=', 'SUPER_ADMIN')
+      .where('ura.outlet_id', 'is', null)
+      .select(['ura.id'])
+      .executeTakeFirst();
 
-    if (superAdminRows.length > 0 && superAdminRows[0].count > 0) {
+    if (superAdmin) {
       return true;
     }
 
     // If no specific permission required, just check for any global role with module access
     if (!permission) {
-      const rows = await this.adapter.queryAll<{ count: number }>(
-        `SELECT COUNT(*) AS count
-         FROM user_role_assignments ura
-         INNER JOIN roles r ON r.id = ura.role_id
-         INNER JOIN module_roles mr ON mr.role_id = r.id
-         WHERE ura.user_id = ? AND mr.company_id = ?
-           AND r.is_global = 1 AND ura.outlet_id IS NULL
-           AND mr.module = ?`,
-        [userId, companyId, module]
-      );
-      return rows.length > 0 && rows[0].count > 0;
+      const moduleAccess = await this.adapter.db
+        .selectFrom('user_role_assignments as ura')
+        .innerJoin('roles as r', 'r.id', 'ura.role_id')
+        .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
+        .where('ura.user_id', '=', userId)
+        .where('ura.company_id', '=', companyId)
+        .where('r.is_global', '=', 1)
+        .where('ura.outlet_id', 'is', null)
+        .where('mr.module', '=', module)
+        .where('mr.company_id', '=', companyId)
+        .select(['mr.id'])
+        .executeTakeFirst();
+
+      return Boolean(moduleAccess);
     }
 
     // Check for specific permission bit
-    const permissionBit = MODULE_PERMISSION_BITS[permission];
-    const rows = await this.adapter.queryAll<{ count: number }>(
-      `SELECT COUNT(*) AS count
-       FROM user_role_assignments ura
-       INNER JOIN roles r ON r.id = ura.role_id
-       INNER JOIN module_roles mr ON mr.role_id = r.id
-       WHERE ura.user_id = ? AND mr.company_id = ?
-         AND r.is_global = 1 AND ura.outlet_id IS NULL
-         AND mr.module = ?
-         AND (mr.permission_mask & ?) <> 0`,
-      [userId, companyId, module, permissionBit]
-    );
+    const moduleAccess = await this.adapter.db
+      .selectFrom('user_role_assignments as ura')
+      .innerJoin('roles as r', 'r.id', 'ura.role_id')
+      .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
+      .where('ura.user_id', '=', userId)
+      .where('ura.company_id', '=', companyId)
+      .where('r.is_global', '=', 1)
+      .where('ura.outlet_id', 'is', null)
+      .where('mr.module', '=', module)
+      .where('mr.company_id', '=', companyId)
+      .select(['mr.permission_mask'])
+      .execute();
 
-    return rows.length > 0 && rows[0].count > 0;
+    if (moduleAccess.length === 0) {
+      return false;
+    }
+
+    // Check if any permission_mask has the required bit
+    const permissionBit = MODULE_PERMISSION_BITS[permission];
+    return moduleAccess.some((row) => {
+      const mask = Number(row.permission_mask);
+      return (mask & permissionBit) !== 0;
+    });
   }
 }

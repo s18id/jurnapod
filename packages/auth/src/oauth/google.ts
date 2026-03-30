@@ -115,21 +115,14 @@ export class GoogleOAuthProvider {
   ): Promise<{ userId: number; companyId: number; email: string } | null> {
     const normalizedEmail = email.trim().toLowerCase();
 
-    const rows = await this.adapter.queryAll<{
-      id: number;
-      company_id: number;
-      email: string;
-      is_active: number;
-    }>(
-      `SELECT u.id, u.company_id, u.email, u.is_active
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       WHERE c.code = ? AND u.email = ?
-       LIMIT 1`,
-      [companyCode, normalizedEmail]
-    );
+    const user = await this.adapter.db
+      .selectFrom('users as u')
+      .innerJoin('companies as c', 'c.id', 'u.company_id')
+      .where('c.code', '=', companyCode)
+      .where('u.email', '=', normalizedEmail)
+      .select(['u.id', 'u.company_id', 'u.email', 'u.is_active'])
+      .executeTakeFirst();
 
-    const user = rows[0];
     if (!user || !user.is_active) {
       return null;
     }
@@ -153,18 +146,14 @@ export class GoogleOAuthProvider {
     const normalizedEmail = params.emailSnapshot.trim().toLowerCase();
 
     // Check for existing link
-    const existingRows = await this.adapter.queryAll<{
-      id: number;
-      user_id: number;
-    }>(
-      `SELECT id, user_id
-       FROM auth_oauth_accounts
-       WHERE company_id = ? AND provider = ? AND provider_user_id = ?
-       LIMIT 1`,
-      [params.companyId, GOOGLE_PROVIDER, params.providerUserId]
-    );
+    const existing = await this.adapter.db
+      .selectFrom('auth_oauth_accounts')
+      .where('company_id', '=', params.companyId)
+      .where('provider', '=', GOOGLE_PROVIDER)
+      .where('provider_user_id', '=', params.providerUserId)
+      .select(['id', 'user_id'])
+      .executeTakeFirst();
 
-    const existing = existingRows[0];
     if (existing) {
       if (existing.user_id !== params.userId) {
         return { success: false, reason: "linked_to_another_user" };
@@ -173,18 +162,16 @@ export class GoogleOAuthProvider {
     }
 
     // Create new link
-    await this.adapter.execute(
-      `INSERT INTO auth_oauth_accounts (
-        company_id, user_id, provider, provider_user_id, email_snapshot
-      ) VALUES (?, ?, ?, ?, ?)`,
-      [
-        params.companyId,
-        params.userId,
-        GOOGLE_PROVIDER,
-        params.providerUserId,
-        normalizedEmail
-      ]
-    );
+    await this.adapter.db
+      .insertInto('auth_oauth_accounts')
+      .values({
+        company_id: params.companyId,
+        user_id: params.userId,
+        provider: GOOGLE_PROVIDER,
+        provider_user_id: params.providerUserId,
+        email_snapshot: normalizedEmail
+      })
+      .execute();
 
     return { success: true, linked: true };
   }

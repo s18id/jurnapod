@@ -11,7 +11,6 @@ import type {
   LoginAuditRecord,
   LoginThrottleKey,
   EmailTokenType,
-  AuthDbConnection,
   AccessCheckOptions,
   AccessCheckResult,
   AuthenticatedUser,
@@ -209,11 +208,10 @@ export function createAuthClient(
       },
 
       async validateAndConsume(
-        connection: AuthDbConnection,
         token: string,
         type: EmailTokenType
       ): Promise<{ userId: number; companyId: number; email: string }> {
-        return emailTokens.validateAndConsume(connection, token, type);
+        return emailTokens.validateAndConsume(token, type);
       },
 
       async invalidate(token: string, type: EmailTokenType): Promise<void> {
@@ -236,30 +234,22 @@ export function createAuthClient(
     // Audit logging - uses adapter directly to insert into audit_logs
     audit: {
       async recordLogin(record: LoginAuditRecord): Promise<void> {
-        await adapter.execute(
-          `INSERT INTO audit_logs (
-            company_id,
-            user_id,
-            action,
-            result,
-            ip_address,
-            user_agent,
-            metadata
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            record.companyId,
-            record.userId,
-            'LOGIN',
-            record.result,
-            record.ipAddress,
-            record.userAgent,
-            JSON.stringify({
+        await adapter.db
+          .insertInto('audit_logs')
+          .values({
+            company_id: record.companyId,
+            user_id: record.userId,
+            action: 'LOGIN',
+            result: record.result,
+            ip_address: record.ipAddress,
+            user_agent: record.userAgent,
+            payload_json: JSON.stringify({
               company_code: record.companyCode,
               email: record.email,
               reason: record.reason,
             }),
-          ]
-        );
+          })
+          .execute();
       },
     },
   };

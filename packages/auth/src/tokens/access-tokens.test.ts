@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { AccessTokenManager } from './access-tokens.js';
-import { testConfig } from '../test-utils/mock-adapter.js';
+import { testConfig } from '../test-utils/test-adapter.js';
 import type { AccessTokenUser } from '../types.js';
 
 test('AccessTokenManager - sign and verify token', async () => {

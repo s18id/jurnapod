@@ -69,12 +69,17 @@ export class RefreshTokenManager {
     const ipAddress = this.normalizeIpAddress(context.ipAddress);
     const userAgent = this.normalizeUserAgent(context.userAgent);
 
-    const result = await this.adapter.execute(
-      `INSERT INTO auth_refresh_tokens (
-        company_id, user_id, token_hash, expires_at, ip_address, user_agent
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
-      [context.companyId, context.userId, tokenHash, expiresAt, ipAddress, userAgent]
-    );
+    const result = await this.adapter.db
+      .insertInto('auth_refresh_tokens')
+      .values({
+        company_id: context.companyId,
+        user_id: context.userId,
+        token_hash: tokenHash,
+        expires_at: expiresAt,
+        ip_address: ipAddress,
+        user_agent: userAgent
+      })
+      .executeTakeFirst();
 
     return {
       token,
@@ -89,26 +94,15 @@ export class RefreshTokenManager {
   ): Promise<RefreshTokenRotateResult> {
     const tokenHash = this.hashToken(refreshToken);
 
-    return this.adapter.transaction(async (tx) => {
+    return this.adapter.db.transaction().execute(async (trx) => {
       // Find existing token with FOR UPDATE lock
-      const rows = await tx.queryAll<
-        {
-          id: number;
-          user_id: number;
-          company_id: number;
-          expires_at: string | Date;
-          revoked_at: string | Date | null;
-        }
-      >(
-        `SELECT id, user_id, company_id, expires_at, revoked_at
-         FROM auth_refresh_tokens
-         WHERE token_hash = ?
-         LIMIT 1
-         FOR UPDATE`,
-        [tokenHash]
-      );
+      const current = await trx
+        .selectFrom('auth_refresh_tokens')
+        .where('token_hash', '=', tokenHash)
+        .forUpdate()
+        .select(['id', 'user_id', 'company_id', 'expires_at', 'revoked_at'])
+        .executeTakeFirst();
 
-      const current = rows[0];
       if (!current) {
         return { success: false, reason: "not_found" };
       }
@@ -120,22 +114,17 @@ export class RefreshTokenManager {
       const expiresAt = current.expires_at instanceof Date
         ? current.expires_at
         : new Date(current.expires_at);
-      
+
       if (expiresAt.getTime() <= Date.now()) {
         return { success: false, reason: "expired" };
       }
 
       // Revoke old token
-      const revokeResult = await tx.execute(
-        `UPDATE auth_refresh_tokens
-         SET revoked_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND revoked_at IS NULL`,
-        [current.id]
-      );
-
-      if (revokeResult.affectedRows !== 1) {
-        return { success: false, reason: "revoked" };
-      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await trx.updateTable("auth_refresh_tokens")
+      .set({ revoked_at: new Date()})
+        .where('id', '=', current.id)
+        .executeTakeFirst();
 
       // Issue new token
       const nextToken = this.generateToken();
@@ -144,21 +133,18 @@ export class RefreshTokenManager {
       const ipAddress = this.normalizeIpAddress(meta.ipAddress);
       const userAgent = this.normalizeUserAgent(meta.userAgent);
 
-      const insertResult = await tx.execute(
-        `INSERT INTO auth_refresh_tokens (
-          company_id, user_id, token_hash, expires_at, rotated_from_id,
-          ip_address, user_agent
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          current.company_id,
-          current.user_id,
-          nextTokenHash,
-          nextExpiresAt,
-          current.id,
-          ipAddress,
-          userAgent
-        ]
-      );
+      const insertResult = await trx
+        .insertInto('auth_refresh_tokens')
+        .values({
+          company_id: current.company_id,
+          user_id: current.user_id,
+          token_hash: nextTokenHash,
+          expires_at: nextExpiresAt,
+          rotated_from_id: current.id,
+          ip_address: ipAddress,
+          user_agent: userAgent
+        })
+        .executeTakeFirst();
 
       return {
         success: true,
@@ -174,13 +160,14 @@ export class RefreshTokenManager {
 
   async revoke(refreshToken: string): Promise<boolean> {
     const tokenHash = this.hashToken(refreshToken);
-    const result = await this.adapter.execute(
-      `UPDATE auth_refresh_tokens
-       SET revoked_at = CURRENT_TIMESTAMP
-       WHERE token_hash = ? AND revoked_at IS NULL`,
-      [tokenHash]
-    );
-    return (result.affectedRows ?? 0) > 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await this.adapter.db
+      .updateTable('auth_refresh_tokens')
+      .set({ revoked_at: new Date() })
+      .where('token_hash', '=', tokenHash)
+      .where('revoked_at', 'is', null)
+      .executeTakeFirst();
+    return (result.numUpdatedRows ?? 0) > 0;
   }
 
   createCookie(token: string, maxAgeSeconds: number): string {

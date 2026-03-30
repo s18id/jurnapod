@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { sql } from "kysely";
 import type { AuthDbAdapter, AuthConfig, LoginThrottleKey } from "../types.js";
 
 export class LoginThrottle {
@@ -42,13 +43,11 @@ export class LoginThrottle {
   async getDelay(keys: LoginThrottleKey[]): Promise<number> {
     if (keys.length === 0) return 0;
 
-    const placeholders = keys.map(() => "?").join(", ");
-    const rows = await this.adapter.queryAll<{ key_hash: string; failure_count: number }>(
-      `SELECT key_hash, failure_count
-       FROM auth_login_throttles
-       WHERE key_hash IN (${placeholders})`,
-      keys.map((k) => k.hash)
-    );
+    const rows = await this.adapter.db
+      .selectFrom('auth_login_throttles')
+      .where('key_hash', 'in', keys.map((k) => k.hash))
+      .select(['key_hash', 'failure_count'])
+      .execute();
 
     const failureCounts = new Map(rows.map((r) => [r.key_hash, Number(r.failure_count)]));
 
@@ -71,29 +70,34 @@ export class LoginThrottle {
 
     const ipAddress = params.ipAddress?.trim() || null;
     const userAgent = params.userAgent?.trim() || null;
-    const values = params.keys.flatMap((k) => [k.hash, ipAddress, userAgent]);
-    const placeholders = params.keys.map(() => "(?, 1, NOW(), ?, ?)").join(", ");
 
-    await this.adapter.execute(
-      `INSERT INTO auth_login_throttles (
-        key_hash, failure_count, last_failed_at, last_ip, last_user_agent
-      ) VALUES ${placeholders}
-      ON DUPLICATE KEY UPDATE
-        failure_count = failure_count + 1,
-        last_failed_at = NOW(),
-        last_ip = VALUES(last_ip),
-        last_user_agent = VALUES(last_user_agent)`,
-      values
-    );
+    // Use Kysely's onDuplicateKeyUpdate for MySQL/MariaDB
+    for (const k of params.keys) {
+      await this.adapter.db
+        .insertInto('auth_login_throttles')
+        .values({
+          key_hash: k.hash,
+          failure_count: 1,
+          last_failed_at: new Date(),
+          last_ip: ipAddress,
+          last_user_agent: userAgent
+        })
+        .onDuplicateKeyUpdate({
+          failure_count: sql`failure_count + 1`,
+          last_failed_at: new Date(),
+          last_ip: sql`VALUES(last_ip)`,
+          last_user_agent: sql`VALUES(last_user_agent)`
+        })
+        .execute();
+    }
   }
 
   async recordSuccess(keys: LoginThrottleKey[]): Promise<void> {
     if (keys.length === 0) return;
 
-    const placeholders = keys.map(() => "?").join(", ");
-    await this.adapter.execute(
-      `DELETE FROM auth_login_throttles WHERE key_hash IN (${placeholders})`,
-      keys.map((k) => k.hash)
-    );
+    await this.adapter.db
+      .deleteFrom('auth_login_throttles')
+      .where('key_hash', 'in', keys.map((k) => k.hash))
+      .execute();
   }
 }

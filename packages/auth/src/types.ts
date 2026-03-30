@@ -6,54 +6,28 @@
 // Database Adapter Interfaces
 // ---------------------------------------------------------------------------
 
+import type { Kysely } from 'kysely';
+import type { DB } from '@jurnapod/db/kysely';
+
 /**
- * Database adapter interface that consumers must implement.
- * This decouples the auth package from any specific database library.
+ * Database adapter interface for auth package.
+ * 
+ * Provides direct Kysely instance for type-safe query building.
+ * Modules should use: this.adapter.db.selectFrom(), .insertInto(), .updateTable(), .deleteFrom()
  */
 export interface AuthDbAdapter {
   /**
-   * Execute a SELECT query and return rows.
-   * @param sql - SQL query string with ? placeholders
-   * @param params - Query parameters
-   * @returns Array of row objects
+   * Kysely instance for type-safe query building.
+   * Use: this.adapter.db.selectFrom('table').where(...).execute()
    */
-  queryAll<T>(sql: string, params: unknown[]): Promise<T[]>;
-
-  /**
-   * Execute an INSERT/UPDATE/DELETE query.
-   * @param sql - SQL query string with ? placeholders
-   * @param params - Query parameters
-   * @returns Result with insertId and affectedRows
-   */
-  execute(
-    sql: string,
-    params: unknown[]
-  ): Promise<{ insertId?: number | bigint; affectedRows?: number }>;
+  db: Kysely<DB>;
 
   /**
    * Execute a function within a database transaction.
-   * The function receives an adapter scoped to the transaction.
    * @param fn - Function to execute within transaction
    * @returns Result of the function
    */
-  transaction<T>(fn: (adapter: AuthDbAdapter) => Promise<T>): Promise<T>;
-}
-
-/**
- * Extended adapter with raw connection access for advanced use cases.
- * Optional - only needed for email token atomic consumption.
- */
-export interface AuthDbAdapterWithConnection extends AuthDbAdapter {
-  getConnection(): Promise<AuthDbConnection>;
-}
-
-export interface AuthDbConnection {
-  queryAll<T>(sql: string, params: unknown[]): Promise<T[]>;
-  execute(sql: string, params: unknown[]): Promise<{ insertId?: number | bigint; affectedRows?: number }>;
-  beginTransaction(): Promise<void>;
-  commit(): Promise<void>;
-  rollback(): Promise<void>;
-  release(): Promise<void>;
+  transaction<T>(fn: (trx: AuthDbAdapter) => Promise<T>): Promise<T>;
 }
 
 // ---------------------------------------------------------------------------
@@ -398,9 +372,8 @@ export interface AuthClient {
       email: string;
     }>;
     
-    /** Validate and atomically consume a token (requires connection) */
+    /** Validate and atomically consume a token */
     validateAndConsume(
-      connection: AuthDbConnection,
       token: string,
       type: EmailTokenType
     ): Promise<{ userId: number; companyId: number; email: string }>;

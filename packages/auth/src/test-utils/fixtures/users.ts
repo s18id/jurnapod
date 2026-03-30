@@ -19,13 +19,17 @@ export async function createUser(
   const plainPassword = overrides.password_hash || 'TestPassword123!';
   const passwordHash = await hasher.hash(plainPassword);
   const email = overrides.email || `test${Date.now()}@example.com`;
-  
-  const result = await adapter.execute(
-    `INSERT INTO users (company_id, email, password_hash, is_active, created_at)
-     VALUES (?, ?, ?, ?, NOW())`,
-    [companyId, email, passwordHash, overrides.is_active ?? 1]
-  );
-  
+
+  const result = await adapter.db
+    .insertInto('users')
+    .values({
+      company_id: companyId,
+      email,
+      password_hash: passwordHash,
+      is_active: overrides.is_active ?? 1,
+    })
+    .executeTakeFirst();
+
   return {
     id: Number(result.insertId),
     company_id: companyId,
@@ -38,9 +42,20 @@ export async function createUser(
 
 export async function cleanupUsers(adapter: AuthDbAdapter, ids: number[]): Promise<void> {
   if (ids.length === 0) return;
-  const placeholders = ids.map(() => '?').join(',');
-  await adapter.execute(
-    `DELETE FROM users WHERE id IN (${placeholders})`,
-    ids
-  );
+  
+  // Delete related tokens before users (explicit cleanup for test isolation)
+  await adapter.db
+    .deleteFrom('email_tokens')
+    .where('user_id', 'in', ids)
+    .execute();
+  
+  await adapter.db
+    .deleteFrom('auth_refresh_tokens')
+    .where('user_id', 'in', ids)
+    .execute();
+  
+  await adapter.db
+    .deleteFrom('users')
+    .where('id', 'in', ids)
+    .execute();
 }

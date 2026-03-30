@@ -69,17 +69,11 @@ test('LoginThrottle Integration - recordFailure() creates throttle record', { sk
   });
 
   // Verify record exists in auth_login_throttles table
-  const rows = await adapter.queryAll<{
-    key_hash: string;
-    failure_count: number;
-    last_ip: string | null;
-    last_user_agent: string | null;
-  }>(
-    `SELECT key_hash, failure_count, last_ip, last_user_agent
-     FROM auth_login_throttles
-     WHERE key_hash IN (?, ?)`,
-    keys.map(k => k.hash)
-  );
+  const rows = await adapter.db
+    .selectFrom('auth_login_throttles')
+    .where('key_hash', 'in', keys.map(k => k.hash))
+    .select(['key_hash', 'failure_count', 'last_ip', 'last_user_agent'])
+    .execute();
 
   assert.strictEqual(rows.length, 2, 'Should have 2 throttle records (primary + IP key)');
   
@@ -118,12 +112,11 @@ test('LoginThrottle Integration - recordFailure() increments failure count', { s
   }
 
   // Verify failure_count = 3 in database
-  const rows = await adapter.queryAll<{ key_hash: string; failure_count: number }>(
-    `SELECT key_hash, failure_count
-     FROM auth_login_throttles
-     WHERE key_hash IN (?, ?)`,
-    keys.map(k => k.hash)
-  );
+  const rows = await adapter.db
+    .selectFrom('auth_login_throttles')
+    .where('key_hash', 'in', keys.map(k => k.hash))
+    .select(['key_hash', 'failure_count'])
+    .execute();
 
   assert.strictEqual(rows.length, 2, 'Should have 2 throttle records');
   
@@ -232,20 +225,22 @@ test('LoginThrottle Integration - recordSuccess() clears throttle entries', { sk
   }
 
   // Verify we have records
-  let rows = await adapter.queryAll<{ key_hash: string }>(
-    `SELECT key_hash FROM auth_login_throttles WHERE key_hash IN (?, ?)`,
-    keys.map(k => k.hash)
-  );
+  let rows = await adapter.db
+    .selectFrom('auth_login_throttles')
+    .where('key_hash', 'in', keys.map(k => k.hash))
+    .select(['key_hash'])
+    .execute();
   assert.strictEqual(rows.length, 2, 'Should have 2 throttle records before clear');
 
   // Call recordSuccess to clear
   await throttle.recordSuccess(keys);
 
   // Verify entries deleted from database
-  rows = await adapter.queryAll<{ key_hash: string }>(
-    `SELECT key_hash FROM auth_login_throttles WHERE key_hash IN (?, ?)`,
-    keys.map(k => k.hash)
-  );
+  rows = await adapter.db
+    .selectFrom('auth_login_throttles')
+    .where('key_hash', 'in', keys.map(k => k.hash))
+    .select(['key_hash'])
+    .execute();
   assert.strictEqual(rows.length, 0, 'All throttle entries should be deleted');
 
   // Verify getDelay returns 0

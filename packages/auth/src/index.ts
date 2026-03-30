@@ -6,8 +6,6 @@
 // Re-export all types
 export type {
   AuthDbAdapter,
-  AuthDbAdapterWithConnection,
-  AuthDbConnection,
   AuthConfig,
   RoleCode,
   ModulePermission,

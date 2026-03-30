@@ -2,7 +2,6 @@ import { createHash, randomBytes } from "node:crypto";
 import type {
   AuthDbAdapter,
   AuthConfig,
-  AuthDbConnection,
   EmailTokenType
 } from "../types.js";
 import {
@@ -30,7 +29,7 @@ export class EmailTokenManager {
   constructor(
     private adapter: AuthDbAdapter,
     private config: AuthConfig
-  ) {}
+  ) { }
 
   private hashToken(token: string): string {
     return createHash("sha256").update(token).digest("hex");
@@ -64,24 +63,34 @@ export class EmailTokenManager {
     createdBy: number;
   }): Promise<{ token: string; expiresAt: Date }> {
     const ttlMinutes = this.getTtlMinutes(params.type);
-    const token = this.generateToken();
-    const tokenHash = this.hashToken(token);
+    let token = this.generateToken();
+    let tokenHash = this.hashToken(token);
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
-    await this.adapter.execute(
-      `INSERT INTO email_tokens (
-        company_id, user_id, email, token_hash, type, expires_at, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        params.companyId,
-        params.userId,
-        params.email,
-        tokenHash,
-        params.type,
-        expiresAt,
-        params.createdBy
-      ]
-    );
+    const rows = await this.adapter.db
+      .selectFrom('email_tokens')
+      .select(['user_id', 'company_id', 'email', 'used_at', 'expires_at'])
+      .where('token_hash', '=', tokenHash)
+      .where('type', '=', params.type)
+      .execute();
+
+    if (rows.length > 0) {
+      token = this.generateToken()
+      tokenHash = this.hashToken(token)
+    }
+
+    await this.adapter.db
+      .insertInto('email_tokens')
+      .values({
+        company_id: params.companyId,
+        user_id: params.userId,
+        email: params.email,
+        token_hash: tokenHash,
+        type: params.type,
+        expires_at: expiresAt,
+        created_by: params.createdBy
+      })
+      .execute();
 
     return { token, expiresAt };
   }
@@ -92,19 +101,16 @@ export class EmailTokenManager {
   ): Promise<{ userId: number; companyId: number; email: string }> {
     const tokenHash = this.hashToken(token);
 
-    const rows = await this.adapter.queryAll<EmailTokenRow>(
-      `SELECT user_id, company_id, email, used_at, expires_at
-       FROM email_tokens
-       WHERE token_hash = ? AND type = ?
-       LIMIT 1`,
-      [tokenHash, type]
-    );
+    const row = await this.adapter.db
+      .selectFrom('email_tokens')
+      .select(['user_id', 'company_id', 'email', 'used_at', 'expires_at'])
+      .where('token_hash', '=', tokenHash)
+      .where('type', '=', type)
+      .executeTakeFirst();
 
-    if (rows.length === 0) {
+    if (!row) {
       throw new EmailTokenInvalidError("Invalid token");
     }
-
-    const row = rows[0];
 
     if (row.used_at) {
       throw new EmailTokenUsedError("Token has already been used");
@@ -126,76 +132,96 @@ export class EmailTokenManager {
   }
 
   async validateAndConsume(
-    connection: AuthDbConnection,
     token: string,
     type: EmailTokenType
   ): Promise<{ userId: number; companyId: number; email: string }> {
     const tokenHash = this.hashToken(token);
 
-    // Atomically consume token
-    const updateResult = await connection.execute(
-      `UPDATE email_tokens
-       SET used_at = CURRENT_TIMESTAMP
-       WHERE token_hash = ? AND type = ?
-         AND used_at IS NULL AND expires_at > NOW()`,
-      [tokenHash, type]
-    );
+    // Use transaction for atomic consumption
+    const result = await this.adapter.db.transaction().execute(async (trx) => {
+      // Determine specific error - fetch the token to see why it failed
+      const exists = await trx
+        .selectFrom('email_tokens')
+        .where('token_hash', '=', tokenHash)
+        .where('type', '=', type)
+        .forUpdate()
+        .select(['user_id', 'company_id', 'email', 'used_at', 'expires_at'])
+        .executeTakeFirst();
 
-    if (updateResult.affectedRows === 0) {
-      // Determine specific error
-      const rows = await connection.queryAll<EmailTokenRow>(
-        `SELECT user_id, company_id, email, used_at, expires_at
-         FROM email_tokens
-         WHERE token_hash = ? AND type = ?
-         LIMIT 1`,
-        [tokenHash, type]
-      );
-
-      if (rows.length === 0) {
+      if (!exists) {
         throw new EmailTokenInvalidError("Invalid token");
       }
 
-      const row = rows[0];
-
-      if (row.used_at) {
+      if (exists.used_at) {
         throw new EmailTokenUsedError("Token has already been used");
       }
 
-      const expiresAt = row.expires_at instanceof Date
-        ? row.expires_at
-        : new Date(row.expires_at);
+      // Check expiry BEFORE attempting update
+      const expiresAt = exists.expires_at instanceof Date
+        ? exists.expires_at
+        : new Date(exists.expires_at);
 
       if (expiresAt < new Date()) {
         throw new EmailTokenExpiredError("Token has expired");
       }
 
-      throw new EmailTokenInvalidError("Token validation failed");
-    }
+      // Atomically update - set used_at where it's NULL
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const updateResult: any = await trx
+        .updateTable('email_tokens')
+        .set({ used_at: new Date() })
+        .where('token_hash', '=', tokenHash)
+        .where('type', '=', type)
+        .where('used_at', 'is', null)
+        .executeTakeFirst();
 
-    // Get consumed token details
-    const rows = await connection.queryAll<{ user_id: number; company_id: number; email: string }>(
-      `SELECT user_id, company_id, email
-       FROM email_tokens
-       WHERE token_hash = ? AND type = ?
-       LIMIT 1`,
-      [tokenHash, type]
-    );
+      const numAffected = updateResult.numUpdatedRows || 0;
 
-    const row = rows[0];
+      if (numAffected === 0) {
+        // Race condition - another transaction consumed it first
+        throw new EmailTokenUsedError("Token has already been used");
+      }
+
+      // Get consumed token details
+      const consumed = await trx
+        .selectFrom('email_tokens')
+        .where('token_hash', '=', tokenHash)
+        .where('type', '=', type)
+        .select(['user_id', 'company_id', 'email'])
+        .executeTakeFirst();
+
+      return consumed!;
+    });
+
     return {
-      userId: row.user_id,
-      companyId: row.company_id,
-      email: row.email
+      userId: result.user_id,
+      companyId: result.company_id,
+      email: result.email
     };
   }
 
   async invalidate(token: string, type: EmailTokenType): Promise<void> {
     const tokenHash = this.hashToken(token);
-    await this.adapter.execute(
-      `UPDATE email_tokens SET used_at = CURRENT_TIMESTAMP
-       WHERE token_hash = ? AND type = ?`,
-      [tokenHash, type]
-    );
+    await this.adapter.db
+      .updateTable('email_tokens')
+      .set({ used_at: new Date() })
+      .where('token_hash', '=', tokenHash)
+      .where('type', '=', type)
+      .execute();
+  }
+
+  /**
+   * Expire a token by setting expires_at to the past.
+   * FOR TESTING PURPOSES ONLY.
+   */
+  async expireToken(token: string, type: EmailTokenType): Promise<void> {
+    const tokenHash = this.hashToken(token);
+    await this.adapter.db
+      .updateTable('email_tokens')
+      .set({ expires_at: new Date(Date.now() - 1000) })
+      .where('token_hash', '=', tokenHash)
+      .where('type', '=', type)
+      .execute();
   }
 
   async getInfo(
@@ -209,17 +235,15 @@ export class EmailTokenManager {
   } | null> {
     const tokenHash = this.hashToken(token);
 
-    const rows = await this.adapter.queryAll<EmailTokenRowWithoutUsed>(
-      `SELECT user_id, company_id, email, expires_at
-       FROM email_tokens
-       WHERE token_hash = ? AND type = ?
-       LIMIT 1`,
-      [tokenHash, type]
-    );
+    const row = await this.adapter.db
+      .selectFrom('email_tokens')
+      .where('token_hash', '=', tokenHash)
+      .where('type', '=', type)
+      .select(['user_id', 'company_id', 'email', 'expires_at'])
+      .executeTakeFirst();
 
-    if (rows.length === 0) return null;
+    if (!row) return null;
 
-    const row = rows[0];
     return {
       userId: row.user_id,
       companyId: row.company_id,

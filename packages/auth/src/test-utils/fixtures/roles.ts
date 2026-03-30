@@ -3,6 +3,7 @@ import type { AuthDbAdapter } from '../../types.js';
 export interface RoleAssignment {
   userId: number;
   roleId: number;
+  companyId: number;
   outletId?: number | null;
 }
 
@@ -10,22 +11,27 @@ export async function getRoleIdByCode(
   adapter: AuthDbAdapter,
   code: string
 ): Promise<number | null> {
-  const rows = await adapter.queryAll<{ id: number }>(
-    'SELECT id FROM roles WHERE code = ? LIMIT 1',
-    [code]
-  );
-  return rows[0]?.id ?? null;
+  const row = await adapter.db
+    .selectFrom('roles')
+    .where('code', '=', code)
+    .select(['id'])
+    .executeTakeFirst();
+  return row?.id ?? null;
 }
 
 export async function assignUserRole(
   adapter: AuthDbAdapter,
   assignment: RoleAssignment
 ): Promise<void> {
-  await adapter.execute(
-    `INSERT INTO user_role_assignments (user_id, role_id, outlet_id, created_at)
-     VALUES (?, ?, ?, NOW())`,
-    [assignment.userId, assignment.roleId, assignment.outletId ?? null]
-  );
+  await adapter.db
+    .insertInto('user_role_assignments')
+    .values({
+      user_id: assignment.userId,
+      role_id: assignment.roleId,
+      company_id: assignment.companyId,
+      outlet_id: assignment.outletId ?? null,
+    })
+    .execute();
 }
 
 export async function cleanupRoleAssignments(
@@ -33,9 +39,8 @@ export async function cleanupRoleAssignments(
   userIds: number[]
 ): Promise<void> {
   if (userIds.length === 0) return;
-  const placeholders = userIds.map(() => '?').join(',');
-  await adapter.execute(
-    `DELETE FROM user_role_assignments WHERE user_id IN (${placeholders})`,
-    userIds
-  );
+  await adapter.db
+    .deleteFrom('user_role_assignments')
+    .where('user_id', 'in', userIds)
+    .execute();
 }
