@@ -3,67 +3,9 @@
 ## Package Purpose
 
 Database connectivity and schema management layer for Jurnapod ERP.
-- **mysql2** for raw SQL and connection pooling
 - **Kysely** for type-safe query building
+- **mysql2** as the underlying driver
 - **Idempotent migrations** for schema evolution
-
----
-
-## ⚠️ MANDATORY: DbConn-Only Standard
-
-**ALL database access MUST use `DbConn`. Direct `mysql2/promise` usage is STRICTLY FORBIDDEN.**
-
-### Enforcement Rules
-
-| Pattern | Status |
-|---------|--------|
-| `import { DbConn } from '@jurnapod/db'` | ✅ **REQUIRED** |
-| `const db = new DbConn(pool)` | ✅ **REQUIRED** |
-| `db.query()`, `db.execute()`, `db.kysely` | ✅ **REQUIRED** |
-| `import ... from 'mysql2/promise'` | ❌ **ABSOLUTELY FORBIDDEN** |
-| `import type { Pool } from 'mysql2/promise'` | ❌ **ABSOLUTELY FORBIDDEN** |
-| `import type { RowDataPacket } from 'mysql2/promise'` | ❌ **ABSOLUTELY FORBIDDEN** |
-| `import type { RowDataPacket } from 'mysql2'` | ✅ **ALLOWED for type assertions** |
-| `import type { ResultSetHeader } from 'mysql2'` | ✅ **ALLOWED for type assertions** |
-
-### Correct Usage
-
-```typescript
-// ✅ CORRECT - Use DbConn
-import { createDbPool, DbConn } from '@jurnapod/db';
-import type { RowDataPacket } from 'mysql2';  // Type assertions only
-
-const pool = createDbPool({ uri: 'mysql://...' });
-const db = new DbConn(pool);
-
-// Raw SQL
-const rows = await db.query<RowDataPacket>('SELECT * FROM accounts WHERE company_id = ?', [companyId]);
-
-// Type-safe Kysely
-const accounts = await db.kysely
-  .selectFrom('accounts')
-  .where('company_id', '=', companyId)
-  .selectAll()
-  .execute();
-```
-
-### Forbidden Usage
-
-```typescript
-// ❌ FORBIDDEN - will fail code review
-import type { Pool, RowDataPacket } from 'mysql2/promise';
-import { createKysely } from '@jurnapod/db/kysely';  // Legacy - use DbConn.kysely instead
-
-// ❌ FORBIDDEN - direct pool usage
-const pool = createDbPool({...});
-const [rows] = await pool.execute('SELECT ...');  // NEVER
-```
-
-### Review Checklist Addition
-
-- [ ] **NO imports from `mysql2/promise`** anywhere in the codebase
-- [ ] All database operations go through `DbConn`
-- [ ] Type imports only from `mysql2` (not `/promise`) for assertions
 
 ---
 
@@ -142,49 +84,46 @@ This updates `src/kysely/schema.ts` with TypeScript types from live database.
 
 ## Database Client Usage
 
-### Basic DbConn
+### Package Exports
 
 ```typescript
-import { createDbPool, DbConn } from '@jurnapod/db';
-
-const pool = createDbPool({
-  uri: 'mysql://user:pass@localhost:3306/jurnapod?charset=utf8mb4&dateStrings=true',
-  connectionLimit: 10
-});
-
-const db = new DbConn(pool);
+import { 
+  Kysely,
+  sql,
+  type Transaction,
+  type Sql,
+  type DatabaseSchema,
+  type DbPoolConfig,
+  createKysely,
+  getKysely
+} from '@jurnapod/db';
 ```
 
-### Raw SQL Queries
+### Create Fresh Instance (Tests)
 
 ```typescript
-// SELECT - returns typed rows
-const rows = await db.query<RowDataPacket>(
-  'SELECT * FROM accounts WHERE company_id = ? AND is_active = 1',
-  [companyId]
-);
+import { createKysely } from '@jurnapod/db';
 
-// SELECT single row - returns one row or null
-const account = await db.querySingle<RowDataPacket>(
-  'SELECT * FROM accounts WHERE company_id = ? AND id = ?',
-  [companyId, accountId]
-);
+const db = createKysely({ uri: 'mysql://...' });
 
-// INSERT/UPDATE/DELETE - returns result with insertId/affectedRows
-const result = await db.execute(
-  'INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)',
-  [companyId, code, name]
-);
-console.log(result.insertId);
+// ... use db ...
+await db.destroy();
 ```
 
-### Kysely Type-Safe Queries
+### Singleton Pattern (API Server)
 
 ```typescript
-import type { DB } from '@jurnapod/db';
+import { getKysely } from '@jurnapod/db';
 
-// Select
-const accounts = await db.kysely
+// Returns singleton instance
+const db = getKysely({ uri: 'mysql://...' });
+```
+
+### Type-Safe Queries
+
+```typescript
+// Select all matching rows
+const accounts = await db
   .selectFrom('accounts')
   .where('company_id', '=', companyId)
   .where('deleted_at', 'is', null)
@@ -192,41 +131,53 @@ const accounts = await db.kysely
   .execute();
 
 // Insert with returning
-const newAccount = await db.kysely
+const newAccount = await db
   .insertInto('accounts')
   .values({ company_id: companyId, code, name, is_active: true })
   .returningAll()
   .executeTakeFirst();
+
+// Update with returning
+const updated = await db
+  .updateTable('accounts')
+  .set({ name: newName })
+  .where('id', '=', accountId)
+  .returningAll()
+  .executeTakeFirst();
+
+// Delete
+await db
+  .deleteFrom('accounts')
+  .where('id', '=', accountId)
+  .execute();
 ```
 
 ### Transactions
 
 ```typescript
-// Manual transaction
-await db.begin();
-try {
-  await db.execute('INSERT INTO accounts ...', [...]);
-  await db.execute('UPDATE companies SET ...', [...]);
-  await db.commit();
-} catch (error) {
-  await db.rollback();
-  throw error;
-}
+// Transaction with automatic rollback on error
+await db.transaction().execute(async (trx) => {
+  await trx.insertInto('items').values({...}).execute();
+  await trx.updateTable('inventory').set({...}).where(...).execute();
+  // Throw to trigger automatic rollback
+});
+```
 
-// Single query transaction helper
-const result = await db.withTransaction(
-  'INSERT INTO accounts (company_id, code, name) VALUES (?, ?, ?)',
-  [companyId, code, name]
-);
+### Raw SQL Escape Hatch
 
-// Kysely transaction
-const trx = await db.startTransaction().execute();
-try {
-  await trx.insertInto('journal_batches').values({ ... }).execute();
-  await trx.commit().execute();
-} catch (error) {
-  await trx.rollback().execute();
-}
+```typescript
+import { sql } from 'kysely';
+
+// Parameterized raw SQL
+const result = await sql`SELECT * FROM items WHERE id = ${itemId}`.execute(db);
+
+// Complex queries
+const complex = await sql`
+  SELECT a.*, b.name as category_name 
+  FROM items a 
+  LEFT JOIN categories b ON a.category_id = b.id 
+  WHERE a.company_id = ${companyId}
+`.execute(db);
 ```
 
 ---
@@ -239,13 +190,17 @@ try {
 
 ```typescript
 // CORRECT
-await db.query(
-  'SELECT * FROM accounts WHERE company_id = ? AND id = ?',
-  [companyId, accountId]
-);
+const account = await db
+  .selectFrom('accounts')
+  .where('company_id', '=', companyId)
+  .where('id', '=', accountId)
+  .executeTakeFirst();
 
 // WRONG - missing tenant scoping
-await db.query('SELECT * FROM accounts WHERE id = ?', [accountId]);
+const account = await db
+  .selectFrom('accounts')
+  .where('id', '=', accountId)
+  .executeTakeFirst();
 ```
 
 ### Money Handling
@@ -279,14 +234,13 @@ WHERE created_at >= '2024-01-01' AND created_at < '2024-01-02'
 ```
 packages/db/
 ├── src/
-│   ├── index.ts              # Main exports
-│   ├── pool.ts               # Connection pool factory
-│   ├── mysql-client.ts       # Raw SQL client (DbConn)
-│   ├── jurnapod-client.ts    # Client interfaces
+│   ├── index.ts              # Main exports (Kysely API)
+│   ├── pool.ts               # Connection pool configuration
 │   └── kysely/
-│       ├── index.ts          # Kysely exports
+│       ├── index.ts          # Kysely factory functions
 │       ├── schema.ts         # Auto-generated types
-│       └── schema-extended.ts # Manual type extensions
+│       ├── schema-extended.ts # Manual type extensions
+│       └── transaction.ts     # Transaction helpers
 ├── migrations/
 │   ├── 0000_schema_migrations.sql
 │   ├── 0001_companies.sql
@@ -330,6 +284,9 @@ When modifying this package:
 - [ ] TypeScript types regenerated if schema changed
 - [ ] Migration tested locally (run twice to verify idempotency)
 - [ ] MySQL 8.0+ and MariaDB compatible syntax
+- [ ] Use `createKysely` for tests, `getKysely` for server singletons
+- [ ] Prefer type-safe Kysely queries over raw SQL
+- [ ] Use `sql` template tag for raw SQL escape hatch
 
 ---
 

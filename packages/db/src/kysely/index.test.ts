@@ -2,15 +2,16 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 /**
- * Tests for Kysely integration via DbConn
+ * Tests for Kysely factory functions.
  * 
  * Note: MariaDB doesn't support RETURNING clause, so we use insertId + SELECT pattern
  */
 
 import { test, after, describe, beforeEach } from 'node:test';
 import assert from 'node:assert';
-import { createDbPool, DbConn } from '../index.js';
-import type { Pool } from 'mysql2';
+import { createKysely, getKysely } from './index.js';
+import type { Kysely } from 'kysely';
+import type { DB } from './schema.js';
 
 // Test database configuration from environment
 const TEST_CONFIG = {
@@ -21,12 +22,17 @@ const TEST_CONFIG = {
   database: process.env.DB_NAME || 'jurnapod'
 };
 
-describe('Kysely via DbConn', () => {
-  let pool: Pool;
-  let db: DbConn;
+describe('createKysely', () => {
+  let db: Kysely<DB>;
 
-  beforeEach(() => {
-    pool = createDbPool({
+  after(async () => {
+    if (db) {
+      await db.destroy();
+    }
+  });
+
+  test('creates Kysely instance with connection params', async () => {
+    db = createKysely({
       host: TEST_CONFIG.host,
       port: TEST_CONFIG.port,
       user: TEST_CONFIG.user,
@@ -34,27 +40,19 @@ describe('Kysely via DbConn', () => {
       database: TEST_CONFIG.database,
       connectionLimit: 5
     });
-    db = new DbConn(pool);
-  });
 
-  after(async () => {
-    if (pool) {
-      await pool.end();
-    }
-  });
+    const result = await db
+      .selectFrom('companies')
+      .select(['id', 'code', 'name'])
+      .limit(1)
+      .executeTakeFirst();
 
-  test('db.kysely returns Kysely instance', () => {
-    const kysely = db.kysely;
-    assert.ok(kysely !== null);
-    assert.ok(typeof kysely.selectFrom === 'function');
-    assert.ok(typeof kysely.insertInto === 'function');
+    // Result may be null if table is empty, but query should work
+    assert.ok(result === null || (result !== undefined && typeof result.id === 'number'));
   });
 
   test('can execute type-safe SELECT query', async () => {
-    const kysely = db.kysely;
-
-    // Use a table that exists in the schema
-    const result = await kysely
+    const result = await db
       .selectFrom('companies')
       .select(['id', 'code', 'name'])
       .limit(1)
@@ -65,24 +63,20 @@ describe('Kysely via DbConn', () => {
   });
 
   test('properly reuses the mysql2 pool', async () => {
-    const kysely = db.kysely;
-
     // Execute multiple queries
-    await kysely.selectFrom('companies').select(['id']).limit(1).executeTakeFirst();
-    await kysely.selectFrom('companies').select(['id']).limit(1).executeTakeFirst();
-    await kysely.selectFrom('companies').select(['id']).limit(1).executeTakeFirst();
+    await db.selectFrom('companies').select(['id']).limit(1).executeTakeFirst();
+    await db.selectFrom('companies').select(['id']).limit(1).executeTakeFirst();
+    await db.selectFrom('companies').select(['id']).limit(1).executeTakeFirst();
 
     // If we get here without errors, the pool is being reused correctly
     assert.ok(true);
   });
 
   test('can insert and retrieve', async () => {
-    const kysely = db.kysely;
-
     const code = 'TEST_KYSELY_' + Date.now();
 
     // Insert without returning (MariaDB doesn't support RETURNING)
-    const result = await kysely
+    const result = await db
       .insertInto('companies')
       .values({
         code,
@@ -95,7 +89,7 @@ describe('Kysely via DbConn', () => {
     assert.ok(typeof result.insertId === 'bigint' || typeof result.insertId === 'number');
 
     // Verify by querying
-    const inserted = await kysely
+    const inserted = await db
       .selectFrom('companies')
       .where('code', '=', code)
       .select(['id', 'code', 'name'])
@@ -107,19 +101,22 @@ describe('Kysely via DbConn', () => {
   });
 
   test('can use where clause with type safety', async () => {
-    const kysely = db.kysely;
-
-    // First insert a known record using DbConn.execute for insertId
     const code = 'TEST_WHERE_' + Date.now();
-    const execResult = await db.execute(
-      'INSERT INTO companies (code, name) VALUES (?, ?)',
-      [code, 'Test Where Clause']
-    );
 
-    assert.ok(execResult.insertId);
+    // Insert using Kysely
+    const execResult = await db
+      .insertInto('companies')
+      .values({
+        code,
+        name: 'Test Where Clause'
+      })
+      .executeTakeFirst();
+
+    assert.ok(execResult);
+    const insertId = Number(execResult.insertId);
 
     // Query with where clause using Kysely
-    const result = await kysely
+    const result = await db
       .selectFrom('companies')
       .where('code', '=', code)
       .select(['id', 'code', 'name'])
@@ -131,26 +128,29 @@ describe('Kysely via DbConn', () => {
   });
 
   test('can update with type-safe query', async () => {
-    const kysely = db.kysely;
-
-    // Insert a record using DbConn.execute
     const code = 'TEST_UPDATE_' + Date.now();
-    const execResult = await db.execute(
-      'INSERT INTO companies (code, name) VALUES (?, ?)',
-      [code, 'Original Name']
-    );
 
-    assert.ok(execResult.insertId);
+    // Insert a record using Kysely
+    const execResult = await db
+      .insertInto('companies')
+      .values({
+        code,
+        name: 'Original Name'
+      })
+      .executeTakeFirst();
+
+    assert.ok(execResult);
+    const insertId = Number(execResult.insertId);
 
     // Update the record using Kysely
-    await kysely
+    await db
       .updateTable('companies')
       .set({ name: 'Updated Name' })
-      .where('id', '=', Number(execResult.insertId))
+      .where('id', '=', insertId)
       .execute();
 
     // Verify the update
-    const updated = await kysely
+    const updated = await db
       .selectFrom('companies')
       .where('code', '=', code)
       .select(['id', 'code', 'name'])
@@ -161,22 +161,27 @@ describe('Kysely via DbConn', () => {
   });
 
   test('can delete with type-safe query', async () => {
-    const kysely = db.kysely;
-
-    // Insert a record using DbConn.execute
     const code = 'TEST_DELETE_' + Date.now();
-    const execResult = await db.execute(
-      'INSERT INTO companies (code, name) VALUES (?, ?)',
-      [code, 'To Be Deleted']
-    );
 
-    assert.ok(execResult.insertId);
+    // Insert a record using Kysely
+    const execResult = await db
+      .insertInto('companies')
+      .values({
+        code,
+        name: 'To Be Deleted'
+      })
+      .executeTakeFirst();
 
-    // Delete using raw SQL (MariaDB doesn't support DELETE...RETURNING that Kysely may generate)
-    await db.execute('DELETE FROM companies WHERE code = ?', [code]);
+    assert.ok(execResult);
+
+    // Delete using Kysely
+    await db
+      .deleteFrom('companies')
+      .where('code', '=', code)
+      .execute();
 
     // Verify deletion using Kysely SELECT
-    const result = await kysely
+    const result = await db
       .selectFrom('companies')
       .where('code', '=', code)
       .select(['id', 'code'])
@@ -186,12 +191,9 @@ describe('Kysely via DbConn', () => {
   });
 
   test('handles transaction with Kysely', async () => {
-    const kysely = db.kysely;
+    const code = 'TEST_TRX_KYSELY_' + Date.now();
 
-    const trx = await kysely.startTransaction().execute();
-
-    try {
-      const code = 'TEST_TRX_KYSELY_' + Date.now();
+    await db.transaction().execute(async (trx) => {
       await trx
         .insertInto('companies')
         .values({
@@ -199,20 +201,70 @@ describe('Kysely via DbConn', () => {
           name: 'Transaction Test'
         })
         .execute();
-
-      await trx.commit().execute();
-    } catch (error) {
-      await trx.rollback().execute();
-      throw error;
-    }
+    });
 
     // Verify the insert was committed
-    const result = await kysely
+    const result = await db
       .selectFrom('companies')
-      .where('code', 'like', 'TEST_TRX_KYSELY_%')
+      .where('code', '=', code)
       .select(['id', 'code'])
       .executeTakeFirst();
 
     assert.ok(result !== undefined);
+  });
+
+  test('destroy() closes pool', async () => {
+    const testDb = createKysely({
+      host: TEST_CONFIG.host,
+      port: TEST_CONFIG.port,
+      user: TEST_CONFIG.user,
+      password: TEST_CONFIG.password,
+      database: TEST_CONFIG.database,
+      connectionLimit: 5
+    });
+
+    // Should work before destroy
+    await testDb.selectFrom('companies').selectAll().execute();
+
+    await testDb.destroy();
+
+    // Should fail after destroy
+    await assert.rejects(
+      async () => {
+        await testDb.selectFrom('companies').selectAll().execute();
+      },
+      { name: 'Error' }
+    );
+  });
+});
+
+describe('getKysely', () => {
+  let db: Kysely<DB>;
+
+  after(async () => {
+    if (db) {
+      await db.destroy();
+    }
+  });
+
+  test('returns same instance for same config', () => {
+    const db1 = getKysely({ uri: 'mysql://test-singleton-1' });
+    const db2 = getKysely({ uri: 'mysql://test-singleton-1' });
+
+    // Should be the same instance (singleton)
+    assert.ok(db1 === db2);
+    db = db1;
+  });
+
+  test('returns different instance for different config', () => {
+    const db1 = getKysely({ uri: 'mysql://test-singleton-2' });
+    const db2 = getKysely({ uri: 'mysql://test-singleton-3' });
+
+    // Should be different instances
+    assert.ok(db1 !== db2);
+
+    // Cleanup
+    db1.destroy();
+    db2.destroy();
   });
 });

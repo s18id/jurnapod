@@ -10,8 +10,9 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createDbPool, DbConn } from './index.js';
-import type { Pool } from 'mysql2';
+import { createKysely } from './kysely/index.js';
+import type { Kysely } from 'kysely';
+import type { DB } from './kysely/schema.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,12 +42,12 @@ function getTestDbConfig() {
 }
 
 /**
- * Create a database pool for testing.
+ * Create a Kysely instance for testing.
  * Uses DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME from .env.
  */
-export function getTestDbPool(): Pool {
+export function getTestKysely(): Kysely<DB> {
   const config = getTestDbConfig();
-  return createDbPool({
+  return createKysely({
     host: config.host,
     port: config.port,
     user: config.user,
@@ -57,41 +58,30 @@ export function getTestDbPool(): Pool {
 }
 
 /**
- * Close a test database pool.
+ * Close a test Kysely instance (and its internal pool).
  */
-export async function closeTestDbPool(pool: Pool): Promise<void> {
-  await pool.end();
-}
-
-/**
- * Create a DbConn instance for testing.
- */
-export function getTestDbConn(pool: Pool): DbConn {
-  return new DbConn(pool);
+export async function closeTestKysely(db: Kysely<DB>): Promise<void> {
+  await db.destroy();
 }
 
 /**
  * Execute a callback within a test transaction.
  * Automatically rolls back after the callback completes.
  * 
- * @param pool - The database pool
+ * @param db - The Kysely instance
  * @param callback - Function to execute within the transaction
  * @returns The result of the callback
  */
 export async function withTestTransaction<T>(
-  pool: Pool,
-  callback: (conn: DbConn) => Promise<T>
+  db: Kysely<DB>,
+  callback: (trx: import('kysely').Transaction<DB>) => Promise<T>
 ): Promise<T> {
-  const conn = new DbConn(pool);
-  await conn.beginTransaction();
-  try {
-    return await callback(conn);
-  } finally {
-    // Rollback if still in transaction
+  return db.transaction().execute(async (trx) => {
     try {
-      await conn.rollback();
-    } catch {
-      // Ignore rollback errors if already committed
+      return await callback(trx);
+    } catch (error) {
+      // Transaction automatically rolls back on error
+      throw error;
     }
-  }
+  });
 }

@@ -2,19 +2,46 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 /**
- * Jurnapod Database Package
+ * Jurnapod Database Package - Kysely Edition
  * 
- * Provides unified database client and Kysely integration.
+ * Pure Kysely interface for type-safe SQL queries.
+ * No wrapper abstractions - use Kysely directly.
+ * 
+ * @example
+ * ```typescript
+ * import { createKysely, sql } from '@jurnapod/db';
+ * 
+ * const db = createKysely({ uri: 'mysql://...' });
+ * 
+ * // Type-safe query
+ * const accounts = await db
+ *   .selectFrom('accounts')
+ *   .where('company_id', '=', companyId)
+ *   .selectAll()
+ *   .execute();
+ * 
+ * // Raw SQL with type safety
+ * const result = await sql`SELECT * FROM accounts`.execute(db);
+ * 
+ * // Transaction
+ * await db.transaction().execute(async (trx) => {
+ *   await trx.insertInto('accounts').values({ ... }).execute();
+ * });
+ * 
+ * // Cleanup
+ * await db.destroy();
+ * ```
  */
 
-// Re-export from kysely subdirectory
-export * from './kysely/index.js';
+// Core Kysely - re-export for convenience
+export { Kysely, sql } from 'kysely';
+export type { Transaction, Sql } from 'kysely';
 
-// Base client interface
-export * from './jurnapod-client.js';
+// Schema types
+export type { DB as DatabaseSchema } from './kysely/schema.js';
 
-// Unified MySQL client
-export * from './mysql-client.js';
+// Factory functions
+export { createKysely, getKysely } from './kysely/index.js';
 
-// Pool factory
-export * from './pool.js';
+// Config type for passing to createKysely
+export type { DbPoolConfig } from './pool.js';
