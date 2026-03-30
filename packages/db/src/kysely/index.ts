@@ -13,8 +13,10 @@ import { Kysely, MysqlDialect } from 'kysely';
 import type { DB } from './schema.js';
 import { createDbPool, type DbPoolConfig } from '../pool.js';
 
+export type KyselySchema =  Kysely<DB>
+
 // Singleton instance cache
-let singletonInstance: Kysely<DB> | null = null;
+let singletonInstance: KyselySchema | null = null;
 let singletonConfigKey: string | null = null;
 
 /**
@@ -41,7 +43,7 @@ let singletonConfigKey: string | null = null;
  * await db.destroy();
  * ```
  */
-export function createKysely(config: DbPoolConfig): Kysely<DB> {
+export function createKysely(config: DbPoolConfig): KyselySchema {
   const pool = createDbPool(config);
   
   return new Kysely<DB>({
@@ -77,7 +79,7 @@ export function createKysely(config: DbPoolConfig): Kysely<DB> {
  * await db.destroy();
  * ```
  */
-export function getKysely(config: DbPoolConfig): Kysely<DB> {
+export function getKysely(config: DbPoolConfig): KyselySchema {
   const configKey = config.uri || 
     `${config.host}:${config.port}:${config.database}`;
   

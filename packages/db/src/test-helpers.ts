@@ -10,7 +10,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createKysely } from './kysely/index.js';
+import { createKysely, KyselySchema } from './kysely/index.js';
 import type { Kysely } from 'kysely';
 import type { DB } from './kysely/schema.js';
 
@@ -45,7 +45,7 @@ function getTestDbConfig() {
  * Create a Kysely instance for testing.
  * Uses DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME from .env.
  */
-export function getTestKysely(): Kysely<DB> {
+export function getTestKysely(): KyselySchema {
   const config = getTestDbConfig();
   return createKysely({
     host: config.host,
@@ -60,7 +60,7 @@ export function getTestKysely(): Kysely<DB> {
 /**
  * Close a test Kysely instance (and its internal pool).
  */
-export async function closeTestKysely(db: Kysely<DB>): Promise<void> {
+export async function closeTestKysely(db: KyselySchema): Promise<void> {
   await db.destroy();
 }
 
@@ -73,7 +73,7 @@ export async function closeTestKysely(db: Kysely<DB>): Promise<void> {
  * @returns The result of the callback
  */
 export async function withTestTransaction<T>(
-  db: Kysely<DB>,
+  db: KyselySchema,
   callback: (trx: import('kysely').Transaction<DB>) => Promise<T>
 ): Promise<T> {
   return db.transaction().execute(async (trx) => {

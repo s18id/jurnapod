@@ -33,21 +33,13 @@
  * ```
  */
 
-// Core Kysely - re-export for convenience
-export { Kysely, sql } from 'kysely';
-export type { Transaction, Sql } from 'kysely';
-
 // Schema types
 export type { DB as DatabaseSchema } from './kysely/schema.js';
 
 // Factory functions
-export { createKysely, getKysely } from './kysely/index.js';
+export { createKysely, getKysely, type KyselySchema } from './kysely/index.js';
+
+export { Transaction } from './kysely/transaction.js';
 
 // Config type for passing to createKysely
 export type { DbPoolConfig } from './pool.js';
-
-// SQL helper utilities
-export { buildQuery } from './sql-helpers.js';
-
-// Kysely adapter for raw SQL with ? placeholders
-export { KyselyAdapter, type ExecuteResult, type TransactionAdapter } from './adapters/kysely-adapter.js';

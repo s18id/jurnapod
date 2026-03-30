@@ -8,8 +8,11 @@
  * for consumers who prefer a function-based approach.
  */
 
-import type { Kysely, Transaction } from 'kysely';
+import type { Transaction as TS } from 'kysely';
 import type { DB } from './schema.js';
+import { KyselySchema } from './index.js';
+
+export type Transaction = TS<DB>
 
 /**
  * Execute a callback within a transaction.
@@ -34,8 +37,8 @@ import type { DB } from './schema.js';
  * ```
  */
 export async function withTransaction<T>(
-  db: Kysely<DB>,
-  callback: (trx: Transaction<DB>) => Promise<T>
+  db: KyselySchema,
+  callback: (trx: Transaction) => Promise<T>
 ): Promise<T> {
   return db.transaction().execute(callback);
 }

@@ -9,7 +9,7 @@
 
 import { test, after, describe, beforeEach } from 'node:test';
 import assert from 'node:assert';
-import { createKysely, getKysely } from './index.js';
+import { createKysely, getKysely, KyselySchema } from './index.js';
 import type { Kysely } from 'kysely';
 import type { DB } from './schema.js';
 
@@ -23,7 +23,7 @@ const TEST_CONFIG = {
 };
 
 describe('createKysely', () => {
-  let db: Kysely<DB>;
+  let db: KyselySchema;
 
   after(async () => {
     if (db) {
@@ -239,7 +239,7 @@ describe('createKysely', () => {
 });
 
 describe('getKysely', () => {
-  let db: Kysely<DB>;
+  let db: KyselySchema;
 
   after(async () => {
     if (db) {
