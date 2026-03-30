@@ -114,6 +114,7 @@ export interface AuditLogs {
   result: string;
   status: Generated<number>;
   success: Generated<number>;
+  user_agent: Generated<string | null>;
   user_id: Generated<number | null>;
 }
 
@@ -449,6 +450,17 @@ export interface FixedAssets {
   updated_at: Generated<Date>;
 }
 
+export interface ImportSessions {
+  checkpoint_data: Generated<string | null>;
+  company_id: number;
+  created_at: Generated<Date>;
+  entity_type: string;
+  expires_at: Date;
+  file_hash: Generated<string | null>;
+  payload: string;
+  session_id: string;
+}
+
 export interface InventoryCostLayers {
   acquired_at: Date;
   company_id: number;
@@ -482,6 +494,7 @@ export interface InventoryStock {
   quantity: Generated<Decimal>;
   reserved_quantity: Generated<Decimal>;
   updated_at: Generated<Date>;
+  variant_id: Generated<number | null>;
 }
 
 export interface InventoryTransactions {
@@ -492,11 +505,12 @@ export interface InventoryTransactions {
   journal_batch_id: Generated<number | null>;
   notes: Generated<string | null>;
   outlet_id: Generated<number | null>;
-  product_id: number;
+  product_id: Generated<number | null>;
   quantity_delta: Decimal;
   reference_id: Generated<string | null>;
   reference_type: Generated<string | null>;
   transaction_type: number;
+  variant_id: Generated<number | null>;
 }
 
 export interface ItemGroups {
@@ -534,8 +548,8 @@ export interface ItemImages {
 export interface ItemPrices {
   company_id: number;
   created_at: Generated<Date>;
-  effective_from: number; // BIGINT unix milliseconds - 0 means always effective
-  effective_to: number; // BIGINT unix milliseconds - 0 means no expiration
+  effective_from: Generated<number>;
+  effective_to: Generated<number>;
   id: Generated<number>;
   is_active: Generated<number>;
   item_id: number;
@@ -543,7 +557,7 @@ export interface ItemPrices {
   price: Decimal;
   scope_key: Generated<string | null>;
   updated_at: Generated<Date>;
-  variant_id: Generated<number | null>; // Added in migration 0122
+  variant_id: Generated<number | null>;
 }
 
 export interface Items {
@@ -593,6 +607,7 @@ export interface ItemVariantCombinations {
 
 export interface ItemVariants {
   archived_at: Generated<Date | null>;
+  attributes: Generated<string | null>;
   barcode: Generated<string | null>;
   company_id: number;
   created_at: Generated<Date | null>;
@@ -664,6 +679,20 @@ export interface NumberingTemplates {
   reset_period: Generated<string>;
   scope_key: Generated<number>;
   updated_at: Generated<Date>;
+}
+
+export interface OperationProgress {
+  company_id: number;
+  completed_at: Generated<Date | null>;
+  completed_units: Generated<number>;
+  details: Generated<string | null>;
+  id: Generated<number>;
+  operation_id: string;
+  operation_type: string;
+  started_at: Date;
+  status: Generated<string>;
+  total_units: Generated<number>;
+  updated_at: Date;
 }
 
 export interface OutletAccountMappings {
@@ -1129,12 +1158,6 @@ export interface ScheduledExports {
   webhook_url: Generated<string | null>;
 }
 
-export interface SchemaMigrations {
-  applied_at: Generated<Date>;
-  id: Generated<number>;
-  version: string;
-}
-
 export interface StaticPages {
   content_md: string;
   created_at: Generated<Date>;
@@ -1161,29 +1184,6 @@ export interface Supplies {
 }
 
 export interface SyncAuditEvents {
-  client_device_id: Generated<string | null>;
-  client_version: Generated<string | null>;
-  company_id: number;
-  completed_at: Generated<Date | null>;
-  created_at: Generated<Date>;
-  duration_ms: Generated<number | null>;
-  error_code: Generated<string | null>;
-  error_message: Generated<string | null>;
-  id: Generated<number>;
-  items_count: Generated<number | null>;
-  operation_type: string;
-  outlet_id: Generated<number | null>;
-  request_size_bytes: Generated<number | null>;
-  response_size_bytes: Generated<number | null>;
-  started_at: Date;
-  status: string;
-  tier_name: string;
-  version_after: Generated<number | null>;
-  version_before: Generated<number | null>;
-}
-
-export interface SyncAuditEventsArchive {
-  archived_at: Generated<Date>;
   client_device_id: Generated<string | null>;
   client_version: Generated<string | null>;
   company_id: number;
@@ -1365,6 +1365,7 @@ export interface UserOutlets {
 }
 
 export interface UserRoleAssignments {
+  company_id: number;
   created_at: Generated<Date>;
   id: Generated<number>;
   outlet_id: Generated<number | null>;
@@ -1382,6 +1383,36 @@ export interface Users {
   name: Generated<string | null>;
   password_hash: string;
   updated_at: Generated<Date>;
+}
+
+export interface VariantSales {
+  client_tx_id: string;
+  company_id: number;
+  created_at: Generated<Date>;
+  id: Generated<number>;
+  item_id: number;
+  outlet_id: number;
+  qty: Decimal;
+  total_amount: Decimal;
+  trx_at: Date;
+  unit_price: Decimal;
+  variant_id: number;
+}
+
+export interface VariantStockAdjustments {
+  adjusted_at: Date;
+  adjustment_type: "DECREASE" | "INCREASE" | "SET";
+  client_tx_id: string;
+  company_id: number;
+  created_at: Generated<Date>;
+  id: Generated<number>;
+  new_stock: number;
+  outlet_id: number;
+  previous_stock: number;
+  quantity: number;
+  reason: string;
+  reference: Generated<string | null>;
+  variant_id: number;
 }
 
 export interface VPosDailyTotals {
@@ -1427,6 +1458,7 @@ export interface DB {
   fixed_asset_disposals: FixedAssetDisposals;
   fixed_asset_events: FixedAssetEvents;
   fixed_assets: FixedAssets;
+  import_sessions: ImportSessions;
   inventory_cost_layers: InventoryCostLayers;
   inventory_item_costs: InventoryItemCosts;
   inventory_stock: InventoryStock;
@@ -1444,6 +1476,7 @@ export interface DB {
   module_roles: ModuleRoles;
   modules: Modules;
   numbering_templates: NumberingTemplates;
+  operation_progress: OperationProgress;
   outlet_account_mappings: OutletAccountMappings;
   outlet_payment_method_mappings: OutletPaymentMethodMappings;
   outlet_tables: OutletTables;
@@ -1473,11 +1506,9 @@ export interface DB {
   sales_payment_splits: SalesPaymentSplits;
   sales_payments: SalesPayments;
   scheduled_exports: ScheduledExports;
-  schema_migrations: SchemaMigrations;
   static_pages: StaticPages;
   supplies: Supplies;
   sync_audit_events: SyncAuditEvents;
-  sync_audit_events_archive: SyncAuditEventsArchive;
   sync_data_versions: SyncDataVersions;
   sync_operations: SyncOperations;
   sync_tier_versions: SyncTierVersions;
@@ -1491,4 +1522,6 @@ export interface DB {
   user_role_assignments: UserRoleAssignments;
   users: Users;
   v_pos_daily_totals: VPosDailyTotals;
+  variant_sales: VariantSales;
+  variant_stock_adjustments: VariantStockAdjustments;
 }

@@ -39,7 +39,8 @@ export type { DB as DatabaseSchema } from './kysely/schema.js';
 // Factory functions
 export { createKysely, getKysely, type KyselySchema } from './kysely/index.js';
 
-export { Transaction } from './kysely/transaction.js';
+export { withTransaction } from './kysely/transaction.js';
+export type { Transaction } from './kysely/transaction.js';
 
 // Config type for passing to createKysely
 export type { DbPoolConfig } from './pool.js';

@@ -31,7 +31,17 @@ import {
 | `npm run db:migrate` | Run pending migrations |
 | `npm run db:seed` | Seed a new company |
 | `npm run db:smoke` | Run smoke tests |
-| `npm run db:generate:schema` | Generate Kysely schema from database |
+| `node scripts/generate-schema.mjs` | Generate Kysely schema from database |
+
+**Schema Generation:**
+
+After running migrations that change table structures, regenerate the Kysely schema:
+
+```bash
+node scripts/generate-schema.mjs
+```
+
+This introspects the database and updates `src/kysely/schema.ts` with TypeScript types.
 
 ## Usage Patterns
 
