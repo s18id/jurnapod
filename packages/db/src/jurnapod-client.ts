@@ -72,7 +72,7 @@ export interface JurnapodDbClient {
    * );
    * ```
    */
-  query<T = any>(sql: string, params?: any[]): Promise<T|null>;
+  query<T = any>(sql: string, params?: any[]): Promise<T>;
 
   /**
    * Execute a raw SQL query and return results.
@@ -90,6 +90,23 @@ export interface JurnapodDbClient {
    * ```
    */
   queryAll<T = any>(sql: string, params?: any[]): Promise<T[]>;
+
+  /**
+   * Execute a raw SQL query and return single result.
+   * 
+   * @param sql - Parameterized SQL query (SELECT)
+   * @param params - Query parameters
+   * @returns Typed result or null
+   * 
+   * @example
+   * ```typescript
+   * const rows = await db.queryOne<RowDataPacket>(
+   *   'SELECT * FROM accounts WHERE id = ?',
+   *   [companyId]
+   * );
+   * ```
+   */
+  queryOne<T = any>(sql: string, params?: any[]): Promise<T | null>;
   
   /**
    * Execute a raw SQL statement that modifies data.

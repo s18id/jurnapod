@@ -152,7 +152,7 @@ export class DbConn implements JurnapodDbClient {
    * Execute a raw SQL query and return results.
    * Uses transaction connection if in a transaction, otherwise uses pool.
    */
-  async query<T = any>(sql: string, params?: any[]): Promise<T | null> {
+  async query<T = any>(sql: string, params?: any[]): Promise<T> {
     return new Promise((resolve, reject) => {
       const conn = this.connection || this.pool;
       conn.query(sql, params, (err, rows: RowDataPacket[]) => {
