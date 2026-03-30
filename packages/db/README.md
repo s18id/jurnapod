@@ -4,6 +4,8 @@ This package provides database connectivity using **Kysely** for type-safe queri
 
 ## Package Exports
 
+`DB` is an alias for `DatabaseSchema` — the Kysely type parameter holding all table definitions.
+
 ```typescript
 import { 
   // Core Kysely
@@ -13,7 +15,7 @@ import {
   // Types
   type Transaction,
   type Sql,
-  type DatabaseSchema,
+  type DatabaseSchema, // <-- DB is an alias for this
   type DbPoolConfig,
   
   // Factory functions

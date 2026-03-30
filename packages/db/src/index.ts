@@ -45,3 +45,9 @@ export { createKysely, getKysely } from './kysely/index.js';
 
 // Config type for passing to createKysely
 export type { DbPoolConfig } from './pool.js';
+
+// SQL helper utilities
+export { buildQuery } from './sql-helpers.js';
+
+// Kysely adapter for raw SQL with ? placeholders
+export { KyselyAdapter, type ExecuteResult, type TransactionAdapter } from './adapters/kysely-adapter.js';

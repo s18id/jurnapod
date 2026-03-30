@@ -86,13 +86,15 @@ This updates `src/kysely/schema.ts` with TypeScript types from live database.
 
 ### Package Exports
 
+`DB` is an alias for `DatabaseSchema` — the Kysely type parameter holding all table definitions.
+
 ```typescript
 import { 
   Kysely,
   sql,
   type Transaction,
   type Sql,
-  type DatabaseSchema,
+  type DatabaseSchema, // <-- DB is an alias for this
   type DbPoolConfig,
   createKysely,
   getKysely
