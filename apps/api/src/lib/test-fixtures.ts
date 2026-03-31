@@ -24,8 +24,8 @@
  * ```
  */
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import { getDbPool } from "./db";
+import { getDb } from "./db";
+import { sql } from "kysely";
 import { createCompanyBasic, CompanyCodeExistsError } from "./companies";
 import { createOutletBasic, OutletCodeExistsError } from "./outlets";
 import { createUserBasic, UserEmailExistsError } from "./users";
@@ -113,7 +113,7 @@ export async function createTestCompanyMinimal(
     currency_code: string;
   }>
 ): Promise<CompanyFixture> {
-  const pool = getDbPool();
+  const db = getDb();
   const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   
   const code = options?.code ?? `TEST-CO-${runId}`.slice(0, 20).toUpperCase();
@@ -132,15 +132,13 @@ export async function createTestCompanyMinimal(
   } catch (error: any) {
     if (error instanceof CompanyCodeExistsError) {
       // Company with this code already exists - fetch it instead
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id, code, name FROM companies WHERE code = ? LIMIT 1`,
-        [code]
-      );
-      if (rows.length > 0) {
+      const result = await sql`SELECT id, code, name FROM companies WHERE code = ${code} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; code: string; name: string };
         const existing = {
-          id: Number(rows[0].id),
-          code: rows[0].code,
-          name: rows[0].name
+          id: Number(row.id),
+          code: row.code,
+          name: row.name
         };
         return existing;
       }
@@ -191,7 +189,7 @@ export async function createTestOutletMinimal(
     timezone: string;
   }>
 ): Promise<OutletFixture> {
-  const pool = getDbPool();
+  const db = getDb();
   const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   
   const code = options?.code ?? `TEST-OL-${runId}`.slice(0, 20).toUpperCase();
@@ -210,16 +208,14 @@ export async function createTestOutletMinimal(
   } catch (error: any) {
     if (error instanceof OutletCodeExistsError) {
       // Outlet with this code already exists for this company - fetch it instead
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id, company_id, code, name FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
-        [companyId, code]
-      );
-      if (rows.length > 0) {
+      const result = await sql`SELECT id, company_id, code, name FROM outlets WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; company_id: number; code: string; name: string };
         const existing = {
-          id: Number(rows[0].id),
-          company_id: Number(rows[0].company_id),
-          code: rows[0].code,
-          name: rows[0].name
+          id: Number(row.id),
+          company_id: Number(row.company_id),
+          code: row.code,
+          name: row.name
         };
         return existing;
       }
@@ -270,7 +266,7 @@ export async function createTestUser(
     isActive: boolean;
   }>
 ): Promise<UserFixture> {
-  const pool = getDbPool();
+  const db = getDb();
   const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   
   const email = options?.email ?? `test-user-${runId}@example.com`;
@@ -285,16 +281,14 @@ export async function createTestUser(
     });
     
     // Get the full user record including password_hash for tests that need it
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id, company_id, email, password_hash FROM users WHERE id = ? LIMIT 1`,
-      [user.id]
-    );
+    const result = await sql`SELECT id, company_id, email, password_hash FROM users WHERE id = ${user.id} LIMIT 1`.execute(db);
     
+    const row = result.rows[0] as { id: number; company_id: number; email: string; password_hash: string | null };
     const fullUser: UserFixture = {
-      id: Number(rows[0].id),
-      company_id: Number(rows[0].company_id),
-      email: rows[0].email,
-      password_hash: rows[0].password_hash
+      id: Number(row.id),
+      company_id: Number(row.company_id),
+      email: row.email,
+      password_hash: row.password_hash ?? undefined
     };
     
     createdFixtures.users.push(fullUser);
@@ -302,16 +296,14 @@ export async function createTestUser(
   } catch (error: any) {
     if (error instanceof UserEmailExistsError) {
       // User with this email already exists - fetch it instead
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id, company_id, email, password_hash FROM users WHERE company_id = ? AND email = ? LIMIT 1`,
-        [companyId, email.toLowerCase()]
-      );
-      if (rows.length > 0) {
+      const result = await sql`SELECT id, company_id, email, password_hash FROM users WHERE company_id = ${companyId} AND email = ${email.toLowerCase()} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; company_id: number; email: string; password_hash: string | null };
         const existing: UserFixture = {
-          id: Number(rows[0].id),
-          company_id: Number(rows[0].company_id),
-          email: rows[0].email,
-          password_hash: rows[0].password_hash
+          id: Number(row.id),
+          company_id: Number(row.company_id),
+          email: row.email,
+          password_hash: row.password_hash ?? undefined
         };
         return existing;
       }
@@ -341,7 +333,7 @@ export async function createTestItem(
     trackStock: boolean;
   }>
 ): Promise<ItemFixture> {
-  const pool = getDbPool();
+  const db = getDb();
   const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   
   const sku = options?.sku ?? `TEST-SKU-${runId}`.slice(0, 30);
@@ -362,17 +354,15 @@ export async function createTestItem(
   } catch (error: any) {
     if (error instanceof DatabaseConflictError) {
       // Item with this SKU already exists - fetch it instead
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id, company_id, sku, name, item_type FROM items WHERE company_id = ? AND sku = ? LIMIT 1`,
-        [companyId, sku]
-      );
-      if (rows.length > 0) {
+      const result = await sql`SELECT id, company_id, sku, name, item_type FROM items WHERE company_id = ${companyId} AND sku = ${sku} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; company_id: number; sku: string | null; name: string; item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE" };
         const existing: ItemFixture = {
-          id: Number(rows[0].id),
-          company_id: Number(rows[0].company_id),
-          sku: rows[0].sku,
-          name: rows[0].name,
-          type: rows[0].item_type
+          id: Number(row.id),
+          company_id: Number(row.company_id),
+          sku: row.sku,
+          name: row.name,
+          type: row.item_type
         };
         return existing;
       }
@@ -399,22 +389,20 @@ export async function createTestVariant(
     attributeValues: string[];
   }>
 ): Promise<VariantFixture> {
-  const pool = getDbPool();
+  const db = getDb();
   
   const attributeName = options?.attributeName ?? "Size";
   const attributeValues = options?.attributeValues ?? ["Default"];
   
   // Get company_id from item
-  const [itemRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT company_id FROM items WHERE id = ? LIMIT 1`,
-    [itemId]
-  );
+  const itemResult = await sql`SELECT company_id FROM items WHERE id = ${itemId} LIMIT 1`.execute(db);
   
-  if (itemRows.length === 0) {
+  if (itemResult.rows.length === 0) {
     throw new Error(`Item ${itemId} not found`);
   }
   
-  const companyId = Number(itemRows[0].company_id);
+  const itemRow = itemResult.rows[0] as { company_id: number };
+  const companyId = Number(itemRow.company_id);
   
   // Create variant attribute (this generates the variant)
   await createVariantAttribute(companyId, itemId, {
@@ -423,25 +411,23 @@ export async function createTestVariant(
   });
   
   // Get the created variant
-  const [variantRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, item_id, company_id, sku, variant_name 
+  const variantResult = await sql`SELECT id, item_id, company_id, sku, variant_name 
      FROM item_variants 
-     WHERE item_id = ? 
+     WHERE item_id = ${itemId} 
      ORDER BY id ASC 
-     LIMIT 1`,
-    [itemId]
-  );
+     LIMIT 1`.execute(db);
   
-  if (variantRows.length === 0) {
+  if (variantResult.rows.length === 0) {
     throw new Error(`Variant not found after creating attribute for item ${itemId}`);
   }
   
+  const row = variantResult.rows[0] as { id: number; item_id: number; company_id: number; sku: string; variant_name: string };
   const variant: VariantFixture = {
-    id: Number(variantRows[0].id),
-    item_id: Number(variantRows[0].item_id),
-    company_id: Number(variantRows[0].company_id),
-    sku: variantRows[0].sku,
-    variant_name: variantRows[0].variant_name
+    id: Number(row.id),
+    item_id: Number(row.item_id),
+    company_id: Number(row.company_id),
+    sku: row.sku,
+    variant_name: row.variant_name
   };
   
   createdFixtures.variants.push(variant);
@@ -464,7 +450,7 @@ export async function createTestVariant(
  * 5. Companies (cleanup last, or let cascade handle it)
  */
 export async function cleanupTestFixtures(): Promise<void> {
-  const pool = getDbPool();
+  const db = getDb();
   
   // Clean up in reverse dependency order
   // Note: MySQL FK constraints should handle most cascading deletes,
@@ -474,10 +460,7 @@ export async function cleanupTestFixtures(): Promise<void> {
   for (const variant of createdFixtures.variants) {
     try {
       // Delete via item_variant_attributes (cascades to combinations)
-      await pool.execute(
-        `DELETE FROM item_variant_attributes WHERE item_id IN (SELECT id FROM items WHERE id = ?)`,
-        [variant.item_id]
-      );
+      await sql`DELETE FROM item_variant_attributes WHERE item_id IN (SELECT id FROM items WHERE id = ${variant.item_id})`.execute(db);
     } catch (error) {
       console.warn(`Failed to cleanup variant ${variant.id}:`, error);
     }
@@ -486,7 +469,7 @@ export async function cleanupTestFixtures(): Promise<void> {
   // 2. Items
   for (const item of createdFixtures.items) {
     try {
-      await pool.execute(`DELETE FROM items WHERE id = ?`, [item.id]);
+      await sql`DELETE FROM items WHERE id = ${item.id}`.execute(db);
     } catch (error) {
       console.warn(`Failed to cleanup item ${item.id}:`, error);
     }
@@ -495,7 +478,7 @@ export async function cleanupTestFixtures(): Promise<void> {
   // 3. Users (and their role assignments - should cascade)
   for (const user of createdFixtures.users) {
     try {
-      await pool.execute(`DELETE FROM users WHERE id = ?`, [user.id]);
+      await sql`DELETE FROM users WHERE id = ${user.id}`.execute(db);
     } catch (error) {
       console.warn(`Failed to cleanup user ${user.id}:`, error);
     }
@@ -504,7 +487,7 @@ export async function cleanupTestFixtures(): Promise<void> {
   // 4. Outlets
   for (const outlet of createdFixtures.outlets) {
     try {
-      await pool.execute(`DELETE FROM outlets WHERE id = ?`, [outlet.id]);
+      await sql`DELETE FROM outlets WHERE id = ${outlet.id}`.execute(db);
     } catch (error) {
       console.warn(`Failed to cleanup outlet ${outlet.id}:`, error);
     }
@@ -513,10 +496,7 @@ export async function cleanupTestFixtures(): Promise<void> {
   // 5. Companies (soft delete via deleted_at)
   for (const company of createdFixtures.companies) {
     try {
-      await pool.execute(
-        `UPDATE companies SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        [company.id]
-      );
+      await sql`UPDATE companies SET deleted_at = CURRENT_TIMESTAMP WHERE id = ${company.id}`.execute(db);
     } catch (error) {
       console.warn(`Failed to cleanup company ${company.id}:`, error);
     }
@@ -610,15 +590,13 @@ export async function createFullTestFixtureSet(options?: {
  * @returns Role ID
  */
 export async function getRoleIdByCode(roleCode: string): Promise<number> {
-  const pool = getDbPool();
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id FROM roles WHERE code = ? LIMIT 1`,
-    [roleCode]
-  );
-  if (rows.length === 0) {
+  const db = getDb();
+  const result = await sql`SELECT id FROM roles WHERE code = ${roleCode} LIMIT 1`.execute(db);
+  if (result.rows.length === 0) {
     throw new Error(`Role '${roleCode}' not found in database`);
   }
-  return Number(rows[0].id);
+  const row = result.rows[0] as { id: number };
+  return Number(row.id);
 }
 
 /**
@@ -632,11 +610,8 @@ export async function assignUserGlobalRole(
   userId: number,
   roleId: number
 ): Promise<void> {
-  const pool = getDbPool();
-  await pool.execute(
-    `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, NULL)`,
-    [userId, roleId]
-  );
+  const db = getDb();
+  await sql`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (${userId}, ${roleId}, NULL)`.execute(db);
 }
 
 /**
@@ -652,11 +627,8 @@ export async function assignUserOutletRole(
   roleId: number,
   outletId: number
 ): Promise<void> {
-  const pool = getDbPool();
-  await pool.execute(
-    `INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`,
-    [userId, roleId, outletId]
-  );
+  const db = getDb();
+  await sql`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (${userId}, ${roleId}, ${outletId})`.execute(db);
 }
 
 /**
@@ -674,11 +646,8 @@ export async function setModulePermission(
   module: string,
   permissionMask: number
 ): Promise<void> {
-  const pool = getDbPool();
-  await pool.execute(
-    `INSERT INTO module_roles (company_id, role_id, module, permission_mask) VALUES (?, ?, ?, ?)`,
-    [companyId, roleId, module, permissionMask]
-  );
+  const db = getDb();
+  await sql`INSERT INTO module_roles (company_id, role_id, module, permission_mask) VALUES (${companyId}, ${roleId}, ${module}, ${permissionMask})`.execute(db);
 }
 
 /**

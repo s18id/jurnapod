@@ -1,11 +1,15 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
-import { getDbPool } from "../db.js";
+import { sql } from "kysely";
+import { getDb, type KyselySchema } from "../db.js";
 import { DatabaseForbiddenError } from "../master-data-errors.js";
 import { ensureUserHasOutletAccess as commonUtilsEnsureUserHasOutletAccess } from "./common-utils.js";
+// Re-export withTransaction from @jurnapod/db for backward compatibility
+// Modules still using mysql2-style transactions import from here
+// After migration, modules should import directly from @jurnapod/db
+export { withTransaction } from "@jurnapod/db";
+export type { Transaction } from "@jurnapod/db";
 
 // Re-export for backward compatibility - prefer importing from common-utils directly
 export const ensureUserHasOutletAccess = commonUtilsEnsureUserHasOutletAccess;
@@ -34,26 +38,6 @@ export function isMysqlError(error: unknown): error is { errno: number; code?: s
   );
 }
 
-/**
- * Transaction wrapper that handles begin/commit/rollback automatically
- */
-export async function withTransaction<T>(operation: (connection: PoolConnection) => Promise<T>): Promise<T> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-    const result = await operation(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-}
-
 type MutationAuditActor = {
   userId: number;
   canManageCompanyDefaults?: boolean;
@@ -73,22 +57,30 @@ type AuditLogInput = {
  * accidentally persist `success=1` / `result='SUCCESS'` for failed operations.
  */
 export async function recordMasterDataAuditLog(
-  executor: { execute: PoolConnection["execute"] },
+  db: KyselySchema,
   input: AuditLogInput
 ): Promise<void> {
-  await executor.execute(
-    `INSERT INTO audit_logs (
-       company_id,
-       outlet_id,
-       user_id,
-       action,
-       result,
-       success,
-       ip_address,
-       payload_json
-     ) VALUES (?, ?, ?, ?, 'SUCCESS', 1, NULL, ?)`,
-    [input.companyId, input.outletId, input.actor?.userId ?? null, input.action, JSON.stringify(input.payload)]
-  );
+  await sql`
+    INSERT INTO audit_logs (
+      company_id,
+      outlet_id,
+      user_id,
+      action,
+      result,
+      success,
+      ip_address,
+      payload_json
+    ) VALUES (
+      ${input.companyId},
+      ${input.outletId},
+      ${input.actor?.userId ?? null},
+      ${input.action},
+      'SUCCESS',
+      1,
+      NULL,
+      ${JSON.stringify(input.payload)}
+    )
+  `.execute(db);
 }
 
 

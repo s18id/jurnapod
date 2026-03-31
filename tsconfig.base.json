@@ -7,6 +7,7 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
+      "@jurnapod/auth": ["packages/auth/src/index.ts"],
       "@jurnapod/db": ["packages/db/src/index.ts"],
       "@jurnapod/shared": ["packages/shared/src/index.ts"],
       "@jurnapod/core": ["packages/core/src/index.ts"],

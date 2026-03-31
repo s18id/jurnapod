@@ -7,24 +7,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadEnvIfPresent } from "../../tests/integration/integration-harness.mjs";
-import { getDbPool, closeDbPool } from "./db";
-import { createTestFixture, type TestFixtureContext } from "../../tests/integration/fixtures";
-import type { RowDataPacket } from "mysql2";
+import { getDb, closeDbPool } from "./db";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
 test("Phase3: scheduled_exports table exists with required columns", { timeout: 30000 }, async () => {
-  const dbPool = getDbPool();
+  const db = getDb();
   
-  const [columns] = await dbPool.execute<RowDataPacket[]>(`
+  const columns = await sql`
     SELECT COLUMN_NAME 
     FROM INFORMATION_SCHEMA.COLUMNS 
     WHERE TABLE_SCHEMA = DATABASE() 
     AND TABLE_NAME = 'scheduled_exports'
     ORDER BY ORDINAL_POSITION
-  `);
+  `.execute(db);
   
-  const columnNames = columns.map(c => c.COLUMN_NAME);
+  const columnNames = (columns.rows as Array<{ COLUMN_NAME: string }>).map(c => c.COLUMN_NAME);
   
   const required = ['id', 'company_id', 'name', 'report_type', 'schedule_type', 'schedule_config', 'recipients', 'delivery_method', 'is_active', 'next_run_at'];
   
@@ -34,17 +33,17 @@ test("Phase3: scheduled_exports table exists with required columns", { timeout: 
 });
 
 test("Phase3: export_files table exists with required columns", { timeout: 30000 }, async () => {
-  const dbPool = getDbPool();
+  const db = getDb();
   
-  const [columns] = await dbPool.execute<RowDataPacket[]>(`
+  const columns = await sql`
     SELECT COLUMN_NAME 
     FROM INFORMATION_SCHEMA.COLUMNS 
     WHERE TABLE_SCHEMA = DATABASE() 
     AND TABLE_NAME = 'export_files'
     ORDER BY ORDINAL_POSITION
-  `);
+  `.execute(db);
   
-  const columnNames = columns.map(c => c.COLUMN_NAME);
+  const columnNames = (columns.rows as Array<{ COLUMN_NAME: string }>).map(c => c.COLUMN_NAME);
   
   const required = ['id', 'company_id', 'scheduled_export_id', 'file_name', 'file_size', 'file_path', 'storage_provider'];
   
@@ -54,17 +53,17 @@ test("Phase3: export_files table exists with required columns", { timeout: 30000
 });
 
 test("Phase3: sales_forecasts table exists with required columns", { timeout: 30000 }, async () => {
-  const dbPool = getDbPool();
+  const db = getDb();
   
-  const [columns] = await dbPool.execute<RowDataPacket[]>(`
+  const columns = await sql`
     SELECT COLUMN_NAME 
     FROM INFORMATION_SCHEMA.COLUMNS 
     WHERE TABLE_SCHEMA = DATABASE() 
     AND TABLE_NAME = 'sales_forecasts'
     ORDER BY ORDINAL_POSITION
-  `);
+  `.execute(db);
   
-  const columnNames = columns.map(c => c.COLUMN_NAME);
+  const columnNames = (columns.rows as Array<{ COLUMN_NAME: string }>).map(c => c.COLUMN_NAME);
   
   const required = ['id', 'company_id', 'outlet_id', 'forecast_type', 'forecast_date', 'predicted_amount', 'confidence_lower', 'confidence_upper'];
   
@@ -74,17 +73,17 @@ test("Phase3: sales_forecasts table exists with required columns", { timeout: 30
 });
 
 test("Phase3: analytics_insights table exists with required columns", { timeout: 30000 }, async () => {
-  const dbPool = getDbPool();
+  const db = getDb();
   
-  const [columns] = await dbPool.execute<RowDataPacket[]>(`
+  const columns = await sql`
     SELECT COLUMN_NAME 
     FROM INFORMATION_SCHEMA.COLUMNS 
     WHERE TABLE_SCHEMA = DATABASE() 
     AND TABLE_NAME = 'analytics_insights'
     ORDER BY ORDINAL_POSITION
-  `);
+  `.execute(db);
   
-  const columnNames = columns.map(c => c.COLUMN_NAME);
+  const columnNames = (columns.rows as Array<{ COLUMN_NAME: string }>).map(c => c.COLUMN_NAME);
   
   const required = ['id', 'company_id', 'insight_type', 'metric_name', 'metric_value', 'severity', 'description', 'expires_at'];
   
@@ -96,74 +95,88 @@ test("Phase3: analytics_insights table exists with required columns", { timeout:
 test("Phase3: Can create and retrieve a scheduled export", { timeout: 60000 }, async () => {
   // NOTE: This test requires migration 0108 to add new job types to document_type enum
   // For now, we just verify the scheduled_exports table works
-  const dbPool = getDbPool();
+  const db = getDb();
   const runId = Date.now();
-  let fixture: TestFixtureContext | null = null;
   let exportId: number | null = null;
   
   try {
-    // Create test fixture instead of relying on existing data
-    fixture = await createTestFixture(dbPool, "phase3");
-    const companyId = fixture.company.id;
+    // Get company from fixture - use a simple query to find existing company
+    const companyRows = await sql`
+      SELECT id FROM companies LIMIT 1
+    `.execute(db);
     
-    const [insertResult] = await dbPool.execute(
-      `INSERT INTO scheduled_exports (
+    if (companyRows.rows.length === 0) {
+      assert.ok(false, "No company found - skipping test");
+      return;
+    }
+    
+    const companyId = Number((companyRows.rows[0] as { id: number }).id);
+    
+    // Get a user from that company
+    const userRows = await sql`
+      SELECT id FROM users WHERE company_id = ${companyId} LIMIT 1
+    `.execute(db);
+    
+    if (userRows.rows.length === 0) {
+      assert.ok(false, "No user found - skipping test");
+      return;
+    }
+    
+    const userId = Number((userRows.rows[0] as { id: number }).id);
+    
+    const insertResult = await sql`
+      INSERT INTO scheduled_exports (
         company_id, name, report_type, export_format, schedule_type, schedule_config,
         recipients, delivery_method, next_run_at, created_by_user_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
-      [companyId, `Test Export ${runId}`, 'SALES', 'CSV', 'ONCE', '{"hour": 0}', '[{"email": "test@example.com", "type": "TO"}]', 'EMAIL', fixture.user.id]
-    );
+      ) VALUES (${companyId}, ${`Test Export ${runId}`}, 'SALES', 'CSV', 'ONCE', '{"hour": 0}', '[{"email": "test@example.com", "type": "TO"}]', 'EMAIL', NOW(), ${userId})
+    `.execute(db);
     
-    exportId = Number((insertResult as { insertId: number }).insertId);
+    exportId = Number(insertResult.insertId);
     
     // Verify the export was created
-    const [exports] = await dbPool.execute<RowDataPacket[]>(
-      `SELECT id, name, report_type FROM scheduled_exports WHERE id = ?`,
-      [exportId]
-    );
+    const exports = await sql`
+      SELECT id, name, report_type FROM scheduled_exports WHERE id = ${exportId}
+    `.execute(db);
     
-    assert.strictEqual(exports.length, 1, "Scheduled export should be created");
-    assert.strictEqual(exports[0].name, `Test Export ${runId}`);
+    assert.strictEqual(exports.rows.length, 1, "Scheduled export should be created");
+    assert.strictEqual((exports.rows[0] as { name: string }).name, `Test Export ${runId}`);
   } finally {
     // Cleanup test data
     if (exportId) {
-      await dbPool.execute(`DELETE FROM scheduled_exports WHERE id = ?`, [exportId]);
-    }
-    if (fixture) {
-      await fixture.cleanup();
+      await sql`DELETE FROM scheduled_exports WHERE id = ${exportId}`.execute(db);
     }
   }
 });
 
 test("Phase3: email_outbox has attachment_path for export delivery", { timeout: 30000 }, async () => {
-  const dbPool = getDbPool();
+  const db = getDb();
   
-  const [columns] = await dbPool.execute<RowDataPacket[]>(`
+  const columns = await sql`
     SELECT COLUMN_NAME 
     FROM INFORMATION_SCHEMA.COLUMNS 
     WHERE TABLE_SCHEMA = DATABASE() 
     AND TABLE_NAME = 'email_outbox'
     AND COLUMN_NAME = 'attachment_path'
-  `);
+  `.execute(db);
   
-  assert.ok(columns.length > 0, "email_outbox should have attachment_path column");
+  assert.ok(columns.rows.length > 0, "email_outbox should have attachment_path column");
 });
 
 test("Phase3: Can queue FORECAST_GENERATION job", { timeout: 60000 }, async () => {
   // NOTE: This test requires migration 0108 to add new job types to document_type enum
   // For now, we verify the sales_forecasts table exists and has correct structure
-  const dbPool = getDbPool();
+  const db = getDb();
   
   // Check we can query the forecasts table
-  const [columns] = await dbPool.execute<RowDataPacket[]>(`
+  const columns = await sql`
     SELECT COLUMN_NAME 
     FROM INFORMATION_SCHEMA.COLUMNS 
     WHERE TABLE_SCHEMA = DATABASE() 
     AND TABLE_NAME = 'sales_forecasts'
     AND COLUMN_NAME = 'predicted_amount'
-  `);
+  `.execute(db);
   
-  assert.ok(columns.length > 0, "sales_forecasts should have predicted_amount column");
+  assert.ok(columns.rows.length > 0, "sales_forecasts should have predicted_amount column");
   
   console.log("Phase 3 job types require migration 0108 to be applied");
 });
@@ -171,18 +184,18 @@ test("Phase3: Can queue FORECAST_GENERATION job", { timeout: 60000 }, async () =
 test("Phase3: Can queue INSIGHTS_CALCULATION job", { timeout: 60000 }, async () => {
   // NOTE: This test requires migration 0108 to add new job types to document_type enum
   // For now, we verify the analytics_insights table exists and has correct structure
-  const dbPool = getDbPool();
+  const db = getDb();
   
   // Check we can query the insights table
-  const [columns] = await dbPool.execute<RowDataPacket[]>(`
+  const columns = await sql`
     SELECT COLUMN_NAME 
     FROM INFORMATION_SCHEMA.COLUMNS 
     WHERE TABLE_SCHEMA = DATABASE() 
     AND TABLE_NAME = 'analytics_insights'
     AND COLUMN_NAME = 'insight_type'
-  `);
+  `.execute(db);
   
-  assert.ok(columns.length > 0, "analytics_insights should have insight_type column");
+  assert.ok(columns.rows.length > 0, "analytics_insights should have insight_type column");
   
   console.log("Phase 3 job types require migration 0108 to be applied");
 });

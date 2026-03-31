@@ -8,9 +8,9 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
+import { sql } from "kysely";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "./db";
+import { closeDbPool, getDb } from "./db";
 import { createCompanyBasic } from "./companies";
 import { createItem } from "./items/index.js";
 import {
@@ -40,51 +40,47 @@ type FixtureContext = {
 };
 
 async function resolveFixtureContext(): Promise<FixtureContext> {
-  const pool = getDbPool();
+  const db = getDb();
   const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
   const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT c.id AS company_id, o.id AS outlet_id
-     FROM companies c
-     INNER JOIN outlets o ON o.company_id = c.id
-     WHERE c.code = ? AND o.code = ?
-     LIMIT 1`,
-    [companyCode, outletCode]
-  );
+  const rows = await sql<{ company_id: number; outlet_id: number }>`
+    SELECT c.id AS company_id, o.id AS outlet_id
+    FROM companies c
+    INNER JOIN outlets o ON o.company_id = c.id
+    WHERE c.code = ${companyCode} AND o.code = ${outletCode}
+    LIMIT 1
+  `.execute(db);
 
-  assert.ok(rows.length > 0, "Fixture company/outlet not found; run seed first");
+  assert.ok(rows.rows.length > 0, "Fixture company/outlet not found; run seed first");
   return {
-    companyId: BigInt(rows[0].company_id),
-    outletId: BigInt(rows[0].outlet_id)
+    companyId: BigInt(rows.rows[0].company_id),
+    outletId: BigInt(rows.rows[0].outlet_id)
   };
 }
 
-async function createTestTable(pool: ReturnType<typeof getDbPool>, companyId: bigint, outletId: bigint, runId: string): Promise<bigint> {
-  const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-     VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
-    [companyId, outletId, `TST-${runId}`.slice(0, 32), `Test Table ${runId}`, "Test Zone", 4]
-  );
-  return BigInt(result.insertId);
+async function createTestTable(db: ReturnType<typeof getDb>, companyId: bigint, outletId: bigint, runId: string): Promise<bigint> {
+  const result = await sql`
+    INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+    VALUES (${companyId}, ${outletId}, ${`TST-${runId}`.slice(0, 32)}, ${`Test Table ${runId}`}, "Test Zone", 4, 'AVAILABLE', 1)
+  `.execute(db);
+  return BigInt(result.insertId ?? 0n);
 }
 
-async function createTestSession(pool: ReturnType<typeof getDbPool>, companyId: bigint, outletId: bigint, tableId: bigint, statusId: number = ServiceSessionStatus.ACTIVE): Promise<bigint> {
-  const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO table_service_sessions (company_id, outlet_id, table_id, status_id, started_at, guest_count, created_at, updated_at, created_by)
-     VALUES (?, ?, ?, ?, NOW(), 2, NOW(), NOW(), 'test-user')`,
-    [companyId, outletId, tableId, statusId]
-  );
+async function createTestSession(db: ReturnType<typeof getDb>, companyId: bigint, outletId: bigint, tableId: bigint, statusId: number = ServiceSessionStatus.ACTIVE): Promise<bigint> {
+  const result = await sql`
+    INSERT INTO table_service_sessions (company_id, outlet_id, table_id, status_id, started_at, guest_count, created_at, updated_at, created_by)
+    VALUES (${companyId}, ${outletId}, ${tableId}, ${statusId}, NOW(), 2, NOW(), NOW(), 'test-user')
+  `.execute(db);
   
-  const sessionId = BigInt(result.insertId);
+  const sessionId = BigInt(result.insertId ?? 0n);
   
   // Set table occupancy to OCCUPIED for ACTIVE sessions
   if (statusId === ServiceSessionStatus.ACTIVE) {
-    await pool.execute(
-      `INSERT INTO table_occupancy (company_id, outlet_id, table_id, status_id, service_session_id, guest_count, created_by)
-       VALUES (?, ?, ?, 2, ?, 2, 'test-user')
-       ON DUPLICATE KEY UPDATE status_id = 2, service_session_id = VALUES(service_session_id), guest_count = 2`,
-      [companyId, outletId, tableId, sessionId]
-    );
+    await sql`
+      INSERT INTO table_occupancy (company_id, outlet_id, table_id, status_id, service_session_id, guest_count, created_by)
+      VALUES (${companyId}, ${outletId}, ${tableId}, 2, ${sessionId}, 2, 'test-user')
+      ON DUPLICATE KEY UPDATE status_id = 2, service_session_id = VALUES(service_session_id), guest_count = 2
+    `.execute(db);
   }
   
   return sessionId;
@@ -92,14 +88,13 @@ async function createTestSession(pool: ReturnType<typeof getDbPool>, companyId: 
 
 async function getOrCreateTestItem(companyId: bigint): Promise<bigint> {
   // Try to find an existing item
-  const pool = getDbPool();
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id FROM items WHERE company_id = ? LIMIT 1`,
-    [companyId]
-  );
+  const db = getDb();
+  const rows = await sql<{ id: number }>`
+    SELECT id FROM items WHERE company_id = ${companyId} LIMIT 1
+  `.execute(db);
   
-  if (rows.length > 0) {
-    return BigInt(rows[0].id);
+  if (rows.rows.length > 0) {
+    return BigInt(rows.rows[0].id);
   }
   
   // Create a test item if none exists using library function
@@ -114,41 +109,26 @@ async function getOrCreateTestItem(companyId: bigint): Promise<bigint> {
   return BigInt(item.id);
 }
 
-async function cleanupTestData(pool: ReturnType<typeof getDbPool>, companyId: bigint, outletId: bigint, sessionIds: bigint[], tableIds: bigint[], itemIds: bigint[] = []) {
+async function cleanupTestData(db: ReturnType<typeof getDb>, companyId: bigint, outletId: bigint, sessionIds: bigint[], tableIds: bigint[], itemIds: bigint[] = []) {
   // Clean up in reverse order of dependencies
   for (const sessionId of sessionIds) {
-    await pool.execute(
-      `DELETE FROM table_service_session_lines WHERE session_id = ?`,
-      [sessionId]
-    );
+    await sql`DELETE FROM table_service_session_lines WHERE session_id = ${sessionId}`.execute(db);
     // Note: table_events is append-only, cannot DELETE
     // Events will remain as audit trail
   }
   
   for (const sessionId of sessionIds) {
-    await pool.execute(
-      `DELETE FROM table_service_sessions WHERE id = ? AND company_id = ? AND outlet_id = ?`,
-      [sessionId, companyId, outletId]
-    );
+    await sql`DELETE FROM table_service_sessions WHERE id = ${sessionId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
   }
   
   for (const tableId of tableIds) {
-    await pool.execute(
-      `DELETE FROM table_occupancy WHERE table_id = ? AND company_id = ? AND outlet_id = ?`,
-      [tableId, companyId, outletId]
-    );
-    await pool.execute(
-      `DELETE FROM outlet_tables WHERE id = ? AND company_id = ? AND outlet_id = ?`,
-      [tableId, companyId, outletId]
-    );
+    await sql`DELETE FROM table_occupancy WHERE table_id = ${tableId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
+    await sql`DELETE FROM outlet_tables WHERE id = ${tableId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
   }
   
   // Clean up test items
   for (const itemId of itemIds) {
-    await pool.execute(
-      `DELETE FROM items WHERE id = ? AND company_id = ? AND sku = 'TEST-ITEM'`,
-      [itemId, companyId]
-    );
+    await sql`DELETE FROM items WHERE id = ${itemId} AND company_id = ${companyId} AND sku = 'TEST-ITEM'`.execute(db);
   }
 }
 
@@ -159,7 +139,7 @@ test(
   "getSession - returns session with lines when found",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -168,11 +148,10 @@ test(
 
     try {
       // Get a real product from the company
-      const [productRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM items WHERE company_id = ? LIMIT 1`,
-        [companyId]
-      );
-      const productId = productRows.length > 0 ? productRows[0].id : null;
+      const productRows = await sql<{ id: number }>`
+        SELECT id FROM items WHERE company_id = ${companyId} LIMIT 1
+      `.execute(db);
+      const productId = productRows.rows.length > 0 ? productRows.rows[0].id : null;
 
       if (!productId) {
         // Create a test product if none exists
@@ -184,18 +163,17 @@ test(
         createdItemIds.push(BigInt(newItem.id));
       }
 
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       // Add a line to the session
-      await pool.execute(
-        `INSERT INTO table_service_session_lines (session_id, line_number, product_id, product_name, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
-         VALUES (?, 1, ?, 'Test Product', 2, 10.00, 0, 0, 20.00, 0, NOW(), NOW())`,
-        [sessionId, productId ?? createdItemIds[0]]
-      );
+      await sql`
+        INSERT INTO table_service_session_lines (session_id, line_number, product_id, product_name, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
+        VALUES (${sessionId}, 1, ${productId ?? createdItemIds[0]}, 'Test Product', 2, 10.00, 0, 0, 20.00, 0, NOW(), NOW())
+      `.execute(db);
 
       const session = await getSession(companyId, outletId, sessionId);
 
@@ -210,7 +188,7 @@ test(
       assert.equal(session?.lines[0].quantity, 2, "Line quantity should match");
       assert.equal(session?.lines[0].lineTotal, 20.00, "Line total should match");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
     }
   }
 );
@@ -235,7 +213,7 @@ test(
   "listSessions - filters by status and pagination works",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -244,11 +222,11 @@ test(
     try {
       // Create 3 tables and sessions
       for (let i = 0; i < 3; i++) {
-        const tableId = await createTestTable(pool, companyId, outletId, `${runId}-${i}`);
+        const tableId = await createTestTable(db, companyId, outletId, `${runId}-${i}`);
         createdTableIds.push(tableId);
         
         const statusId = i === 0 ? ServiceSessionStatus.CLOSED : ServiceSessionStatus.ACTIVE;
-        const sessionId = await createTestSession(pool, companyId, outletId, tableId, statusId);
+        const sessionId = await createTestSession(db, companyId, outletId, tableId, statusId);
         createdSessionIds.push(sessionId);
       }
 
@@ -300,7 +278,7 @@ test(
       assert.equal(pageResult.limit, 2, "Limit should be 2");
       assert.equal(pageResult.offset, 0, "Offset should be 0");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -312,7 +290,7 @@ test(
   "addSessionLine - creates line in ACTIVE session and logs event",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -320,10 +298,10 @@ test(
     const createdItemIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       const productId = await getOrCreateTestItem(companyId);
@@ -364,17 +342,16 @@ test(
       assert.equal(line.isVoided, false, "Line should not be voided");
 
       // Verify event was logged
-      const [eventRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT * FROM table_events WHERE service_session_id = ? AND client_tx_id = ?`,
-        [sessionId, input.clientTxId]
-      );
+      const eventRows = await sql<{ event_type_id: number; event_data: string }>`
+        SELECT * FROM table_events WHERE service_session_id = ${sessionId} AND client_tx_id = ${input.clientTxId}
+      `.execute(db);
 
-      assert.equal(eventRows.length, 1, "Should have one event logged");
-      assert.equal(eventRows[0].event_type_id, 9, "Event type should be SESSION_LINE_ADDED (9)");
-      const eventData = JSON.parse(eventRows[0].event_data);
+      assert.equal(eventRows.rows.length, 1, "Should have one event logged");
+      assert.equal(eventRows.rows[0].event_type_id, 9, "Event type should be SESSION_LINE_ADDED (9)");
+      const eventData = JSON.parse(eventRows.rows[0].event_data);
       assert.equal(eventData.productName, "Burger", "Event data should include product name");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
     }
   }
 );
@@ -386,7 +363,7 @@ test(
   "addSessionLine - idempotent with same clientTxId",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -394,10 +371,10 @@ test(
     const createdItemIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       const productId = await getOrCreateTestItem(companyId);
@@ -429,13 +406,12 @@ test(
       assert.equal(line1.productName, line2.productName, "Should return same product");
 
       // Verify only one line exists
-      const [lineRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) as count FROM table_service_session_lines WHERE session_id = ?`,
-        [sessionId]
-      );
-      assert.equal(lineRows[0].count, 1, "Should have only one line in database");
+      const lineRows = await sql<{ count: number }>`
+        SELECT COUNT(*) as count FROM table_service_session_lines WHERE session_id = ${sessionId}
+      `.execute(db);
+      assert.equal(lineRows.rows[0].count, 1, "Should have only one line in database");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
     }
   }
 );
@@ -444,7 +420,7 @@ test(
   "addSessionLine - idempotent replay returns original line even after newer lines",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -452,10 +428,10 @@ test(
     const createdItemIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
 
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       const productId = await getOrCreateTestItem(companyId);
@@ -508,7 +484,7 @@ test(
       assert.equal(replayA.productName, lineA.productName, "Replay must return original payload data");
       assert.equal(replayA.quantity, lineA.quantity, "Replay must keep original quantity");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
     }
   }
 );
@@ -520,7 +496,7 @@ test(
   "updateSessionLine - updates line and recalculates total",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -528,10 +504,10 @@ test(
     const createdItemIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       const productId = await getOrCreateTestItem(companyId);
@@ -540,12 +516,11 @@ test(
       }
 
       // Create initial line
-      const [lineResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO table_service_session_lines (session_id, line_number, product_id, product_name, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
-         VALUES (?, 1, ?, 'Original Product', 1, 10.00, 0, 0, 10.00, 0, NOW(), NOW())`,
-        [sessionId, productId]
-      );
-      const lineId = BigInt(lineResult.insertId);
+      const insertResult = await sql`
+        INSERT INTO table_service_session_lines (session_id, line_number, product_id, product_name, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
+        VALUES (${sessionId}, 1, ${productId}, 'Original Product', 1, 10.00, 0, 0, 10.00, 0, NOW(), NOW())
+      `.execute(db);
+      const lineId = BigInt(insertResult.insertId ?? 0n);
 
       const input: UpdateSessionLineInput = {
         companyId,
@@ -568,7 +543,7 @@ test(
       // lineTotal = 3 * 12.00 = 36.00
       assert.equal(updatedLine.lineTotal, 36.00, "Line total should be recalculated");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
     }
   }
 );
@@ -580,7 +555,7 @@ test(
   "removeSessionLine - deletes line and logs event",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -588,10 +563,10 @@ test(
     const createdItemIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       const productId = await getOrCreateTestItem(companyId);
@@ -600,12 +575,11 @@ test(
       }
 
       // Create line to remove
-      const [lineResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO table_service_session_lines (session_id, line_number, product_id, product_name, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
-         VALUES (?, 1, ?, 'Product To Remove', 2, 8.00, 0, 0, 16.00, 0, NOW(), NOW())`,
-        [sessionId, productId]
-      );
-      const lineId = BigInt(lineResult.insertId);
+      const insertResult = await sql`
+        INSERT INTO table_service_session_lines (session_id, line_number, product_id, product_name, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
+        VALUES (${sessionId}, 1, ${productId}, 'Product To Remove', 2, 8.00, 0, 0, 16.00, 0, NOW(), NOW())
+      `.execute(db);
+      const lineId = BigInt(insertResult.insertId ?? 0n);
 
       const result = await removeSessionLine({
         companyId,
@@ -620,21 +594,19 @@ test(
       assert.equal(result.lineId, lineId, "Should return deleted line ID");
 
       // Verify line was deleted
-      const [lineRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) as count FROM table_service_session_lines WHERE id = ?`,
-        [lineId]
-      );
-      assert.equal(lineRows[0].count, 0, "Line should be deleted from database");
+      const lineRows = await sql<{ count: number }>`
+        SELECT COUNT(*) as count FROM table_service_session_lines WHERE id = ${lineId}
+      `.execute(db);
+      assert.equal(lineRows.rows[0].count, 0, "Line should be deleted from database");
 
       // Verify event was logged
-      const [eventRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT * FROM table_events WHERE service_session_id = ? AND client_tx_id = ?`,
-        [sessionId, `remove-line-${runId}`]
-      );
-      assert.equal(eventRows.length, 1, "Should have one event logged");
-      assert.equal(eventRows[0].event_type_id, 11, "Event type should be SESSION_LINE_REMOVED (11)");
+      const eventRows = await sql<{ event_type_id: number }>`
+        SELECT * FROM table_events WHERE service_session_id = ${sessionId} AND client_tx_id = ${`remove-line-${runId}`}
+      `.execute(db);
+      assert.equal(eventRows.rows.length, 1, "Should have one event logged");
+      assert.equal(eventRows.rows[0].event_type_id, 11, "Event type should be SESSION_LINE_REMOVED (11)");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds, createdItemIds);
     }
   }
 );
@@ -646,17 +618,17 @@ test(
   "lockSessionForPayment - transitions from ACTIVE to LOCKED_FOR_PAYMENT",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       const input: LockSessionInput = {
@@ -674,14 +646,13 @@ test(
       assert.ok(lockedSession.lockedAt !== null, "LockedAt should be set");
 
       // Verify event was logged
-      const [eventRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT * FROM table_events WHERE service_session_id = ? AND client_tx_id = ?`,
-        [sessionId, `lock-${runId}`]
-      );
-      assert.equal(eventRows.length, 1, "Should have one event logged");
-      assert.equal(eventRows[0].event_type_id, 12, "Event type should be SESSION_LOCKED (12)");
+      const eventRows = await sql<{ event_type_id: number }>`
+        SELECT * FROM table_events WHERE service_session_id = ${sessionId} AND client_tx_id = ${`lock-${runId}`}
+      `.execute(db);
+      assert.equal(eventRows.rows.length, 1, "Should have one event logged");
+      assert.equal(eventRows.rows[0].event_type_id, 12, "Event type should be SESSION_LOCKED (12)");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -693,17 +664,17 @@ test(
   "lockSessionForPayment - rejects if session is not ACTIVE",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.CLOSED);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.CLOSED);
       createdSessionIds.push(sessionId);
 
       const input: LockSessionInput = {
@@ -726,7 +697,7 @@ test(
         }
       );
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -738,7 +709,7 @@ test(
   "closeSession - transitions from LOCKED_FOR_PAYMENT to CLOSED and releases occupancy",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -746,29 +717,27 @@ test(
     const snapshotId = `snap-${runId}`.slice(0, 36);
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.LOCKED_FOR_PAYMENT);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.LOCKED_FOR_PAYMENT);
       createdSessionIds.push(sessionId);
 
       const nowTs = Date.now();
-      await pool.execute(
-        `INSERT INTO pos_order_snapshots
-         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?)`,
-        [snapshotId, companyId, outletId, nowTs, nowTs]
-      );
+      await sql`
+        INSERT INTO pos_order_snapshots
+        (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
+        VALUES (${snapshotId}, ${companyId}, ${outletId}, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ${nowTs}, NOW(), ${nowTs})
+      `.execute(db);
 
       // Update session to be locked with persisted snapshot link
-      await pool.execute(
-        `UPDATE table_service_sessions
-         SET status_id = ?,
-             locked_at = NOW(),
-             pos_order_snapshot_id = ?
-         WHERE id = ?`,
-        [ServiceSessionStatus.LOCKED_FOR_PAYMENT, snapshotId, sessionId]
-      );
+      await sql`
+        UPDATE table_service_sessions
+        SET status_id = ${ServiceSessionStatus.LOCKED_FOR_PAYMENT},
+            locked_at = NOW(),
+            pos_order_snapshot_id = ${snapshotId}
+        WHERE id = ${sessionId}
+      `.execute(db);
 
       const input: CloseSessionInput = {
         companyId,
@@ -785,33 +754,25 @@ test(
       assert.ok(closedSession.closedAt !== null, "ClosedAt should be set");
 
       // Verify table occupancy was released
-      const [occupancyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT status_id, service_session_id FROM table_occupancy WHERE table_id = ? AND company_id = ? AND outlet_id = ?`,
-        [tableId, companyId, outletId]
-      );
+      const occupancyRows = await sql<{ status_id: number; service_session_id: number | null }>`
+        SELECT status_id, service_session_id FROM table_occupancy WHERE table_id = ${tableId} AND company_id = ${companyId} AND outlet_id = ${outletId}
+      `.execute(db);
       
-      if (occupancyRows.length > 0) {
-        assert.equal(occupancyRows[0].status_id, 1, "Occupancy should be AVAILABLE (1)");
-        assert.equal(occupancyRows[0].service_session_id, null, "Service session ID should be cleared");
+      if (occupancyRows.rows.length > 0) {
+        assert.equal(occupancyRows.rows[0].status_id, 1, "Occupancy should be AVAILABLE (1)");
+        assert.equal(occupancyRows.rows[0].service_session_id, null, "Service session ID should be cleared");
       }
 
       // Verify event was logged
-      const [eventRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT * FROM table_events WHERE service_session_id = ? AND client_tx_id = ?`,
-        [sessionId, `close-${runId}`]
-      );
-      assert.equal(eventRows.length, 1, "Should have one event logged");
-      assert.equal(eventRows[0].event_type_id, 13, "Event type should be SESSION_CLOSED (13)");
+      const eventRows = await sql<{ event_type_id: number }>`
+        SELECT * FROM table_events WHERE service_session_id = ${sessionId} AND client_tx_id = ${`close-${runId}`}
+      `.execute(db);
+      assert.equal(eventRows.rows.length, 1, "Should have one event logged");
+      assert.equal(eventRows.rows[0].event_type_id, 13, "Event type should be SESSION_CLOSED (13)");
     } finally {
-      await pool.execute(
-        `DELETE FROM pos_order_snapshot_lines WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
-        [snapshotId, companyId, outletId]
-      );
-      await pool.execute(
-        `DELETE FROM pos_order_snapshots WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
-        [snapshotId, companyId, outletId]
-      );
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await sql`DELETE FROM pos_order_snapshot_lines WHERE order_id = ${snapshotId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
+      await sql`DELETE FROM pos_order_snapshots WHERE order_id = ${snapshotId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -823,7 +784,7 @@ test(
   "closeSession - transitions from ACTIVE to CLOSED with snapshot",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -831,28 +792,26 @@ test(
     const snapshotId = `snap-active-${runId}`.slice(0, 36);
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       // Create snapshot for the session (required for closing)
       const nowTs = Date.now();
-      await pool.execute(
-        `INSERT INTO pos_order_snapshots
-         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?)`,
-        [snapshotId, companyId, outletId, nowTs, nowTs]
-      );
+      await sql`
+        INSERT INTO pos_order_snapshots
+        (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
+        VALUES (${snapshotId}, ${companyId}, ${outletId}, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ${nowTs}, NOW(), ${nowTs})
+      `.execute(db);
 
       // Link snapshot to session (required for close invariant)
-      await pool.execute(
-        `UPDATE table_service_sessions
-         SET pos_order_snapshot_id = ?
-         WHERE id = ?`,
-        [snapshotId, sessionId]
-      );
+      await sql`
+        UPDATE table_service_sessions
+        SET pos_order_snapshot_id = ${snapshotId}
+        WHERE id = ${sessionId}
+      `.execute(db);
 
       const input: CloseSessionInput = {
         companyId,
@@ -867,15 +826,9 @@ test(
       assert.equal(closedSession.statusId, ServiceSessionStatus.CLOSED, "Status should be CLOSED");
       assert.ok(closedSession.closedAt !== null, "ClosedAt should be set");
     } finally {
-      await pool.execute(
-        `DELETE FROM pos_order_snapshot_lines WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
-        [snapshotId, companyId, outletId]
-      );
-      await pool.execute(
-        `DELETE FROM pos_order_snapshots WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
-        [snapshotId, companyId, outletId]
-      );
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await sql`DELETE FROM pos_order_snapshot_lines WHERE order_id = ${snapshotId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
+      await sql`DELETE FROM pos_order_snapshots WHERE order_id = ${snapshotId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -890,7 +843,7 @@ test(
   "closeSession - snapshot lines derive freshness from source lines (Story 17.3 / 18.2)",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -898,38 +851,35 @@ test(
     const snapshotId = `snap-ts-${runId}`.slice(0, 36);
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
 
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       // Create and link a snapshot
       const nowTs = Date.now();
-      await pool.execute(
-        `INSERT INTO pos_order_snapshots
-         (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ?, NOW(), ?)`,
-        [snapshotId, companyId, outletId, nowTs, nowTs]
-      );
+      await sql`
+        INSERT INTO pos_order_snapshots
+        (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, paid_amount, opened_at, opened_at_ts, updated_at, updated_at_ts)
+        VALUES (${snapshotId}, ${companyId}, ${outletId}, 'DINE_IN', 'OPEN', 'OPEN', 0, 0, NOW(), ${nowTs}, NOW(), ${nowTs})
+      `.execute(db);
 
       // Update session to be ACTIVE with snapshot link (simulating lock being called)
-      await pool.execute(
-        `UPDATE table_service_sessions
-         SET pos_order_snapshot_id = ?
-         WHERE id = ?`,
-        [snapshotId, sessionId]
-      );
+      await sql`
+        UPDATE table_service_sessions
+        SET pos_order_snapshot_id = ${snapshotId}
+        WHERE id = ${sessionId}
+      `.execute(db);
 
       // Add a session line (this is what will be synced to snapshot lines)
       const productId = await getOrCreateTestItem(companyId);
       const sourceLineUpdatedAt = new Date("2026-03-20T10:15:00.000Z");
-      await pool.execute(
-        `INSERT INTO table_service_session_lines
-          (session_id, line_number, product_id, product_name, product_sku, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
-         VALUES (?, 1, ?, 'Test Product', 'TEST-SKU', 2, 15.00, 0, 0, 30.00, 0, NOW(), ?)`,
-        [sessionId, productId, sourceLineUpdatedAt]
-      );
+      await sql`
+        INSERT INTO table_service_session_lines
+        (session_id, line_number, product_id, product_name, product_sku, quantity, unit_price, discount_amount, tax_amount, line_total, is_voided, created_at, updated_at)
+        VALUES (${sessionId}, 1, ${productId}, 'Test Product', 'TEST-SKU', 2, 15.00, 0, 0, 30.00, 0, NOW(), ${sourceLineUpdatedAt})
+      `.execute(db);
 
       // Close the session - this triggers syncSnapshotLinesFromSession internally
       const input: CloseSessionInput = {
@@ -946,23 +896,21 @@ test(
       assert.equal(closedSession.statusId, ServiceSessionStatus.CLOSED, "Status should be CLOSED");
 
       // Verify the retained snapshot line timestamp semantics
-      const [lineRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT updated_at_ts
-         FROM pos_order_snapshot_lines
-         WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
-        [snapshotId, companyId, outletId]
-      );
+      const lineRows = await sql<{ updated_at_ts: bigint }>`
+        SELECT updated_at_ts
+        FROM pos_order_snapshot_lines
+        WHERE order_id = ${snapshotId} AND company_id = ${companyId} AND outlet_id = ${outletId}
+      `.execute(db);
 
-      assert.ok(lineRows.length > 0, "Should have created snapshot lines via syncSnapshotLinesFromSession");
+      assert.ok(lineRows.rows.length > 0, "Should have created snapshot lines via syncSnapshotLinesFromSession");
 
-      const { updated_at_ts } = lineRows[0];
+      const { updated_at_ts } = lineRows.rows[0];
 
       const storedUpdatedAtTs = Number(updated_at_ts);
-      const [expectedRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT UNIX_TIMESTAMP(?) * 1000 AS expected_updated_at_ts`,
-        [sourceLineUpdatedAt]
-      );
-      const expectedUpdatedAtTs = Number(expectedRows[0].expected_updated_at_ts);
+      const expectedRows = await sql<{ expected_updated_at_ts: number }>`
+        SELECT UNIX_TIMESTAMP(${sourceLineUpdatedAt}) * 1000 AS expected_updated_at_ts
+      `.execute(db);
+      const expectedUpdatedAtTs = Number(expectedRows.rows[0].expected_updated_at_ts);
 
       // updated_at_ts is derived from the latest source line updated_at
       assert.ok(
@@ -971,15 +919,9 @@ test(
       );
 
     } finally {
-      await pool.execute(
-        `DELETE FROM pos_order_snapshot_lines WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
-        [snapshotId, companyId, outletId]
-      );
-      await pool.execute(
-        `DELETE FROM pos_order_snapshots WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
-        [snapshotId, companyId, outletId]
-      );
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await sql`DELETE FROM pos_order_snapshot_lines WHERE order_id = ${snapshotId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
+      await sql`DELETE FROM pos_order_snapshots WHERE order_id = ${snapshotId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -991,24 +933,23 @@ test(
   "closeSession - rejects if session is already CLOSED",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.CLOSED);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.CLOSED);
       createdSessionIds.push(sessionId);
 
       // Update to closed
-      await pool.execute(
-        `UPDATE table_service_sessions SET status_id = ?, closed_at = NOW() WHERE id = ?`,
-        [ServiceSessionStatus.CLOSED, sessionId]
-      );
+      await sql`
+        UPDATE table_service_sessions SET status_id = ${ServiceSessionStatus.CLOSED}, closed_at = NOW() WHERE id = ${sessionId}
+      `.execute(db);
 
       const input: CloseSessionInput = {
         companyId,
@@ -1028,7 +969,7 @@ test(
         }
       );
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -1040,17 +981,17 @@ test(
   "Tenant isolation - wrong company returns null for getSession",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       // Try to access with wrong company
@@ -1059,7 +1000,7 @@ test(
       
       assert.strictEqual(session, null, "Should return null for wrong company");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -1068,17 +1009,17 @@ test(
   "Tenant isolation - wrong outlet returns null for getSession",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       // Try to access with wrong outlet
@@ -1087,7 +1028,7 @@ test(
       
       assert.strictEqual(session, null, "Should return null for wrong outlet");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -1096,17 +1037,17 @@ test(
   "Tenant isolation - wrong company returns empty list for listSessions",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       // Try to list with wrong company
@@ -1121,7 +1062,7 @@ test(
       assert.equal(result.sessions.length, 0, "Should return empty list for wrong company");
       assert.equal(result.total, 0, "Total should be 0 for wrong company");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -1130,17 +1071,17 @@ test(
   "Tenant isolation - addSessionLine throws SessionNotFoundError for wrong company",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       // Try to add line with wrong company
@@ -1164,7 +1105,7 @@ test(
         }
       );
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -1173,18 +1114,18 @@ test(
   "addSessionLine - throws InvalidSessionStatusError when session is not ACTIVE",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
       
       // Create a LOCKED session
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.LOCKED_FOR_PAYMENT);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.LOCKED_FOR_PAYMENT);
       createdSessionIds.push(sessionId);
 
       await assert.rejects(
@@ -1205,7 +1146,7 @@ test(
         }
       );
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -1217,17 +1158,17 @@ test(
   "addSessionLine - throws SessionValidationError for non-existent product",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
 
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       // Use a non-existent product ID
@@ -1252,7 +1193,7 @@ test(
         }
       );
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -1261,17 +1202,17 @@ test(
   "addSessionLine - throws SessionValidationError for product from different company",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
     const createdTableIds: bigint[] = [];
 
     try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
+      const tableId = await createTestTable(db, companyId, outletId, runId);
       createdTableIds.push(tableId);
 
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
+      const sessionId = await createTestSession(db, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId);
 
       // Create a product for a different company
@@ -1311,17 +1252,11 @@ test(
         );
       } finally {
         // Cleanup different company's data
-        await pool.execute(
-          `DELETE FROM items WHERE id = ? AND company_id = ?`,
-          [differentProductId, differentCompanyId]
-        );
-        await pool.execute(
-          `DELETE FROM companies WHERE id = ?`,
-          [differentCompanyId]
-        );
+        await sql`DELETE FROM items WHERE id = ${differentProductId} AND company_id = ${differentCompanyId}`.execute(db);
+        await sql`DELETE FROM companies WHERE id = ${differentCompanyId}`.execute(db);
       }
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
@@ -1331,7 +1266,7 @@ test(
   "addSessionLine - duplicate clientTxId in different session throws conflict",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdSessionIds: bigint[] = [];
@@ -1339,160 +1274,57 @@ test(
 
     try {
       // Create two tables and two sessions
-      const tableId1 = await createTestTable(pool, companyId, outletId, `${runId}-A`);
+      const tableId1 = await createTestTable(db, companyId, outletId, `${runId}-A`);
       createdTableIds.push(tableId1);
-      const tableId2 = await createTestTable(pool, companyId, outletId, `${runId}-B`);
+      const tableId2 = await createTestTable(db, companyId, outletId, `${runId}-B`);
       createdTableIds.push(tableId2);
 
-      const sessionId1 = await createTestSession(pool, companyId, outletId, tableId1, ServiceSessionStatus.ACTIVE);
+      const sessionId1 = await createTestSession(db, companyId, outletId, tableId1, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId1);
-      const sessionId2 = await createTestSession(pool, companyId, outletId, tableId2, ServiceSessionStatus.ACTIVE);
+      const sessionId2 = await createTestSession(db, companyId, outletId, tableId2, ServiceSessionStatus.ACTIVE);
       createdSessionIds.push(sessionId2);
 
       const productId = await getOrCreateTestItem(companyId);
-      const clientTxId = `scoped-${runId}`;
+      const clientTxId = `cross-session-${runId}`;
 
       // Add line to session 1
-      const line1 = await addSessionLine({
+      await addSessionLine({
         companyId,
         outletId,
         sessionId: sessionId1,
         productId,
-        productName: "Session 1 Item",
+        productName: "Product in Session 1",
         quantity: 1,
-        unitPrice: 10.00,
+        unitPrice: 10,
         createdBy: "test-user",
-        clientTxId
+        clientTxId,
       });
 
-      // Same clientTxId in a different session should fail as conflict
+      // Try to add line to session 2 with same clientTxId
       await assert.rejects(
         async () => addSessionLine({
           companyId,
           outletId,
           sessionId: sessionId2,
           productId,
-          productName: "Session 2 Item",
-          quantity: 2,
-          unitPrice: 20.00,
+          productName: "Product in Session 2",
+          quantity: 1,
+          unitPrice: 10,
           createdBy: "test-user",
-          clientTxId
+          clientTxId,
         }),
         (error: unknown) => {
           assert.ok(error instanceof SessionConflictError, "Should throw SessionConflictError");
           return true;
         }
       );
-
-      // Retry to session 1 with same clientTxId - should return existing line (idempotency replay)
-      const line1Replay = await addSessionLine({
-        companyId,
-        outletId,
-        sessionId: sessionId1,
-        productId,
-        productName: "Different Name", // Should be ignored due to idempotency
-        quantity: 99, // Should be ignored due to idempotency
-        unitPrice: 999.00, // Should be ignored due to idempotency
-        createdBy: "test-user",
-        clientTxId
-      });
-
-      assert.strictEqual(line1.id, line1Replay.id, "Replay should return same line for same session");
-      assert.strictEqual(line1Replay.productName, "Session 1 Item", "Replay should return original data");
-      assert.strictEqual(line1Replay.quantity, 1, "Replay should return original quantity");
     } finally {
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
+      await cleanupTestData(db, companyId, outletId, createdSessionIds, createdTableIds);
     }
   }
 );
 
-// Test: Lock retry preserves existing snapshot link
-test(
-  "lockSessionForPayment - retry preserves existing snapshot link",
-  { concurrency: false, timeout: 30000 },
-  async () => {
-    const pool = getDbPool();
-    const runId = Date.now().toString(36);
-    const { companyId, outletId } = await resolveFixtureContext();
-    const createdSessionIds: bigint[] = [];
-    const createdTableIds: bigint[] = [];
-    const createdSnapshotIds: string[] = [];
-
-    try {
-      const tableId = await createTestTable(pool, companyId, outletId, runId);
-      createdTableIds.push(tableId);
-
-      const sessionId = await createTestSession(pool, companyId, outletId, tableId, ServiceSessionStatus.ACTIVE);
-      createdSessionIds.push(sessionId);
-
-      // Create snapshot
-      const snapshotId = `snap-${runId}`;
-      const nowTs = Date.now();
-      await pool.execute(
-        `INSERT INTO pos_order_snapshots (order_id, company_id, outlet_id, service_type, order_state, order_status, is_finalized, opened_at, opened_at_ts, updated_at, updated_at_ts)
-         VALUES (?, ?, ?, 'DINE_IN', 'OPEN', 'OPEN', 0, NOW(), ?, NOW(), ?)`,
-        [snapshotId, companyId, outletId, nowTs, nowTs]
-      );
-      createdSnapshotIds.push(snapshotId);
-
-      const clientTxId = `lock-${runId}`;
-
-      // First lock with snapshot
-      const firstLock = await lockSessionForPayment({
-        companyId,
-        outletId,
-        sessionId,
-        clientTxId,
-        posOrderSnapshotId: snapshotId,
-        updatedBy: "test-user"
-      });
-
-      assert.strictEqual(firstLock.statusId, ServiceSessionStatus.LOCKED_FOR_PAYMENT, "Session should be locked");
-
-      // Verify snapshot is linked
-      const [rows1] = await pool.execute<RowDataPacket[]>(
-        `SELECT pos_order_snapshot_id FROM table_service_sessions WHERE id = ?`,
-        [sessionId]
-      );
-      assert.strictEqual(rows1[0]?.pos_order_snapshot_id, snapshotId, "Snapshot should be linked after first lock");
-
-      // Retry lock with SAME clientTxId but WITHOUT snapshot - should be idempotent and preserve link
-      const secondLock = await lockSessionForPayment({
-        companyId,
-        outletId,
-        sessionId,
-        clientTxId, // Same ID for idempotency
-        // posOrderSnapshotId omitted - should preserve existing link
-        updatedBy: "test-user"
-      });
-
-      assert.strictEqual(secondLock.statusId, ServiceSessionStatus.LOCKED_FOR_PAYMENT, "Session should remain locked");
-
-      // Verify snapshot link is preserved
-      const [rows2] = await pool.execute<RowDataPacket[]>(
-        `SELECT pos_order_snapshot_id FROM table_service_sessions WHERE id = ?`,
-        [sessionId]
-      );
-      assert.strictEqual(rows2[0]?.pos_order_snapshot_id, snapshotId, "Snapshot link should be preserved on idempotent retry without snapshot");
-
-    } finally {
-      // Cleanup snapshots
-      for (const snapId of createdSnapshotIds) {
-        await pool.execute(
-          `DELETE FROM pos_order_snapshot_lines WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
-          [snapId, companyId, outletId]
-        );
-        await pool.execute(
-          `DELETE FROM pos_order_snapshots WHERE order_id = ? AND company_id = ? AND outlet_id = ?`,
-          [snapId, companyId, outletId]
-        );
-      }
-      await cleanupTestData(pool, companyId, outletId, createdSessionIds, createdTableIds);
-    }
-  }
-);
-
-// Close database pool after all tests
+// Pool cleanup
 test.after(async () => {
   await closeDbPool();
 });

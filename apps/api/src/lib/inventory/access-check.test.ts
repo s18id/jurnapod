@@ -4,9 +4,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../db";
+import { closeDbPool, getDb } from "../db";
 import { checkItemAccess } from "./access-check";
-import type { RowDataPacket } from "mysql2/promise";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
@@ -14,7 +14,7 @@ test(
   "inventory/access-check - Access granted for item matching company",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
     const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
@@ -25,33 +25,27 @@ test(
 
     try {
       // Get company ID from fixtures
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT c.id
+      const companyResult = await sql`SELECT c.id
          FROM companies c
          INNER JOIN users u ON u.company_id = c.id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1`.execute(db);
 
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows[0] as { id: number }).id);
+      assert.ok(companyResult.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       // Get an existing item from this company
-      const [itemRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM items 
-         WHERE company_id = ?
-         LIMIT 1`,
-        [companyId]
-      );
+      const itemResult = await sql`SELECT id FROM items 
+         WHERE company_id = ${companyId}
+         LIMIT 1`.execute(db);
 
-      assert.ok(itemRows.length > 0, "Item fixture not found for company");
-      testItemId = Number((itemRows[0] as { id: number }).id);
+      assert.ok(itemResult.rows.length > 0, "Item fixture not found for company");
+      testItemId = Number((itemResult.rows[0] as { id: number }).id);
 
       // Test access with correct company
       const result = await checkItemAccess(testItemId, companyId);
@@ -85,7 +79,7 @@ test(
   "inventory/access-check - Access denied with not_found for item in different company",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
     const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
@@ -96,33 +90,27 @@ test(
 
     try {
       // Get company ID
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT c.id
+      const companyResult = await sql`SELECT c.id
          FROM companies c
          INNER JOIN users u ON u.company_id = c.id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1`.execute(db);
 
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows[0] as { id: number }).id);
+      assert.ok(companyResult.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       // Get an item from this company
-      const [itemRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM items 
-         WHERE company_id = ?
-         LIMIT 1`,
-        [companyId]
-      );
+      const itemResult = await sql`SELECT id FROM items 
+         WHERE company_id = ${companyId}
+         LIMIT 1`.execute(db);
 
-      assert.ok(itemRows.length > 0, "Item fixture not found for company");
-      testItemId = Number((itemRows[0] as { id: number }).id);
+      assert.ok(itemResult.rows.length > 0, "Item fixture not found for company");
+      testItemId = Number((itemResult.rows[0] as { id: number }).id);
 
       // Try to access with wrong company ID
       const wrongCompanyId = companyId + 999;

@@ -11,10 +11,10 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../lib/db";
+import { closeDbPool, getDb } from "../lib/db";
 import { MODULE_PERMISSION_BITS } from "@jurnapod/auth";
 import { checkUserAccess } from "../lib/auth";
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
@@ -22,25 +22,22 @@ const TEST_COMPANY_CODE = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Permission System", { concurrency: false }, () => {
-  let connection: PoolConnection;
   let testUserId = 0;
   let testCompanyId = 0;
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    const db = getDb();
 
-    // Find test user fixture
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id AS user_id, u.company_id
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       WHERE c.code = ?
-         AND u.email = ?
-         AND u.is_active = 1
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL]
-    );
+    // Find test user fixture using Kysely query builder
+    const userRows = await db
+      .selectFrom("users as u")
+      .innerJoin("companies as c", "c.id", "u.company_id")
+      .where("c.code", "=", TEST_COMPANY_CODE)
+      .where("u.email", "=", TEST_OWNER_EMAIL)
+      .where("u.is_active", "=", 1)
+      .select(["u.id as user_id", "u.company_id"])
+      .limit(1)
+      .execute();
 
     if (userRows.length === 0) {
       throw new Error(`Test user not found: ${TEST_OWNER_EMAIL} in company ${TEST_COMPANY_CODE}`);
@@ -52,9 +49,7 @@ describe("Permission System", { concurrency: false }, () => {
   });
 
   after(async () => {
-    if (connection) {
-      connection.release();
-    }
+    await closeDbPool();
   });
 
   describe("Permission Bitmask System", () => {
@@ -66,32 +61,32 @@ describe("Permission System", { concurrency: false }, () => {
     });
 
     test("user has role assignments", async () => {
-      const [roleRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) as role_count 
-         FROM user_role_assignments ura
-         WHERE ura.user_id = ?`,
-        [testUserId]
-      );
+      const db = getDb();
+      const result = await sql<{ role_count: number }>`
+        SELECT COUNT(*) as role_count 
+        FROM user_role_assignments ura
+        WHERE ura.user_id = ${testUserId}
+      `.execute(db);
 
-      assert.ok(roleRows.length > 0, "Should have role assignment data");
-      assert.ok(roleRows[0].role_count > 0, "User should have at least one role assignment");
+      assert.ok(result.rows.length > 0, "Should have role assignment data");
+      assert.ok(result.rows[0].role_count > 0, "User should have at least one role assignment");
     });
 
     test("roles have module permissions", async () => {
-      const [moduleRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT mr.module, mr.permission_mask, r.code as role_code
-         FROM user_role_assignments ura
-         INNER JOIN roles r ON r.id = ura.role_id
-         INNER JOIN module_roles mr ON mr.role_id = r.id
-         WHERE ura.user_id = ? AND mr.company_id = ?
-         LIMIT 5`,
-        [testUserId, testCompanyId]
-      );
+      const db = getDb();
+      const result = await sql<{ module: string; permission_mask: number; role_code: string }>`
+        SELECT mr.module, mr.permission_mask, r.code as role_code
+        FROM user_role_assignments ura
+        INNER JOIN roles r ON r.id = ura.role_id
+        INNER JOIN module_roles mr ON mr.role_id = r.id
+        WHERE ura.user_id = ${testUserId} AND mr.company_id = ${testCompanyId}
+        LIMIT 5
+      `.execute(db);
 
-      if (moduleRows.length > 0) {
-        console.log("Sample module permissions:", moduleRows);
+      if (result.rows.length > 0) {
+        console.log("Sample module permissions:", result.rows);
         
-        for (const row of moduleRows) {
+        for (const row of result.rows) {
           assert.ok(row.module, "Module should be defined");
           assert.ok(typeof row.permission_mask === "number", "Permission mask should be a number");
           assert.ok(row.role_code, "Role code should be defined");
@@ -142,31 +137,24 @@ describe("Permission System", { concurrency: false }, () => {
 
   describe("Database Schema Verification", () => {
     test("user_role_assignments table exists and has correct structure", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `DESCRIBE user_role_assignments`
-      );
+      const db = getDb();
+      const result = await sql<{ Field: string }>`DESCRIBE user_role_assignments`.execute(db);
 
-      const columns = rows.map(row => row.Field);
+      const columns = result.rows.map(row => row.Field);
       assert.ok(columns.includes("user_id"), "Should have user_id column");
       assert.ok(columns.includes("role_id"), "Should have role_id column");
       assert.ok(columns.includes("outlet_id"), "Should have outlet_id column");
     });
 
     test("module_roles table exists and has permission_mask column", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `DESCRIBE module_roles`
-      );
+      const db = getDb();
+      const result = await sql<{ Field: string }>`DESCRIBE module_roles`.execute(db);
 
-      const columns = rows.map(row => row.Field);
+      const columns = result.rows.map(row => row.Field);
       assert.ok(columns.includes("permission_mask"), "Should have permission_mask column");
       assert.ok(columns.includes("module"), "Should have module column");
       assert.ok(columns.includes("role_id"), "Should have role_id column");
       assert.ok(columns.includes("company_id"), "Should have company_id column");
     });
   });
-});
-
-// Close database pool after all tests
-test.after(async () => {
-  await closeDbPool();
 });

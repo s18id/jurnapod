@@ -2,15 +2,13 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { AuditService, type AuditDbClient } from "@jurnapod/modules-platform";
-import { getDbPool } from "./db";
-import { DbConn } from "@jurnapod/db";
+import { getDb } from "./db";
 
 /**
- * Create AuditService instance with JurnapodMySQLDb
+ * Create AuditService instance with Kysely db client
  */
 function createAuditService(): AuditService {
-  const pool = getDbPool();
-  const dbClient = new DbConn(pool);
+  const dbClient = getDb();
   return new AuditService(dbClient as AuditDbClient);
 }
 

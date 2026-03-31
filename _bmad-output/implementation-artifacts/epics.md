@@ -236,7 +236,7 @@ Migrate Epic 13 library modules from raw SQL to Kysely ORM.
 ### Story 14.4: Migrate import/batch-operations.ts - WRITE Operations
 ### Story 14.5: Epic 14 Documentation
 
-**Path:** [epic-14](./epic-14.md)
+**Path:** [epic-14](../implementation-artifacts/stories/epic-14/epic-14.md)
 
 ---
 
@@ -250,7 +250,7 @@ Resolve TD-030 while hardening foundation with connection safety and test-fixtur
 ### Story 15.4: Epic 15 Documentation + Epic 16 Planning
 ### Story 15.5: TD-031 Alert Retry Spike (if time permits)
 
-**Path:** [epic-15](./epic-15.md)
+**Path:** [epic-15](../implementation-artifacts/stories/epic-15/epic-15.md)
 
 ---
 
@@ -262,7 +262,7 @@ Address TD-031 (alert retry logic) and TD-032 (batch processing backfills).
 ### Story 16.2: Batch Processing for Backfills
 ### Story 16.3: Epic 16 Documentation
 
-**Path:** [epic-16](./epic-16.md)
+**Path:** [epic-16](../implementation-artifacts/stories/epic-16/epic-16.md)
 
 ---
 

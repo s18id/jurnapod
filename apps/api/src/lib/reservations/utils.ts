@@ -1,16 +1,17 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-/**
- * Reservations Domain Module - Shared Utilities
- *
- * Single source of truth for all helper functions used across reservations sub-modules.
- * This file should be imported by crud.ts, availability.ts, and status.ts.
- * 
- * Part of Story 6.5c (Reservations Domain Extraction).
- */
+// /**
+//  * Reservations Domain Module - Shared Utilities
+//  *
+//  * Single source of truth for all helper functions used across reservations sub-modules.
+//  * This file should be imported by crud.ts, availability.ts, and status.ts.
+//  * 
+//  * Part of Story 6.5c (Reservations Domain Extraction).
+//  */
 
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
+import type { KyselySchema } from "../db";
 import {
   ReservationStatusV2,
   type ReservationStatus,
@@ -227,11 +228,11 @@ export function canTransition(fromStatus: ReservationStatus, toStatus: Reservati
 export const MAX_CODE_GENERATION_RETRIES = 3;
 
 export async function generateReservationCodeWithConnection(
-  connection: { execute: Function },
+  db: KyselySchema,
   outletId: bigint
 ): Promise<string> {
   // Check if reservation_code column exists; if not, skip uniqueness check
-  const hasReservationCodeCol = await checkColumnExists(connection, 'reservations', 'reservation_code');
+  const hasReservationCodeCol = await checkColumnExists(db, 'reservations', 'reservation_code');
   if (!hasReservationCodeCol) {
     return `RES-${generateRandomCode()}`;
   }
@@ -239,11 +240,10 @@ export async function generateReservationCodeWithConnection(
   for (let attempt = 0; attempt < MAX_CODE_GENERATION_RETRIES; attempt++) {
     const code = `RES-${generateRandomCode()}`;
     try {
-      const [rows] = await connection.execute(
-        `SELECT id FROM reservations WHERE reservation_code = ? AND outlet_id = ? LIMIT 1`,
-        [code, outletId]
-      );
-      if ((rows as RowDataPacket[]).length === 0) {
+      const result = await sql`
+        SELECT id FROM reservations WHERE reservation_code = ${code} AND outlet_id = ${outletId} LIMIT 1
+      `.execute(db);
+      if (result.rows.length === 0) {
         return code;
       }
       // Collision detected, retry
@@ -259,17 +259,16 @@ export async function generateReservationCodeWithConnection(
 }
 
 async function checkColumnExists(
-  connection: { execute: Function },
+  db: KyselySchema,
   table: string,
   column: string
 ): Promise<boolean> {
   try {
-    const [rows] = await (connection.execute as Function)(
-      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
-      [table, column]
-    ) as [RowDataPacket[], unknown];
-    return rows.length > 0;
+    const result = await sql`
+      SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${table} AND COLUMN_NAME = ${column}
+    `.execute(db);
+    return result.rows.length > 0;
   } catch {
     return false;
   }
@@ -289,17 +288,16 @@ function generateRandomCode(): string {
 // ============================================================================
 
 export async function columnExists(
-  connection: { execute: Function },
+  db: KyselySchema,
   table: string,
   column: string
 ): Promise<boolean> {
   try {
-    const [rows] = await (connection.execute as Function)(
-      `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
-      [table, column]
-    ) as [RowDataPacket[], unknown];
-    return rows.length > 0;
+    const result = await sql`
+      SELECT COLUMN_NAME FROM information_schema.COLUMNS 
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${table} AND COLUMN_NAME = ${column}
+    `.execute(db);
+    return result.rows.length > 0;
   } catch {
     return false;
   }

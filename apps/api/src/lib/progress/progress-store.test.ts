@@ -13,9 +13,9 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after, beforeEach } from "node:test";
 import { randomUUID } from "node:crypto";
-import { closeDbPool, getDbPool } from "../db.js";
+import { closeDbPool, getDb } from "../db.js";
+import { sql } from "kysely";
 import {
-  setProgressPool,
   clearProgressTracking,
   startProgress,
   updateProgress,
@@ -37,27 +37,24 @@ import {
   SSE_POLL_INTERVAL_MS,
   SSE_KEEPALIVE_INTERVAL_MS,
 } from "../../routes/progress.js";
-import type { Pool, ResultSetHeader } from "mysql2/promise";
 
 const COMPANY_ID = 1;
 const OTHER_COMPANY_ID = 999;
 
 describe("Progress Store", { concurrency: false }, () => {
-  let pool: Pool;
-
   before(async () => {
-    pool = getDbPool();
-    setProgressPool(pool);
+    const db = getDb();
     clearProgressTracking();
     // Clean up any existing test data
-    await pool.execute(`DELETE FROM operation_progress WHERE company_id IN (?, ?)`, [COMPANY_ID, OTHER_COMPANY_ID]);
+    await sql`DELETE FROM operation_progress WHERE company_id IN (${sql.join([COMPANY_ID, OTHER_COMPANY_ID].map(id => sql`${id}`), sql`, `)})`.execute(db);
   });
 
   after(async () => {
+    const db = getDb();
     // Clean up test data
     try {
       clearProgressTracking();
-      await pool.execute(`DELETE FROM operation_progress WHERE company_id IN (?, ?)`, [COMPANY_ID, OTHER_COMPANY_ID]);
+      await sql`DELETE FROM operation_progress WHERE company_id IN (${sql.join([COMPANY_ID, OTHER_COMPANY_ID].map(id => sql`${id}`), sql`, `)})`.execute(db);
     } catch {
       // Ignore cleanup errors
     }
@@ -92,7 +89,8 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.ok(progress!.details?.filename, "test.csv");
 
       // Cleanup
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("supports export operation type", async () => {
@@ -109,7 +107,8 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.ok(progress);
       assert.equal(progress!.operationType, "export");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("supports batch_update operation type", async () => {
@@ -126,7 +125,8 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.ok(progress);
       assert.equal(progress!.operationType, "batch_update");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
   });
 
@@ -154,7 +154,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, OTHER_COMPANY_ID);
       assert.equal(progress, null);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("retrieves existing progress with all fields", async () => {
@@ -169,11 +170,9 @@ describe("Progress Store", { concurrency: false }, () => {
         details,
       });
 
-      // Update progress
-      await pool.execute<ResultSetHeader>(
-        `UPDATE operation_progress SET completed_units = 250 WHERE operation_id = ?`,
-        [operationId]
-      );
+      // Update progress using sql template
+      const db = getDb();
+      await sql`UPDATE operation_progress SET completed_units = 250 WHERE operation_id = ${operationId}`.execute(db);
 
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.ok(progress);
@@ -181,7 +180,7 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(progress!.details?.source, "test");
       assert.equal(progress!.details?.priority, "high");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
   });
 
@@ -210,7 +209,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.completedUnits, 25);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("returns false when throttled (not at milestone)", async () => {
@@ -242,7 +242,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.completedUnits, 10); // Should still be 10
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("persists at 10% milestone", async () => {
@@ -266,7 +267,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.completedUnits, 10);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("persists at 25% milestone", async () => {
@@ -289,7 +291,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.completedUnits, 25);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("persists at 50% milestone", async () => {
@@ -312,7 +315,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.completedUnits, 50);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("persists at 75% milestone", async () => {
@@ -335,7 +339,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.completedUnits, 75);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("persists at 90% milestone", async () => {
@@ -358,7 +363,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.completedUnits, 90);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("always persists at 100%", async () => {
@@ -381,7 +387,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.completedUnits, 100);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("updates details when provided", async () => {
@@ -405,7 +412,8 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(progress!.details?.currentBatch, 5);
       assert.equal(progress!.details?.totalBatches, 10);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
   });
 
@@ -425,10 +433,8 @@ describe("Progress Store", { concurrency: false }, () => {
       });
 
       // Update to some intermediate state
-      await pool.execute<ResultSetHeader>(
-        `UPDATE operation_progress SET completed_units = 50 WHERE operation_id = ?`,
-        [operationId]
-      );
+      const db = getDb();
+      await sql`UPDATE operation_progress SET completed_units = 50 WHERE operation_id = ${operationId}`.execute(db);
 
       await completeProgress({
         operationId,
@@ -443,7 +449,7 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.ok(progress!.completedAt instanceof Date);
       assert.equal(progress!.details?.finalResult, "success");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("handles completion with no intermediate updates", async () => {
@@ -466,7 +472,8 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(progress!.status, "completed");
       assert.equal(progress!.completedUnits, 50);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
   });
 
@@ -497,7 +504,8 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(progress!.details?.error, "Database connection lost");
       assert.ok(progress!.completedAt instanceof Date);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("preserves existing details when failing", async () => {
@@ -524,7 +532,8 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(progress!.details?.error, "Failed");
       assert.equal(progress!.details?.newField, "newValue");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
   });
 
@@ -550,7 +559,8 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(progress!.status, "cancelled");
       assert.ok(progress!.completedAt instanceof Date);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
   });
 
@@ -579,8 +589,9 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(result.total, 3);
 
       // Cleanup
+      const db = getDb();
       for (const opId of [op1, op2, op3]) {
-        await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [opId]);
+        await sql`DELETE FROM operation_progress WHERE operation_id = ${opId}`.execute(db);
       }
     });
 
@@ -600,8 +611,9 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(completed.operations.length, 1);
       assert.equal(completed.operations[0].operationId, op1);
 
+      const db = getDb();
       for (const opId of [op1, op2]) {
-        await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [opId]);
+        await sql`DELETE FROM operation_progress WHERE operation_id = ${opId}`.execute(db);
       }
     });
 
@@ -620,8 +632,9 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(exports.operations.length, 1);
       assert.equal(exports.operations[0].operationType, "export");
 
+      const db = getDb();
       for (const opId of [op1, op2]) {
-        await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [opId]);
+        await sql`DELETE FROM operation_progress WHERE operation_id = ${opId}`.execute(db);
       }
     });
 
@@ -644,8 +657,9 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(page4.operations.length, 1);
 
       // Cleanup
+      const db = getDb();
       for (const opId of opIds) {
-        await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [opId]);
+        await sql`DELETE FROM operation_progress WHERE operation_id = ${opId}`.execute(db);
       }
     });
   });
@@ -659,19 +673,21 @@ describe("Progress Store", { concurrency: false }, () => {
       const operationId = randomUUID();
 
       // Insert a stale operation directly
-      await pool.execute(
-        `INSERT INTO operation_progress
+      const db = getDb();
+      await sql`
+        INSERT INTO operation_progress
          (operation_id, operation_type, company_id, total_units, completed_units, status, started_at, updated_at)
-         VALUES (?, 'import', ?, 100, 50, 'running',
-                 DATE_SUB(NOW(), INTERVAL 3 HOUR),
-                 DATE_SUB(NOW(), INTERVAL 3 HOUR))`,
-        [operationId, COMPANY_ID]
-      );
+         VALUES (
+           ${operationId}, 'import', ${COMPANY_ID}, 100, 50, 'running',
+           DATE_SUB(NOW(), INTERVAL 3 HOUR),
+           DATE_SUB(NOW(), INTERVAL 3 HOUR)
+         )
+      `.execute(db);
 
       const stale = await findStaleOperations();
       assert.ok(stale.includes(operationId), "Should find stale operation");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("does not find recent operations", async () => {
@@ -687,7 +703,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const stale = await findStaleOperations();
       assert.ok(!stale.includes(operationId), "Recent operation should not be stale");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("does not find completed operations", async () => {
@@ -704,7 +721,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const stale = await findStaleOperations();
       assert.ok(!stale.includes(operationId), "Completed operation should not be stale");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
   });
 
@@ -714,22 +732,25 @@ describe("Progress Store", { concurrency: false }, () => {
       const op2 = randomUUID();
 
       // Insert two stale operations
-      await pool.execute(
-        `INSERT INTO operation_progress
+      const db = getDb();
+      await sql`
+        INSERT INTO operation_progress
          (operation_id, operation_type, company_id, total_units, completed_units, status, started_at, updated_at)
-         VALUES (?, 'import', ?, 100, 50, 'running',
-                 DATE_SUB(NOW(), INTERVAL 3 HOUR),
-                 DATE_SUB(NOW(), INTERVAL 3 HOUR))`,
-        [op1, COMPANY_ID]
-      );
-      await pool.execute(
-        `INSERT INTO operation_progress
+         VALUES (
+           ${op1}, 'import', ${COMPANY_ID}, 100, 50, 'running',
+           DATE_SUB(NOW(), INTERVAL 3 HOUR),
+           DATE_SUB(NOW(), INTERVAL 3 HOUR)
+         )
+      `.execute(db);
+      await sql`
+        INSERT INTO operation_progress
          (operation_id, operation_type, company_id, total_units, completed_units, status, started_at, updated_at)
-         VALUES (?, 'export', ?, 50, 25, 'running',
-                 DATE_SUB(NOW(), INTERVAL 4 HOUR),
-                 DATE_SUB(NOW(), INTERVAL 4 HOUR))`,
-        [op2, COMPANY_ID]
-      );
+         VALUES (
+           ${op2}, 'export', ${COMPANY_ID}, 50, 25, 'running',
+           DATE_SUB(NOW(), INTERVAL 4 HOUR),
+           DATE_SUB(NOW(), INTERVAL 4 HOUR)
+         )
+      `.execute(db);
 
       const count = await cleanupStaleOperations();
       assert.equal(count, 2);
@@ -740,7 +761,7 @@ describe("Progress Store", { concurrency: false }, () => {
       assert.equal(progress2!.status, "failed");
       assert.ok(progress1!.details?.error, "Should have error message");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id IN (?, ?)`, [op1, op2]);
+      await sql`DELETE FROM operation_progress WHERE operation_id IN (${sql.join([op1, op2].map(id => sql`${id}`), sql`, `)})`.execute(db);
     });
 
     test("returns 0 when no stale operations", async () => {
@@ -756,7 +777,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const count = await cleanupStaleOperations();
       assert.equal(count, 0);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
   });
 
@@ -778,7 +800,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, OTHER_COMPANY_ID);
       assert.equal(progress, null, "Company B should not see Company A's operation");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("company A cannot update company B's progress", async () => {
@@ -802,7 +825,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.completedUnits, 0, "Progress should not change");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("company A cannot complete company B's progress", async () => {
@@ -823,7 +847,8 @@ describe("Progress Store", { concurrency: false }, () => {
       const progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.status, "running", "Status should remain running");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
   });
 
@@ -937,20 +962,18 @@ describe("Progress Store", { concurrency: false }, () => {
 // ============================================================================
 
 describe("Progress Store - Integration Scenarios", { concurrency: false }, () => {
-  let pool: Pool;
-
   before(async () => {
-    pool = getDbPool();
-    setProgressPool(pool);
+    const db = getDb();
     clearProgressTracking();
     // Clean up any existing test data
-    await pool.execute(`DELETE FROM operation_progress WHERE company_id IN (?, ?)`, [COMPANY_ID, OTHER_COMPANY_ID]);
+    await sql`DELETE FROM operation_progress WHERE company_id IN (${sql.join([COMPANY_ID, OTHER_COMPANY_ID].map(id => sql`${id}`), sql`, `)})`.execute(db);
   });
 
   after(async () => {
+    const db = getDb();
     try {
       clearProgressTracking();
-      await pool.execute(`DELETE FROM operation_progress WHERE company_id IN (?, ?)`, [COMPANY_ID, OTHER_COMPANY_ID]);
+      await sql`DELETE FROM operation_progress WHERE company_id IN (${sql.join([COMPANY_ID, OTHER_COMPANY_ID].map(id => sql`${id}`), sql`, `)})`.execute(db);
     } catch {
       // Ignore cleanup errors
     }
@@ -1002,7 +1025,8 @@ describe("Progress Store - Integration Scenarios", { concurrency: false }, () =>
       assert.equal(final!.status, "completed");
       assert.equal(final!.completedUnits, 1000);
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("scenario: progress persists across simulated restart", async () => {
@@ -1023,9 +1047,8 @@ describe("Progress Store - Integration Scenarios", { concurrency: false }, () =>
         completedUnits: 250,
       });
 
-      // Simulate server restart - pool reference persists
-      // In real scenario, setProgressPool would be called again
-      setProgressPool(pool);
+      // Simulate server restart - clear tracking state but data persists in DB
+      clearProgressTracking();
 
       // Get progress after "restart"
       const progress = await getProgress(operationId, COMPANY_ID);
@@ -1042,21 +1065,24 @@ describe("Progress Store - Integration Scenarios", { concurrency: false }, () =>
       const final = await getProgress(operationId, COMPANY_ID);
       assert.equal(final!.status, "completed");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
 
     test("scenario: stale operation marked as failed on cleanup", async () => {
       const staleId = randomUUID();
 
       // Insert a stale operation
-      await pool.execute(
-        `INSERT INTO operation_progress
+      const db = getDb();
+      await sql`
+        INSERT INTO operation_progress
          (operation_id, operation_type, company_id, total_units, completed_units, status, started_at, updated_at)
-         VALUES (?, 'import', ?, 100, 50, 'running',
-                 DATE_SUB(NOW(), INTERVAL 3 HOUR),
-                 DATE_SUB(NOW(), INTERVAL 3 HOUR))`,
-        [staleId, COMPANY_ID]
-      );
+         VALUES (
+           ${staleId}, 'import', ${COMPANY_ID}, 100, 50, 'running',
+           DATE_SUB(NOW(), INTERVAL 3 HOUR),
+           DATE_SUB(NOW(), INTERVAL 3 HOUR)
+         )
+      `.execute(db);
 
       // Verify it's running before cleanup
       let progress = await getProgress(staleId, COMPANY_ID);
@@ -1070,7 +1096,7 @@ describe("Progress Store - Integration Scenarios", { concurrency: false }, () =>
       assert.equal(progress!.status, "failed");
       assert.ok(typeof progress!.details?.error === "string" && progress!.details.error.includes("timed out"));
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [staleId]);
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${staleId}`.execute(db);
     });
 
     test("scenario: company isolation prevents cross-tenant access", async () => {
@@ -1116,7 +1142,8 @@ describe("Progress Store - Integration Scenarios", { concurrency: false }, () =>
       progress = await getProgress(operationId, COMPANY_ID);
       assert.equal(progress!.status, "completed");
 
-      await pool.execute(`DELETE FROM operation_progress WHERE operation_id = ?`, [operationId]);
+      const db = getDb();
+      await sql`DELETE FROM operation_progress WHERE operation_id = ${operationId}`.execute(db);
     });
   });
 });
@@ -1169,7 +1196,7 @@ describe("SSE Configuration Constants", () => {
     
     // In a real scenario, we'd re-import the module
     // Here we verify the Number() conversion behavior
-    const customKeepalive = Number(process.env.SSE_KEEPALIVE_INTERVAL_MS || 30000);
+    const customKeepalive = Number(process.env.SEE_KEEPALIVE_INTERVAL_MS || 30000);
     assert.strictEqual(customKeepalive, 60000);
   });
 

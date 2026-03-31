@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { sql } from "kysely";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import {
   addIngredientToRecipe,
@@ -15,12 +16,8 @@ import {
   DatabaseReferenceError,
   DatabaseForbiddenError
 } from "./recipe-composition";
-import {
-  deleteRecipeIngredient,
-} from "./recipe-ingredients.js";
 import { createItem } from "./items/index.js";
-import { closeDbPool, getDbPool } from "./db";
-import type { RowDataPacket } from "mysql2";
+import { closeDbPool, getDb } from "./db";
 
 loadEnvIfPresent();
 
@@ -28,7 +25,7 @@ test(
   "addIngredientToRecipe - successfully adds ingredient to recipe",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -40,12 +37,11 @@ test(
 
     try {
       // Get company fixture
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyResult.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       // Create test recipe item (type = RECIPE)
       const recipeItem = await createItem(companyId, {
@@ -83,13 +79,13 @@ test(
     } finally {
       // Cleanup
       if (recipeIngredientId) {
-        await deleteRecipeIngredient(pool, recipeIngredientId, companyId);
+        await removeIngredientFromRecipe(companyId, recipeIngredientId);
       }
       if (ingredientItemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
+        await sql`DELETE FROM items WHERE id = ${ingredientItemId}`.execute(db);
       }
       if (recipeItemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+        await sql`DELETE FROM items WHERE id = ${recipeItemId}`.execute(db);
       }
     }
   }
@@ -99,7 +95,7 @@ test(
   "addIngredientToRecipe - prevents adding non-ingredient/non-product types",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -109,11 +105,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       // Create test recipe item
       const recipeItem = await createItem(companyId, {
@@ -141,8 +136,8 @@ test(
       );
 
     } finally {
-      if (serviceItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [serviceItemId]);
-      if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+      if (serviceItemId) await sql`DELETE FROM items WHERE id = ${serviceItemId}`.execute(db);
+      if (recipeItemId) await sql`DELETE FROM items WHERE id = ${recipeItemId}`.execute(db);
     }
   }
 );
@@ -151,7 +146,7 @@ test(
   "addIngredientToRecipe - prevents self reference",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -160,20 +155,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
-
-      const [unitCostColumnRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) AS column_exists
-         FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE()
-           AND TABLE_NAME = 'inventory_transactions'
-           AND COLUMN_NAME = 'unit_cost'`
-      );
-      const supportsUnitCost = Number(unitCostColumnRows[0]?.column_exists ?? 0) > 0;
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       const recipe = await createItem(companyId, {
         name: `Recipe ${runId}`,
@@ -193,7 +178,7 @@ test(
       );
 
     } finally {
-      if (recipeId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeId]);
+      if (recipeId) await sql`DELETE FROM items WHERE id = ${recipeId}`.execute(db);
     }
   }
 );
@@ -202,7 +187,7 @@ test(
   "addIngredientToRecipe - prevents using RECIPE as ingredient type",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -212,11 +197,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       const recipeMain = await createItem(companyId, {
         name: `Recipe Main ${runId}`,
@@ -240,8 +224,8 @@ test(
         (err: Error) => err instanceof DatabaseForbiddenError && err.message.includes("Only ingredients and products")
       );
     } finally {
-      if (recipeIngredientId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeIngredientId]);
-      if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+      if (recipeIngredientId) await sql`DELETE FROM items WHERE id = ${recipeIngredientId}`.execute(db);
+      if (recipeItemId) await sql`DELETE FROM items WHERE id = ${recipeItemId}`.execute(db);
     }
   }
 );
@@ -250,7 +234,7 @@ test(
   "addIngredientToRecipe - prevents duplicate ingredients",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -261,11 +245,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       // Create recipe and ingredient
       const recipeItem = await createItem(companyId, {
@@ -299,9 +282,15 @@ test(
       );
 
     } finally {
-      if (recipeIngredientId) await deleteRecipeIngredient(pool, recipeIngredientId, companyId);
-      if (ingredientItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
-      if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+      if (recipeIngredientId) {
+        await removeIngredientFromRecipe(companyId, recipeIngredientId);
+      }
+      if (ingredientItemId) {
+        await sql`DELETE FROM items WHERE id = ${ingredientItemId}`.execute(db);
+      }
+      if (recipeItemId) {
+        await sql`DELETE FROM items WHERE id = ${recipeItemId}`.execute(db);
+      }
     }
   }
 );
@@ -310,7 +299,7 @@ test(
   "addIngredientToRecipe - requires RECIPE type item",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -320,11 +309,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       // Create PRODUCT item (not RECIPE)
       const productItem = await createItem(companyId, {
@@ -352,8 +340,8 @@ test(
       );
 
     } finally {
-      if (ingredientItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
-      if (productItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [productItemId]);
+      if (ingredientItemId) await sql`DELETE FROM items WHERE id = ${ingredientItemId}`.execute(db);
+      if (productItemId) await sql`DELETE FROM items WHERE id = ${productItemId}`.execute(db);
     }
   }
 );
@@ -362,7 +350,7 @@ test(
   "getRecipeIngredients - returns all ingredients for a recipe",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -375,11 +363,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       // Create recipe
       const recipeItem = await createItem(companyId, {
@@ -427,11 +414,11 @@ test(
       assert.strictEqual(firstIngredient.unit_of_measure, "kg");
 
     } finally {
-      if (recipeIngredientId1) await deleteRecipeIngredient(pool, recipeIngredientId1, companyId);
-      if (recipeIngredientId2) await deleteRecipeIngredient(pool, recipeIngredientId2, companyId);
-      if (ingredientItemId1) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId1]);
-      if (ingredientItemId2) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId2]);
-      if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+      if (recipeIngredientId1) await removeIngredientFromRecipe(companyId, recipeIngredientId1);
+      if (recipeIngredientId2) await removeIngredientFromRecipe(companyId, recipeIngredientId2);
+      if (ingredientItemId1) await sql`DELETE FROM items WHERE id = ${ingredientItemId1}`.execute(db);
+      if (ingredientItemId2) await sql`DELETE FROM items WHERE id = ${ingredientItemId2}`.execute(db);
+      if (recipeItemId) await sql`DELETE FROM items WHERE id = ${recipeItemId}`.execute(db);
     }
   }
 );
@@ -440,7 +427,7 @@ test(
   "updateRecipeIngredient - updates quantity successfully",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -451,11 +438,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       // Create recipe and ingredient
       const recipeItem = await createItem(companyId, {
@@ -490,9 +476,9 @@ test(
       assert.strictEqual(updated.unit_of_measure, "unit"); // Unchanged
 
     } finally {
-      if (recipeIngredientId) await deleteRecipeIngredient(pool, recipeIngredientId, companyId);
-      if (ingredientItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
-      if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+      if (recipeIngredientId) await removeIngredientFromRecipe(companyId, recipeIngredientId);
+      if (ingredientItemId) await sql`DELETE FROM items WHERE id = ${ingredientItemId}`.execute(db);
+      if (recipeItemId) await sql`DELETE FROM items WHERE id = ${recipeItemId}`.execute(db);
     }
   }
 );
@@ -501,7 +487,7 @@ test(
   "removeIngredientFromRecipe - removes ingredient successfully",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -512,11 +498,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       // Create recipe and ingredient
       const recipeItem = await createItem(companyId, {
@@ -551,9 +536,9 @@ test(
       assert.strictEqual(ingredients.length, 0);
 
     } finally {
-      if (recipeIngredientId) await deleteRecipeIngredient(pool, recipeIngredientId, companyId);
-      if (ingredientItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
-      if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+      if (recipeIngredientId) await removeIngredientFromRecipe(companyId, recipeIngredientId);
+      if (ingredientItemId) await sql`DELETE FROM items WHERE id = ${ingredientItemId}`.execute(db);
+      if (recipeItemId) await sql`DELETE FROM items WHERE id = ${recipeItemId}`.execute(db);
     }
   }
 );
@@ -562,7 +547,7 @@ test(
   "calculateRecipeCost - calculates cost breakdown correctly",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -576,18 +561,16 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
-      const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ? ORDER BY id ASC LIMIT 1`,
-        [companyId]
-      );
-      assert.ok(outletRows.length > 0, "Outlet fixture not found");
-      outletId = Number(outletRows[0].id);
+      const outletResult = await sql`
+        SELECT id FROM outlets WHERE company_id = ${companyId} ORDER BY id ASC LIMIT 1
+      `.execute(db);
+      assert.ok(outletResult.rows.length > 0, "Outlet fixture not found");
+      outletId = Number((outletResult.rows[0] as { id: number }).id);
 
       // Create recipe
       const recipeItem = await createItem(companyId, {
@@ -622,20 +605,11 @@ test(
       });
       recipeIngredientId2 = ing2.id;
 
-      await pool.execute(
-        `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
-         VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
-        [
-          companyId,
-          ingredientItemId1,
-          outletId,
-          2.25,
-          companyId,
-          ingredientItemId2,
-          outletId,
-          1.5
-        ]
-      );
+      await sql`
+        INSERT INTO item_prices (company_id, item_id, outlet_id, price)
+        VALUES (${companyId}, ${ingredientItemId1}, ${outletId}, 2.25),
+               (${companyId}, ${ingredientItemId2}, ${outletId}, 1.5)
+      `.execute(db);
 
       const costBreakdown = await calculateRecipeCost(companyId, recipeItemId);
 
@@ -653,22 +627,21 @@ test(
       assert.strictEqual(ingredientTwo.unit_cost, 1.5);
       assert.strictEqual(ingredientTwo.line_cost, 4.5);
 
-      await pool.execute(
-        `UPDATE item_prices SET price = ? WHERE company_id = ? AND item_id = ?`,
-        [3.0, companyId, ingredientItemId1]
-      );
+      await sql`
+        UPDATE item_prices SET price = 3.0 WHERE company_id = ${companyId} AND item_id = ${ingredientItemId1}
+      `.execute(db);
 
       const recalculated = await calculateRecipeCost(companyId, recipeItemId);
       assert.strictEqual(recalculated.total_ingredient_cost, 10.5);
 
     } finally {
-      if (ingredientItemId1) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId1]);
-      if (ingredientItemId2) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId2]);
-      if (recipeIngredientId1) await deleteRecipeIngredient(pool, recipeIngredientId1, companyId);
-      if (recipeIngredientId2) await deleteRecipeIngredient(pool, recipeIngredientId2, companyId);
-      if (ingredientItemId1) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId1]);
-      if (ingredientItemId2) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId2]);
-      if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+      if (ingredientItemId1) await sql`DELETE FROM item_prices WHERE company_id = ${companyId} AND item_id = ${ingredientItemId1}`.execute(db);
+      if (ingredientItemId2) await sql`DELETE FROM item_prices WHERE company_id = ${companyId} AND item_id = ${ingredientItemId2}`.execute(db);
+      if (recipeIngredientId1) await removeIngredientFromRecipe(companyId, recipeIngredientId1);
+      if (recipeIngredientId2) await removeIngredientFromRecipe(companyId, recipeIngredientId2);
+      if (ingredientItemId1) await sql`DELETE FROM items WHERE id = ${ingredientItemId1}`.execute(db);
+      if (ingredientItemId2) await sql`DELETE FROM items WHERE id = ${ingredientItemId2}`.execute(db);
+      if (recipeItemId) await sql`DELETE FROM items WHERE id = ${recipeItemId}`.execute(db);
     }
   }
 );
@@ -677,7 +650,7 @@ test(
   "calculateRecipeCost - batches mixed inventory and fallback ingredient cost resolution",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -690,11 +663,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       const recipeItem = await createItem(companyId, {
         name: `Batch Recipe ${runId}`,
@@ -726,34 +698,32 @@ test(
       });
       recipeIngredientId2 = ing2.id;
 
-      const [unitCostColumnRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) AS column_exists
-         FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE()
-           AND TABLE_NAME = 'inventory_transactions'
-           AND COLUMN_NAME = 'unit_cost'`
-      );
-      const supportsUnitCost = Number(unitCostColumnRows[0]?.column_exists ?? 0) > 0;
+      // Check if unit_cost column exists
+      const unitCostCheck = await sql`
+        SELECT COUNT(*) AS column_exists
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'inventory_transactions'
+          AND COLUMN_NAME = 'unit_cost'
+      `.execute(db);
+      const supportsUnitCost = Number((unitCostCheck.rows[0] as { column_exists: number }).column_exists ?? 0) > 0;
 
       if (supportsUnitCost) {
-        await pool.execute(
-          `INSERT INTO inventory_transactions (company_id, product_id, transaction_type, quantity_delta, unit_cost, created_at)
-           VALUES (?, ?, 6, ?, ?, NOW())`,
-          [companyId, ingredientItemId1, 10, 2.5]
-        );
+        await sql`
+          INSERT INTO inventory_transactions (company_id, product_id, transaction_type, quantity_delta, unit_cost, created_at)
+          VALUES (${companyId}, ${ingredientItemId1}, 6, 10, 2.5, NOW())
+        `.execute(db);
       } else {
-        await pool.execute(
-          `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
-           VALUES (?, ?, NULL, ?)`,
-          [companyId, ingredientItemId1, 2.5]
-        );
+        await sql`
+          INSERT INTO item_prices (company_id, item_id, outlet_id, price)
+          VALUES (${companyId}, ${ingredientItemId1}, NULL, 2.5)
+        `.execute(db);
       }
 
-      await pool.execute(
-        `INSERT INTO item_prices (company_id, item_id, outlet_id, price)
-         VALUES (?, ?, NULL, ?)`,
-        [companyId, ingredientItemId2, 4.25]
-      );
+      await sql`
+        INSERT INTO item_prices (company_id, item_id, outlet_id, price)
+        VALUES (${companyId}, ${ingredientItemId2}, NULL, 4.25)
+      `.execute(db);
 
       const costBreakdown = await calculateRecipeCost(companyId, recipeItemId);
 
@@ -768,14 +738,14 @@ test(
       assert.strictEqual(ingredientTwo.unit_cost, 4.25);
       assert.strictEqual(ingredientTwo.line_cost, 12.75);
     } finally {
-      if (ingredientItemId1) await pool.execute(`DELETE FROM inventory_transactions WHERE company_id = ? AND product_id = ?`, [companyId, ingredientItemId1]);
-      if (ingredientItemId1) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId1]);
-      if (ingredientItemId2) await pool.execute(`DELETE FROM item_prices WHERE company_id = ? AND item_id = ?`, [companyId, ingredientItemId2]);
-      if (recipeIngredientId1) await deleteRecipeIngredient(pool, recipeIngredientId1, companyId);
-      if (recipeIngredientId2) await deleteRecipeIngredient(pool, recipeIngredientId2, companyId);
-      if (ingredientItemId1) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId1]);
-      if (ingredientItemId2) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId2]);
-      if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+      if (ingredientItemId1) await sql`DELETE FROM inventory_transactions WHERE company_id = ${companyId} AND product_id = ${ingredientItemId1}`.execute(db);
+      if (ingredientItemId1) await sql`DELETE FROM item_prices WHERE company_id = ${companyId} AND item_id = ${ingredientItemId1}`.execute(db);
+      if (ingredientItemId2) await sql`DELETE FROM item_prices WHERE company_id = ${companyId} AND item_id = ${ingredientItemId2}`.execute(db);
+      if (recipeIngredientId1) await removeIngredientFromRecipe(companyId, recipeIngredientId1);
+      if (recipeIngredientId2) await removeIngredientFromRecipe(companyId, recipeIngredientId2);
+      if (ingredientItemId1) await sql`DELETE FROM items WHERE id = ${ingredientItemId1}`.execute(db);
+      if (ingredientItemId2) await sql`DELETE FROM items WHERE id = ${ingredientItemId2}`.execute(db);
+      if (recipeItemId) await sql`DELETE FROM items WHERE id = ${recipeItemId}`.execute(db);
     }
   }
 );
@@ -784,7 +754,7 @@ test(
   "validateRecipeComposition - validates correctly",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -796,11 +766,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyResult.rows[0] as { id: number }).id);
 
       // Create recipe
       const recipeItem = await createItem(companyId, {
@@ -850,10 +819,10 @@ test(
       assert.ok(validation.error?.includes("not found"));
 
     } finally {
-      if (recipeIngredientId) await deleteRecipeIngredient(pool, recipeIngredientId, companyId);
-      if (serviceItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [serviceItemId]);
-      if (ingredientItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [ingredientItemId]);
-      if (recipeItemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [recipeItemId]);
+      if (recipeIngredientId) await removeIngredientFromRecipe(companyId, recipeIngredientId);
+      if (serviceItemId) await sql`DELETE FROM items WHERE id = ${serviceItemId}`.execute(db);
+      if (ingredientItemId) await sql`DELETE FROM items WHERE id = ${ingredientItemId}`.execute(db);
+      if (recipeItemId) await sql`DELETE FROM items WHERE id = ${recipeItemId}`.execute(db);
     }
   }
 );

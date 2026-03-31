@@ -15,8 +15,9 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../lib/db";
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
+import { closeDbPool, getDb } from "../lib/db";
+import { sql } from "kysely";
+import type { KyselySchema } from "../lib/db";
 
 loadEnvIfPresent();
 
@@ -25,30 +26,29 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
-  let connection: PoolConnection;
+  let db: KyselySchema;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    db = getDb();
 
     // Find test user fixture
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       INNER JOIN user_outlets uo ON uo.user_id = u.id
-       INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE c.code = ?
-         AND u.email = ?
-         AND u.is_active = 1
-         AND o.code = ?
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL, TEST_OUTLET_CODE]
-    );
+    const userResult = await sql<{ user_id: number; company_id: number; outlet_id: number }>`
+      SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+      FROM users u
+      INNER JOIN companies c ON c.id = u.company_id
+      INNER JOIN user_outlets uo ON uo.user_id = u.id
+      INNER JOIN outlets o ON o.id = uo.outlet_id
+      WHERE c.code = ${TEST_COMPANY_CODE}
+        AND u.email = ${TEST_OWNER_EMAIL}
+        AND u.is_active = 1
+        AND o.code = ${TEST_OUTLET_CODE}
+      LIMIT 1
+    `.execute(db);
 
+    const userRows = userResult.rows;
     assert.ok(
       userRows.length > 0,
       `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`
@@ -59,7 +59,6 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
   });
 
   after(async () => {
-    connection.release();
     await closeDbPool();
   });
 
@@ -70,12 +69,12 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
   describe("Tax Rates Data Structure", () => {
     test("tax_rates table exists with required columns", async () => {
       try {
-        const [columns] = await connection.execute<RowDataPacket[]>(
-          `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tax_rates'`
-        );
+        const result = await sql<{ COLUMN_NAME: string }>`
+          SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tax_rates'
+        `.execute(db);
 
-        const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+        const columnNames = result.rows.map(r => r.COLUMN_NAME);
         assert.ok(columnNames.includes("id"), "Should have id column");
         assert.ok(columnNames.includes("company_id"), "Should have company_id column");
         assert.ok(columnNames.includes("name"), "Should have name column");
@@ -88,16 +87,15 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
 
     test("returns tax rates for company", async () => {
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id, name, rate_percent, is_active 
-           FROM tax_rates 
-           WHERE company_id = ? 
-           LIMIT 10`,
-          [testCompanyId]
-        );
+        const result = await sql<{ id: number; name: string; rate_percent: string; is_active: number }>`
+          SELECT id, name, rate_percent, is_active 
+          FROM tax_rates 
+          WHERE company_id = ${testCompanyId}
+          LIMIT 10
+        `.execute(db);
 
-        assert.ok(Array.isArray(rows), "Should return array");
-        for (const row of rows) {
+        assert.ok(Array.isArray(result.rows), "Should return array");
+        for (const row of result.rows) {
           assert.ok(row.id > 0, "Tax rate should have valid id");
           assert.ok(typeof row.name === "string", "Tax rate should have name");
         }
@@ -111,18 +109,16 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
   describe("Tax Rates Filtering", () => {
     test("filters by active status", async () => {
       try {
-        const [activeRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id FROM tax_rates WHERE company_id = ? AND is_active = 1 LIMIT 5`,
-          [testCompanyId]
-        );
+        const activeResult = await sql<{ id: number }>`
+          SELECT id FROM tax_rates WHERE company_id = ${testCompanyId} AND is_active = 1 LIMIT 5
+        `.execute(db);
 
-        const [inactiveRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id FROM tax_rates WHERE company_id = ? AND is_active = 0 LIMIT 5`,
-          [testCompanyId]
-        );
+        const inactiveResult = await sql<{ id: number }>`
+          SELECT id FROM tax_rates WHERE company_id = ${testCompanyId} AND is_active = 0 LIMIT 5
+        `.execute(db);
 
-        assert.ok(activeRows.length >= 0, "Active tax rates query should work");
-        assert.ok(inactiveRows.length >= 0, "Inactive tax rates query should work");
+        assert.ok(activeResult.rows.length >= 0, "Active tax rates query should work");
+        assert.ok(inactiveResult.rows.length >= 0, "Inactive tax rates query should work");
       } catch {
         // Table may not exist - skip gracefully
         assert.ok(true, "tax_rates table may not exist");
@@ -131,13 +127,12 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
 
     test("has rate_percent column for tax calculation", async () => {
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT rate_percent FROM tax_rates WHERE company_id = ? LIMIT 1`,
-          [testCompanyId]
-        );
+        const result = await sql<{ rate_percent: string }>`
+          SELECT rate_percent FROM tax_rates WHERE company_id = ${testCompanyId} LIMIT 1
+        `.execute(db);
 
-        if (rows.length > 0) {
-          const rate = Number(rows[0].rate_percent);
+        if (result.rows.length > 0) {
+          const rate = Number(result.rows[0].rate_percent);
           assert.ok(rate >= 0, "Tax rate should be non-negative");
           assert.ok(rate <= 100, "Tax rate should be <= 100%");
         }
@@ -151,12 +146,11 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
   describe("Tax Rates Company Scoping", () => {
     test("prevents cross-company tax rate access", async () => {
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id FROM tax_rates WHERE company_id = ? LIMIT 1`,
-          [testCompanyId + 9999]
-        );
+        const result = await sql<{ id: number }>`
+          SELECT id FROM tax_rates WHERE company_id = ${testCompanyId + 9999} LIMIT 1
+        `.execute(db);
 
-        assert.equal(rows.length, 0, "Should not find tax rates from non-existent company");
+        assert.equal(result.rows.length, 0, "Should not find tax rates from non-existent company");
       } catch {
         // Table may not exist - skip gracefully
         assert.ok(true, "tax_rates table may not exist");
@@ -165,11 +159,11 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
 
     test("company_tax_defaults table exists", async () => {
       try {
-        const [tables] = await connection.execute<RowDataPacket[]>(
-          `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'company_tax_defaults'`
-        );
+        const result = await sql<{ TABLE_NAME: string }>`
+          SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'company_tax_defaults'
+        `.execute(db);
 
-        if (tables.length > 0) {
+        if (result.rows.length > 0) {
           assert.ok(true, "company_tax_defaults table exists");
         } else {
           assert.ok(true, "company_tax_defaults table may not exist");
@@ -186,74 +180,70 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
 
   describe("Roles Data Structure", () => {
     test("roles table exists with required columns", async () => {
-      const [columns] = await connection.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'roles'`
-      );
+      const result = await sql<{ COLUMN_NAME: string }>`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'roles'
+      `.execute(db);
 
-      const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+      const columnNames = result.rows.map(r => r.COLUMN_NAME);
       assert.ok(columnNames.includes("id"), "Should have id column");
       assert.ok(columnNames.includes("code"), "Should have code column");
       assert.ok(columnNames.includes("name"), "Should have name column");
     });
 
     test("returns roles for company", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id, code, name, is_global 
-         FROM roles 
-         WHERE company_id = ? OR company_id IS NULL
-         LIMIT 10`,
-        [testCompanyId]
-      );
+      const result = await sql<{ id: number; code: string; name: string; is_global: number }>`
+        SELECT id, code, name, is_global 
+        FROM roles 
+        WHERE company_id = ${testCompanyId} OR company_id IS NULL
+        LIMIT 10
+      `.execute(db);
 
-      assert.ok(Array.isArray(rows), "Should return array");
+      assert.ok(Array.isArray(result.rows), "Should return array");
     });
   });
 
   describe("Roles Filtering", () => {
     test("includes global roles", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM roles WHERE company_id IS NULL LIMIT 5`
-      );
+      const result = await sql<{ id: number }>`
+        SELECT id FROM roles WHERE company_id IS NULL LIMIT 5
+      `.execute(db);
 
       // Global roles may or may not exist
-      assert.ok(Array.isArray(rows), "Should return array");
+      assert.ok(Array.isArray(result.rows), "Should return array");
     });
 
     test("filters by company_id", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM roles WHERE company_id = ? LIMIT 5`,
-        [testCompanyId]
-      );
+      const result = await sql<{ id: number }>`
+        SELECT id FROM roles WHERE company_id = ${testCompanyId} LIMIT 5
+      `.execute(db);
 
-      assert.ok(Array.isArray(rows), "Should return array");
+      assert.ok(Array.isArray(result.rows), "Should return array");
     });
   });
 
   describe("Roles Company Scoping", () => {
     test("prevents access to roles from different company", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM roles WHERE company_id = ? LIMIT 1`,
-        [testCompanyId + 9999]
-      );
+      const result = await sql<{ id: number }>`
+        SELECT id FROM roles WHERE company_id = ${testCompanyId + 9999} LIMIT 1
+      `.execute(db);
 
-      assert.equal(rows.length, 0, "Should not find roles from non-existent company");
+      assert.equal(result.rows.length, 0, "Should not find roles from non-existent company");
     });
 
     test("user has appropriate role level", async () => {
       // Verify test user has a high-level role (OWNER, ADMIN, etc.)
       // user_roles table may not exist in all deployments
       try {
-        const [rows] = await connection.execute(
-          `SELECT role_code FROM user_roles ur 
-           INNER JOIN roles r ON r.id = ur.role_id 
-           WHERE ur.user_id = ? AND r.role_level >= 100
-           LIMIT 1`,
-          [testUserId]
-        ) as [RowDataPacket[], unknown];
+        const result = await sql`
+          SELECT role_code FROM user_roles ur 
+          INNER JOIN roles r ON r.id = ur.role_id 
+          WHERE ur.user_id = ${testUserId} AND r.role_level >= 100
+          LIMIT 1
+        `.execute(db);
 
         // User should have at least one high-level role
-        assert.ok(rows.length >= 0, "Role level check query works");
+        assert.ok(result.rows.length >= 0, "Role level check query works");
       } catch {
         // Table may not exist - skip gracefully
         assert.ok(true, "user_roles table may not exist");
@@ -268,10 +258,10 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
   describe("Access Control", () => {
     test("tax_rates module exists", async () => {
       try {
-        const [modules] = await connection.execute<RowDataPacket[]>(
-          `SELECT module_name FROM module_permissions LIMIT 5`
-        );
-        assert.ok(Array.isArray(modules), "Module permissions check works");
+        const result = await sql<{ module_name: string }>`
+          SELECT module_name FROM module_permissions LIMIT 5
+        `.execute(db);
+        assert.ok(Array.isArray(result.rows), "Module permissions check works");
       } catch {
         // Table may not exist - skip gracefully
         assert.ok(true, "module_permissions table may not exist");
@@ -280,17 +270,16 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
 
     test("user has read permission for tax_rates", async () => {
       try {
-        const [rows] = await connection.execute(
-          `SELECT 1 FROM user_roles ur 
-           INNER JOIN roles r ON r.id = ur.role_id 
-           INNER JOIN module_permissions mp ON mp.role_id = r.id 
-           WHERE ur.user_id = ? AND mp.module_name = 'tax_rates'
-           LIMIT 1`,
-          [testUserId]
-        ) as [RowDataPacket[], unknown];
+        const result = await sql`
+          SELECT 1 FROM user_roles ur 
+          INNER JOIN roles r ON r.id = ur.role_id 
+          INNER JOIN module_permissions mp ON mp.role_id = r.id 
+          WHERE ur.user_id = ${testUserId} AND mp.module_name = 'tax_rates'
+          LIMIT 1
+        `.execute(db);
 
         // User may or may not have tax_rates permission
-        assert.ok(rows.length >= 0, "Permission check query works");
+        assert.ok(result.rows.length >= 0, "Permission check query works");
       } catch {
         // Table may not exist - skip gracefully
         assert.ok(true, "Permission check failed gracefully");
@@ -320,12 +309,11 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
 
     test("handles missing tax rates gracefully", async () => {
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id FROM tax_rates WHERE company_id = ? LIMIT 1`,
-          [testCompanyId]
-        );
+        const result = await sql<{ id: number }>`
+          SELECT id FROM tax_rates WHERE company_id = ${testCompanyId} LIMIT 1
+        `.execute(db);
         // Empty result is valid
-        assert.ok(Array.isArray(rows), "Should return array");
+        assert.ok(Array.isArray(result.rows), "Should return array");
       } catch {
         // Table may not exist - skip gracefully
         assert.ok(true, "tax_rates table may not exist");
@@ -333,12 +321,11 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
     });
 
     test("handles missing roles gracefully", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM roles WHERE company_id = ? LIMIT 1`,
-        [testCompanyId]
-      );
+      const result = await sql<{ id: number }>`
+        SELECT id FROM roles WHERE company_id = ${testCompanyId} LIMIT 1
+      `.execute(db);
       // Empty result is valid
-      assert.ok(Array.isArray(rows), "Should return array");
+      assert.ok(Array.isArray(result.rows), "Should return array");
     });
   });
 });

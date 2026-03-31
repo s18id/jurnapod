@@ -10,15 +10,13 @@ import type {
   JournalBatchResponse,
   JournalListQuery
 } from "@jurnapod/shared";
-import { getDbPool } from "./db";
-import { DbConn } from "@jurnapod/db";
+import { getDb } from "./db";
 
 /**
  * Create JournalsService instance with DbConn and audit service
  */
 async function createJournalsService(): Promise<JournalsService> {
-  const pool = getDbPool();
-  const dbClient = new DbConn(pool);
+  const dbClient = getDb();
   
   // Import AuditService class using dynamic import
   const { AuditService } = await import("@jurnapod/modules-platform");

@@ -1,9 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { getDbPool } from "./db";
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { getDb } from "./db";
+import { sql } from "kysely";
 
 /**
  * Module settings for a company
@@ -25,44 +24,26 @@ export class ModuleNotFoundError extends Error {
   }
 }
 
-type ModuleRow = RowDataPacket & {
-  id: number;
-};
-
-type CompanyModuleRow = RowDataPacket & {
-  code: string;
-  name: string;
-  enabled: number;
-  config_json: string | null;
-};
-
-type EnabledRow = RowDataPacket & {
-  enabled: number;
-};
-
 /**
  * List all modules for a company with their settings.
  *
  * @param companyId - The company ID
- * @param connection - Optional database connection for transaction support
  * @returns Array of module settings ordered by code
  */
 export async function listCompanyModules(
-  companyId: number,
-  connection?: PoolConnection
+  companyId: number
 ): Promise<ModuleSettings[]> {
-  const db = connection || getDbPool();
+  const db = getDb();
 
-  const [rows] = await db.execute<CompanyModuleRow[]>(
-    `SELECT m.code, m.name, cm.enabled, cm.config_json
-     FROM modules m
-     INNER JOIN company_modules cm ON cm.module_id = m.id
-     WHERE cm.company_id = ?
-     ORDER BY m.code ASC`,
-    [companyId]
-  );
+  const rows = await sql<{ code: string; name: string; enabled: number; config_json: string | null }>`
+    SELECT m.code, m.name, cm.enabled, cm.config_json
+    FROM modules m
+    INNER JOIN company_modules cm ON cm.module_id = m.id
+    WHERE cm.company_id = ${companyId}
+    ORDER BY m.code ASC
+  `.execute(db);
 
-  return rows.map((row) => ({
+  return rows.rows.map((row) => ({
     code: row.code,
     name: row.name,
     enabled: Boolean(row.enabled),
@@ -75,25 +56,22 @@ export async function listCompanyModules(
  * Returns null if module doesn't exist.
  *
  * @param code - The module code
- * @param connection - Optional database connection for transaction support
  * @returns Module ID or null if not found
  */
 export async function getModuleIdByCode(
-  code: string,
-  connection?: PoolConnection
+  code: string
 ): Promise<number | null> {
-  const db = connection || getDbPool();
+  const db = getDb();
 
-  const [rows] = await db.execute<ModuleRow[]>(
-    `SELECT id FROM modules WHERE code = ? LIMIT 1`,
-    [code]
-  );
+  const rows = await sql<{ id: number }>`
+    SELECT id FROM modules WHERE code = ${code} LIMIT 1
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  return rows[0].id;
+  return rows.rows[0].id;
 }
 
 /**
@@ -104,34 +82,31 @@ export async function getModuleIdByCode(
  * @param moduleCode - The module code
  * @param enabled - Whether the module is enabled
  * @param configJson - Optional JSON configuration string
- * @param connection - Optional database connection for transaction support
  * @throws ModuleNotFoundError - If the module code doesn't exist
  */
 export async function updateCompanyModule(
   companyId: number,
   moduleCode: string,
   enabled: boolean,
-  configJson: string | null,
-  connection?: PoolConnection
+  configJson: string | null
 ): Promise<void> {
-  const db = connection || getDbPool();
+  const db = getDb();
 
   // First get the module ID by code
-  const moduleId = await getModuleIdByCode(moduleCode, connection);
+  const moduleId = await getModuleIdByCode(moduleCode);
 
   if (moduleId === null) {
     throw new ModuleNotFoundError(moduleCode);
   }
 
-  await db.execute<ResultSetHeader>(
-    `INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at)
-     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-     ON DUPLICATE KEY UPDATE
-       enabled = VALUES(enabled),
-       config_json = VALUES(config_json),
-       updated_at = CURRENT_TIMESTAMP`,
-    [companyId, moduleId, enabled ? 1 : 0, configJson]
-  );
+  await sql`
+    INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at)
+    VALUES (${companyId}, ${moduleId}, ${enabled ? 1 : 0}, ${configJson}, CURRENT_TIMESTAMP)
+    ON DUPLICATE KEY UPDATE
+      enabled = VALUES(enabled),
+      config_json = VALUES(config_json),
+      updated_at = CURRENT_TIMESTAMP
+  `.execute(db);
 }
 
 /**
@@ -145,19 +120,18 @@ export async function isModuleEnabled(
   companyId: number,
   moduleCode: string
 ): Promise<boolean> {
-  const pool = getDbPool();
+  const db = getDb();
 
-  const [rows] = await pool.execute<EnabledRow[]>(
-    `SELECT cm.enabled
-     FROM company_modules cm
-     INNER JOIN modules m ON m.id = cm.module_id
-     WHERE cm.company_id = ? AND m.code = ?`,
-    [companyId, moduleCode]
-  );
+  const rows = await sql<{ enabled: number }>`
+    SELECT cm.enabled
+    FROM company_modules cm
+    INNER JOIN modules m ON m.id = cm.module_id
+    WHERE cm.company_id = ${companyId} AND m.code = ${moduleCode}
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (rows.rows.length === 0) {
     return false;
   }
 
-  return Boolean(rows[0].enabled);
+  return Boolean(rows.rows[0].enabled);
 }

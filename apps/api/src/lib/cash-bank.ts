@@ -3,9 +3,8 @@
 
 import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/core";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection, Pool } from "mysql2/promise";
-import { getDbPool } from "./db";
+import { getDb, type KyselySchema } from "./db";
+import { sql } from "kysely";
 import { toMysqlDateTime } from "./date-helpers";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 import { userHasOutletAccess } from "./auth";
@@ -13,22 +12,18 @@ import { userHasOutletAccess } from "./auth";
 export type CashBankType = "MUTATION" | "TOP_UP" | "WITHDRAWAL" | "FOREX";
 export type CashBankStatus = "DRAFT" | "POSTED" | "VOID";
 
-type QueryExecutor = {
-  execute: PoolConnection["execute"] | Pool["execute"];
-};
-
 type MutationActor = {
   userId: number;
 };
 
-type AccountRow = RowDataPacket & {
+type AccountRow = {
   id: number;
   company_id: number;
   name: string;
   type_name: string | null;
 };
 
-type CashBankRow = RowDataPacket & {
+type CashBankRow = {
   id: number;
   company_id: number;
   outlet_id: number | null;
@@ -194,61 +189,47 @@ function validateDirectionByTransactionType(
   }
 }
 
-async function withTransaction<T>(operation: (connection: PoolConnection) => Promise<T>): Promise<T> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-    const result = await operation(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+async function withTransaction<T>(operation: (db: KyselySchema) => Promise<T>): Promise<T> {
+  const db = getDb();
+  return db.transaction().execute(operation);
 }
 
 async function ensureOutletBelongsToCompany(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   outletId: number
 ): Promise<void> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id
-     FROM outlets
-     WHERE company_id = ?
-       AND id = ?
-     LIMIT 1`,
-    [companyId, outletId]
-  );
+  const row = await db
+    .selectFrom("outlets")
+    .where("company_id", "=", companyId)
+    .where("id", "=", outletId)
+    .limit(1)
+    .select("id")
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     throw new CashBankValidationError("Outlet not found for company");
   }
 }
 
 async function ensureAccount(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   accountId: number,
   roleLabel: "source" | "destination" | "fx"
-): Promise<AccountRow> {
-  const [rows] = await executor.execute<AccountRow[]>(
-    `SELECT id, company_id, name, type_name
-     FROM accounts
-     WHERE company_id = ?
-       AND id = ?
-     LIMIT 1`,
-    [companyId, accountId]
-  );
+): Promise<{ id: number; company_id: number; name: string; type_name: string | null }> {
+  const account = await db
+    .selectFrom("accounts")
+    .where("company_id", "=", companyId)
+    .where("id", "=", accountId)
+    .limit(1)
+    .select(["id", "company_id", "name", "type_name"])
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!account) {
     throw new CashBankValidationError(`${roleLabel} account not found`);
   }
 
-  const account = rows[0];
   if (!isCashBankTypeName(account.type_name)) {
     throw new CashBankValidationError(`${roleLabel} account must be cash/bank classified`);
   }
@@ -365,60 +346,54 @@ class CashBankPostingMapper implements PostingMapper {
 class CashBankPostingRepository implements PostingRepository {
   private readonly lineDate: string;
 
-  constructor(private readonly executor: QueryExecutor, private readonly postedAt: string) {
+  constructor(private readonly db: KyselySchema, private readonly postedAt: string) {
     this.lineDate = postedAt.slice(0, 10);
   }
 
   async createJournalBatch(request: PostingRequest): Promise<{ journal_batch_id: number }> {
-    const [result] = await this.executor.execute<ResultSetHeader>(
-      `INSERT INTO journal_batches (
-         company_id,
-         outlet_id,
-         doc_type,
-         doc_id,
-         posted_at
-       ) VALUES (?, ?, ?, ?, ?)`,
-      [request.company_id, request.outlet_id ?? null, request.doc_type, request.doc_id, this.postedAt]
-    );
+    const result = await this.db
+      .insertInto("journal_batches")
+      .values({
+        company_id: request.company_id,
+        outlet_id: request.outlet_id ?? null,
+        doc_type: request.doc_type,
+        doc_id: request.doc_id,
+        posted_at: new Date(this.postedAt)
+      })
+      .executeTakeFirst();
 
     return { journal_batch_id: Number(result.insertId) };
   }
 
   async insertJournalLines(journalBatchId: number, request: PostingRequest, lines: JournalLine[]): Promise<void> {
-    const placeholders = lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-    const values = lines.flatMap((line) => [
-      journalBatchId,
-      request.company_id,
-      request.outlet_id ?? null,
-      line.account_id,
-      this.lineDate,
-      line.debit,
-      line.credit,
-      line.description
-    ]);
+    if (lines.length === 0) {
+      return;
+    }
 
-    await this.executor.execute(
-      `INSERT INTO journal_lines (
-         journal_batch_id,
-         company_id,
-         outlet_id,
-         account_id,
-         line_date,
-         debit,
-         credit,
-         description
-       ) VALUES ${placeholders}`,
-      values
-    );
+    await this.db
+      .insertInto("journal_lines")
+      .values(
+        lines.map((line) => ({
+          journal_batch_id: journalBatchId,
+          company_id: request.company_id,
+          outlet_id: request.outlet_id ?? null,
+          account_id: line.account_id,
+          line_date: new Date(this.lineDate),
+          debit: line.debit,
+          credit: line.credit,
+          description: line.description
+        }))
+      )
+      .execute();
   }
 }
 
 async function postCashBankToJournal(
-  executor: QueryExecutor,
+  db: KyselySchema,
   tx: CashBankTransaction,
   options: { voidMode?: boolean }
 ): Promise<PostingResult> {
-  await ensureDateWithinOpenFiscalYearWithExecutor(executor, tx.company_id, tx.transaction_date);
+  await ensureDateWithinOpenFiscalYearWithExecutor(db, tx.company_id, tx.transaction_date);
 
   const baseDocType = DOC_TYPE_BY_TRANSACTION_TYPE[tx.transaction_type];
   const docType = options.voidMode ? `${baseDocType}_VOID` : baseDocType;
@@ -428,7 +403,7 @@ async function postCashBankToJournal(
       ? toMysqlDateTimeStrict(tx.posted_at)
       : toMysqlDateTimeStrict(new Date().toISOString());
 
-  const service = new PostingService(new CashBankPostingRepository(executor, postedAt), {
+  const service = new PostingService(new CashBankPostingRepository(db, postedAt), {
     [docType]: new CashBankPostingMapper(tx, Boolean(options.voidMode))
   });
 
@@ -443,51 +418,52 @@ async function postCashBankToJournal(
 }
 
 async function readCashBankById(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   transactionId: number,
   options?: { forUpdate?: boolean }
 ): Promise<CashBankTransaction | null> {
-  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
-  const [rows] = await executor.execute<CashBankRow[]>(
-    `SELECT cbt.id,
-            cbt.company_id,
-            cbt.outlet_id,
-            cbt.transaction_type,
-            cbt.transaction_date,
-            cbt.reference,
-            cbt.description,
-            cbt.source_account_id,
-            sa.name AS source_account_name,
-            cbt.destination_account_id,
-            da.name AS destination_account_name,
-            cbt.amount,
-            cbt.currency_code,
-            cbt.exchange_rate,
-            cbt.base_amount,
-            cbt.fx_gain_loss,
-            cbt.fx_account_id,
-            fxa.name AS fx_account_name,
-            cbt.status,
-            cbt.posted_at,
-            cbt.created_by_user_id,
-            cbt.created_at,
-            cbt.updated_at
-     FROM cash_bank_transactions cbt
-     LEFT JOIN accounts sa ON sa.company_id = cbt.company_id AND sa.id = cbt.source_account_id
-     LEFT JOIN accounts da ON da.company_id = cbt.company_id AND da.id = cbt.destination_account_id
-     LEFT JOIN accounts fxa ON fxa.company_id = cbt.company_id AND fxa.id = cbt.fx_account_id
-     WHERE cbt.company_id = ?
-       AND cbt.id = ?
-     LIMIT 1${forUpdateClause}`,
-    [companyId, transactionId]
-  );
+  const forUpdateClause = options?.forUpdate ? sql` FOR UPDATE` : sql``;
 
-  if (rows.length === 0) {
+  const row = await sql<CashBankRow>`
+    SELECT cbt.id,
+           cbt.company_id,
+           cbt.outlet_id,
+           cbt.transaction_type,
+           cbt.transaction_date,
+           cbt.reference,
+           cbt.description,
+           cbt.source_account_id,
+           sa.name AS source_account_name,
+           cbt.destination_account_id,
+           da.name AS destination_account_name,
+           cbt.amount,
+           cbt.currency_code,
+           cbt.exchange_rate,
+           cbt.base_amount,
+           cbt.fx_gain_loss,
+           cbt.fx_account_id,
+           fxa.name AS fx_account_name,
+           cbt.status,
+           cbt.posted_at,
+           cbt.created_by_user_id,
+           cbt.created_at,
+           cbt.updated_at
+    FROM cash_bank_transactions cbt
+    LEFT JOIN accounts sa ON sa.company_id = cbt.company_id AND sa.id = cbt.source_account_id
+    LEFT JOIN accounts da ON da.company_id = cbt.company_id AND da.id = cbt.destination_account_id
+    LEFT JOIN accounts fxa ON fxa.company_id = cbt.company_id AND fxa.id = cbt.fx_account_id
+    WHERE cbt.company_id = ${companyId}
+      AND cbt.id = ${transactionId}
+    LIMIT 1
+    ${forUpdateClause}
+  `.execute(db);
+
+  if (row.rows.length === 0) {
     return null;
   }
 
-  return toCashBankTransaction(rows[0]);
+  return toCashBankTransaction(row.rows[0]);
 }
 
 export async function listCashBankTransactions(
@@ -502,79 +478,63 @@ export async function listCashBankTransactions(
     offset?: number;
   }
 ) {
-  const pool = getDbPool();
-  const conditions: string[] = ["cbt.company_id = ?"];
-  const values: Array<string | number> = [companyId];
-
-  if (typeof filters.outletId === "number") {
-    conditions.push("cbt.outlet_id = ?");
-    values.push(filters.outletId);
-  }
-  if (filters.transactionType) {
-    conditions.push("cbt.transaction_type = ?");
-    values.push(filters.transactionType);
-  }
-  if (filters.status) {
-    conditions.push("cbt.status = ?");
-    values.push(filters.status);
-  }
-  if (filters.dateFrom) {
-    conditions.push("cbt.transaction_date >= ?");
-    values.push(filters.dateFrom);
-  }
-  if (filters.dateTo) {
-    conditions.push("cbt.transaction_date <= ?");
-    values.push(filters.dateTo);
-  }
-
-  const where = conditions.join(" AND ");
+  const db = getDb();
   const limit = filters.limit ?? 50;
   const offset = filters.offset ?? 0;
 
-  const [countRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) AS total
-     FROM cash_bank_transactions cbt
-     WHERE ${where}`,
-    values
-  );
+  // Build parameterized WHERE clause using Kysely sql template
+  const countResult = await sql<{ total: number }>`SELECT COUNT(*) AS total
+    FROM cash_bank_transactions cbt
+    WHERE cbt.company_id = ${companyId}
+      ${filters.outletId !== undefined ? sql`AND cbt.outlet_id = ${filters.outletId}` : sql``}
+      ${filters.transactionType ? sql`AND cbt.transaction_type = ${filters.transactionType}` : sql``}
+      ${filters.status ? sql`AND cbt.status = ${filters.status}` : sql``}
+      ${filters.dateFrom ? sql`AND cbt.transaction_date >= ${filters.dateFrom}` : sql``}
+      ${filters.dateTo ? sql`AND cbt.transaction_date <= ${filters.dateTo}` : sql``}
+  `.execute(db);
 
-  const [rows] = await pool.execute<CashBankRow[]>(
-    `SELECT cbt.id,
-            cbt.company_id,
-            cbt.outlet_id,
-            cbt.transaction_type,
-            cbt.transaction_date,
-            cbt.reference,
-            cbt.description,
-            cbt.source_account_id,
-            sa.name AS source_account_name,
-            cbt.destination_account_id,
-            da.name AS destination_account_name,
-            cbt.amount,
-            cbt.currency_code,
-            cbt.exchange_rate,
-            cbt.base_amount,
-            cbt.fx_gain_loss,
-            cbt.fx_account_id,
-            fxa.name AS fx_account_name,
-            cbt.status,
-            cbt.posted_at,
-            cbt.created_by_user_id,
-            cbt.created_at,
-            cbt.updated_at
-     FROM cash_bank_transactions cbt
-     LEFT JOIN accounts sa ON sa.company_id = cbt.company_id AND sa.id = cbt.source_account_id
-     LEFT JOIN accounts da ON da.company_id = cbt.company_id AND da.id = cbt.destination_account_id
-     LEFT JOIN accounts fxa ON fxa.company_id = cbt.company_id AND fxa.id = cbt.fx_account_id
-     WHERE ${where}
-     ORDER BY cbt.transaction_date DESC, cbt.id DESC
-     LIMIT ? OFFSET ?`,
-    [...values, limit, offset]
-  );
+  const total = Number(countResult.rows[0]?.total ?? 0);
+
+  // Data query
+  const rows = await sql<CashBankRow>`SELECT cbt.id,
+         cbt.company_id,
+         cbt.outlet_id,
+         cbt.transaction_type,
+         cbt.transaction_date,
+         cbt.reference,
+         cbt.description,
+         cbt.source_account_id,
+         sa.name AS source_account_name,
+         cbt.destination_account_id,
+         da.name AS destination_account_name,
+         cbt.amount,
+         cbt.currency_code,
+         cbt.exchange_rate,
+         cbt.base_amount,
+         cbt.fx_gain_loss,
+         cbt.fx_account_id,
+         fxa.name AS fx_account_name,
+         cbt.status,
+         cbt.posted_at,
+         cbt.created_by_user_id,
+         cbt.created_at,
+         cbt.updated_at
+  FROM cash_bank_transactions cbt
+  LEFT JOIN accounts sa ON sa.company_id = cbt.company_id AND sa.id = cbt.source_account_id
+  LEFT JOIN accounts da ON da.company_id = cbt.company_id AND da.id = cbt.destination_account_id
+  LEFT JOIN accounts fxa ON fxa.company_id = cbt.company_id AND fxa.id = cbt.fx_account_id
+  WHERE cbt.company_id = ${companyId}
+    ${filters.outletId !== undefined ? sql`AND cbt.outlet_id = ${filters.outletId}` : sql``}
+    ${filters.transactionType ? sql`AND cbt.transaction_type = ${filters.transactionType}` : sql``}
+    ${filters.status ? sql`AND cbt.status = ${filters.status}` : sql``}
+    ${filters.dateFrom ? sql`AND cbt.transaction_date >= ${filters.dateFrom}` : sql``}
+    ${filters.dateTo ? sql`AND cbt.transaction_date <= ${filters.dateTo}` : sql``}
+  ORDER BY cbt.transaction_date DESC, cbt.id DESC
+  LIMIT ${limit} OFFSET ${offset}`.execute(db);
 
   return {
-    total: Number(countRows[0]?.total ?? 0),
-    transactions: rows.map(toCashBankTransaction)
+    total,
+    transactions: rows.rows.map(toCashBankTransaction)
   };
 }
 
@@ -583,8 +543,8 @@ export async function getCashBankTransaction(
   transactionId: number,
   options?: { forUpdate?: boolean }
 ): Promise<CashBankTransaction> {
-  const pool = getDbPool();
-  const tx = await readCashBankById(pool, companyId, transactionId, options);
+  const db = getDb();
+  const tx = await readCashBankById(db, companyId, transactionId, options);
   if (!tx) {
     throw new CashBankNotFoundError("Cash/bank transaction not found");
   }
@@ -669,43 +629,27 @@ export async function createCashBankTransaction(
       throw new CashBankValidationError("fx_account_id is required when FOREX produces gain/loss");
     }
 
-    const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO cash_bank_transactions (
-         company_id,
-         outlet_id,
-         transaction_type,
-         transaction_date,
-         reference,
-         description,
-         source_account_id,
-         destination_account_id,
-         amount,
-         currency_code,
-         exchange_rate,
-         base_amount,
-         fx_gain_loss,
-         fx_account_id,
-         status,
-         created_by_user_id
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?)`,
-      [
-        companyId,
-        outletId,
-        transactionType,
-        input.transaction_date,
-        input.reference ?? null,
-        input.description,
-        input.source_account_id,
-        input.destination_account_id,
-        normalizeMoney(input.amount),
-        currencyCode,
-        exchangeRate,
-        baseAmount,
-        fxGainLoss,
-        fxAccountId,
-        actor?.userId ?? null
-      ]
-    );
+    const result = await connection
+      .insertInto("cash_bank_transactions")
+      .values({
+        company_id: companyId,
+        outlet_id: outletId,
+        transaction_type: transactionType,
+        transaction_date: new Date(input.transaction_date),
+        reference: input.reference ?? null,
+        description: input.description,
+        source_account_id: input.source_account_id,
+        destination_account_id: input.destination_account_id,
+        amount: normalizeMoney(input.amount),
+        currency_code: currencyCode,
+        exchange_rate: exchangeRate,
+        base_amount: baseAmount,
+        fx_gain_loss: fxGainLoss,
+        fx_account_id: fxAccountId,
+        status: "DRAFT",
+        created_by_user_id: actor?.userId ?? null
+      })
+      .executeTakeFirst();
 
     const created = await readCashBankById(connection, companyId, Number(result.insertId));
     if (!created) {
@@ -746,15 +690,16 @@ export async function postCashBankTransaction(
 
     await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, current.transaction_date);
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE cash_bank_transactions
-       SET status = 'POSTED',
-           posted_at = CURRENT_TIMESTAMP,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ?
-         AND id = ?`,
-      [companyId, transactionId]
-    );
+    await connection
+      .updateTable("cash_bank_transactions")
+      .set({
+        status: "POSTED",
+        posted_at: new Date(),
+        updated_at: new Date()
+      })
+      .where("company_id", "=", companyId)
+      .where("id", "=", transactionId)
+      .execute();
 
     const posted = await readCashBankById(connection, companyId, transactionId, { forUpdate: true });
     if (!posted) {
@@ -793,14 +738,15 @@ export async function voidCashBankTransaction(
 
     await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, current.transaction_date);
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE cash_bank_transactions
-       SET status = 'VOID',
-           updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ?
-         AND id = ?`,
-      [companyId, transactionId]
-    );
+    await connection
+      .updateTable("cash_bank_transactions")
+      .set({
+        status: "VOID",
+        updated_at: new Date()
+      })
+      .where("company_id", "=", companyId)
+      .where("id", "=", transactionId)
+      .execute();
 
     const voided = await readCashBankById(connection, companyId, transactionId, { forUpdate: true });
     if (!voided) {

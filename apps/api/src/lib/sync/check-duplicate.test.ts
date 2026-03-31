@@ -16,8 +16,9 @@ import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { randomUUID } from "node:crypto";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../db";
-import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { closeDbPool, getDb } from "../db";
+import type { KyselySchema } from "@/lib/db";
+import { sql } from "kysely";
 import { checkDuplicateClientTx, type DuplicateCheckResult } from "./check-duplicate";
 
 loadEnvIfPresent();
@@ -27,41 +28,38 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("checkDuplicateClientTx", { concurrency: false }, () => {
-  let connection: PoolConnection;
+  let db: KyselySchema;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    db = getDb();
 
     // Find test user fixture with company and outlets
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       INNER JOIN user_outlets uo ON uo.user_id = u.id
-       INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE c.code = ?
-         AND u.email = ?
-         AND u.is_active = 1
-         AND o.code = ?
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL, TEST_OUTLET_CODE]
-    );
+    const userRows = await sql`
+      SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+      FROM users u
+      INNER JOIN companies c ON c.id = u.company_id
+      INNER JOIN user_outlets uo ON uo.user_id = u.id
+      INNER JOIN outlets o ON o.id = uo.outlet_id
+      WHERE c.code = ${TEST_COMPANY_CODE}
+        AND u.email = ${TEST_OWNER_EMAIL}
+        AND u.is_active = 1
+        AND o.code = ${TEST_OUTLET_CODE}
+      LIMIT 1
+    `.execute(db);
 
     assert.ok(
-      userRows.length > 0,
+      userRows.rows.length > 0,
       `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`
     );
-    testUserId = Number(userRows[0].user_id);
-    testCompanyId = Number(userRows[0].company_id);
-    testOutletId = Number(userRows[0].outlet_id);
+    testUserId = Number((userRows.rows[0] as { user_id: number }).user_id);
+    testCompanyId = Number((userRows.rows[0] as { company_id: number }).company_id);
+    testOutletId = Number((userRows.rows[0] as { outlet_id: number }).outlet_id);
   });
 
   after(async () => {
-    connection.release();
     await closeDbPool();
   });
 
@@ -71,23 +69,21 @@ describe("checkDuplicateClientTx", { concurrency: false }, () => {
 
   async function insertTestTransaction(clientTxId: string): Promise<number> {
     // client_tx_id is char(36) in the schema, so we use a proper UUID format
-    const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO pos_transactions (
+    const result = await sql`
+      INSERT INTO pos_transactions (
         company_id, outlet_id, cashier_user_id, client_tx_id, 
         status, service_type, trx_at, payload_sha256, payload_hash_version,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'COMPLETED', 'TAKEAWAY', NOW(), 'test-hash', 2, NOW(), NOW())`,
-      [testCompanyId, testOutletId, testUserId, clientTxId]
-    );
+      ) VALUES (${testCompanyId}, ${testOutletId}, ${testUserId}, ${clientTxId}, 'COMPLETED', 'TAKEAWAY', NOW(), 'test-hash', 2, NOW(), NOW())
+    `.execute(db);
     
-    return result.insertId;
+    return Number(result.insertId);
   }
 
   async function deleteTestTransaction(clientTxId: string): Promise<void> {
-    await connection.execute(
-      `DELETE FROM pos_transactions WHERE client_tx_id = ? AND company_id = ?`,
-      [clientTxId, testCompanyId]
-    );
+    await sql`
+      DELETE FROM pos_transactions WHERE client_tx_id = ${clientTxId} AND company_id = ${testCompanyId}
+    `.execute(db);
   }
 
   // ===========================================================================
@@ -101,7 +97,7 @@ describe("checkDuplicateClientTx", { concurrency: false }, () => {
       const result = await checkDuplicateClientTx(
         testCompanyId,
         nonExistentId,
-        connection
+        db
       );
       
       assert.equal(result.isDuplicate, false, "Should not find duplicate");
@@ -115,7 +111,7 @@ describe("checkDuplicateClientTx", { concurrency: false }, () => {
       const result = await checkDuplicateClientTx(
         999999,
         clientTxId,
-        connection
+        db
       );
       
       assert.equal(result.isDuplicate, false, "Should not find duplicate for non-existent company");
@@ -134,7 +130,7 @@ describe("checkDuplicateClientTx", { concurrency: false }, () => {
         const result = await checkDuplicateClientTx(
           testCompanyId,
           clientTxId,
-          connection
+          db
         );
         
         assert.equal(result.isDuplicate, true, "Should find duplicate");
@@ -151,25 +147,24 @@ describe("checkDuplicateClientTx", { concurrency: false }, () => {
       const clientTxId = randomUUID();
       
       try {
-        // Insert using the same connection that will be passed to check
-        const [insertResult] = await connection.execute<ResultSetHeader>(
-          `INSERT INTO pos_transactions (
+        // Insert using the same db that will be passed to check
+        const insertResult = await sql`
+          INSERT INTO pos_transactions (
             company_id, outlet_id, cashier_user_id, client_tx_id, 
             status, service_type, trx_at, payload_sha256, payload_hash_version,
             created_at, updated_at
-          ) VALUES (?, ?, ?, ?, 'COMPLETED', 'TAKEAWAY', NOW(), 'test-hash', 2, NOW(), NOW())`,
-          [testCompanyId, testOutletId, testUserId, clientTxId]
-        );
+          ) VALUES (${testCompanyId}, ${testOutletId}, ${testUserId}, ${clientTxId}, 'COMPLETED', 'TAKEAWAY', NOW(), 'test-hash', 2, NOW(), NOW())
+        `.execute(db);
         
-        // Use the same connection for check
+        // Use the same db for check
         const result = await checkDuplicateClientTx(
           testCompanyId,
           clientTxId,
-          connection
+          db
         );
         
-        assert.equal(result.isDuplicate, true, "Should find duplicate using provided connection");
-        assert.strictEqual(result.existingId, insertResult.insertId, "existingId should match");
+        assert.equal(result.isDuplicate, true, "Should find duplicate using provided db");
+        assert.strictEqual(result.existingId, Number(insertResult.insertId), "existingId should match");
       } finally {
         await deleteTestTransaction(clientTxId);
       }
@@ -179,17 +174,16 @@ describe("checkDuplicateClientTx", { concurrency: false }, () => {
       const clientTxId = randomUUID();
       
       try {
-        // Insert using the shared connection
-        await connection.execute<ResultSetHeader>(
-          `INSERT INTO pos_transactions (
+        // Insert using the shared db
+        await sql`
+          INSERT INTO pos_transactions (
             company_id, outlet_id, cashier_user_id, client_tx_id, 
             status, service_type, trx_at, payload_sha256, payload_hash_version,
             created_at, updated_at
-          ) VALUES (?, ?, ?, ?, 'COMPLETED', 'TAKEAWAY', NOW(), 'test-hash', 2, NOW(), NOW())`,
-          [testCompanyId, testOutletId, testUserId, clientTxId]
-        );
+          ) VALUES (${testCompanyId}, ${testOutletId}, ${testUserId}, ${clientTxId}, 'COMPLETED', 'TAKEAWAY', NOW(), 'test-hash', 2, NOW(), NOW())
+        `.execute(db);
         
-        // Call without connection - should use default pool
+        // Call without db - should use default pool
         const result = await checkDuplicateClientTx(
           testCompanyId,
           clientTxId
@@ -209,7 +203,7 @@ describe("checkDuplicateClientTx", { concurrency: false }, () => {
       const result = await checkDuplicateClientTx(
         testCompanyId,
         clientTxId,
-        connection
+        db
       );
       
       // Verify the result structure
@@ -228,7 +222,7 @@ describe("checkDuplicateClientTx", { concurrency: false }, () => {
         const result = await checkDuplicateClientTx(
           testCompanyId,
           clientTxId,
-          connection
+          db
         );
         
         // Verify the result structure

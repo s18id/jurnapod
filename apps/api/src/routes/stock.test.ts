@@ -10,20 +10,18 @@
 
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
-import { getDbPool, closeDbPool } from "../lib/db";
-import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
-import { createCompanyBasic } from "../lib/companies.js";
-import { createOutletBasic } from "../lib/outlets.js";
-import { createItem } from "../lib/items/index.js";
+import { getDb, closeDbPool } from "../lib/db";
+import { sql } from "kysely";
 import { createTestCompanyMinimal, createTestOutletMinimal, createTestItem } from "../lib/test-fixtures";
+import type { KyselySchema } from "../lib/db";
 
 describe("Stock Routes", { concurrency: false }, () => {
-  let connection: PoolConnection;
+  let db: KyselySchema;
   let TEST_COMPANY_ID: number;
   let TEST_OUTLET_ID: number;
   let TEST_PRODUCT_ID: number;
 
-  async function setupTestData(connection: PoolConnection): Promise<void> {
+  async function setupTestData(db: KyselySchema): Promise<void> {
     const runId = Date.now().toString(36);
 
     // Create test company dynamically using shared fixtures
@@ -50,164 +48,128 @@ describe("Stock Routes", { concurrency: false }, () => {
     TEST_PRODUCT_ID = product.id;
 
     // Set low_stock_threshold via direct update (not supported by createItem)
-    await connection.execute(
-      `UPDATE items SET low_stock_threshold = 10.0000 WHERE id = ?`,
-      [TEST_PRODUCT_ID]
-    );
+    await sql`UPDATE items SET low_stock_threshold = 10.0000 WHERE id = ${TEST_PRODUCT_ID}`.execute(db);
 
     // Create test stock record
-    await connection.execute(
-      `INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-       VALUES (?, ?, ?, 100.0000, 0.0000, 100.0000, NOW(), NOW())`,
-      [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
-    );
+    await sql`INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
+       VALUES (${TEST_COMPANY_ID}, ${TEST_OUTLET_ID}, ${TEST_PRODUCT_ID}, 100.0000, 0.0000, 100.0000, NOW(), NOW())`.execute(db);
   }
 
-  async function cleanupTestData(connection: PoolConnection): Promise<void> {
-    await connection.execute(
-      `DELETE FROM inventory_transactions WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await connection.execute(
-      `DELETE FROM inventory_stock WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await connection.execute(
-      `DELETE FROM item_prices WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await connection.execute(
-      `DELETE FROM items WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await connection.execute(
-      `DELETE FROM outlets WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await connection.execute(
-      `DELETE FROM companies WHERE id = ?`,
-      [TEST_COMPANY_ID]
-    );
+  async function cleanupTestData(db: KyselySchema): Promise<void> {
+    await sql`DELETE FROM inventory_transactions WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM inventory_stock WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM item_prices WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM items WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM outlets WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM companies WHERE id = ${TEST_COMPANY_ID}`.execute(db);
   }
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
-    await setupTestData(connection);
+    db = getDb();
+    await setupTestData(db);
   });
 
   after(async () => {
-    await cleanupTestData(connection);
-    connection.release();
+    await cleanupTestData(db);
     await closeDbPool();
   });
 
   describe("Stock Service Integration", () => {
     test("should retrieve stock levels via service", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT product_id, quantity, available_quantity, reserved_quantity
-         FROM inventory_stock
-         WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
-        [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
-      );
+      const result = await sql<{ product_id: number; quantity: string; available_quantity: string; reserved_quantity: string }>`
+        SELECT product_id, quantity, available_quantity, reserved_quantity
+        FROM inventory_stock
+        WHERE company_id = ${TEST_COMPANY_ID} AND outlet_id = ${TEST_OUTLET_ID} AND product_id = ${TEST_PRODUCT_ID}
+      `.execute(db);
 
-      assert.equal(rows.length, 1);
-      assert.equal(Number(rows[0].quantity), 100);
-      assert.equal(Number(rows[0].available_quantity), 100);
-      assert.equal(Number(rows[0].reserved_quantity), 0);
+      assert.equal(result.rows.length, 1);
+      assert.equal(Number(result.rows[0].quantity), 100);
+      assert.equal(Number(result.rows[0].available_quantity), 100);
+      assert.equal(Number(result.rows[0].reserved_quantity), 0);
     });
 
     test("should retrieve stock transactions", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) as count FROM inventory_transactions WHERE company_id = ?`,
-        [TEST_COMPANY_ID]
-      );
+      const result = await sql<{ count: string }>`
+        SELECT COUNT(*) as count FROM inventory_transactions WHERE company_id = ${TEST_COMPANY_ID}
+      `.execute(db);
 
-      assert.ok(typeof rows[0].count === "number");
+      assert.ok(typeof result.rows[0].count === "string");
     });
 
     test("should identify low stock products", async () => {
       // Adjust stock to be below threshold
-      await connection.execute(
-        `UPDATE inventory_stock 
-         SET quantity = 5.0000, available_quantity = 5.0000
-         WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
-        [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
-      );
+      await sql`
+        UPDATE inventory_stock 
+        SET quantity = 5.0000, available_quantity = 5.0000
+        WHERE company_id = ${TEST_COMPANY_ID} AND outlet_id = ${TEST_OUTLET_ID} AND product_id = ${TEST_PRODUCT_ID}
+      `.execute(db);
 
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT i.id, i.sku, i.name, s.quantity, s.available_quantity, i.low_stock_threshold
-         FROM items i
-         JOIN inventory_stock s ON s.product_id = i.id
-         WHERE i.company_id = ?
-           AND i.track_stock = 1
-           AND i.low_stock_threshold IS NOT NULL
-           AND (s.outlet_id = ? OR s.outlet_id IS NULL)
-           AND s.available_quantity <= i.low_stock_threshold`,
-        [TEST_COMPANY_ID, TEST_OUTLET_ID]
-      );
+      const result = await sql<{ id: number; sku: string; name: string; quantity: string; available_quantity: string; low_stock_threshold: string | null }>`
+        SELECT i.id, i.sku, i.name, s.quantity, s.available_quantity, i.low_stock_threshold
+        FROM items i
+        JOIN inventory_stock s ON s.product_id = i.id
+        WHERE i.company_id = ${TEST_COMPANY_ID}
+          AND i.track_stock = 1
+          AND i.low_stock_threshold IS NOT NULL
+          AND (s.outlet_id = ${TEST_OUTLET_ID} OR s.outlet_id IS NULL)
+          AND s.available_quantity <= i.low_stock_threshold
+      `.execute(db);
 
-      assert.ok(rows.length >= 1);
-      const product = rows.find((r: RowDataPacket) => r.id === TEST_PRODUCT_ID);
+      assert.ok(result.rows.length >= 1);
+      const product = result.rows.find((r) => r.id === TEST_PRODUCT_ID);
       assert.ok(product);
 
       // Restore stock
-      await connection.execute(
-        `UPDATE inventory_stock 
-         SET quantity = 100.0000, available_quantity = 100.0000
-         WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
-        [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
-      );
+      await sql`
+        UPDATE inventory_stock 
+        SET quantity = 100.0000, available_quantity = 100.0000
+        WHERE company_id = ${TEST_COMPANY_ID} AND outlet_id = ${TEST_OUTLET_ID} AND product_id = ${TEST_PRODUCT_ID}
+      `.execute(db);
     });
 
     test("should perform stock adjustment", async () => {
       const adjustmentQty = 20;
 
       // Get initial stock
-      const [initialRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT quantity FROM inventory_stock
-         WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
-        [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
-      );
-      const initialQty = Number(initialRows[0].quantity);
+      const initialResult = await sql<{ quantity: string }>`
+        SELECT quantity FROM inventory_stock
+        WHERE company_id = ${TEST_COMPANY_ID} AND outlet_id = ${TEST_OUTLET_ID} AND product_id = ${TEST_PRODUCT_ID}
+      `.execute(db);
+      const initialQty = Number(initialResult.rows[0].quantity);
 
       // Perform adjustment
-      await connection.execute(
-        `UPDATE inventory_stock
-         SET quantity = quantity + ?,
-             available_quantity = available_quantity + ?,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
-        [adjustmentQty, adjustmentQty, TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
-      );
+      await sql`
+        UPDATE inventory_stock
+        SET quantity = quantity + ${adjustmentQty},
+            available_quantity = available_quantity + ${adjustmentQty},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = ${TEST_COMPANY_ID} AND outlet_id = ${TEST_OUTLET_ID} AND product_id = ${TEST_PRODUCT_ID}
+      `.execute(db);
 
       // Record transaction
-      await connection.execute(
-        `INSERT INTO inventory_transactions (
+      await sql`
+        INSERT INTO inventory_transactions (
           company_id, outlet_id, transaction_type, reference_type,
           reference_id, product_id, quantity_delta, created_at
-        ) VALUES (?, ?, 5, 'ADJUSTMENT', ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [TEST_COMPANY_ID, TEST_OUTLET_ID, `TEST-ADJ-${Date.now()}`, TEST_PRODUCT_ID, adjustmentQty]
-      );
+        ) VALUES (${TEST_COMPANY_ID}, ${TEST_OUTLET_ID}, 5, 'ADJUSTMENT', ${`TEST-ADJ-${Date.now()}`}, ${TEST_PRODUCT_ID}, ${adjustmentQty}, CURRENT_TIMESTAMP)
+      `.execute(db);
 
       // Verify adjustment
-      const [updatedRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT quantity FROM inventory_stock
-         WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
-        [TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
-      );
+      const updatedResult = await sql<{ quantity: string }>`
+        SELECT quantity FROM inventory_stock
+        WHERE company_id = ${TEST_COMPANY_ID} AND outlet_id = ${TEST_OUTLET_ID} AND product_id = ${TEST_PRODUCT_ID}
+      `.execute(db);
 
-      assert.equal(Number(updatedRows[0].quantity), initialQty + adjustmentQty);
+      assert.equal(Number(updatedResult.rows[0].quantity), initialQty + adjustmentQty);
 
       // Revert adjustment
-      await connection.execute(
-        `UPDATE inventory_stock
-         SET quantity = ?,
-             available_quantity = ?,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ? AND outlet_id = ? AND product_id = ?`,
-        [initialQty, initialQty, TEST_COMPANY_ID, TEST_OUTLET_ID, TEST_PRODUCT_ID]
-      );
+      await sql`
+        UPDATE inventory_stock
+        SET quantity = ${initialQty},
+            available_quantity = ${initialQty},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = ${TEST_COMPANY_ID} AND outlet_id = ${TEST_OUTLET_ID} AND product_id = ${TEST_PRODUCT_ID}
+      `.execute(db);
     });
   });
 });

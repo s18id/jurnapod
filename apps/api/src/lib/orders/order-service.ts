@@ -8,9 +8,8 @@
  * Extracted from sales.ts (originally lines 2411-3249)
  */
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
-import { getDbPool } from "@/lib/db";
+import { getDb, type KyselySchema } from "@/lib/db";
+import { sql } from "kysely";
 import {
   DOCUMENT_TYPES,
   type DocumentType
@@ -21,12 +20,10 @@ import type { InvoiceTaxInput, InvoiceDueTerm, SalesInvoiceDetail } from "@/lib/
 import {
   normalizeMoney,
   sumMoney,
-  withTransaction,
   getNumberWithConflictMapping,
   ensureCompanyOutletExists,
   ensureUserHasOutletAccess,
   formatDateOnly,
-  type QueryExecutor,
   DatabaseConflictError,
   DatabaseReferenceError,
   DatabaseForbiddenError
@@ -63,36 +60,57 @@ import type {
 } from "./types";
 
 // =============================================================================
+// Transaction Helper
+// =============================================================================
+
+async function withTransaction<T>(operation: (db: KyselySchema) => Promise<T>): Promise<T> {
+  const db = getDb();
+  return db.transaction().execute(operation);
+}
+
+// =============================================================================
 // Item Helpers
 // =============================================================================
 
+interface ItemRow {
+  id: number;
+  name: string;
+  sku: string;
+  type: string;
+  default_price: number | null;
+}
+
 async function findItemByIdWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   itemId: number
 ): Promise<ItemLookup | null> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT i.id, i.name, i.sku, i.item_type as type,
+  const rows = await sql`
+    SELECT i.id, i.name, i.sku, i.item_type as type,
             (SELECT price FROM item_prices
              WHERE item_id = i.id AND company_id = i.company_id
              ORDER BY outlet_id IS NULL DESC, is_active DESC, id ASC
              LIMIT 1) as default_price
      FROM items i
-     WHERE i.id = ? AND i.company_id = ? AND i.is_active = 1
-     LIMIT 1`,
-    [itemId, companyId]
-  );
-  return rows[0] ? {
-    id: Number(rows[0].id),
-    name: rows[0].name,
-    sku: rows[0].sku,
-    type: rows[0].type,
-    default_price: rows[0].default_price !== null ? Number(rows[0].default_price) : null
-  } : null;
+     WHERE i.id = ${itemId} AND i.company_id = ${companyId} AND i.is_active = 1
+     LIMIT 1
+  `.execute(db);
+
+  if (rows.rows.length === 0) {
+    return null;
+  }
+  const row = rows.rows[0] as ItemRow;
+  return {
+    id: Number(row.id),
+    name: row.name,
+    sku: row.sku,
+    type: row.type,
+    default_price: row.default_price !== null ? Number(row.default_price) : null
+  };
 }
 
 async function validateAndGetItemForLine(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   itemId: number | undefined,
   lineType: "SERVICE" | "PRODUCT"
@@ -105,7 +123,7 @@ async function validateAndGetItemForLine(
     throw new DatabaseReferenceError("Product lines require a valid item_id");
   }
 
-  const item = await findItemByIdWithExecutor(executor, companyId, itemId);
+  const item = await findItemByIdWithExecutor(db, companyId, itemId);
   if (!item) {
     throw new DatabaseReferenceError("Item not found or not active");
   }
@@ -166,41 +184,39 @@ function buildOrderLines(
 // =============================================================================
 
 async function findOrderByIdWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   orderId: number,
   options?: { forUpdate?: boolean }
 ): Promise<SalesOrderRow | null> {
-  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
-  const [rows] = await executor.execute<SalesOrderRow[]>(
-    `SELECT * FROM sales_orders WHERE company_id = ? AND id = ?${forUpdateClause}`,
-    [companyId, orderId]
-  );
-  return rows[0] || null;
+  const forUpdateClause = options?.forUpdate ? sql` FOR UPDATE` : sql``;
+  const rows = await sql`
+    SELECT * FROM sales_orders WHERE company_id = ${companyId} AND id = ${orderId}
+    ${forUpdateClause}
+  `.execute(db);
+  return (rows.rows[0] as SalesOrderRow) || null;
 }
 
 async function findOrderByClientRefWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   clientRef: string
 ): Promise<SalesOrderRow | null> {
-  const [rows] = await executor.execute<SalesOrderRow[]>(
-    `SELECT * FROM sales_orders WHERE company_id = ? AND client_ref = ?`,
-    [companyId, clientRef]
-  );
-  return rows[0] || null;
+  const rows = await sql`
+    SELECT * FROM sales_orders WHERE company_id = ${companyId} AND client_ref = ${clientRef}
+  `.execute(db);
+  return (rows.rows[0] as SalesOrderRow) || null;
 }
 
 async function findOrderLinesByOrderId(
-  executor: QueryExecutor,
+  db: KyselySchema,
   orderId: number
 ): Promise<SalesOrderLineRow[]> {
-  const [rows] = await executor.execute<SalesOrderLineRow[]>(
-    `SELECT id, order_id, line_no, line_type, item_id, description, qty, unit_price, line_total
-     FROM sales_order_lines WHERE order_id = ? ORDER BY line_no`,
-    [orderId]
-  );
-  return rows;
+  const rows = await sql`
+    SELECT id, order_id, line_no, line_type, item_id, description, qty, unit_price, line_total
+     FROM sales_order_lines WHERE order_id = ${orderId} ORDER BY line_no
+  `.execute(db);
+  return rows.rows as SalesOrderLineRow[];
 }
 
 function normalizeSalesOrderRow(row: SalesOrderRow): SalesOrder {
@@ -243,16 +259,16 @@ function normalizeSalesOrderLineRow(row: SalesOrderLineRow): SalesOrderLine {
 }
 
 async function findOrderDetailWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   orderId: number
 ): Promise<SalesOrderDetail | null> {
-  const order = await findOrderByIdWithExecutor(executor, companyId, orderId);
+  const order = await findOrderByIdWithExecutor(db, companyId, orderId);
   if (!order) {
     return null;
   }
 
-  const lines = await findOrderLinesByOrderId(executor, orderId);
+  const lines = await findOrderLinesByOrderId(db, orderId);
   return {
     ...normalizeSalesOrderRow(order),
     lines: lines.map(normalizeSalesOrderLineRow)
@@ -310,14 +326,14 @@ export async function createOrder(
   },
   actor?: MutationActor
 ): Promise<SalesOrderDetail> {
-  return withTransaction(async (connection) => {
+  return withTransaction(async (db) => {
     if (input.client_ref) {
-      const existing = await findOrderByClientRefWithExecutor(connection, companyId, input.client_ref);
+      const existing = await findOrderByClientRefWithExecutor(db, companyId, input.client_ref);
       if (existing) {
         if (actor) {
           await ensureUserHasOutletAccess(actor.userId, companyId, existing.outlet_id);
         }
-        const lines = await findOrderLinesByOrderId(connection, existing.id);
+        const lines = await findOrderLinesByOrderId(db, existing.id);
         return {
           ...normalizeSalesOrderRow(existing),
           lines: lines.map(normalizeSalesOrderLineRow)
@@ -325,7 +341,7 @@ export async function createOrder(
       }
     }
 
-    await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+    await ensureCompanyOutletExists(db, companyId, input.outlet_id);
     if (actor) {
       await ensureUserHasOutletAccess(actor.userId, companyId, input.outlet_id);
     }
@@ -335,7 +351,7 @@ export async function createOrder(
     for (const line of input.lines) {
       const lineType = line.line_type ?? "SERVICE";
       if (lineType === "PRODUCT") {
-        const item = await validateAndGetItemForLine(connection, companyId, line.item_id, lineType);
+        const item = await validateAndGetItemForLine(db, companyId, line.item_id, lineType);
         if (item) {
           itemLookups.set(item.id, item);
         }
@@ -352,8 +368,8 @@ export async function createOrder(
     const lineRows = buildOrderLines(input.lines, itemLookups);
     const subtotal = lineRows.reduce((acc, line) => acc + line.line_total, 0);
 
-    const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO sales_orders (
+    const insertResult = await sql`
+      INSERT INTO sales_orders (
         company_id,
         outlet_id,
         order_no,
@@ -367,27 +383,28 @@ export async function createOrder(
         grand_total,
         created_by_user_id,
         updated_by_user_id
-      ) VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, 0, ?, ?, ?)`,
-      [
-        companyId,
-        input.outlet_id,
-        orderNo,
-        input.order_date,
-        input.expected_date ?? null,
-        input.client_ref ?? null,
-        input.notes ?? null,
-        subtotal,
-        subtotal,
-        actor?.userId ?? null,
-        actor?.userId ?? null
-      ]
-    );
+      ) VALUES (
+        ${companyId},
+        ${input.outlet_id},
+        ${orderNo},
+        ${input.order_date},
+        ${input.expected_date ?? null},
+        ${input.client_ref ?? null},
+        'DRAFT',
+        ${input.notes ?? null},
+        ${subtotal},
+        ${subtotal},
+        0,
+        ${actor?.userId ?? null},
+        ${actor?.userId ?? null}
+      )
+    `.execute(db);
 
-    const orderId = Number(result.insertId);
+    const orderId = Number(insertResult.insertId);
 
     for (const line of lineRows) {
-      await connection.execute<ResultSetHeader>(
-        `INSERT INTO sales_order_lines (
+      await sql`
+        INSERT INTO sales_order_lines (
           order_id,
           company_id,
           outlet_id,
@@ -398,28 +415,27 @@ export async function createOrder(
           qty,
           unit_price,
           line_total
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          orderId,
-          companyId,
-          input.outlet_id,
-          line.line_no,
-          line.line_type,
-          line.item_id,
-          line.description,
-          line.qty,
-          line.unit_price,
-          line.line_total
-        ]
-      );
+        ) VALUES (
+          ${orderId},
+          ${companyId},
+          ${input.outlet_id},
+          ${line.line_no},
+          ${line.line_type},
+          ${line.item_id},
+          ${line.description},
+          ${line.qty},
+          ${line.unit_price},
+          ${line.line_total}
+        )
+      `.execute(db);
     }
 
-    const order = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    const order = await findOrderByIdWithExecutor(db, companyId, orderId);
     if (!order) {
       throw new Error("Created order not found");
     }
 
-    const lines = await findOrderLinesByOrderId(connection, orderId);
+    const lines = await findOrderLinesByOrderId(db, orderId);
     return {
       ...normalizeSalesOrderRow(order),
       lines: lines.map(normalizeSalesOrderLineRow)
@@ -432,8 +448,8 @@ export async function getOrder(
   orderId: number,
   actor?: MutationActor
 ): Promise<SalesOrderDetail | null> {
-  const pool = getDbPool();
-  const order = await findOrderByIdWithExecutor(pool, companyId, orderId);
+  const db = getDb();
+  const order = await findOrderByIdWithExecutor(db, companyId, orderId);
   if (!order) {
     return null;
   }
@@ -442,7 +458,7 @@ export async function getOrder(
     await ensureUserHasOutletAccess(actor.userId, companyId, order.outlet_id);
   }
 
-  const lines = await findOrderLinesByOrderId(pool, orderId);
+  const lines = await findOrderLinesByOrderId(db, orderId);
   return {
     ...normalizeSalesOrderRow(order),
     lines: lines.map(normalizeSalesOrderLineRow)
@@ -462,8 +478,8 @@ export async function updateOrder(
   },
   actor?: MutationActor
 ): Promise<SalesOrderDetail | null> {
-  return withTransaction(async (connection) => {
-    const current = await findOrderByIdWithExecutor(connection, companyId, orderId, {
+  return withTransaction(async (db) => {
+    const current = await findOrderByIdWithExecutor(db, companyId, orderId, {
       forUpdate: true
     });
     if (!current) {
@@ -479,7 +495,7 @@ export async function updateOrder(
     }
 
     if (typeof input.outlet_id === "number") {
-      await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+      await ensureCompanyOutletExists(db, companyId, input.outlet_id);
       if (actor) {
         await ensureUserHasOutletAccess(actor.userId, companyId, input.outlet_id);
       }
@@ -498,7 +514,7 @@ export async function updateOrder(
       for (const line of input.lines) {
         const lineType = line.line_type ?? "SERVICE";
         if (lineType === "PRODUCT") {
-          const item = await validateAndGetItemForLine(connection, companyId, line.item_id, lineType);
+          const item = await validateAndGetItemForLine(db, companyId, line.item_id, lineType);
           if (item) {
             itemLookups.set(item.id, item);
           }
@@ -521,7 +537,7 @@ export async function updateOrder(
       lineRows = buildOrderLines(input.lines, itemLookups);
       subtotal = sumMoney(lineRows.map((line) => line.line_total));
     } else if (nextOutletId !== current.outlet_id) {
-      const existingLines = await findOrderLinesByOrderId(connection, orderId);
+      const existingLines = await findOrderLinesByOrderId(db, orderId);
       const lineInputs = existingLines.map((line) => ({
         line_type: line.line_type,
         item_id: line.item_id ?? undefined,
@@ -537,43 +553,23 @@ export async function updateOrder(
     const grandTotal = normalizeMoney(subtotal + taxAmount);
 
     if (lineRows) {
-      await connection.execute<ResultSetHeader>(
-        `DELETE FROM sales_order_lines
-         WHERE company_id = ?
-           AND order_id = ?`,
-        [companyId, orderId]
-      );
+      await sql`DELETE FROM sales_order_lines WHERE company_id = ${companyId} AND order_id = ${orderId}`.execute(db);
     }
 
     try {
-      await connection.execute<ResultSetHeader>(
-        `UPDATE sales_orders
-         SET outlet_id = ?,
-             order_no = ?,
-             order_date = ?,
-             expected_date = ?,
-             notes = ?,
-             subtotal = ?,
-             tax_amount = ?,
-             grand_total = ?,
-             updated_by_user_id = ?,
+      await sql`UPDATE sales_orders
+         SET outlet_id = ${nextOutletId},
+             order_no = ${nextOrderNo},
+             order_date = ${nextOrderDate},
+             expected_date = ${nextExpectedDate},
+             notes = ${nextNotes},
+             subtotal = ${subtotal},
+             tax_amount = ${taxAmount},
+             grand_total = ${grandTotal},
+             updated_by_user_id = ${actor?.userId ?? null},
              updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ?
-           AND id = ?`,
-        [
-          nextOutletId,
-          nextOrderNo,
-          nextOrderDate,
-          nextExpectedDate,
-          nextNotes,
-          subtotal,
-          taxAmount,
-          grandTotal,
-          actor?.userId ?? null,
-          companyId,
-          orderId
-        ]
-      );
+         WHERE company_id = ${companyId}
+           AND id = ${orderId}`.execute(db);
     } catch (error) {
       if (error instanceof Error && 'errno' in error && (error as { errno: number }).errno === 1062) {
         throw new DatabaseConflictError("Duplicate order");
@@ -582,25 +578,8 @@ export async function updateOrder(
     }
 
     if (lineRows) {
-      const placeholders = lineRows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-      const values: Array<string | number | null> = [];
       for (const line of lineRows) {
-        values.push(
-          orderId,
-          companyId,
-          nextOutletId,
-          line.line_no,
-          line.line_type,
-          line.item_id,
-          line.description,
-          line.qty,
-          line.unit_price,
-          line.line_total
-        );
-      }
-
-      await connection.execute(
-        `INSERT INTO sales_order_lines (
+        await sql`INSERT INTO sales_order_lines (
            order_id,
            company_id,
            outlet_id,
@@ -611,12 +590,22 @@ export async function updateOrder(
            qty,
            unit_price,
            line_total
-         ) VALUES ${placeholders}`,
-        values
-      );
+         ) VALUES (
+           ${orderId},
+           ${companyId},
+           ${nextOutletId},
+           ${line.line_no},
+           ${line.line_type},
+           ${line.item_id},
+           ${line.description},
+           ${line.qty},
+           ${line.unit_price},
+           ${line.line_total}
+         )`.execute(db);
+      }
     }
 
-    return findOrderDetailWithExecutor(connection, companyId, orderId);
+    return findOrderDetailWithExecutor(db, companyId, orderId);
   });
 }
 
@@ -628,7 +617,7 @@ export async function listOrders(
   companyId: number,
   filters: OrderListFilters
 ): Promise<{ total: number; orders: SalesOrderDetail[] }> {
-  const pool = getDbPool();
+  const db = getDb();
   const conditions: string[] = ["company_id = ?"];
   const values: Array<number | string> = [companyId];
 
@@ -669,23 +658,17 @@ export async function listOrders(
 
   const whereClause = conditions.join(" AND ");
 
-  const [countRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) as total FROM sales_orders WHERE ${whereClause}`,
-    values
-  );
-  const total = Number(countRows[0]?.total ?? 0);
+  const countResult = await sql`SELECT COUNT(*) as total FROM sales_orders WHERE ${sql.raw(whereClause)}`.execute(db);
+  const total = Number((countResult.rows[0] as { total?: number }).total ?? 0);
 
   const limit = filters.limit ?? 50;
   const offset = filters.offset ?? 0;
 
-  const [orderRows] = await pool.execute<SalesOrderRow[]>(
-    `SELECT * FROM sales_orders WHERE ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    [...values, limit, offset]
-  );
+  const orderResult = await sql`SELECT * FROM sales_orders WHERE ${sql.raw(whereClause)} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`.execute(db);
 
   const orders: SalesOrderDetail[] = [];
-  for (const row of orderRows) {
-    const lines = await findOrderLinesByOrderId(pool, row.id);
+  for (const row of orderResult.rows as SalesOrderRow[]) {
+    const lines = await findOrderLinesByOrderId(db, row.id);
     orders.push({
       ...normalizeSalesOrderRow(row),
       lines: lines.map(normalizeSalesOrderLineRow)
@@ -704,8 +687,8 @@ export async function confirmOrder(
   orderId: number,
   actor?: MutationActor
 ): Promise<SalesOrderDetail> {
-  return withTransaction(async (connection) => {
-    const order = await findOrderByIdWithExecutor(connection, companyId, orderId);
+  return withTransaction(async (db) => {
+    const order = await findOrderByIdWithExecutor(db, companyId, orderId);
     if (!order) {
       throw new DatabaseReferenceError("Order not found");
     }
@@ -718,23 +701,20 @@ export async function confirmOrder(
       await ensureUserHasOutletAccess(actor.userId, companyId, order.outlet_id);
     }
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_orders 
+    await sql`UPDATE sales_orders 
        SET status = 'CONFIRMED', 
-           confirmed_by_user_id = ?, 
+           confirmed_by_user_id = ${actor?.userId ?? null}, 
            confirmed_at = CURRENT_TIMESTAMP,
-           updated_by_user_id = ?,
+           updated_by_user_id = ${actor?.userId ?? null},
            updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ? AND id = ?`,
-      [actor?.userId ?? null, actor?.userId ?? null, companyId, orderId]
-    );
+       WHERE company_id = ${companyId} AND id = ${orderId}`.execute(db);
 
-    const updatedOrder = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    const updatedOrder = await findOrderByIdWithExecutor(db, companyId, orderId);
     if (!updatedOrder) {
       throw new Error("Updated order not found");
     }
 
-    const lines = await findOrderLinesByOrderId(connection, orderId);
+    const lines = await findOrderLinesByOrderId(db, orderId);
     return {
       ...normalizeSalesOrderRow(updatedOrder),
       lines: lines.map(normalizeSalesOrderLineRow)
@@ -747,8 +727,8 @@ export async function completeOrder(
   orderId: number,
   actor?: MutationActor
 ): Promise<SalesOrderDetail> {
-  return withTransaction(async (connection) => {
-    const order = await findOrderByIdWithExecutor(connection, companyId, orderId);
+  return withTransaction(async (db) => {
+    const order = await findOrderByIdWithExecutor(db, companyId, orderId);
     if (!order) {
       throw new DatabaseReferenceError("Order not found");
     }
@@ -761,23 +741,20 @@ export async function completeOrder(
       await ensureUserHasOutletAccess(actor.userId, companyId, order.outlet_id);
     }
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_orders 
+    await sql`UPDATE sales_orders 
        SET status = 'COMPLETED', 
-           completed_by_user_id = ?, 
+           completed_by_user_id = ${actor?.userId ?? null}, 
            completed_at = CURRENT_TIMESTAMP,
-           updated_by_user_id = ?,
+           updated_by_user_id = ${actor?.userId ?? null},
            updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ? AND id = ?`,
-      [actor?.userId ?? null, actor?.userId ?? null, companyId, orderId]
-    );
+       WHERE company_id = ${companyId} AND id = ${orderId}`.execute(db);
 
-    const updatedOrder = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    const updatedOrder = await findOrderByIdWithExecutor(db, companyId, orderId);
     if (!updatedOrder) {
       throw new Error("Updated order not found");
     }
 
-    const lines = await findOrderLinesByOrderId(connection, orderId);
+    const lines = await findOrderLinesByOrderId(db, orderId);
     return {
       ...normalizeSalesOrderRow(updatedOrder),
       lines: lines.map(normalizeSalesOrderLineRow)
@@ -790,8 +767,8 @@ export async function voidOrder(
   orderId: number,
   actor?: MutationActor
 ): Promise<SalesOrderDetail> {
-  return withTransaction(async (connection) => {
-    const order = await findOrderByIdWithExecutor(connection, companyId, orderId);
+  return withTransaction(async (db) => {
+    const order = await findOrderByIdWithExecutor(db, companyId, orderId);
     if (!order) {
       throw new DatabaseReferenceError("Order not found");
     }
@@ -808,21 +785,18 @@ export async function voidOrder(
       await ensureUserHasOutletAccess(actor.userId, companyId, order.outlet_id);
     }
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_orders 
+    await sql`UPDATE sales_orders 
        SET status = 'VOID',
-           updated_by_user_id = ?,
+           updated_by_user_id = ${actor?.userId ?? null},
            updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ? AND id = ?`,
-      [actor?.userId ?? null, companyId, orderId]
-    );
+       WHERE company_id = ${companyId} AND id = ${orderId}`.execute(db);
 
-    const updatedOrder = await findOrderByIdWithExecutor(connection, companyId, orderId);
+    const updatedOrder = await findOrderByIdWithExecutor(db, companyId, orderId);
     if (!updatedOrder) {
       throw new Error("Updated order not found");
     }
 
-    const lines = await findOrderLinesByOrderId(connection, orderId);
+    const lines = await findOrderLinesByOrderId(db, orderId);
     return {
       ...normalizeSalesOrderRow(updatedOrder),
       lines: lines.map(normalizeSalesOrderLineRow)
@@ -848,8 +822,8 @@ export async function convertOrderToInvoice(
   },
   actor?: MutationActor
 ): Promise<SalesInvoiceDetail> {
-  return withTransaction(async (connection) => {
-    const order = await findOrderByIdWithExecutor(connection, companyId, orderId);
+  return withTransaction(async (db) => {
+    const order = await findOrderByIdWithExecutor(db, companyId, orderId);
     if (!order) {
       throw new DatabaseReferenceError("Order not found");
     }
@@ -862,7 +836,7 @@ export async function convertOrderToInvoice(
       throw new DatabaseReferenceError("Outlet mismatch");
     }
 
-    await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+    await ensureCompanyOutletExists(db, companyId, input.outlet_id);
     if (actor) {
       await ensureUserHasOutletAccess(actor.userId, companyId, input.outlet_id);
     }
@@ -879,7 +853,7 @@ export async function convertOrderToInvoice(
       dueTerm: input.due_term
     });
 
-    const orderLines = await findOrderLinesByOrderId(connection, orderId);
+    const orderLines = await findOrderLinesByOrderId(db, orderId);
     const invoiceLines = orderLines.map((line, index) => ({
       line_no: index + 1,
       line_type: line.line_type,
@@ -896,13 +870,9 @@ export async function convertOrderToInvoice(
 
     if (input.taxes && input.taxes.length > 0) {
       const taxRateIds = input.taxes.map((tax) => tax.tax_rate_id);
-      const placeholders = taxRateIds.map(() => "?").join(", ");
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM tax_rates WHERE company_id = ? AND is_active = 1 AND id IN (${placeholders})`,
-        [companyId, ...taxRateIds]
-      );
+      const taxIdsResult = await sql`SELECT id FROM tax_rates WHERE company_id = ${companyId} AND is_active = 1 AND id IN (${sql.join(taxRateIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
 
-      const matched = new Set((rows as Array<{ id?: number }>).map((row) => Number(row.id)));
+      const matched = new Set((taxIdsResult.rows as Array<{ id: number }>).map((row) => Number(row.id)));
       if (matched.size !== taxRateIds.length) {
         throw new DatabaseReferenceError("Invalid tax rate");
       }
@@ -916,8 +886,7 @@ export async function convertOrderToInvoice(
 
     const grandTotal = normalizeMoney(subtotal + taxAmount);
 
-    const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO sales_invoices (
+    const insertResult = await sql`INSERT INTO sales_invoices (
         company_id,
         outlet_id,
         order_id,
@@ -932,27 +901,27 @@ export async function convertOrderToInvoice(
         paid_total,
         created_by_user_id,
         updated_by_user_id
-      ) VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', 'UNPAID', ?, ?, ?, 0, ?, ?)`,
-      [
-        companyId,
-        input.outlet_id,
-        orderId,
-        invoiceNo,
-        input.invoice_date,
-        dueDate,
-        subtotal,
-        taxAmount,
-        grandTotal,
-        actor?.userId ?? null,
-        actor?.userId ?? null
-      ]
-    );
+      ) VALUES (
+        ${companyId},
+        ${input.outlet_id},
+        ${orderId},
+        ${invoiceNo},
+        ${input.invoice_date},
+        ${dueDate},
+        'DRAFT',
+        'UNPAID',
+        ${subtotal},
+        ${taxAmount},
+        ${grandTotal},
+        0,
+        ${actor?.userId ?? null},
+        ${actor?.userId ?? null}
+      )`.execute(db);
 
-    const invoiceId = Number(result.insertId);
+    const invoiceId = Number(insertResult.insertId);
 
     for (const line of invoiceLines) {
-      await connection.execute<ResultSetHeader>(
-        `INSERT INTO sales_invoice_lines (
+      await sql`INSERT INTO sales_invoice_lines (
           invoice_id,
           company_id,
           outlet_id,
@@ -963,45 +932,39 @@ export async function convertOrderToInvoice(
           qty,
           unit_price,
           line_total
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          invoiceId,
-          companyId,
-          input.outlet_id,
-          line.line_no,
-          line.line_type,
-          line.item_id,
-          line.description,
-          line.qty,
-          line.unit_price,
-          line.line_total
-        ]
-      );
+        ) VALUES (
+          ${invoiceId},
+          ${companyId},
+          ${input.outlet_id},
+          ${line.line_no},
+          ${line.line_type},
+          ${line.item_id},
+          ${line.description},
+          ${line.qty},
+          ${line.unit_price},
+          ${line.line_total}
+        )`.execute(db);
     }
 
     if (taxLines.length > 0) {
-      const placeholders = taxLines.map(() => "(?, ?, ?, ?, ?)").join(", ");
-      const values = taxLines.flatMap((tax) => [
-        invoiceId,
-        companyId,
-        input.outlet_id,
-        tax.tax_rate_id,
-        tax.amount
-      ]);
-
-      await connection.execute<ResultSetHeader>(
-        `INSERT INTO sales_invoice_taxes (
+      for (const tax of taxLines) {
+        await sql`INSERT INTO sales_invoice_taxes (
           sales_invoice_id,
           company_id,
           outlet_id,
           tax_rate_id,
           amount
-        ) VALUES ${placeholders}`,
-        values
-      );
+        ) VALUES (
+          ${invoiceId},
+          ${companyId},
+          ${input.outlet_id},
+          ${tax.tax_rate_id},
+          ${tax.amount}
+        )`.execute(db);
+      }
     }
 
-    const invoice = await findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
+    const invoice = await findInvoiceDetailWithExecutor(db, companyId, invoiceId);
     if (!invoice) {
       throw new Error("Created invoice not found");
     }

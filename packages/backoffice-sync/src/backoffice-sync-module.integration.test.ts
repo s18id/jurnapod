@@ -16,8 +16,7 @@ import { config as loadEnv } from 'dotenv';
 loadEnv({ path: path.resolve(process.cwd(), '.env') });
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { createDbPool, DbConn } from '@jurnapod/db';
-import type { Pool } from 'mysql2';
+import { createKysely, type KyselySchema } from '@jurnapod/db';
 import { BackofficeSyncModule } from './backoffice-sync-module.js';
 import { BackofficeDataService } from './core/backoffice-data-service.js';
 import { BatchProcessor } from './batch/batch-processor.js';
@@ -46,8 +45,7 @@ function loadTestConfig(): TestConfig {
 // ============================================================================
 
 interface TestFixtures {
-  db: DbConn;
-  pool: Pool;
+  db: KyselySchema;
   testUserId: number;
   testCompanyId: number;
   testOutletId: number;
@@ -56,35 +54,30 @@ interface TestFixtures {
 async function setupTestFixtures(): Promise<TestFixtures> {
   const config = loadTestConfig();
   
-  // Create database pool using environment variables
-  const pool = createDbPool({
+  // Create Kysely instance using environment variables
+  const db = createKysely({
     host: process.env.DB_HOST ?? '127.0.0.1',
     port: Number(process.env.DB_PORT ?? '3306'),
     user: process.env.DB_USER ?? 'root',
     password: process.env.DB_PASSWORD ?? '',
     database: process.env.DB_NAME ?? 'jurnapod',
-    connectionLimit: 10,
-    dateStrings: true,
   });
 
-  const db = new DbConn(pool);
+  // Find test user fixture using Kysely
+  const userResult = await db
+    .selectFrom('users as u')
+    .innerJoin('companies as c', 'c.id', 'u.company_id')
+    .innerJoin('user_outlets as uo', 'uo.user_id', 'u.id')
+    .innerJoin('outlets as o', 'o.id', 'uo.outlet_id')
+    .select(['u.id as user_id', 'u.company_id', 'o.id as outlet_id'])
+    .where('c.code', '=', config.companyCode)
+    .where('u.email', '=', config.ownerEmail)
+    .where('u.is_active', '=', 1)
+    .where('o.code', '=', config.outletCode)
+    .limit(1)
+    .executeTakeFirst();
 
-  // Find test user fixture
-  const userRows = await db.queryAll<any>(
-    `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
-     FROM users u
-     INNER JOIN companies c ON c.id = u.company_id
-     INNER JOIN user_outlets uo ON uo.user_id = u.id
-     INNER JOIN outlets o ON o.id = uo.outlet_id
-     WHERE c.code = ?
-       AND u.email = ?
-       AND u.is_active = 1
-       AND o.code = ?
-     LIMIT 1`,
-    [config.companyCode, config.ownerEmail, config.outletCode]
-  );
-
-  if (userRows.length === 0) {
+  if (!userResult) {
     throw new Error(
       `Owner fixture not found; run database seed first. ` +
       `Looking for company=${config.companyCode}, email=${config.ownerEmail}, outlet=${config.outletCode}`
@@ -93,20 +86,10 @@ async function setupTestFixtures(): Promise<TestFixtures> {
 
   return {
     db,
-    pool,
-    testUserId: Number(userRows[0].user_id),
-    testCompanyId: Number(userRows[0].company_id),
-    testOutletId: Number(userRows[0].outlet_id),
+    testUserId: Number(userResult.user_id),
+    testCompanyId: Number(userResult.company_id),
+    testOutletId: Number(userResult.outlet_id),
   };
-}
-
-async function closePool(pool: Pool): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    pool.end((err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
 }
 
 // ============================================================================
@@ -147,8 +130,8 @@ describe('BackofficeSyncModule Integration', () => {
     }
     
     // Close database pool (only if fixtures were setup successfully)
-    if (fixtures?.pool) {
-      await closePool(fixtures.pool);
+    if (fixtures?.db) {
+      await fixtures.db.destroy();
     }
   });
 

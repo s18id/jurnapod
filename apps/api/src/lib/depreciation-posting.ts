@@ -1,19 +1,15 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+import { sql } from "kysely";
 import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/core";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
-import type { ResultSetHeader } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
 import type { DepreciationPlan, DepreciationRun } from "./depreciation";
 import { toMysqlDateTime } from "./date-helpers";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
+import type { KyselySchema } from "./db";
 
 const DEPRECIATION_DOC_TYPE = "DEPRECIATION";
-
-type QueryExecutor = {
-  execute: PoolConnection["execute"];
-};
 
 const MONEY_SCALE = 100;
 
@@ -31,7 +27,7 @@ function normalizeMoney(value: number): number {
 
 class DepreciationPostingMapper implements PostingMapper {
   constructor(
-    private readonly _dbExecutor: QueryExecutor,
+    private readonly _db: KyselySchema,
     private readonly plan: DepreciationPlan,
     private readonly run: DepreciationRun
   ) {}
@@ -61,64 +57,69 @@ class DepreciationPostingRepository implements PostingRepository {
   private readonly lineDate: string;
 
   constructor(
-    private readonly dbExecutor: QueryExecutor,
+    private readonly db: KyselySchema,
     private readonly postedAt: string
   ) {
     this.lineDate = postedAt.slice(0, 10);
   }
 
   async createJournalBatch(request: PostingRequest): Promise<{ journal_batch_id: number }> {
-    const [insertResult] = await this.dbExecutor.execute<ResultSetHeader>(
-      `INSERT INTO journal_batches (
-         company_id,
-         outlet_id,
-         doc_type,
-         doc_id,
-         posted_at
-       ) VALUES (?, ?, ?, ?, ?)`,
-      [request.company_id, request.outlet_id ?? null, request.doc_type, request.doc_id, this.postedAt]
-    );
+    const result = await sql`
+      INSERT INTO journal_batches (
+        company_id,
+        outlet_id,
+        doc_type,
+        doc_id,
+        posted_at
+      ) VALUES (
+        ${request.company_id},
+        ${request.outlet_id ?? null},
+        ${request.doc_type},
+        ${request.doc_id},
+        ${this.postedAt}
+      )
+    `.execute(this.db);
 
     return {
-      journal_batch_id: Number(insertResult.insertId)
+      journal_batch_id: Number(result.insertId)
     };
   }
 
   async insertJournalLines(journalBatchId: number, request: PostingRequest, lines: JournalLine[]): Promise<void> {
-    const placeholders = lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-    const values = lines.flatMap((line) => [
-      journalBatchId,
-      request.company_id,
-      request.outlet_id ?? null,
-      line.account_id,
-      this.lineDate,
-      line.debit,
-      line.credit,
-      line.description
-    ]);
+    const values = lines.map((line) => sql`
+      (
+        ${journalBatchId},
+        ${request.company_id},
+        ${request.outlet_id ?? null},
+        ${line.account_id},
+        ${this.lineDate},
+        ${line.debit},
+        ${line.credit},
+        ${line.description}
+      )
+    `);
 
-    await this.dbExecutor.execute(
-      `INSERT INTO journal_lines (
-         journal_batch_id,
-         company_id,
-         outlet_id,
-         account_id,
-         line_date,
-         debit,
-         credit,
-         description
-       ) VALUES ${placeholders}`,
-      values
-    );
+    await sql`
+      INSERT INTO journal_lines (
+        journal_batch_id,
+        company_id,
+        outlet_id,
+        account_id,
+        line_date,
+        debit,
+        credit,
+        description
+      ) VALUES ${sql.join(values, sql`, `)}
+    `.execute(this.db);
   }
 }
 
 export async function postDepreciationRunToJournal(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   plan: DepreciationPlan,
   run: DepreciationRun
 ): Promise<PostingResult> {
-  await ensureDateWithinOpenFiscalYearWithExecutor(dbExecutor, run.company_id, run.run_date);
+  await ensureDateWithinOpenFiscalYearWithExecutor(db, run.company_id, run.run_date);
 
   const postingRequest: PostingRequest = {
     doc_type: DEPRECIATION_DOC_TYPE,
@@ -128,9 +129,9 @@ export async function postDepreciationRunToJournal(
   };
 
   const postingService = new PostingService(
-    new DepreciationPostingRepository(dbExecutor, toMysqlDateTime(run.updated_at)),
+    new DepreciationPostingRepository(db, toMysqlDateTime(run.updated_at)),
     {
-      [DEPRECIATION_DOC_TYPE]: new DepreciationPostingMapper(dbExecutor, plan, run)
+      [DEPRECIATION_DOC_TYPE]: new DepreciationPostingMapper(db, plan, run)
     }
   );
 

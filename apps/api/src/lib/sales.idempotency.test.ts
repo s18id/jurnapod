@@ -7,10 +7,10 @@ import {
   loadEnvIfPresent,
   readEnv
 } from "../../tests/integration/integration-harness.mjs";
-import { getDbPool, closeDbPool } from "./db";
+import { getDb, closeDbPool } from "./db";
 import { createPayment, DatabaseConflictError, PaymentAllocationError } from "./sales";
 import { createAccount } from "./accounts.js";
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
 import { randomUUID } from "node:crypto";
 
 loadEnvIfPresent();
@@ -19,7 +19,7 @@ test(
   "Payment idempotency behavior tests",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -40,24 +40,23 @@ test(
 
     try {
       // Find existing company/outlet/user
-      const [ownerRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+      const ownerRows = await sql`
+        SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(ownerRows.length > 0, "Owner fixture not found; run database seed first");
-      companyId = Number(ownerRows[0].company_id);
-      outletId = Number(ownerRows[0].outlet_id);
-      userId = Number(ownerRows[0].user_id);
+      assert.ok(ownerRows.rows.length > 0, "Owner fixture not found; run database seed first");
+      userId = Number((ownerRows.rows[0] as { user_id: number }).user_id);
+      companyId = Number((ownerRows.rows[0] as { company_id: number }).company_id);
+      outletId = Number((ownerRows.rows[0] as { outlet_id: number }).outlet_id);
 
       // Create two payable accounts for split tests
       const accountA = await createAccount({
@@ -83,24 +82,22 @@ test(
       createdAccountIds.push(accountBId);
 
       // Create an invoice (POSTED status required for payment)
-      const [invoiceResult] = await pool.execute(
-        `INSERT INTO sales_invoices (
+      const invoiceResult = await sql`
+        INSERT INTO sales_invoices (
           company_id, outlet_id, invoice_no, invoice_date,
           subtotal, tax_amount, grand_total, paid_total, status, payment_status
-        ) VALUES (?, ?, ?, CURDATE(), ?, 0, ?, 0, 'POSTED', 'UNPAID')`,
-        [companyId, outletId, `INV-${runId}`, 10000, 10000]
-      );
-      invoiceId = Number((invoiceResult as { insertId: number }).insertId);
+        ) VALUES (${companyId}, ${outletId}, ${`INV-${runId}`}, CURDATE(), 10000, 0, 10000, 0, 'POSTED', 'UNPAID')
+      `.execute(db);
+      invoiceId = Number(invoiceResult.insertId);
       createdInvoiceIds.push(invoiceId);
 
       // Create invoice line
-      await pool.execute(
-        `INSERT INTO sales_invoice_lines (
+      await sql`
+        INSERT INTO sales_invoice_lines (
           invoice_id, company_id, outlet_id, line_no,
           description, qty, unit_price, line_total
-        ) VALUES (?, ?, ?, 1, 'Test Service', 1, 10000, 10000)`,
-        [invoiceId, companyId, outletId]
-      );
+        ) VALUES (${invoiceId}, ${companyId}, ${outletId}, 1, 'Test Service', 1, 10000, 10000)
+      `.execute(db);
 
       // ============================================
       // Test A: Same client_ref + equivalent timestamp => idempotent success
@@ -249,35 +246,17 @@ test(
     } finally {
       // Cleanup in reverse dependency order
       if (createdPaymentIds.length > 0) {
-        const placeholders = createdPaymentIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM sales_payment_splits WHERE payment_id IN (${placeholders})`,
-          createdPaymentIds
-        );
-        await pool.execute(
-          `DELETE FROM sales_payments WHERE id IN (${placeholders})`,
-          createdPaymentIds
-        );
+        await sql`DELETE FROM sales_payment_splits WHERE payment_id IN (${sql.join(createdPaymentIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
+        await sql`DELETE FROM sales_payments WHERE id IN (${sql.join(createdPaymentIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
       }
 
       if (createdInvoiceIds.length > 0) {
-        const placeholders = createdInvoiceIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM sales_invoice_lines WHERE invoice_id IN (${placeholders})`,
-          createdInvoiceIds
-        );
-        await pool.execute(
-          `DELETE FROM sales_invoices WHERE id IN (${placeholders})`,
-          createdInvoiceIds
-        );
+        await sql`DELETE FROM sales_invoice_lines WHERE invoice_id IN (${sql.join(createdInvoiceIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
+        await sql`DELETE FROM sales_invoices WHERE id IN (${sql.join(createdInvoiceIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
       }
 
       if (createdAccountIds.length > 0) {
-        const placeholders = createdAccountIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM accounts WHERE id IN (${placeholders})`,
-          createdAccountIds
-        );
+        await sql`DELETE FROM accounts WHERE id IN (${sql.join(createdAccountIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
       }
     }
   }
@@ -287,7 +266,7 @@ test(
   "Service precision validation - non-split payments",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -306,24 +285,23 @@ test(
 
     try {
       // Find existing company/outlet/user
-      const [ownerRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+      const ownerRows = await sql`
+        SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(ownerRows.length > 0, "Owner fixture not found");
-      companyId = Number(ownerRows[0].company_id);
-      outletId = Number(ownerRows[0].outlet_id);
-      userId = Number(ownerRows[0].user_id);
+      assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
+      userId = Number((ownerRows.rows[0] as { user_id: number }).user_id);
+      companyId = Number((ownerRows.rows[0] as { company_id: number }).company_id);
+      outletId = Number((ownerRows.rows[0] as { outlet_id: number }).outlet_id);
 
       // Create payable account
       const account = await createAccount({
@@ -338,24 +316,22 @@ test(
       createdAccountIds.push(accountId);
 
       // Create an invoice
-      const [invoiceResult] = await pool.execute(
-        `INSERT INTO sales_invoices (
+      const invoiceResult = await sql`
+        INSERT INTO sales_invoices (
           company_id, outlet_id, invoice_no, invoice_date,
           subtotal, tax_amount, grand_total, paid_total, status, payment_status
-        ) VALUES (?, ?, ?, CURDATE(), ?, 0, ?, 0, 'POSTED', 'UNPAID')`,
-        [companyId, outletId, `INV-${runId}`, 10000, 10000]
-      );
-      invoiceId = Number((invoiceResult as { insertId: number }).insertId);
+        ) VALUES (${companyId}, ${outletId}, ${`INV-${runId}`}, CURDATE(), 10000, 0, 10000, 0, 'POSTED', 'UNPAID')
+      `.execute(db);
+      invoiceId = Number(invoiceResult.insertId);
       createdInvoiceIds.push(invoiceId);
 
       // Create invoice line
-      await pool.execute(
-        `INSERT INTO sales_invoice_lines (
+      await sql`
+        INSERT INTO sales_invoice_lines (
           invoice_id, company_id, outlet_id, line_no,
           description, qty, unit_price, line_total
-        ) VALUES (?, ?, ?, 1, 'Test Service', 1, 10000, 10000)`,
-        [invoiceId, companyId, outletId]
-      );
+        ) VALUES (${invoiceId}, ${companyId}, ${outletId}, 1, 'Test Service', 1, 10000, 10000)
+      `.execute(db);
 
       // Test: Non-split payment with >2 decimals should fail
       await assert.rejects(
@@ -376,7 +352,7 @@ test(
         (err: Error) => {
           assert.ok(err instanceof PaymentAllocationError, "Should throw PaymentAllocationError");
           assert.ok(err.message.includes("2 decimal places"), "Error should mention decimal places");
-          return true
+          return true;
         }
       );
 
@@ -400,35 +376,17 @@ test(
     } finally {
       // Cleanup
       if (createdPaymentIds.length > 0) {
-        const placeholders = createdPaymentIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM sales_payment_splits WHERE payment_id IN (${placeholders})`,
-          createdPaymentIds
-        );
-        await pool.execute(
-          `DELETE FROM sales_payments WHERE id IN (${placeholders})`,
-          createdPaymentIds
-        );
+        await sql`DELETE FROM sales_payment_splits WHERE payment_id IN (${sql.join(createdPaymentIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
+        await sql`DELETE FROM sales_payments WHERE id IN (${sql.join(createdPaymentIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
       }
 
       if (createdInvoiceIds.length > 0) {
-        const placeholders = createdInvoiceIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM sales_invoice_lines WHERE invoice_id IN (${placeholders})`,
-          createdInvoiceIds
-        );
-        await pool.execute(
-          `DELETE FROM sales_invoices WHERE id IN (${placeholders})`,
-          createdInvoiceIds
-        );
+        await sql`DELETE FROM sales_invoice_lines WHERE invoice_id IN (${sql.join(createdInvoiceIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
+        await sql`DELETE FROM sales_invoices WHERE id IN (${sql.join(createdInvoiceIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
       }
 
       if (createdAccountIds.length > 0) {
-        const placeholders = createdAccountIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM accounts WHERE id IN (${placeholders})`,
-          createdAccountIds
-        );
+        await sql`DELETE FROM accounts WHERE id IN (${sql.join(createdAccountIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
       }
     }
   }

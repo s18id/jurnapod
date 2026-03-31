@@ -2,8 +2,8 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import sharp from "sharp";
-import { getDbPool } from "./db";
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
+import { sql } from "kysely";
+import { getDb } from "./db";
 import type { UploadImageResponse, ItemImagesResponse } from "@jurnapod/shared";
 import { createStorageProvider, generateFileKey, type StorageProvider } from "./image-storage";
 
@@ -23,20 +23,21 @@ export class CrossTenantAccessError extends Error {
  * @throws CrossTenantAccessError if item belongs to a different company
  */
 export async function verifyItemOwnership(
-  pool: ReturnType<typeof getDbPool>,
+  db: ReturnType<typeof getDb>,
   itemId: number,
   companyId: number
 ): Promise<boolean> {
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    "SELECT company_id FROM items WHERE id = ?",
-    [itemId]
-  );
+  const row = await db
+    .selectFrom("items")
+    .where("id", "=", itemId)
+    .select(["company_id"])
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     return false;
   }
 
-  const actualCompanyId = rows[0].company_id;
+  const actualCompanyId = (row as { company_id: number }).company_id;
   if (actualCompanyId !== companyId) {
     throw new CrossTenantAccessError(
       `Item ${itemId} belongs to company ${actualCompanyId}, not ${companyId}`
@@ -175,30 +176,30 @@ export async function uploadItemImage(
     variantId?: number;
   }
 ): Promise<UploadImageResponse> {
-  const pool = getDbPool();
+  const db = getDb();
   const storage = createStorageProvider();
 
   // Verify tenant ownership of item before proceeding
-  const itemExists = await verifyItemOwnership(pool, itemId, companyId);
+  const itemExists = await verifyItemOwnership(db, itemId, companyId);
   if (!itemExists) {
     throw new Error(`Item ${itemId} not found`);
   }
 
   // If variant_id is provided, verify it belongs to this item and company
   if (options?.variantId) {
-    const [variantRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT v.id, v.item_id, i.company_id
-       FROM item_variants v
-       JOIN items i ON v.item_id = i.id
-       WHERE v.id = ? AND i.company_id = ?`,
-      [options.variantId, companyId]
-    );
+    const variantRow = await db
+      .selectFrom("item_variants as v")
+      .innerJoin("items as i", "i.id", "v.item_id")
+      .where("v.id", "=", options.variantId)
+      .where("i.company_id", "=", companyId)
+      .select(["v.id", "v.item_id"])
+      .executeTakeFirst();
 
-    if (variantRows.length === 0) {
+    if (!variantRow) {
       throw new Error(`Variant ${options.variantId} not found or does not belong to company ${companyId}`);
     }
 
-    if (variantRows[0].item_id !== itemId) {
+    if ((variantRow as { item_id: number }).item_id !== itemId) {
       throw new Error(`Variant ${options.variantId} does not belong to item ${itemId}`);
     }
   }
@@ -228,69 +229,49 @@ export async function uploadItemImage(
 
   // If setting as primary, unset any existing primary
   if (options?.isPrimary) {
-    await pool.execute(
-      `UPDATE item_images 
-       SET is_primary = FALSE 
-       WHERE company_id = ? AND item_id = ?`,
-      [companyId, itemId]
-    );
+    await sql`
+      UPDATE item_images 
+      SET is_primary = FALSE 
+      WHERE company_id = ${companyId} AND item_id = ${itemId}
+    `.execute(db);
   }
 
   // Get next sort order
-  const [sortRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT COALESCE(MAX(sort_order), 0) + 1 as next_order 
-     FROM item_images 
-     WHERE company_id = ? AND item_id = ?`,
-    [companyId, itemId]
-  );
-  const sortOrder = sortRows[0]?.next_order || 1;
+  const sortRow = await sql`
+    SELECT COALESCE(MAX(sort_order), 0) + 1 as next_order 
+    FROM item_images 
+    WHERE company_id = ${companyId} AND item_id = ${itemId}
+  `.execute(db);
+  const sortOrder = (sortRow.rows[0] as { next_order: number })?.next_order || 1;
 
   // Insert record
-  const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO item_images (
+  const insertResult = await sql`
+    INSERT INTO item_images (
        company_id, item_id, variant_id, file_name,
        original_url, large_url, medium_url, thumbnail_url,
        file_size_bytes, mime_type, width_pixels, height_pixels,
        is_primary, sort_order, uploaded_by
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      companyId,
-      itemId,
-      options?.variantId || null,
-      fileName,
-      originalUrl,
-      largeUrl,
-      mediumUrl,
-      thumbnailUrl,
-      fileBuffer.length,
-      mimeType,
-      processed.width,
-      processed.height,
-      options?.isPrimary || false,
-      sortOrder,
-      uploadedBy
-    ]
-  );
+     ) VALUES (
+       ${companyId}, ${itemId}, ${options?.variantId || null}, ${fileName},
+       ${originalUrl}, ${largeUrl}, ${mediumUrl}, ${thumbnailUrl},
+       ${fileBuffer.length}, ${mimeType}, ${processed.width}, ${processed.height},
+       ${options?.isPrimary || false}, ${sortOrder}, ${uploadedBy}
+     )
+  `.execute(db);
 
   // Log audit
-  await pool.execute(
-    `INSERT INTO audit_logs (
+  await sql`
+    INSERT INTO audit_logs (
        company_id, outlet_id, user_id, action, result, success, ip_address, payload_json
-     ) VALUES (?, NULL, ?, ?, 'SUCCESS', 1, NULL, ?)`,
-    [
-      companyId,
-      uploadedBy,
-      'ITEM_IMAGE_UPLOAD',
-      JSON.stringify({
-        item_id: itemId,
-        image_id: result.insertId,
-        file_name: fileName
-      })
-    ]
-  );
+     ) VALUES (${companyId}, NULL, ${uploadedBy}, 'ITEM_IMAGE_UPLOAD', 'SUCCESS', 1, NULL, ${JSON.stringify({
+       item_id: itemId,
+       image_id: insertResult.insertId,
+       file_name: fileName
+     })})
+  `.execute(db);
 
   return {
-    id: result.insertId,
+    id: Number(insertResult.insertId),
     item_id: itemId,
     file_name: fileName,
     original_url: originalUrl,
@@ -310,31 +291,45 @@ export async function getItemImages(
   companyId: number,
   itemId: number
 ): Promise<ItemImagesResponse> {
-  const pool = getDbPool();
+  const db = getDb();
 
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, file_name, original_url, large_url, medium_url, thumbnail_url,
-            width_pixels, height_pixels, file_size_bytes, is_primary, sort_order, created_at
-     FROM item_images
-     WHERE company_id = ? AND item_id = ?
-     ORDER BY is_primary DESC, sort_order ASC, created_at DESC`,
-    [companyId, itemId]
-  );
+  const rows = await db
+    .selectFrom("item_images")
+    .where("company_id", "=", companyId)
+    .where("item_id", "=", itemId)
+    .orderBy("is_primary", "desc")
+    .orderBy("sort_order", "asc")
+    .orderBy("created_at", "desc")
+    .select([
+      "id",
+      "file_name",
+      "original_url",
+      "large_url",
+      "medium_url",
+      "thumbnail_url",
+      "width_pixels",
+      "height_pixels",
+      "file_size_bytes",
+      "is_primary",
+      "sort_order",
+      "created_at"
+    ])
+    .execute();
 
   return {
-    images: rows.map(row => ({
+    images: rows.map((row) => ({
       id: row.id,
       file_name: row.file_name,
-      original_url: row.original_url,
-      large_url: row.large_url,
-      medium_url: row.medium_url,
-      thumbnail_url: row.thumbnail_url,
-      width_pixels: row.width_pixels,
-      height_pixels: row.height_pixels,
+      original_url: row.original_url!,
+      large_url: row.large_url!,
+      medium_url: row.medium_url!,
+      thumbnail_url: row.thumbnail_url!,
+      width_pixels: row.width_pixels!,
+      height_pixels: row.height_pixels!,
       file_size_bytes: row.file_size_bytes,
       is_primary: row.is_primary === 1,
-      sort_order: row.sort_order,
-      created_at: row.created_at
+      sort_order: row.sort_order!,
+      created_at: (row.created_at as Date).toISOString()
     }))
   };
 }
@@ -346,17 +341,17 @@ export async function getItemThumbnail(
   companyId: number,
   itemId: number
 ): Promise<string | null> {
-  const pool = getDbPool();
+  const db = getDb();
 
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT thumbnail_url
-     FROM item_images
-     WHERE company_id = ? AND item_id = ? AND is_primary = TRUE
-     LIMIT 1`,
-    [companyId, itemId]
-  );
+  const row = await db
+    .selectFrom("item_images")
+    .where("company_id", "=", companyId)
+    .where("item_id", "=", itemId)
+    .where("is_primary", "=", 1)
+    .select(["thumbnail_url"])
+    .executeTakeFirst();
 
-  return rows[0]?.thumbnail_url || null;
+  return (row as { thumbnail_url: string | null } | undefined)?.thumbnail_url || null;
 }
 
 /**
@@ -371,18 +366,16 @@ export async function getItemThumbnailsBatch(
     return new Map();
   }
 
-  const pool = getDbPool();
-  const placeholders = itemIds.map(() => "?").join(", ");
-
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT item_id, thumbnail_url
-     FROM item_images
-     WHERE company_id = ? AND item_id IN (${placeholders}) AND is_primary = TRUE`,
-    [companyId, ...itemIds]
-  );
+  const db = getDb();
+  
+  const rows = await sql<{ item_id: number; thumbnail_url: string }>`
+    SELECT item_id, thumbnail_url
+    FROM item_images
+    WHERE company_id = ${companyId} AND item_id IN (${sql.join(itemIds.map(id => sql`${id}`))}) AND is_primary = TRUE
+  `.execute(db);
 
   const thumbnailMap = new Map<number, string>();
-  for (const row of rows as Array<{ item_id: number; thumbnail_url: string }>) {
+  for (const row of rows.rows) {
     thumbnailMap.set(row.item_id, row.thumbnail_url);
   }
 
@@ -401,39 +394,38 @@ export async function updateImage(
   },
   userId: number
 ): Promise<void> {
-  const pool = getDbPool();
+  const db = getDb();
 
   // Get image details
-  const [imageRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT item_id FROM item_images WHERE id = ? AND company_id = ?`,
-    [imageId, companyId]
-  );
+  const imageRow = await db
+    .selectFrom("item_images")
+    .where("id", "=", imageId)
+    .where("company_id", "=", companyId)
+    .select(["item_id"])
+    .executeTakeFirst();
 
-  if (imageRows.length === 0) {
+  if (!imageRow) {
     throw new Error("Image not found");
   }
 
-  const itemId = imageRows[0].item_id;
+  const itemId = (imageRow as { item_id: number }).item_id;
 
   // Verify tenant ownership of item before updating
-  await verifyItemOwnership(pool, itemId, companyId);
+  await verifyItemOwnership(db, itemId, companyId);
 
   // Build update
-  const updateFields: string[] = [];
-  const values: (number | boolean)[] = [];
+  const updateFields: Array<{ field: string; value: unknown }> = [];
 
   if (updates.isPrimary !== undefined) {
-    updateFields.push("is_primary = ?");
-    values.push(updates.isPrimary);
+    updateFields.push({ field: "is_primary", value: updates.isPrimary });
 
     // If setting as primary, unset others
     if (updates.isPrimary) {
-      await pool.execute(
-        `UPDATE item_images 
-         SET is_primary = FALSE 
-         WHERE company_id = ? AND item_id = ? AND id != ?`,
-        [companyId, itemId, imageId]
-      );
+      await sql`
+        UPDATE item_images 
+        SET is_primary = FALSE 
+        WHERE company_id = ${companyId} AND item_id = ${itemId} AND id != ${imageId}
+      `.execute(db);
     }
   }
 
@@ -441,41 +433,42 @@ export async function updateImage(
     // TODO: Implement atomic swap/resequence for robust reordering
     // Current: single-row update can create duplicate sort_order values
     // Future: transaction-based swap or full resequence for stable ordering
-    updateFields.push("sort_order = ?");
-    values.push(updates.sortOrder);
+    updateFields.push({ field: "sort_order", value: updates.sortOrder });
   }
 
   if (updateFields.length === 0) {
     return;
   }
 
-  values.push(imageId, companyId);
+  // Execute update using Kysely query builder
+  if (updates.isPrimary !== undefined) {
+    await db
+      .updateTable("item_images")
+      .set({ is_primary: updates.isPrimary ? 1 : 0 })
+      .where("id", "=", imageId)
+      .where("company_id", "=", companyId)
+      .execute();
+  }
 
-  const [result] = await pool.execute<ResultSetHeader>(
-    `UPDATE item_images SET ${updateFields.join(', ')} WHERE id = ? AND company_id = ?`,
-    values
-  );
-
-  if (result.affectedRows === 0) {
-    throw new Error("Image not found or no changes made");
+  if (updates.sortOrder !== undefined) {
+    await db
+      .updateTable("item_images")
+      .set({ sort_order: updates.sortOrder })
+      .where("id", "=", imageId)
+      .where("company_id", "=", companyId)
+      .execute();
   }
 
   // Log audit
-  await pool.execute(
-    `INSERT INTO audit_logs (
+  await sql`
+    INSERT INTO audit_logs (
        company_id, outlet_id, user_id, action, result, success, ip_address, payload_json
-     ) VALUES (?, NULL, ?, ?, 'SUCCESS', 1, NULL, ?)`,
-    [
-      companyId,
-      userId,
-      'ITEM_IMAGE_UPDATE',
-      JSON.stringify({
-        image_id: imageId,
-        item_id: itemId,
-        updates
-      })
-    ]
-  );
+     ) VALUES (${companyId}, NULL, ${userId}, 'ITEM_IMAGE_UPDATE', 'SUCCESS', 1, NULL, ${JSON.stringify({
+       image_id: imageId,
+       item_id: itemId,
+       updates
+     })})
+  `.execute(db);
 }
 
 /**
@@ -486,25 +479,31 @@ export async function deleteImage(
   imageId: number,
   userId: number
 ): Promise<void> {
-  const pool = getDbPool();
+  const db = getDb();
   const storage = createStorageProvider();
 
   // Get image details
-  const [imageRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT original_url, large_url, medium_url, thumbnail_url, item_id
-     FROM item_images 
-     WHERE id = ? AND company_id = ?`,
-    [imageId, companyId]
-  );
+  const imageRow = await db
+    .selectFrom("item_images")
+    .where("id", "=", imageId)
+    .where("company_id", "=", companyId)
+    .select(["original_url", "large_url", "medium_url", "thumbnail_url", "item_id"])
+    .executeTakeFirst();
 
-  if (imageRows.length === 0) {
+  if (!imageRow) {
     throw new Error("Image not found");
   }
 
-  const image = imageRows[0];
+  const image = imageRow as {
+    original_url: string;
+    large_url: string;
+    medium_url: string;
+    thumbnail_url: string;
+    item_id: number;
+  };
 
   // Verify tenant ownership of item before deleting
-  await verifyItemOwnership(pool, image.item_id, companyId);
+  await verifyItemOwnership(db, image.item_id, companyId);
 
   // Delete from storage (extract keys from URLs)
   const urlToKey = (url: string): string | null => {
@@ -525,30 +524,23 @@ export async function deleteImage(
   await Promise.all(keys.map(key => storage.delete(key)));
 
   // Delete from database
-  const [result] = await pool.execute<ResultSetHeader>(
-    `DELETE FROM item_images WHERE id = ? AND company_id = ?`,
-    [imageId, companyId]
-  );
+  const result = await sql`
+    DELETE FROM item_images WHERE id = ${imageId} AND company_id = ${companyId}
+  `.execute(db);
 
-  if (result.affectedRows === 0) {
+  if (result.numAffectedRows === BigInt(0)) {
     throw new Error("Image not found");
   }
 
   // Log audit
-  await pool.execute(
-    `INSERT INTO audit_logs (
+  await sql`
+    INSERT INTO audit_logs (
        company_id, outlet_id, user_id, action, result, success, ip_address, payload_json
-     ) VALUES (?, NULL, ?, ?, 'SUCCESS', 1, NULL, ?)`,
-    [
-      companyId,
-      userId,
-      'ITEM_IMAGE_DELETE',
-      JSON.stringify({
-        image_id: imageId,
-        item_id: image.item_id
-      })
-    ]
-  );
+     ) VALUES (${companyId}, NULL, ${userId}, 'ITEM_IMAGE_DELETE', 'SUCCESS', 1, NULL, ${JSON.stringify({
+       image_id: imageId,
+       item_id: image.item_id
+     })})
+  `.execute(db);
 }
 
 /**
@@ -572,35 +564,47 @@ export async function getImageById(
   sort_order: number;
   created_at: string;
 } | null> {
-  const pool = getDbPool();
+  const db = getDb();
 
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, item_id, file_name, original_url, large_url, medium_url, thumbnail_url,
-            width_pixels, height_pixels, file_size_bytes, is_primary, sort_order, created_at
-     FROM item_images
-     WHERE id = ? AND company_id = ?`,
-    [imageId, companyId]
-  );
+  const row = await db
+    .selectFrom("item_images")
+    .where("id", "=", imageId)
+    .where("company_id", "=", companyId)
+    .select([
+      "id",
+      "item_id",
+      "file_name",
+      "original_url",
+      "large_url",
+      "medium_url",
+      "thumbnail_url",
+      "width_pixels",
+      "height_pixels",
+      "file_size_bytes",
+      "is_primary",
+      "sort_order",
+      "created_at"
+    ])
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     return null;
   }
 
-  const row = rows[0];
   return {
     id: row.id,
     item_id: row.item_id,
     file_name: row.file_name,
-    original_url: row.original_url,
-    large_url: row.large_url,
-    medium_url: row.medium_url,
-    thumbnail_url: row.thumbnail_url,
-    width_pixels: row.width_pixels,
-    height_pixels: row.height_pixels,
+    original_url: row.original_url!,
+    large_url: row.large_url!,
+    medium_url: row.medium_url!,
+    thumbnail_url: row.thumbnail_url!,
+    width_pixels: row.width_pixels!,
+    height_pixels: row.height_pixels!,
     file_size_bytes: row.file_size_bytes,
     is_primary: row.is_primary === 1,
-    sort_order: row.sort_order,
-    created_at: row.created_at
+    sort_order: row.sort_order!,
+    created_at: (row.created_at as Date).toISOString()
   };
 }
 

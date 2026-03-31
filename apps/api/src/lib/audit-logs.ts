@@ -1,12 +1,12 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { RowDataPacket } from "mysql2";
-import { getDbPool } from "./db";
+import { sql } from "kysely";
+import { getDb } from "./db";
 import { toRfc3339Required } from "@jurnapod/shared";
 import type { AuditLogQuery, AuditLogResponse, AuditStatusCode } from "@jurnapod/shared";
 
-type AuditLogRow = RowDataPacket & {
+type AuditLogRow = {
   id: number;
   company_id: number | null;
   outlet_id: number | null;
@@ -45,60 +45,59 @@ function normalizeAuditLog(row: AuditLogRow): AuditLogResponse {
 export async function queryAuditLogs(
   query: AuditLogQuery
 ): Promise<{ total: number; logs: AuditLogResponse[] }> {
-  const pool = getDbPool();
-  const conditions: string[] = ["company_id = ?"];
-  const values: Array<string | number> = [query.company_id];
+  const db = getDb();
+
+  // Build conditions using Kysely sql template tag
+  const conditions: ReturnType<typeof sql>[] = [];
+  conditions.push(sql`company_id = ${query.company_id}`);
 
   if (query.entity_type) {
-    conditions.push("entity_type = ?");
-    values.push(query.entity_type);
+    conditions.push(sql`entity_type = ${query.entity_type}`);
   }
 
   if (query.entity_id) {
-    conditions.push("entity_id = ?");
-    values.push(query.entity_id);
+    conditions.push(sql`entity_id = ${query.entity_id}`);
   }
 
   if (query.user_id) {
-    conditions.push("user_id = ?");
-    values.push(query.user_id);
+    conditions.push(sql`user_id = ${query.user_id}`);
   }
 
   if (query.action) {
-    conditions.push("action = ?");
-    values.push(query.action);
+    conditions.push(sql`action = ${query.action}`);
   }
 
   if (query.from_date) {
-    conditions.push("created_at >= ?");
-    values.push(query.from_date);
+    conditions.push(sql`created_at >= ${query.from_date}`);
   }
 
   if (query.to_date) {
-    conditions.push("created_at <= ?");
-    values.push(query.to_date);
+    conditions.push(sql`created_at <= ${query.to_date}`);
   }
 
-  const whereClause = conditions.join(" AND ");
+  const whereClause = sql.join(conditions, sql` AND `);
 
-  const [countRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) as total FROM audit_logs WHERE ${whereClause}`,
-    values
-  );
-  const total = Number(countRows[0]?.total ?? 0);
+  // Get total count
+  const countResult = await sql<{ total: string }>`
+    SELECT COUNT(*) as total FROM audit_logs WHERE ${whereClause}
+  `.execute(db);
+  const total = Number(countResult.rows[0]?.total ?? 0);
 
-  const [rows] = await pool.execute<AuditLogRow[]>(
-    `SELECT id, company_id, outlet_id, user_id, entity_type, entity_id,
-            action, result, success, status, ip_address, payload_json, changes_json, created_at
-     FROM audit_logs
-     WHERE ${whereClause}
-     ORDER BY created_at DESC, id DESC
-     LIMIT ? OFFSET ?`,
-    [...values, query.limit ?? 100, query.offset ?? 0]
-  );
+  // Get paginated results
+  const limit = query.limit ?? 100;
+  const offset = query.offset ?? 0;
+
+  const rows = await sql<AuditLogRow>`
+    SELECT id, company_id, outlet_id, user_id, entity_type, entity_id,
+           action, result, success, status, ip_address, payload_json, changes_json, created_at
+    FROM audit_logs
+    WHERE ${whereClause}
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `.execute(db);
 
   return {
     total,
-    logs: rows.map(normalizeAuditLog)
+    logs: rows.rows.map(normalizeAuditLog)
   };
 }

@@ -1,25 +1,24 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-/**
- * Reservations Domain Module - Status Management
- *
- * This file contains status management functions for reservations.
- * Part of Story 6.5d (Reservations Domain Extraction).
- */
+// /**
+//  * Reservations Domain Module - Status Management
+//  *
+//  * This file contains status management functions for reservations.
+//  * Part of Story 6.5d (Reservations Domain Extraction).
+//  */
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { sql } from "kysely";
 import { randomBytes } from "node:crypto";
-import { getDbPool } from "@/lib/db";
+import { getDb, type KyselySchema } from "@/lib/db";
 import {
   ReservationStatusV2,
   TableOccupancyStatus,
   type ReservationStatus,
 } from "@jurnapod/shared";
 import {
-  holdTableWithConnection,
-  seatTableWithConnection,
+  holdTableWithKysely,
+  seatTableWithKysely,
   TableOccupancyConflictError,
   TableNotAvailableError,
 } from "@/lib/table-occupancy";
@@ -59,29 +58,30 @@ import { getReservationV2WithConnection } from "./crud";
  * Get table occupancy snapshot with row locking
  */
 async function getTableOccupancySnapshotWithConnection(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: bigint,
   outletId: bigint,
   tableId: bigint
 ): Promise<{ statusId: number; version: number; reservationId: bigint | null } | null> {
-  const [rows] = await connection.execute<OccupancySnapshotRow[]>(
-    `SELECT status_id, version, reservation_id
+  const result = await sql<OccupancySnapshotRow>`
+    SELECT status_id, version, reservation_id
      FROM table_occupancy
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND table_id = ?
-     FOR UPDATE`,
-    [companyId, outletId, tableId]
-  );
+     WHERE company_id = ${companyId}
+       AND outlet_id = ${outletId}
+       AND table_id = ${tableId}
+     FOR UPDATE
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (result.rows.length === 0) {
     return null;
   }
 
-  const reservationIdRaw = rows[0].reservation_id;
+  const row = result.rows[0]!;
+
+  const reservationIdRaw = row.reservation_id;
   return {
-    statusId: Number(rows[0].status_id),
-    version: Number(rows[0].version),
+    statusId: Number(row.status_id),
+    version: Number(row.version),
     reservationId: reservationIdRaw == null ? null : BigInt(String(reservationIdRaw))
   };
 }
@@ -96,19 +96,19 @@ async function getTableOccupancySnapshotWithConnection(
  * Retries up to 3 times if collision occurs
  */
 export async function generateReservationCode(outletId: bigint): Promise<string> {
-  const pool = getDbPool();
+  const db = getDb();
   
   // Check if reservation_code column exists
   let hasReservationCodeColumn = false;
   try {
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT 1 FROM information_schema.COLUMNS 
+    const result = await sql`
+      SELECT 1 FROM information_schema.COLUMNS 
        WHERE TABLE_SCHEMA = DATABASE() 
          AND TABLE_NAME = 'reservations' 
          AND COLUMN_NAME = 'reservation_code'
-       LIMIT 1`
-    );
-    hasReservationCodeColumn = rows.length > 0;
+       LIMIT 1
+    `.execute(db);
+    hasReservationCodeColumn = result.rows.length > 0;
   } catch {
     hasReservationCodeColumn = false;
   }
@@ -121,18 +121,17 @@ export async function generateReservationCode(outletId: bigint): Promise<string>
     // Check uniqueness against database only if column exists
     if (hasReservationCodeColumn) {
       try {
-        const [rows] = await pool.execute<RowDataPacket[]>(
-          `SELECT 1 FROM reservations 
-           WHERE outlet_id = ? AND reservation_code = ?
-           LIMIT 1`,
-          [outletId, code]
-        );
+        const result = await sql`
+          SELECT 1 FROM reservations 
+           WHERE outlet_id = ${outletId} AND reservation_code = ${code}
+           LIMIT 1
+        `.execute(db);
         
-        if (rows.length === 0) {
+        if (result.rows.length === 0) {
           return code;
         }
         // Collision detected, retry
-      } catch (error) {
+      } catch {
         // If query fails (column doesn't exist), just return the code
         return code;
       }
@@ -152,11 +151,11 @@ export async function generateReservationCode(outletId: bigint): Promise<string>
  * Used within transactions to ensure consistency
  */
 export async function generateReservationCodeWithConnection(
-  connection: PoolConnection,
+  db: KyselySchema,
   outletId: bigint
 ): Promise<string> {
   // Check if reservation_code column exists
-  const hasReservationCodeColumn = await columnExists(connection, 'reservations', 'reservation_code');
+  const hasReservationCodeColumn = await columnExists(db, 'reservations', 'reservation_code');
   
   for (let attempt = 0; attempt < MAX_CODE_GENERATION_RETRIES; attempt++) {
     const randomPart = randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
@@ -165,18 +164,17 @@ export async function generateReservationCodeWithConnection(
     // Only check uniqueness if the column exists
     if (hasReservationCodeColumn) {
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT 1 FROM reservations 
-           WHERE outlet_id = ? AND reservation_code = ?
-           LIMIT 1`,
-          [outletId, code]
-        );
+        const result = await sql`
+          SELECT 1 FROM reservations 
+           WHERE outlet_id = ${outletId} AND reservation_code = ${code}
+           LIMIT 1
+        `.execute(db);
         
-        if (rows.length === 0) {
+        if (result.rows.length === 0) {
           return code;
         }
         // Collision detected, retry
-      } catch (error) {
+      } catch {
         // If query fails (column doesn't exist), just return the code
         return code;
       }
@@ -199,7 +197,7 @@ export async function generateReservationCodeWithConnection(
  * Overlap exists if: existing_start < new_end AND existing_end > new_start
  */
 async function checkReservationOverlap(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: bigint,
   outletId: bigint,
   tableId: bigint | null,
@@ -214,45 +212,40 @@ async function checkReservationOverlap(
   const newStartTs = reservationTime.getTime();
   const newEndTs = newStartTs + durationMinutes * 60000;
 
-  let canonicalSql = `
-    SELECT COUNT(*) as count
-    FROM reservations
-    WHERE company_id = ?
-      AND outlet_id = ?
-      AND table_id = ?
-      AND status_id NOT IN (?, ?, ?)
-  `;
-
-  const params: (bigint | number)[] = [
-    companyId,
-    outletId,
-    tableId,
-    ReservationStatusV2.CANCELLED,
-    ReservationStatusV2.COMPLETED,
-    ReservationStatusV2.NO_SHOW
-  ];
-
+  let canonicalQuery;
   if (excludeReservationId) {
-    canonicalSql += ` AND id != ?`;
-    params.push(excludeReservationId);
+    canonicalQuery = sql<{ count: number }>`
+      SELECT COUNT(*) as count
+      FROM reservations
+      WHERE company_id = ${companyId}
+        AND outlet_id = ${outletId}
+        AND table_id = ${tableId}
+        AND status_id NOT IN (${ReservationStatusV2.CANCELLED}, ${ReservationStatusV2.COMPLETED}, ${ReservationStatusV2.NO_SHOW})
+        AND id <> ${excludeReservationId}
+        AND reservation_start_ts IS NOT NULL
+        AND reservation_end_ts IS NOT NULL
+        AND reservation_start_ts < ${newEndTs}
+        AND reservation_end_ts > ${newStartTs}
+      LIMIT 1
+    `;
+  } else {
+    canonicalQuery = sql<{ count: number }>`
+      SELECT COUNT(*) as count
+      FROM reservations
+      WHERE company_id = ${companyId}
+        AND outlet_id = ${outletId}
+        AND table_id = ${tableId}
+        AND status_id NOT IN (${ReservationStatusV2.CANCELLED}, ${ReservationStatusV2.COMPLETED}, ${ReservationStatusV2.NO_SHOW})
+        AND reservation_start_ts IS NOT NULL
+        AND reservation_end_ts IS NOT NULL
+        AND reservation_start_ts < ${newEndTs}
+        AND reservation_end_ts > ${newStartTs}
+      LIMIT 1
+    `;
   }
 
-  canonicalSql += `
-    AND reservation_start_ts IS NOT NULL
-      AND reservation_end_ts IS NOT NULL
-      AND reservation_start_ts < ?
-      AND reservation_end_ts > ?
-    LIMIT 1
-  `;
-
-  params.push(newEndTs, newStartTs);
-
-  const [rows] = await connection.execute<Array<RowDataPacket & { count: number }>>(
-    canonicalSql,
-    params
-  );
-
-  return rows[0]?.count > 0;
+  const result = await canonicalQuery.execute(db);
+  return (result.rows[0]?.count ?? 0) > 0;
 }
 
 /**
@@ -264,15 +257,12 @@ export async function updateReservationStatus(
   outletId: bigint,
   input: UpdateStatusInput
 ): Promise<Reservation> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
 
-  try {
-    await connection.beginTransaction();
-
+  return db.transaction().execute(async (trx) => {
     // Get current reservation state
     const currentReservation = await getReservationV2WithConnection(
-      connection,
+      trx,
       id,
       companyId,
       outletId
@@ -300,7 +290,7 @@ export async function updateReservationStatus(
     if (tableId && (isTableChanged || isConfirming)) {
       // Check for overlapping reservations on this table
       const overlapExists = await checkReservationOverlap(
-        connection,
+        trx,
         companyId,
         outletId,
         tableId,
@@ -322,14 +312,14 @@ export async function updateReservationStatus(
         heldUntil.setMinutes(heldUntil.getMinutes() + currentReservation.durationMinutes);
 
         const occupancy = await getTableOccupancySnapshotWithConnection(
-          connection,
+          trx,
           companyId,
           outletId,
           tableId
         );
         const expectedVersion = occupancy?.version ?? 1;
 
-        await holdTableWithConnection(connection, {
+        await holdTableWithKysely(trx, {
           companyId,
           outletId,
           tableId,
@@ -344,26 +334,27 @@ export async function updateReservationStatus(
       // CANCELLED: Release held table if exists
       if (tableId) {
         const occupancy = await getTableOccupancySnapshotWithConnection(
-          connection,
+          trx,
           companyId,
           outletId,
           tableId
         );
         if (occupancy && occupancy.reservationId === id) {
           // Table is held for this reservation, release it
-          const [releaseResult] = await connection.execute<ResultSetHeader>(
-            `UPDATE table_occupancy 
-             SET status_id = ?, 
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const releaseResult = await sql`
+            UPDATE table_occupancy 
+             SET status_id = ${TableOccupancyStatus.AVAILABLE}, 
                   reservation_id = NULL, 
                   reserved_until = NULL,
                   version = version + 1,
                   updated_at = NOW(),
-                  updated_by = ?
-             WHERE company_id = ? AND outlet_id = ? AND table_id = ? AND version = ?`,
-            [TableOccupancyStatus.AVAILABLE, input.updatedBy, companyId, outletId, tableId, occupancy.version]
-          );
+                  updated_by = ${input.updatedBy}
+             WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND table_id = ${tableId} AND version = ${occupancy.version}
+          `.execute(trx);
 
-          if (releaseResult.affectedRows === 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if ((releaseResult as any).affectedRows === 0) {
             throw new ReservationConflictError("Table state has changed, please retry");
           }
         }
@@ -373,7 +364,7 @@ export async function updateReservationStatus(
       if (tableId) {
         // Verify table is reserved for this reservation
         const occupancy = await getTableOccupancySnapshotWithConnection(
-          connection,
+          trx,
           companyId,
           outletId,
           tableId
@@ -386,7 +377,7 @@ export async function updateReservationStatus(
 
         // Seat the table - creates service session and updates occupancy
         try {
-          await seatTableWithConnection(connection, {
+          await seatTableWithKysely(trx, {
             companyId,
             outletId,
             tableId,
@@ -426,26 +417,27 @@ export async function updateReservationStatus(
       // Release held table if exists (similar to CANCELLED handling)
       if (tableId) {
         const occupancy = await getTableOccupancySnapshotWithConnection(
-          connection,
+          trx,
           companyId,
           outletId,
           tableId
         );
         if (occupancy && occupancy.reservationId === id) {
           // Table is held for this reservation, release it
-          const [releaseResult] = await connection.execute<ResultSetHeader>(
-            `UPDATE table_occupancy 
-             SET status_id = ?, 
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const releaseResult = await sql`
+            UPDATE table_occupancy 
+             SET status_id = ${TableOccupancyStatus.AVAILABLE}, 
                   reservation_id = NULL, 
                   reserved_until = NULL,
                   version = version + 1,
                   updated_at = NOW(),
-                  updated_by = ?
-             WHERE company_id = ? AND outlet_id = ? AND table_id = ? AND version = ?`,
-            [TableOccupancyStatus.AVAILABLE, input.updatedBy, companyId, outletId, tableId, occupancy.version]
-          );
+                  updated_by = ${input.updatedBy}
+             WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND table_id = ${tableId} AND version = ${occupancy.version}
+          `.execute(trx);
 
-          if (releaseResult.affectedRows === 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if ((releaseResult as any).affectedRows === 0) {
             throw new ReservationConflictError("Table state has changed, please retry");
           }
         }
@@ -453,13 +445,12 @@ export async function updateReservationStatus(
     }
 
     // Build update SQL dynamically based on provided fields
-    const updates: string[] = [];
-    const values: (number | string | bigint | null)[] = [];
+    const updates: ReturnType<typeof sql>[] = [];
     
     // Check which columns exist
-    const hasStatusId = await columnExists(connection, 'reservations', 'status_id');
-    const hasCancellationReason = await columnExists(connection, 'reservations', 'cancellation_reason');
-    const hasUpdatedBy = await columnExists(connection, 'reservations', 'updated_by');
+    const hasStatusId = await columnExists(trx, 'reservations', 'status_id');
+    const hasCancellationReason = await columnExists(trx, 'reservations', 'cancellation_reason');
+    const hasUpdatedBy = await columnExists(trx, 'reservations', 'updated_by');
     
     // Map V2 status to legacy status string
     const legacyStatusMap: Record<number, string> = {
@@ -472,58 +463,50 @@ export async function updateReservationStatus(
     };
     
     // Always update legacy status column
-    updates.push('status = ?');
-    values.push(legacyStatusMap[input.statusId] ?? 'BOOKED');
+    updates.push(sql`status = ${legacyStatusMap[input.statusId] ?? 'BOOKED'}`);
     
     // Update status_id if column exists
     if (hasStatusId) {
-      updates.push('status_id = ?');
-      values.push(input.statusId);
+      updates.push(sql`status_id = ${input.statusId}`);
     }
 
     if (input.tableId !== undefined && input.tableId !== null) {
-      updates.push('table_id = ?');
-      values.push(input.tableId);
+      updates.push(sql`table_id = ${input.tableId}`);
     }
 
     if (input.cancellationReason !== undefined && hasCancellationReason) {
-      updates.push('cancellation_reason = ?');
-      values.push(input.cancellationReason);
+      updates.push(sql`cancellation_reason = ${input.cancellationReason}`);
     }
 
     if (input.notes !== undefined) {
-      updates.push('notes = ?');
-      values.push(input.notes);
+      updates.push(sql`notes = ${input.notes}`);
     }
 
     if (hasUpdatedBy) {
-      updates.push('updated_by = ?');
-      values.push(input.updatedBy);
+      updates.push(sql`updated_by = ${input.updatedBy}`);
     }
 
     // Update timestamp
-    updates.push('updated_at = NOW()');
+    updates.push(sql`updated_at = NOW()`);
 
-    // Add WHERE clause params
-    values.push(id, companyId, outletId);
+    const updateClause = sql.join(updates, sql`, `);
 
     // Execute update
-    const [updateResult] = await connection.execute<ResultSetHeader>(
-      `UPDATE reservations 
-       SET ${updates.join(', ')}
-       WHERE id = ? AND company_id = ? AND outlet_id = ?`,
-      values
-    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updateResult = await sql`
+      UPDATE reservations 
+       SET ${updateClause}
+       WHERE id = ${id} AND company_id = ${companyId} AND outlet_id = ${outletId}
+    `.execute(trx);
 
-    if (updateResult.affectedRows === 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((updateResult as any).affectedRows === 0) {
       throw new ReservationNotFoundError(id);
     }
 
-    await connection.commit();
-
     // Fetch and return updated reservation
     const updatedReservation = await getReservationV2WithConnection(
-      connection,
+      trx,
       id,
       companyId,
       outletId
@@ -534,10 +517,5 @@ export async function updateReservationStatus(
     }
 
     return updatedReservation;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }

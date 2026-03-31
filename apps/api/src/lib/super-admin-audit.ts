@@ -13,7 +13,7 @@
  * See: docs/SUPER_ADMIN_POLICY.md
  */
 
-import { getDbPool } from "./db";
+import { getDb } from "./db";
 
 export type SuperAdminAuditAction =
   | "CREATE_COMPANY"
@@ -66,7 +66,7 @@ export type SuperAdminAuditParams = {
 export async function auditSuperAdminCrossCompanyWrite(
   params: SuperAdminAuditParams
 ): Promise<void> {
-  const pool = getDbPool();
+  const db = getDb();
 
   try {
     const payloadJson = JSON.stringify({
@@ -75,34 +75,22 @@ export async function auditSuperAdminCrossCompanyWrite(
     });
     const changesJson = JSON.stringify(params.changes);
 
-    await pool.execute(
-      `INSERT INTO audit_logs (
-        company_id,
-        user_id,
-        outlet_id,
-        action,
-        result,
-        success,
-        entity_type,
-        entity_id,
-        payload_json,
-        changes_json,
-        ip_address
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        params.targetCompanyId,
-        params.userId,
-        params.outletId ?? null,
-        params.action,
-        "SUCCESS",
-        1,
-        params.entityType,
-        params.entityId != null ? String(params.entityId) : null,
-        payloadJson,
-        changesJson,
-        params.ipAddress ?? null
-      ]
-    );
+    await db
+      .insertInto('audit_logs')
+      .values({
+        company_id: params.targetCompanyId,
+        user_id: params.userId,
+        outlet_id: params.outletId ?? null,
+        action: params.action,
+        result: "SUCCESS",
+        success: 1,
+        entity_type: params.entityType,
+        entity_id: params.entityId != null ? String(params.entityId) : null,
+        payload_json: payloadJson,
+        changes_json: changesJson,
+        ip_address: params.ipAddress ?? null
+      })
+      .execute();
   } catch (error) {
     // Log but don't throw - audit logging failures should not block operations
     console.error("Failed to log SUPER_ADMIN cross-company audit trail", {

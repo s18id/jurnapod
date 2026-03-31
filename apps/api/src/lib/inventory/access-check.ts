@@ -8,8 +8,8 @@
  * Items are scoped to companies; outlet scoping is handled at the price level.
  */
 
-import { getDbPool } from "../db";
-import type { RowDataPacket, PoolConnection } from "mysql2/promise";
+import { sql } from "kysely";
+import { getDb } from "../db";
 
 /**
  * Result of an item access check
@@ -33,26 +33,21 @@ export interface AccessCheckResult {
  * 
  * @param itemId - Item ID to check
  * @param companyId - Company ID for scoping
- * @param connection - Optional database connection for transaction support
  * @returns Access check result with reason if denied
  */
 export async function checkItemAccess(
   itemId: number,
-  companyId: number,
-  connection?: PoolConnection
+  companyId: number
 ): Promise<AccessCheckResult> {
-  const db = connection || getDbPool();
+  const db = getDb();
 
-  const [rows] = await db.execute<RowDataPacket[]>(
-    `SELECT i.id
+  const result = await sql`SELECT i.id
      FROM items i
-     WHERE i.id = ?
-       AND i.company_id = ?
-     LIMIT 1`,
-    [itemId, companyId]
-  );
+     WHERE i.id = ${itemId}
+       AND i.company_id = ${companyId}
+     LIMIT 1`.execute(db);
 
-  if (rows.length === 0) {
+  if (result.rows.length === 0) {
     // Item not found - could be non-existent or belong to different company
     return { hasAccess: false, reason: "not_found" };
   }

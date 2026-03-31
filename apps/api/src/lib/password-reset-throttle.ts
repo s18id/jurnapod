@@ -2,15 +2,9 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { createHmac } from "node:crypto";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import { getDbPool } from "./db";
+import { getDb } from "./db";
 import { getAppEnv } from "./env";
-
-type ThrottleRow = RowDataPacket & {
-  key_hash: string;
-  request_count: number;
-  window_started_at: string;
-};
+import { sql } from "kysely";
 
 export type PasswordResetThrottleKey = {
   scope: "email_ip" | "ip";
@@ -67,16 +61,14 @@ export async function checkPasswordResetAllowed(
     return { allowed: true };
   }
 
-  const pool = getDbPool();
+  const db = getDb();
   const windowStartThreshold = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago
 
-  const placeholders = keys.map(() => "?").join(", ");
-  const [rows] = await pool.execute<ThrottleRow[]>(
-    `SELECT key_hash, request_count, window_started_at
-     FROM auth_password_reset_throttles
-     WHERE key_hash IN (${placeholders})`,
-    keys.map((key) => key.hash)
-  );
+  const rows = await db
+    .selectFrom("auth_password_reset_throttles")
+    .where("key_hash", "in", keys.map((key) => key.hash))
+    .select(["key_hash", "request_count", "window_started_at"])
+    .execute();
 
   const limits = {
     email_ip: 5,
@@ -115,7 +107,7 @@ export async function recordPasswordResetAttempt(params: {
     return;
   }
 
-  const pool = getDbPool();
+  const db = getDb();
   const ipAddress = params.ipAddress?.trim() || null;
   const userAgent = params.userAgent?.trim() || null;
 
@@ -123,14 +115,14 @@ export async function recordPasswordResetAttempt(params: {
   // If window has expired (> 1 hour old), reset count to 1 and start new window
   // Otherwise, increment count
   for (const key of params.keys) {
-    await pool.execute<ResultSetHeader>(
-      `INSERT INTO auth_password_reset_throttles (
+    await sql`
+      INSERT INTO auth_password_reset_throttles (
         key_hash,
         request_count,
         window_started_at,
         last_ip,
         last_user_agent
-      ) VALUES (?, 1, NOW(), ?, ?)
+      ) VALUES (${key.hash}, 1, NOW(), ${ipAddress}, ${userAgent})
       ON DUPLICATE KEY UPDATE
         request_count = IF(
           window_started_at < DATE_SUB(NOW(), INTERVAL 1 HOUR),
@@ -143,8 +135,7 @@ export async function recordPasswordResetAttempt(params: {
           window_started_at
         ),
         last_ip = VALUES(last_ip),
-        last_user_agent = VALUES(last_user_agent)`,
-      [key.hash, ipAddress, userAgent]
-    );
+        last_user_agent = VALUES(last_user_agent)
+    `.execute(db);
   }
 }

@@ -1,35 +1,12 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { sql } from "kysely";
 import { toRfc3339Required } from "@jurnapod/shared";
-import { getDbPool } from "../db.js";
+import { getDb, type KyselySchema } from "../db.js";
 import { DatabaseConflictError, DatabaseReferenceError } from "../master-data-errors.js";
-import {
-  isMysqlError,
-  mysqlDuplicateErrorCode,
-  recordMasterDataAuditLog,
-  withTransaction
-} from "../shared/master-data-utils.js";
-
-type ItemRow = RowDataPacket & {
-  id: number;
-  company_id: number;
-  sku: string | null;
-  name: string;
-  item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
-  item_group_id: number | null;
-  barcode: string | null;
-  cogs_account_id: number | null;
-  inventory_asset_account_id: number | null;
-  is_active: number;
-  updated_at: string;
-};
-
-type QueryExecutor = {
-  execute: PoolConnection["execute"];
-};
+import { isMysqlError, mysqlDuplicateErrorCode } from "../shared/master-data-utils.js";
+import { withTransaction, type Transaction } from "@jurnapod/db";
 
 type MutationAuditActor = {
   userId: number;
@@ -43,7 +20,7 @@ const itemAuditActions = {
 } as const;
 
 async function recordItemAuditLog(
-  executor: QueryExecutor,
+  db: KyselySchema,
   input: {
     companyId: number;
     actor: MutationAuditActor | undefined;
@@ -51,113 +28,195 @@ async function recordItemAuditLog(
     payload: Record<string, unknown>;
   }
 ): Promise<void> {
-  await recordMasterDataAuditLog(executor, {
-    companyId: input.companyId,
-    outletId: null,
-    actor: input.actor,
-    action: input.action,
-    payload: input.payload
-  });
+  await sql`
+    INSERT INTO audit_logs (
+      company_id,
+      outlet_id,
+      user_id,
+      action,
+      result,
+      success,
+      ip_address,
+      payload_json
+    ) VALUES (
+      ${input.companyId},
+      NULL,
+      ${input.actor?.userId ?? null},
+      ${input.action},
+      'SUCCESS',
+      1,
+      NULL,
+      ${JSON.stringify(input.payload)}
+    )
+  `.execute(db);
 }
 
-function normalizeItem(row: ItemRow) {
+type NormalizedItem = {
+  id: number;
+  company_id: number;
+  sku: string | null;
+  name: string;
+  type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+  item_group_id: number | null;
+  barcode: string | null;
+  cogs_account_id: number | null;
+  inventory_asset_account_id: number | null;
+  is_active: boolean;
+  updated_at: string;
+};
+
+function normalizeItem(row: {
+  id: number;
+  company_id: number;
+  sku: string | null;
+  name: string;
+  item_type: string;
+  item_group_id: number | null;
+  barcode: string | null;
+  cogs_account_id: number | null;
+  inventory_asset_account_id: number | null;
+  is_active: number;
+  updated_at: string | Date;
+}): NormalizedItem {
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
     sku: row.sku,
     name: row.name,
-    type: row.item_type,
+    type: row.item_type as "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE",
     item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
     barcode: row.barcode,
     cogs_account_id: row.cogs_account_id == null ? null : Number(row.cogs_account_id),
     inventory_asset_account_id: row.inventory_asset_account_id == null ? null : Number(row.inventory_asset_account_id),
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at)
+    updated_at: toRfc3339Required(row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at)
   };
 }
 
 async function ensureCompanyAccountExists(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   accountId: number
 ): Promise<void> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id
-     FROM accounts
-     WHERE id = ?
-       AND company_id = ?
-     LIMIT 1`,
-    [accountId, companyId]
-  );
+  const row = await db
+    .selectFrom("accounts")
+    .where("id", "=", accountId)
+    .where("company_id", "=", companyId)
+    .select("id")
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     throw new DatabaseReferenceError("Account not found for company");
   }
 }
 
 async function ensureCompanyItemGroupExists(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   groupId: number
 ): Promise<void> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id
-     FROM item_groups
-     WHERE id = ?
-       AND company_id = ?
-     LIMIT 1`,
-    [groupId, companyId]
-  );
+  const row = await db
+    .selectFrom("item_groups")
+    .where("id", "=", groupId)
+    .where("company_id", "=", companyId)
+    .select("id")
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     throw new DatabaseReferenceError("Item group not found for company");
   }
 }
 
-async function findItemByIdWithExecutor(
-  executor: QueryExecutor,
+type ItemRowForNormalize = {
+  id: number;
+  company_id: number;
+  sku: string | null;
+  name: string;
+  item_type: string;
+  item_group_id: number | null;
+  barcode: string | null;
+  cogs_account_id: number | null;
+  inventory_asset_account_id: number | null;
+  is_active: number;
+  updated_at: string | Date;
+};
+
+async function findItemByIdWithTransaction(
+  db: Transaction | KyselySchema,
   companyId: number,
   itemId: number,
   options?: { forUpdate?: boolean }
-) {
-  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
-  const [rows] = await executor.execute<ItemRow[]>(
-    `SELECT id, company_id, sku, name, item_type, item_group_id, cogs_account_id, inventory_asset_account_id, is_active, updated_at
-     FROM items
-     WHERE company_id = ?
-       AND id = ?
-     LIMIT 1${forUpdateClause}`,
-    [companyId, itemId]
-  );
+): Promise<NormalizedItem | null> {
+  let row: ItemRowForNormalize | undefined;
+  
+  if (options?.forUpdate) {
+    const rows = await sql<ItemRowForNormalize>`
+      SELECT id, company_id, sku, name, item_type, item_group_id, barcode, cogs_account_id, inventory_asset_account_id, is_active, updated_at
+      FROM items
+      WHERE company_id = ${companyId} AND id = ${itemId}
+      LIMIT 1 FOR UPDATE
+    `.execute(db);
+    row = rows.rows[0];
+  } else {
+    const result = await db
+      .selectFrom("items")
+      .where("company_id", "=", companyId)
+      .where("id", "=", itemId)
+      .select([
+        "id",
+        "company_id",
+        "sku",
+        "name",
+        "item_type",
+        "item_group_id",
+        "barcode",
+        "cogs_account_id",
+        "inventory_asset_account_id",
+        "is_active",
+        "updated_at"
+      ])
+      .executeTakeFirst();
+    row = result as ItemRowForNormalize | undefined;
+  }
 
-  if (!rows[0]) {
+  if (!row) {
     return null;
   }
 
-  return normalizeItem(rows[0]);
+  return normalizeItem(row);
 }
 
 export async function listItems(companyId: number, filters?: { isActive?: boolean }) {
-  const pool = getDbPool();
-  const values: Array<number> = [companyId];
+  const db = getDb();
 
-  let sql =
-    "SELECT id, company_id, sku, name, item_type, item_group_id, barcode, cogs_account_id, inventory_asset_account_id, is_active, updated_at FROM items WHERE company_id = ?";
+  let query = db
+    .selectFrom("items")
+    .where("company_id", "=", companyId)
+    .select([
+      "id",
+      "company_id",
+      "sku",
+      "name",
+      "item_type",
+      "item_group_id",
+      "barcode",
+      "cogs_account_id",
+      "inventory_asset_account_id",
+      "is_active",
+      "updated_at"
+    ]);
 
   if (typeof filters?.isActive === "boolean") {
-    sql += " AND is_active = ?";
-    values.push(filters.isActive ? 1 : 0);
+    query = query.where("is_active", "=", filters.isActive ? 1 : 0);
   }
 
-  sql += " ORDER BY id ASC";
-
-  const [rows] = await pool.execute<ItemRow[]>(sql, values);
+  const rows = await query.orderBy("id", "asc").execute();
   return rows.map(normalizeItem);
 }
 
 export async function findItemById(companyId: number, itemId: number) {
-  const pool = getDbPool();
-  return findItemByIdWithExecutor(pool, companyId, itemId);
+  const db = getDb();
+  return findItemByIdWithTransaction(db, companyId, itemId);
 }
 
 export async function createItem(
@@ -174,42 +233,43 @@ export async function createItem(
   },
   actor?: MutationAuditActor
 ) {
-  return withTransaction(async (connection) => {
+  const db = getDb();
+
+  return withTransaction(db, async (trx) => {
     try {
       if (typeof input.item_group_id === "number") {
-        await ensureCompanyItemGroupExists(connection, companyId, input.item_group_id);
+        await ensureCompanyItemGroupExists(trx, companyId, input.item_group_id);
       }
 
       if (typeof input.cogs_account_id === "number") {
-        await ensureCompanyAccountExists(connection, companyId, input.cogs_account_id);
+        await ensureCompanyAccountExists(trx, companyId, input.cogs_account_id);
       }
 
       if (typeof input.inventory_asset_account_id === "number") {
-        await ensureCompanyAccountExists(connection, companyId, input.inventory_asset_account_id);
+        await ensureCompanyAccountExists(trx, companyId, input.inventory_asset_account_id);
       }
 
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO items (company_id, sku, name, item_type, item_group_id, cogs_account_id, inventory_asset_account_id, is_active, track_stock)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          companyId,
-          input.sku ?? null,
-          input.name,
-          input.type,
-          input.item_group_id ?? null,
-          input.cogs_account_id ?? null,
-          input.inventory_asset_account_id ?? null,
-          input.is_active === false ? 0 : 1,
-          input.track_stock === true ? 1 : 0
-        ]
-      );
+      const result = await trx
+        .insertInto("items")
+        .values({
+          company_id: companyId,
+          sku: input.sku ?? null,
+          name: input.name,
+          item_type: input.type,
+          item_group_id: input.item_group_id ?? null,
+          cogs_account_id: input.cogs_account_id ?? null,
+          inventory_asset_account_id: input.inventory_asset_account_id ?? null,
+          is_active: input.is_active === false ? 0 : 1,
+          track_stock: input.track_stock === true ? 1 : 0
+        })
+        .executeTakeFirst();
 
-      const item = await findItemByIdWithExecutor(connection, companyId, Number(result.insertId));
+      const item = await findItemByIdWithTransaction(trx, companyId, Number(result.insertId));
       if (!item) {
         throw new Error("Created item not found");
       }
 
-      await recordItemAuditLog(connection, {
+      await recordItemAuditLog(trx, {
         companyId,
         actor,
         action: itemAuditActions.create,
@@ -244,84 +304,83 @@ export async function updateItem(
   },
   actor?: MutationAuditActor
 ) {
-  const fields: string[] = [];
-  const values: Array<string | number | null> = [];
+  const db = getDb();
 
-  if (Object.hasOwn(input, "sku")) {
-    fields.push("sku = ?");
-    values.push(input.sku ?? null);
-  }
-
-  if (typeof input.name === "string") {
-    fields.push("name = ?");
-    values.push(input.name);
-  }
-
-  if (typeof input.type === "string") {
-    fields.push("item_type = ?");
-    values.push(input.type);
-  }
-
-  if (Object.hasOwn(input, "item_group_id") && input.item_group_id !== undefined) {
-    fields.push("item_group_id = ?");
-    values.push(typeof input.item_group_id === "number" ? input.item_group_id : null);
-  }
-
-  if (Object.hasOwn(input, "cogs_account_id") && input.cogs_account_id !== undefined) {
-    fields.push("cogs_account_id = ?");
-    values.push(input.cogs_account_id ?? null);
-  }
-
-  if (Object.hasOwn(input, "inventory_asset_account_id") && input.inventory_asset_account_id !== undefined) {
-    fields.push("inventory_asset_account_id = ?");
-    values.push(input.inventory_asset_account_id ?? null);
-  }
-
-  if (typeof input.is_active === "boolean") {
-    fields.push("is_active = ?");
-    values.push(input.is_active ? 1 : 0);
-  }
-
-  if (fields.length === 0) {
-    throw new Error("No fields to update");
-  }
-
-  values.push(companyId, itemId);
-
-  return withTransaction(async (connection) => {
+  return withTransaction(db, async (trx) => {
     try {
       if (typeof input.item_group_id === "number") {
-        await ensureCompanyItemGroupExists(connection, companyId, input.item_group_id);
+        await ensureCompanyItemGroupExists(trx, companyId, input.item_group_id);
       }
 
       if (typeof input.cogs_account_id === "number") {
-        await ensureCompanyAccountExists(connection, companyId, input.cogs_account_id);
+        await ensureCompanyAccountExists(trx, companyId, input.cogs_account_id);
       }
 
       if (typeof input.inventory_asset_account_id === "number") {
-        await ensureCompanyAccountExists(connection, companyId, input.inventory_asset_account_id);
+        await ensureCompanyAccountExists(trx, companyId, input.inventory_asset_account_id);
       }
 
-      const beforeItem = await findItemByIdWithExecutor(connection, companyId, itemId);
+      const beforeItem = await findItemByIdWithTransaction(trx, companyId, itemId);
       if (!beforeItem) {
         throw new DatabaseReferenceError("Item not found");
       }
 
-      await connection.execute(`UPDATE items SET ${fields.join(", ")} WHERE company_id = ? AND id = ?`, values);
+      const updates: Record<string, unknown> = {};
 
-      const item = await findItemByIdWithExecutor(connection, companyId, itemId);
+      if (Object.hasOwn(input, "sku")) {
+        updates.sku = input.sku ?? null;
+      }
+
+      if (typeof input.name === "string") {
+        updates.name = input.name;
+      }
+
+      if (typeof input.type === "string") {
+        updates.item_type = input.type;
+      }
+
+      if (Object.hasOwn(input, "item_group_id") && input.item_group_id !== undefined) {
+        updates.item_group_id = typeof input.item_group_id === "number" ? input.item_group_id : null;
+      }
+
+      if (Object.hasOwn(input, "cogs_account_id") && input.cogs_account_id !== undefined) {
+        updates.cogs_account_id = input.cogs_account_id ?? null;
+      }
+
+      if (Object.hasOwn(input, "inventory_asset_account_id") && input.inventory_asset_account_id !== undefined) {
+        updates.inventory_asset_account_id = input.inventory_asset_account_id ?? null;
+      }
+
+      if (typeof input.is_active === "boolean") {
+        updates.is_active = input.is_active ? 1 : 0;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        throw new Error("No fields to update");
+      }
+
+      await trx
+        .updateTable("items")
+        .set(updates)
+        .where("company_id", "=", companyId)
+        .where("id", "=", itemId)
+        .execute();
+
+      const item = await findItemByIdWithTransaction(trx, companyId, itemId);
       if (!item) {
         throw new Error("Updated item not found");
       }
 
       if (typeof input.is_active === "boolean" && input.is_active === false) {
-        await connection.execute<ResultSetHeader>(
-          `UPDATE item_prices SET is_active = 0 WHERE item_id = ? AND company_id = ?`,
-          [itemId, companyId]
-        );
+        await trx
+          .updateTable("item_prices")
+          .set({ is_active: 0 })
+          .where("item_id", "=", itemId)
+          .where("company_id", "=", companyId)
+          .execute();
       }
 
-      await recordItemAuditLog(connection, {
+      await recordItemAuditLog(trx, {
         companyId,
         actor,
         action: itemAuditActions.update,
@@ -348,22 +407,23 @@ export async function deleteItem(
   itemId: number,
   actor?: MutationAuditActor
 ): Promise<boolean> {
-  return withTransaction(async (connection) => {
-    const before = await findItemByIdWithExecutor(connection, companyId, itemId, {
+  const db = getDb();
+
+  return withTransaction(db, async (trx) => {
+    const before = await findItemByIdWithTransaction(trx, companyId, itemId, {
       forUpdate: true
     });
     if (!before) {
       return false;
     }
 
-    await connection.execute<ResultSetHeader>(
-      `DELETE FROM items
-       WHERE company_id = ?
-         AND id = ?`,
-      [companyId, itemId]
-    );
+    await trx
+      .deleteFrom("items")
+      .where("company_id", "=", companyId)
+      .where("id", "=", itemId)
+      .execute();
 
-    await recordItemAuditLog(connection, {
+    await recordItemAuditLog(trx, {
       companyId,
       actor,
       action: itemAuditActions.delete,
@@ -389,23 +449,21 @@ export async function getItemVariantStats(companyId: number, itemIds: number[]):
     return [];
   }
 
-  const pool = getDbPool();
-  const placeholders = itemIds.map(() => "?").join(",");
+  const db = getDb();
 
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT 
-       i.id as item_id,
-       COALESCE(COUNT(iv.id), 0) as variant_count,
-       COALESCE(SUM(iv.stock_quantity), 0) as total_stock
-     FROM items i
-     LEFT JOIN item_variants iv ON iv.item_id = i.id
-     WHERE i.company_id = ? AND i.id IN (${placeholders})
-     GROUP BY i.id
-     ORDER BY i.id ASC`,
-    [companyId, ...itemIds]
-  );
+  const rows = await sql<{ item_id: number; variant_count: number; total_stock: number }>`
+    SELECT 
+      i.id as item_id,
+      COALESCE(COUNT(iv.id), 0) as variant_count,
+      COALESCE(SUM(iv.stock_quantity), 0) as total_stock
+    FROM items i
+    LEFT JOIN item_variants iv ON iv.item_id = i.id
+    WHERE i.company_id = ${companyId} AND i.id IN (${sql.join(itemIds.map(id => sql`${id}`))})
+    GROUP BY i.id
+    ORDER BY i.id ASC
+  `.execute(db);
 
-  return rows.map((row) => ({
+  return rows.rows.map((row) => ({
     item_id: Number(row.item_id),
     variant_count: Number(row.variant_count),
     total_stock: Number(row.total_stock),

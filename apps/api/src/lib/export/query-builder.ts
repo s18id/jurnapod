@@ -8,8 +8,9 @@
  * Supports multiple entity types with dynamic column selection and filtering.
  */
 
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
-import { getDbPool } from "../db.js";
+import type { RowDataPacket } from "mysql2/promise";
+import { getDbPool, type KyselySchema } from "../db.js";
+import { sql } from "kysely";
 
 // ============================================================================
 // Types
@@ -522,19 +523,30 @@ function resolveColumns(entityType: ExportableEntity, requestedColumns?: string[
  * 
  * @param sql - SQL query string (should use ? placeholders)
  * @param values - Query parameter values
- * @param connection - Optional database connection (uses pool if not provided)
+ * @param db - Optional Kysely database instance (uses singleton if not provided)
  * @returns Array of row data
  */
 export async function executeExportQuery(
-  sql: string,
+  sqlStr: string,
   values: unknown[],
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<RowDataPacket[]> {
-  const pool = connection ?? getDbPool();
+  const database = db ?? getDbPool();
   
-  const [rows] = await pool.execute<RowDataPacket[]>(sql, values as (string | number | boolean | null)[]);
+  // Replace ? placeholders with properly escaped values (Kysely pattern)
+  // This follows the approach used in kysely-adapter.ts for dynamic SQL
+  let paramIndex = 0;
+  const processedSql = sqlStr.replace(/\?/g, () => {
+    const param = values[paramIndex++];
+    if (param === null) return 'NULL';
+    if (typeof param === 'number') return param.toString();
+    if (typeof param === 'boolean') return param ? '1' : '0';
+    return `'${String(param).replace(/'/g, "''")}'`;
+  });
   
-  return rows;
+  const result = await sql`${processedSql}`.execute(database);
+  
+  return result.rows as RowDataPacket[];
 }
 
 /**
@@ -543,16 +555,16 @@ export async function executeExportQuery(
  * @param sql - SQL query string
  * @param values - Query parameter values
  * @param transform - Transform function for each row
- * @param connection - Optional database connection
+ * @param db - Optional Kysely database instance
  * @returns Array of transformed rows
  */
 export async function executeExportQueryWithTransform<T>(
   sql: string,
   values: unknown[],
   transform: (row: RowDataPacket) => T,
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<T[]> {
-  const rows = await executeExportQuery(sql, values, connection);
+  const rows = await executeExportQuery(sql, values, db);
   return rows.map(transform);
 }
 

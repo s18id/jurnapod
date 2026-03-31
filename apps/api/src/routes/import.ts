@@ -14,14 +14,13 @@
  */
 
 import { Hono } from "hono";
-import type { RowDataPacket } from "mysql2";
 import {
   authenticateRequest,
   requireAccess,
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import { getDbPool } from "../lib/db.js";
+import { getDb } from "../lib/db.js";
 import {
   parseCSVSync,
   parseExcelSync,
@@ -63,7 +62,7 @@ import {
 import { randomUUID } from "node:crypto";
 
 // Clean up expired sessions at startup (non-fatal if DB not yet ready)
-cleanupExpiredSessions(getDbPool()).catch(() => {/* non-fatal at startup */});
+cleanupExpiredSessions().catch(() => {/* non-fatal at startup */});
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -398,14 +397,12 @@ function validatePriceRowWithFkCache(
  * 
  * @param row - The mapped row data
  * @param companyId - Company ID for SKU uniqueness check
- * @param pool - Database pool
  * @param fkResults - Pre-fetched FK validation results from batchValidateForeignKeys
  * @returns Array of validation errors
  */
 async function validateItemRow(
   row: Record<string, unknown>,
   companyId: number,
-  pool: ReturnType<typeof getDbPool>,
   fkResults: FkLookupResults
 ): Promise<Array<{ field: string; message: string }>> {
   const errors: Array<{ field: string; message: string }> = [];
@@ -430,14 +427,12 @@ async function validateItemRow(
  * 
  * @param row - The mapped row data
  * @param companyId - Company ID for item existence check
- * @param pool - Database pool
  * @param fkResults - Pre-fetched FK validation results from batchValidateForeignKeys
  * @returns Array of validation errors
  */
 async function validatePriceRow(
   row: Record<string, unknown>,
   companyId: number,
-  pool: ReturnType<typeof getDbPool>,
   fkResults: FkLookupResults
 ): Promise<Array<{ field: string; message: string }>> {
   const errors: Array<{ field: string; message: string }> = [];
@@ -485,7 +480,6 @@ interface ApplyOptions {
 async function applyItemImport(
   rows: Array<Record<string, unknown>>,
   companyId: number,
-  pool: ReturnType<typeof getDbPool>,
   options: ApplyOptions = {}
 ): Promise<ApplyResult> {
   const { startBatch = 0, onBatchCommit } = options;
@@ -509,14 +503,11 @@ async function applyItemImport(
 
     const batchStart = batchIndex * BATCH_SIZE;
     const batch = rows.slice(batchStart, batchStart + BATCH_SIZE);
-    const connection = await pool.getConnection();
 
     try {
-      await connection.beginTransaction();
-
       // Batch existence check — O(1) lookup with Map
       const skus = batch.map(r => String(r.sku || "")).filter(s => s.length > 0);
-      const skuToIdMap = await batchFindItemsBySkus(companyId, skus, connection);
+      const skuToIdMap = await batchFindItemsBySkus(companyId, skus);
 
       // Prepare batch update/insert arrays
       const updates: BatchItemUpdate[] = [];
@@ -572,18 +563,16 @@ async function applyItemImport(
 
       // Execute batch operations
       if (updates.length > 0) {
-        await batchUpdateItems(updates, connection);
+        await batchUpdateItems(updates);
       }
       if (inserts.length > 0) {
-        await batchInsertItems(companyId, inserts, connection);
+        await batchInsertItems(companyId, inserts);
       }
 
-      await connection.commit();
       result.batchesCompleted++;
       result.rowsProcessed += batch.length;
       await onBatchCommit?.(batchIndex, result.rowsProcessed);
     } catch (error) {
-      await connection.rollback();
       result.batchesFailed++;
       result.failedAtBatch = batchIndex;
       result.canResume = true; // Can resume from this batch
@@ -591,8 +580,6 @@ async function applyItemImport(
         row: batchStart + 1,
         error: `Batch ${batchIndex + 1} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
       });
-    } finally {
-      connection.release();
     }
   }
 
@@ -607,7 +594,6 @@ async function applyItemImport(
 async function applyPriceImport(
   rows: Array<Record<string, unknown>>,
   companyId: number,
-  pool: ReturnType<typeof getDbPool>,
   options: ApplyOptions = {}
 ): Promise<ApplyResult> {
   const { startBatch = 0, onBatchCommit } = options;
@@ -631,18 +617,15 @@ async function applyPriceImport(
 
     const batchStart = batchIndex * BATCH_SIZE;
     const batch = rows.slice(batchStart, batchStart + BATCH_SIZE);
-    const connection = await pool.getConnection();
 
     try {
-      await connection.beginTransaction();
-
       // Batch item lookup — O(1) lookup with Map
       const itemSkus = batch.map(r => String(r.item_sku || "")).filter(s => s.length > 0);
-      const skuToItemIdMap = await batchFindItemsBySkus(companyId, itemSkus, connection);
+      const skuToItemIdMap = await batchFindItemsBySkus(companyId, itemSkus);
 
       // Batch existing prices lookup
       const itemIds = [...skuToItemIdMap.values()];
-      const existingPricesMap = await batchFindPricesByItemIds(companyId, itemIds, connection);
+      const existingPricesMap = await batchFindPricesByItemIds(companyId, itemIds);
 
       // Prepare batch update/insert arrays
       const updates: BatchPriceUpdate[] = [];
@@ -694,18 +677,16 @@ async function applyPriceImport(
 
       // Execute batch operations
       if (updates.length > 0) {
-        await batchUpdatePrices(updates, connection);
+        await batchUpdatePrices(updates);
       }
       if (inserts.length > 0) {
-        await batchInsertPrices(companyId, inserts, connection);
+        await batchInsertPrices(companyId, inserts);
       }
 
-      await connection.commit();
       result.batchesCompleted++;
       result.rowsProcessed += batch.length;
       await onBatchCommit?.(batchIndex, result.rowsProcessed);
     } catch (error) {
-      await connection.rollback();
       result.batchesFailed++;
       result.failedAtBatch = batchIndex;
       result.canResume = true; // Can resume from this batch
@@ -713,8 +694,6 @@ async function applyPriceImport(
         row: batchStart + 1,
         error: `Batch ${batchIndex + 1} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
       });
-    } finally {
-      connection.release();
     }
   }
 
@@ -824,8 +803,7 @@ importRoutes.post("/:entityType/upload", async (c) => {
     const fileHash = computeFileHash(buffer);
 
     // Persist session to database
-    const pool = getDbPool();
-    await createSession(pool, sessionId, auth.companyId, entityType, {
+    await createSession(sessionId, auth.companyId, entityType, {
       entityType,
       filename: file.name,
       rowCount: parseResult.rows.length,
@@ -835,7 +813,7 @@ importRoutes.post("/:entityType/upload", async (c) => {
     });
 
     // Store file hash for resume integrity verification
-    await updateFileHash(pool, sessionId, auth.companyId, fileHash);
+    await updateFileHash(sessionId, auth.companyId, fileHash);
 
     return successResponse({
       uploadId: sessionId,
@@ -893,8 +871,7 @@ importRoutes.post("/:entityType/validate", async (c) => {
     }
 
     // Get upload session (company isolation enforced in query)
-    const pool = getDbPool();
-    const stored = await getSession(pool, uploadId, auth.companyId);
+    const stored = await getSession(uploadId, auth.companyId);
     if (!stored) {
       return errorResponse("NOT_FOUND", "Upload session not found or expired", 404);
     }
@@ -946,7 +923,7 @@ importRoutes.post("/:entityType/validate", async (c) => {
     }
 
     const fkResults = fkRequests.length > 0
-      ? await batchValidateForeignKeys(fkRequests, pool)
+      ? await batchValidateForeignKeys(fkRequests)
       : new Map<string, Map<number, boolean>>();
 
     // Phase 3: Validate rows using cached FK results
@@ -972,8 +949,8 @@ importRoutes.post("/:entityType/validate", async (c) => {
 
       // Entity-specific validation with FK cache
       const entityErrors = entityType === "items"
-        ? await validateItemRow(mappedData, auth.companyId, pool, fkResults)
-        : await validatePriceRow(mappedData, auth.companyId, pool, fkResults);
+        ? await validateItemRow(mappedData, auth.companyId, fkResults)
+        : await validatePriceRow(mappedData, auth.companyId, fkResults);
 
       if (entityErrors.length > 0) {
         for (const err of entityErrors) {
@@ -1043,8 +1020,7 @@ importRoutes.post("/:entityType/apply", async (c) => {
     }
 
     // Get upload session (company isolation enforced in query)
-    const pool = getDbPool();
-    const stored = await getSession(pool, uploadId, auth.companyId);
+    const stored = await getSession(uploadId, auth.companyId);
     if (!stored) {
       return errorResponse("NOT_FOUND", "Upload session not found or expired", 404);
     }
@@ -1090,7 +1066,7 @@ importRoutes.post("/:entityType/apply", async (c) => {
       } else {
         console.info(`[import] Session ${uploadId} checkpoint expired (checkpoint: ${stored.checkpointData.timestamp}, TTL: 30min)`);
         // Checkpoint expired, start fresh
-        await clearCheckpoint(pool, uploadId, auth.companyId);
+        await clearCheckpoint(uploadId, auth.companyId);
       }
     }
 
@@ -1100,7 +1076,7 @@ importRoutes.post("/:entityType/apply", async (c) => {
 
     // Apply import — per-batch transactions with checkpoint persistence
     const applyFn = entityType === "items" ? applyItemImport : applyPriceImport;
-    const result = await applyFn(mappedRows, auth.companyId, pool, {
+    const result = await applyFn(mappedRows, auth.companyId, {
       startBatch,
       onBatchCommit: async (batchIndex: number, rowsCommitted: number) => {
         // Story 8.1 AC1: Persist checkpoint after each successful batch
@@ -1109,15 +1085,15 @@ importRoutes.post("/:entityType/apply", async (c) => {
           rowsCommitted,
           timestamp: new Date().toISOString(),
         };
-        await updateCheckpoint(pool, uploadId, auth.companyId, checkpoint);
+        await updateCheckpoint(uploadId, auth.companyId, checkpoint);
         console.info(`[import] Checkpoint saved: batch ${batchIndex}, rows ${rowsCommitted}`);
       },
     });
 
     // Only delete session and clear checkpoint when all batches completed without failure
     if (result.batchesFailed === 0) {
-      await clearCheckpoint(pool, uploadId, auth.companyId);
-      await deleteSession(pool, uploadId, auth.companyId);
+      await clearCheckpoint(uploadId, auth.companyId);
+      await deleteSession(uploadId, auth.companyId);
     }
 
     // Story 8.1 AC4: Return structured error with partial failure info

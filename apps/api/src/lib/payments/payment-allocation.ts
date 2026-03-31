@@ -7,7 +7,8 @@
  * Split and allocation logic for payments extracted from sales.ts
  */
 
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
+import type { KyselySchema } from "@/lib/db";
 import type { SalesPayment, SalesPaymentSplit } from "@/lib/sales";
 import type { QueryExecutor, CanonicalPaymentInput } from "./types";
 import { toMysqlDateTime, toMysqlDateTimeFromDateLike } from "@/lib/date-helpers";
@@ -79,25 +80,24 @@ export function normalizePayment(row: SalesPaymentRow): SalesPayment {
 }
 
 export async function fetchPaymentSplits(
-  executor: QueryExecutor,
+  executor: KyselySchema,
   companyId: number,
   paymentId: number
 ): Promise<SalesPaymentSplit[]> {
-  const [rows] = await executor.execute<SalesPaymentSplitRow[]>(
-    `SELECT sps.id, sps.payment_id, sps.company_id, sps.outlet_id, sps.split_index,
-            sps.account_id, a.name as account_name, sps.amount
-     FROM sales_payment_splits sps
-     LEFT JOIN accounts a ON a.id = sps.account_id AND a.company_id = sps.company_id
-     WHERE sps.company_id = ?
-       AND sps.payment_id = ?
-     ORDER BY sps.split_index`,
-    [companyId, paymentId]
-  );
+  const result = await sql`SELECT sps.id, sps.payment_id, sps.company_id, sps.outlet_id, sps.split_index,
+          sps.account_id, a.name as account_name, sps.amount
+   FROM sales_payment_splits sps
+   LEFT JOIN accounts a ON a.id = sps.account_id AND a.company_id = sps.company_id
+   WHERE sps.company_id = ${companyId}
+     AND sps.payment_id = ${paymentId}
+   ORDER BY sps.split_index`.execute(executor);
+
+  const rows = result.rows as SalesPaymentSplitRow[];
   return rows.map(normalizePaymentSplit);
 }
 
 export async function fetchPaymentSplitsForMultiple(
-  executor: QueryExecutor,
+  executor: KyselySchema,
   companyId: number,
   paymentIds: number[]
 ): Promise<Map<number, SalesPaymentSplit[]>> {
@@ -105,18 +105,15 @@ export async function fetchPaymentSplitsForMultiple(
     return new Map();
   }
 
-  const placeholders = paymentIds.map(() => "?").join(", ");
-  const [rows] = await executor.execute<SalesPaymentSplitRow[]>(
-    `SELECT sps.id, sps.payment_id, sps.company_id, sps.outlet_id, sps.split_index,
-            sps.account_id, a.name as account_name, sps.amount
-     FROM sales_payment_splits sps
-     LEFT JOIN accounts a ON a.id = sps.account_id AND a.company_id = sps.company_id
-     WHERE sps.company_id = ?
-       AND sps.payment_id IN (${placeholders})
-     ORDER BY sps.payment_id, sps.split_index`,
-    [companyId, ...paymentIds]
-  );
+  const result = await sql`SELECT sps.id, sps.payment_id, sps.company_id, sps.outlet_id, sps.split_index,
+          sps.account_id, a.name as account_name, sps.amount
+   FROM sales_payment_splits sps
+   LEFT JOIN accounts a ON a.id = sps.account_id AND a.company_id = sps.company_id
+   WHERE sps.company_id = ${companyId}
+     AND sps.payment_id IN (${sql.join(paymentIds.map(id => sql`${id}`), sql`, `)})
+   ORDER BY sps.payment_id, sps.split_index`.execute(executor);
 
+  const rows = result.rows as SalesPaymentSplitRow[];
   const splitsByPaymentId = new Map<number, SalesPaymentSplit[]>();
   for (const row of rows) {
     const paymentId = Number(row.payment_id);

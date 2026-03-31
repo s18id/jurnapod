@@ -3,9 +3,9 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import { sql } from "kysely";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "./db";
+import { closeDbPool, getDb } from "./db";
 import {
   createReservationGroupWithTables,
   getReservationGroup,
@@ -25,26 +25,25 @@ type TestContext = {
 };
 
 async function resolveTestContext(): Promise<TestContext> {
-  const pool = getDbPool();
+  const db = getDb();
   const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
   const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
   const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT c.id AS company_id, o.id AS outlet_id, u.id AS user_id
+  const rows = await sql`
+    SELECT c.id AS company_id, o.id AS outlet_id, u.id AS user_id
      FROM companies c
      INNER JOIN outlets o ON o.company_id = c.id
      INNER JOIN users u ON u.company_id = c.id
      INNER JOIN user_outlets uo ON uo.user_id = u.id AND uo.outlet_id = o.id
-     WHERE c.code = ? AND o.code = ? AND u.email = ?
-     LIMIT 1`,
-    [companyCode, outletCode, ownerEmail]
-  );
+     WHERE c.code = ${companyCode} AND o.code = ${outletCode} AND u.email = ${ownerEmail}
+     LIMIT 1
+  `.execute(db);
 
-  assert.ok(rows.length > 0, "Fixture company/outlet/user not found; run seed first");
+  assert.ok(rows.rows.length > 0, "Fixture company/outlet/user not found; run seed first");
   return {
-    companyId: Number(rows[0].company_id),
-    outletId: Number(rows[0].outlet_id),
-    userId: Number(rows[0].user_id),
+    companyId: Number((rows.rows[0] as { company_id: number }).company_id),
+    outletId: Number((rows.rows[0] as { outlet_id: number }).outlet_id),
+    userId: Number((rows.rows[0] as { user_id: number }).user_id),
     runId: Date.now().toString(36)
   };
 }
@@ -103,30 +102,21 @@ async function createTestGroup(
 }
 
 async function cleanupGroup(groupId: number, tableIds: number[]): Promise<void> {
-  const pool = getDbPool();
+  const db = getDb();
 
   // Delete all reservations that reference these tables (including unlinked ones)
   if (tableIds.length > 0) {
-    const tablePlaceholders = tableIds.map(() => "?").join(",");
-    await pool.execute(
-      `DELETE FROM reservations WHERE table_id IN (${tablePlaceholders})`,
-      tableIds
-    );
+    await sql`
+      DELETE FROM reservations WHERE table_id IN (${sql.join(tableIds.map(id => sql`${id}`))})
+    `.execute(db);
   }
 
   // Delete the group
-  await pool.execute(
-    `DELETE FROM reservation_groups WHERE id = ?`,
-    [groupId]
-  );
+  await sql`DELETE FROM reservation_groups WHERE id = ${groupId}`.execute(db);
 
   // Delete test tables
   if (tableIds.length > 0) {
-    const placeholders = tableIds.map(() => "?").join(",");
-    await pool.execute(
-      `DELETE FROM outlet_tables WHERE id IN (${placeholders})`,
-      tableIds
-    );
+    await sql`DELETE FROM outlet_tables WHERE id IN (${sql.join(tableIds.map(id => sql`${id}`))})`.execute(db);
   }
 }
 
@@ -148,13 +138,10 @@ test(
       assert.strictEqual(result.groupId, fixtures.groupId);
 
       // Verify the update via direct query (getReservationGroup doesn't return customer_name)
-      const pool = getDbPool();
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT customer_name FROM reservations WHERE reservation_group_id = ? LIMIT 1`,
-        [fixtures.groupId]
-      );
-      assert.ok(rows.length > 0);
-      assert.strictEqual(rows[0].customer_name, "Updated Name");
+      const db = getDb();
+      const rows = await sql`SELECT customer_name FROM reservations WHERE reservation_group_id = ${fixtures.groupId} LIMIT 1`.execute(db);
+      assert.ok(rows.rows.length > 0);
+      assert.strictEqual((rows.rows[0] as { customer_name: string }).customer_name, "Updated Name");
 
     } finally {
       await cleanupGroup(fixtures.groupId, fixtures.tableIds);
@@ -183,14 +170,11 @@ test(
       });
 
       // Verify via direct query
-      const pool = getDbPool();
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT customer_phone, notes FROM reservations WHERE reservation_group_id = ? LIMIT 1`,
-        [fixtures.groupId]
-      );
-      assert.ok(rows.length > 0);
-      assert.strictEqual(rows[0].customer_phone, "+9876543210");
-      assert.strictEqual(rows[0].notes, "Updated test notes");
+      const db = getDb();
+      const rows = await sql`SELECT customer_phone, notes FROM reservations WHERE reservation_group_id = ${fixtures.groupId} LIMIT 1`.execute(db);
+      assert.ok(rows.rows.length > 0);
+      assert.strictEqual((rows.rows[0] as { customer_phone: string }).customer_phone, "+9876543210");
+      assert.strictEqual((rows.rows[0] as { notes: string }).notes, "Updated test notes");
 
     } finally {
       await cleanupGroup(fixtures.groupId, fixtures.tableIds);
@@ -268,12 +252,9 @@ test(
       assert.strictEqual(result.removedTables.length, 2);
 
       // Verify removed tables are unlinked
-      const pool = getDbPool();
-      const [removedRes] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM reservations WHERE table_id IN (${fixtures.tableIds.slice(2).map(() => "?").join(",")}) AND reservation_group_id IS NULL`,
-        fixtures.tableIds.slice(2)
-      );
-      assert.strictEqual(removedRes.length, 2);
+      const db = getDb();
+      const removedRes = await sql`SELECT id FROM reservations WHERE table_id IN (${sql.join(fixtures.tableIds.slice(2).map(id => sql`${id}`))}) AND reservation_group_id IS NULL`.execute(db);
+      assert.strictEqual(removedRes.rows.length, 2);
 
     } finally {
       await cleanupGroup(fixtures.groupId, fixtures.tableIds);
@@ -302,13 +283,10 @@ test(
       });
 
       // Verify guest count updated
-      const pool = getDbPool();
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT guest_count FROM reservations WHERE reservation_group_id = ? LIMIT 1`,
-        [fixtures.groupId]
-      );
-      assert.ok(rows.length > 0);
-      assert.strictEqual(rows[0].guest_count, 10);
+      const db = getDb();
+      const rows = await sql`SELECT guest_count FROM reservations WHERE reservation_group_id = ${fixtures.groupId} LIMIT 1`.execute(db);
+      assert.ok(rows.rows.length > 0);
+      assert.strictEqual((rows.rows[0] as { guest_count: number }).guest_count, 10);
 
     } finally {
       await cleanupGroup(fixtures.groupId, fixtures.tableIds);
@@ -346,11 +324,8 @@ test(
 
     try {
       // Mark first reservation as ARRIVED
-      const pool = getDbPool();
-      await pool.execute(
-        `UPDATE reservations SET status = 'ARRIVED' WHERE id = ?`,
-        [fixtures.reservationIds[0]]
-      );
+      const db = getDb();
+      await sql`UPDATE reservations SET status = 'ARRIVED' WHERE id = ${fixtures.reservationIds[0]}`.execute(db);
 
       await assert.rejects(
         async () =>
@@ -409,30 +384,16 @@ test(
 
     try {
       // Create another reservation at the same time
-      const pool = getDbPool();
-      const [tableRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT capacity FROM outlet_tables WHERE id = ? LIMIT 1`,
-        [fixtures.tableIds[0]]
-      );
+      const db = getDb();
+      const tableRows = await sql`SELECT capacity FROM outlet_tables WHERE id = ${fixtures.tableIds[0]} LIMIT 1`.execute(db);
 
       const conflictDate = new Date(Date.now() + 24 * 60 * 60 * 1000 + 30 * 60 * 1000);
       const conflictTimeIso = conflictDate.toISOString();
       const conflictTimeDb = toDbDateTime(conflictDate);
-      await pool.execute(
-        `INSERT INTO reservations (company_id, outlet_id, table_id, customer_name, guest_count, reservation_at, reservation_start_ts, reservation_end_ts, duration_minutes, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1)`,
-        [
-          ctx.companyId,
-          ctx.outletId,
-          fixtures.tableIds[0],
-          "Conflict Reservation",
-          2,
-          conflictTimeDb,
-          conflictDate.getTime(),
-          conflictDate.getTime() + 2 * 60 * 60 * 1000,
-          120
-        ]
-      );
+      await sql`
+        INSERT INTO reservations (company_id, outlet_id, table_id, customer_name, guest_count, reservation_at, reservation_start_ts, reservation_end_ts, duration_minutes, status, status_id)
+         VALUES (${ctx.companyId}, ${ctx.outletId}, ${fixtures.tableIds[0]}, "Conflict Reservation", 2, ${conflictTimeDb}, ${conflictDate.getTime()}, ${conflictDate.getTime() + 2 * 60 * 60 * 1000}, 120, 'BOOKED', 1)
+      `.execute(db);
 
       // Try to change time to overlap with conflict
       await assert.rejects(
@@ -463,11 +424,8 @@ test(
 
     try {
       // Manually delete all reservations to create empty group
-      const pool = getDbPool();
-      await pool.execute(
-        `DELETE FROM reservations WHERE reservation_group_id = ?`,
-        [fixtures.groupId]
-      );
+      const db = getDb();
+      await sql`DELETE FROM reservations WHERE reservation_group_id = ${fixtures.groupId}`.execute(db);
 
       // Try to add tables - this requires knowing current time via getFirstReservationTime
       // which should throw for empty group
@@ -486,16 +444,9 @@ test(
 
     } finally {
       // Clean up empty group
-      const pool = getDbPool();
-      await pool.execute(
-        `DELETE FROM reservation_groups WHERE id = ?`,
-        [fixtures.groupId]
-      );
-      const placeholders = fixtures.tableIds.map(() => "?").join(",");
-      await pool.execute(
-        `DELETE FROM outlet_tables WHERE id IN (${placeholders})`,
-        fixtures.tableIds
-      );
+      const db = getDb();
+      await sql`DELETE FROM reservation_groups WHERE id = ${fixtures.groupId}`.execute(db);
+      await sql`DELETE FROM outlet_tables WHERE id IN (${sql.join(fixtures.tableIds.map(id => sql`${id}`))})`.execute(db);
     }
   }
 );
@@ -596,17 +547,15 @@ test(
 
     try {
       // Capture initial state before failed update
-      const pool = getDbPool();
-      const [beforeRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT customer_name, customer_phone, notes, guest_count 
-         FROM reservations WHERE reservation_group_id = ? LIMIT 1`,
-        [fixtures.groupId]
-      );
-      const [beforeTableCount] = await pool.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) as cnt FROM reservations 
-         WHERE reservation_group_id = ?`,
-        [fixtures.groupId]
-      );
+      const db = getDb();
+      const beforeRows = await sql`
+        SELECT customer_name, customer_phone, notes, guest_count 
+        FROM reservations WHERE reservation_group_id = ${fixtures.groupId} LIMIT 1
+      `.execute(db);
+      const beforeTableCount = await sql`
+        SELECT COUNT(*) as cnt FROM reservations 
+        WHERE reservation_group_id = ${fixtures.groupId}
+      `.execute(db);
 
       // Attempt update that should fail (insufficient capacity)
       // Keep only 2 tables (8 capacity) but group needs 10 guests
@@ -622,22 +571,25 @@ test(
       );
 
       // Verify NO changes persisted - state unchanged
-      const [afterRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT customer_name, customer_phone, notes, guest_count 
-         FROM reservations WHERE reservation_group_id = ? LIMIT 1`,
-        [fixtures.groupId]
-      );
-      const [afterTableCount] = await pool.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) as cnt FROM reservations 
-         WHERE reservation_group_id = ?`,
-        [fixtures.groupId]
-      );
+      const afterRows = await sql`
+        SELECT customer_name, customer_phone, notes, guest_count 
+        FROM reservations WHERE reservation_group_id = ${fixtures.groupId} LIMIT 1
+      `.execute(db);
+      const afterTableCount = await sql`
+        SELECT COUNT(*) as cnt FROM reservations 
+        WHERE reservation_group_id = ${fixtures.groupId}
+      `.execute(db);
 
       // Assert state completely unchanged - proof of rollback
-      assert.deepStrictEqual(afterRows[0], beforeRows[0]);
-      assert.strictEqual(afterTableCount[0].cnt, beforeTableCount[0].cnt);
-      assert.strictEqual(afterRows[0].customer_name, `Test Group ${ctx.runId}`);
-      assert.strictEqual(afterRows[0].guest_count, 10);
+      const beforeRow = beforeRows.rows[0] as { customer_name: string; customer_phone: string; notes: string; guest_count: number };
+      const afterRow = afterRows.rows[0] as { customer_name: string; customer_phone: string; notes: string; guest_count: number };
+      const beforeCnt = beforeTableCount.rows[0] as { cnt: number };
+      const afterCnt = afterTableCount.rows[0] as { cnt: number };
+      
+      assert.deepStrictEqual(afterRow, beforeRow);
+      assert.strictEqual(afterCnt.cnt, beforeCnt.cnt);
+      assert.strictEqual(afterRow.customer_name, `Test Group ${ctx.runId}`);
+      assert.strictEqual(afterRow.guest_count, 10);
 
     } finally {
       await cleanupGroup(fixtures.groupId, fixtures.tableIds);
@@ -653,22 +605,18 @@ test(
     const fixtures = await createTestGroup(ctx, 3, 6);
 
     try {
-      const pool = getDbPool();
+      const db = getDb();
       
       // Mark one reservation as ARRIVED to trigger business rule violation
-      await pool.execute(
-        `UPDATE reservations SET status = 'ARRIVED' WHERE id = ?`,
-        [fixtures.reservationIds[0]]
-      );
+      await sql`UPDATE reservations SET status = 'ARRIVED' WHERE id = ${fixtures.reservationIds[0]}`.execute(db);
 
       // Capture state before failed update
-      const [before] = await pool.execute<RowDataPacket[]>(
-        `SELECT customer_name, notes FROM reservations 
-         WHERE reservation_group_id = ? LIMIT 1`,
-        [fixtures.groupId]
-      );
-      const beforeName = before[0].customer_name;
-      const beforeNotes = before[0].notes;
+      const before = await sql`
+        SELECT customer_name, notes FROM reservations 
+        WHERE reservation_group_id = ${fixtures.groupId} LIMIT 1
+      `.execute(db);
+      const beforeName = (before.rows[0] as { customer_name: string }).customer_name;
+      const beforeNotes = (before.rows[0] as { notes: string }).notes;
 
       // Attempt update - should fail due to started reservation
       await assert.rejects(
@@ -683,16 +631,16 @@ test(
       );
 
       // Verify name and notes unchanged - proof of rollback
-      const [after] = await pool.execute<RowDataPacket[]>(
-        `SELECT customer_name, notes FROM reservations 
-         WHERE reservation_group_id = ? LIMIT 1`,
-        [fixtures.groupId]
-      );
+      const after = await sql`
+        SELECT customer_name, notes FROM reservations 
+        WHERE reservation_group_id = ${fixtures.groupId} LIMIT 1
+      `.execute(db);
       
-      assert.strictEqual(after[0].customer_name, beforeName);
-      assert.strictEqual(after[0].notes, beforeNotes);
-      assert.notStrictEqual(after[0].customer_name, "Should Not Persist");
-      assert.notStrictEqual(after[0].notes, "Corrupted");
+      const afterRow = after.rows[0] as { customer_name: string; notes: string };
+      assert.strictEqual(afterRow.customer_name, beforeName);
+      assert.strictEqual(afterRow.notes, beforeNotes);
+      assert.notStrictEqual(afterRow.customer_name, "Should Not Persist");
+      assert.notStrictEqual(afterRow.notes, "Corrupted");
 
     } finally {
       await cleanupGroup(fixtures.groupId, fixtures.tableIds);

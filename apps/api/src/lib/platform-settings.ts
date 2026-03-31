@@ -1,22 +1,12 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { RowDataPacket } from "mysql2/promise";
-import { getDbPool } from "./db";
+import { getDb } from "./db";
+import { sql } from "kysely";
 import { getAppEnv } from "./env";
 import { encrypt, decrypt, type EncryptedPayload } from "./encryption";
 
 export class PlatformSettingNotFoundError extends Error {}
-
-type PlatformSettingRow = RowDataPacket & {
-  id: number;
-  key: string;
-  value_json: string;
-  is_sensitive: number;
-  updated_at: string;
-  updated_by: number | null;
-  created_at: string;
-};
 
 /**
  * Sensitive setting keys (v1: only SMTP password)
@@ -56,28 +46,21 @@ function buildPlatformSettingsSeedValues(env: ReturnType<typeof getAppEnv>): Rec
 }
 
 export async function ensurePlatformSettingsSeeded(): Promise<void> {
-  const pool = getDbPool();
-  const [markerRows] = await pool.execute<PlatformSettingRow[]>(
-    `SELECT \`key\` FROM platform_settings WHERE \`key\` = ? LIMIT 1`,
-    [PLATFORM_SETTINGS_SEED_MARKER_KEY]
-  );
+  const db = getDb();
+  const markerRows = await sql<{ key: string }>`
+    SELECT \`key\` FROM platform_settings WHERE \`key\` = ${PLATFORM_SETTINGS_SEED_MARKER_KEY} LIMIT 1
+  `.execute(db);
 
-  if (markerRows.length > 0) {
+  if (markerRows.rows.length > 0) {
     return;
   }
 
-  const connection = await pool.getConnection();
+  await db.transaction().execute(async (trx) => {
+    const markerRowsInTx = await sql<{ key: string }>`
+      SELECT \`key\` FROM platform_settings WHERE \`key\` = ${PLATFORM_SETTINGS_SEED_MARKER_KEY} LIMIT 1
+    `.execute(trx);
 
-  try {
-    await connection.beginTransaction();
-
-    const [markerRowsInTx] = await connection.execute<PlatformSettingRow[]>(
-      `SELECT \`key\` FROM platform_settings WHERE \`key\` = ? LIMIT 1`,
-      [PLATFORM_SETTINGS_SEED_MARKER_KEY]
-    );
-
-    if (markerRowsInTx.length > 0) {
-      await connection.commit();
+    if (markerRowsInTx.rows.length > 0) {
       return;
     }
 
@@ -98,46 +81,36 @@ export async function ensurePlatformSettingsSeeded(): Promise<void> {
         valueToStore = JSON.stringify(encrypted);
       }
 
-      await connection.execute(
-        `INSERT IGNORE INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
-         VALUES (?, ?, ?, ?)`,
-        [key, valueToStore, isSensitive ? 1 : 0, null]
-      );
+      await sql`
+        INSERT IGNORE INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
+        VALUES (${key}, ${valueToStore}, ${isSensitive ? 1 : 0}, NULL)
+      `.execute(trx);
     }
 
-    await connection.execute(
-      `INSERT IGNORE INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
-       VALUES (?, ?, 0, ?)`,
-      [PLATFORM_SETTINGS_SEED_MARKER_KEY, "true", null]
-    );
-
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+    await sql`
+      INSERT IGNORE INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
+      VALUES (${PLATFORM_SETTINGS_SEED_MARKER_KEY}, "true", 0, NULL)
+    `.execute(trx);
+  });
 }
 
 /**
  * Get a single platform setting by key
  */
 export async function getPlatformSetting(key: string): Promise<string | null> {
-  const pool = getDbPool();
-  const [rows] = await pool.execute<PlatformSettingRow[]>(
-    `SELECT \`key\`, value_json, is_sensitive
-     FROM platform_settings
-     WHERE \`key\` = ?
-     LIMIT 1`,
-    [key]
-  );
+  const db = getDb();
+  const rows = await sql<{ key: string; value_json: string; is_sensitive: number }>`
+    SELECT \`key\`, value_json, is_sensitive
+    FROM platform_settings
+    WHERE \`key\` = ${key}
+    LIMIT 1
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  const row = rows[0];
+  const row = rows.rows[0];
   
   if (row.is_sensitive === 1) {
     const env = getAppEnv();
@@ -157,15 +130,16 @@ export async function getPlatformSetting(key: string): Promise<string | null> {
  * Get all platform settings (masked for sensitive values)
  */
 export async function getAllPlatformSettings(): Promise<Record<string, { value: string; is_set: boolean; is_sensitive: boolean }>> {
-  const pool = getDbPool();
-  const [rows] = await pool.execute<PlatformSettingRow[]>(
-    `SELECT \`key\`, value_json, is_sensitive
-     FROM platform_settings
-     ORDER BY \`key\` ASC`
-  );
+  const db = getDb();
+  const rows = await sql<{ key: string; value_json: string; is_sensitive: number }>`
+    SELECT \`key\`, value_json, is_sensitive
+    FROM platform_settings
+    ORDER BY \`key\` ASC
+  `.execute(db);
+
   const settings: Record<string, { value: string; is_set: boolean; is_sensitive: boolean }> = {};
 
-  for (const row of rows) {
+  for (const row of rows.rows) {
     const isSensitive = row.is_sensitive === 1;
     let value = row.value_json;
 
@@ -192,13 +166,10 @@ export async function setPlatformSetting(params: {
   value: string;
   updatedBy: number;
 }): Promise<void> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
   const env = getAppEnv();
 
-  try {
-    await connection.beginTransaction();
-
+  await db.transaction().execute(async (trx) => {
     const isSensitive = isSensitiveKey(params.key);
     let valueToStore = params.value;
 
@@ -209,23 +180,15 @@ export async function setPlatformSetting(params: {
     }
 
     // Upsert
-    await connection.execute(
-      `INSERT INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         value_json = VALUES(value_json),
-         updated_by = VALUES(updated_by),
-         updated_at = CURRENT_TIMESTAMP`,
-      [params.key, valueToStore, isSensitive ? 1 : 0, params.updatedBy]
-    );
-
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+    await sql`
+      INSERT INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
+      VALUES (${params.key}, ${valueToStore}, ${isSensitive ? 1 : 0}, ${params.updatedBy})
+      ON DUPLICATE KEY UPDATE
+        value_json = VALUES(value_json),
+        updated_by = VALUES(updated_by),
+        updated_at = CURRENT_TIMESTAMP
+    `.execute(trx);
+  });
 }
 
 /**
@@ -235,19 +198,15 @@ export async function setBulkPlatformSettings(params: {
   settings: Record<string, string | null>;
   updatedBy: number;
 }): Promise<void> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
   const env = getAppEnv();
 
-  try {
-    await connection.beginTransaction();
-
+  await db.transaction().execute(async (trx) => {
     for (const [key, value] of Object.entries(params.settings)) {
       if (key === "mailer.smtp.pass" && (value === "" || value === null)) {
-        await connection.execute(
-          `DELETE FROM platform_settings WHERE \`key\` = ?`,
-          [key]
-        );
+        await sql`
+          DELETE FROM platform_settings WHERE \`key\` = ${key}
+        `.execute(trx);
         continue;
       }
       if (value === null) {
@@ -266,33 +225,24 @@ export async function setBulkPlatformSettings(params: {
         valueToStore = JSON.stringify(encrypted);
       }
 
-      await connection.execute(
-        `INSERT INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           value_json = VALUES(value_json),
-           updated_by = VALUES(updated_by),
-           updated_at = CURRENT_TIMESTAMP`,
-        [key, valueToStore, isSensitive ? 1 : 0, params.updatedBy]
-      );
+      await sql`
+        INSERT INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
+        VALUES (${key}, ${valueToStore}, ${isSensitive ? 1 : 0}, ${params.updatedBy})
+        ON DUPLICATE KEY UPDATE
+          value_json = VALUES(value_json),
+          updated_by = VALUES(updated_by),
+          updated_at = CURRENT_TIMESTAMP
+      `.execute(trx);
     }
-
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }
 
 /**
  * Delete a platform setting
  */
 export async function deletePlatformSetting(key: string): Promise<void> {
-  const pool = getDbPool();
-  await pool.execute(
-    `DELETE FROM platform_settings WHERE \`key\` = ?`,
-    [key]
-  );
+  const db = getDb();
+  await sql`
+    DELETE FROM platform_settings WHERE \`key\` = ${key}
+  `.execute(db);
 }

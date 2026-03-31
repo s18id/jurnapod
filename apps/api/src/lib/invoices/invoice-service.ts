@@ -8,9 +8,8 @@
  * Extracted from sales.ts (originally lines 772-1030, 1033-1268, 1270-1371, 3251-3333)
  */
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
-import { getDbPool } from "@/lib/db";
+import { getDb, type KyselySchema } from "@/lib/db";
+import { sql } from "kysely";
 import { calculateTaxLines, listCompanyDefaultTaxRates } from "@/lib/taxes";
 import { postSalesInvoiceToJournal } from "@/lib/sales-posting";
 import { deductStockForSaleWithCogs } from "@/lib/stock";
@@ -210,33 +209,44 @@ function buildInvoiceLines(
 // Item Helpers
 // =============================================================================
 
+interface ItemRow {
+  id: number;
+  name: string;
+  sku: string;
+  type: string;
+  default_price: number | null;
+}
+
 async function findItemByIdWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   itemId: number
 ): Promise<ItemLookup | null> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT i.id, i.name, i.sku, i.item_type as type,
+  const rows = await sql`
+    SELECT i.id, i.name, i.sku, i.item_type as type,
             (SELECT price FROM item_prices
              WHERE item_id = i.id AND company_id = i.company_id
              ORDER BY outlet_id IS NULL DESC, is_active DESC, id ASC
              LIMIT 1) as default_price
      FROM items i
-     WHERE i.id = ? AND i.company_id = ? AND i.is_active = 1
-     LIMIT 1`,
-    [itemId, companyId]
-  );
-  return rows[0] ? {
-    id: Number(rows[0].id),
-    name: rows[0].name,
-    sku: rows[0].sku,
-    type: rows[0].type,
-    default_price: rows[0].default_price !== null ? Number(rows[0].default_price) : null
-  } : null;
+     WHERE i.id = ${itemId} AND i.company_id = ${companyId} AND i.is_active = 1
+     LIMIT 1
+  `.execute(db);
+  if (rows.rows.length === 0) {
+    return null;
+  }
+  const row = rows.rows[0] as ItemRow;
+  return {
+    id: Number(row.id),
+    name: row.name,
+    sku: row.sku,
+    type: row.type,
+    default_price: row.default_price !== null ? Number(row.default_price) : null
+  };
 }
 
 async function validateAndGetItemForLine(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   itemId: number | undefined,
   lineType: "SERVICE" | "PRODUCT"
@@ -249,7 +259,7 @@ async function validateAndGetItemForLine(
     throw new DatabaseReferenceError("Product lines require a valid item_id");
   }
 
-  const item = await findItemByIdWithExecutor(executor, companyId, itemId);
+  const item = await findItemByIdWithExecutor(db, companyId, itemId);
   if (!item) {
     throw new DatabaseReferenceError("Item not found or not active");
   }
@@ -262,98 +272,95 @@ async function validateAndGetItemForLine(
 // =============================================================================
 
 async function findInvoiceByIdWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   invoiceId: number,
   options?: { forUpdate?: boolean }
 ): Promise<SalesInvoice | null> {
-  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
-  const [rows] = await executor.execute<SalesInvoiceRow[]>(
-    `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, due_date, status, payment_status,
+  const forUpdateClause = options?.forUpdate ? sql` FOR UPDATE` : sql``;
+  const rows = await sql`
+    SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, due_date, status, payment_status,
             subtotal, tax_amount, grand_total, paid_total,
             approved_by_user_id, approved_at,
             created_by_user_id, updated_by_user_id, created_at, updated_at
      FROM sales_invoices
-     WHERE company_id = ?
-       AND id = ?
-     LIMIT 1${forUpdateClause}`,
-    [companyId, invoiceId]
-  );
+     WHERE company_id = ${companyId}
+       AND id = ${invoiceId}
+     LIMIT 1
+     ${forUpdateClause}
+  `.execute(db);
 
-  if (!rows[0]) {
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  return normalizeInvoice(rows[0]);
+  return normalizeInvoice(rows.rows[0] as SalesInvoiceRow);
 }
 
 async function findInvoiceByClientRefWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   clientRef: string
 ): Promise<SalesInvoiceDetail | null> {
-  const [rows] = await executor.execute<IdRow[]>(
-    `SELECT id
+  const rows = await sql`
+    SELECT id
      FROM sales_invoices
-     WHERE company_id = ?
-       AND client_ref = ?
-     LIMIT 1`,
-    [companyId, clientRef]
-  );
+     WHERE company_id = ${companyId}
+       AND client_ref = ${clientRef}
+     LIMIT 1
+  `.execute(db);
 
-  if (!rows[0]) {
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  return findInvoiceDetailWithExecutor(executor, companyId, Number(rows[0].id));
+  return findInvoiceDetailWithExecutor(db, companyId, Number((rows.rows[0] as IdRow).id));
 }
 
 async function listInvoiceLinesWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   invoiceId: number
 ): Promise<SalesInvoiceLine[]> {
-  const [rows] = await executor.execute<SalesInvoiceLineRow[]>(
-    `SELECT id, invoice_id, line_no, line_type, item_id, description, qty, unit_price, line_total
+  const rows = await sql`
+    SELECT id, invoice_id, line_no, line_type, item_id, description, qty, unit_price, line_total
      FROM sales_invoice_lines
-     WHERE company_id = ?
-       AND invoice_id = ?
-     ORDER BY line_no ASC`,
-    [companyId, invoiceId]
-  );
+     WHERE company_id = ${companyId}
+       AND invoice_id = ${invoiceId}
+     ORDER BY line_no ASC
+  `.execute(db);
 
-  return rows.map(normalizeInvoiceLine);
+  return (rows.rows as SalesInvoiceLineRow[]).map(normalizeInvoiceLine);
 }
 
 async function listInvoiceTaxesWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   invoiceId: number
 ): Promise<SalesInvoiceTax[]> {
-  const [rows] = await executor.execute<SalesInvoiceTaxRow[]>(
-    `SELECT id, sales_invoice_id AS invoice_id, tax_rate_id, amount
+  const rows = await sql`
+    SELECT id, sales_invoice_id AS invoice_id, tax_rate_id, amount
      FROM sales_invoice_taxes
-     WHERE company_id = ?
-       AND sales_invoice_id = ?`,
-    [companyId, invoiceId]
-  );
+     WHERE company_id = ${companyId}
+       AND sales_invoice_id = ${invoiceId}
+  `.execute(db);
 
-  return rows.map(normalizeInvoiceTax);
+  return (rows.rows as SalesInvoiceTaxRow[]).map(normalizeInvoiceTax);
 }
 
 export async function findInvoiceDetailWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   invoiceId: number
 ): Promise<SalesInvoiceDetail | null> {
-  const invoice = await findInvoiceByIdWithExecutor(executor, companyId, invoiceId);
+  const invoice = await findInvoiceByIdWithExecutor(db, companyId, invoiceId);
   if (!invoice) {
     return null;
   }
 
   const [lines, taxes] = await Promise.all([
-    listInvoiceLinesWithExecutor(executor, companyId, invoiceId),
-    listInvoiceTaxesWithExecutor(executor, companyId, invoiceId)
+    listInvoiceLinesWithExecutor(db, companyId, invoiceId),
+    listInvoiceTaxesWithExecutor(db, companyId, invoiceId)
   ]);
 
   return {
@@ -419,41 +426,66 @@ function buildInvoiceWhereClause(companyId: number, filters: InvoiceListFilters)
 // =============================================================================
 
 export async function listInvoices(companyId: number, filters: InvoiceListFilters) {
-  const pool = getDbPool();
+  const db = getDb();
   const limit = filters.limit ?? 50;
   const offset = filters.offset ?? 0;
-  const where = buildInvoiceWhereClause(companyId, filters);
 
-  if (where.isEmpty) {
-    return { total: 0, invoices: [] };
+  // Build WHERE clause dynamically
+  const conditions: Array<ReturnType<typeof sql>> = [sql`company_id = ${companyId}`];
+
+  if (filters.outletIds) {
+    if (filters.outletIds.length === 0) {
+      return { total: 0, invoices: [] };
+    }
+    conditions.push(sql`outlet_id IN (${sql.join(filters.outletIds.map(id => sql`${id}`), sql`, `)})`);
   }
 
-  const [countRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) as total
-     FROM sales_invoices
-     WHERE ${where.clause}`,
-    where.values
-  );
-  const total = Number(countRows[0]?.total ?? 0);
+  if (filters.status) {
+    conditions.push(sql`status = ${filters.status}`);
+  }
 
-  const [rows] = await pool.execute<SalesInvoiceRow[]>(
-    `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, due_date, status, payment_status,
-            subtotal, tax_amount, grand_total, paid_total,
-            approved_by_user_id, approved_at,
-            created_by_user_id, updated_by_user_id, created_at, updated_at
-     FROM sales_invoices
-     WHERE ${where.clause}
-     ORDER BY invoice_date DESC, id DESC
-     LIMIT ? OFFSET ?`,
-    [...where.values, limit, offset]
-  );
+  if (filters.paymentStatus) {
+    conditions.push(sql`payment_status = ${filters.paymentStatus}`);
+  }
 
-  return { total, invoices: rows.map(normalizeInvoice) };
+  // Handle timezone conversion for date range
+  let dateFrom = filters.dateFrom;
+  let dateTo = filters.dateTo;
+
+  if (dateFrom && dateTo && filters.timezone && filters.timezone !== 'UTC') {
+    const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, filters.timezone);
+    dateFrom = range.fromStartUTC.slice(0, 10);
+    dateTo = range.toEndUTC.slice(0, 10);
+  }
+
+  if (dateFrom) {
+    conditions.push(sql`invoice_date >= ${dateFrom}`);
+  }
+
+  if (dateTo) {
+    conditions.push(sql`invoice_date <= ${dateTo}`);
+  }
+
+  const whereClause = sql.join(conditions, sql` AND `);
+
+  const countResult = await sql`SELECT COUNT(*) as total FROM sales_invoices WHERE ${whereClause}`.execute(db);
+  const total = Number((countResult.rows[0] as { total?: number }).total ?? 0);
+
+  const rows = await sql`SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, due_date, status, payment_status,
+          subtotal, tax_amount, grand_total, paid_total,
+          approved_by_user_id, approved_at,
+          created_by_user_id, updated_by_user_id, created_at, updated_at
+   FROM sales_invoices
+   WHERE ${whereClause}
+   ORDER BY invoice_date DESC, id DESC
+   LIMIT ${limit} OFFSET ${offset}`.execute(db);
+
+  return { total, invoices: (rows.rows as SalesInvoiceRow[]).map(normalizeInvoice) };
 }
 
 export async function getInvoice(companyId: number, invoiceId: number) {
-  const pool = getDbPool();
-  return findInvoiceDetailWithExecutor(pool, companyId, invoiceId);
+  const db = getDb();
+  return findInvoiceDetailWithExecutor(db, companyId, invoiceId);
 }
 
 export async function createInvoice(
@@ -521,17 +553,13 @@ export async function createInvoice(
 
     if (input.taxes && input.taxes.length > 0) {
       const taxRateIds = input.taxes.map((tax) => tax.tax_rate_id);
-      const placeholders = taxRateIds.map(() => "?").join(", ");
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id
+      const rows = await sql`SELECT id
          FROM tax_rates
-         WHERE company_id = ?
+         WHERE company_id = ${companyId}
            AND is_active = 1
-           AND id IN (${placeholders})`,
-        [companyId, ...taxRateIds]
-      );
+           AND id IN (${sql.join(taxRateIds.map(id => sql`${id}`), sql`, `)})`.execute(connection);
 
-      const matched = new Set((rows as Array<{ id?: number }>).map((row) => Number(row.id)));
+      const matched = new Set((rows.rows as Array<{ id?: number }>).map((row) => Number(row.id)));
       if (matched.size !== taxRateIds.length) {
         throw new DatabaseReferenceError("Invalid tax rate");
       }
@@ -554,37 +582,39 @@ export async function createInvoice(
     const grandTotal = normalizeMoney(subtotal + taxAmount);
 
     try {
-      const [result] = await connection.execute<ResultSetHeader>(
-          `INSERT INTO sales_invoices (
-            company_id,
-            outlet_id,
-            invoice_no,
-            invoice_date,
-            due_date,
-            client_ref,
-            status,
-            payment_status,
-            subtotal,
-           tax_amount,
-            grand_total,
-            paid_total,
-            created_by_user_id,
-            updated_by_user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', 'UNPAID', ?, ?, ?, 0, ?, ?)`,
-        [
-          companyId,
-          input.outlet_id,
-          invoiceNo,
-          input.invoice_date,
-          dueDate,
-          input.client_ref ?? null,
+      const result = await sql`
+        INSERT INTO sales_invoices (
+          company_id,
+          outlet_id,
+          invoice_no,
+          invoice_date,
+          due_date,
+          client_ref,
+          status,
+          payment_status,
           subtotal,
-          taxAmount,
-          grandTotal,
-          actor?.userId ?? null,
-          actor?.userId ?? null
-        ]
-      );
+          tax_amount,
+          grand_total,
+          paid_total,
+          created_by_user_id,
+          updated_by_user_id
+        ) VALUES (
+          ${companyId},
+          ${input.outlet_id},
+          ${invoiceNo},
+          ${input.invoice_date},
+          ${dueDate},
+          ${input.client_ref ?? null},
+          'DRAFT',
+          'UNPAID',
+          ${subtotal},
+          ${taxAmount},
+          ${grandTotal},
+          0,
+          ${actor?.userId ?? null},
+          ${actor?.userId ?? null}
+        )
+      `.execute(connection);
 
       const invoiceId = Number(result.insertId);
 
@@ -606,43 +636,36 @@ export async function createInvoice(
           );
         }
 
-        await connection.execute(
-          `INSERT INTO sales_invoice_lines (
-             invoice_id,
-             company_id,
-             outlet_id,
-             line_no,
-             line_type,
-             item_id,
-             description,
-             qty,
-             unit_price,
-             line_total
-           ) VALUES ${placeholders}`,
-          values
-        );
+        await sql`
+          INSERT INTO sales_invoice_lines (
+            invoice_id,
+            company_id,
+            outlet_id,
+            line_no,
+            line_type,
+            item_id,
+            description,
+            qty,
+            unit_price,
+            line_total
+          ) VALUES ${sql.join(lineRows.map(line => sql`
+            (${invoiceId}, ${companyId}, ${input.outlet_id}, ${line.line_no}, ${line.line_type}, ${line.item_id}, ${line.description}, ${line.qty}, ${line.unit_price}, ${line.line_total})
+          `), sql`, `)}
+        `.execute(connection);
       }
 
       if (taxLines.length > 0) {
-        const placeholders = taxLines.map(() => "(?, ?, ?, ?, ?)").join(", ");
-        const values = taxLines.flatMap((tax) => [
-          invoiceId,
-          companyId,
-          input.outlet_id,
-          tax.tax_rate_id,
-          tax.amount
-        ]);
-
-        await connection.execute(
-          `INSERT INTO sales_invoice_taxes (
-             sales_invoice_id,
-             company_id,
-             outlet_id,
-             tax_rate_id,
-             amount
-           ) VALUES ${placeholders}`,
-          values
-        );
+        await sql`
+          INSERT INTO sales_invoice_taxes (
+            sales_invoice_id,
+            company_id,
+            outlet_id,
+            tax_rate_id,
+            amount
+          ) VALUES ${sql.join(taxLines.map(tax => sql`
+            (${invoiceId}, ${companyId}, ${input.outlet_id}, ${tax.tax_rate_id}, ${tax.amount})
+          `), sql`, `)}
+        `.execute(connection);
       }
 
       const invoice = await findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
@@ -773,17 +796,13 @@ export async function updateInvoice(
     if (input.taxes !== undefined) {
       if (input.taxes.length > 0) {
         const taxRateIds = input.taxes.map((tax) => tax.tax_rate_id);
-        const placeholders = taxRateIds.map(() => "?").join(", ");
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id
+        const rows = await sql`SELECT id
            FROM tax_rates
-           WHERE company_id = ?
+           WHERE company_id = ${companyId}
              AND is_active = 1
-             AND id IN (${placeholders})`,
-          [companyId, ...taxRateIds]
-        );
+             AND id IN (${sql.join(taxRateIds.map(id => sql`${id}`), sql`, `)})`.execute(connection);
 
-        const matched = new Set((rows as Array<{ id?: number }>).map((row) => Number(row.id)));
+        const matched = new Set((rows.rows as Array<{ id?: number }>).map((row) => Number(row.id)));
         if (matched.size !== taxRateIds.length) {
           throw new DatabaseReferenceError("Invalid tax rate");
         }
@@ -801,42 +820,25 @@ export async function updateInvoice(
     const grandTotal = normalizeMoney(subtotal + taxAmount);
 
     if (lineRows) {
-      await connection.execute<ResultSetHeader>(
-        `DELETE FROM sales_invoice_lines
-         WHERE company_id = ?
-           AND outlet_id = ?
-           AND invoice_id = ?`,
-        [companyId, current.outlet_id, invoiceId]
-      );
+      await sql`DELETE FROM sales_invoice_lines
+         WHERE company_id = ${companyId}
+           AND outlet_id = ${current.outlet_id}
+           AND invoice_id = ${invoiceId}`.execute(connection);
     }
 
     try {
-      await connection.execute<ResultSetHeader>(
-        `UPDATE sales_invoices
-         SET outlet_id = ?,
-             invoice_no = ?,
-             invoice_date = ?,
-             due_date = ?,
-             subtotal = ?,
-             tax_amount = ?,
-             grand_total = ?,
-             updated_by_user_id = ?,
+      await sql`UPDATE sales_invoices
+         SET outlet_id = ${nextOutletId},
+             invoice_no = ${nextInvoiceNo},
+             invoice_date = ${nextInvoiceDate},
+             due_date = ${nextDueDate},
+             subtotal = ${subtotal},
+             tax_amount = ${taxAmount},
+             grand_total = ${grandTotal},
+             updated_by_user_id = ${actor?.userId ?? null},
              updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ?
-           AND id = ?`,
-        [
-          nextOutletId,
-          nextInvoiceNo,
-          nextInvoiceDate,
-          nextDueDate,
-          subtotal,
-          taxAmount,
-          grandTotal,
-          actor?.userId ?? null,
-          companyId,
-          invoiceId
-        ]
-      );
+         WHERE company_id = ${companyId}
+           AND id = ${invoiceId}`.execute(connection);
     } catch (error) {
       if (isMysqlError(error) && error.errno === 1062) {
         throw new DatabaseConflictError("Duplicate invoice");
@@ -863,51 +865,41 @@ export async function updateInvoice(
         );
       }
 
-      await connection.execute(
-        `INSERT INTO sales_invoice_lines (
-           invoice_id,
-           company_id,
-           outlet_id,
-           line_no,
-           line_type,
-           item_id,
-           description,
-           qty,
-           unit_price,
-           line_total
-         ) VALUES ${placeholders}`,
-        values
-      );
+      await sql`
+        INSERT INTO sales_invoice_lines (
+          invoice_id,
+          company_id,
+          outlet_id,
+          line_no,
+          line_type,
+          item_id,
+          description,
+          qty,
+          unit_price,
+          line_total
+        ) VALUES ${sql.join(lineRows.map(line => sql`
+          (${invoiceId}, ${companyId}, ${nextOutletId}, ${line.line_no}, ${line.line_type}, ${line.item_id}, ${line.description}, ${line.qty}, ${line.unit_price}, ${line.line_total})
+        `), sql`, `)}
+      `.execute(connection);
     }
 
     if (taxLines !== null) {
-      await connection.execute<ResultSetHeader>(
-        `DELETE FROM sales_invoice_taxes
-         WHERE company_id = ?
-           AND sales_invoice_id = ?`,
-        [companyId, invoiceId]
-      );
+      await sql`DELETE FROM sales_invoice_taxes
+         WHERE company_id = ${companyId}
+           AND sales_invoice_id = ${invoiceId}`.execute(connection);
 
       if (taxLines.length > 0) {
-        const placeholders = taxLines.map(() => "(?, ?, ?, ?, ?)").join(", ");
-        const values = taxLines.flatMap((tax) => [
-          invoiceId,
-          companyId,
-          nextOutletId,
-          tax.tax_rate_id,
-          tax.amount
-        ]);
-
-        await connection.execute(
-          `INSERT INTO sales_invoice_taxes (
-             sales_invoice_id,
-             company_id,
-             outlet_id,
-             tax_rate_id,
-             amount
-           ) VALUES ${placeholders}`,
-          values
-        );
+        await sql`
+          INSERT INTO sales_invoice_taxes (
+            sales_invoice_id,
+            company_id,
+            outlet_id,
+            tax_rate_id,
+            amount
+          ) VALUES ${sql.join(taxLines.map(tax => sql`
+            (${invoiceId}, ${companyId}, ${nextOutletId}, ${tax.tax_rate_id}, ${tax.amount})
+          `), sql`, `)}
+        `.execute(connection);
       }
     }
 
@@ -944,39 +936,32 @@ export async function postInvoice(
       throw new InvoiceStatusError("Invoice cannot be posted");
     }
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_invoices
+    await sql`UPDATE sales_invoices
        SET status = 'POSTED',
-           updated_by_user_id = ?,
+           updated_by_user_id = ${actor?.userId ?? null},
            updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ?
-         AND id = ?`,
-       [actor?.userId ?? null, companyId, invoiceId]
-     );
+       WHERE company_id = ${companyId}
+         AND id = ${invoiceId}`.execute(connection);
 
-    const postedInvoice = await findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
-    if (!postedInvoice) {
-      throw new Error("Posted invoice not found");
-    }
+     const postedInvoice = await findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
+     if (!postedInvoice) {
+       throw new Error("Posted invoice not found");
+     }
 
-    await postSalesInvoiceToJournal(connection, postedInvoice);
+     await postSalesInvoiceToJournal(connection, postedInvoice);
 
-    const cogsFeatureEnabled = await isCogsFeatureEnabled(connection, companyId);
+     const cogsFeatureEnabled = await isCogsFeatureEnabled(connection, companyId);
 
-    // Post COGS for inventory-tracked items when feature is enabled
-    const inventoryLines = postedInvoice.lines.filter((line) => line.line_type === "PRODUCT" && line.item_id);
+     // Post COGS for inventory-tracked items when feature is enabled
+     const inventoryLines = postedInvoice.lines.filter((line) => line.line_type === "PRODUCT" && line.item_id);
 
-    if (cogsFeatureEnabled && inventoryLines.length > 0) {
-      const itemIds = inventoryLines.map((line) => line.item_id as number);
-      const placeholders = itemIds.map(() => "?").join(", ");
+     if (cogsFeatureEnabled && inventoryLines.length > 0) {
+       const itemIds = inventoryLines.map((line) => line.item_id as number);
 
-      const [itemRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id, track_stock FROM items 
-         WHERE company_id = ? AND id IN (${placeholders}) AND track_stock = 1`,
-        [companyId, ...itemIds]
-      );
+       const itemRows = await sql`SELECT id, track_stock FROM items 
+          WHERE company_id = ${companyId} AND id IN (${sql.join(itemIds.map(id => sql`${id}`), sql`, `)}) AND track_stock = 1`.execute(connection);
 
-      const trackStockItemIds = new Set((itemRows as Array<{ id: number }>).map((row) => row.id));
+       const trackStockItemIds = new Set((itemRows.rows as Array<{ id: number }>).map((row) => row.id));
 
       const inventoryItems = inventoryLines
         .filter((line) => line.item_id && trackStockItemIds.has(line.item_id))
@@ -1051,17 +1036,14 @@ export async function approveInvoice(
       throw new InvoiceStatusError("Only draft invoices can be approved");
     }
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_invoices
+    await sql`UPDATE sales_invoices
        SET status = 'APPROVED',
-           approved_by_user_id = ?,
+           approved_by_user_id = ${actor?.userId ?? null},
            approved_at = CURRENT_TIMESTAMP,
-           updated_by_user_id = ?,
+           updated_by_user_id = ${actor?.userId ?? null},
            updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ?
-         AND id = ?`,
-      [actor?.userId ?? null, actor?.userId ?? null, companyId, invoiceId]
-    );
+       WHERE company_id = ${companyId}
+         AND id = ${invoiceId}`.execute(connection);
 
     return findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
   });
@@ -1092,15 +1074,12 @@ export async function voidInvoice(
       throw new InvoiceStatusError("Cannot void invoice with payments. Process refunds first.");
     }
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_invoices
+    await sql`UPDATE sales_invoices
        SET status = 'VOID',
-           updated_by_user_id = ?,
+           updated_by_user_id = ${actor?.userId ?? null},
            updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ?
-         AND id = ?`,
-      [actor?.userId ?? null, companyId, invoiceId]
-    );
+       WHERE company_id = ${companyId}
+         AND id = ${invoiceId}`.execute(connection);
 
     return findInvoiceDetailWithExecutor(connection, companyId, invoiceId);
   });
@@ -1109,11 +1088,6 @@ export async function voidInvoice(
 // =============================================================================
 // Module Config Helper (for COGS feature gate)
 // =============================================================================
-
-type ModuleConfigRow = RowDataPacket & {
-  enabled: number;
-  config_json: string;
-};
 
 function parseFeatureGateValue(value: unknown): boolean {
   if (value === 1 || value === true) {
@@ -1135,20 +1109,17 @@ function parseFeatureGateValue(value: unknown): boolean {
 }
 
 async function isCogsFeatureEnabled(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number
 ): Promise<boolean> {
-  const [rows] = await executor.execute<ModuleConfigRow[]>(
-    `SELECT cm.enabled, cm.config_json
+  const rows = await sql`SELECT cm.enabled, cm.config_json
      FROM company_modules cm
      INNER JOIN modules m ON m.id = cm.module_id
-     WHERE cm.company_id = ?
+     WHERE cm.company_id = ${companyId}
        AND m.code = 'inventory'
-     LIMIT 1`,
-    [companyId]
-  );
+     LIMIT 1`.execute(db);
 
-  const moduleRow = rows[0];
+  const moduleRow = rows.rows[0] as { enabled: number; config_json: string } | undefined;
   if (!moduleRow || Number(moduleRow.enabled) !== 1) {
     return false;
   }
@@ -1179,6 +1150,5 @@ export type {
   SalesInvoiceLineRow,
   SalesInvoiceTaxRow,
   AccessCheckRow,
-  IdRow,
-  ModuleConfigRow
+  IdRow
 };

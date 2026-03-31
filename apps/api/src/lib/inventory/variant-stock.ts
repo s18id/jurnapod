@@ -8,8 +8,8 @@
  * Each variant can have independent stock levels tracked in inventory_stock table.
  */
 
-import { getDbPool } from "../db";
-import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { sql } from "kysely";
+import { getDb } from "../db";
 
 /**
  * Check stock availability for variants
@@ -21,6 +21,19 @@ export interface VariantStockCheckResult {
   available_quantity: number;
 }
 
+interface VariantRow {
+  stock_quantity: number;
+  item_id: number;
+}
+
+interface StockRow {
+  available_quantity: number;
+}
+
+interface ColumnCheckRow {
+  COLUMN_NAME: string;
+}
+
 /**
  * Get available stock for a variant at an outlet
  */
@@ -30,69 +43,58 @@ export async function checkVariantStockAvailability(
   variantId: number,
   requestedQuantity: number
 ): Promise<VariantStockCheckResult> {
-  const dbPool = getDbPool();
-  const conn = await dbPool.getConnection();
+  const db = getDb();
 
-  try {
-    // First check item_variants table (which has stock_quantity)
-    const [variantRows] = await conn.execute<RowDataPacket[]>(
-      `SELECT stock_quantity 
-       FROM item_variants 
-       WHERE id = ? AND company_id = ? AND is_active = TRUE`,
-      [variantId, companyId]
-    );
+  // First check item_variants table (which has stock_quantity)
+  const variantResult = await sql`SELECT stock_quantity 
+     FROM item_variants 
+     WHERE id = ${variantId} AND company_id = ${companyId} AND is_active = TRUE`.execute(db);
 
-    if (variantRows.length === 0) {
-      return {
-        variant_id: variantId,
-        available: false,
-        requested_quantity: requestedQuantity,
-        available_quantity: 0
-      };
-    }
-
-    // Check if variant_id column exists in inventory_stock
-    let hasVariantIdColumn = false;
-    try {
-      const [cols] = await conn.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'inventory_stock' AND COLUMN_NAME = 'variant_id'`
-      );
-      hasVariantIdColumn = cols.length > 0;
-    } catch {
-      // Ignore - column doesn't exist
-    }
-
-    // Check inventory_stock for variant-specific stock (if exists)
-    let availableQuantity: number;
-    if (hasVariantIdColumn) {
-      const [stockRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT available_quantity 
-         FROM inventory_stock 
-         WHERE company_id = ? 
-           AND outlet_id = ? 
-           AND variant_id = ?
-         LIMIT 1`,
-        [companyId, outletId, variantId]
-      );
-      // Use variant stock if exists, otherwise fallback to item_variants.stock_quantity
-      availableQuantity = stockRows.length > 0
-        ? Number(stockRows[0].available_quantity)
-        : Number(variantRows[0].stock_quantity);
-    } else {
-      // No variant_id column - just use item_variants.stock_quantity
-      availableQuantity = Number(variantRows[0].stock_quantity);
-    }
-
+  if (variantResult.rows.length === 0) {
     return {
       variant_id: variantId,
-      available: availableQuantity >= requestedQuantity,
+      available: false,
       requested_quantity: requestedQuantity,
-      available_quantity: availableQuantity
+      available_quantity: 0
     };
-  } finally {
-    conn.release();
   }
+
+  const variantRow = variantResult.rows[0] as VariantRow;
+
+  // Check if variant_id column exists in inventory_stock
+  let hasVariantIdColumn = false;
+  try {
+    const colsResult = await sql`SELECT COLUMN_NAME FROM information_schema.COLUMNS 
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'inventory_stock' AND COLUMN_NAME = 'variant_id'`.execute(db);
+    hasVariantIdColumn = colsResult.rows.length > 0;
+  } catch {
+    // Ignore - column doesn't exist
+  }
+
+  // Check inventory_stock for variant-specific stock (if exists)
+  let availableQuantity: number;
+  if (hasVariantIdColumn) {
+    const stockResult = await sql`SELECT available_quantity 
+     FROM inventory_stock 
+     WHERE company_id = ${companyId} 
+       AND outlet_id = ${outletId} 
+       AND variant_id = ${variantId}
+     LIMIT 1`.execute(db);
+    // Use variant stock if exists, otherwise fallback to item_variants.stock_quantity
+    availableQuantity = stockResult.rows.length > 0
+      ? Number((stockResult.rows[0] as StockRow).available_quantity)
+      : Number(variantRow.stock_quantity);
+  } else {
+    // No variant_id column - just use item_variants.stock_quantity
+    availableQuantity = Number(variantRow.stock_quantity);
+  }
+
+  return {
+    variant_id: variantId,
+    available: availableQuantity >= requestedQuantity,
+    requested_quantity: requestedQuantity,
+    available_quantity: availableQuantity
+  };
 }
 
 /**
@@ -134,88 +136,61 @@ export async function reserveVariantStock(
   companyId: number,
   outletId: number,
   items: Array<{ variant_id: number; quantity: number }>,
-  referenceId: string,
-  connection?: PoolConnection
+  referenceId: string
 ): Promise<VariantStockReservationResult> {
-  const conflicts: Array<{ variant_id: number; requested: number; available: number }> = [];
+  const db = getDb();
 
-  // Reserve stock (decrement available_quantity in inventory_stock)
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
-
-  try {
-    if (!connection) {
-      await conn.beginTransaction();
-    }
+  return db.transaction().execute(async (trx) => {
+    const conflicts: Array<{ variant_id: number; requested: number; available: number }> = [];
 
     // For each item, atomically check availability and reserve in a single locked operation
     for (const item of items) {
       // First, get the variant info (needed for product_id later and for fallback stock)
-      const [variantRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT item_id, stock_quantity FROM item_variants 
-         WHERE id = ? AND company_id = ? AND is_active = TRUE`,
-        [item.variant_id, companyId]
-      );
+      const variantResult = await sql`SELECT item_id, stock_quantity FROM item_variants 
+       WHERE id = ${item.variant_id} AND company_id = ${companyId} AND is_active = TRUE`.execute(trx);
 
-      if (variantRows.length === 0) {
-        if (!connection) await conn.rollback();
+      if (variantResult.rows.length === 0) {
         return {
           success: false,
           conflicts: [{ variant_id: item.variant_id, requested: item.quantity, available: 0 }]
         };
       }
 
-      const itemId = Number(variantRows[0].item_id);
-      const baseStock = Number(variantRows[0].stock_quantity);
+      const variantRow = variantResult.rows[0] as VariantRow;
+      const itemId = Number(variantRow.item_id);
+      const baseStock = Number(variantRow.stock_quantity);
 
       // Try to update existing inventory_stock row with row lock
-      const [updateResult] = await conn.execute<ResultSetHeader>(
-        `UPDATE inventory_stock 
-         SET reserved_quantity = reserved_quantity + ?,
-             available_quantity = available_quantity - ?,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ?
-           AND outlet_id = ?
-           AND variant_id = ?
-           AND available_quantity >= ?`,
-        [
-          item.quantity,
-          item.quantity,
-          companyId,
-          outletId,
-          item.variant_id,
-          item.quantity
-        ]
-      );
+      const updateResult = await sql`UPDATE inventory_stock 
+       SET reserved_quantity = reserved_quantity + ${item.quantity},
+           available_quantity = available_quantity - ${item.quantity},
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ${companyId}
+         AND outlet_id = ${outletId}
+         AND variant_id = ${item.variant_id}
+         AND available_quantity >= ${item.quantity}`.execute(trx);
 
-      if (updateResult.affectedRows === 0) {
+      if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
         // No existing inventory_stock row or insufficient available
         // Need to handle the case where row doesn't exist yet
         // Lock the item_variants row to serialize concurrent first-time reservations
-        const [lockedVariantRows] = await conn.execute<RowDataPacket[]>(
-          `SELECT item_id, stock_quantity FROM item_variants 
-           WHERE id = ? AND company_id = ? AND is_active = TRUE
-           FOR UPDATE`,
-          [item.variant_id, companyId]
-        );
+        const lockedVariantResult = await sql`SELECT item_id, stock_quantity FROM item_variants 
+         WHERE id = ${item.variant_id} AND company_id = ${companyId} AND is_active = TRUE
+         FOR UPDATE`.execute(trx);
 
         // Re-check inventory_stock after acquiring lock
-        const [stockRows] = await conn.execute<RowDataPacket[]>(
-          `SELECT available_quantity 
-           FROM inventory_stock 
-           WHERE company_id = ?
-             AND outlet_id = ?
-             AND variant_id = ?
-           LIMIT 1
-           FOR UPDATE`,
-          [companyId, outletId, item.variant_id]
-        );
+        const stockResult = await sql`SELECT available_quantity 
+         FROM inventory_stock 
+         WHERE company_id = ${companyId}
+           AND outlet_id = ${outletId}
+           AND variant_id = ${item.variant_id}
+         LIMIT 1
+         FOR UPDATE`.execute(trx);
 
-        if (stockRows.length > 0) {
+        if (stockResult.rows.length > 0) {
           // Another transaction created the row after we released our lock
           // Re-attempt the reservation
-          const currentAvailable = Number(stockRows[0].available_quantity);
+          const currentAvailable = Number((stockResult.rows[0] as StockRow).available_quantity);
           if (currentAvailable < item.quantity) {
             conflicts.push({
               variant_id: item.variant_id,
@@ -225,18 +200,15 @@ export async function reserveVariantStock(
             continue;
           }
 
-          const [retryResult] = await conn.execute<ResultSetHeader>(
-            `UPDATE inventory_stock 
-             SET reserved_quantity = reserved_quantity + ?,
-                 available_quantity = available_quantity - ?,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE company_id = ?
-               AND outlet_id = ?
-               AND variant_id = ?`,
-            [item.quantity, item.quantity, companyId, outletId, item.variant_id]
-          );
+          const retryResult = await sql`UPDATE inventory_stock 
+           SET reserved_quantity = reserved_quantity + ${item.quantity},
+               available_quantity = available_quantity - ${item.quantity},
+               updated_at = CURRENT_TIMESTAMP
+           WHERE company_id = ${companyId}
+             AND outlet_id = ${outletId}
+             AND variant_id = ${item.variant_id}`.execute(trx);
 
-          if (retryResult.affectedRows === 0) {
+          if (!retryResult.numAffectedRows || retryResult.numAffectedRows === BigInt(0)) {
             conflicts.push({
               variant_id: item.variant_id,
               requested: item.quantity,
@@ -259,51 +231,33 @@ export async function reserveVariantStock(
 
           // This INSERT either creates a new row OR updates an existing one
           // The ON DUPLICATE KEY path should not happen since we just checked
-          await conn.execute(
-            `INSERT INTO inventory_stock (
-              company_id, outlet_id, product_id, variant_id,
-              quantity, reserved_quantity, available_quantity,
-              created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON DUPLICATE KEY UPDATE
-              quantity = VALUES(quantity),
-              reserved_quantity = VALUES(reserved_quantity),
-              available_quantity = VALUES(available_quantity),
-              updated_at = CURRENT_TIMESTAMP`,
-            [companyId, outletId, itemId, item.variant_id, baseStock, item.quantity, newAvailable]
-          );
+          await sql`INSERT INTO inventory_stock (
+            company_id, outlet_id, product_id, variant_id,
+            quantity, reserved_quantity, available_quantity,
+            created_at, updated_at
+          ) VALUES (${companyId}, ${outletId}, ${itemId}, ${item.variant_id}, ${baseStock}, ${item.quantity}, ${newAvailable}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON DUPLICATE KEY UPDATE
+            quantity = VALUES(quantity),
+            reserved_quantity = VALUES(reserved_quantity),
+            available_quantity = VALUES(available_quantity),
+            updated_at = CURRENT_TIMESTAMP`.execute(trx);
         }
       }
 
       // Record reservation in transactions
-      await conn.execute(
-        `INSERT INTO inventory_transactions (
-          company_id, outlet_id, product_id, transaction_type,
-          reference_type, reference_id, variant_id,
-          quantity_delta, created_at
-        ) VALUES (?, ?, ?, ?, 'RESERVATION', ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [companyId, outletId, itemId, 3, referenceId, item.variant_id, item.quantity]
-      );
+      await sql`INSERT INTO inventory_transactions (
+        company_id, outlet_id, product_id, transaction_type,
+        reference_type, reference_id, variant_id,
+        quantity_delta, created_at
+      ) VALUES (${companyId}, ${outletId}, ${itemId}, 3, 'RESERVATION', ${referenceId}, ${item.variant_id}, ${item.quantity}, CURRENT_TIMESTAMP)`.execute(trx);
     }
 
     if (conflicts.length > 0) {
-      if (!connection) await conn.rollback();
       return { success: false, conflicts };
     }
 
-    if (!connection) {
-      await conn.commit();
-    }
-
     return { success: true };
-  } catch (error) {
-    if (!connection) await conn.rollback();
-    throw error;
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
-  }
+  });
 }
 
 /**
@@ -313,72 +267,38 @@ export async function releaseVariantStock(
   companyId: number,
   outletId: number,
   items: Array<{ variant_id: number; quantity: number }>,
-  referenceId: string,
-  connection?: PoolConnection
+  referenceId: string
 ): Promise<boolean> {
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const db = getDb();
 
-  try {
-    if (!connection) {
-      await conn.beginTransaction();
-    }
-
+  return db.transaction().execute(async (trx) => {
     for (const item of items) {
       // Release reserved stock
-      const [updateResult] = await conn.execute<ResultSetHeader>(
-        `UPDATE inventory_stock 
-         SET reserved_quantity = reserved_quantity - ?,
-             available_quantity = available_quantity + ?,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ?
-           AND outlet_id = ?
-           AND variant_id = ?
-           AND reserved_quantity >= ?`,
-        [
-          item.quantity,
-          item.quantity,
-          companyId,
-          outletId,
-          item.variant_id,
-          item.quantity
-        ]
-      );
+      const updateResult = await sql`UPDATE inventory_stock 
+       SET reserved_quantity = reserved_quantity - ${item.quantity},
+           available_quantity = available_quantity + ${item.quantity},
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ${companyId}
+         AND outlet_id = ${outletId}
+         AND variant_id = ${item.variant_id}
+         AND reserved_quantity >= ${item.quantity}`.execute(trx);
 
-      if (updateResult.affectedRows > 0) {
+      if (updateResult.numAffectedRows && updateResult.numAffectedRows > BigInt(0)) {
         // Get product_id from variant for the transaction record
-        const [variantRows] = await conn.execute<RowDataPacket[]>(
-          `SELECT item_id FROM item_variants WHERE id = ? AND company_id = ?`,
-          [item.variant_id, companyId]
-        );
-        const productId = variantRows[0]?.item_id ?? null;
+        const variantResult = await sql`SELECT item_id FROM item_variants WHERE id = ${item.variant_id} AND company_id = ${companyId}`.execute(trx);
+        const productId = (variantResult.rows[0] as VariantRow | undefined)?.item_id ?? null;
 
         // Record release transaction
-        await conn.execute(
-          `INSERT INTO inventory_transactions (
-            company_id, outlet_id, product_id, transaction_type,
-            reference_type, reference_id, variant_id,
-            quantity_delta, created_at
-          ) VALUES (?, ?, ?, ?, 'RELEASE', ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [companyId, outletId, productId, 4, referenceId, item.variant_id, -item.quantity]
-        );
+        await sql`INSERT INTO inventory_transactions (
+          company_id, outlet_id, product_id, transaction_type,
+          reference_type, reference_id, variant_id,
+          quantity_delta, created_at
+        ) VALUES (${companyId}, ${outletId}, ${productId}, 4, 'RELEASE', ${referenceId}, ${item.variant_id}, ${-item.quantity}, CURRENT_TIMESTAMP)`.execute(trx);
       }
     }
 
-    if (!connection) {
-      await conn.commit();
-    }
-
     return true;
-  } catch (error) {
-    if (!connection) await conn.rollback();
-    throw error;
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
-  }
+  });
 }
 
 /**
@@ -388,55 +308,44 @@ export async function deductVariantStock(
   companyId: number,
   outletId: number,
   items: Array<{ variant_id: number; quantity: number }>,
-  referenceId: string,
-  connection?: PoolConnection
+  referenceId: string
 ): Promise<boolean> {
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const db = getDb();
 
-  try {
-    if (!connection) {
-      await conn.beginTransaction();
-    }
-
+  return db.transaction().execute(async (trx) => {
     for (const item of items) {
       // First get current stock from inventory_stock
-      const [stockRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT quantity, available_quantity 
-         FROM inventory_stock 
-         WHERE company_id = ?
-           AND outlet_id = ?
-           AND variant_id = ?
-         LIMIT 1
-         FOR UPDATE`,
-        [companyId, outletId, item.variant_id]
-      );
+      const stockResult = await sql`SELECT quantity, available_quantity 
+       FROM inventory_stock 
+       WHERE company_id = ${companyId}
+         AND outlet_id = ${outletId}
+         AND variant_id = ${item.variant_id}
+       LIMIT 1
+       FOR UPDATE`.execute(trx);
 
       let currentQty = 0;
       let currentAvailable = 0;
       let useInventoryStock = false;
 
-      if (stockRows.length > 0) {
+      if (stockResult.rows.length > 0) {
         // Use inventory_stock record
-        currentQty = Number(stockRows[0].quantity);
-        currentAvailable = Number(stockRows[0].available_quantity);
+        const stockRow = stockResult.rows[0] as { quantity: number; available_quantity: number };
+        currentQty = Number(stockRow.quantity);
+        currentAvailable = Number(stockRow.available_quantity);
         useInventoryStock = true;
       } else {
         // Fall back to item_variants.stock_quantity
-        const [variantRows] = await conn.execute<RowDataPacket[]>(
-          `SELECT stock_quantity, item_id 
-           FROM item_variants 
-           WHERE id = ? AND company_id = ?
-           FOR UPDATE`,
-          [item.variant_id, companyId]
-        );
+        const variantResult = await sql`SELECT stock_quantity, item_id 
+         FROM item_variants 
+         WHERE id = ${item.variant_id} AND company_id = ${companyId}
+         FOR UPDATE`.execute(trx);
 
-        if (variantRows.length === 0) {
+        if (variantResult.rows.length === 0) {
           throw new Error(`Variant ${item.variant_id} not found`);
         }
 
-        currentQty = Number(variantRows[0].stock_quantity);
+        const variantRow = variantResult.rows[0] as VariantRow;
+        currentQty = Number(variantRow.stock_quantity);
         currentAvailable = currentQty;
       }
 
@@ -449,78 +358,46 @@ export async function deductVariantStock(
 
       if (useInventoryStock) {
         // Update existing inventory_stock record
-        await conn.execute(
-          `UPDATE inventory_stock 
-           SET quantity = ?,
-               available_quantity = ?,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE company_id = ?
-             AND outlet_id = ?
-             AND variant_id = ?`,
-          [newQty, newAvailable, companyId, outletId, item.variant_id]
-        );
+        await sql`UPDATE inventory_stock 
+         SET quantity = ${newQty},
+             available_quantity = ${newAvailable},
+             updated_at = CURRENT_TIMESTAMP
+         WHERE company_id = ${companyId}
+           AND outlet_id = ${outletId}
+           AND variant_id = ${item.variant_id}`.execute(trx);
 
         // Also update item_variants.stock_quantity to keep sources in sync
-        await conn.execute(
-          `UPDATE item_variants SET stock_quantity = ? WHERE id = ? AND company_id = ?`,
-          [newQty, item.variant_id, companyId]
-        );
+        await sql`UPDATE item_variants SET stock_quantity = ${newQty} WHERE id = ${item.variant_id} AND company_id = ${companyId}`.execute(trx);
       } else {
         // Get item_id for the insert
-        const [variantRows] = await conn.execute<RowDataPacket[]>(
-          `SELECT item_id FROM item_variants WHERE id = ? AND company_id = ?`,
-          [item.variant_id, companyId]
-        );
-        const itemId = Number(variantRows[0].item_id);
+        const variantResult = await sql`SELECT item_id FROM item_variants WHERE id = ${item.variant_id} AND company_id = ${companyId}`.execute(trx);
+        const itemId = Number((variantResult.rows[0] as VariantRow).item_id);
 
         // Create new record with deducted stock (with item_id as product_id)
-        await conn.execute(
-          `INSERT INTO inventory_stock (
-            company_id, outlet_id, product_id, variant_id,
-            quantity, reserved_quantity, available_quantity,
-            created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-          [companyId, outletId, itemId, item.variant_id, newQty, newAvailable]
-        );
+        await sql`INSERT INTO inventory_stock (
+          company_id, outlet_id, product_id, variant_id,
+          quantity, reserved_quantity, available_quantity,
+          created_at, updated_at
+        ) VALUES (${companyId}, ${outletId}, ${itemId}, ${item.variant_id}, ${newQty}, 0, ${newAvailable}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`.execute(trx);
 
         // Also update item_variants.stock_quantity
-        await conn.execute(
-          `UPDATE item_variants SET stock_quantity = ? WHERE id = ? AND company_id = ?`,
-          [newQty, item.variant_id, companyId]
-        );
+        await sql`UPDATE item_variants SET stock_quantity = ${newQty} WHERE id = ${item.variant_id} AND company_id = ${companyId}`.execute(trx);
       }
 
       // Get product_id from variant for the transaction record
-      const [variantRows2] = await conn.execute<RowDataPacket[]>(
-        `SELECT item_id FROM item_variants WHERE id = ? AND company_id = ?`,
-        [item.variant_id, companyId]
-      );
-      const productId2 = variantRows2[0]?.item_id ?? null;
+      const variantResult2 = await sql`SELECT item_id FROM item_variants WHERE id = ${item.variant_id} AND company_id = ${companyId}`.execute(trx);
+      const productId2 = (variantResult2.rows[0] as VariantRow | undefined)?.item_id ?? null;
 
       // Record sale transaction
-      await conn.execute(
-        `INSERT INTO inventory_transactions (
-          company_id, outlet_id, product_id, transaction_type,
-          reference_type, reference_id, variant_id,
-          quantity_delta, created_at
-        ) VALUES (?, ?, ?, ?, 'SALE', ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [companyId, outletId, productId2, 1, referenceId, item.variant_id, -item.quantity]
-      );
-    }
-
-    if (!connection) {
-      await conn.commit();
+      await sql`INSERT INTO inventory_transactions (
+        company_id, outlet_id, product_id, transaction_type,
+        reference_type, reference_id, variant_id,
+        quantity_delta, created_at
+      ) VALUES (${companyId}, ${outletId}, ${productId2}, 1, 'SALE', ${referenceId}, ${item.variant_id}, ${-item.quantity}, CURRENT_TIMESTAMP)`.execute(trx);
     }
 
     return true;
-  } catch (error) {
-    if (!connection) await conn.rollback();
-    throw error;
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
-  }
+  });
 }
 
 /**
@@ -533,52 +410,49 @@ export interface VariantStockLevel {
   available_quantity: number;
 }
 
+interface StockLevelRow {
+  quantity: number;
+  reserved_quantity: number;
+  available_quantity: number;
+}
+
 export async function getVariantStockLevel(
   companyId: number,
   outletId: number,
   variantId: number
 ): Promise<VariantStockLevel | null> {
-  const dbPool = getDbPool();
-  const conn = await dbPool.getConnection();
+  const db = getDb();
 
-  try {
-    // First check inventory_stock
-    const [stockRows] = await conn.execute<RowDataPacket[]>(
-      `SELECT quantity, reserved_quantity, available_quantity 
-       FROM inventory_stock 
-       WHERE company_id = ? AND outlet_id = ? AND variant_id = ?
-       LIMIT 1`,
-      [companyId, outletId, variantId]
-    );
+  // First check inventory_stock
+  const stockResult = await sql`SELECT quantity, reserved_quantity, available_quantity 
+     FROM inventory_stock 
+     WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND variant_id = ${variantId}
+     LIMIT 1`.execute(db);
 
-    if (stockRows.length > 0) {
-      return {
-        variant_id: variantId,
-        quantity: Number(stockRows[0].quantity),
-        reserved_quantity: Number(stockRows[0].reserved_quantity),
-        available_quantity: Number(stockRows[0].available_quantity)
-      };
-    }
-
-    // Fall back to item_variants.stock_quantity
-    const [variantRows] = await conn.execute<RowDataPacket[]>(
-      `SELECT stock_quantity FROM item_variants WHERE id = ? AND company_id = ?`,
-      [variantId, companyId]
-    );
-
-    if (variantRows.length === 0) {
-      return null;
-    }
-
+  if (stockResult.rows.length > 0) {
+    const row = stockResult.rows[0] as StockLevelRow;
     return {
       variant_id: variantId,
-      quantity: Number(variantRows[0].stock_quantity),
-      reserved_quantity: 0,
-      available_quantity: Number(variantRows[0].stock_quantity)
+      quantity: Number(row.quantity),
+      reserved_quantity: Number(row.reserved_quantity),
+      available_quantity: Number(row.available_quantity)
     };
-  } finally {
-    conn.release();
   }
+
+  // Fall back to item_variants.stock_quantity
+  const variantResult = await sql`SELECT stock_quantity FROM item_variants WHERE id = ${variantId} AND company_id = ${companyId}`.execute(db);
+
+  if (variantResult.rows.length === 0) {
+    return null;
+  }
+
+  const variantRow = variantResult.rows[0] as VariantRow;
+  return {
+    variant_id: variantId,
+    quantity: Number(variantRow.stock_quantity),
+    reserved_quantity: 0,
+    available_quantity: Number(variantRow.stock_quantity)
+  };
 }
 
 /**
@@ -595,84 +469,90 @@ export interface AggregatedStockLevel {
   }>;
 }
 
+interface AggregatedBaseRow {
+  quantity: number | null;
+  available_quantity: number | null;
+}
+
+interface AggregatedVariantRow {
+  variant_id: number;
+  quantity: number;
+  available_quantity: number;
+  variant_base_stock: number;
+}
+
+interface VariantWithoutStockRow {
+  variant_id: number;
+  stock_quantity: number;
+}
+
 export async function getAggregatedItemStock(
   companyId: number,
   outletId: number,
   itemId: number
 ): Promise<AggregatedStockLevel> {
-  const dbPool = getDbPool();
-  const conn = await dbPool.getConnection();
+  const db = getDb();
 
-  try {
-    // Get item's base stock from inventory_stock (no variant_id)
-    const [baseStockRows] = await conn.execute<RowDataPacket[]>(
-      `SELECT quantity, available_quantity 
-       FROM inventory_stock 
-       WHERE company_id = ? AND outlet_id = ? AND product_id = ? AND variant_id IS NULL
-       LIMIT 1`,
-      [companyId, outletId, itemId]
-    );
+  // Get item's base stock from inventory_stock (no variant_id)
+  const baseStockResult = await sql`SELECT quantity, available_quantity 
+     FROM inventory_stock 
+     WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND product_id = ${itemId} AND variant_id IS NULL
+     LIMIT 1`.execute(db);
 
-    let baseQty = 0;
-    let baseAvailable = 0;
-    if (baseStockRows.length > 0) {
-      baseQty = Number(baseStockRows[0].quantity);
-      baseAvailable = Number(baseStockRows[0].available_quantity);
-    }
-
-    // Get all variant stocks for this item
-    const [variantStockRows] = await conn.execute<RowDataPacket[]>(
-      `SELECT s.variant_id, s.quantity, s.available_quantity, v.stock_quantity as variant_base_stock
-       FROM inventory_stock s
-       INNER JOIN item_variants v ON v.id = s.variant_id AND v.company_id = s.company_id
-       WHERE s.company_id = ? AND s.outlet_id = ? AND v.item_id = ? AND s.variant_id IS NOT NULL`,
-      [companyId, outletId, itemId]
-    );
-
-    // Get variants that don't have inventory_stock records but have stock in item_variants
-    const [variantsWithoutStock] = await conn.execute<RowDataPacket[]>(
-      `SELECT v.id as variant_id, v.stock_quantity
-       FROM item_variants v
-       WHERE v.company_id = ? AND v.item_id = ? AND v.is_active = TRUE
-         AND NOT EXISTS (
-           SELECT 1 FROM inventory_stock s 
-           WHERE s.company_id = v.company_id AND s.variant_id = v.id AND s.outlet_id = ?
-         )`,
-      [companyId, itemId, outletId]
-    );
-
-    const variants: Array<{ variant_id: number; quantity: number; available: number }> = [];
-
-    // Process variants with inventory_stock records
-    for (const row of variantStockRows) {
-      variants.push({
-        variant_id: Number(row.variant_id),
-        quantity: Number(row.quantity),
-        available: Number(row.available_quantity)
-      });
-    }
-
-    // Process variants without inventory_stock but with stock in item_variants
-    for (const row of variantsWithoutStock) {
-      const qty = Number(row.stock_quantity);
-      variants.push({
-        variant_id: Number(row.variant_id),
-        quantity: qty,
-        available: qty
-      });
-    }
-
-    // Calculate totals
-    const variantTotalQty = variants.reduce((sum, v) => sum + v.quantity, 0);
-    const variantTotalAvailable = variants.reduce((sum, v) => sum + v.available, 0);
-
-    return {
-      item_id: itemId,
-      total_quantity: baseQty + variantTotalQty,
-      total_available: baseAvailable + variantTotalAvailable,
-      variants
-    };
-  } finally {
-    conn.release();
+  let baseQty = 0;
+  let baseAvailable = 0;
+  if (baseStockResult.rows.length > 0) {
+    const row = baseStockResult.rows[0] as AggregatedBaseRow;
+    baseQty = Number(row.quantity);
+    baseAvailable = Number(row.available_quantity);
   }
+
+  // Get all variant stocks for this item
+  const variantStockResult = await sql`SELECT s.variant_id, s.quantity, s.available_quantity, v.stock_quantity as variant_base_stock
+     FROM inventory_stock s
+     INNER JOIN item_variants v ON v.id = s.variant_id AND v.company_id = s.company_id
+     WHERE s.company_id = ${companyId} AND s.outlet_id = ${outletId} AND v.item_id = ${itemId} AND s.variant_id IS NOT NULL`.execute(db);
+
+  // Get variants that don't have inventory_stock records but have stock in item_variants
+  const variantsWithoutStockResult = await sql`SELECT v.id as variant_id, v.stock_quantity
+     FROM item_variants v
+     WHERE v.company_id = ${companyId} AND v.item_id = ${itemId} AND v.is_active = TRUE
+       AND NOT EXISTS (
+         SELECT 1 FROM inventory_stock s 
+         WHERE s.company_id = v.company_id AND s.variant_id = v.id AND s.outlet_id = ${outletId}
+       )`.execute(db);
+
+  const variants: Array<{ variant_id: number; quantity: number; available: number }> = [];
+
+  // Process variants with inventory_stock records
+  for (const row of variantStockResult.rows) {
+    const r = row as AggregatedVariantRow;
+    variants.push({
+      variant_id: Number(r.variant_id),
+      quantity: Number(r.quantity),
+      available: Number(r.available_quantity)
+    });
+  }
+
+  // Process variants without inventory_stock but with stock in item_variants
+  for (const row of variantsWithoutStockResult.rows) {
+    const r = row as VariantWithoutStockRow;
+    const qty = Number(r.stock_quantity);
+    variants.push({
+      variant_id: Number(r.variant_id),
+      quantity: qty,
+      available: qty
+    });
+  }
+
+  // Calculate totals
+  const variantTotalQty = variants.reduce((sum, v) => sum + v.quantity, 0);
+  const variantTotalAvailable = variants.reduce((sum, v) => sum + v.available, 0);
+
+  return {
+    item_id: itemId,
+    total_quantity: baseQty + variantTotalQty,
+    total_available: baseAvailable + variantTotalAvailable,
+    variants
+  };
 }

@@ -14,8 +14,7 @@
  */
 
 import { Hono } from "hono";
-import { getDbPool } from "../lib/db.js";
-import { getSyncMetricsSnapshot, getImportMetricsSnapshot, getExportMetricsSnapshot } from "../lib/metrics/health.js";
+import { checkDatabaseHealth, getSyncMetricsSnapshot, getImportMetricsSnapshot, getExportMetricsSnapshot } from "../lib/metrics/health.js";
 
 const healthRoutes = new Hono();
 
@@ -95,46 +94,6 @@ healthRoutes.get("/", async (c) => {
   const statusCode = response.status === "unhealthy" ? 503 : 200;
   return c.json(response, statusCode);
 });
-
-/**
- * Check database connection pool health
- */
-async function checkDatabaseHealth(): Promise<SubsystemStatus> {
-  const startTime = Date.now();
-  const pool = getDbPool();
-
-  try {
-    // Get pool stats
-    const poolStats = pool.pool;
-    
-    // Try a simple query to verify connectivity
-    const connection = await pool.getConnection();
-    try {
-      await connection.ping();
-    } finally {
-      connection.release();
-    }
-
-    const latencyMs = Date.now() - startTime;
-
-    // Check if pool is healthy based on connection usage
-    // Note: mysql2 doesn't expose exact pool stats the same way, 
-    // but we can check if we can get a connection
-    return {
-      status: "healthy",
-      latencyMs,
-      details: {
-        poolStatus: "active",
-      },
-    };
-  } catch (error) {
-    return {
-      status: "unhealthy",
-      latencyMs: Date.now() - startTime,
-      message: error instanceof Error ? error.message : "Database connection failed",
-    };
-  }
-}
 
 /**
  * Liveness probe - simple check that server is running

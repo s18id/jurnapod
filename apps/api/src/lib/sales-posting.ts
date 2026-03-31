@@ -8,11 +8,12 @@ import {
   accountMappingIdToCode,
   type AccountMappingCode
 } from "@jurnapod/shared";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { getDb, type KyselySchema } from "./db";
+import { sql } from "kysely";
 import { toMysqlDateTime, toMysqlDateTimeFromDateLike } from "./date-helpers";
 import type { SalesInvoiceDetail, SalesPayment } from "./sales";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
+import type { QueryExecutor } from "@/lib/shared/common-utils";
 
 const SALES_INVOICE_DOC_TYPE = "SALES_INVOICE";
 const SALES_PAYMENT_IN_DOC_TYPE = "SALES_PAYMENT_IN";
@@ -25,10 +26,6 @@ export const OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE = "OUTLET_ACCOUNT_MAPPING_MI
 export const OUTLET_PAYMENT_MAPPING_MISSING_MESSAGE = "OUTLET_PAYMENT_MAPPING_MISSING";
 export const TAX_ACCOUNT_MISSING_MESSAGE = "TAX_ACCOUNT_MISSING";
 export const UNSUPPORTED_PAYMENT_METHOD_MESSAGE = "UNSUPPORTED_PAYMENT_METHOD";
-
-type QueryExecutor = {
-  execute: PoolConnection["execute"];
-};
 
 const MONEY_SCALE = 100;
 
@@ -69,7 +66,7 @@ function resolveMappingCode(row: { mapping_type_id?: number | null; mapping_key?
 }
 
 async function readOutletAccountMappingByKey(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   outletId: number
 ): Promise<OutletAccountMapping> {
@@ -77,17 +74,14 @@ async function readOutletAccountMappingByKey(
   const requiredTypeIds = requiredKeys.map((key) => ACCOUNT_MAPPING_TYPE_ID_BY_CODE[key]);
   const idPlaceholders = requiredTypeIds.map(() => "?").join(", ");
   const keyPlaceholders = requiredKeys.map(() => "?").join(", ");
-  const [rows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_type_id, mapping_key, account_id
+  const rows = await sql`SELECT mapping_type_id, mapping_key, account_id
      FROM outlet_account_mappings
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND (mapping_type_id IN (${idPlaceholders}) OR mapping_key IN (${keyPlaceholders}))`,
-    [companyId, outletId, ...requiredTypeIds, ...requiredKeys]
-  );
+     WHERE company_id = ${companyId}
+       AND outlet_id = ${outletId}
+       AND (mapping_type_id IN (${sql.raw(idPlaceholders)}, ${sql.join(requiredTypeIds.map(id => sql`${id}`), sql`, `)}) OR mapping_key IN (${sql.join(requiredKeys.map(k => sql`${k}`), sql`, `)}))`.execute(db);
 
   const accountByKey = new Map<string, number>();
-  for (const row of rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+  for (const row of rows.rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
     const mappingCode = resolveMappingCode(row);
     if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
@@ -100,15 +94,12 @@ async function readOutletAccountMappingByKey(
     accountByKey.set(mappingCode, Number(row.account_id));
   }
 
-  const [companyRows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_type_id, mapping_key, account_id
+  const companyRows = await sql`SELECT mapping_type_id, mapping_key, account_id
      FROM company_account_mappings
-     WHERE company_id = ?
-       AND (mapping_type_id IN (${idPlaceholders}) OR mapping_key IN (${keyPlaceholders}))`,
-    [companyId, ...requiredTypeIds, ...requiredKeys]
-  );
+     WHERE company_id = ${companyId}
+       AND (mapping_type_id IN (${sql.join(requiredTypeIds.map(id => sql`${id}`), sql`, `)}) OR mapping_key IN (${sql.join(requiredKeys.map(k => sql`${k}`), sql`, `)}))`.execute(db);
 
-  for (const row of companyRows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+  for (const row of companyRows.rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
     const mappingCode = resolveMappingCode(row);
     if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
@@ -136,21 +127,18 @@ async function readOutletAccountMappingByKey(
 }
 
 async function readCreditNoteAccountMapping(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   outletId: number
 ): Promise<{ AR: number; SALES_RETURNS: number }> {
-  const [rows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_type_id, mapping_key, account_id
+  const rows = await sql`SELECT mapping_type_id, mapping_key, account_id
      FROM outlet_account_mappings
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND (mapping_type_id IN (?, ?, ?) OR mapping_key IN ('AR', 'SALES_RETURNS', 'SALES_REVENUE'))`,
-    [companyId, outletId, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.AR, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_RETURNS, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_REVENUE]
-  );
+     WHERE company_id = ${companyId}
+       AND outlet_id = ${outletId}
+       AND (mapping_type_id IN (${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.AR}, ${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_RETURNS}, ${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_REVENUE}) OR mapping_key IN ('AR', 'SALES_RETURNS', 'SALES_REVENUE'))`.execute(db);
 
   const accountByKey = new Map<string, number>();
-  for (const row of rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+  for (const row of rows.rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
     const mappingCode = resolveMappingCode(row);
     if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
@@ -158,15 +146,12 @@ async function readCreditNoteAccountMapping(
     accountByKey.set(mappingCode, Number(row.account_id));
   }
 
-  const [companyRows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_type_id, mapping_key, account_id
+  const companyRows = await sql`SELECT mapping_type_id, mapping_key, account_id
      FROM company_account_mappings
-     WHERE company_id = ?
-       AND (mapping_type_id IN (?, ?, ?) OR mapping_key IN ('AR', 'SALES_RETURNS', 'SALES_REVENUE'))`,
-    [companyId, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.AR, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_RETURNS, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_REVENUE]
-  );
+     WHERE company_id = ${companyId}
+       AND (mapping_type_id IN (${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.AR}, ${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_RETURNS}, ${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_REVENUE}) OR mapping_key IN ('AR', 'SALES_RETURNS', 'SALES_REVENUE'))`.execute(db);
 
-  for (const row of companyRows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+  for (const row of companyRows.rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
     const mappingCode = resolveMappingCode(row);
     if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
@@ -193,20 +178,17 @@ async function readCreditNoteAccountMapping(
 }
 
 async function readOutletPaymentMethodMappings(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   outletId: number
 ): Promise<Map<string, number>> {
-  const [rows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT method_code, account_id
+  const result = await sql`SELECT method_code, account_id
      FROM outlet_payment_method_mappings
-     WHERE company_id = ?
-       AND outlet_id = ?`,
-    [companyId, outletId]
-  );
+     WHERE company_id = ${companyId}
+       AND outlet_id = ${outletId}`.execute(db);
 
   const accountByMethod = new Map<string, number>();
-  for (const row of rows as Array<{ method_code?: string; account_id?: number }>) {
+  for (const row of result.rows as Array<{ method_code?: string; account_id?: number }>) {
     if (!row.method_code || !Number.isFinite(row.account_id)) {
       continue;
     }
@@ -216,18 +198,13 @@ async function readOutletPaymentMethodMappings(
 
   const fallbackKeys = ["CASH", "QRIS", "CARD"];
   const fallbackTypeIds = fallbackKeys.map((key) => ACCOUNT_MAPPING_TYPE_ID_BY_CODE[key as keyof typeof ACCOUNT_MAPPING_TYPE_ID_BY_CODE]);
-  const placeholders = fallbackKeys.map(() => "?").join(", ");
-  const typePlaceholders = fallbackTypeIds.map(() => "?").join(", ");
-  const [fallbackRows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_type_id, mapping_key, account_id
+  const fallbackResult = await sql`SELECT mapping_type_id, mapping_key, account_id
      FROM outlet_account_mappings
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND (mapping_type_id IN (${typePlaceholders}) OR mapping_key IN (${placeholders}))`,
-    [companyId, outletId, ...fallbackTypeIds, ...fallbackKeys]
-  );
+     WHERE company_id = ${companyId}
+       AND outlet_id = ${outletId}
+       AND (mapping_type_id IN (${sql.join(fallbackTypeIds.map(id => sql`${id}`), sql`, `)}) OR mapping_key IN (${sql.join(fallbackKeys.map(k => sql`${k}`), sql`, `)}))`.execute(db);
 
-  for (const row of fallbackRows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+  for (const row of fallbackResult.rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
     const mappingCode = resolveMappingCode(row);
     if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
@@ -238,14 +215,11 @@ async function readOutletPaymentMethodMappings(
     }
   }
 
-  const [companyRows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT method_code, account_id
+  const companyResult = await sql`SELECT method_code, account_id
      FROM company_payment_method_mappings
-     WHERE company_id = ?`,
-    [companyId]
-  );
+     WHERE company_id = ${companyId}`.execute(db);
 
-  for (const row of companyRows as Array<{ method_code?: string; account_id?: number }>) {
+  for (const row of companyResult.rows as Array<{ method_code?: string; account_id?: number }>) {
     if (!row.method_code || !Number.isFinite(row.account_id)) {
       continue;
     }
@@ -269,21 +243,18 @@ export class PaymentVarianceConfigError extends Error {
 }
 
 async function readCompanyPaymentVarianceAccounts(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   companyId: number
 ): Promise<{ gain: number | null; loss: number | null }> {
-  const [rows] = await dbExecutor.execute<RowDataPacket[]>(
-    `SELECT mapping_type_id, mapping_key, account_id
+  const result = await sql`SELECT mapping_type_id, mapping_key, account_id
      FROM company_account_mappings
-     WHERE company_id = ?
-       AND (mapping_type_id IN (?, ?) OR mapping_key IN ('PAYMENT_VARIANCE_GAIN', 'PAYMENT_VARIANCE_LOSS'))`,
-    [companyId, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_GAIN, ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_LOSS]
-  );
+     WHERE company_id = ${companyId}
+       AND (mapping_type_id IN (${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_GAIN}, ${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_LOSS}) OR mapping_key IN ('PAYMENT_VARIANCE_GAIN', 'PAYMENT_VARIANCE_LOSS'))`.execute(db);
 
   let gain: number | null = null;
   let loss: number | null = null;
 
-  for (const row of rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+  for (const row of result.rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
     const mappingCode = resolveMappingCode(row);
     if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
@@ -342,16 +313,12 @@ class SalesInvoicePostingMapper implements PostingMapper {
     if (this.invoice.taxes && this.invoice.taxes.length > 0) {
       const taxRateIds = this.invoice.taxes.map(t => t.tax_rate_id);
       if (taxRateIds.length > 0) {
-        const placeholders = taxRateIds.map(() => "?").join(", ");
-        const [taxRows] = await this.dbExecutor.execute<RowDataPacket[]>(
-          `SELECT tr.id, tr.code, tr.account_id
+        const taxResult = await sql`SELECT tr.id, tr.code, tr.account_id
            FROM tax_rates tr
-           WHERE tr.id IN (${placeholders}) AND tr.company_id = ?`,
-          [...taxRateIds, this.invoice.company_id]
-        );
+           WHERE tr.id IN (${sql.join(taxRateIds.map(id => sql`${id}`), sql`, `)}) AND tr.company_id = ${this.invoice.company_id}`.execute(this.dbExecutor);
         
         const taxRateAccountMap = new Map<number, { code: string; account_id: number | null }>();
-        for (const row of taxRows as Array<{ id: number; code: string; account_id: number | null }>) {
+        for (const row of taxResult.rows as Array<{ id: number; code: string; account_id: number | null }>) {
           taxRateAccountMap.set(Number(row.id), {
             code: String(row.code),
             account_id: row.account_id
@@ -492,37 +459,23 @@ class SalesPostingRepository implements PostingRepository {
   }
 
   async createJournalBatch(request: PostingRequest): Promise<{ journal_batch_id: number }> {
-    const [insertResult] = await this.dbExecutor.execute<ResultSetHeader>(
-      `INSERT INTO journal_batches (
+    const result = await sql`INSERT INTO journal_batches (
          company_id,
          outlet_id,
          doc_type,
          doc_id,
          posted_at
-       ) VALUES (?, ?, ?, ?, ?)`,
-      [request.company_id, request.outlet_id ?? null, request.doc_type, request.doc_id, this.postedAt]
-    );
+       ) VALUES (${request.company_id}, ${request.outlet_id ?? null}, ${request.doc_type}, ${request.doc_id}, ${this.postedAt})`.execute(this.dbExecutor);
 
     return {
-      journal_batch_id: Number(insertResult.insertId)
+      journal_batch_id: Number(result.insertId)
     };
   }
 
   async insertJournalLines(journalBatchId: number, request: PostingRequest, lines: JournalLine[]): Promise<void> {
-    const placeholders = lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-    const values = lines.flatMap((line) => [
-      journalBatchId,
-      request.company_id,
-      request.outlet_id ?? null,
-      line.account_id,
-      this.lineDate,
-      line.debit,
-      line.credit,
-      line.description
-    ]);
+    if (lines.length === 0) return;
 
-    await this.dbExecutor.execute(
-      `INSERT INTO journal_lines (
+    await sql`INSERT INTO journal_lines (
          journal_batch_id,
          company_id,
          outlet_id,
@@ -531,9 +484,7 @@ class SalesPostingRepository implements PostingRepository {
          debit,
          credit,
          description
-       ) VALUES ${placeholders}`,
-      values
-    );
+       ) VALUES ${sql.join(lines.map(line => sql`(${journalBatchId}, ${request.company_id}, ${request.outlet_id ?? null}, ${line.account_id}, ${this.lineDate}, ${line.debit}, ${line.credit}, ${line.description})`), sql`, `)}`.execute(this.dbExecutor);
   }
 }
 

@@ -15,8 +15,8 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../lib/db";
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
+import { closeDbPool, getDb } from "../lib/db";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
@@ -25,29 +25,26 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Inventory Routes", { concurrency: false }, () => {
-  let connection: PoolConnection;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    const db = getDb();
 
-    // Find test user fixture
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       INNER JOIN user_outlets uo ON uo.user_id = u.id
-       INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE c.code = ?
-         AND u.email = ?
-         AND u.is_active = 1
-         AND o.code = ?
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL, TEST_OUTLET_CODE]
-    );
+    // Find test user fixture using Kysely query builder
+    const userRows = await db
+      .selectFrom("users as u")
+      .innerJoin("companies as c", "c.id", "u.company_id")
+      .innerJoin("user_outlets as uo", "uo.user_id", "u.id")
+      .innerJoin("outlets as o", "o.id", "uo.outlet_id")
+      .where("c.code", "=", TEST_COMPANY_CODE)
+      .where("u.email", "=", TEST_OWNER_EMAIL)
+      .where("u.is_active", "=", 1)
+      .where("o.code", "=", TEST_OUTLET_CODE)
+      .select(["u.id as user_id", "u.company_id", "o.id as outlet_id"])
+      .limit(1)
+      .execute();
 
     assert.ok(
       userRows.length > 0,
@@ -59,7 +56,6 @@ describe("Inventory Routes", { concurrency: false }, () => {
   });
 
   after(async () => {
-    connection.release();
     await closeDbPool();
   });
 
@@ -69,12 +65,13 @@ describe("Inventory Routes", { concurrency: false }, () => {
 
   describe("Item Data Structure", () => {
     test("items table exists with required columns", async () => {
-      const [columns] = await connection.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'items'`
-      );
+      const db = getDb();
+      const result = await sql<{ COLUMN_NAME: string }>`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'items'
+      `.execute(db);
 
-      const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+      const columnNames = result.rows.map(r => r.COLUMN_NAME);
       assert.ok(columnNames.includes("id"), "Should have id column");
       assert.ok(columnNames.includes("company_id"), "Should have company_id column");
       assert.ok(columnNames.includes("name"), "Should have name column");
@@ -82,13 +79,13 @@ describe("Inventory Routes", { concurrency: false }, () => {
     });
 
     test("returns items for company", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id, name, is_active 
-         FROM items 
-         WHERE company_id = ? 
-         LIMIT 10`,
-        [testCompanyId]
-      );
+      const db = getDb();
+      const rows = await db
+        .selectFrom("items")
+        .where("company_id", "=", testCompanyId)
+        .select(["id", "name", "is_active"])
+        .limit(10)
+        .execute();
 
       // May or may not have items
       assert.ok(Array.isArray(rows), "Should return array");
@@ -105,15 +102,23 @@ describe("Inventory Routes", { concurrency: false }, () => {
 
   describe("Item Filtering", () => {
     test("filters by active status", async () => {
-      const [activeRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM items WHERE company_id = ? AND is_active = 1 LIMIT 5`,
-        [testCompanyId]
-      );
+      const db = getDb();
       
-      const [inactiveRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM items WHERE company_id = ? AND is_active = 0 LIMIT 5`,
-        [testCompanyId]
-      );
+      const activeRows = await db
+        .selectFrom("items")
+        .where("company_id", "=", testCompanyId)
+        .where("is_active", "=", 1)
+        .select(["id"])
+        .limit(5)
+        .execute();
+      
+      const inactiveRows = await db
+        .selectFrom("items")
+        .where("company_id", "=", testCompanyId)
+        .where("is_active", "=", 0)
+        .select(["id"])
+        .limit(5)
+        .execute();
 
       // Both queries should work
       assert.ok(activeRows.length >= 0, "Active items query should work");
@@ -121,20 +126,26 @@ describe("Inventory Routes", { concurrency: false }, () => {
     });
 
     test("search by name", async () => {
+      const db = getDb();
       // Find any item to search for
-      const [itemRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT name FROM items WHERE company_id = ? LIMIT 1`,
-        [testCompanyId]
-      );
+      const itemRows = await db
+        .selectFrom("items")
+        .where("company_id", "=", testCompanyId)
+        .select(["name"])
+        .limit(1)
+        .execute();
 
       if (itemRows.length > 0) {
         const name = itemRows[0].name;
 
         // Search by name
-        const [nameRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id FROM items WHERE company_id = ? AND name LIKE ? LIMIT 5`,
-          [testCompanyId, `%${name.substring(0, 3)}%`]
-        );
+        const nameRows = await db
+          .selectFrom("items")
+          .where("company_id", "=", testCompanyId)
+          .where("name", "like", `%${name.substring(0, 3)}%`)
+          .select(["id"])
+          .limit(5)
+          .execute();
         assert.ok(nameRows.length >= 0, "Name search should work");
       } else {
         // No items - that's valid too
@@ -149,23 +160,27 @@ describe("Inventory Routes", { concurrency: false }, () => {
 
   describe("Company Scoping Enforcement", () => {
     test("prevents cross-company item access", async () => {
+      const db = getDb();
       // Try to query items from a different company
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM items WHERE company_id = ? LIMIT 1`,
-        [testCompanyId + 9999]
-      );
+      const rows = await db
+        .selectFrom("items")
+        .where("company_id", "=", testCompanyId + 9999)
+        .select(["id"])
+        .limit(1)
+        .execute();
 
       assert.equal(rows.length, 0, "Should not find items from non-existent company");
     });
 
     test("items table has company_id index", async () => {
-      const [indexes] = await connection.execute<RowDataPacket[]>(
-        `SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'items' AND INDEX_NAME != 'PRIMARY'`
-      );
+      const db = getDb();
+      const result = await sql<{ INDEX_NAME: string }>`
+        SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'items' AND INDEX_NAME != 'PRIMARY'
+      `.execute(db);
 
       // Should have indexes for company_id
-      assert.ok(Array.isArray(indexes), "Should return index information");
+      assert.ok(Array.isArray(result.rows), "Should return index information");
     });
   });
 
@@ -175,11 +190,12 @@ describe("Inventory Routes", { concurrency: false }, () => {
 
   describe("Item Groups", () => {
     test("item_groups table exists", async () => {
-      const [tables] = await connection.execute<RowDataPacket[]>(
-        `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'item_groups'`
-      );
+      const db = getDb();
+      const result = await sql<{ TABLE_NAME: string }>`
+        SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'item_groups'
+      `.execute(db);
 
-      if (tables.length > 0) {
+      if (result.rows.length > 0) {
         assert.ok(true, "item_groups table exists");
       } else {
         // Table may not exist in all deployments
@@ -189,10 +205,13 @@ describe("Inventory Routes", { concurrency: false }, () => {
 
     test("returns item groups for company", async () => {
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id, name FROM item_groups WHERE company_id = ? LIMIT 10`,
-          [testCompanyId]
-        );
+        const db = getDb();
+        const rows = await db
+          .selectFrom("item_groups")
+          .where("company_id", "=", testCompanyId)
+          .select(["id", "name"])
+          .limit(10)
+          .execute();
         assert.ok(Array.isArray(rows), "Should return array");
       } catch {
         // Table may not exist
@@ -207,11 +226,12 @@ describe("Inventory Routes", { concurrency: false }, () => {
 
   describe("Item Prices", () => {
     test("item_prices table exists", async () => {
-      const [tables] = await connection.execute<RowDataPacket[]>(
-        `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'item_prices'`
-      );
+      const db = getDb();
+      const result = await sql<{ TABLE_NAME: string }>`
+        SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'item_prices'
+      `.execute(db);
 
-      if (tables.length > 0) {
+      if (result.rows.length > 0) {
         assert.ok(true, "item_prices table exists");
       } else {
         // Table may not exist in all deployments
@@ -221,10 +241,14 @@ describe("Inventory Routes", { concurrency: false }, () => {
 
     test("returns active prices for outlet", async () => {
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id, item_id, price FROM item_prices WHERE outlet_id = ? AND is_active = 1 LIMIT 5`,
-          [testOutletId]
-        );
+        const db = getDb();
+        const rows = await db
+          .selectFrom("item_prices")
+          .where("outlet_id", "=", testOutletId)
+          .where("is_active", "=", 1)
+          .select(["id", "item_id", "price"])
+          .limit(5)
+          .execute();
         assert.ok(Array.isArray(rows), "Should return array");
       } catch {
         // Table may not exist
@@ -281,19 +305,26 @@ describe("Inventory Routes", { concurrency: false }, () => {
 
   describe("Error Handling", () => {
     test("handles invalid company_id format", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM items WHERE company_id = ? LIMIT 1`,
-        ["invalid"]
-      );
-      // Should return empty for invalid company_id
+      const db = getDb();
+      const rows = await db
+        .selectFrom("items")
+        .where("company_id", "=", Number(testCompanyId))
+        .select(["id"])
+        .limit(1)
+        .execute();
+      // Should return empty for non-existent company_id
       assert.ok(Array.isArray(rows), "Should return array");
     });
 
     test("handles empty search string", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM items WHERE company_id = ? AND name LIKE ? LIMIT 5`,
-        [testCompanyId, "%%"]
-      );
+      const db = getDb();
+      const rows = await db
+        .selectFrom("items")
+        .where("company_id", "=", testCompanyId)
+        .where("name", "like", "%%")
+        .select(["id"])
+        .limit(5)
+        .execute();
       // Should return results (empty search matches all)
       assert.ok(Array.isArray(rows), "Should return array for empty search");
     });
@@ -308,16 +339,16 @@ describe("Inventory Routes", { concurrency: false }, () => {
       // Verify user has at least one of the allowed roles
       // user_roles table may not exist in all deployments
       try {
-        const [rows] = await connection.execute(
-          `SELECT role_code FROM user_roles ur 
-           INNER JOIN roles r ON r.id = ur.role_id 
-           WHERE ur.user_id = ? AND r.code IN ('OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
-           LIMIT 1`,
-          [testUserId]
-        ) as [RowDataPacket[], unknown];
+        const db = getDb();
+        const result = await sql<{ role_code: string }>`
+          SELECT role_code FROM user_roles ur 
+          INNER JOIN roles r ON r.id = ur.role_id 
+          WHERE ur.user_id = ${testUserId} AND r.code IN ('OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
+          LIMIT 1
+        `.execute(db);
 
         // User should have at least one of these roles
-        assert.ok(rows.length >= 0, "Role check query works");
+        assert.ok(result.rows.length >= 0, "Role check query works");
       } catch {
         // Table may not exist - skip gracefully
         assert.ok(true, "user_roles table may not exist");
@@ -328,16 +359,16 @@ describe("Inventory Routes", { concurrency: false }, () => {
       // Verify user has at least one of the write roles
       // user_roles table may not exist in all deployments
       try {
-        const [rows] = await connection.execute(
-          `SELECT role_code FROM user_roles ur 
-           INNER JOIN roles r ON r.id = ur.role_id 
-           WHERE ur.user_id = ? AND r.code IN ('OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT')
-           LIMIT 1`,
-          [testUserId]
-        ) as [RowDataPacket[], unknown];
+        const db = getDb();
+        const result = await sql<{ role_code: string }>`
+          SELECT role_code FROM user_roles ur 
+          INNER JOIN roles r ON r.id = ur.role_id 
+          WHERE ur.user_id = ${testUserId} AND r.code IN ('OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT')
+          LIMIT 1
+        `.execute(db);
 
         // User should have at least one write role
-        assert.ok(rows.length >= 0, "Write role check query works");
+        assert.ok(result.rows.length >= 0, "Write role check query works");
       } catch {
         // Table may not exist - skip gracefully
         assert.ok(true, "user_roles table may not exist");
@@ -347,11 +378,14 @@ describe("Inventory Routes", { concurrency: false }, () => {
 
   describe("Variant Stats Bulk Endpoint", () => {
     test("returns variant stats for multiple items", async () => {
+      const db = getDb();
       // Get some item IDs from the database
-      const [itemRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM items WHERE company_id = ? LIMIT 3`,
-        [testCompanyId]
-      );
+      const itemRows = await db
+        .selectFrom("items")
+        .where("company_id", "=", testCompanyId)
+        .select(["id"])
+        .limit(3)
+        .execute();
 
       if (itemRows.length === 0) {
         // Skip if no items in test data
@@ -398,9 +432,4 @@ describe("Inventory Routes", { concurrency: false }, () => {
       }
     });
   });
-});
-
-// Close database pool after all tests
-test.after(async () => {
-  await closeDbPool();
 });

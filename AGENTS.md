@@ -3,6 +3,19 @@
 Important:
 - Never commit unless explicitly asked.
 
+Routing:
+- product discovery, research, briefs -> @bmad-analyst
+- PRD creation, validation, epics, course correction -> @bmad-pm
+- architecture, technical design, implementation-readiness -> @bmad-architect
+- sprint planning, story creation, sprint coordination -> @bmad-sm
+- story implementation and code changes -> @bmad-dev
+- code review, adversarial review, and implementation validation -> @bmad-review
+- test generation for existing features -> @bmad-qa
+- quick flow and solo-dev execution -> @bmad-master
+- UX design workflows -> @bmad-ux-designer
+- documentation and editorial work -> @bmad-tech-writer
+- advanced test strategy, NFRs, CI, and traceability -> @bmad-testarch
+
 ## Standardized Document Paths
 
 | Artifact | Path |

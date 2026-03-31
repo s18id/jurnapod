@@ -1,10 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { sql } from "kysely";
 import { toRfc3339Required } from "@jurnapod/shared";
-import { getDbPool } from "../db.js";
+import { getDb, type KyselySchema } from "../db.js";
 import { DatabaseConflictError, DatabaseReferenceError } from "../master-data-errors.js";
 import {
   isMysqlError,
@@ -12,20 +11,7 @@ import {
   recordMasterDataAuditLog,
   withTransaction
 } from "../shared/master-data-utils.js";
-
-type ItemGroupRow = RowDataPacket & {
-  id: number;
-  company_id: number;
-  parent_id: number | null;
-  code: string | null;
-  name: string;
-  is_active: number;
-  updated_at: string;
-};
-
-type QueryExecutor = {
-  execute: PoolConnection["execute"];
-};
+import { type Transaction } from "@jurnapod/db";
 
 type MutationAuditActor = {
   userId: number;
@@ -39,7 +25,7 @@ const itemGroupAuditActions = {
 } as const;
 
 async function recordItemGroupAuditLog(
-  executor: QueryExecutor,
+  db: KyselySchema,
   input: {
     companyId: number;
     actor: MutationAuditActor | undefined;
@@ -47,7 +33,7 @@ async function recordItemGroupAuditLog(
     payload: Record<string, unknown>;
   }
 ): Promise<void> {
-  await recordMasterDataAuditLog(executor, {
+  await recordMasterDataAuditLog(db, {
     companyId: input.companyId,
     outletId: null,
     actor: input.actor,
@@ -56,7 +42,15 @@ async function recordItemGroupAuditLog(
   });
 }
 
-function normalizeItemGroup(row: ItemGroupRow) {
+function normalizeItemGroup(row: {
+  id: number;
+  company_id: number;
+  parent_id: number | null;
+  code: string | null;
+  name: string;
+  is_active: number;
+  updated_at: string | Date;
+}) {
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
@@ -64,53 +58,49 @@ function normalizeItemGroup(row: ItemGroupRow) {
     code: row.code,
     name: row.name,
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at)
+    updated_at: toRfc3339Required(row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at)
   };
 }
 
 async function ensureCompanyItemGroupExists(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   groupId: number
 ): Promise<void> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id
-     FROM item_groups
-     WHERE id = ?
-       AND company_id = ?
-     LIMIT 1`,
-    [groupId, companyId]
-  );
+  const row = await db
+    .selectFrom("item_groups")
+    .where("id", "=", groupId)
+    .where("company_id", "=", companyId)
+    .select(["id"])
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     throw new DatabaseReferenceError("Item group not found for company");
   }
 }
 
 async function getItemGroupParentId(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   groupId: number
 ): Promise<number | null> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT parent_id
-     FROM item_groups
-     WHERE company_id = ?
-       AND id = ?
-     LIMIT 1`,
-    [companyId, groupId]
-  );
+  const row = await db
+    .selectFrom("item_groups")
+    .where("company_id", "=", companyId)
+    .where("id", "=", groupId)
+    .select(["parent_id"])
+    .executeTakeFirst();
 
-  if (!rows[0]) {
+  if (!row) {
     return null;
   }
 
-  const parentId = (rows[0] as { parent_id: number | null }).parent_id;
+  const parentId = (row as { parent_id: number | null }).parent_id;
   return parentId == null ? null : Number(parentId);
 }
 
 async function isItemGroupDescendant(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   candidateParentId: number,
   groupId: number
@@ -128,7 +118,7 @@ async function isItemGroupDescendant(
     }
 
     visited.add(currentId);
-    currentId = await getItemGroupParentId(executor, companyId, currentId);
+    currentId = await getItemGroupParentId(db, companyId, currentId);
     if (currentId == null) {
       break;
     }
@@ -138,49 +128,49 @@ async function isItemGroupDescendant(
 }
 
 async function findItemGroupByIdWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   groupId: number,
   options?: { forUpdate?: boolean }
 ) {
-  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
-  const [rows] = await executor.execute<ItemGroupRow[]>(
-    `SELECT id, company_id, parent_id, code, name, is_active, updated_at
-     FROM item_groups
-     WHERE company_id = ?
-       AND id = ?
-     LIMIT 1${forUpdateClause}`,
-    [companyId, groupId]
-  );
+  let query = db
+    .selectFrom("item_groups")
+    .where("company_id", "=", companyId)
+    .where("id", "=", groupId)
+    .select(["id", "company_id", "parent_id", "code", "name", "is_active", "updated_at"]);
 
-  if (!rows[0]) {
+  if (options?.forUpdate) {
+    query = query.forUpdate();
+  }
+
+  const row = await query.executeTakeFirst();
+
+  if (!row) {
     return null;
   }
 
-  return normalizeItemGroup(rows[0]);
+  return normalizeItemGroup(row);
 }
 
 export async function listItemGroups(companyId: number, filters?: { isActive?: boolean }) {
-  const pool = getDbPool();
-  const values: Array<number> = [companyId];
+  const db = getDb();
 
-  let sql =
-    "SELECT id, company_id, parent_id, code, name, is_active, updated_at FROM item_groups WHERE company_id = ?";
+  let query = db
+    .selectFrom("item_groups")
+    .where("company_id", "=", companyId)
+    .select(["id", "company_id", "parent_id", "code", "name", "is_active", "updated_at"]);
 
   if (typeof filters?.isActive === "boolean") {
-    sql += " AND is_active = ?";
-    values.push(filters.isActive ? 1 : 0);
+    query = query.where("is_active", "=", filters.isActive ? 1 : 0);
   }
 
-  sql += " ORDER BY id ASC";
-
-  const [rows] = await pool.execute<ItemGroupRow[]>(sql, values);
+  const rows = await query.orderBy("id", "asc").execute();
   return rows.map(normalizeItemGroup);
 }
 
 export async function findItemGroupById(companyId: number, groupId: number) {
-  const pool = getDbPool();
-  return findItemGroupByIdWithExecutor(pool, companyId, groupId);
+  const db = getDb();
+  return findItemGroupByIdWithExecutor(db, companyId, groupId);
 }
 
 export async function createItemGroup(
@@ -193,24 +183,35 @@ export async function createItemGroup(
   },
   actor?: MutationAuditActor
 ) {
-  return withTransaction(async (connection) => {
+  const db = getDb();
+  return withTransaction(db, async (trx) => {
     try {
       if (typeof input.parent_id === "number") {
-        await ensureCompanyItemGroupExists(connection, companyId, input.parent_id);
+        await ensureCompanyItemGroupExists(trx, companyId, input.parent_id);
       }
 
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO item_groups (company_id, parent_id, code, name, is_active)
-         VALUES (?, ?, ?, ?, ?)`,
-        [companyId, input.parent_id ?? null, input.code ?? null, input.name, input.is_active === false ? 0 : 1]
-      );
+      const result = await trx
+        .insertInto("item_groups")
+        .values({
+          company_id: companyId,
+          parent_id: input.parent_id ?? null,
+          code: input.code ?? null,
+          name: input.name,
+          is_active: input.is_active === false ? 0 : 1
+        })
+        .returningAll()
+        .executeTakeFirst();
 
-      const itemGroup = await findItemGroupByIdWithExecutor(connection, companyId, Number(result.insertId));
+      if (!result) {
+        throw new Error("Created item group not found");
+      }
+
+      const itemGroup = await findItemGroupByIdWithExecutor(trx, companyId, Number(result.id));
       if (!itemGroup) {
         throw new Error("Created item group not found");
       }
 
-      await recordItemGroupAuditLog(connection, {
+      await recordItemGroupAuditLog(trx, {
         companyId,
         actor,
         action: itemGroupAuditActions.create,
@@ -252,7 +253,8 @@ export async function createItemGroupsBulk(
   rows: ItemGroupBulkRow[],
   actor?: MutationAuditActor
 ): Promise<{ created_count: number; groups: Awaited<ReturnType<typeof findItemGroupById>>[] }> {
-  return withTransaction(async (connection) => {
+  const db = getDb();
+  return withTransaction(db, async (trx) => {
     const normalizedRows = rows.map((r) => ({
       code: r.code?.trim() ?? null,
       name: r.name.trim(),
@@ -274,12 +276,13 @@ export async function createItemGroupsBulk(
     const codeToIdMap = new Map<string, number>();
     if (codeSet.size > 0) {
       const codes = Array.from(codeSet);
-      const placeholders = codes.map(() => "?").join(",");
-      const [existing] = await connection.execute<RowDataPacket[]>(
-        `SELECT id, code FROM item_groups WHERE company_id = ? AND LOWER(code) IN (${placeholders})`,
-        [companyId, ...codes]
-      );
-      for (const row of existing as Array<{ id: number; code: string }>) {
+      const existingResult = await sql<{ id: number; code: string }>`
+        SELECT id, code FROM item_groups 
+        WHERE company_id = ${companyId} 
+        AND LOWER(code) IN (${sql.join(codes.map(c => sql`${c.toLowerCase()}`))})
+      `.execute(trx);
+
+      for (const row of existingResult.rows) {
         codeToIdMap.set(row.code.toLowerCase(), row.id);
       }
       if (codeToIdMap.size > 0) {
@@ -372,24 +375,30 @@ export async function createItemGroupsBulk(
         parentId = resolvedParentId;
       }
 
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO item_groups (company_id, parent_id, code, name, is_active)
-         VALUES (?, ?, ?, ?, ?)`,
-        [companyId, parentId, row.code, row.name, row.is_active ? 1 : 0]
-      );
+      const result = await trx
+        .insertInto("item_groups")
+        .values({
+          company_id: companyId,
+          parent_id: parentId,
+          code: row.code,
+          name: row.name,
+          is_active: row.is_active ? 1 : 0
+        })
+        .returningAll()
+        .executeTakeFirst();
 
-      const newId = Number(result.insertId);
+      const newId = Number(result!.id);
 
       if (row.code) {
         codeToIdMap.set(row.code.toLowerCase(), newId);
       }
 
-      const itemGroup = await findItemGroupByIdWithExecutor(connection, companyId, newId);
+      const itemGroup = await findItemGroupByIdWithExecutor(trx, companyId, newId);
       if (!itemGroup) {
         throw new Error("Created item group not found");
       }
 
-      await recordItemGroupAuditLog(connection, {
+      await recordItemGroupAuditLog(trx, {
         companyId,
         actor,
         action: itemGroupAuditActions.create,
@@ -417,76 +426,75 @@ export async function updateItemGroup(
   },
   actor?: MutationAuditActor
 ) {
-  return withTransaction(async (connection) => {
-    const before = await findItemGroupByIdWithExecutor(connection, companyId, groupId, {
+  const db = getDb();
+  return withTransaction(db, async (trx) => {
+    const before = await findItemGroupByIdWithExecutor(trx, companyId, groupId, {
       forUpdate: true
     });
     if (!before) {
       return null;
     }
 
-    const fields: string[] = [];
-    const values: Array<string | number | null> = [];
+    // Build update values dynamically
+    type UpdateValues = {
+      code?: string | null;
+      name?: string;
+      parent_id?: number | null;
+      is_active?: number;
+    };
+    const updateValues: UpdateValues = {};
 
     if (Object.hasOwn(input, "code")) {
-      fields.push("code = ?");
-      values.push(input.code ?? null);
+      updateValues.code = input.code ?? null;
     }
 
     if (typeof input.name === "string") {
-      fields.push("name = ?");
-      values.push(input.name);
+      updateValues.name = input.name;
     }
 
     if (typeof input.is_active === "boolean") {
-      fields.push("is_active = ?");
-      values.push(input.is_active ? 1 : 0);
+      updateValues.is_active = input.is_active ? 1 : 0;
     }
 
     if (Object.hasOwn(input, "parent_id")) {
       const nextParentId = input.parent_id ?? null;
       if (nextParentId !== before.parent_id) {
         if (nextParentId == null) {
-          fields.push("parent_id = ?");
-          values.push(null);
+          updateValues.parent_id = null;
         } else {
           if (nextParentId === groupId) {
             throw new DatabaseConflictError("Item group parent cannot be itself");
           }
 
-          await ensureCompanyItemGroupExists(connection, companyId, nextParentId);
-          const isDescendant = await isItemGroupDescendant(connection, companyId, nextParentId, groupId);
+          await ensureCompanyItemGroupExists(trx, companyId, nextParentId);
+          const isDescendant = await isItemGroupDescendant(trx, companyId, nextParentId, groupId);
           if (isDescendant) {
             throw new DatabaseConflictError("Item group parent cannot be descendant");
           }
 
-          fields.push("parent_id = ?");
-          values.push(nextParentId);
+          updateValues.parent_id = nextParentId;
         }
       }
     }
 
-    if (fields.length === 0) {
+    if (Object.keys(updateValues).length === 0) {
       return before;
     }
 
-    values.push(companyId, groupId);
-
     try {
-      await connection.execute<ResultSetHeader>(
-        `UPDATE item_groups
-         SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ?
-           AND id = ?`,
-        values
-      );
+      await trx
+        .updateTable("item_groups")
+        .set({ ...updateValues, updated_at: new Date() })
+        .where("company_id", "=", companyId)
+        .where("id", "=", groupId)
+        .execute();
 
-      const itemGroup = await findItemGroupByIdWithExecutor(connection, companyId, groupId);
+      const itemGroup = await findItemGroupByIdWithExecutor(trx, companyId, groupId);
       if (!itemGroup) {
         return null;
       }
 
-      await recordItemGroupAuditLog(connection, {
+      await recordItemGroupAuditLog(trx, {
         companyId,
         actor,
         action: itemGroupAuditActions.update,
@@ -513,34 +521,34 @@ export async function deleteItemGroup(
   groupId: number,
   actor?: MutationAuditActor
 ): Promise<boolean> {
-  return withTransaction(async (connection) => {
-    const before = await findItemGroupByIdWithExecutor(connection, companyId, groupId, {
+  const db = getDb();
+  return withTransaction(db, async (trx) => {
+    const before = await findItemGroupByIdWithExecutor(trx, companyId, groupId, {
       forUpdate: true
     });
     if (!before) {
       return false;
     }
 
-    const [children] = await connection.execute<RowDataPacket[]>(
-      `SELECT id
-       FROM item_groups
-       WHERE company_id = ?
-         AND parent_id = ?
-       LIMIT 1`,
-      [companyId, groupId]
-    );
+    const children = await trx
+      .selectFrom("item_groups")
+      .where("company_id", "=", companyId)
+      .where("parent_id", "=", groupId)
+      .select(["id"])
+      .limit(1)
+      .execute();
+
     if (children.length > 0) {
       throw new DatabaseConflictError("Item group has child groups");
     }
 
-    await connection.execute<ResultSetHeader>(
-      `DELETE FROM item_groups
-       WHERE company_id = ?
-         AND id = ?`,
-      [companyId, groupId]
-    );
+    await trx
+      .deleteFrom("item_groups")
+      .where("company_id", "=", companyId)
+      .where("id", "=", groupId)
+      .execute();
 
-    await recordItemGroupAuditLog(connection, {
+    await recordItemGroupAuditLog(trx, {
       companyId,
       actor,
       action: itemGroupAuditActions.delete,

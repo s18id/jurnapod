@@ -16,14 +16,13 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { randomUUID } from "node:crypto";
-import { closeDbPool, getDbPool } from "../../lib/db.js";
+import { closeDbPool, getDb } from "../../lib/db.js";
 import {
   createSession,
   getSession,
   deleteSession,
   cleanupExpiredSessions,
 } from "./session-store.js";
-import type { Pool } from "mysql2/promise";
 
 const COMPANY_A = 1;
 const COMPANY_B = 2;
@@ -38,10 +37,9 @@ const SAMPLE_PAYLOAD = {
 };
 
 describe("Import Session Store", () => {
-  let pool: Pool;
-
   before(() => {
-    pool = getDbPool();
+    // Warm up the db connection
+    getDb();
   });
 
   after(async () => {
@@ -52,9 +50,9 @@ describe("Import Session Store", () => {
     test("creates a session and retrieves it by ID and company", async () => {
       const sessionId = randomUUID();
 
-      await createSession(pool, sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
 
-      const session = await getSession(pool, sessionId, COMPANY_A);
+      const session = await getSession(sessionId, COMPANY_A);
 
       assert.ok(session, "Session should be found");
       assert.equal(session.sessionId, sessionId);
@@ -64,36 +62,36 @@ describe("Import Session Store", () => {
       assert.equal(session.payload.rowCount, 3);
 
       // Cleanup
-      await deleteSession(pool, sessionId, COMPANY_A);
+      await deleteSession(sessionId, COMPANY_A);
     });
 
     test("returns null for non-existent session", async () => {
-      const session = await getSession(pool, randomUUID(), COMPANY_A);
+      const session = await getSession(randomUUID(), COMPANY_A);
       assert.equal(session, null);
     });
 
     test("company B cannot read company A session (isolation enforced)", async () => {
       const sessionId = randomUUID();
 
-      await createSession(pool, sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
 
       // Company B attempts to read Company A's session
-      const session = await getSession(pool, sessionId, COMPANY_B);
+      const session = await getSession(sessionId, COMPANY_B);
       assert.equal(session, null, "Company B must not access Company A session");
 
       // Cleanup
-      await deleteSession(pool, sessionId, COMPANY_A);
+      await deleteSession(sessionId, COMPANY_A);
     });
 
     test("session read by correct company succeeds", async () => {
       const sessionIdA = randomUUID();
       const sessionIdB = randomUUID();
 
-      await createSession(pool, sessionIdA, COMPANY_A, "items", SAMPLE_PAYLOAD);
-      await createSession(pool, sessionIdB, COMPANY_B, "prices", { ...SAMPLE_PAYLOAD, entityType: "prices" });
+      await createSession(sessionIdA, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionIdB, COMPANY_B, "prices", { ...SAMPLE_PAYLOAD, entityType: "prices" });
 
-      const sessionA = await getSession(pool, sessionIdA, COMPANY_A);
-      const sessionB = await getSession(pool, sessionIdB, COMPANY_B);
+      const sessionA = await getSession(sessionIdA, COMPANY_A);
+      const sessionB = await getSession(sessionIdB, COMPANY_B);
 
       assert.ok(sessionA, "Company A should read its own session");
       assert.ok(sessionB, "Company B should read its own session");
@@ -101,8 +99,8 @@ describe("Import Session Store", () => {
       assert.equal(sessionB.entityType, "prices");
 
       // Cleanup
-      await deleteSession(pool, sessionIdA, COMPANY_A);
-      await deleteSession(pool, sessionIdB, COMPANY_B);
+      await deleteSession(sessionIdA, COMPANY_A);
+      await deleteSession(sessionIdB, COMPANY_B);
     });
   });
 
@@ -110,65 +108,66 @@ describe("Import Session Store", () => {
     test("deletes session so it is no longer retrievable", async () => {
       const sessionId = randomUUID();
 
-      await createSession(pool, sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
-      await deleteSession(pool, sessionId, COMPANY_A);
+      await createSession(sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await deleteSession(sessionId, COMPANY_A);
 
-      const session = await getSession(pool, sessionId, COMPANY_A);
+      const session = await getSession(sessionId, COMPANY_A);
       assert.equal(session, null, "Deleted session must not be retrievable");
     });
 
     test("delete by wrong company leaves session intact", async () => {
       const sessionId = randomUUID();
 
-      await createSession(pool, sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
 
       // Company B attempts delete of Company A session — must be a no-op
-      await deleteSession(pool, sessionId, COMPANY_B);
+      await deleteSession(sessionId, COMPANY_B);
 
-      const session = await getSession(pool, sessionId, COMPANY_A);
+      const session = await getSession(sessionId, COMPANY_A);
       assert.ok(session, "Session owned by Company A must survive Company B delete attempt");
 
       // Cleanup
-      await deleteSession(pool, sessionId, COMPANY_A);
+      await deleteSession(sessionId, COMPANY_A);
     });
   });
 
   describe("cleanupExpiredSessions", () => {
     test("returns a non-negative count", async () => {
-      const count = await cleanupExpiredSessions(pool);
+      const count = await cleanupExpiredSessions();
       assert.ok(count >= 0, "Cleanup count must be non-negative");
     });
 
     test("does not delete active (non-expired) sessions", async () => {
       const sessionId = randomUUID();
 
-      await createSession(pool, sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
 
       // Run cleanup — session is not expired, must survive
-      await cleanupExpiredSessions(pool);
+      await cleanupExpiredSessions();
 
-      const session = await getSession(pool, sessionId, COMPANY_A);
+      const session = await getSession(sessionId, COMPANY_A);
       assert.ok(session, "Active session must survive cleanup");
 
       // Cleanup
-      await deleteSession(pool, sessionId, COMPANY_A);
+      await deleteSession(sessionId, COMPANY_A);
     });
 
     test("cleanup removes expired sessions (inserted with past expires_at)", async () => {
       const sessionId = randomUUID();
 
       // Insert a session that expired 1 hour ago directly via SQL
-      await pool.execute(
-        `INSERT INTO import_sessions (session_id, company_id, entity_type, payload, created_at, expires_at)
-         VALUES (?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 1 HOUR))`,
-        [sessionId, COMPANY_A, "items", JSON.stringify(SAMPLE_PAYLOAD)]
-      );
+      const db = getDb();
+      const { sql } = await import("kysely");
+      await sql`
+        INSERT INTO import_sessions (session_id, company_id, entity_type, payload, created_at, expires_at)
+        VALUES (${sessionId}, ${COMPANY_A}, ${"items"}, ${JSON.stringify(SAMPLE_PAYLOAD)}, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 1 HOUR))
+      `.execute(db);
 
-      const deletedCount = await cleanupExpiredSessions(pool);
+      const deletedCount = await cleanupExpiredSessions();
       assert.ok(deletedCount >= 1, "At least the expired test session must be cleaned up");
 
       // Confirm it's gone
-      const session = await getSession(pool, sessionId, COMPANY_A);
+      const session = await getSession(sessionId, COMPANY_A);
       assert.equal(session, null, "Expired session must be gone after cleanup");
     });
   });

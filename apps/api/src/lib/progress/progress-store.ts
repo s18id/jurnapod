@@ -17,8 +17,8 @@
  * - Stale operation cleanup on restart
  */
 
-// Use relative imports for DB
-import type { Pool, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { getDb, type KyselySchema } from "@/lib/db";
+import { sql } from "kysely";
 
 // ============================================================================
 // Types
@@ -90,22 +90,6 @@ export interface FailProgressInput {
   details?: Record<string, unknown>;
 };
 
-/**
- * Database row representation
- */
-interface OperationProgressRow extends RowDataPacket {
-  operation_id: string;
-  operation_type: string;
-  company_id: number;
-  total_units: number;
-  completed_units: number;
-  status: string;
-  started_at: Date;
-  updated_at: Date;
-  completed_at: Date | null;
-  details: string | null;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
@@ -143,36 +127,12 @@ const lastUpdateTimes = new Map<string, number>();
 const lastMilestones = new Map<string, number>();
 
 /**
- * Pool reference for fire-and-forget updates
- * Set during module initialization
- */
-let progressPool: Pool | null = null;
-
-/**
  * Clear all tracking state
  * Used for test isolation
  */
 export function clearProgressTracking(): void {
   lastUpdateTimes.clear();
   lastMilestones.clear();
-}
-
-/**
- * Set the database pool for progress operations
- * Called during server initialization
- */
-export function setProgressPool(pool: Pool): void {
-  progressPool = pool;
-}
-
-/**
- * Get the database pool for progress operations
- */
-function getPool(): Pool {
-  if (!progressPool) {
-    throw new Error("Progress pool not initialized. Call setProgressPool() first.");
-  }
-  return progressPool;
 }
 
 // ============================================================================
@@ -183,21 +143,17 @@ function getPool(): Pool {
  * Start tracking a new operation
  */
 export async function startProgress(input: StartProgressInput): Promise<void> {
-  const pool = getPool();
+  const db = getDb();
 
-  await pool.execute<ResultSetHeader>(
-    `INSERT INTO operation_progress (
+  await sql`
+    INSERT INTO operation_progress (
       operation_id, operation_type, company_id, total_units, completed_units,
       status, started_at, updated_at, details
-    ) VALUES (?, ?, ?, ?, 0, 'running', NOW(), NOW(), ?)`,
-    [
-      input.operationId,
-      input.operationType,
-      input.companyId,
-      input.totalUnits,
-      input.details ? JSON.stringify(input.details) : null,
-    ]
-  );
+    ) VALUES (
+      ${input.operationId}, ${input.operationType}, ${input.companyId}, ${input.totalUnits}, 0,
+      'running', NOW(), NOW(), ${input.details ? JSON.stringify(input.details) : null}
+    )
+  `.execute(db);
 
   // Initialize tracking state
   lastUpdateTimes.set(input.operationId, Date.now());
@@ -212,21 +168,31 @@ export async function getProgress(
   operationId: string,
   companyId: number
 ): Promise<OperationProgress | null> {
-  const pool = getPool();
+  const db = getDb();
 
-  const [rows] = await pool.execute<OperationProgressRow[]>(
-    `SELECT operation_id, operation_type, company_id, total_units, completed_units,
-            status, started_at, updated_at, completed_at, details
+  const rows = await sql<{
+    operation_id: string;
+    operation_type: string;
+    company_id: number;
+    total_units: number;
+    completed_units: number;
+    status: string;
+    started_at: Date;
+    updated_at: Date;
+    completed_at: Date | null;
+    details: string | null;
+  }>`
+    SELECT operation_id, operation_type, company_id, total_units, completed_units,
+           status, started_at, updated_at, completed_at, details
      FROM operation_progress
-     WHERE operation_id = ? AND company_id = ?`,
-    [operationId, companyId]
-  );
+     WHERE operation_id = ${operationId} AND company_id = ${companyId}
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  return mapRowToProgress(rows[0]);
+  return mapRowToProgress(rows.rows[0]);
 }
 
 /**
@@ -234,7 +200,7 @@ export async function getProgress(
  * Returns true if update was persisted, false if skipped (not yet at milestone/interval)
  */
 export async function updateProgress(input: UpdateProgressInput): Promise<boolean> {
-  const pool = getPool();
+  const db = getDb();
   const { operationId, companyId, completedUnits, details } = input;
 
   // Get current progress
@@ -259,24 +225,23 @@ export async function updateProgress(input: UpdateProgressInput): Promise<boolea
     return false;
   }
 
-  // Build update query
-  const updateParts: string[] = [
-    "completed_units = ?",
-    "updated_at = NOW()",
-  ];
-  const params: (string | number)[] = [completedUnits];
-
+  // Build update query using sql template
   if (details) {
-    updateParts.push("details = ?");
-    params.push(JSON.stringify(details));
+    await sql`
+      UPDATE operation_progress 
+      SET completed_units = ${completedUnits},
+          updated_at = NOW(),
+          details = ${JSON.stringify(details)}
+      WHERE operation_id = ${operationId} AND company_id = ${companyId}
+    `.execute(db);
+  } else {
+    await sql`
+      UPDATE operation_progress 
+      SET completed_units = ${completedUnits},
+          updated_at = NOW()
+      WHERE operation_id = ${operationId} AND company_id = ${companyId}
+    `.execute(db);
   }
-
-  params.push(operationId, companyId);
-
-  await pool.execute<ResultSetHeader>(
-    `UPDATE operation_progress SET ${updateParts.join(", ")} WHERE operation_id = ? AND company_id = ?`,
-    params
-  );
 
   // Update tracking state
   lastUpdateTimes.set(operationId, Date.now());
@@ -301,7 +266,7 @@ export function updateProgressAsync(input: UpdateProgressInput): void {
  * Mark an operation as completed
  */
 export async function completeProgress(input: CompleteProgressInput): Promise<void> {
-  const pool = getPool();
+  const db = getDb();
   const { operationId, companyId, details } = input;
 
   // Get current progress to ensure it exists
@@ -310,26 +275,27 @@ export async function completeProgress(input: CompleteProgressInput): Promise<vo
     return;
   }
 
-  // Update to completed status with 100% progress
-  const updateParts: string[] = [
-    "completed_units = total_units",
-    "status = 'completed'",
-    "updated_at = NOW()",
-    "completed_at = NOW()",
-  ];
-  const params: (string | number)[] = [];
-
+  // Build update query using sql template
   if (details) {
-    updateParts.push("details = ?");
-    params.push(JSON.stringify(details));
+    await sql`
+      UPDATE operation_progress 
+      SET completed_units = total_units,
+          status = 'completed',
+          updated_at = NOW(),
+          completed_at = NOW(),
+          details = ${JSON.stringify(details)}
+      WHERE operation_id = ${operationId} AND company_id = ${companyId}
+    `.execute(db);
+  } else {
+    await sql`
+      UPDATE operation_progress 
+      SET completed_units = total_units,
+          status = 'completed',
+          updated_at = NOW(),
+          completed_at = NOW()
+      WHERE operation_id = ${operationId} AND company_id = ${companyId}
+    `.execute(db);
   }
-
-  params.push(operationId, companyId);
-
-  await pool.execute<ResultSetHeader>(
-    `UPDATE operation_progress SET ${updateParts.join(", ")} WHERE operation_id = ? AND company_id = ?`,
-    params
-  );
 
   // Cleanup tracking state
   lastUpdateTimes.delete(operationId);
@@ -340,7 +306,7 @@ export async function completeProgress(input: CompleteProgressInput): Promise<vo
  * Mark an operation as failed
  */
 export async function failProgress(input: FailProgressInput): Promise<void> {
-  const pool = getPool();
+  const db = getDb();
   const { operationId, companyId, error, details } = input;
 
   // Get current details to merge with
@@ -357,12 +323,11 @@ export async function failProgress(input: FailProgressInput): Promise<void> {
     errorDetails.failedAt = new Date().toISOString();
   }
 
-  await pool.execute<ResultSetHeader>(
-    `UPDATE operation_progress
-     SET status = 'failed', updated_at = NOW(), completed_at = NOW(), details = ?
-     WHERE operation_id = ? AND company_id = ?`,
-    [JSON.stringify(errorDetails), operationId, companyId]
-  );
+  await sql`
+    UPDATE operation_progress
+    SET status = 'failed', updated_at = NOW(), completed_at = NOW(), details = ${JSON.stringify(errorDetails)}
+    WHERE operation_id = ${operationId} AND company_id = ${companyId}
+  `.execute(db);
 
   // Cleanup tracking state
   lastUpdateTimes.delete(operationId);
@@ -376,14 +341,13 @@ export async function cancelProgress(
   operationId: string,
   companyId: number
 ): Promise<void> {
-  const pool = getPool();
+  const db = getDb();
 
-  await pool.execute<ResultSetHeader>(
-    `UPDATE operation_progress
-     SET status = 'cancelled', updated_at = NOW(), completed_at = NOW()
-     WHERE operation_id = ? AND company_id = ?`,
-    [operationId, companyId]
-  );
+  await sql`
+    UPDATE operation_progress
+    SET status = 'cancelled', updated_at = NOW(), completed_at = NOW()
+    WHERE operation_id = ${operationId} AND company_id = ${companyId}
+  `.execute(db);
 
   // Cleanup tracking state
   lastUpdateTimes.delete(operationId);
@@ -399,17 +363,16 @@ export async function cancelProgress(
  * Returns the count of stale operations found
  */
 export async function findStaleOperations(): Promise<string[]> {
-  const pool = getPool();
+  const db = getDb();
 
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT operation_id
+  const rows = await sql<{ operation_id: string }>`
+    SELECT operation_id
      FROM operation_progress
      WHERE status = 'running'
-       AND updated_at < DATE_SUB(NOW(), INTERVAL ? SECOND)`,
-    [Math.floor(STALE_THRESHOLD_MS / 1000)]
-  );
+       AND updated_at < DATE_SUB(NOW(), INTERVAL ${Math.floor(STALE_THRESHOLD_MS / 1000)} SECOND)
+  `.execute(db);
 
-  return rows.map((row) => String(row.operation_id));
+  return rows.rows.map((row) => String(row.operation_id));
 }
 
 /**
@@ -418,7 +381,7 @@ export async function findStaleOperations(): Promise<string[]> {
  * Returns the count of operations marked as failed
  */
 export async function cleanupStaleOperations(): Promise<number> {
-  const pool = getPool();
+  const db = getDb();
 
   const staleIds = await findStaleOperations();
 
@@ -426,18 +389,16 @@ export async function cleanupStaleOperations(): Promise<number> {
     return 0;
   }
 
-  const placeholders = staleIds.map(() => "?").join(",");
   // Use MySQL NOW() for datetime to avoid format issues
-  const [result] = await pool.execute<ResultSetHeader>(
-    `UPDATE operation_progress
-     SET status = 'failed',
-         completed_at = NOW(),
-         details = JSON_SET(COALESCE(details, '{}'), '$.error', 'Operation timed out after server restart')
-     WHERE operation_id IN (${placeholders}) AND status = 'running'`,
-    staleIds
-  );
+  const result = await sql`
+    UPDATE operation_progress
+    SET status = 'failed',
+        completed_at = NOW(),
+        details = JSON_SET(COALESCE(details, '{}'), '$.error', 'Operation timed out after server restart')
+    WHERE operation_id IN (${sql.join(staleIds.map(id => sql`${id}`), sql`, `)}) AND status = 'running'
+  `.execute(db);
 
-  const count = result.affectedRows;
+  const count = Number(result.numAffectedRows ?? 0);
   if (count > 0) {
     console.info(`[progress] Marked ${count} stale operation(s) as failed on startup`);
   }
@@ -464,46 +425,52 @@ export async function listProgress(
     offset?: number;
   }
 ): Promise<{ operations: OperationProgress[]; total: number }> {
-  const pool = getPool();
+  const db = getDb();
 
-  const conditions: string[] = ["company_id = ?"];
-  const params: (number | string)[] = [companyId];
+  const conditions: Array<ReturnType<typeof sql>> = [sql`company_id = ${companyId}`];
 
   if (options?.status) {
-    conditions.push("status = ?");
-    params.push(options.status);
+    conditions.push(sql`status = ${options.status}`);
   }
 
   if (options?.type) {
-    conditions.push("operation_type = ?");
-    params.push(options.type);
+    conditions.push(sql`operation_type = ${options.type}`);
   }
 
-  const whereClause = conditions.join(" AND ");
+  const whereClause = sql.join(conditions, sql` AND `);
 
   // Get total count
-  const [countRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) as total FROM operation_progress WHERE ${whereClause}`,
-    params
-  );
-  const total = Number(countRows[0]?.total ?? 0);
+  const countResult = await sql<{ total: number }>`
+    SELECT COUNT(*) as total FROM operation_progress WHERE ${whereClause}
+  `.execute(db);
+  const total = Number(countResult.rows[0]?.total ?? 0);
 
   // Get paginated results
   const limit = options?.limit ?? 50;
   const offset = options?.offset ?? 0;
 
-  const [rows] = await pool.execute<OperationProgressRow[]>(
-    `SELECT operation_id, operation_type, company_id, total_units, completed_units,
-            status, started_at, updated_at, completed_at, details
+  const rows = await sql<{
+    operation_id: string;
+    operation_type: string;
+    company_id: number;
+    total_units: number;
+    completed_units: number;
+    status: string;
+    started_at: Date;
+    updated_at: Date;
+    completed_at: Date | null;
+    details: string | null;
+  }>`
+    SELECT operation_id, operation_type, company_id, total_units, completed_units,
+           status, started_at, updated_at, completed_at, details
      FROM operation_progress
      WHERE ${whereClause}
      ORDER BY started_at DESC
-     LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
+     LIMIT ${limit} OFFSET ${offset}
+  `.execute(db);
 
   return {
-    operations: rows.map(mapRowToProgress),
+    operations: rows.rows.map(mapRowToProgress),
     total,
   };
 }
@@ -549,7 +516,18 @@ function shouldPersistUpdate(
 /**
  * Map database row to OperationProgress object
  */
-function mapRowToProgress(row: OperationProgressRow): OperationProgress {
+function mapRowToProgress(row: {
+  operation_id: string;
+  operation_type: string;
+  company_id: number;
+  total_units: number;
+  completed_units: number;
+  status: string;
+  started_at: Date;
+  updated_at: Date;
+  completed_at: Date | null;
+  details: string | null;
+}): OperationProgress {
   return {
     operationId: String(row.operation_id),
     operationType: row.operation_type as OperationType,

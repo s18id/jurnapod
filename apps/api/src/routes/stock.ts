@@ -22,7 +22,6 @@ import {
   adjustStock,
   type StockAdjustmentInput
 } from "../lib/stock.js";
-import { getDbPool } from "../lib/db.js";
 import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
 import { type RoleCode } from "../lib/auth.js";
 import { successResponse, errorResponse } from "../lib/response.js";
@@ -170,16 +169,13 @@ stockRoutes.get(
   requireStockAccess(["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"]),
   async (c) => {
     const auth = c.get("auth");
-    const dbPool = getDbPool();
-    let connection;
 
     try {
       const outletId = parseInt(c.req.param("outletId") ?? "", 10);
       const { product_id } = c.req.valid('query');
 
-      connection = await dbPool.getConnection();
       const productIds = product_id ? [product_id] : undefined;
-      const stockLevels = await getStockLevels(auth.companyId, outletId, productIds, connection);
+      const stockLevels = await getStockLevels(auth.companyId, outletId, productIds);
 
       return successResponse({
         company_id: auth.companyId,
@@ -198,10 +194,6 @@ stockRoutes.get(
         error instanceof Error ? error.message : "Failed to get stock levels",
         500
       );
-    } finally {
-      if (connection) {
-        connection.release();
-      }
     }
   }
 );
@@ -224,14 +216,11 @@ stockRoutes.get(
   requireStockAccess(["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"]),
   async (c) => {
     const auth = c.get("auth");
-    const dbPool = getDbPool();
-    let connection;
 
     try {
       const outletId = parseInt(c.req.param("outletId") ?? "", 10);
       const { product_id, transaction_type, limit, offset } = c.req.valid('query');
 
-      connection = await dbPool.getConnection();
       const { transactions, total } = await getStockTransactions(
         auth.companyId,
         outletId,
@@ -240,8 +229,7 @@ stockRoutes.get(
           transaction_type,
           limit,
           offset
-        },
-        connection
+        }
       );
 
       return successResponse({
@@ -267,10 +255,6 @@ stockRoutes.get(
         error instanceof Error ? error.message : "Failed to get stock transactions",
         500
       );
-    } finally {
-      if (connection) {
-        connection.release();
-      }
     }
   }
 );
@@ -288,14 +272,11 @@ stockRoutes.get(
   requireStockAccess(["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"]),
   async (c) => {
     const auth = c.get("auth");
-    const dbPool = getDbPool();
-    let connection;
 
     try {
       const outletId = parseInt(c.req.param("outletId") ?? "", 10);
 
-      connection = await dbPool.getConnection();
-      const alerts = await getLowStockAlerts(auth.companyId, outletId, connection);
+      const alerts = await getLowStockAlerts(auth.companyId, outletId);
 
       return successResponse({
         company_id: auth.companyId,
@@ -315,10 +296,6 @@ stockRoutes.get(
         error instanceof Error ? error.message : "Failed to get low stock alerts",
         500
       );
-    } finally {
-      if (connection) {
-        connection.release();
-      }
     }
   }
 );
@@ -340,8 +317,6 @@ stockRoutes.post(
   requireStockAccess(["OWNER", "ADMIN", "ACCOUNTANT"], "create"),
   async (c) => {
     const auth = c.get("auth");
-    const dbPool = getDbPool();
-    let connection;
 
     try {
       const outletId = parseInt(c.req.param("outletId") ?? "", 10);
@@ -351,8 +326,6 @@ stockRoutes.post(
         reason: string;
       };
 
-      connection = await dbPool.getConnection();
-      
       const adjustmentInput: StockAdjustmentInput = {
         company_id: auth.companyId,
         outlet_id: outletId,
@@ -363,7 +336,7 @@ stockRoutes.post(
         user_id: auth.userId
       };
 
-      const success = await adjustStock(adjustmentInput, connection);
+      const success = await adjustStock(adjustmentInput);
 
       if (!success) {
         return errorResponse(
@@ -393,10 +366,6 @@ stockRoutes.post(
         error instanceof Error ? error.message : "Failed to adjust stock",
         500
       );
-    } finally {
-      if (connection) {
-        connection.release();
-      }
     }
   }
 );

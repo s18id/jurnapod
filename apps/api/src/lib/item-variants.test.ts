@@ -4,6 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { sql } from "kysely";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import {
   createVariantAttribute,
@@ -22,9 +23,8 @@ import {
   AttributeNotFoundError,
   ItemNotFoundError
 } from "./item-variants";
-import { closeDbPool, getDbPool } from "./db";
+import { closeDbPool, getDb } from "./db";
 import { createTestItem, createTestCompanyMinimal, cleanupTestFixtures } from "./test-fixtures";
-import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
 
@@ -32,7 +32,7 @@ test(
   "createVariantAttribute - creates attribute and generates variants",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -80,10 +80,10 @@ test(
     } finally {
       // Cleanup - cascade delete will handle related records
       if (attributeId) {
-        await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
+        await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
       }
       if (itemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
     }
   }
@@ -93,7 +93,7 @@ test(
   "createVariantAttribute - with multiple attributes generates cartesian product",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -104,12 +104,11 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
       const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
@@ -144,9 +143,9 @@ test(
       assert.ok(variantNames.some(n => n.includes("Blue") && n.includes("M")), "Should have Blue, M variant");
 
     } finally {
-      if (attr2Id) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attr2Id]);
-      if (attr1Id) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attr1Id]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (attr2Id) await sql`DELETE FROM item_variant_attributes WHERE id = ${attr2Id}`.execute(db);
+      if (attr1Id) await sql`DELETE FROM item_variant_attributes WHERE id = ${attr1Id}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );
@@ -155,15 +154,13 @@ test(
   "createVariantAttribute - throws ItemNotFoundError for invalid item",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
-    const [companyRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-      [companyCode]
-    );
-    assert.ok(companyRows.length > 0, "Company fixture not found");
-    const companyId = Number(companyRows[0].id);
+    const companyRows = await sql<{ id: number }>`
+      SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+    `.execute(getDb());
+    assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+    const companyId = Number(companyRows.rows[0].id);
 
     await assert.rejects(
       async () => {
@@ -181,7 +178,7 @@ test(
   "updateVariantAttribute - updates values and regenerates variants",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -191,12 +188,11 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
       const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
@@ -238,8 +234,8 @@ test(
       assert.strictEqual(lVariant!.is_active, true, "L variant should be active");
 
     } finally {
-      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (attributeId) await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );
@@ -248,7 +244,7 @@ test(
   "deleteVariantAttribute - archives variants and deletes attribute",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -258,12 +254,11 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
       const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
@@ -296,8 +291,8 @@ test(
       assert.strictEqual(attributes.length, 0);
 
     } finally {
-      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (attributeId) await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );
@@ -306,7 +301,7 @@ test(
   "updateVariant - updates SKU, price, and status",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -316,12 +311,11 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
       const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
@@ -353,8 +347,8 @@ test(
       assert.strictEqual(updated.is_active, false);
 
     } finally {
-      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (attributeId) await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );
@@ -363,7 +357,7 @@ test(
   "updateVariant - throws DuplicateSkuError for duplicate SKU",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -373,12 +367,11 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
       const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
@@ -408,8 +401,8 @@ test(
       );
 
     } finally {
-      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (attributeId) await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );
@@ -418,7 +411,7 @@ test(
   "adjustVariantStock - adjusts stock quantity",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -428,12 +421,11 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
       const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
@@ -465,8 +457,8 @@ test(
       assert.strictEqual(updated!.stock_quantity, 70);
 
     } finally {
-      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (attributeId) await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );
@@ -475,7 +467,7 @@ test(
   "adjustVariantStock - prevents negative stock",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -485,12 +477,11 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
       const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
@@ -513,8 +504,8 @@ test(
       assert.strictEqual(newStock, 0, "Stock should not go below 0");
 
     } finally {
-      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (attributeId) await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );
@@ -523,7 +514,7 @@ test(
   "validateVariantSku - checks SKU uniqueness",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -533,12 +524,11 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
       const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
@@ -570,8 +560,8 @@ test(
       assert.strictEqual(result3.valid, true);
 
     } finally {
-      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (attributeId) await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );
@@ -580,7 +570,7 @@ test(
   "getVariantEffectivePrice - returns override or parent price",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -593,19 +583,17 @@ test(
     const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
-      const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
-        [companyId, outletCode]
-      );
-      assert.ok(outletRows.length > 0, "Outlet fixture not found");
-      outletId = Number(outletRows[0].id);
+      const outletRows = await sql<{ id: number }>`
+        SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+      `.execute(db);
+      assert.ok(outletRows.rows.length > 0, "Outlet fixture not found");
+      outletId = Number(outletRows.rows[0].id);
 
       const item = await createTestItem(companyId, {
         name: `Test Item ${runId}`,
@@ -615,11 +603,11 @@ test(
       itemId = item.id;
 
       // Set parent item price
-      const [priceResult] = await pool.execute(
-        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active) VALUES (?, NULL, ?, ?, 1)`,
-        [companyId, itemId, 50.00]
-      );
-      itemPriceId = Number((priceResult as { insertId: number }).insertId);
+      const insertResult = await sql`
+        INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active) 
+        VALUES (${companyId}, NULL, ${itemId}, 50.00, 1)
+      `.execute(db);
+      itemPriceId = Number(insertResult.insertId);
 
       const attr = await createVariantAttribute(companyId, itemId, {
         attribute_name: "Size",
@@ -642,9 +630,9 @@ test(
       assert.strictEqual(price, 75.00);
 
     } finally {
-      if (itemPriceId) await pool.execute(`DELETE FROM item_prices WHERE id = ?`, [itemPriceId]);
-      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (itemPriceId) await sql`DELETE FROM item_prices WHERE id = ${itemPriceId}`.execute(db);
+      if (attributeId) await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );
@@ -653,15 +641,13 @@ test(
   "getVariantById - returns null for non-existent variant",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
-    const [companyRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-      [companyCode]
-    );
-    assert.ok(companyRows.length > 0, "Company fixture not found");
-    const companyId = Number(companyRows[0].id);
+    const companyRows = await sql<{ id: number }>`
+      SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+    `.execute(getDb());
+    assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+    const companyId = Number(companyRows.rows[0].id);
 
     const result = await getVariantById(companyId, 999999);
     assert.strictEqual(result, null);
@@ -672,15 +658,13 @@ test(
   "updateVariant - throws VariantNotFoundError for invalid variant",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
-    const [companyRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-      [companyCode]
-    );
-    assert.ok(companyRows.length > 0, "Company fixture not found");
-    const companyId = Number(companyRows[0].id);
+    const companyRows = await sql<{ id: number }>`
+      SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+    `.execute(getDb());
+    assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+    const companyId = Number(companyRows.rows[0].id);
 
     await assert.rejects(
       async () => {
@@ -695,15 +679,13 @@ test(
   "deleteVariantAttribute - throws AttributeNotFoundError for invalid attribute",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
-    const [companyRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-      [companyCode]
-    );
-    assert.ok(companyRows.length > 0, "Company fixture not found");
-    const companyId = Number(companyRows[0].id);
+    const companyRows = await sql<{ id: number }>`
+      SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+    `.execute(getDb());
+    assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+    const companyId = Number(companyRows.rows[0].id);
 
     await assert.rejects(
       async () => {
@@ -718,7 +700,7 @@ test(
   "getVariantsForSync - returns active variants with attributes and effective prices",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -731,19 +713,17 @@ test(
 
     try {
       // Get company and outlet
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
-      const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
-        [companyId, outletCode]
-      );
-      assert.ok(outletRows.length > 0, "Outlet fixture not found");
-      outletId = Number(outletRows[0].id);
+      const outletRows = await sql<{ id: number }>`
+        SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+      `.execute(db);
+      assert.ok(outletRows.rows.length > 0, "Outlet fixture not found");
+      outletId = Number(outletRows.rows[0].id);
 
       // Create test item
       const item = await createTestItem(companyId, {
@@ -783,8 +763,8 @@ test(
       assert.strictEqual(syncLarge!.attributes["Size"], "Large", "Attributes should map size to Large");
 
     } finally {
-      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (attributeId) await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );
@@ -793,7 +773,7 @@ test(
   "getVariantsForSync - excludes inactive and archived variants",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -803,12 +783,11 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyRows.rows[0].id);
 
       const item = await createTestItem(companyId, {
         name: `Active Variant Test ${runId}`,
@@ -839,8 +818,8 @@ test(
       assert.ok(syncItemVariants.every(v => v.is_active), "All sync variants should be active");
 
     } finally {
-      if (attributeId) await pool.execute(`DELETE FROM item_variant_attributes WHERE id = ?`, [attributeId]);
-      if (itemId) await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+      if (attributeId) await sql`DELETE FROM item_variant_attributes WHERE id = ${attributeId}`.execute(db);
+      if (itemId) await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
     }
   }
 );

@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
+import { sql } from "kysely";
+import { getDb } from "./db";
 
 const POS_SALE_DOC_TYPE = "POS_SALE";
 
@@ -31,206 +32,185 @@ export interface ReconciliationResult {
   status: "PASS" | "FAIL";
 }
 
-interface QueryExecutor {
-  execute: PoolConnection["execute"];
-}
-
 function toIsoString(date: Date): string {
   return date.toISOString();
 }
 
-function buildWhereClause(
-  companyId: number,
-  outletId?: number
-): { sql: string; values: (number | string)[] } {
-  const clauses = ["p.company_id = ?"];
-  const values: (number | string)[] = [companyId];
-
-  if (outletId != null) {
-    clauses.push("p.outlet_id = ?");
-    values.push(outletId);
-  }
-
-  return {
-    sql: ` AND ${clauses.join(" AND ")}`,
-    values
-  };
-}
-
-function buildJournalWhereClause(
-  companyId: number,
-  outletId?: number
-): { sql: string; values: (number | string)[] } {
-  const clauses = ["jb.company_id = ?"];
-  const values: (number | string)[] = [companyId];
-
-  if (outletId != null) {
-    clauses.push("jb.outlet_id = ?");
-    values.push(outletId);
-  }
-
-  return {
-    sql: ` AND ${clauses.join(" AND ")}`,
-    values
-  };
+interface ReconciliationRow {
+  id: number;
+  company_id: number;
+  outlet_id: number | null;
+  total_debit?: number;
+  total_credit?: number;
 }
 
 async function detectMissingJournals(
-  executor: QueryExecutor,
+  db: ReturnType<typeof getDb>,
   companyId: number,
   outletId?: number
 ): Promise<ReconciliationFinding[]> {
-  const where = buildWhereClause(companyId, outletId);
-
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT p.id, p.company_id, p.outlet_id
+  let query = sql`SELECT p.id, p.company_id, p.outlet_id
      FROM pos_transactions p
      LEFT JOIN journal_batches jb
        ON jb.company_id = p.company_id
-      AND jb.doc_type = ?
+      AND jb.doc_type = ${POS_SALE_DOC_TYPE}
       AND jb.doc_id = p.id
      WHERE p.status = 'COMPLETED'
-       AND jb.id IS NULL${where.sql}
-     ORDER BY p.id ASC`,
-    [POS_SALE_DOC_TYPE, ...where.values]
-  );
+       AND jb.id IS NULL
+       AND p.company_id = ${companyId}`;
 
-  return (rows as Array<{ id: number; company_id: number; outlet_id: number }>).map((row) => ({
+  if (outletId != null) {
+    query = sql`${query} AND p.outlet_id = ${outletId}`;
+  }
+
+  query = sql`${query} ORDER BY p.id ASC`;
+
+  const result = await query.execute(db);
+  const rows = result.rows as ReconciliationRow[];
+
+  return rows.map((row) => ({
     type: "MISSING_JOURNAL" as const,
     sourceId: row.id,
     companyId: row.company_id,
-    outletId: row.outlet_id,
+    outletId: row.outlet_id ?? undefined,
     details: `POS transaction ${row.id} is COMPLETED but has no journal batch`
   }));
 }
 
 async function detectUnbalancedBatches(
-  executor: QueryExecutor,
+  db: ReturnType<typeof getDb>,
   companyId: number,
   outletId?: number
 ): Promise<ReconciliationFinding[]> {
-  const where = buildJournalWhereClause(companyId, outletId);
-
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT jb.id, jb.company_id, jb.outlet_id,
-            COALESCE(SUM(jl.debit), 0) AS total_debit,
-            COALESCE(SUM(jl.credit), 0) AS total_credit
+  let query = sql`SELECT jb.id, jb.company_id, jb.outlet_id,
+          COALESCE(SUM(jl.debit), 0) AS total_debit,
+          COALESCE(SUM(jl.credit), 0) AS total_credit
      FROM journal_batches jb
      LEFT JOIN journal_lines jl ON jl.journal_batch_id = jb.id
-     WHERE jb.doc_type = ?${where.sql}
-     GROUP BY jb.id
-     HAVING total_debit <> total_credit
-     ORDER BY jb.id ASC`,
-    [POS_SALE_DOC_TYPE, ...where.values]
-  );
+     WHERE jb.doc_type = ${POS_SALE_DOC_TYPE}
+       AND jb.company_id = ${companyId}`;
 
-  return (rows as Array<{
-    id: number;
-    company_id: number;
-    outlet_id: number;
-    total_debit: number;
-    total_credit: number;
-  }>).map((row) => ({
+  if (outletId != null) {
+    query = sql`${query} AND jb.outlet_id = ${outletId}`;
+  }
+
+  query = sql`${query} GROUP BY jb.id
+     HAVING total_debit <> total_credit
+     ORDER BY jb.id ASC`;
+
+  const result = await query.execute(db);
+  const rows = result.rows as ReconciliationRow[];
+
+  return rows.map((row) => ({
     type: "UNBALANCED" as const,
     journalBatchId: row.id,
     companyId: row.company_id,
-    outletId: row.outlet_id,
+    outletId: row.outlet_id ?? undefined,
     details: `Journal batch ${row.id} has unbalanced lines: debit=${row.total_debit}, credit=${row.total_credit}`
   }));
 }
 
 async function detectOrphanBatches(
-  executor: QueryExecutor,
+  db: ReturnType<typeof getDb>,
   companyId: number,
   outletId?: number
 ): Promise<ReconciliationFinding[]> {
-  const where = buildJournalWhereClause(companyId, outletId);
-
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT jb.id, jb.company_id, jb.outlet_id
+  let query = sql`SELECT jb.id, jb.company_id, jb.outlet_id
      FROM journal_batches jb
      LEFT JOIN pos_transactions p
        ON p.company_id = jb.company_id
       AND p.id = jb.doc_id
-     WHERE jb.doc_type = ?
-       AND p.id IS NULL${where.sql}
-     ORDER BY jb.id ASC`,
-    [POS_SALE_DOC_TYPE, ...where.values]
-  );
+     WHERE jb.doc_type = ${POS_SALE_DOC_TYPE}
+       AND p.id IS NULL
+       AND jb.company_id = ${companyId}`;
 
-  return (rows as Array<{ id: number; company_id: number; outlet_id: number }>).map((row) => ({
+  if (outletId != null) {
+    query = sql`${query} AND jb.outlet_id = ${outletId}`;
+  }
+
+  query = sql`${query} ORDER BY jb.id ASC`;
+
+  const result = await query.execute(db);
+  const rows = result.rows as ReconciliationRow[];
+
+  return rows.map((row) => ({
     type: "ORPHAN" as const,
     journalBatchId: row.id,
     companyId: row.company_id,
-    outletId: row.outlet_id,
+    outletId: row.outlet_id ?? undefined,
     details: `Journal batch ${row.id} has no corresponding POS transaction`
   }));
 }
 
 async function countMissingJournals(
-  executor: QueryExecutor,
+  db: ReturnType<typeof getDb>,
   companyId: number,
   outletId?: number
 ): Promise<number> {
-  const where = buildWhereClause(companyId, outletId);
-
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) AS total
+  let query = sql`SELECT COUNT(*) AS total
      FROM pos_transactions p
      LEFT JOIN journal_batches jb
        ON jb.company_id = p.company_id
-      AND jb.doc_type = ?
+      AND jb.doc_type = ${POS_SALE_DOC_TYPE}
       AND jb.doc_id = p.id
      WHERE p.status = 'COMPLETED'
-       AND jb.id IS NULL${where.sql}`,
-    [POS_SALE_DOC_TYPE, ...where.values]
-  );
+       AND jb.id IS NULL
+       AND p.company_id = ${companyId}`;
 
-  return Number((rows[0] as { total: number }).total);
+  if (outletId != null) {
+    query = sql`${query} AND p.outlet_id = ${outletId}`;
+  }
+
+  const result = await query.execute(db);
+  return Number((result.rows[0] as { total: number }).total);
 }
 
 async function countUnbalancedBatches(
-  executor: QueryExecutor,
+  db: ReturnType<typeof getDb>,
   companyId: number,
   outletId?: number
 ): Promise<number> {
-  const where = buildJournalWhereClause(companyId, outletId);
-
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) AS total
+  let query = sql`SELECT COUNT(*) AS total
      FROM (
        SELECT jb.id
        FROM journal_batches jb
        LEFT JOIN journal_lines jl ON jl.journal_batch_id = jb.id
-       WHERE jb.doc_type = ?${where.sql}
+       WHERE jb.doc_type = ${POS_SALE_DOC_TYPE}
+         AND jb.company_id = ${companyId}`;
+
+  if (outletId != null) {
+    query = sql`${query} AND jb.outlet_id = ${outletId}`;
+  }
+
+  query = sql`${query}
        GROUP BY jb.id
        HAVING COALESCE(SUM(jl.debit), 0) <> COALESCE(SUM(jl.credit), 0)
-     ) t`,
-    [POS_SALE_DOC_TYPE, ...where.values]
-  );
+     ) t`;
 
-  return Number((rows[0] as { total: number }).total);
+  const result = await query.execute(db);
+  return Number((result.rows[0] as { total: number }).total);
 }
 
 async function countOrphanBatches(
-  executor: QueryExecutor,
+  db: ReturnType<typeof getDb>,
   companyId: number,
   outletId?: number
 ): Promise<number> {
-  const where = buildJournalWhereClause(companyId, outletId);
-
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) AS total
+  let query = sql`SELECT COUNT(*) AS total
      FROM journal_batches jb
      LEFT JOIN pos_transactions p
        ON p.company_id = jb.company_id
       AND p.id = jb.doc_id
-     WHERE jb.doc_type = ?
-       AND p.id IS NULL${where.sql}`,
-    [POS_SALE_DOC_TYPE, ...where.values]
-  );
+     WHERE jb.doc_type = ${POS_SALE_DOC_TYPE}
+       AND p.id IS NULL
+       AND jb.company_id = ${companyId}`;
 
-  return Number((rows[0] as { total: number }).total);
+  if (outletId != null) {
+    query = sql`${query} AND jb.outlet_id = ${outletId}`;
+  }
+
+  const result = await query.execute(db);
+  return Number((result.rows[0] as { total: number }).total);
 }
 
 export interface ReconciliationOptions {
@@ -239,7 +219,7 @@ export interface ReconciliationOptions {
 }
 
 export class ReconciliationService {
-  constructor(private readonly executor: QueryExecutor) {}
+  constructor(private readonly db: ReturnType<typeof getDb>) {}
 
   /**
    * Run reconciliation check for POS transactions vs journal batches.
@@ -251,9 +231,9 @@ export class ReconciliationService {
 
     // Run all detection queries in parallel for efficiency
     const [missingJournals, unbalanced, orphans] = await Promise.all([
-      detectMissingJournals(this.executor, companyId, outletId),
-      detectUnbalancedBatches(this.executor, companyId, outletId),
-      detectOrphanBatches(this.executor, companyId, outletId)
+      detectMissingJournals(this.db, companyId, outletId),
+      detectUnbalancedBatches(this.db, companyId, outletId),
+      detectOrphanBatches(this.db, companyId, outletId)
     ]);
 
     const findings = [...missingJournals, ...unbalanced, ...orphans];
@@ -282,9 +262,9 @@ export class ReconciliationService {
     const { companyId, outletId } = options;
 
     const [missingCount, unbalancedCount, orphanCount] = await Promise.all([
-      countMissingJournals(this.executor, companyId, outletId),
-      countUnbalancedBatches(this.executor, companyId, outletId),
-      countOrphanBatches(this.executor, companyId, outletId)
+      countMissingJournals(this.db, companyId, outletId),
+      countUnbalancedBatches(this.db, companyId, outletId),
+      countOrphanBatches(this.db, companyId, outletId)
     ]);
 
     return {

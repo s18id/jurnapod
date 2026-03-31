@@ -7,9 +7,8 @@
  * CRUD and lifecycle operations for sales credit notes.
  */
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
-import { getDbPool } from "../db";
+import { getDb, type KyselySchema } from "@/lib/db";
+import { sql } from "kysely";
 import {
   postCreditNoteToJournal,
   voidCreditNoteToJournal
@@ -17,25 +16,21 @@ import {
 import {
   DOCUMENT_TYPES,
   type DocumentType
-} from "../numbering";
+} from "@/lib/numbering";
 import { toRfc3339Required } from "@jurnapod/shared";
 import {
   normalizeMoney,
-  withTransaction,
   getNumberWithConflictMapping,
   ensureCompanyOutletExists,
   ensureUserHasOutletAccess,
   formatDateOnly,
   isMysqlError,
   MYSQL_DUPLICATE_ERROR_CODE,
-  type QueryExecutor,
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError
 } from "@/lib/shared/common-utils";
 import type {
-  SalesCreditNoteRow,
-  SalesCreditNoteLineRow,
   SalesCreditNoteDetail,
   CreditNoteLineInput,
   CreditNoteListFilters,
@@ -59,58 +54,90 @@ export {
 } from "@/lib/shared/common-utils";
 
 // ============================================================================
-// Helper Functions
+// Transaction Helper
 // ============================================================================
 
-// Note: Uses shared normalizeMoney, withTransaction, getNumberWithConflictMapping,
-// ensureCompanyOutletExists, ensureUserHasOutletAccess, formatDateOnly, isMysqlError, MYSQL_DUPLICATE_ERROR_CODE
+async function withTransaction<T>(operation: (db: KyselySchema) => Promise<T>): Promise<T> {
+  const db = getDb();
+  return db.transaction().execute(operation);
+}
 
 // ============================================================================
 // Credit Note Database Operations
 // ============================================================================
 
+interface CreditNoteRow {
+  id: number;
+  company_id: number;
+  outlet_id: number;
+  invoice_id: number;
+  credit_note_no: string;
+  credit_note_date: string;
+  client_ref: string | null;
+  status: string;
+  reason: string | null;
+  notes: string | null;
+  amount: string | number;
+  created_by_user_id: number | null;
+  updated_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CreditNoteLineRow {
+  id: number;
+  credit_note_id: number;
+  line_no: number;
+  description: string;
+  qty: string | number;
+  unit_price: string | number;
+  line_total: string | number;
+}
+
 async function findCreditNoteByIdWithExecutor(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   creditNoteId: number,
   options?: { forUpdate?: boolean }
-): Promise<SalesCreditNoteRow | null> {
-  const [rows] = await connection.execute<SalesCreditNoteRow[]>(
-    `SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
-            client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
-            created_at, updated_at
-     FROM sales_credit_notes
-     WHERE company_id = ? AND id = ?${options?.forUpdate ? " FOR UPDATE" : ""}`,
-    [companyId, creditNoteId]
-  );
-  return rows[0] || null;
+): Promise<CreditNoteRow | null> {
+  const forUpdateClause = options?.forUpdate ? sql` FOR UPDATE` : sql``;
+  const rows = await sql`SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
+          client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
+          created_at, updated_at
+   FROM sales_credit_notes
+   WHERE company_id = ${companyId} AND id = ${creditNoteId}
+   ${forUpdateClause}
+   LIMIT 1`.execute(db);
+
+  if (rows.rows.length === 0) {
+    return null;
+  }
+  return rows.rows[0] as CreditNoteRow;
 }
 
 async function findCreditNoteLinesWithExecutor(
-  connection: PoolConnection,
+  db: KyselySchema,
   creditNoteId: number
-): Promise<SalesCreditNoteLineRow[]> {
-  const [rows] = await connection.execute<SalesCreditNoteLineRow[]>(
-    `SELECT id, credit_note_id, line_no, description, qty, unit_price, line_total
-     FROM sales_credit_note_lines
-     WHERE credit_note_id = ?
-     ORDER BY line_no`,
-    [creditNoteId]
-  );
-  return rows;
+): Promise<CreditNoteLineRow[]> {
+  const rows = await sql`SELECT id, credit_note_id, line_no, description, qty, unit_price, line_total
+   FROM sales_credit_note_lines
+   WHERE credit_note_id = ${creditNoteId}
+   ORDER BY line_no`.execute(db);
+
+  return rows.rows as CreditNoteLineRow[];
 }
 
 async function findCreditNoteDetailWithExecutor(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   creditNoteId: number
 ): Promise<SalesCreditNoteDetail | null> {
-  const creditNote = await findCreditNoteByIdWithExecutor(connection, companyId, creditNoteId);
+  const creditNote = await findCreditNoteByIdWithExecutor(db, companyId, creditNoteId);
   if (!creditNote) {
     return null;
   }
 
-  const lines = await findCreditNoteLinesWithExecutor(connection, creditNoteId);
+  const lines = await findCreditNoteLinesWithExecutor(db, creditNoteId);
 
   return {
     id: creditNote.id,
@@ -120,7 +147,7 @@ async function findCreditNoteDetailWithExecutor(
     credit_note_no: creditNote.credit_note_no,
     credit_note_date: formatDateOnly(creditNote.credit_note_date),
     client_ref: creditNote.client_ref ?? null,
-    status: creditNote.status,
+    status: creditNote.status as "DRAFT" | "POSTED" | "VOID",
     reason: creditNote.reason ?? null,
     notes: creditNote.notes ?? null,
     amount: Number(creditNote.amount),
@@ -140,43 +167,52 @@ async function findCreditNoteDetailWithExecutor(
   };
 }
 
+interface InvoiceForCreditCheck {
+  id: number;
+  grand_total: number;
+  paid_total: number;
+  payment_status: string;
+}
+
 async function ensureInvoiceExistsAndPosted(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   invoiceId: number
-): Promise<{ id: number; grand_total: number; paid_total: number; payment_status: string }> {
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT id, grand_total, paid_total, payment_status
-     FROM sales_invoices
-     WHERE company_id = ? AND outlet_id = ? AND id = ? AND status = 'POSTED'`,
-    [companyId, outletId, invoiceId]
-  );
-  if (!rows[0]) {
+): Promise<InvoiceForCreditCheck> {
+  const rows = await sql`SELECT id, grand_total, paid_total, payment_status
+   FROM sales_invoices
+   WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id = ${invoiceId} AND status = 'POSTED'
+   LIMIT 1`.execute(db);
+
+  if (rows.rows.length === 0) {
     throw new DatabaseReferenceError("Invoice not found or not posted");
   }
+  const row = rows.rows[0] as InvoiceForCreditCheck;
   return {
-    id: rows[0].id,
-    grand_total: Number(rows[0].grand_total),
-    paid_total: Number(rows[0].paid_total),
-    payment_status: rows[0].payment_status
+    id: row.id,
+    grand_total: Number(row.grand_total),
+    paid_total: Number(row.paid_total),
+    payment_status: row.payment_status
   };
 }
 
 async function findCreditNoteByClientRef(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   clientRef: string
-): Promise<SalesCreditNoteRow | null> {
-  const [rows] = await connection.execute<SalesCreditNoteRow[]>(
-    `SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
-            client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
-            created_at, updated_at
-     FROM sales_credit_notes
-     WHERE company_id = ? AND client_ref = ?`,
-    [companyId, clientRef]
-  );
-  return rows[0] || null;
+): Promise<CreditNoteRow | null> {
+  const rows = await sql`SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
+          client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
+          created_at, updated_at
+   FROM sales_credit_notes
+   WHERE company_id = ${companyId} AND client_ref = ${clientRef}
+   LIMIT 1`.execute(db);
+
+  if (rows.rows.length === 0) {
+    return null;
+  }
+  return rows.rows[0] as CreditNoteRow;
 }
 
 /**
@@ -185,51 +221,40 @@ async function findCreditNoteByClientRef(
  * Uses FOR UPDATE locking on invoice and credit notes to prevent race over-crediting.
  */
 async function getRemainingCreditCapacity(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   invoiceId: number,
   excludeCreditNoteId?: number
 ): Promise<{ grand_total: number; already_credited: number; remaining: number }> {
   // Lock the invoice row first
-  const [invoiceRows] = await connection.execute<RowDataPacket[]>(
-    `SELECT grand_total FROM sales_invoices
-     WHERE company_id = ? AND id = ? AND status = 'POSTED'
-     FOR UPDATE`,
-    [companyId, invoiceId]
-  );
+  const invoiceRows = await sql`SELECT grand_total FROM sales_invoices
+   WHERE company_id = ${companyId} AND id = ${invoiceId} AND status = 'POSTED'
+   FOR UPDATE`.execute(db);
 
-  if (!invoiceRows[0]) {
+  if (invoiceRows.rows.length === 0) {
     throw new DatabaseReferenceError("Invoice not found or not posted");
   }
 
-  const grandTotal = Number(invoiceRows[0].grand_total);
+  const grandTotal = Number((invoiceRows.rows[0] as { grand_total: string | number }).grand_total);
 
   // Lock individual credit note rows (not using FOR UPDATE with aggregates)
-  const excludeClause = excludeCreditNoteId ? " AND id != ?" : "";
+  const excludeClause = excludeCreditNoteId ? sql` AND id != ${excludeCreditNoteId}` : sql``;
   const lockParams = excludeCreditNoteId
     ? [companyId, invoiceId, excludeCreditNoteId]
     : [companyId, invoiceId];
 
-  await connection.execute<RowDataPacket[]>(
-    `SELECT id FROM sales_credit_notes
-     WHERE company_id = ? AND invoice_id = ? AND status = 'POSTED'${excludeClause}
-     FOR UPDATE`,
-    lockParams
-  );
+  await sql`SELECT id FROM sales_credit_notes
+   WHERE company_id = ${companyId} AND invoice_id = ${invoiceId} AND status = 'POSTED'
+   ${excludeClause}
+   FOR UPDATE`.execute(db);
 
   // Now calculate the sum without FOR UPDATE
-  const sumParams = excludeCreditNoteId
-    ? [companyId, invoiceId, excludeCreditNoteId]
-    : [companyId, invoiceId];
+  const creditRows = await sql`SELECT COALESCE(SUM(amount), 0) as total
+   FROM sales_credit_notes
+   WHERE company_id = ${companyId} AND invoice_id = ${invoiceId} AND status = 'POSTED'
+   ${excludeClause}`.execute(db);
 
-  const [creditRows] = await connection.execute<RowDataPacket[]>(
-    `SELECT COALESCE(SUM(amount), 0) as total
-     FROM sales_credit_notes
-     WHERE company_id = ? AND invoice_id = ? AND status = 'POSTED'${excludeClause}`,
-    sumParams
-  );
-
-  const alreadyCredited = Number(creditRows[0]?.total ?? 0);
+  const alreadyCredited = Number((creditRows.rows[0] as { total: string | number }).total ?? 0);
   const remaining = Math.max(0, grandTotal - alreadyCredited);
 
   return { grand_total: grandTotal, already_credited: alreadyCredited, remaining };
@@ -268,26 +293,26 @@ export async function createCreditNote(
   },
   actor?: MutationActor
 ): Promise<SalesCreditNoteDetail> {
-  const result = await withTransaction(async (connection) => {
+  const result = await withTransaction(async (db) => {
     await ensureUserHasOutletAccess(actor?.userId ?? 0, companyId, input.outlet_id);
-    await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+    await ensureCompanyOutletExists(db, companyId, input.outlet_id);
 
     // Idempotency: return existing credit note if client_ref matches
     if (input.client_ref) {
-      const existingCreditNote = await findCreditNoteByClientRef(connection, companyId, input.client_ref);
+      const existingCreditNote = await findCreditNoteByClientRef(db, companyId, input.client_ref);
       if (existingCreditNote) {
         if (actor) {
           await ensureUserHasOutletAccess(actor.userId, companyId, existingCreditNote.outlet_id);
         }
-        return findCreditNoteDetailWithExecutor(connection, companyId, existingCreditNote.id);
+        return findCreditNoteDetailWithExecutor(db, companyId, existingCreditNote.id);
       }
     }
 
-    await ensureInvoiceExistsAndPosted(connection, companyId, input.outlet_id, input.invoice_id);
+    await ensureInvoiceExistsAndPosted(db, companyId, input.outlet_id, input.invoice_id);
 
     // Validate invoice exists with locking; compute cumulative credit capacity
     const { grand_total: grandTotal, remaining } = await getRemainingCreditCapacity(
-      connection,
+      db,
       companyId,
       input.invoice_id
     );
@@ -316,58 +341,34 @@ export async function createCreditNote(
     );
 
     try {
-      const [insertResult] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO sales_credit_notes (
+      const insertResult = await sql`INSERT INTO sales_credit_notes (
           company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
           status, client_ref, reason, notes, amount, created_by_user_id, updated_by_user_id
-        ) VALUES (?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?)`,
-        [
-          companyId,
-          input.outlet_id,
-          input.invoice_id,
-          creditNoteNo,
-          input.credit_note_date,
-          input.client_ref ?? null,
-          input.reason ?? null,
-          input.notes ?? null,
-          normalizedAmount,
-          actor?.userId ?? null,
-          actor?.userId ?? null
-        ]
-      );
+        ) VALUES (${companyId}, ${input.outlet_id}, ${input.invoice_id}, ${creditNoteNo}, ${input.credit_note_date},
+          'DRAFT', ${input.client_ref ?? null}, ${input.reason ?? null}, ${input.notes ?? null},
+          ${normalizedAmount}, ${actor?.userId ?? null}, ${actor?.userId ?? null})`.execute(db);
 
-      const creditNoteId = insertResult.insertId;
+      const creditNoteId = Number(insertResult.insertId);
 
       for (let i = 0; i < input.lines.length; i++) {
         const line = input.lines[i];
         const lineTotal = normalizeMoney(line.qty * line.unit_price);
-        await connection.execute<ResultSetHeader>(
-          `INSERT INTO sales_credit_note_lines (
+        await sql`INSERT INTO sales_credit_note_lines (
             credit_note_id, company_id, outlet_id, line_no, description, qty, unit_price, line_total
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            creditNoteId,
-            companyId,
-            input.outlet_id,
-            i + 1,
-            line.description,
-            line.qty,
-            normalizeMoney(line.unit_price),
-            lineTotal
-          ]
-        );
+          ) VALUES (${creditNoteId}, ${companyId}, ${input.outlet_id}, ${i + 1},
+            ${line.description}, ${line.qty}, ${normalizeMoney(line.unit_price)}, ${lineTotal})`.execute(db);
       }
 
-      return findCreditNoteDetailWithExecutor(connection, companyId, creditNoteId);
+      return findCreditNoteDetailWithExecutor(db, companyId, creditNoteId);
     } catch (error) {
       // Idempotency race handling: if client_ref provided and unique index conflict, fetch and return existing
       if (input.client_ref && isMysqlError(error) && error.errno === MYSQL_DUPLICATE_ERROR_CODE) {
-        const existingCreditNote = await findCreditNoteByClientRef(connection, companyId, input.client_ref);
+        const existingCreditNote = await findCreditNoteByClientRef(db, companyId, input.client_ref);
         if (existingCreditNote) {
           if (actor) {
             await ensureUserHasOutletAccess(actor.userId, companyId, existingCreditNote.outlet_id);
           }
-          return findCreditNoteDetailWithExecutor(connection, companyId, existingCreditNote.id);
+          return findCreditNoteDetailWithExecutor(db, companyId, existingCreditNote.id);
         }
       }
       throw error;
@@ -385,8 +386,8 @@ export async function getCreditNote(
   creditNoteId: number,
   actor?: MutationActor
 ): Promise<SalesCreditNoteDetail | null> {
-  return withTransaction(async (connection) => {
-    const creditNote = await findCreditNoteByIdWithExecutor(connection, companyId, creditNoteId);
+  return withTransaction(async (db) => {
+    const creditNote = await findCreditNoteByIdWithExecutor(db, companyId, creditNoteId);
     if (!creditNote) {
       return null;
     }
@@ -395,7 +396,7 @@ export async function getCreditNote(
       await ensureUserHasOutletAccess(actor.userId, companyId, creditNote.outlet_id);
     }
 
-    return findCreditNoteDetailWithExecutor(connection, companyId, creditNoteId);
+    return findCreditNoteDetailWithExecutor(db, companyId, creditNoteId);
   });
 }
 
@@ -403,23 +404,19 @@ export async function listCreditNotes(
   companyId: number,
   filters: CreditNoteListFilters
 ): Promise<{ total: number; credit_notes: SalesCreditNoteDetail[] }> {
-  return withTransaction(async (connection) => {
-    const conditions: string[] = ["company_id = ?"];
-    const params: (string | number)[] = [companyId];
+  return withTransaction(async (db) => {
+    const conditions: Array<ReturnType<typeof sql>> = [sql`company_id = ${companyId}`];
 
     if (filters.outletIds && filters.outletIds.length > 0) {
-      conditions.push(`outlet_id IN (${filters.outletIds.map(() => "?").join(", ")})`);
-      params.push(...filters.outletIds);
+      conditions.push(sql`outlet_id IN (${sql.join(filters.outletIds.map(id => sql`${id}`), sql`, `)})`);
     }
 
     if (filters.invoiceId) {
-      conditions.push("invoice_id = ?");
-      params.push(filters.invoiceId);
+      conditions.push(sql`invoice_id = ${filters.invoiceId}`);
     }
 
     if (filters.status) {
-      conditions.push("status = ?");
-      params.push(filters.status);
+      conditions.push(sql`status = ${filters.status}`);
     }
 
     // Handle timezone conversion for date range
@@ -434,39 +431,31 @@ export async function listCreditNotes(
     }
 
     if (dateFrom) {
-      conditions.push("credit_note_date >= ?");
-      params.push(dateFrom);
+      conditions.push(sql`credit_note_date >= ${dateFrom}`);
     }
 
     if (dateTo) {
-      conditions.push("credit_note_date <= ?");
-      params.push(dateTo);
+      conditions.push(sql`credit_note_date <= ${dateTo}`);
     }
 
-    const whereClause = conditions.join(" AND ");
+    const whereClause = sql.join(conditions, sql` AND `);
 
-    const [countResult] = await connection.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as total FROM sales_credit_notes WHERE ${whereClause}`,
-      params
-    );
+    const countResult = await sql`SELECT COUNT(*) as total FROM sales_credit_notes WHERE ${whereClause}`.execute(db);
 
     const limit = filters.limit ?? 50;
     const offset = filters.offset ?? 0;
 
-    const [rows] = await connection.execute<SalesCreditNoteRow[]>(
-      `SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
-              client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
-              created_at, updated_at
-       FROM sales_credit_notes
-       WHERE ${whereClause}
-       ORDER BY id DESC
-       LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
-    );
+    const rows = await sql`SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
+            client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
+            created_at, updated_at
+     FROM sales_credit_notes
+     WHERE ${whereClause}
+     ORDER BY id DESC
+     LIMIT ${limit} OFFSET ${offset}`.execute(db);
 
     const creditNotes: SalesCreditNoteDetail[] = [];
-    for (const row of rows) {
-      const lines = await findCreditNoteLinesWithExecutor(connection, row.id);
+    for (const row of rows.rows as CreditNoteRow[]) {
+      const lines = await findCreditNoteLinesWithExecutor(db, row.id);
       creditNotes.push({
         id: row.id,
         company_id: row.company_id,
@@ -475,7 +464,7 @@ export async function listCreditNotes(
         credit_note_no: row.credit_note_no,
         credit_note_date: formatDateOnly(row.credit_note_date),
         client_ref: row.client_ref ?? null,
-        status: row.status,
+        status: row.status as "DRAFT" | "POSTED" | "VOID",
         reason: row.reason ?? null,
         notes: row.notes ?? null,
         amount: Number(row.amount),
@@ -495,7 +484,7 @@ export async function listCreditNotes(
       });
     }
 
-    return { total: Number(countResult[0].total), credit_notes: creditNotes };
+    return { total: Number((countResult.rows[0] as { total: string | number }).total), credit_notes: creditNotes };
   });
 }
 
@@ -511,8 +500,8 @@ export async function updateCreditNote(
   },
   actor?: MutationActor
 ): Promise<SalesCreditNoteDetail | null> {
-  return withTransaction(async (connection) => {
-    const creditNote = await findCreditNoteByIdWithExecutor(connection, companyId, creditNoteId, {
+  return withTransaction(async (db) => {
+    const creditNote = await findCreditNoteByIdWithExecutor(db, companyId, creditNoteId, {
       forUpdate: true
     });
     if (!creditNote) {
@@ -527,28 +516,24 @@ export async function updateCreditNote(
       throw new DatabaseForbiddenError("Only DRAFT credit notes can be updated");
     }
 
-    const updates: string[] = ["updated_by_user_id = ?", "updated_at = CURRENT_TIMESTAMP"];
-    const params: (string | number | null)[] = [actor?.userId ?? null];
+    const updates: Array<ReturnType<typeof sql>> = [sql`updated_by_user_id = ${actor?.userId ?? null}`, sql`updated_at = CURRENT_TIMESTAMP`];
 
     if (input.credit_note_date) {
-      updates.push("credit_note_date = ?");
-      params.push(input.credit_note_date);
+      updates.push(sql`credit_note_date = ${input.credit_note_date}`);
     }
 
     if (input.reason !== undefined) {
-      updates.push("reason = ?");
-      params.push(input.reason ?? null);
+      updates.push(sql`reason = ${input.reason ?? null}`);
     }
 
     if (input.notes !== undefined) {
-      updates.push("notes = ?");
-      params.push(input.notes ?? null);
+      updates.push(sql`notes = ${input.notes ?? null}`);
     }
 
     if (input.amount !== undefined) {
       // Validate that new amount doesn't exceed cumulative credit capacity, excluding this note
       const { grand_total: grandTotal, remaining } = await getRemainingCreditCapacity(
-        connection,
+        db,
         companyId,
         creditNote.invoice_id,
         creditNoteId
@@ -561,8 +546,7 @@ export async function updateCreditNote(
         );
       }
 
-      updates.push("amount = ?");
-      params.push(normalizedAmount);
+      updates.push(sql`amount = ${normalizedAmount}`);
     }
 
     // Validate that sum of line totals exactly equals credit note amount (cent-exact)
@@ -579,41 +563,22 @@ export async function updateCreditNote(
       }
     }
 
-    params.push(companyId, creditNoteId);
-
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_credit_notes SET ${updates.join(", ")} WHERE company_id = ? AND id = ?`,
-      params
-    );
+    await sql`UPDATE sales_credit_notes SET ${sql.join(updates, sql`, `)} WHERE company_id = ${companyId} AND id = ${creditNoteId}`.execute(db);
 
     if (input.lines) {
-      await connection.execute<ResultSetHeader>(
-        "DELETE FROM sales_credit_note_lines WHERE credit_note_id = ?",
-        [creditNoteId]
-      );
+      await sql`DELETE FROM sales_credit_note_lines WHERE credit_note_id = ${creditNoteId}`.execute(db);
 
       for (let i = 0; i < input.lines.length; i++) {
         const line = input.lines[i];
         const lineTotal = normalizeMoney(line.qty * line.unit_price);
-        await connection.execute<ResultSetHeader>(
-          `INSERT INTO sales_credit_note_lines (
+        await sql`INSERT INTO sales_credit_note_lines (
             credit_note_id, company_id, outlet_id, line_no, description, qty, unit_price, line_total
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            creditNoteId,
-            companyId,
-            creditNote.outlet_id,
-            i + 1,
-            line.description,
-            line.qty,
-            normalizeMoney(line.unit_price),
-            lineTotal
-          ]
-        );
+          ) VALUES (${creditNoteId}, ${companyId}, ${creditNote.outlet_id}, ${i + 1},
+            ${line.description}, ${line.qty}, ${normalizeMoney(line.unit_price)}, ${lineTotal})`.execute(db);
       }
     }
 
-    return findCreditNoteDetailWithExecutor(connection, companyId, creditNoteId);
+    return findCreditNoteDetailWithExecutor(db, companyId, creditNoteId);
   });
 }
 
@@ -622,8 +587,8 @@ export async function postCreditNote(
   creditNoteId: number,
   actor?: MutationActor
 ): Promise<SalesCreditNoteDetail | null> {
-  return withTransaction(async (connection) => {
-    const creditNote = await findCreditNoteByIdWithExecutor(connection, companyId, creditNoteId, {
+  return withTransaction(async (db) => {
+    const creditNote = await findCreditNoteByIdWithExecutor(db, companyId, creditNoteId, {
       forUpdate: true
     });
     if (!creditNote) {
@@ -639,7 +604,7 @@ export async function postCreditNote(
     }
 
     const remainingCapacity = await getRemainingCreditCapacity(
-      connection,
+      db,
       companyId,
       creditNote.invoice_id
     );
@@ -650,7 +615,7 @@ export async function postCreditNote(
       );
     }
 
-    await postCreditNoteToJournal(connection, {
+    await postCreditNoteToJournal(db, {
       id: creditNote.id,
       company_id: creditNote.company_id,
       outlet_id: creditNote.outlet_id,
@@ -661,24 +626,20 @@ export async function postCreditNote(
       updated_at: creditNote.updated_at
     });
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_credit_notes
-       SET status = 'POSTED',
-           updated_by_user_id = ?,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ? AND id = ?`,
-      [actor?.userId ?? null, companyId, creditNoteId]
-    );
+    await sql`UPDATE sales_credit_notes
+     SET status = 'POSTED',
+         updated_by_user_id = ${actor?.userId ?? null},
+         updated_at = CURRENT_TIMESTAMP
+     WHERE company_id = ${companyId} AND id = ${creditNoteId}`.execute(db);
 
-    const [invoiceResult] = await connection.execute<RowDataPacket[]>(
-      `SELECT paid_total, payment_status, grand_total FROM sales_invoices
-       WHERE company_id = ? AND id = ?`,
-      [companyId, creditNote.invoice_id]
-    );
+    const invoiceResult = await sql`SELECT paid_total, payment_status, grand_total FROM sales_invoices
+     WHERE company_id = ${companyId} AND id = ${creditNote.invoice_id}
+     LIMIT 1`.execute(db);
 
-    if (invoiceResult[0]) {
-      const currentPaidTotal = Number(invoiceResult[0].paid_total);
-      const grandTotal = Number(invoiceResult[0].grand_total);
+    if (invoiceResult.rows.length > 0) {
+      const row = invoiceResult.rows[0] as { paid_total: string | number; payment_status: string; grand_total: string | number };
+      const currentPaidTotal = Number(row.paid_total);
+      const grandTotal = Number(row.grand_total);
       const newPaidTotal = Math.max(0, currentPaidTotal - Number(creditNote.amount));
 
       let newPaymentStatus: string;
@@ -690,15 +651,12 @@ export async function postCreditNote(
         newPaymentStatus = "PARTIAL";
       }
 
-      await connection.execute<ResultSetHeader>(
-        `UPDATE sales_invoices
-         SET paid_total = ?, payment_status = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ? AND id = ?`,
-        [normalizeMoney(newPaidTotal), newPaymentStatus, companyId, creditNote.invoice_id]
-      );
+      await sql`UPDATE sales_invoices
+       SET paid_total = ${normalizeMoney(newPaidTotal)}, payment_status = ${newPaymentStatus}, updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ${companyId} AND id = ${creditNote.invoice_id}`.execute(db);
     }
 
-    return findCreditNoteDetailWithExecutor(connection, companyId, creditNoteId);
+    return findCreditNoteDetailWithExecutor(db, companyId, creditNoteId);
   });
 }
 
@@ -707,8 +665,8 @@ export async function voidCreditNote(
   creditNoteId: number,
   actor?: MutationActor
 ): Promise<SalesCreditNoteDetail | null> {
-  return withTransaction(async (connection) => {
-    const creditNote = await findCreditNoteByIdWithExecutor(connection, companyId, creditNoteId, {
+  return withTransaction(async (db) => {
+    const creditNote = await findCreditNoteByIdWithExecutor(db, companyId, creditNoteId, {
       forUpdate: true
     });
     if (!creditNote) {
@@ -720,21 +678,18 @@ export async function voidCreditNote(
     }
 
     if (creditNote.status === "VOID") {
-      return findCreditNoteDetailWithExecutor(connection, companyId, creditNoteId);
+      return findCreditNoteDetailWithExecutor(db, companyId, creditNoteId);
     }
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_credit_notes
-       SET status = 'VOID',
-           updated_by_user_id = ?,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ? AND id = ?`,
-      [actor?.userId ?? null, companyId, creditNoteId]
-    );
+    await sql`UPDATE sales_credit_notes
+     SET status = 'VOID',
+         updated_by_user_id = ${actor?.userId ?? null},
+         updated_at = CURRENT_TIMESTAMP
+     WHERE company_id = ${companyId} AND id = ${creditNoteId}`.execute(db);
 
     if (creditNote.status === "POSTED") {
       // Create reversing journal entry
-      await voidCreditNoteToJournal(connection, {
+      await voidCreditNoteToJournal(db, {
         id: creditNote.id,
         company_id: creditNote.company_id,
         outlet_id: creditNote.outlet_id,
@@ -745,15 +700,14 @@ export async function voidCreditNote(
         updated_at: creditNote.updated_at
       });
 
-      const [invoiceResult] = await connection.execute<RowDataPacket[]>(
-        `SELECT paid_total, payment_status, grand_total FROM sales_invoices
-         WHERE company_id = ? AND id = ?`,
-        [companyId, creditNote.invoice_id]
-      );
+      const invoiceResult = await sql`SELECT paid_total, payment_status, grand_total FROM sales_invoices
+       WHERE company_id = ${companyId} AND id = ${creditNote.invoice_id}
+       LIMIT 1`.execute(db);
 
-      if (invoiceResult[0]) {
-        const currentPaidTotal = Number(invoiceResult[0].paid_total);
-        const grandTotal = Number(invoiceResult[0].grand_total);
+      if (invoiceResult.rows.length > 0) {
+        const row = invoiceResult.rows[0] as { paid_total: string | number; payment_status: string; grand_total: string | number };
+        const currentPaidTotal = Number(row.paid_total);
+        const grandTotal = Number(row.grand_total);
         const newPaidTotal = Math.min(grandTotal, currentPaidTotal + Number(creditNote.amount));
 
         let newPaymentStatus: string;
@@ -765,15 +719,12 @@ export async function voidCreditNote(
           newPaymentStatus = "PARTIAL";
         }
 
-        await connection.execute<ResultSetHeader>(
-          `UPDATE sales_invoices
-           SET paid_total = ?, payment_status = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE company_id = ? AND id = ?`,
-          [normalizeMoney(newPaidTotal), newPaymentStatus, companyId, creditNote.invoice_id]
-        );
+        await sql`UPDATE sales_invoices
+         SET paid_total = ${normalizeMoney(newPaidTotal)}, payment_status = ${newPaymentStatus}, updated_at = CURRENT_TIMESTAMP
+         WHERE company_id = ${companyId} AND id = ${creditNote.invoice_id}`.execute(db);
       }
     }
 
-    return findCreditNoteDetailWithExecutor(connection, companyId, creditNoteId);
+    return findCreditNoteDetailWithExecutor(db, companyId, creditNoteId);
   });
 }

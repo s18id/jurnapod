@@ -1,21 +1,17 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection, QueryResult } from "mysql2/promise";
+import { getDb } from "./db";
+import type { KyselySchema } from "@jurnapod/db";
+import type { InsertResult } from "kysely";
 import { AuditService } from "@jurnapod/modules-platform";
-import { getDbPool } from "./db";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
-import { newKyselyConnection } from "@jurnapod/db";
+import { sql } from "kysely";
 
 export class CompanyNotFoundError extends Error {}
 export class CompanyCodeExistsError extends Error {}
 export class CompanyDeactivatedError extends Error {}
 export class CompanyAlreadyActiveError extends Error {}
-
-type IdRow = RowDataPacket & {
-  id: number;
-};
 
 const DEFAULT_OUTLET_CODE = "MAIN";
 const DEFAULT_OUTLET_NAME = "Main Outlet";
@@ -333,7 +329,7 @@ type CompanyActor = {
   ipAddress?: string | null;
 };
 
-type CompanyRow = RowDataPacket & {
+type CompanyRow = {
   id: number;
   code: string;
   name: string;
@@ -347,51 +343,10 @@ type CompanyRow = RowDataPacket & {
   address_line2: string | null;
   city: string | null;
   postal_code: string | null;
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
+  created_at: Date;
+  updated_at: Date;
+  deleted_at: Date | null;
 };
-
-class ConnectionAuditDbClient {
-  constructor(private readonly connection: PoolConnection) {}
-
-  get kysely() {
-    return newKyselyConnection(this.connection);
-  }
-
-  async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
-    const [rows] = await this.connection.execute<RowDataPacket[]>(sql, params || []);
-    return rows as T[];
-  }
-
-  async execute(
-    sql: string,
-    params?: any[]
-  ): Promise<{ affectedRows: number; insertId?: number }> {
-    const [result] = await this.connection.execute<ResultSetHeader>(sql, params || []);
-    return {
-      affectedRows: result.affectedRows,
-      insertId: result.insertId
-    };
-  }
-
-  async begin(): Promise<void> {
-    // No-op: transaction is managed by caller.
-  }
-
-  async commit(): Promise<void> {
-    // No-op: transaction is managed by caller.
-  }
-
-  async rollback(): Promise<void> {
-    // No-op: transaction is managed by caller.
-  }
-}
-
-function createAuditServiceForConnection(connection: PoolConnection): AuditService {
-  const dbClient = new ConnectionAuditDbClient(connection);
-  return new AuditService(dbClient);
-}
 
 function buildAuditContext(companyId: number, actor: CompanyActor) {
   return {
@@ -424,60 +379,85 @@ function normalizeCompanyRow(row: CompanyRow): CompanyResponse {
 }
 
 async function ensureDefaultOutlet(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number
 ): Promise<number> {
   // Get company timezone to inherit
-  const [companyRows] = await connection.execute<CompanyRow[]>(
-    `SELECT timezone FROM companies WHERE id = ?`,
-    [companyId]
-  );
-  
-  const companyTimezone = companyRows[0]?.timezone ?? 'UTC';
-  
-  const [result] = await connection.execute<ResultSetHeader>(
-    `INSERT INTO outlets (company_id, code, name, timezone)
-     VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       id = LAST_INSERT_ID(id),
-       timezone = COALESCE(timezone, VALUES(timezone))`,
-    [companyId, DEFAULT_OUTLET_CODE, DEFAULT_OUTLET_NAME, companyTimezone]
-  );
+  const companyRow = await db
+    .selectFrom('companies')
+    .where('id', '=', companyId)
+    .select(['timezone'])
+    .executeTakeFirst();
 
-  return Number(result.insertId);
+  const companyTimezone = companyRow?.timezone ?? 'UTC';
+
+  // Insert outlet with ON DUPLICATE KEY UPDATE using raw SQL (MySQL specific)
+  const result = await sql`
+    INSERT INTO outlets (company_id, code, name, timezone)
+    VALUES (${companyId}, ${DEFAULT_OUTLET_CODE}, ${DEFAULT_OUTLET_NAME}, ${companyTimezone})
+    ON DUPLICATE KEY UPDATE
+      id = LAST_INSERT_ID(id),
+      timezone = COALESCE(timezone, VALUES(timezone))
+  `.execute(db);
+
+  // For INSERT...ON DUPLICATE KEY UPDATE with LAST_INSERT_ID, we need to get the ID differently
+  // If insertId is available, use it; otherwise query for the outlet
+  let insertId = 0;
+  if ('insertId' in result && result.insertId !== undefined) {
+    insertId = Number(result.insertId);
+  }
+  
+  if (insertId === 0) {
+    // Query to get existing outlet
+    const existing = await db
+      .selectFrom('outlets')
+      .where('company_id', '=', companyId)
+      .where('code', '=', DEFAULT_OUTLET_CODE)
+      .select(['id'])
+      .executeTakeFirst();
+    if (existing) {
+      return Number(existing.id);
+    }
+  }
+
+  return insertId > 0 ? insertId : companyId; // Fallback
 }
 
 async function upsertRole(
-  connection: PoolConnection,
+  db: KyselySchema,
   roleCode: string,
   roleName: string,
   isGlobal: boolean,
   roleLevel: number
 ): Promise<number> {
-  const [existing] = await connection.execute<IdRow[]>(
-    `SELECT id FROM roles WHERE code = ?`,
-    [roleCode]
-  );
+  const existing = await db
+    .selectFrom('roles')
+    .where('code', '=', roleCode)
+    .select(['id'])
+    .executeTakeFirst();
 
-  if (existing.length > 0) {
-    const id = existing.map(a => a.id)[0]
-    return id
+  if (existing) {
+    return Number(existing.id);
   }
 
-  const [result] = await connection.execute<ResultSetHeader>(
-    `INSERT INTO roles (code, name, is_global, role_level)
-     VALUES (?, ?, ?, ?)`,
-    [roleCode, roleName, isGlobal ? 1 : 0, roleLevel]
-  );
+  const result = await db
+    .insertInto('roles')
+    .values({
+      code: roleCode,
+      name: roleName,
+      is_global: isGlobal ? 1 : 0,
+      role_level: roleLevel
+    })
+    .executeTakeFirst();
 
   return Number(result.insertId);
 }
 
-async function ensureRoles(connection: PoolConnection): Promise<Record<string, number>> {
+async function ensureRoles(db: KyselySchema): Promise<Record<string, number>> {
   const roleIds: Record<string, number> = {};
   for (const role of ROLE_DEFINITIONS) {
     roleIds[role.code] = await upsertRole(
-      connection,
+      db,
       role.code,
       role.name,
       role.isGlobal,
@@ -488,221 +468,214 @@ async function ensureRoles(connection: PoolConnection): Promise<Record<string, n
 }
 
 async function upsertModule(
-  connection: PoolConnection,
+  db: KyselySchema,
   moduleCode: string,
   moduleName: string,
   moduleDescription: string | null
 ): Promise<number> {
-  await connection.execute(
-    `INSERT INTO modules (code, name, description)
-     VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       name = VALUES(name),
-       description = VALUES(description),
-       updated_at = CURRENT_TIMESTAMP`,
-    [moduleCode, moduleName, moduleDescription]
-  );
+  await sql`
+    INSERT INTO modules (code, name, description)
+    VALUES (${moduleCode}, ${moduleName}, ${moduleDescription})
+    ON DUPLICATE KEY UPDATE
+      name = VALUES(name)
+  `.execute(db);
 
-  // Use SELECT to get the ID since INSERT ... ON DUPLICATE KEY UPDATE
-  // returns insertId=0 when an update occurs (not the existing row's ID)
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT id FROM modules WHERE code = ?`,
-    [moduleCode]
-  );
-
-  return rows[0].id;
+  const row = await db
+    .selectFrom('modules')
+    .where('code', '=', moduleCode)
+    .select(['id'])
+    .executeTakeFirst();
+  
+  return Number(row!.id);
 }
 
-async function ensureModules(connection: PoolConnection): Promise<Record<string, number>> {
-  const moduleIds: Record<string, number> = {};
-  for (const moduleEntry of MODULE_DEFINITIONS) {
-    moduleIds[moduleEntry.code] = await upsertModule(
-      connection,
-      moduleEntry.code,
-      moduleEntry.name,
-      moduleEntry.description
-    );
+async function ensureModules(db: KyselySchema): Promise<void> {
+  for (const module of MODULE_DEFINITIONS) {
+    await upsertModule(db, module.code, module.name, module.description);
   }
-  return moduleIds;
+}
+
+async function upsertSetting(
+  db: KyselySchema,
+  key: string,
+  value: string
+): Promise<void> {
+  await sql`
+    INSERT INTO settings (setting_key, setting_value)
+    VALUES (${key}, ${value})
+    ON DUPLICATE KEY UPDATE
+      setting_value = VALUES(setting_value)
+  `.execute(db);
+}
+
+async function ensureSettings(db: KyselySchema): Promise<void> {
+  for (const setting of SETTINGS_DEFINITIONS) {
+    const envValue = process.env[setting.envKey];
+    const parsedValue = setting.parse(envValue);
+    const stringValue = String(parsedValue);
+    await upsertSetting(db, setting.key, stringValue);
+  }
+}
+
+async function ensureDefaultTaxRate(
+  db: KyselySchema,
+  companyId: number
+): Promise<void> {
+  await sql`
+    INSERT IGNORE INTO tax_rates (company_id, name, rate, code)
+    VALUES (${companyId}, 'VAT', 0.11, 'VAT')
+  `.execute(db);
 }
 
 async function ensureCompanyModules(
-  connection: PoolConnection,
-  companyId: number,
-  moduleIds: Record<string, number>,
-  actorUserId: number
+  db: KyselySchema,
+  companyId: number
 ): Promise<void> {
-  for (const moduleEntry of COMPANY_MODULE_DEFAULTS) {
-    const moduleId = moduleIds[moduleEntry.code];
-    if (!moduleId) {
-      throw new Error(`module id not found for ${moduleEntry.code}`);
+  // First get module IDs
+  for (const moduleDefault of COMPANY_MODULE_DEFAULTS) {
+    const moduleRow = await db
+      .selectFrom('modules')
+      .where('code', '=', moduleDefault.code)
+      .select(['id'])
+      .executeTakeFirst();
+    
+    if (moduleRow) {
+      await sql`
+        INSERT IGNORE INTO company_modules (company_id, module_id, enabled, config_json)
+        VALUES (${companyId}, ${Number(moduleRow.id)}, ${moduleDefault.enabled ? 1 : 0}, ${JSON.stringify(moduleDefault.config)})
+      `.execute(db);
     }
-
-    await connection.execute(
-      `INSERT IGNORE INTO company_modules (
-         company_id,
-         module_id,
-         enabled,
-         config_json,
-         created_by_user_id,
-         updated_by_user_id
-       ) VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        companyId,
-        moduleId,
-        moduleEntry.enabled ? 1 : 0,
-        JSON.stringify(moduleEntry.config ?? {}),
-        actorUserId,
-        actorUserId
-      ]
-    );
   }
 }
 
-async function ensureModuleRoles(
-  connection: PoolConnection,
+async function ensureCompanyModuleRoles(
+  db: KyselySchema,
   companyId: number,
   roleIds: Record<string, number>
 ): Promise<void> {
-  for (const roleEntry of MODULE_ROLE_DEFAULTS) {
-    const roleId = roleIds[roleEntry.roleCode];
-    if (!roleId) {
-      throw new Error(`role id not found for ${roleEntry.roleCode}`);
+  for (const moduleRoleDefault of MODULE_ROLE_DEFAULTS) {
+    const roleId = roleIds[moduleRoleDefault.roleCode];
+    if (!roleId) continue;
+    
+    // Get module_id first
+    const moduleRow = await db
+      .selectFrom('modules')
+      .where('code', '=', moduleRoleDefault.module)
+      .select(['id'])
+      .executeTakeFirst();
+    
+    if (moduleRow) {
+      await sql`
+        INSERT IGNORE INTO module_roles (company_id, role_id, module, permission_mask)
+        VALUES (${companyId}, ${roleId}, ${moduleRoleDefault.module}, ${moduleRoleDefault.permissionMask})
+      `.execute(db);
     }
-
-    await connection.execute(
-      `INSERT IGNORE INTO module_roles (company_id, role_id, module, permission_mask)
-       VALUES (?, ?, ?, ?)`,
-      [companyId, roleId, roleEntry.module, roleEntry.permissionMask]
-    );
   }
 }
 
-async function ensureCompanySettings(
-  connection: PoolConnection,
-  companyId: number,
-  outletId: number,
-  actorUserId: number
-): Promise<void> {
-  for (const setting of SETTINGS_DEFINITIONS) {
-    const rawValue = process.env[setting.envKey];
-    const parsedValue = setting.parse(rawValue);
-    const valueJson = JSON.stringify(parsedValue);
-
-    await connection.execute(
-      `INSERT IGNORE INTO company_settings (
-         company_id,
-         outlet_id,
-         \`key\`,
-         value_type,
-         value_json,
-         created_by_user_id,
-         updated_by_user_id
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [companyId, outletId, setting.key, setting.valueType, valueJson, actorUserId, actorUserId]
-    );
-  }
-}
-
-async function ensureDefaultFiscalYear(
-  connection: PoolConnection,
-  companyId: number,
-  actorUserId: number
-): Promise<void> {
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT id
-     FROM fiscal_years
-     WHERE company_id = ?
-     LIMIT 1`,
-    [companyId]
-  );
-
-  if (rows.length > 0) {
-    return;
-  }
-
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  const startDate = `${year}-01-01`;
-  const endDate = `${year}-12-31`;
-  const code = `FY${year}`;
-  const name = `Fiscal Year ${year}`;
-
-  await connection.execute(
-    `INSERT INTO fiscal_years (
-       company_id,
-       code,
-       name,
-       start_date,
-       end_date,
-       status,
-       created_by_user_id,
-       updated_by_user_id
-     ) VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?)`,
-    [companyId, code, name, startDate, endDate, actorUserId, actorUserId]
-  );
-}
-
-const DEFAULT_NUMBERING_TEMPLATES = [
-  { doc_type: "SALES_INVOICE", pattern: "INV/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" },
-  { doc_type: "SALES_PAYMENT", pattern: "PAY/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" },
-  { doc_type: "SALES_ORDER", pattern: "SO/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" },
-  { doc_type: "CREDIT_NOTE", pattern: "CN/{{yy}}{{mm}}/{{seq4}}", reset_period: "MONTHLY" }
-];
-
-async function ensureNumberingTemplates(
-  connection: PoolConnection,
+async function ensureSystemAccounts(
+  db: KyselySchema,
   companyId: number
 ): Promise<void> {
-  for (const template of DEFAULT_NUMBERING_TEMPLATES) {
-    const [existing] = await connection.execute<RowDataPacket[]>(
-      `SELECT id FROM numbering_templates WHERE company_id = ? AND outlet_id IS NULL AND doc_type = ?`,
-      [companyId, template.doc_type]
-    );
-    if (existing.length === 0) {
-      await connection.execute(
-        `INSERT INTO numbering_templates (company_id, outlet_id, scope_key, doc_type, pattern, reset_period, current_value, is_active)
-         VALUES (?, NULL, 0, ?, ?, ?, 0, 1)`,
-        [companyId, template.doc_type, template.pattern, template.reset_period]
-      );
+  const accountsToEnsure = [
+    { code: "CASH", name: "Cash", type: "ASSET", parentCode: null },
+    { code: "BANK", name: "Bank", type: "ASSET", parentCode: null },
+    { code: "AR", name: "Accounts Receivable", type: "ASSET", parentCode: null },
+    { code: "AP", name: "Accounts Payable", type: "LIABILITY", parentCode: null },
+    { code: "SALES", name: "Sales Revenue", type: "REVENUE", parentCode: null },
+    { code: "COGS", name: "Cost of Goods Sold", type: "EXPENSE", parentCode: null },
+    { code: "INVENTORY", name: "Inventory", type: "ASSET", parentCode: null },
+  ];
+
+  for (const accountDef of accountsToEnsure) {
+    const existing = await db
+      .selectFrom('accounts')
+      .where('company_id', '=', companyId)
+      .where('code', '=', accountDef.code)
+      .select(['id'])
+      .executeTakeFirst();
+
+    if (!existing) {
+      // Get account_type_id for this type
+      const typeRow = await db
+        .selectFrom('account_types')
+        .where('name', '=', accountDef.type)
+        .select(['id'])
+        .executeTakeFirst();
+
+      if (typeRow) {
+        await db
+          .insertInto('accounts')
+          .values({
+            company_id: companyId,
+            code: accountDef.code,
+            name: accountDef.name,
+            account_type_id: Number(typeRow.id)
+          })
+          .execute();
+      }
     }
   }
 }
 
 async function bootstrapCompanyDefaults(
-  connection: PoolConnection,
-  params: { companyId: number; actor: CompanyActor }
+  db: KyselySchema,
+  params: {
+    companyId: number;
+    actor: CompanyActor;
+  }
 ): Promise<void> {
-  const outletId = await ensureDefaultOutlet(connection, params.companyId);
-  const roleIds = await ensureRoles(connection);
-  const moduleIds = await ensureModules(connection);
+  await ensureDefaultOutlet(db, params.companyId);
+  await ensureRoles(db);
+  await ensureModules(db);
+  await ensureSettings(db);
+  await ensureDefaultTaxRate(db, params.companyId);
+  await ensureCompanyModules(db, params.companyId);
 
-  await ensureCompanyModules(connection, params.companyId, moduleIds, params.actor.userId);
-  await ensureModuleRoles(connection, params.companyId, roleIds);
-  await ensureCompanySettings(connection, params.companyId, outletId, params.actor.userId);
-  await ensureDefaultFiscalYear(connection, params.companyId, params.actor.userId);
-  await ensureNumberingTemplates(connection, params.companyId);
+  // Get role IDs after ensureRoles
+  const roleIds: Record<string, number> = {};
+  for (const role of ROLE_DEFINITIONS) {
+    const row = await db
+      .selectFrom('roles')
+      .where('code', '=', role.code)
+      .select(['id'])
+      .executeTakeFirst();
+    if (row) {
+      roleIds[role.code] = Number(row.id);
+    }
+  }
+
+  await ensureCompanyModuleRoles(db, params.companyId, roleIds);
+  await ensureSystemAccounts(db, params.companyId);
 }
 
 async function ensureCompanyExists(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   options?: { includeDeleted?: boolean }
 ): Promise<CompanyRow> {
   const includeDeleted = options?.includeDeleted ?? false;
-  const [rows] = await connection.execute<CompanyRow[]>(
-    `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
-     FROM companies
-     WHERE id = ?
-     ${includeDeleted ? "" : "AND deleted_at IS NULL"}`,
-    [companyId]
-  );
+  
+  let query = db
+    .selectFrom('companies')
+    .where('id', '=', companyId)
+    .select([
+      'id', 'code', 'name', 'legal_name', 'tax_id', 'email', 'phone', 
+      'timezone', 'currency_code', 'address_line1', 'address_line2', 
+      'city', 'postal_code', 'created_at', 'updated_at', 'deleted_at'
+    ]);
 
-  if (rows.length === 0) {
+  if (!includeDeleted) {
+    query = query.where('deleted_at', 'is', null);
+  }
+
+  const row = await query.executeTakeFirst();
+
+  if (!row) {
     throw new CompanyNotFoundError(`Company with id ${companyId} not found`);
   }
 
-  return rows[0];
+  return row;
 }
 
 /**
@@ -723,37 +696,37 @@ export async function createCompanyBasic(params: {
   address_line2?: string | null;
   city?: string | null;
   postal_code?: string | null;
-}): Promise<{ id: number; code: string; name: string }> {
-  const pool = getDbPool();
+}, db?: KyselySchema): Promise<{ id: number; code: string; name: string }> {
+  const database = db ?? getDb();
 
   // Check if code already exists
-  const [existing] = await pool.execute<CompanyRow[]>(
-    `SELECT id FROM companies WHERE code = ?`,
-    [params.code]
-  );
+  const existing = await database
+    .selectFrom('companies')
+    .where('code', '=', params.code)
+    .select(['id'])
+    .executeTakeFirst();
 
-  if (existing.length > 0) {
+  if (existing) {
     throw new CompanyCodeExistsError(`Company with code ${params.code} already exists`);
   }
 
-  const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO companies (code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      params.code,
-      params.name,
-      params.legal_name ?? null,
-      params.tax_id ?? null,
-      params.email ?? null,
-      params.phone ?? null,
-      params.timezone ?? 'UTC',
-      params.currency_code ?? 'IDR',
-      params.address_line1 ?? null,
-      params.address_line2 ?? null,
-      params.city ?? null,
-      params.postal_code ?? null
-    ]
-  );
+  const result = await database
+    .insertInto('companies')
+    .values({
+      code: params.code,
+      name: params.name,
+      legal_name: params.legal_name ?? null,
+      tax_id: params.tax_id ?? null,
+      email: params.email ?? null,
+      phone: params.phone ?? null,
+      timezone: params.timezone ?? 'UTC',
+      currency_code: params.currency_code ?? 'IDR',
+      address_line1: params.address_line1 ?? null,
+      address_line2: params.address_line2 ?? null,
+      city: params.city ?? null,
+      postal_code: params.postal_code ?? null
+    })
+    .executeTakeFirst();
 
   return {
     id: Number(result.insertId),
@@ -781,62 +754,71 @@ export async function createCompany(params: {
   postal_code?: string | null;
   actor: CompanyActor;
 }): Promise<CompanyResponse> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-  const auditService = createAuditServiceForConnection(connection);
+  const db = getDb();
+  const auditService = new AuditService(db);
 
   try {
-    await connection.beginTransaction();
+    await db.transaction().execute(async (trx) => {
+      // Use createCompanyBasic to insert the company row
+      const created = await createCompanyBasic({
+        code: params.code,
+        name: params.name,
+        legal_name: params.legal_name,
+        tax_id: params.tax_id,
+        email: params.email,
+        phone: params.phone,
+        timezone: params.timezone,
+        currency_code: params.currency_code,
+        address_line1: params.address_line1,
+        address_line2: params.address_line2,
+        city: params.city,
+        postal_code: params.postal_code
+      });
 
-    // Use createCompanyBasic to insert the company row
-    const created = await createCompanyBasic({
-      code: params.code,
-      name: params.name,
-      legal_name: params.legal_name,
-      tax_id: params.tax_id,
-      email: params.email,
-      phone: params.phone,
-      timezone: params.timezone,
-      currency_code: params.currency_code,
-      address_line1: params.address_line1,
-      address_line2: params.address_line2,
-      city: params.city,
-      postal_code: params.postal_code
+      const companyId = created.id;
+
+      await bootstrapCompanyDefaults(trx, {
+        companyId,
+        actor: params.actor
+      });
     });
 
-    const companyId = created.id;
+    const companyId = await db
+      .selectFrom('companies')
+      .where('code', '=', params.code)
+      .select(['id'])
+      .executeTakeFirst()
+      .then(row => row ? Number(row.id) : 0);
 
-    await bootstrapCompanyDefaults(connection, {
-      companyId,
-      actor: params.actor
-    });
+    if (companyId === 0) {
+      throw new CompanyNotFoundError(`Company not found after creation`);
+    }
+
     const auditContext = buildAuditContext(companyId, params.actor);
 
-    const [rows] = await connection.execute<CompanyRow[]>(
-      `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
-       FROM companies
-       WHERE id = ?`,
-      [companyId]
-    );
+    const rows = await db
+      .selectFrom('companies')
+      .where('id', '=', companyId)
+      .select([
+        'id', 'code', 'name', 'legal_name', 'tax_id', 'email', 'phone',
+        'timezone', 'currency_code', 'address_line1', 'address_line2',
+        'city', 'postal_code', 'created_at', 'updated_at', 'deleted_at'
+      ])
+      .executeTakeFirst();
 
-    const createdCompany = rows[0];
-    if (!createdCompany) {
+    if (!rows) {
       throw new CompanyNotFoundError(`Company with id ${companyId} not found`);
     }
 
+    const createdCompany = rows;
     await auditService.logCreate(auditContext, "company", companyId, {
       code: createdCompany.code,
       name: createdCompany.name
     });
 
-    await connection.commit();
-
     return normalizeCompanyRow(createdCompany);
   } catch (error) {
-    await connection.rollback();
     throw error;
-  } finally {
-    connection.release();
   }
 }
 
@@ -847,24 +829,26 @@ export async function listCompanies(params: {
   companyId?: number;
   includeDeleted?: boolean;
 }): Promise<CompanyResponse[]> {
-  const pool = getDbPool();
-  const conditions: string[] = [];
-  const values: Array<number> = [];
+  const db = getDb();
+  
+  let query = db
+    .selectFrom('companies')
+    .select([
+      'id', 'code', 'name', 'legal_name', 'tax_id', 'email', 'phone',
+      'timezone', 'currency_code', 'address_line1', 'address_line2',
+      'city', 'postal_code', 'created_at', 'updated_at', 'deleted_at'
+    ])
+    .orderBy('name', 'asc');
+
   if (params.companyId) {
-    conditions.push("id = ?");
-    values.push(params.companyId);
+    query = query.where('id', '=', params.companyId);
   }
+  
   if (!params.includeDeleted) {
-    conditions.push("deleted_at IS NULL");
+    query = query.where('deleted_at', 'is', null);
   }
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const [rows] = await pool.execute<CompanyRow[]>(
-    `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
-     FROM companies
-     ${whereClause}
-     ORDER BY name ASC`,
-    values
-  );
+
+  const rows = await query.execute();
 
   return rows.map((row) => normalizeCompanyRow(row));
 }
@@ -876,21 +860,29 @@ export async function getCompany(
   companyId: number,
   options?: { includeDeleted?: boolean }
 ): Promise<CompanyResponse> {
-  const pool = getDbPool();
+  const db = getDb();
   const includeDeleted = options?.includeDeleted ?? false;
-  const [rows] = await pool.execute<CompanyRow[]>(
-    `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
-     FROM companies
-     WHERE id = ?
-     ${includeDeleted ? "" : "AND deleted_at IS NULL"}`,
-    [companyId]
-  );
+  
+  let query = db
+    .selectFrom('companies')
+    .where('id', '=', companyId)
+    .select([
+      'id', 'code', 'name', 'legal_name', 'tax_id', 'email', 'phone',
+      'timezone', 'currency_code', 'address_line1', 'address_line2',
+      'city', 'postal_code', 'created_at', 'updated_at', 'deleted_at'
+    ]);
 
-  if (rows.length === 0) {
+  if (!includeDeleted) {
+    query = query.where('deleted_at', 'is', null);
+  }
+
+  const row = await query.executeTakeFirst();
+
+  if (!row) {
     throw new CompanyNotFoundError(`Company with id ${companyId} not found`);
   }
 
-  return normalizeCompanyRow(rows[0]);
+  return normalizeCompanyRow(row);
 }
 
 /**
@@ -911,73 +903,56 @@ export async function updateCompany(params: {
   postal_code?: string | null;
   actor: CompanyActor;
 }): Promise<CompanyResponse> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-  const auditService = createAuditServiceForConnection(connection);
+  const db = getDb();
+  const auditService = new AuditService(db);
 
-  try {
-    await connection.beginTransaction();
-
-    const currentCompany = await ensureCompanyExists(connection, params.companyId, {
+  return await db.transaction().execute(async (trx) => {
+    const currentCompany = await ensureCompanyExists(trx, params.companyId, {
       includeDeleted: true
     });
 
-    const updates: string[] = [];
-    const values: (string | number | null)[] = [];
+    const updates: Record<string, unknown> = {};
 
     if (params.name !== undefined && params.name !== currentCompany.name) {
-      updates.push("name = ?");
-      values.push(params.name);
+      updates.name = params.name;
     }
     if (params.legal_name !== undefined && params.legal_name !== currentCompany.legal_name) {
-      updates.push("legal_name = ?");
-      values.push(params.legal_name);
+      updates.legal_name = params.legal_name;
     }
     if (params.tax_id !== undefined && params.tax_id !== currentCompany.tax_id) {
-      updates.push("tax_id = ?");
-      values.push(params.tax_id);
+      updates.tax_id = params.tax_id;
     }
     if (params.email !== undefined && params.email !== currentCompany.email) {
-      updates.push("email = ?");
-      values.push(params.email);
+      updates.email = params.email;
     }
     if (params.phone !== undefined && params.phone !== currentCompany.phone) {
-      updates.push("phone = ?");
-      values.push(params.phone);
+      updates.phone = params.phone;
     }
     if (params.timezone !== undefined && params.timezone !== currentCompany.timezone) {
-      updates.push("timezone = ?");
-      values.push(params.timezone);
+      updates.timezone = params.timezone;
     }
     if (params.currency_code !== undefined && params.currency_code !== currentCompany.currency_code) {
-      updates.push("currency_code = ?");
-      values.push(params.currency_code);
+      updates.currency_code = params.currency_code;
     }
     if (params.address_line1 !== undefined && params.address_line1 !== currentCompany.address_line1) {
-      updates.push("address_line1 = ?");
-      values.push(params.address_line1);
+      updates.address_line1 = params.address_line1;
     }
     if (params.address_line2 !== undefined && params.address_line2 !== currentCompany.address_line2) {
-      updates.push("address_line2 = ?");
-      values.push(params.address_line2);
+      updates.address_line2 = params.address_line2;
     }
     if (params.city !== undefined && params.city !== currentCompany.city) {
-      updates.push("city = ?");
-      values.push(params.city);
+      updates.city = params.city;
     }
     if (params.postal_code !== undefined && params.postal_code !== currentCompany.postal_code) {
-      updates.push("postal_code = ?");
-      values.push(params.postal_code);
+      updates.postal_code = params.postal_code;
     }
 
-    if (updates.length > 0) {
-      updates.push("updated_at = CURRENT_TIMESTAMP");
-      values.push(params.companyId);
-
-      await connection.execute(
-        `UPDATE companies SET ${updates.join(", ")} WHERE id = ?`,
-        values
-      );
+    if (Object.keys(updates).length > 0) {
+      await trx
+        .updateTable('companies')
+        .set(updates)
+        .where('id', '=', params.companyId)
+        .execute();
 
       const auditContext = buildAuditContext(params.companyId, params.actor);
       await auditService.logUpdate(
@@ -1013,25 +988,22 @@ export async function updateCompany(params: {
       );
     }
 
-    await connection.commit();
+    const rows = await trx
+      .selectFrom('companies')
+      .where('id', '=', params.companyId)
+      .select([
+        'id', 'code', 'name', 'legal_name', 'tax_id', 'email', 'phone',
+        'timezone', 'currency_code', 'address_line1', 'address_line2',
+        'city', 'postal_code', 'created_at', 'updated_at', 'deleted_at'
+      ])
+      .executeTakeFirst();
 
-    const [rows] = await connection.execute<CompanyRow[]>(
-      `SELECT id, code, name, legal_name, tax_id, email, phone, timezone, currency_code, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
-       FROM companies WHERE id = ?`,
-      [params.companyId]
-    );
-
-    if (rows.length === 0) {
+    if (!rows) {
       throw new CompanyNotFoundError(`Company with id ${params.companyId} not found`);
     }
 
-    return normalizeCompanyRow(rows[0]);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+    return normalizeCompanyRow(rows);
+  });
 }
 
 /**
@@ -1048,13 +1020,11 @@ export async function deactivateCompany(params: {
   companyId: number;
   actor: CompanyActor;
 }): Promise<CompanyResponse> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-  const auditService = createAuditServiceForConnection(connection);
+  const db = getDb();
+  const auditService = new AuditService(db);
 
-  try {
-    await connection.beginTransaction();
-    const company = await ensureCompanyExists(connection, params.companyId, {
+  return await db.transaction().execute(async (trx) => {
+    const company = await ensureCompanyExists(trx, params.companyId, {
       includeDeleted: true
     });
 
@@ -1062,14 +1032,15 @@ export async function deactivateCompany(params: {
       throw new CompanyDeactivatedError("Company is already deactivated");
     }
 
-    await connection.execute(
-      `UPDATE companies
-       SET deleted_at = CURRENT_TIMESTAMP,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?
-         AND deleted_at IS NULL`,
-      [params.companyId]
-    );
+    await trx
+      .updateTable('companies')
+      .set({
+        deleted_at: new Date(),
+        updated_at: new Date()
+      })
+      .where('id', '=', params.companyId)
+      .where('deleted_at', 'is', null)
+      .execute();
 
     const auditContext = buildAuditContext(params.companyId, params.actor);
     await auditService.logDeactivate(auditContext, "company", params.companyId, {
@@ -1078,34 +1049,33 @@ export async function deactivateCompany(params: {
       forced: true
     });
 
-    await connection.commit();
+    const rows = await trx
+      .selectFrom('companies')
+      .where('id', '=', params.companyId)
+      .select([
+        'id', 'code', 'name', 'legal_name', 'tax_id', 'email', 'phone',
+        'timezone', 'currency_code', 'address_line1', 'address_line2', 
+        'city', 'postal_code', 'created_at', 'updated_at', 'deleted_at'
+      ])
+      .executeTakeFirst();
 
-    const [rows] = await connection.execute<CompanyRow[]>(
-      `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
-       FROM companies WHERE id = ?`,
-      [params.companyId]
-    );
+    if (!rows) {
+      throw new CompanyNotFoundError(`Company with id ${params.companyId} not found`);
+    }
 
-    return normalizeCompanyRow(rows[0]);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+    return normalizeCompanyRow(rows);
+  });
 }
 
 export async function reactivateCompany(params: {
   companyId: number;
   actor: CompanyActor;
 }): Promise<CompanyResponse> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-  const auditService = createAuditServiceForConnection(connection);
+  const db = getDb();
+  const auditService = new AuditService(db);
 
-  try {
-    await connection.beginTransaction();
-    const company = await ensureCompanyExists(connection, params.companyId, {
+  return await db.transaction().execute(async (trx) => {
+    const company = await ensureCompanyExists(trx, params.companyId, {
       includeDeleted: true
     });
 
@@ -1113,13 +1083,14 @@ export async function reactivateCompany(params: {
       throw new CompanyAlreadyActiveError("Company is already active");
     }
 
-    await connection.execute(
-      `UPDATE companies
-       SET deleted_at = NULL,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [params.companyId]
-    );
+    await trx
+      .updateTable('companies')
+      .set({
+        deleted_at: null,
+        updated_at: new Date()
+      })
+      .where('id', '=', params.companyId)
+      .execute();
 
     const auditContext = buildAuditContext(params.companyId, params.actor);
     await auditService.logReactivate(auditContext, "company", params.companyId, {
@@ -1127,19 +1098,20 @@ export async function reactivateCompany(params: {
       name: company.name
     });
 
-    await connection.commit();
+    const rows = await trx
+      .selectFrom('companies')
+      .where('id', '=', params.companyId)
+      .select([
+        'id', 'code', 'name', 'legal_name', 'tax_id', 'email', 'phone',
+        'timezone', 'currency_code', 'address_line1', 'address_line2', 
+        'city', 'postal_code', 'created_at', 'updated_at', 'deleted_at'
+      ])
+      .executeTakeFirst();
 
-    const [rows] = await connection.execute<CompanyRow[]>(
-      `SELECT id, code, name, legal_name, tax_id, email, phone, address_line1, address_line2, city, postal_code, created_at, updated_at, deleted_at
-       FROM companies WHERE id = ?`,
-      [params.companyId]
-    );
+    if (!rows) {
+      throw new CompanyNotFoundError(`Company with id ${params.companyId} not found`);
+    }
 
-    return normalizeCompanyRow(rows[0]);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+    return normalizeCompanyRow(rows);
+  });
 }

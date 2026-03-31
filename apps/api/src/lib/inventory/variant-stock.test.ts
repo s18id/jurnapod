@@ -10,8 +10,8 @@
 
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
-import { getDbPool, closeDbPool } from "../../lib/db.js";
-import type { RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { getDb, closeDbPool } from "../../lib/db.js";
+import { sql } from "kysely";
 import {
   checkVariantStockAvailability,
   reserveVariantStock,
@@ -24,28 +24,19 @@ import { createOutletBasic } from "../outlets.js";
 import { createItem } from "../items/index.js";
 
 describe("Variant Stock Operations", () => {
-  let pool: ReturnType<typeof getDbPool>;
-
   before(async () => {
-    pool = getDbPool();
+    const db = getDb();
     
     // Ensure variant_id column exists in inventory_stock
-    const conn = await pool.getConnection();
     try {
-      const [cols] = await conn.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'inventory_stock' AND COLUMN_NAME = 'variant_id'`
-      );
+      const colsResult = await sql`SELECT COLUMN_NAME FROM information_schema.COLUMNS 
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'inventory_stock' AND COLUMN_NAME = 'variant_id'`.execute(db);
       
-      if (cols.length === 0) {
-        await conn.execute(
-          `ALTER TABLE inventory_stock ADD COLUMN variant_id BIGINT UNSIGNED NULL AFTER product_id`
-        );
+      if (colsResult.rows.length === 0) {
+        await sql`ALTER TABLE inventory_stock ADD COLUMN variant_id BIGINT UNSIGNED NULL AFTER product_id`.execute(db);
       }
     } catch (e) {
       // Column might already exist, ignore error
-    } finally {
-      conn.release();
     }
   });
 
@@ -54,7 +45,7 @@ describe("Variant Stock Operations", () => {
   });
 
   test("checkVariantStockAvailability - returns available when stock sufficient", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     
     // Create company and outlet dynamically
@@ -82,11 +73,8 @@ describe("Variant Stock Operations", () => {
       itemId = item.id;
 
       // Create variant with 100 stock
-      const [variantResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, ?, 100, 1)`,
-        [company.id, itemId, `TEST-VS-${runId}-1`, 'Small']
-      );
+      const variantResult = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-VS-${runId}-1`}, 'Small', 100, 1)`.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Check stock
@@ -97,17 +85,16 @@ describe("Variant Stock Operations", () => {
       assert.strictEqual(result.requested_quantity, 10);
       assert.strictEqual(result.available_quantity, 100);
     } finally {
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 
   test("checkVariantStockAvailability - returns unavailable when stock insufficient", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     
     // Create company and outlet dynamically
@@ -134,11 +121,8 @@ describe("Variant Stock Operations", () => {
       itemId = item.id;
 
       // Create variant with 5 stock
-      const [variantResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, ?, 5, 1)`,
-        [company.id, itemId, `TEST-VS-${runId}-2`, 'Medium']
-      );
+      const variantResult = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-VS-${runId}-2`}, 'Medium', 5, 1)`.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Request 10, only 5 available
@@ -149,12 +133,11 @@ describe("Variant Stock Operations", () => {
       assert.strictEqual(result.requested_quantity, 10);
       assert.strictEqual(result.available_quantity, 5);
     } finally {
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 
@@ -177,15 +160,13 @@ describe("Variant Stock Operations", () => {
     assert.strictEqual(result.available_quantity, 0);
 
     // Cleanup
-    const pool = getDbPool();
-    const conn = await pool.getConnection();
-    await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-    await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-    conn.release();
+    const db = getDb();
+    await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+    await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
   });
 
   test("checkVariantStockAvailability - uses inventory_stock when available", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     
     // Create company and outlet dynamically
@@ -212,19 +193,13 @@ describe("Variant Stock Operations", () => {
       itemId = item.id;
 
       // Create variant with stock_quantity = 50
-      const [variantResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, ?, 50, 1)`,
-        [company.id, itemId, `TEST-VS-${runId}-3`, 'Large']
-      );
+      const variantResult = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-VS-${runId}-3`}, 'Large', 50, 1)`.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Add inventory_stock record with 30 (different from variant's 50)
-      await conn.execute(
-        `INSERT INTO inventory_stock (company_id, outlet_id, product_id, variant_id, quantity, reserved_quantity, available_quantity)
-         VALUES (?, ?, ?, ?, 30, 0, 30)`,
-        [company.id, outlet.id, itemId, variantId]
-      );
+      await sql`INSERT INTO inventory_stock (company_id, outlet_id, product_id, variant_id, quantity, reserved_quantity, available_quantity)
+       VALUES (${company.id}, ${outlet.id}, ${itemId}, ${variantId}, 30, 0, 30)`.execute(db);
 
       // Should use inventory_stock value (30), not item_variants (50)
       const result = await checkVariantStockAvailability(company.id, outlet.id, variantId, 10);
@@ -233,19 +208,18 @@ describe("Variant Stock Operations", () => {
       assert.strictEqual(result.available_quantity, 30);
 
       // Clean up inventory_stock first
-      await conn.execute(`DELETE FROM inventory_stock WHERE variant_id = ?`, [variantId]);
+      await sql`DELETE FROM inventory_stock WHERE variant_id = ${variantId}`.execute(db);
     } finally {
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 
   test("reserveVariantStock - reserves stock successfully", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const refId = `TEST-RES-4-${runId}`;
     
@@ -274,11 +248,8 @@ describe("Variant Stock Operations", () => {
       itemId = item.id;
 
       // Create variant with 100 stock
-      const [variantResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, ?, 100, 1)`,
-        [company.id, itemId, `TEST-VS-${runId}-4`, 'XL']
-      );
+      const variantResult = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-VS-${runId}-4`}, 'XL', 100, 1)`.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Reserve 10 stock
@@ -286,49 +257,43 @@ describe("Variant Stock Operations", () => {
         company.id,
         outlet.id,
         [{ variant_id: variantId, quantity: 10 }],
-        refId,
-        conn
+        refId
       );
 
       assert.strictEqual(result.success, true, "Reservation should succeed");
       assert.strictEqual(result.conflicts, undefined, "Should have no conflicts");
 
       // Verify inventory_stock record was created with correct reservation
-      const [stockRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT quantity, reserved_quantity, available_quantity 
-         FROM inventory_stock 
-         WHERE company_id = ? AND outlet_id = ? AND variant_id = ?`,
-        [company.id, outlet.id, variantId]
-      );
-      assert.strictEqual(stockRows.length, 1, "Should have inventory_stock record");
-      assert.strictEqual(Number(stockRows[0].quantity), 100, "Quantity should be 100");
-      assert.strictEqual(Number(stockRows[0].reserved_quantity), 10, "Reserved should be 10");
-      assert.strictEqual(Number(stockRows[0].available_quantity), 90, "Available should be 90");
+      const stockResult = await sql`SELECT quantity, reserved_quantity, available_quantity 
+       FROM inventory_stock 
+       WHERE company_id = ${company.id} AND outlet_id = ${outlet.id} AND variant_id = ${variantId}`.execute(db);
+      assert.strictEqual(stockResult.rows.length, 1, "Should have inventory_stock record");
+      const stockRow = stockResult.rows[0] as { quantity: number; reserved_quantity: number; available_quantity: number };
+      assert.strictEqual(Number(stockRow.quantity), 100, "Quantity should be 100");
+      assert.strictEqual(Number(stockRow.reserved_quantity), 10, "Reserved should be 10");
+      assert.strictEqual(Number(stockRow.available_quantity), 90, "Available should be 90");
 
       // Verify transaction was recorded
-      const [txRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT transaction_type, quantity_delta FROM inventory_transactions 
-         WHERE reference_id = ? AND variant_id = ?`,
-        [refId, variantId]
-      );
-      assert.strictEqual(txRows.length, 1, "Should have 1 transaction record");
-      assert.strictEqual(Number(txRows[0].transaction_type), 3, "Should be RESERVATION (type 3)");
-      assert.strictEqual(Number(txRows[0].quantity_delta), 10, "Quantity delta should be 10");
+      const txResult = await sql`SELECT transaction_type, quantity_delta FROM inventory_transactions 
+       WHERE reference_id = ${refId} AND variant_id = ${variantId}`.execute(db);
+      assert.strictEqual(txResult.rows.length, 1, "Should have 1 transaction record");
+      const txRow = txResult.rows[0] as { transaction_type: number; quantity_delta: number };
+      assert.strictEqual(Number(txRow.transaction_type), 3, "Should be RESERVATION (type 3)");
+      assert.strictEqual(Number(txRow.quantity_delta), 10, "Quantity delta should be 10");
     } finally {
       // Clean up in correct order
-      await conn.execute(`DELETE FROM inventory_transactions WHERE reference_id = ?`, [refId]);
-      await conn.execute(`DELETE FROM inventory_stock WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM inventory_transactions WHERE reference_id = ${refId}`.execute(db);
+      await sql`DELETE FROM inventory_stock WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 
   test("reserveVariantStock - fails when insufficient stock", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     
     // Create company and outlet dynamically
@@ -355,11 +320,8 @@ describe("Variant Stock Operations", () => {
       itemId = item.id;
 
       // Create variant with 5 stock
-      const [variantResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, ?, 5, 1)`,
-        [company.id, itemId, `TEST-VS-${runId}-5`, 'XXL']
-      );
+      const variantResult = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-VS-${runId}-5`}, 'XXL', 5, 1)`.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Try to reserve 10 (more than available)
@@ -367,8 +329,7 @@ describe("Variant Stock Operations", () => {
         company.id,
         outlet.id,
         [{ variant_id: variantId, quantity: 10 }],
-        `TEST-RES-5-${runId}`,
-        conn
+        `TEST-RES-5-${runId}`
       );
 
       assert.strictEqual(result.success, false);
@@ -377,17 +338,16 @@ describe("Variant Stock Operations", () => {
       assert.strictEqual(result.conflicts?.[0].requested, 10);
       assert.strictEqual(result.conflicts?.[0].available, 5);
     } finally {
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 
   test("deductVariantStock - throws when insufficient stock", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     
     // Create company and outlet dynamically
@@ -414,11 +374,8 @@ describe("Variant Stock Operations", () => {
       itemId = item.id;
 
       // Create variant with 3 stock
-      const [variantResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, ?, 3, 1)`,
-        [company.id, itemId, `TEST-VS-${runId}-7`, 'Medium']
-      );
+      const variantResult = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-VS-${runId}-7`}, 'Medium', 3, 1)`.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Try to deduct 10 (more than available)
@@ -427,8 +384,7 @@ describe("Variant Stock Operations", () => {
           company.id,
           outlet.id,
           [{ variant_id: variantId, quantity: 10 }],
-          `TEST-SALE-7-${runId}`,
-          conn
+          `TEST-SALE-7-${runId}`
         );
         throw new Error("Should have thrown");
       } catch (error: unknown) {
@@ -436,17 +392,16 @@ describe("Variant Stock Operations", () => {
         assert.strictEqual(err.message.includes("Insufficient stock"), true);
       }
     } finally {
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 
   test("deductVariantStock - deducts stock on sale completion", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const refId = `TEST-SALE-6-${runId}`;
     
@@ -475,11 +430,8 @@ describe("Variant Stock Operations", () => {
       itemId = item.id;
 
       // Create variant with 50 stock
-      const [variantResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, ?, 50, 1)`,
-        [company.id, itemId, `TEST-VS-${runId}-6`, 'Small']
-      );
+      const variantResult = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-VS-${runId}-6`}, 'Small', 50, 1)`.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Deduct 5 stock
@@ -487,43 +439,37 @@ describe("Variant Stock Operations", () => {
         company.id,
         outlet.id,
         [{ variant_id: variantId, quantity: 5 }],
-        refId,
-        conn
+        refId
       );
 
       assert.strictEqual(result, true, "Deduction should succeed");
 
       // Verify stock was deducted
-      const [variantRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT stock_quantity FROM item_variants WHERE id = ?`,
-        [variantId]
-      );
-      assert.strictEqual(Number(variantRows[0].stock_quantity), 45, "Stock should be 45 after deducting 5");
+      const variantResult2 = await sql`SELECT stock_quantity FROM item_variants WHERE id = ${variantId}`.execute(db);
+      const variantRow = variantResult2.rows[0] as { stock_quantity: number };
+      assert.strictEqual(Number(variantRow.stock_quantity), 45, "Stock should be 45 after deducting 5");
 
       // Verify transaction was recorded
-      const [txRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT transaction_type, quantity_delta FROM inventory_transactions 
-         WHERE reference_id = ? AND variant_id = ?`,
-        [refId, variantId]
-      );
-      assert.strictEqual(txRows.length, 1, "Should have 1 transaction record");
-      assert.strictEqual(Number(txRows[0].transaction_type), 1, "Should be SALE (type 1)");
-      assert.strictEqual(Number(txRows[0].quantity_delta), -5, "Quantity delta should be -5");
+      const txResult = await sql`SELECT transaction_type, quantity_delta FROM inventory_transactions 
+       WHERE reference_id = ${refId} AND variant_id = ${variantId}`.execute(db);
+      assert.strictEqual(txResult.rows.length, 1, "Should have 1 transaction record");
+      const txRow = txResult.rows[0] as { transaction_type: number; quantity_delta: number };
+      assert.strictEqual(Number(txRow.transaction_type), 1, "Should be SALE (type 1)");
+      assert.strictEqual(Number(txRow.quantity_delta), -5, "Quantity delta should be -5");
     } finally {
       // Clean up in correct order
-      await conn.execute(`DELETE FROM inventory_transactions WHERE reference_id = ?`, [refId]);
-      await conn.execute(`DELETE FROM inventory_stock WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM inventory_transactions WHERE reference_id = ${refId}`.execute(db);
+      await sql`DELETE FROM inventory_stock WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 
   test("releaseVariantStock - releases reserved stock", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const refId = `TEST-REL-9-${runId}`;
     
@@ -552,11 +498,8 @@ describe("Variant Stock Operations", () => {
       itemId = item.id;
 
       // Create variant with 100 stock
-      const [variantResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, ?, 100, 1)`,
-        [company.id, itemId, `TEST-VS-${runId}-9`, 'Medium']
-      );
+      const variantResult = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-VS-${runId}-9`}, 'Medium', 100, 1)`.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Reserve 20 stock first
@@ -564,68 +507,60 @@ describe("Variant Stock Operations", () => {
         company.id,
         outlet.id,
         [{ variant_id: variantId, quantity: 20 }],
-        refId,
-        conn
+        refId
       );
 
       // Verify reservation in inventory_stock
-      const [afterReserve] = await conn.execute<RowDataPacket[]>(
-        `SELECT reserved_quantity, available_quantity 
-         FROM inventory_stock 
-         WHERE company_id = ? AND outlet_id = ? AND variant_id = ?`,
-        [company.id, outlet.id, variantId]
-      );
-      assert.strictEqual(Number(afterReserve[0].reserved_quantity), 20, "Reserved should be 20");
-      assert.strictEqual(Number(afterReserve[0].available_quantity), 80, "Available should be 80");
+      const afterReserveResult = await sql`SELECT reserved_quantity, available_quantity 
+       FROM inventory_stock 
+       WHERE company_id = ${company.id} AND outlet_id = ${outlet.id} AND variant_id = ${variantId}`.execute(db);
+      const afterReserveRow = afterReserveResult.rows[0] as { reserved_quantity: number; available_quantity: number };
+      assert.strictEqual(Number(afterReserveRow.reserved_quantity), 20, "Reserved should be 20");
+      assert.strictEqual(Number(afterReserveRow.available_quantity), 80, "Available should be 80");
 
       // Release the reserved stock
       const releaseResult = await releaseVariantStock(
         company.id,
         outlet.id,
         [{ variant_id: variantId, quantity: 20 }],
-        refId,
-        conn
+        refId
       );
 
       assert.strictEqual(releaseResult, true, "Release should succeed");
 
       // Verify reservation was released
-      const [afterRelease] = await conn.execute<RowDataPacket[]>(
-        `SELECT reserved_quantity, available_quantity 
-         FROM inventory_stock 
-         WHERE company_id = ? AND outlet_id = ? AND variant_id = ?`,
-        [company.id, outlet.id, variantId]
-      );
-      assert.strictEqual(Number(afterRelease[0].reserved_quantity), 0, "Reserved should be 0");
-      assert.strictEqual(Number(afterRelease[0].available_quantity), 100, "Available should be restored to 100");
+      const afterReleaseResult = await sql`SELECT reserved_quantity, available_quantity 
+       FROM inventory_stock 
+       WHERE company_id = ${company.id} AND outlet_id = ${outlet.id} AND variant_id = ${variantId}`.execute(db);
+      const afterReleaseRow = afterReleaseResult.rows[0] as { reserved_quantity: number; available_quantity: number };
+      assert.strictEqual(Number(afterReleaseRow.reserved_quantity), 0, "Reserved should be 0");
+      assert.strictEqual(Number(afterReleaseRow.available_quantity), 100, "Available should be restored to 100");
 
       // Verify transactions were recorded
-      const [txRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT transaction_type, quantity_delta FROM inventory_transactions 
-         WHERE reference_id = ? AND variant_id = ? 
-         ORDER BY id`,
-        [refId, variantId]
-      );
-      assert.strictEqual(txRows.length, 2, "Should have 2 transaction records");
-      assert.strictEqual(Number(txRows[0].transaction_type), 3, "First should be RESERVATION (type 3)");
-      assert.strictEqual(Number(txRows[0].quantity_delta), 20, "Reservation delta should be 20");
-      assert.strictEqual(Number(txRows[1].transaction_type), 4, "Second should be RELEASE (type 4)");
-      assert.strictEqual(Number(txRows[1].quantity_delta), -20, "Release delta should be -20");
+      const txResult = await sql`SELECT transaction_type, quantity_delta FROM inventory_transactions 
+       WHERE reference_id = ${refId} AND variant_id = ${variantId} 
+       ORDER BY id`.execute(db);
+      assert.strictEqual(txResult.rows.length, 2, "Should have 2 transaction records");
+      const txRow0 = txResult.rows[0] as { transaction_type: number; quantity_delta: number };
+      const txRow1 = txResult.rows[1] as { transaction_type: number; quantity_delta: number };
+      assert.strictEqual(Number(txRow0.transaction_type), 3, "First should be RESERVATION (type 3)");
+      assert.strictEqual(Number(txRow0.quantity_delta), 20, "Reservation delta should be 20");
+      assert.strictEqual(Number(txRow1.transaction_type), 4, "Second should be RELEASE (type 4)");
+      assert.strictEqual(Number(txRow1.quantity_delta), -20, "Release delta should be -20");
     } finally {
       // Clean up in correct order
-      await conn.execute(`DELETE FROM inventory_transactions WHERE reference_id = ?`, [refId]);
-      await conn.execute(`DELETE FROM inventory_stock WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM inventory_transactions WHERE reference_id = ${refId}`.execute(db);
+      await sql`DELETE FROM inventory_stock WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 
   test("getAggregatedItemStock - calculates total from variants and base", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     
     // Create company and outlet dynamically
@@ -653,25 +588,16 @@ describe("Variant Stock Operations", () => {
       itemId = item.id;
 
       // Create base stock (no variant)
-      await conn.execute(
-        `INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity)
-         VALUES (?, ?, ?, 20, 0, 20)`,
-        [company.id, outlet.id, itemId]
-      );
+      await sql`INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity)
+       VALUES (${company.id}, ${outlet.id}, ${itemId}, 20, 0, 20)`.execute(db);
 
       // Create variants with stock
-      const [v1Result] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, 'Small', 30, 1)`,
-        [company.id, itemId, `TEST-VS-${runId}-8A`]
-      );
+      const v1Result = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-VS-${runId}-8A`}, 'Small', 30, 1)`.execute(db);
       v1Id = Number(v1Result.insertId);
 
-      const [v2Result] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, 'Large', 40, 1)`,
-        [company.id, itemId, `TEST-VS-${runId}-8B`]
-      );
+      const v2Result = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-VS-${runId}-8B`}, 'Large', 40, 1)`.execute(db);
       v2Id = Number(v2Result.insertId);
 
       // Get aggregated stock
@@ -683,32 +609,25 @@ describe("Variant Stock Operations", () => {
       assert.strictEqual(result.variants.length, 2);
 
       // Clean up inventory_stock
-      await conn.execute(`DELETE FROM inventory_stock WHERE product_id = ? AND variant_id IS NULL`, [itemId]);
+      await sql`DELETE FROM inventory_stock WHERE product_id = ${itemId} AND variant_id IS NULL`.execute(db);
     } finally {
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id IN (?, ?)`, [v1Id, v2Id]);
-      await conn.execute(`DELETE FROM item_variants WHERE id IN (?, ?)`, [v1Id, v2Id]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id IN (${v1Id}, ${v2Id})`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id IN (${v1Id}, ${v2Id})`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 });
 
 // POS Cart Integration
 describe("POS Cart Variant Stock Integration", () => {
-  let pool: ReturnType<typeof getDbPool>;
-
-  before(async () => {
-    pool = getDbPool();
-  });
-
   after(async () => {
     await closeDbPool();
   });
 
   test("POS cart line - rejects insufficient variant stock", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     
     // Create company and outlet dynamically
@@ -735,11 +654,8 @@ describe("POS Cart Variant Stock Integration", () => {
       itemId = item.id;
 
       // Create variant with 2 stock
-      const [variantResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, 'Small', 2, 1)`,
-        [company.id, itemId, `TEST-PC-${runId}`]
-      );
+      const variantResult = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-PC-${runId}`}, 'Small', 2, 1)`.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Try to add 5 to cart (more than available)
@@ -753,30 +669,23 @@ describe("POS Cart Variant Stock Integration", () => {
       assert.strictEqual(stockCheck.available, false);
       assert.strictEqual(stockCheck.available_quantity, 2);
     } finally {
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 });
 
 // Concurrency Tests
 describe("Variant Stock Concurrency", () => {
-  let pool: ReturnType<typeof getDbPool>;
-
-  before(async () => {
-    pool = getDbPool();
-  });
-
   after(async () => {
     await closeDbPool();
   });
 
   test("reserveVariantStock - prevents concurrent double reservation", async () => {
-    const conn = await pool.getConnection();
+    const db = getDb();
     const runId = Date.now().toString(36);
     
     // Create company and outlet dynamically
@@ -805,11 +714,8 @@ describe("Variant Stock Concurrency", () => {
       itemId = item.id;
 
       // Create variant with 10 stock
-      const [variantResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
-         VALUES (?, ?, ?, ?, 10, 1)`,
-        [company.id, itemId, `TEST-CON-${runId}`, 'Large']
-      );
+      const variantResult = await sql`INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active) 
+       VALUES (${company.id}, ${itemId}, ${`TEST-CON-${runId}`}, 'Large', 10, 1)`.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Create 3 reference IDs for concurrent reservations
@@ -856,38 +762,32 @@ describe("Variant Stock Concurrency", () => {
       assert.strictEqual(failedResult?.conflicts?.[0].available, 0, "Should show 0 available after 2 reservations");
 
       // Verify final stock state
-      const [stockRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT quantity, reserved_quantity, available_quantity 
-         FROM inventory_stock 
-         WHERE company_id = ? AND outlet_id = ? AND variant_id = ?`,
-        [company.id, outlet.id, variantId]
-      );
-      assert.strictEqual(stockRows.length, 1, "Should have inventory_stock record");
-      assert.strictEqual(Number(stockRows[0].quantity), 10, "Quantity should be 10");
-      assert.strictEqual(Number(stockRows[0].reserved_quantity), 10, "Reserved should be 10");
-      assert.strictEqual(Number(stockRows[0].available_quantity), 0, "Available should be 0");
+      const stockResult = await sql`SELECT quantity, reserved_quantity, available_quantity 
+       FROM inventory_stock 
+       WHERE company_id = ${company.id} AND outlet_id = ${outlet.id} AND variant_id = ${variantId}`.execute(db);
+      assert.strictEqual(stockResult.rows.length, 1, "Should have inventory_stock record");
+      const stockRow = stockResult.rows[0] as { quantity: number; reserved_quantity: number; available_quantity: number };
+      assert.strictEqual(Number(stockRow.quantity), 10, "Quantity should be 10");
+      assert.strictEqual(Number(stockRow.reserved_quantity), 10, "Reserved should be 10");
+      assert.strictEqual(Number(stockRow.available_quantity), 0, "Available should be 0");
 
       // Verify 2 reservation transactions were recorded
-      const [txRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT reference_id, transaction_type, quantity_delta 
-         FROM inventory_transactions 
-         WHERE variant_id = ? AND transaction_type = 3
-         ORDER BY id`,
-        [variantId]
-      );
-      assert.strictEqual(txRows.length, 2, "Should have exactly 2 reservation transactions");
+      const txResult = await sql`SELECT reference_id, transaction_type, quantity_delta 
+       FROM inventory_transactions 
+       WHERE variant_id = ${variantId} AND transaction_type = 3
+       ORDER BY id`.execute(db);
+      assert.strictEqual(txResult.rows.length, 2, "Should have exactly 2 reservation transactions");
     } finally {
       // Clean up in correct order
       for (const refId of refIds) {
-        await conn.execute(`DELETE FROM inventory_transactions WHERE reference_id = ?`, [refId]);
+        await sql`DELETE FROM inventory_transactions WHERE reference_id = ${refId}`.execute(db);
       }
-      await conn.execute(`DELETE FROM inventory_stock WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
-      await conn.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
-      await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [company.id]);
-      await conn.execute(`DELETE FROM companies WHERE id = ?`, [company.id]);
-      conn.release();
+      await sql`DELETE FROM inventory_stock WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variantId}`.execute(db);
+      await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
+      await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
     }
   });
 });

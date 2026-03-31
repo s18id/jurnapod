@@ -2,10 +2,9 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { createHash, randomBytes } from "crypto";
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
-import { getDbPool } from "./db";
+import { getDb } from "./db";
 import { getAppEnv } from "./env";
+import type { Transaction } from "@jurnapod/db";
 
 export type EmailTokenType = "PASSWORD_RESET" | "INVITE" | "VERIFY_EMAIL";
 
@@ -13,19 +12,6 @@ export class EmailTokenNotFoundError extends Error {}
 export class EmailTokenExpiredError extends Error {}
 export class EmailTokenUsedError extends Error {}
 export class EmailTokenInvalidError extends Error {}
-
-type EmailTokenRow = RowDataPacket & {
-  id: number;
-  company_id: number;
-  user_id: number;
-  email: string;
-  token_hash: string;
-  type: string;
-  expires_at: string;
-  used_at: string | null;
-  created_at: string;
-  created_by: number | null;
-};
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -56,25 +42,24 @@ export async function createEmailToken(params: {
   type: EmailTokenType;
   createdBy: number;
 }): Promise<{ token: string; expiresAt: string }> {
-  const pool = getDbPool();
+  const db = getDb();
   const ttlMinutes = getTokenTtlMinutes(params.type);
   const token = generateToken();
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
-  await pool.execute(
-    `INSERT INTO email_tokens (company_id, user_id, email, token_hash, type, expires_at, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      params.companyId,
-      params.userId,
-      params.email,
-      tokenHash,
-      params.type,
-      expiresAt,
-      params.createdBy
-    ]
-  );
+  await db
+    .insertInto("email_tokens")
+    .values({
+      company_id: params.companyId,
+      user_id: params.userId,
+      email: params.email,
+      token_hash: tokenHash,
+      type: params.type,
+      expires_at: expiresAt,
+      created_by: params.createdBy,
+    })
+    .execute();
 
   return { token, expiresAt: expiresAt.toISOString() };
 }
@@ -83,22 +68,20 @@ export async function validateEmailToken(
   token: string,
   type: EmailTokenType
 ): Promise<{ userId: number; companyId: number; email: string }> {
-  const pool = getDbPool();
+  const db = getDb();
   const tokenHash = hashToken(token);
 
-  const [rows] = await pool.execute<EmailTokenRow[]>(
-    `SELECT id, company_id, user_id, email, token_hash, type, expires_at, used_at
-     FROM email_tokens
-     WHERE token_hash = ? AND type = ?
-     LIMIT 1`,
-    [tokenHash, type]
-  );
+  const row = await db
+    .selectFrom("email_tokens")
+    .where("token_hash", "=", tokenHash)
+    .where("type", "=", type)
+    .limit(1)
+    .select(["id", "company_id", "user_id", "email", "token_hash", "type", "expires_at", "used_at"])
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     throw new EmailTokenInvalidError("Invalid token");
   }
-
-  const row = rows[0];
 
   if (row.used_at) {
     throw new EmailTokenUsedError("Token has already been used");
@@ -111,19 +94,20 @@ export async function validateEmailToken(
   return {
     userId: row.user_id,
     companyId: row.company_id,
-    email: row.email
+    email: row.email,
   };
 }
 
 export async function invalidateEmailToken(token: string, type: EmailTokenType): Promise<void> {
-  const pool = getDbPool();
+  const db = getDb();
   const tokenHash = hashToken(token);
 
-  await pool.execute(
-    `UPDATE email_tokens SET used_at = CURRENT_TIMESTAMP
-     WHERE token_hash = ? AND type = ?`,
-    [tokenHash, type]
-  );
+  await db
+    .updateTable("email_tokens")
+    .set({ used_at: new Date() })
+    .where("token_hash", "=", tokenHash)
+    .where("type", "=", type)
+    .execute();
 }
 
 /**
@@ -138,39 +122,36 @@ export async function invalidateEmailToken(token: string, type: EmailTokenType):
  * Usage: Call this within a transaction context (BEGIN/COMMIT wrapper).
  */
 export async function validateAndConsumeToken(
-  connection: PoolConnection,
+  connection: Transaction,
   token: string,
   type: EmailTokenType
 ): Promise<{ userId: number; companyId: number; email: string }> {
   const tokenHash = hashToken(token);
 
   // Atomically mark token as used ONLY if it's valid, unused, and not expired
-  const [updateResult] = await connection.execute<ResultSetHeader>(
-    `UPDATE email_tokens 
-     SET used_at = CURRENT_TIMESTAMP
-     WHERE token_hash = ? 
-       AND type = ?
-       AND used_at IS NULL
-       AND expires_at > NOW()`,
-    [tokenHash, type]
-  );
+  const updateResult = await connection
+    .updateTable("email_tokens")
+    .set({ used_at: new Date() })
+    .where("token_hash", "=", tokenHash)
+    .where("type", "=", type)
+    .where("used_at", "is", null)
+    .where("expires_at", ">", new Date())
+    .executeTakeFirst();
 
   // If no rows were updated, the token is either invalid, already used, or expired
-  if (updateResult.affectedRows === 0) {
+  if (!updateResult || updateResult.numUpdatedRows === BigInt(0)) {
     // Fetch token to determine specific error
-    const [rows] = await connection.execute<EmailTokenRow[]>(
-      `SELECT id, company_id, user_id, email, expires_at, used_at
-       FROM email_tokens
-       WHERE token_hash = ? AND type = ?
-       LIMIT 1`,
-      [tokenHash, type]
-    );
+    const row = await connection
+      .selectFrom("email_tokens")
+      .where("token_hash", "=", tokenHash)
+      .where("type", "=", type)
+      .limit(1)
+      .select(["id", "company_id", "user_id", "email", "expires_at", "used_at"])
+      .executeTakeFirst();
 
-    if (rows.length === 0) {
+    if (!row) {
       throw new EmailTokenInvalidError("Invalid token");
     }
-
-    const row = rows[0];
 
     if (row.used_at) {
       throw new EmailTokenUsedError("Token has already been used");
@@ -185,20 +166,22 @@ export async function validateAndConsumeToken(
   }
 
   // Token was successfully consumed, fetch the details
-  const [rows] = await connection.execute<EmailTokenRow[]>(
-    `SELECT company_id, user_id, email
-     FROM email_tokens
-     WHERE token_hash = ? AND type = ?
-     LIMIT 1`,
-    [tokenHash, type]
-  );
+  const tokenRow = await connection
+    .selectFrom("email_tokens")
+    .where("token_hash", "=", tokenHash)
+    .where("type", "=", type)
+    .limit(1)
+    .select(["company_id", "user_id", "email"])
+    .executeTakeFirst();
 
-  const row = rows[0];
+  if (!tokenRow) {
+    throw new EmailTokenInvalidError("Invalid token");
+  }
 
   return {
-    userId: row.user_id,
-    companyId: row.company_id,
-    email: row.email
+    userId: tokenRow.user_id,
+    companyId: tokenRow.company_id,
+    email: tokenRow.email,
   };
 }
 
@@ -206,27 +189,25 @@ export async function getEmailTokenInfo(
   token: string,
   type: EmailTokenType
 ): Promise<{ userId: number; companyId: number; email: string; expiresAt: string } | null> {
-  const pool = getDbPool();
+  const db = getDb();
   const tokenHash = hashToken(token);
 
-  const [rows] = await pool.execute<EmailTokenRow[]>(
-    `SELECT company_id, user_id, email, expires_at
-     FROM email_tokens
-     WHERE token_hash = ? AND type = ?
-     LIMIT 1`,
-    [tokenHash, type]
-  );
+  const row = await db
+    .selectFrom("email_tokens")
+    .where("token_hash", "=", tokenHash)
+    .where("type", "=", type)
+    .limit(1)
+    .select(["company_id", "user_id", "email", "expires_at"])
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     return null;
   }
-
-  const row = rows[0];
 
   return {
     userId: row.user_id,
     companyId: row.company_id,
     email: row.email,
-    expiresAt: row.expires_at
+    expiresAt: String(row.expires_at),
   };
 }

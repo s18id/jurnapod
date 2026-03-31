@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { getDbPool } from "./db";
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
+import { sql } from "kysely";
+import { getDb } from "./db";
 
 export type BarcodeType = 'EAN13' | 'UPCA' | 'CODE128' | 'CUSTOM';
 
@@ -12,7 +12,7 @@ export interface BarcodeValidationResult {
   error?: string;
 }
 
-export interface ItemWithBarcode extends RowDataPacket {
+export interface ItemWithBarcode {
   id: number;
   company_id: number;
   sku: string | null;
@@ -23,7 +23,7 @@ export interface ItemWithBarcode extends RowDataPacket {
   thumbnail_url: string | null;
 }
 
-export interface ItemVariantWithBarcode extends RowDataPacket {
+export interface ItemVariantWithBarcode {
   id: number;
   item_id: number;
   sku: string;
@@ -144,62 +144,47 @@ export async function checkBarcodeUnique(
   barcode: string,
   excludeItemId?: number
 ): Promise<{ unique: boolean; existingItem?: ItemWithBarcode }> {
-  const pool = getDbPool();
+  const db = getDb();
   
-  let sql = `
-    SELECT id, company_id, sku, name, barcode, barcode_type, 
-           COALESCE((
-             SELECT price FROM item_prices 
-             WHERE item_id = items.id AND outlet_id IS NULL AND is_active = 1 
-             LIMIT 1
-           ), 0) as base_price,
-           (
-             SELECT thumbnail_url FROM item_images
-             WHERE item_id = items.id AND company_id = items.company_id AND is_primary = TRUE
-             LIMIT 1
-           ) as thumbnail_url
+  const itemResult = await sql<ItemWithBarcode>`
+    SELECT 
+      id, company_id, sku, name, barcode, barcode_type, 
+      COALESCE((
+        SELECT price FROM item_prices 
+        WHERE item_id = items.id AND outlet_id IS NULL AND is_active = 1 
+        LIMIT 1
+      ), 0) as base_price,
+      (
+        SELECT thumbnail_url FROM item_images
+        WHERE item_id = items.id AND company_id = items.company_id AND is_primary = TRUE
+        LIMIT 1
+      ) as thumbnail_url
     FROM items 
-    WHERE company_id = ? AND barcode = ?
-  `;
-  const params: (number | string)[] = [companyId, barcode];
+    WHERE company_id = ${companyId} AND barcode = ${barcode}
+    ${excludeItemId ? sql`AND id != ${excludeItemId}` : sql``}
+    LIMIT 1
+  `.execute(db);
   
-  if (excludeItemId) {
-    sql += " AND id != ?";
-    params.push(excludeItemId);
-  }
-  
-  sql += " LIMIT 1";
-  
-  const [rows] = await pool.execute<ItemWithBarcode[]>(sql, params);
-  
-  if (rows.length > 0) {
-    return { unique: false, existingItem: rows[0] };
+  if (itemResult.rows.length > 0) {
+    return { unique: false, existingItem: itemResult.rows[0] };
   }
   
   // Also check variant barcodes
-  let variantSql = `
+  const variantResult = await sql<ItemVariantWithBarcode & ItemWithBarcode>`
     SELECT v.id, v.item_id, v.sku, v.variant_name as name, v.barcode, 
            'CUSTOM' as barcode_type, v.price_override as base_price
     FROM item_variants v
     JOIN items i ON v.item_id = i.id
-    WHERE i.company_id = ? AND v.barcode = ?
-  `;
-  const variantParams: (number | string)[] = [companyId, barcode];
+    WHERE i.company_id = ${companyId} AND v.barcode = ${barcode}
+    ${excludeItemId ? sql`AND v.item_id != ${excludeItemId}` : sql``}
+    LIMIT 1
+  `.execute(db);
   
-  if (excludeItemId) {
-    variantSql += " AND v.item_id != ?";
-    variantParams.push(excludeItemId);
-  }
-  
-  variantSql += " LIMIT 1";
-  
-  const [variantRows] = await pool.execute<(ItemVariantWithBarcode & ItemWithBarcode)[]>(variantSql, variantParams);
-  
-  if (variantRows.length > 0) {
+  if (variantResult.rows.length > 0) {
     return { 
       unique: false, 
       existingItem: {
-        ...variantRows[0],
+        ...variantResult.rows[0],
         company_id: companyId,
         thumbnail_url: null
       }
@@ -219,7 +204,7 @@ export async function updateItemBarcode(
   barcodeType: BarcodeType,
   userId: number
 ): Promise<ItemWithBarcode> {
-  const pool = getDbPool();
+  const db = getDb();
   
   // Validate barcode
   const validation = validateBarcode(barcode, barcodeType);
@@ -235,27 +220,26 @@ export async function updateItemBarcode(
   
   // Update item (DB-level uniqueness constraint will catch races)
   try {
-    const [result] = await pool.execute<ResultSetHeader>(
-      `UPDATE items 
-       SET barcode = ?, barcode_type = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND company_id = ?`,
-      [barcode, barcodeType, itemId, companyId]
-    );
+    const result = await sql`
+      UPDATE items 
+      SET barcode = ${barcode}, barcode_type = ${barcodeType}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${itemId} AND company_id = ${companyId}
+    `.execute(db);
     
-    if (result.affectedRows === 0) {
+    if (result.numAffectedRows === BigInt(0)) {
       throw new Error("Item not found or no changes made");
     }
-  } catch (dbError: any) {
+  } catch (dbError: unknown) {
     // Handle DB duplicate key error (race condition)
-    if (dbError.code === 'ER_DUP_ENTRY' || dbError.errno === 1062) {
+    if (typeof dbError === 'object' && dbError !== null && 'code' in dbError && (dbError as { code: string }).code === 'ER_DUP_ENTRY') {
       throw new Error(`Barcode already in use by another item (concurrent update detected)`);
     }
     throw dbError;
   }
   
   // Log audit event
-  await pool.execute(
-    `INSERT INTO audit_logs (
+  await sql`
+    INSERT INTO audit_logs (
        company_id,
        outlet_id,
        user_id,
@@ -264,18 +248,12 @@ export async function updateItemBarcode(
        success,
        ip_address,
        payload_json
-     ) VALUES (?, NULL, ?, ?, 'SUCCESS', 1, NULL, ?)`,
-    [
-      companyId,
-      userId,
-      'ITEM_BARCODE_UPDATE',
-      JSON.stringify({ item_id: itemId, barcode, barcode_type: barcodeType })
-    ]
-  );
+     ) VALUES (${companyId}, NULL, ${userId}, 'ITEM_BARCODE_UPDATE', 'SUCCESS', 1, NULL, ${JSON.stringify({ item_id: itemId, barcode, barcode_type: barcodeType })})
+  `.execute(db);
   
   // Return updated item
-  const [rows] = await pool.execute<ItemWithBarcode[]>(
-    `SELECT id, company_id, sku, name, barcode, barcode_type, 
+  const rows = await sql<ItemWithBarcode>`
+    SELECT id, company_id, sku, name, barcode, barcode_type, 
             COALESCE((
               SELECT price FROM item_prices 
               WHERE item_id = items.id AND outlet_id IS NULL AND is_active = 1 
@@ -287,15 +265,14 @@ export async function updateItemBarcode(
               LIMIT 1
             ) as thumbnail_url
      FROM items 
-     WHERE id = ? AND company_id = ?`,
-    [itemId, companyId]
-  );
+     WHERE id = ${itemId} AND company_id = ${companyId}
+  `.execute(db);
   
-  if (rows.length === 0) {
+  if (rows.rows.length === 0) {
     throw new Error("Item not found after update");
   }
   
-  return rows[0];
+  return rows.rows[0];
 }
 
 /**
@@ -305,11 +282,11 @@ export async function findItemsByBarcode(
   companyId: number,
   barcode: string
 ): Promise<Array<ItemWithBarcode & { variants?: ItemVariantWithBarcode[] }>> {
-  const pool = getDbPool();
+  const db = getDb();
   
   // Find items with matching barcode
-  const [itemRows] = await pool.execute<ItemWithBarcode[]>(
-    `SELECT id, company_id, sku, name, barcode, barcode_type, 
+  const itemRows = await sql<ItemWithBarcode>`
+    SELECT id, company_id, sku, name, barcode, barcode_type, 
             COALESCE((
               SELECT price FROM item_prices 
               WHERE item_id = items.id AND outlet_id IS NULL AND is_active = 1 
@@ -321,13 +298,12 @@ export async function findItemsByBarcode(
               LIMIT 1
             ) as thumbnail_url
      FROM items 
-     WHERE company_id = ? AND barcode = ? AND is_active = 1`,
-    [companyId, barcode]
-  );
+     WHERE company_id = ${companyId} AND barcode = ${barcode} AND is_active = 1
+  `.execute(db);
   
   // Find variants with matching barcode
-  const [variantRows] = await pool.execute<ItemVariantWithBarcode[]>(
-    `SELECT v.id, v.item_id, v.sku, v.variant_name, v.barcode,
+  const variantRows = await sql<ItemVariantWithBarcode>`
+    SELECT v.id, v.item_id, v.sku, v.variant_name, v.barcode,
             COALESCE(v.price_override, (
               SELECT price FROM item_prices 
               WHERE item_id = i.id AND outlet_id IS NULL AND is_active = 1 
@@ -335,13 +311,12 @@ export async function findItemsByBarcode(
             ), 0) as price
      FROM item_variants v
      JOIN items i ON v.item_id = i.id
-     WHERE i.company_id = ? AND v.barcode = ? AND v.is_active = 1 AND i.is_active = 1`,
-    [companyId, barcode]
-  );
+     WHERE i.company_id = ${companyId} AND v.barcode = ${barcode} AND v.is_active = 1 AND i.is_active = 1
+  `.execute(db);
   
   // Group variants by item
   const variantsByItem = new Map<number, ItemVariantWithBarcode[]>();
-  for (const variant of variantRows) {
+  for (const variant of variantRows.rows) {
     if (!variantsByItem.has(variant.item_id)) {
       variantsByItem.set(variant.item_id, []);
     }
@@ -351,7 +326,7 @@ export async function findItemsByBarcode(
   // Build result with variants
   const result: Array<ItemWithBarcode & { variants?: ItemVariantWithBarcode[] }> = [];
   
-  for (const item of itemRows) {
+  for (const item of itemRows.rows) {
     result.push({
       ...item,
       variants: variantsByItem.get(item.id)
@@ -360,11 +335,11 @@ export async function findItemsByBarcode(
   
   // Add items that only have matching variants (not the parent item itself)
   for (const [itemId, variants] of variantsByItem) {
-    const alreadyIncluded = itemRows.some(item => item.id === itemId);
+    const alreadyIncluded = itemRows.rows.some(item => item.id === itemId);
     if (!alreadyIncluded) {
       // Fetch parent item details
-      const [parentRows] = await pool.execute<ItemWithBarcode[]>(
-        `SELECT id, company_id, sku, name, barcode, barcode_type, 
+      const parentRows = await sql<ItemWithBarcode>`
+        SELECT id, company_id, sku, name, barcode, barcode_type, 
                 COALESCE((
                   SELECT price FROM item_prices 
                   WHERE item_id = items.id AND outlet_id IS NULL AND is_active = 1 
@@ -372,13 +347,12 @@ export async function findItemsByBarcode(
                 ), 0) as base_price,
                 NULL as thumbnail_url
          FROM items 
-         WHERE id = ? AND company_id = ?`,
-        [itemId, companyId]
-      );
+         WHERE id = ${itemId} AND company_id = ${companyId}
+      `.execute(db);
       
-      if (parentRows.length > 0) {
+      if (parentRows.rows.length > 0) {
         result.push({
-          ...parentRows[0],
+          ...parentRows.rows[0],
           variants
         });
       }
@@ -396,22 +370,21 @@ export async function removeItemBarcode(
   itemId: number,
   userId: number
 ): Promise<void> {
-  const pool = getDbPool();
+  const db = getDb();
   
-  const [result] = await pool.execute<ResultSetHeader>(
-    `UPDATE items 
-     SET barcode = NULL, barcode_type = NULL, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND company_id = ?`,
-    [itemId, companyId]
-  );
+  const result = await sql`
+    UPDATE items 
+    SET barcode = NULL, barcode_type = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${itemId} AND company_id = ${companyId}
+  `.execute(db);
   
-  if (result.affectedRows === 0) {
+  if (result.numAffectedRows === BigInt(0)) {
     throw new Error("Item not found or no changes made");
   }
   
   // Log audit event
-  await pool.execute(
-    `INSERT INTO audit_logs (
+  await sql`
+    INSERT INTO audit_logs (
        company_id,
        outlet_id,
        user_id,
@@ -420,12 +393,6 @@ export async function removeItemBarcode(
        success,
        ip_address,
        payload_json
-     ) VALUES (?, NULL, ?, ?, 'SUCCESS', 1, NULL, ?)`,
-    [
-      companyId,
-      userId,
-      'ITEM_BARCODE_REMOVE',
-      JSON.stringify({ item_id: itemId, barcode_removed: true })
-    ]
-  );
+     ) VALUES (${companyId}, NULL, ${userId}, 'ITEM_BARCODE_REMOVE', 'SUCCESS', 1, NULL, ${JSON.stringify({ item_id: itemId, barcode_removed: true })})
+  `.execute(db);
 }

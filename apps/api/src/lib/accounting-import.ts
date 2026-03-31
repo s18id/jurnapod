@@ -2,8 +2,8 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { createHash } from "crypto";
-import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
-import { getDbPool } from "./db";
+import { getDb, type KyselySchema } from "./db";
+import { sql } from "kysely";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
 
 type ParsedFile = {
@@ -353,24 +353,7 @@ function getParentCode(code: string, groupCodes: Set<string>): string | null {
   return groupCodes.has(candidate) ? candidate : null;
 }
 
-async function withTransaction<T>(operation: (connection: PoolConnection) => Promise<T>): Promise<T> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-    const result = await operation(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-}
-
-async function upsertAccounts(connection: PoolConnection, companyId: number, accounts: AccountRow[]) {
+async function upsertAccounts(trx: KyselySchema, companyId: number, accounts: AccountRow[]) {
   if (accounts.length === 0) {
     return;
   }
@@ -378,63 +361,53 @@ async function upsertAccounts(connection: PoolConnection, companyId: number, acc
   const rows = accounts.map((account) => {
     const mapping = account.typeName ? ACCOUNT_TYPE_MAPPING[account.typeName] : null;
     return {
+      company_id: companyId,
       code: account.code,
       name: account.name,
-      typeName: account.typeName,
-      normalBalance: mapping?.normalBalance ?? null,
-      reportGroup: mapping?.reportGroup ?? null,
-      isGroup: account.isGroup ? 1 : 0
+      type_name: account.typeName,
+      normal_balance: mapping?.normalBalance ?? null,
+      report_group: mapping?.reportGroup ?? null,
+      is_group: account.isGroup ? 1 : 0
     };
   });
 
   const chunkSize = 200;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
-    const values = chunk.flatMap((row) => [
-      companyId,
-      row.code,
-      row.name,
-      row.typeName,
-      row.normalBalance,
-      row.reportGroup,
-      row.isGroup
-    ]);
-    const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ");
 
-    await connection.execute(
-      `INSERT INTO accounts (
-         company_id,
-         code,
-         name,
-         type_name,
-         normal_balance,
-         report_group,
-         is_group
-       ) VALUES ${placeholders}
-       ON DUPLICATE KEY UPDATE
-         name = VALUES(name),
-         type_name = VALUES(type_name),
-         normal_balance = VALUES(normal_balance),
-         report_group = VALUES(report_group),
-         is_group = VALUES(is_group)`,
-      values
-    );
+    await sql`
+      INSERT INTO accounts (
+        company_id,
+        code,
+        name,
+        type_name,
+        normal_balance,
+        report_group,
+        is_group
+      ) VALUES ${sql.join(chunk.map((row) => sql`(${row.company_id}, ${row.code}, ${row.name}, ${row.type_name}, ${row.normal_balance}, ${row.report_group}, ${row.is_group})`))}
+      ON DUPLICATE KEY UPDATE
+        name = VALUES(name),
+        type_name = VALUES(type_name),
+        normal_balance = VALUES(normal_balance),
+        report_group = VALUES(report_group),
+        is_group = VALUES(is_group)
+    `.execute(trx);
   }
 }
 
 async function updateAccountParents(
-  connection: PoolConnection,
+  trx: KyselySchema,
   companyId: number,
   accounts: AccountRow[]
 ): Promise<Map<string, number>> {
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT id, code
-     FROM accounts
-     WHERE company_id = ?`,
-    [companyId]
-  );
+  const result = await sql<{ id: number; code: string }>`
+    SELECT id, code
+    FROM accounts
+    WHERE company_id = ${companyId}
+  `.execute(trx);
+
   const accountIdByCode = new Map<string, number>();
-  for (const row of rows) {
+  for (const row of result.rows) {
     accountIdByCode.set(String(row.code), Number(row.id));
   }
 
@@ -451,20 +424,19 @@ async function updateAccountParents(
       continue;
     }
 
-    await connection.execute(
-      `UPDATE accounts
-       SET parent_account_id = ?
-       WHERE id = ?
-         AND company_id = ?`,
-      [parentId, accountId, companyId]
-    );
+    await sql`
+      UPDATE accounts
+      SET parent_account_id = ${parentId}
+      WHERE id = ${accountId}
+        AND company_id = ${companyId}
+    `.execute(trx);
   }
 
   return accountIdByCode;
 }
 
 async function insertJournalBatches(
-  connection: PoolConnection,
+  trx: KyselySchema,
   companyId: number,
   trnsRows: TrnsRow[]
 ): Promise<Map<number, number>> {
@@ -472,37 +444,31 @@ async function insertJournalBatches(
     return new Map();
   }
 
-  const values = trnsRows.flatMap((row) => [
-    companyId,
-    null,
-    "IMPORT_TRX",
-    row.transactionId,
-    `${row.date} 00:00:00`
-  ]);
-  const placeholders = trnsRows.map(() => "(?, ?, ?, ?, ?)").join(", ");
+  const values = trnsRows.map((row) => {
+    const postedAt = `${row.date} 00:00:00`;
+    return sql`(${companyId}, NULL, 'IMPORT_TRX', ${row.transactionId}, ${postedAt})`;
+  });
 
-  await connection.execute(
-    `INSERT INTO journal_batches (
-       company_id,
-       outlet_id,
-       doc_type,
-       doc_id,
-       posted_at
-     ) VALUES ${placeholders}`,
-    values
-  );
+  await sql`
+    INSERT INTO journal_batches (
+      company_id,
+      outlet_id,
+      doc_type,
+      doc_id,
+      posted_at
+    ) VALUES ${sql.join(values)}
+  `.execute(trx);
 
-  const [batchRows] = await connection.execute<RowDataPacket[]>(
-    `SELECT id, doc_id
-     FROM journal_batches
-     WHERE company_id = ?
-       AND doc_type = 'IMPORT_TRX'
-       AND doc_id IN (${trnsRows.map(() => "?").join(", ")})`,
-    [companyId, ...trnsRows.map((row) => row.transactionId)]
-  );
+  const batchRows = await sql<{ id: number; doc_id: number }>`
+    SELECT id, doc_id
+    FROM journal_batches
+    WHERE company_id = ${companyId}
+      AND doc_type = 'IMPORT_TRX'
+      AND doc_id IN (${sql.join(trnsRows.map((row) => sql`${row.transactionId}`))})
+  `.execute(trx);
 
   const batchMap = new Map<number, number>();
-  for (const row of batchRows) {
+  for (const row of batchRows.rows) {
     batchMap.set(Number(row.doc_id), Number(row.id));
   }
 
@@ -510,7 +476,7 @@ async function insertJournalBatches(
 }
 
 async function insertJournalLines(
-  connection: PoolConnection,
+  trx: KyselySchema,
   companyId: number,
   alkRows: AlkRow[],
   batchMap: Map<number, number>,
@@ -521,8 +487,7 @@ async function insertJournalLines(
     return;
   }
 
-  const values: Array<string | number | null> = [];
-  const placeholders: string[] = [];
+  const values: Array<{ batch_id: number; company_id: number; outlet_id: null; account_id: number; line_date: string; debit: number; credit: number; description: string }> = [];
   for (const row of alkRows) {
     const batchId = batchMap.get(row.transactionId);
     const accountId = accountIdByCode.get(row.accountCode);
@@ -535,41 +500,39 @@ async function insertJournalLines(
     const debit = row.normalBalance === "D" ? row.amount : 0;
     const credit = row.normalBalance === "C" ? row.amount : 0;
 
-    placeholders.push("(?, ?, ?, ?, ?, ?, ?, ?)");
-    values.push(
-      batchId,
-      companyId,
-      null,
-      accountId,
-      row.date,
+    values.push({
+      batch_id: batchId,
+      company_id: companyId,
+      outlet_id: null,
+      account_id: accountId,
+      line_date: row.date,
       debit,
       credit,
       description
-    );
+    });
   }
 
   const chunkSize = 200;
-  for (let i = 0; i < placeholders.length; i += chunkSize) {
-    const chunkPlaceholders = placeholders.slice(i, i + chunkSize);
-    const chunkValues = values.slice(i * 8, (i + chunkSize) * 8);
-    await connection.execute(
-      `INSERT INTO journal_lines (
-         journal_batch_id,
-         company_id,
-         outlet_id,
-         account_id,
-         line_date,
-         debit,
-         credit,
-         description
-       ) VALUES ${chunkPlaceholders.join(", ")}`,
-      chunkValues
-    );
+  for (let i = 0; i < values.length; i += chunkSize) {
+    const chunk = values.slice(i, i + chunkSize);
+
+    await sql`
+      INSERT INTO journal_lines (
+        journal_batch_id,
+        company_id,
+        outlet_id,
+        account_id,
+        line_date,
+        debit,
+        credit,
+        description
+      ) VALUES ${sql.join(chunk.map((v) => sql`(${v.batch_id}, ${v.company_id}, ${v.outlet_id}, ${v.account_id}, ${v.line_date}, ${v.debit}, ${v.credit}, ${v.description})`))}
+    `.execute(trx);
   }
 }
 
 async function updateCurrentBalances(
-  connection: PoolConnection,
+  trx: KyselySchema,
   companyId: number,
   alkRows: AlkRow[],
   accountIdByCode: Map<string, number>
@@ -601,40 +564,37 @@ async function updateCurrentBalances(
     return;
   }
 
-  const values: Array<string | number> = [];
-  const placeholders: string[] = [];
+  const values: Array<{ company_id: number; account_id: number; as_of_date: string; debit_total: number; credit_total: number; balance: number }> = [];
   for (const [accountId, aggregate] of totals.entries()) {
-    placeholders.push("(?, ?, ?, ?, ?, ?)");
-    values.push(
-      companyId,
-      accountId,
-      maxDate,
-      aggregate.debit,
-      aggregate.credit,
-      aggregate.debit - aggregate.credit
-    );
+    values.push({
+      company_id: companyId,
+      account_id: accountId,
+      as_of_date: maxDate,
+      debit_total: aggregate.debit,
+      credit_total: aggregate.credit,
+      balance: aggregate.debit - aggregate.credit
+    });
   }
 
-  if (placeholders.length === 0) {
+  if (values.length === 0) {
     return;
   }
 
-  await connection.execute(
-    `INSERT INTO account_balances_current (
-       company_id,
-       account_id,
-       as_of_date,
-       debit_total,
-       credit_total,
-       balance
-     ) VALUES ${placeholders.join(", ")}
-     ON DUPLICATE KEY UPDATE
-       debit_total = debit_total + VALUES(debit_total),
-       credit_total = credit_total + VALUES(credit_total),
-       balance = (debit_total + VALUES(debit_total)) - (credit_total + VALUES(credit_total)),
-       as_of_date = GREATEST(as_of_date, VALUES(as_of_date))`,
-    values
-  );
+  await sql`
+    INSERT INTO account_balances_current (
+      company_id,
+      account_id,
+      as_of_date,
+      debit_total,
+      credit_total,
+      balance
+    ) VALUES ${sql.join(values.map((v) => sql`(${v.company_id}, ${v.account_id}, ${v.as_of_date}, ${v.debit_total}, ${v.credit_total}, ${v.balance})`))}
+    ON DUPLICATE KEY UPDATE
+      debit_total = debit_total + VALUES(debit_total),
+      credit_total = credit_total + VALUES(credit_total),
+      balance = (debit_total + VALUES(debit_total)) - (credit_total + VALUES(credit_total)),
+      as_of_date = GREATEST(as_of_date, VALUES(as_of_date))
+  `.execute(trx);
 }
 
 function buildParsedFile(fileName: string, text: string): ParsedFile {
@@ -704,9 +664,9 @@ export async function importAccountingCsv(input: {
   }
 
   const uniqueDates = Array.from(new Set(trnsRows.map((row) => row.date)));
-  const pool = getDbPool();
+  const db = getDb();
   for (const date of uniqueDates) {
-    await ensureDateWithinOpenFiscalYearWithExecutor(pool, input.companyId, date);
+    await ensureDateWithinOpenFiscalYearWithExecutor(db, input.companyId, date);
   }
 
   const fileHash = createFileHash([
@@ -715,17 +675,17 @@ export async function importAccountingCsv(input: {
     Buffer.from(input.allocationsFile.text, "utf8")
   ]);
 
-  const [existingRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, status
-     FROM data_imports
-     WHERE company_id = ?
-       AND file_hash = ?
-     LIMIT 1`,
-    [input.companyId, fileHash]
-  );
-  if (existingRows.length > 0) {
+  const existingResult = await sql<{ id: number; status: string }>`
+    SELECT id, status
+    FROM data_imports
+    WHERE company_id = ${input.companyId}
+      AND file_hash = ${fileHash}
+    LIMIT 1
+  `.execute(db);
+
+  if (existingResult.rows.length > 0) {
     return {
-      importId: Number(existingRows[0].id),
+      importId: Number(existingResult.rows[0].id),
       duplicate: true,
       totals: {
         accounts: 0,
@@ -737,52 +697,49 @@ export async function importAccountingCsv(input: {
     };
   }
 
-  return await withTransaction(async (connection) => {
-    const [insertResult] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO data_imports (
-         company_id,
-         accounts_file_name,
-         transactions_file_name,
-         allocations_file_name,
-         file_hash,
-         status,
-         created_by
-       ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`,
-      [
-        input.companyId,
-        input.accountsFile.fileName,
-        input.transactionsFile.fileName,
-        input.allocationsFile.fileName,
-        fileHash,
-        input.userId
-      ]
-    );
+  return await db.transaction().execute(async (trx) => {
+    const insertResult = await sql`
+      INSERT INTO data_imports (
+        company_id,
+        accounts_file_name,
+        transactions_file_name,
+        allocations_file_name,
+        file_hash,
+        status,
+        created_by
+      ) VALUES (
+        ${input.companyId},
+        ${input.accountsFile.fileName},
+        ${input.transactionsFile.fileName},
+        ${input.allocationsFile.fileName},
+        ${fileHash},
+        'PENDING',
+        ${input.userId}
+      )
+    `.execute(trx);
+
     const importId = Number(insertResult.insertId);
 
-    await upsertAccounts(connection, input.companyId, accounts);
-    const accountIdByCode = await updateAccountParents(connection, input.companyId, accounts);
+    await upsertAccounts(trx, input.companyId, accounts);
+    const accountIdByCode = await updateAccountParents(trx, input.companyId, accounts);
 
-    const batchMap = await insertJournalBatches(connection, input.companyId, trnsRows);
-    await insertJournalLines(connection, input.companyId, alkRows, batchMap, accountIdByCode, transactionMap);
-    await updateCurrentBalances(connection, input.companyId, alkRows, accountIdByCode);
+    const batchMap = await insertJournalBatches(trx, input.companyId, trnsRows);
+    await insertJournalLines(trx, input.companyId, alkRows, batchMap, accountIdByCode, transactionMap);
+    await updateCurrentBalances(trx, input.companyId, alkRows, accountIdByCode);
 
-    await connection.execute(
-      `UPDATE data_imports
-       SET status = 'COMPLETED',
-           counts_json = ?,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [
-        JSON.stringify({
-          accounts: accounts.length,
-          trns: trnsRows.length,
-          alk: alkRows.length,
-          journal_batches: batchMap.size,
-          journal_lines: alkRows.length
-        }),
-        importId
-      ]
-    );
+    await sql`
+      UPDATE data_imports
+      SET status = 'COMPLETED',
+          counts_json = ${JSON.stringify({
+            accounts: accounts.length,
+            trns: trnsRows.length,
+            alk: alkRows.length,
+            journal_batches: batchMap.size,
+            journal_lines: alkRows.length
+          })},
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${importId}
+    `.execute(trx);
 
     return {
       importId,

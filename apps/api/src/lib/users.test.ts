@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "./db";
+import { closeDbPool, getDb } from "./db";
+import { sql } from "kysely";
 import {
   createUser,
   findUserById,
@@ -21,7 +22,6 @@ import {
   CrossCompanyAccessError
 } from "./users";
 import { createTestOutletMinimal, cleanupTestFixtures } from "./test-fixtures";
-import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
 
@@ -29,7 +29,7 @@ test(
   "users CRUD - create, list, update, deactivate",
   { concurrency: false, timeout: 120000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const testEmail = `test-user-${runId}@example.com`;
 
@@ -46,32 +46,30 @@ test(
     const createdUserIds: number[] = [];
 
     try {
-      const [ownerRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT u.id, u.company_id, o.id AS outlet_id
-         FROM users u
-         INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
-           AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+      const ownerRows = await sql`
+        SELECT u.id, u.company_id, o.id AS outlet_id
+        FROM users u
+        INNER JOIN companies c ON c.id = u.company_id
+        INNER JOIN user_outlets uo ON uo.user_id = u.id
+        INNER JOIN outlets o ON o.id = uo.outlet_id
+        WHERE c.code = ${companyCode}
+          AND u.email = ${ownerEmail}
+          AND u.is_active = 1
+          AND o.code = ${outletCode}
+        LIMIT 1
+      `.execute(db);
 
-      assert.ok(ownerRows.length > 0, "Owner fixture not found");
-      const owner = ownerRows[0] as { company_id: number; id: number; outlet_id: number };
+      assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
+      const owner = ownerRows.rows[0] as { company_id: number; id: number; outlet_id: number };
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
       outletId = Number(owner.outlet_id);
 
-      const [roleRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id, code FROM roles WHERE code IN ('ADMIN', 'CASHIER') AND (company_id = ? OR company_id IS NULL)`,
-        [companyId]
-      );
+      const roleRows = await sql`
+        SELECT id, code FROM roles WHERE code IN ('ADMIN', 'CASHIER') AND (company_id = ${companyId} OR company_id IS NULL)
+      `.execute(db);
 
-      for (const row of roleRows as Array<{ id: number; code: string }>) {
+      for (const row of roleRows.rows as Array<{ id: number; code: string }>) {
         if (row.code === "ADMIN") {
           adminRoleId = Number(row.id);
         }
@@ -79,12 +77,11 @@ test(
 
       assert.ok(adminRoleId > 0, "ADMIN role not found");
 
-      const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ? LIMIT 1`,
-        [companyId]
-      );
-      assert.ok(outletRows.length > 0, "No outlets found");
-      outletId = Number(outletRows[0].id);
+      const outletRows = await sql`
+        SELECT id FROM outlets WHERE company_id = ${companyId} LIMIT 1
+      `.execute(db);
+      assert.ok(outletRows.rows.length > 0, "No outlets found");
+      outletId = Number((outletRows.rows[0] as { id: number }).id);
 
       const created = await createUser({
         companyId,
@@ -128,7 +125,7 @@ test(
       console.log("✅ users CRUD test passed");
     } finally {
       if (testUserId > 0) {
-        await pool.execute(`DELETE FROM users WHERE id = ?`, [testUserId]);
+        await sql`DELETE FROM users WHERE id = ${testUserId}`.execute(db);
       }
     }
   }
@@ -138,7 +135,7 @@ test(
   "users - tenant isolation",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const testEmail = `cross-company-${runId}@example.com`;
 
@@ -151,32 +148,30 @@ test(
     let ownerUserId = 0;
 
     try {
-      const [ownerRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT u.id, u.company_id
-         FROM users u
-         INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
-           AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+      const ownerRows = await sql`
+        SELECT u.id, u.company_id
+        FROM users u
+        INNER JOIN companies c ON c.id = u.company_id
+        INNER JOIN user_outlets uo ON uo.user_id = u.id
+        INNER JOIN outlets o ON o.id = uo.outlet_id
+        WHERE c.code = ${companyCode}
+          AND u.email = ${ownerEmail}
+          AND u.is_active = 1
+          AND o.code = ${outletCode}
+        LIMIT 1
+      `.execute(db);
 
-      assert.ok(ownerRows.length > 0, "Owner fixture not found");
-      const owner = ownerRows[0] as { company_id: number; id: number };
+      assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
+      const owner = ownerRows.rows[0] as { company_id: number; id: number };
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
 
-      const [otherCompanyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE id != ? LIMIT 1`,
-        [companyId]
-      );
+      const otherCompanyRows = await sql`
+        SELECT id FROM companies WHERE id != ${companyId} LIMIT 1
+      `.execute(db);
 
-      if (otherCompanyRows.length > 0) {
-        otherCompanyId = Number(otherCompanyRows[0].id);
+      if (otherCompanyRows.rows.length > 0) {
+        otherCompanyId = Number((otherCompanyRows.rows[0] as { id: number }).id);
 
         // Non-super-admin should not be able to list users from another company
         await assert.rejects(
@@ -197,7 +192,7 @@ test(
   "users - role level enforcement",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const testEmail = `role-test-${runId}@example.com`;
 
@@ -212,39 +207,36 @@ test(
     let outletId = 0;
 
     try {
-      const [ownerRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT u.id, u.company_id
-         FROM users u
-         INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
-           AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+      const ownerRows = await sql`
+        SELECT u.id, u.company_id
+        FROM users u
+        INNER JOIN companies c ON c.id = u.company_id
+        INNER JOIN user_outlets uo ON uo.user_id = u.id
+        INNER JOIN outlets o ON o.id = uo.outlet_id
+        WHERE c.code = ${companyCode}
+          AND u.email = ${ownerEmail}
+          AND u.is_active = 1
+          AND o.code = ${outletCode}
+        LIMIT 1
+      `.execute(db);
 
-      assert.ok(ownerRows.length > 0, "Owner fixture not found");
-      const owner = ownerRows[0] as { company_id: number; id: number };
+      assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
+      const owner = ownerRows.rows[0] as { company_id: number; id: number };
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
 
-      const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ? LIMIT 1`,
-        [companyId]
-      );
-      assert.ok(outletRows.length > 0, "No outlets found");
-      outletId = Number(outletRows[0].id);
+      const outletRows = await sql`
+        SELECT id FROM outlets WHERE company_id = ${companyId} LIMIT 1
+      `.execute(db);
+      assert.ok(outletRows.rows.length > 0, "No outlets found");
+      outletId = Number((outletRows.rows[0] as { id: number }).id);
 
-      const [roleRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id, code, is_global FROM roles WHERE code = 'CASHIER' AND (company_id = ? OR company_id IS NULL)`,
-        [companyId]
-      );
+      const roleRows = await sql`
+        SELECT id, code, is_global FROM roles WHERE code = 'CASHIER' AND (company_id = ${companyId} OR company_id IS NULL)
+      `.execute(db);
 
-      assert.ok(roleRows.length > 0, "CASHIER role not found");
-      cashierRoleId = Number(roleRows[0].id);
+      assert.ok(roleRows.rows.length > 0, "CASHIER role not found");
+      cashierRoleId = Number((roleRows.rows[0] as { id: number }).id);
 
       const created = await createUser({
         companyId,
@@ -273,7 +265,7 @@ test(
       console.log("✅ role level enforcement test passed");
     } finally {
       if (testUserId > 0) {
-        await pool.execute(`DELETE FROM users WHERE id = ?`, [testUserId]);
+        await sql`DELETE FROM users WHERE id = ${testUserId}`.execute(db);
       }
     }
   }
@@ -283,7 +275,7 @@ test(
   "userHasOutletAccess - global roles get access to all outlets",
   { concurrency: false, timeout: 30000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -295,21 +287,20 @@ test(
 
     try {
       // Get company and owner info
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT c.id, u.id AS owner_id
-         FROM companies c
-         INNER JOIN users u ON u.company_id = c.id
-         WHERE c.code = ? AND u.email = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail]
-      );
+      const companyRows = await sql`
+        SELECT c.id, u.id AS owner_id
+        FROM companies c
+        INNER JOIN users u ON u.company_id = c.id
+        WHERE c.code = ${companyCode} AND u.email = ${ownerEmail}
+        LIMIT 1
+      `.execute(db);
 
-      if (companyRows.length === 0) {
+      if (companyRows.rows.length === 0) {
         throw new Error(`Company ${companyCode} or owner ${ownerEmail} not found`);
       }
 
-      companyId = companyRows[0].id;
-      ownerUserId = companyRows[0].owner_id;
+      companyId = (companyRows.rows[0] as { id: number }).id;
+      ownerUserId = (companyRows.rows[0] as { owner_id: number }).owner_id;
 
       // Create a test outlet using shared fixtures
       const outlet = await createTestOutletMinimal(companyId, {
@@ -325,22 +316,22 @@ test(
       assert.equal(hasAccess, true, "Owner should have access to newly created outlet via global role");
 
       // Test that owner has access to all existing outlets
-      const [outlets] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ?`,
-        [companyId]
-      );
+      const outlets = await sql`
+        SELECT id FROM outlets WHERE company_id = ${companyId}
+      `.execute(db);
 
-      for (const outlet of outlets) {
-        const hasOutletAccess = await userHasOutletAccess(ownerUserId, companyId, outlet.id);
-        assert.equal(hasOutletAccess, true, `Owner should have access to outlet ${outlet.id}`);
+      for (const outletRow of outlets.rows as { id: number }[]) {
+        const outletId = outletRow.id;
+        const hasOutletAccess = await userHasOutletAccess(ownerUserId, companyId, outletId);
+        assert.equal(hasOutletAccess, true, `Owner should have access to outlet ${outletId}`);
       }
 
-      console.log(`✅ Owner has access to all ${outlets.length} outlets via global role`);
+      console.log(`✅ Owner has access to all ${outlets.rows.length} outlets via global role`);
 
     } finally {
       // Cleanup test outlet
       if (testOutletId > 0) {
-        await pool.execute(`DELETE FROM outlets WHERE id = ?`, [testOutletId]);
+        await sql`DELETE FROM outlets WHERE id = ${testOutletId}`.execute(db);
       }
     }
   }

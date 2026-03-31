@@ -8,14 +8,14 @@
  * Contains canonical mappers and shared transaction helpers.
  */
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { sql } from "kysely";
 import {
   ServiceSessionStatus,
   ServiceSessionLineState,
   TableEventTypeLabels,
   type ServiceSessionStatusType,
 } from "@jurnapod/shared";
+import { getDb, type KyselySchema } from "../db";
 import type {
   ServiceSession,
   SessionLine,
@@ -111,7 +111,7 @@ export interface SessionEvent {
   createdBy: string;
 }
 
-interface SessionEventDbRow extends RowDataPacket {
+interface SessionEventDbRow {
   id: number;
   event_type_id: number;
   client_tx_id: string;
@@ -129,16 +129,19 @@ interface SessionEventDbRow extends RowDataPacket {
  * Used for idempotency - duplicate clientTxId means this operation was already processed.
  */
 export async function checkClientTxIdExists(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: bigint,
   outletId: bigint,
   clientTxId: string
 ): Promise<boolean> {
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT id FROM table_events WHERE company_id = ? AND outlet_id = ? AND client_tx_id = ? LIMIT 1`,
-    [companyId, outletId, clientTxId]
-  );
-  return rows.length > 0;
+  const row = await sql<{ id: number }>`
+    SELECT id FROM table_events 
+    WHERE company_id = ${companyId} 
+      AND outlet_id = ${outletId} 
+      AND client_tx_id = ${clientTxId} 
+    LIMIT 1
+  `.execute(db);
+  return row.rows.length > 0;
 }
 
 // ============================================================================
@@ -151,13 +154,13 @@ export async function checkClientTxIdExists(
  * Uses outlet_tables JOIN to get table info.
  */
 export async function getSessionWithConnection(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: bigint,
   outletId: bigint,
   sessionId: bigint
 ): Promise<ServiceSessionDbRow | null> {
-  const [rows] = await connection.execute<ServiceSessionDbRow[]>(
-    `SELECT 
+  const rows = await sql<ServiceSessionDbRow>`
+    SELECT 
       s.id,
       s.company_id,
       s.outlet_id,
@@ -181,14 +184,12 @@ export async function getSessionWithConnection(
     LEFT JOIN outlet_tables ot ON s.table_id = ot.id
       AND s.company_id = ot.company_id
       AND s.outlet_id = ot.outlet_id
-    WHERE s.id = ?
-      AND s.company_id = ?
-      AND s.outlet_id = ?
-    LIMIT 1`,
-    [sessionId, companyId, outletId]
-  );
-
-  return rows.length > 0 ? rows[0] : null;
+    WHERE s.id = ${sessionId}
+      AND s.company_id = ${companyId}
+      AND s.outlet_id = ${outletId}
+    LIMIT 1
+  `.execute(db);
+  return rows.rows.length > 0 ? rows.rows[0] : null;
 }
 
 /**
@@ -196,14 +197,14 @@ export async function getSessionWithConnection(
  * Scoped to session_id with company/outlet scoping via JOIN on table_service_sessions.
  */
 export async function getSessionLineWithConnection(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: bigint,
   outletId: bigint,
   sessionId: bigint,
   lineId: bigint
 ): Promise<SessionLineDbRow | null> {
-  const [rows] = await connection.execute<SessionLineDbRow[]>(
-    `SELECT 
+  const rows = await sql<SessionLineDbRow>`
+    SELECT 
       l.id,
       l.session_id,
       l.line_number,
@@ -224,15 +225,13 @@ export async function getSessionLineWithConnection(
       l.updated_at
     FROM table_service_session_lines l
     INNER JOIN table_service_sessions s ON l.session_id = s.id
-      AND s.company_id = ?
-      AND s.outlet_id = ?
-    WHERE l.id = ?
-      AND l.session_id = ?
-    LIMIT 1`,
-    [companyId, outletId, lineId, sessionId]
-  );
-
-  return rows.length > 0 ? rows[0] : null;
+      AND s.company_id = ${companyId}
+      AND s.outlet_id = ${outletId}
+    WHERE l.id = ${lineId}
+      AND l.session_id = ${sessionId}
+    LIMIT 1
+  `.execute(db);
+  return rows.rows.length > 0 ? rows.rows[0] : null;
 }
 
 /**
@@ -240,11 +239,11 @@ export async function getSessionLineWithConnection(
  * Returns all lines for a session (no line_id filter).
  */
 export async function getSessionLinesWithConnection(
-  connection: PoolConnection,
+  db: KyselySchema,
   sessionId: bigint
 ): Promise<SessionLine[]> {
-  const [rows] = await connection.execute<SessionLineDbRow[]>(
-    `SELECT 
+  const rows = await sql<SessionLineDbRow>`
+    SELECT 
       id,
       session_id,
       line_number,
@@ -264,12 +263,10 @@ export async function getSessionLinesWithConnection(
       created_at,
       updated_at
     FROM table_service_session_lines
-    WHERE session_id = ?
-    ORDER BY line_number ASC, id ASC`,
-    [sessionId]
-  );
-
-  return rows.map(mapDbRowToSessionLine);
+    WHERE session_id = ${sessionId}
+    ORDER BY line_number ASC, id ASC
+  `.execute(db);
+  return rows.rows.map(mapDbRowToSessionLine);
 }
 
 // ============================================================================
@@ -281,7 +278,7 @@ export async function getSessionLinesWithConnection(
  * Used for session line mutations (add/update/remove).
  */
 export async function logTableEventWithConnection(
-  connection: PoolConnection,
+  db: KyselySchema,
   event: {
     companyId: bigint;
     outletId: bigint;
@@ -293,22 +290,23 @@ export async function logTableEventWithConnection(
     createdBy: string;
   }
 ): Promise<void> {
-  await connection.execute(
-    `INSERT INTO table_events
+  await sql`
+    INSERT INTO table_events
      (company_id, outlet_id, table_id, event_type_id, client_tx_id,
       service_session_id, event_data, occurred_at, created_at, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)`,
-    [
-      event.companyId,
-      event.outletId,
-      event.tableId,
-      event.eventTypeId,
-      event.clientTxId,
-      event.serviceSessionId,
-      event.eventData ? JSON.stringify(event.eventData) : null,
-      event.createdBy
-    ]
-  );
+     VALUES (
+       ${event.companyId},
+       ${event.outletId},
+       ${event.tableId},
+       ${event.eventTypeId},
+       ${event.clientTxId},
+       ${event.serviceSessionId},
+       ${event.eventData ? JSON.stringify(event.eventData) : null},
+       NOW(),
+       NOW(),
+       ${event.createdBy}
+     )
+  `.execute(db);
 }
 
 /**
@@ -316,7 +314,7 @@ export async function logTableEventWithConnection(
  * Used for lifecycle operations (lock, close, batch finalize).
  */
 export async function logSessionEvent(
-  connection: PoolConnection,
+  db: KyselySchema,
   event: {
     companyId: bigint;
     outletId: bigint;
@@ -328,22 +326,23 @@ export async function logSessionEvent(
     createdBy: string;
   }
 ): Promise<void> {
-  await connection.execute(
-    `INSERT INTO table_events
+  await sql`
+    INSERT INTO table_events
      (company_id, outlet_id, table_id, event_type_id, client_tx_id,
       service_session_id, event_data, occurred_at, created_at, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)`,
-    [
-      event.companyId,
-      event.outletId,
-      event.tableId,
-      event.eventTypeId,
-      event.clientTxId,
-      event.sessionId,
-      event.eventData ? JSON.stringify(event.eventData) : null,
-      event.createdBy
-    ]
-  );
+     VALUES (
+       ${event.companyId},
+       ${event.outletId},
+       ${event.tableId},
+       ${event.eventTypeId},
+       ${event.clientTxId},
+       ${event.sessionId},
+       ${event.eventData ? JSON.stringify(event.eventData) : null},
+       NOW(),
+       NOW(),
+       ${event.createdBy}
+     )
+  `.execute(db);
 }
 
 // ============================================================================
@@ -354,22 +353,20 @@ export async function logSessionEvent(
  * Get session version for optimistic concurrency control.
  */
 export async function getSessionVersionWithConnection(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: bigint,
   outletId: bigint,
   sessionId: bigint
 ): Promise<number> {
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT COALESCE(session_version, 1) AS session_version
+  const rows = await sql<{ session_version: number }>`
+    SELECT COALESCE(session_version, 1) AS session_version
      FROM table_service_sessions
-     WHERE id = ?
-       AND company_id = ?
-       AND outlet_id = ?
-     LIMIT 1`,
-    [sessionId, companyId, outletId]
-  );
-
-  return rows.length > 0 ? Number(rows[0].session_version) : 1;
+     WHERE id = ${sessionId}
+       AND company_id = ${companyId}
+       AND outlet_id = ${outletId}
+     LIMIT 1
+  `.execute(db);
+  return rows.rows.length > 0 ? Number(rows.rows[0].session_version) : 1;
 }
 
 // ============================================================================
@@ -381,7 +378,7 @@ export async function getSessionVersionWithConnection(
  * Called during batch finalization and session close.
  */
 export async function syncSnapshotLinesFromSession(
-  connection: PoolConnection,
+  db: KyselySchema,
   params: {
     snapshotId: string;
     companyId: bigint;
@@ -390,53 +387,48 @@ export async function syncSnapshotLinesFromSession(
     onlyFinalized: boolean;
   }
 ): Promise<number> {
-  await connection.execute(
-    `DELETE FROM pos_order_snapshot_lines
-     WHERE order_id = ?
-       AND company_id = ?
-       AND outlet_id = ?`,
-    [params.snapshotId, params.companyId, params.outletId]
-  );
+  await sql`
+    DELETE FROM pos_order_snapshot_lines
+     WHERE order_id = ${params.snapshotId}
+       AND company_id = ${params.companyId}
+       AND outlet_id = ${params.outletId}
+  `.execute(db);
 
-  const finalizedFilter = params.onlyFinalized ? "AND COALESCE(l.line_state, 1) = ?" : "";
+  const finalizedFilter = params.onlyFinalized 
+    ? sql`AND COALESCE(l.line_state, 1) = ${ServiceSessionLineState.FINALIZED}`
+    : sql``;
+
   // Snapshot-line timestamp semantics for service-session aggregation:
   // - updated_at / updated_at_ts: snapshot freshness, derived from the latest source line update
   // - created_at_ts: removed per ADR-0001 / Story 18.1 (created_at is retained)
   //
   // This path does not have source `_ts` columns, but it does have source `updated_at` DATETIME.
   // We therefore derive freshness from MAX(l.updated_at) rather than fabricating chronology.
-  const [insertResult] = await connection.execute<ResultSetHeader>(
-    `INSERT INTO pos_order_snapshot_lines
+  const insertResult = await sql`
+    INSERT INTO pos_order_snapshot_lines
      (order_id, company_id, outlet_id, item_id, sku_snapshot, name_snapshot,
       item_type_snapshot, unit_price_snapshot, qty, discount_amount, updated_at, updated_at_ts)
-     SELECT
-       ? AS order_id,
-       ? AS company_id,
-       ? AS outlet_id,
-       l.product_id AS item_id,
-       MAX(l.product_sku) AS sku_snapshot,
-       MAX(l.product_name) AS name_snapshot,
-       'PRODUCT' AS item_type_snapshot,
-       ROUND(MAX(l.unit_price), 2) AS unit_price_snapshot,
-       SUM(l.quantity) AS qty,
-       ROUND(SUM(l.discount_amount), 2) AS discount_amount,
-       MAX(l.updated_at) AS updated_at,
-       UNIX_TIMESTAMP(MAX(l.updated_at)) * 1000 AS updated_at_ts
-     FROM table_service_session_lines l
-     WHERE l.session_id = ?
-       AND l.is_voided = 0
-       ${finalizedFilter}
-     GROUP BY l.product_id`,
-    [
-      params.snapshotId,
-      params.companyId,
-      params.outletId,
-      params.sessionId,
-      ...(params.onlyFinalized ? [ServiceSessionLineState.FINALIZED] : [])
-    ]
-  );
+    SELECT
+      ${params.snapshotId} AS order_id,
+      ${params.companyId} AS company_id,
+      ${params.outletId} AS outlet_id,
+      l.product_id AS item_id,
+      MAX(l.product_sku) AS sku_snapshot,
+      MAX(l.product_name) AS name_snapshot,
+      'PRODUCT' AS item_type_snapshot,
+      ROUND(MAX(l.unit_price), 2) AS unit_price_snapshot,
+      SUM(l.quantity) AS qty,
+      ROUND(SUM(l.discount_amount), 2) AS discount_amount,
+      MAX(l.updated_at) AS updated_at,
+      UNIX_TIMESTAMP(MAX(l.updated_at)) * 1000 AS updated_at_ts
+    FROM table_service_session_lines l
+    WHERE l.session_id = ${params.sessionId}
+      AND l.is_voided = 0
+      ${finalizedFilter}
+    GROUP BY l.product_id
+  `.execute(db);
 
-  return insertResult.affectedRows;
+  return Number(insertResult.numAffectedRows ?? 0);
 }
 
 // ============================================================================
@@ -453,11 +445,10 @@ export async function getSessionEvents(
   sessionId: bigint,
   limit: number = 20
 ): Promise<SessionEvent[]> {
-  const { getDbPool } = await import("../db");
-  const pool = getDbPool();
+  const db = getDb();
 
-  const [rows] = await pool.execute<SessionEventDbRow[]>(
-    `SELECT 
+  const rows = await sql<SessionEventDbRow>`
+    SELECT 
       id,
       event_type_id,
       client_tx_id,
@@ -465,15 +456,14 @@ export async function getSessionEvents(
       occurred_at,
       created_by
     FROM table_events
-    WHERE company_id = ? 
-      AND outlet_id = ? 
-      AND service_session_id = ?
+    WHERE company_id = ${companyId} 
+      AND outlet_id = ${outletId} 
+      AND service_session_id = ${sessionId}
     ORDER BY occurred_at DESC, id DESC
-    LIMIT ?`,
-    [companyId, outletId, sessionId, limit]
-  );
+    LIMIT ${limit}
+  `.execute(db);
 
-  return rows.map(row => ({
+  return rows.rows.map((row) => ({
     id: BigInt(row.id),
     eventTypeId: row.event_type_id,
     eventTypeLabel: TableEventTypeLabels[row.event_type_id as keyof typeof TableEventTypeLabels] || "Unknown",

@@ -40,8 +40,8 @@ import { posCartRoutes } from "./routes/pos-cart.js";
 import { exportRoutes } from "./routes/export.js";
 import { importRoutes } from "./routes/import.js";
 import { progressRoutes } from "./routes/progress.js";
-import { setProgressPool, cleanupStaleOperations } from "./lib/progress/progress-store.js";
-import { getDbPool } from "./lib/db.js";
+import { cleanupStaleOperations } from "./lib/progress/progress-store.js";
+import { getDb } from "./lib/db.js";
 import { initializeDefaultMetrics, getMetricsOutput, getMetricsContentType } from "./lib/metrics/index.js";
 import { alertManager } from "./lib/alerts/alert-manager.js";
 
@@ -218,9 +218,8 @@ try {
   console.error("Failed to initialize sync modules. Server will continue without modular sync.", error);
 }
 
-// Initialize progress tracking pool and cleanup stale operations
+// Initialize progress tracking - cleanup stale operations on startup
 try {
-  setProgressPool(getDbPool());
   const staleCount = await cleanupStaleOperations();
   if (staleCount > 0) {
     console.info(`[progress] Cleaned up ${staleCount} stale operation(s) on startup`);

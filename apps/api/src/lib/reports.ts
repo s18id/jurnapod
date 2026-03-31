@@ -1,14 +1,11 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
 import { sql } from "kysely";
-import { getDbPool } from "./db";
-import { newKyselyConnection } from "@jurnapod/db";
+import { getDb } from "./db";
 import { toDateTimeRangeWithTimezone, normalizeDate, toMysqlDateTime } from "./date-helpers";
 
-type PosTransactionRow = RowDataPacket & {
+type PosTransactionRow = {
   id: number;
   outlet_id: number;
   client_tx_id: string;
@@ -24,7 +21,7 @@ type PosTransactionRow = RowDataPacket & {
   item_count: number | null;
 };
 
-type PosDailyRow = RowDataPacket & {
+type PosDailyRow = {
   trx_date: string;
   outlet_id: number;
   outlet_name: string | null;
@@ -33,7 +30,7 @@ type PosDailyRow = RowDataPacket & {
   paid_total: number | string | null;
 };
 
-type PosPaymentRow = RowDataPacket & {
+type PosPaymentRow = {
   outlet_id: number;
   outlet_name: string | null;
   method: string;
@@ -41,7 +38,7 @@ type PosPaymentRow = RowDataPacket & {
   total_amount: number | string | null;
 };
 
-type JournalBatchRow = RowDataPacket & {
+type JournalBatchRow = {
   id: number;
   outlet_id: number | null;
   outlet_name: string | null;
@@ -53,7 +50,7 @@ type JournalBatchRow = RowDataPacket & {
   line_count: number;
 };
 
-type TrialBalanceRow = RowDataPacket & {
+type TrialBalanceRow = {
   account_id: number;
   account_code: string;
   account_name: string;
@@ -62,7 +59,7 @@ type TrialBalanceRow = RowDataPacket & {
   balance: number | string;
 };
 
-type GeneralLedgerRow = RowDataPacket & {
+type GeneralLedgerRow = {
   account_id: number;
   account_code: string;
   account_name: string;
@@ -74,7 +71,7 @@ type GeneralLedgerRow = RowDataPacket & {
   period_credit: number | string | null;
 };
 
-type GeneralLedgerLineRow = RowDataPacket & {
+type GeneralLedgerLineRow = {
   line_id: number;
   account_id: number;
   account_code: string;
@@ -91,7 +88,7 @@ type GeneralLedgerLineRow = RowDataPacket & {
   posted_at: string;
 };
 
-type ProfitLossRow = RowDataPacket & {
+type ProfitLossRow = {
   account_id: number;
   account_code: string;
   account_name: string;
@@ -99,7 +96,7 @@ type ProfitLossRow = RowDataPacket & {
   total_credit: number | string | null;
 };
 
-type WorksheetRow = RowDataPacket & {
+type WorksheetRow = {
   account_id: number;
   account_code: string;
   account_name: string;
@@ -112,7 +109,7 @@ type WorksheetRow = RowDataPacket & {
   period_credit: number | string | null;
 };
 
-type ReceivablesAgeingRow = RowDataPacket & {
+type ReceivablesAgeingRow = {
   invoice_id: number;
   invoice_no: string;
   outlet_id: number;
@@ -245,21 +242,6 @@ function shouldFallbackDailySalesView(error: unknown): boolean {
   return maybeMysqlError.errno === 1146 || maybeMysqlError.errno === 1356;
 }
 
-async function withConsistentReadSnapshot<T>(
-  connection: PoolConnection,
-  callback: () => Promise<T>
-): Promise<T> {
-  await connection.query("START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY");
-  try {
-    const result = await callback();
-    await connection.query("COMMIT");
-    return result;
-  } catch (error) {
-    await connection.query("ROLLBACK");
-    throw error;
-  }
-}
-
 function buildOutletInClause(outletIds: readonly number[]): { sql: string; values: number[] } {
   if (outletIds.length === 0) {
     return {
@@ -276,7 +258,7 @@ function buildOutletInClause(outletIds: readonly number[]): { sql: string; value
 }
 
 export async function listPosTransactions(filter: PosTransactionFilter) {
-  const pool = getDbPool();
+  const db = getDb();
   const outletClause = buildOutletInClause(filter.outletIds);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
   const asOf = filter.asOf ?? new Date().toISOString();
@@ -301,17 +283,13 @@ export async function listPosTransactions(filter: PosTransactionFilter) {
     scopeValues.push(filter.userId);
   }
 
-  const connection = await pool.getConnection();
-  try {
-    const { rows, countRows, asOfId } = await withConsistentReadSnapshot(connection, async () => {
-      let asOfId = filter.asOfId ?? null;
-      if (asOfId == null) {
-        if (filter.outletIds.length === 0) {
-          asOfId = 0;
-        } else {
-        // Use Kysely for the simple asOfId lookup; keep the main aggregation query as raw SQL.
-        const kysely = newKyselyConnection(connection);
-        let query = kysely
+  return await db.transaction().execute(async (trx) => {
+    let asOfId = filter.asOfId ?? null;
+    if (asOfId == null) {
+      if (filter.outletIds.length === 0) {
+        asOfId = 0;
+      } else {
+        let query = trx
           .selectFrom("pos_transactions as pt")
           .where("pt.company_id", "=", filter.companyId)
           .where("pt.trx_at", ">=", mysqlDateTimeToUtcDate(range.fromStart))
@@ -335,70 +313,80 @@ export async function listPosTransactions(filter: PosTransactionFilter) {
           .executeTakeFirst();
 
         asOfId = Number(row?.as_of_id ?? 0);
-        }
       }
+    }
 
-      const [rows] = await connection.execute<PosTransactionRow[]>(
-        `SELECT pt.id,
-                pt.outlet_id,
-                pt.client_tx_id,
-                pt.status,
-                pt.service_type,
-                pt.table_id,
-                pt.reservation_id,
-                pt.guest_count,
-                pt.order_status,
-                pt.trx_at,
-                COALESCE(i.gross_total, 0) AS gross_total,
-                COALESCE(p.paid_total, 0) AS paid_total,
-                COALESCE(i.item_count, 0) AS item_count
-         FROM pos_transactions pt
-         LEFT JOIN (
-           SELECT pos_transaction_id,
-                  SUM(qty * price_snapshot) AS gross_total,
-                  COUNT(*) AS item_count
-           FROM pos_transaction_items
-           GROUP BY pos_transaction_id
-         ) i ON i.pos_transaction_id = pt.id
-         LEFT JOIN (
-           SELECT pos_transaction_id,
-                  SUM(amount) AS paid_total
-           FROM pos_transaction_payments
-           GROUP BY pos_transaction_id
-          ) p ON p.pos_transaction_id = pt.id
-           WHERE pt.company_id = ?
-             AND pt.trx_at >= ?
-             AND pt.trx_at < ?
-             AND pt.trx_at <= ?
-             AND pt.id <= ?${outletClause.sql}${statusClause}${userClause}
-           ORDER BY pt.trx_at DESC, pt.id DESC
-           LIMIT ? OFFSET ?`,
-         [...coreValues, asOfId, ...scopeValues, filter.limit, filter.offset]
-       );
+    let listQuery = sql`SELECT pt.id,
+            pt.outlet_id,
+            pt.client_tx_id,
+            pt.status,
+            pt.service_type,
+            pt.table_id,
+            pt.reservation_id,
+            pt.guest_count,
+            pt.order_status,
+            pt.trx_at,
+            COALESCE(i.gross_total, 0) AS gross_total,
+            COALESCE(p.paid_total, 0) AS paid_total,
+            COALESCE(i.item_count, 0) AS item_count
+     FROM pos_transactions pt
+     LEFT JOIN (
+       SELECT pos_transaction_id,
+              SUM(qty * price_snapshot) AS gross_total,
+              COUNT(*) AS item_count
+       FROM pos_transaction_items
+       GROUP BY pos_transaction_id
+     ) i ON i.pos_transaction_id = pt.id
+     LEFT JOIN (
+       SELECT pos_transaction_id,
+              SUM(amount) AS paid_total
+       FROM pos_transaction_payments
+       GROUP BY pos_transaction_id
+      ) p ON p.pos_transaction_id = pt.id
+       WHERE pt.company_id = ${filter.companyId}
+         AND pt.trx_at >= ${range.fromStart}
+         AND pt.trx_at < ${range.nextDayStart}
+         AND pt.trx_at <= ${asOfSql}
+         AND pt.id <= ${asOfId}`;
 
-      const [countRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) AS total
-         FROM pos_transactions pt
-         WHERE pt.company_id = ?
-            AND pt.trx_at >= ?
-            AND pt.trx_at < ?
-            AND pt.trx_at <= ?
-            AND pt.id <= ?${outletClause.sql}${statusClause}${userClause}`,
-        [...coreValues, asOfId, ...scopeValues]
-      );
+    if (outletClause.values.length > 0) {
+      listQuery = sql`${listQuery} AND pt.outlet_id IN (${sql.join(outletClause.values.map(v => sql`${v}`))})`;
+    }
+    if (filter.status) {
+      listQuery = sql`${listQuery} AND pt.status = ${filter.status}`;
+    }
+    if (typeof filter.userId === "number") {
+      listQuery = sql`${listQuery} AND pt.cashier_user_id = ${filter.userId}`;
+    }
+    listQuery = sql`${listQuery} ORDER BY pt.trx_at DESC, pt.id DESC LIMIT ${filter.limit} OFFSET ${filter.offset}`;
 
-      return {
-        rows,
-        countRows,
-        asOfId
-      };
-    });
+    const rows = await sql<PosTransactionRow>`${listQuery}`.execute(trx);
+
+    let countQuery = sql`SELECT COUNT(*) AS total
+     FROM pos_transactions pt
+     WHERE pt.company_id = ${filter.companyId}
+        AND pt.trx_at >= ${range.fromStart}
+        AND pt.trx_at < ${range.nextDayStart}
+        AND pt.trx_at <= ${asOfSql}
+        AND pt.id <= ${asOfId}`;
+
+    if (outletClause.values.length > 0) {
+      countQuery = sql`${countQuery} AND pt.outlet_id IN (${sql.join(outletClause.values.map(v => sql`${v}`))})`;
+    }
+    if (filter.status) {
+      countQuery = sql`${countQuery} AND pt.status = ${filter.status}`;
+    }
+    if (typeof filter.userId === "number") {
+      countQuery = sql`${countQuery} AND pt.cashier_user_id = ${filter.userId}`;
+    }
+
+    const countResult = await sql<{ total: number }>`${countQuery}`.execute(trx);
 
     return {
       as_of: asOf,
       as_of_id: asOfId,
-      total: Number(countRows[0]?.total ?? 0),
-      transactions: rows.map((row) => ({
+      total: Number(countResult.rows[0]?.total ?? 0),
+      transactions: rows.rows.map((row) => ({
         id: Number(row.id),
         outlet_id: Number(row.outlet_id),
         client_tx_id: row.client_tx_id,
@@ -414,50 +402,46 @@ export async function listPosTransactions(filter: PosTransactionFilter) {
         item_count: Number(row.item_count ?? 0)
       }))
     };
-  } finally {
-    connection.release();
-  }
+  });
 }
 
 export async function listDailySalesSummary(
   filter: BaseFilter & { status?: "COMPLETED" | "VOID" | "REFUND" }
 ) {
-  const pool = getDbPool();
+  const db = getDb();
   const outletClause = buildOutletInClause(filter.outletIds);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
   const hasUserScope = typeof filter.userId === "number";
 
-  const viewValues: Array<number | string> = [
-    filter.companyId,
-    filter.dateFrom,
-    filter.dateTo,
-    ...outletClause.values
-  ];
   let statusClause = "";
   if (filter.status) {
     statusClause = " AND pt.status = ?";
-    viewValues.push(filter.status);
   }
 
   let rows: PosDailyRow[] = [];
   if (!hasUserScope) {
     try {
-      const [viewRows] = await pool.execute<PosDailyRow[]>(
-        `SELECT v.trx_date,
-                v.outlet_id,
-                o.name AS outlet_name,
-                SUM(v.tx_count) AS tx_count,
-                SUM(v.gross_total) AS gross_total,
-                SUM(v.paid_total) AS paid_total
-         FROM v_pos_daily_totals v
-         LEFT JOIN outlets o ON o.id = v.outlet_id
-          WHERE v.company_id = ?
-            AND v.trx_date BETWEEN ? AND ?${outletClause.sql.replaceAll("pt.", "v.")}${statusClause.replaceAll("pt.", "v.")}
-          GROUP BY v.trx_date, v.outlet_id, o.name
-          ORDER BY v.trx_date DESC, v.outlet_id ASC`,
-        viewValues
-      );
-      rows = viewRows;
+      let viewQuery = sql`SELECT v.trx_date,
+              v.outlet_id,
+              o.name AS outlet_name,
+              SUM(v.tx_count) AS tx_count,
+              SUM(v.gross_total) AS gross_total,
+              SUM(v.paid_total) AS paid_total
+       FROM v_pos_daily_totals v
+       LEFT JOIN outlets o ON o.id = v.outlet_id
+        WHERE v.company_id = ${filter.companyId}
+          AND v.trx_date BETWEEN ${filter.dateFrom} AND ${filter.dateTo}`;
+
+      if (outletClause.values.length > 0) {
+        viewQuery = sql`${viewQuery} AND v.outlet_id IN (${sql.join(outletClause.values.map(v => sql`${v}`))})`;
+      }
+      if (filter.status) {
+        viewQuery = sql`${viewQuery} AND v.status = ${filter.status}`;
+      }
+      viewQuery = sql`${viewQuery} GROUP BY v.trx_date, v.outlet_id, o.name ORDER BY v.trx_date DESC, v.outlet_id ASC`;
+
+      const viewResult = await sql<PosDailyRow>`${viewQuery}`.execute(db);
+      rows = viewResult.rows;
     } catch (error) {
       if (!shouldFallbackDailySalesView(error)) {
         throw error;
@@ -466,47 +450,43 @@ export async function listDailySalesSummary(
   }
 
   if (hasUserScope || rows.length === 0) {
-    const userClause = hasUserScope ? " AND pt.cashier_user_id = ?" : "";
-    const fallbackValues: Array<number | string> = [
-      filter.companyId,
-      range.fromStart,
-      range.nextDayStart,
-      ...outletClause.values,
-      ...(filter.status ? [filter.status] : [])
-    ];
-    if (hasUserScope) {
-      fallbackValues.push(filter.userId as number);
-    }
+    let fallbackQuery = sql`SELECT DATE(pt.trx_at) AS trx_date,
+            pt.outlet_id,
+            o.name AS outlet_name,
+            COUNT(*) AS tx_count,
+            COALESCE(SUM(i.gross_total), 0) AS gross_total,
+            COALESCE(SUM(p.paid_total), 0) AS paid_total
+     FROM pos_transactions pt
+     LEFT JOIN outlets o ON o.id = pt.outlet_id
+     LEFT JOIN (
+       SELECT pos_transaction_id,
+              SUM(qty * price_snapshot) AS gross_total
+       FROM pos_transaction_items
+       GROUP BY pos_transaction_id
+     ) i ON i.pos_transaction_id = pt.id
+     LEFT JOIN (
+       SELECT pos_transaction_id,
+              SUM(amount) AS paid_total
+       FROM pos_transaction_payments
+       GROUP BY pos_transaction_id
+      ) p ON p.pos_transaction_id = pt.id
+      WHERE pt.company_id = ${filter.companyId}
+        AND pt.trx_at >= ${range.fromStart}
+        AND pt.trx_at < ${range.nextDayStart}`;
 
-    const [fallbackRows] = await pool.execute<PosDailyRow[]>(
-      `SELECT DATE(pt.trx_at) AS trx_date,
-              pt.outlet_id,
-              o.name AS outlet_name,
-              COUNT(*) AS tx_count,
-              COALESCE(SUM(i.gross_total), 0) AS gross_total,
-              COALESCE(SUM(p.paid_total), 0) AS paid_total
-       FROM pos_transactions pt
-       LEFT JOIN outlets o ON o.id = pt.outlet_id
-       LEFT JOIN (
-         SELECT pos_transaction_id,
-                SUM(qty * price_snapshot) AS gross_total
-         FROM pos_transaction_items
-         GROUP BY pos_transaction_id
-       ) i ON i.pos_transaction_id = pt.id
-       LEFT JOIN (
-         SELECT pos_transaction_id,
-                SUM(amount) AS paid_total
-         FROM pos_transaction_payments
-         GROUP BY pos_transaction_id
-        ) p ON p.pos_transaction_id = pt.id
-        WHERE pt.company_id = ?
-          AND pt.trx_at >= ?
-          AND pt.trx_at < ?${outletClause.sql}${statusClause}${userClause}
-         GROUP BY DATE(pt.trx_at), pt.outlet_id, o.name
-         ORDER BY DATE(pt.trx_at) DESC, pt.outlet_id ASC`,
-      fallbackValues
-    );
-    rows = fallbackRows;
+    if (outletClause.values.length > 0) {
+      fallbackQuery = sql`${fallbackQuery} AND pt.outlet_id IN (${sql.join(outletClause.values.map(v => sql`${v}`))})`;
+    }
+    if (filter.status) {
+      fallbackQuery = sql`${fallbackQuery} AND pt.status = ${filter.status}`;
+    }
+    if (hasUserScope) {
+      fallbackQuery = sql`${fallbackQuery} AND pt.cashier_user_id = ${filter.userId}`;
+    }
+    fallbackQuery = sql`${fallbackQuery} GROUP BY DATE(pt.trx_at), pt.outlet_id, o.name ORDER BY DATE(pt.trx_at) DESC, pt.outlet_id ASC`;
+
+    const fallbackResult = await sql<PosDailyRow>`${fallbackQuery}`.execute(db);
+    rows = fallbackResult.rows;
   }
 
   return rows.map((row) => ({
@@ -522,47 +502,36 @@ export async function listDailySalesSummary(
 export async function listPosPaymentsSummary(
   filter: BaseFilter & { status?: "COMPLETED" | "VOID" | "REFUND" }
 ) {
-  const pool = getDbPool();
+  const db = getDb();
   const outletClause = buildOutletInClause(filter.outletIds);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
 
-  const values: Array<number | string> = [
-    filter.companyId,
-    range.fromStart,
-    range.nextDayStart,
-    ...outletClause.values
-  ];
+  let query = sql`SELECT pt.outlet_id,
+          o.name AS outlet_name,
+          ptp.method,
+          COUNT(*) AS payment_count,
+          COALESCE(SUM(ptp.amount), 0) AS total_amount
+   FROM pos_transaction_payments ptp
+   INNER JOIN pos_transactions pt ON pt.id = ptp.pos_transaction_id
+   LEFT JOIN outlets o ON o.id = pt.outlet_id
+    WHERE pt.company_id = ${filter.companyId}
+     AND pt.trx_at >= ${range.fromStart}
+     AND pt.trx_at < ${range.nextDayStart}`;
 
-  let statusClause = "";
+  if (outletClause.values.length > 0) {
+    query = sql`${query} AND pt.outlet_id IN (${sql.join(outletClause.values.map(v => sql`${v}`))})`;
+  }
   if (filter.status) {
-    statusClause = " AND pt.status = ?";
-    values.push(filter.status);
+    query = sql`${query} AND pt.status = ${filter.status}`;
   }
-
-  let userClause = "";
   if (typeof filter.userId === "number") {
-    userClause = " AND pt.cashier_user_id = ?";
-    values.push(filter.userId);
+    query = sql`${query} AND pt.cashier_user_id = ${filter.userId}`;
   }
+  query = sql`${query} GROUP BY pt.outlet_id, o.name, ptp.method ORDER BY pt.outlet_id ASC, ptp.method ASC`;
 
-  const [rows] = await pool.execute<PosPaymentRow[]>(
-    `SELECT pt.outlet_id,
-            o.name AS outlet_name,
-            ptp.method,
-            COUNT(*) AS payment_count,
-            COALESCE(SUM(ptp.amount), 0) AS total_amount
-     FROM pos_transaction_payments ptp
-     INNER JOIN pos_transactions pt ON pt.id = ptp.pos_transaction_id
-     LEFT JOIN outlets o ON o.id = pt.outlet_id
-      WHERE pt.company_id = ?
-       AND pt.trx_at >= ?
-       AND pt.trx_at < ?${outletClause.sql}${statusClause}${userClause}
-     GROUP BY pt.outlet_id, o.name, ptp.method
-     ORDER BY pt.outlet_id ASC, ptp.method ASC`,
-    values
-  );
+  const result = await sql<PosPaymentRow>`${query}`.execute(db);
 
-  return rows.map((row) => ({
+  return result.rows.map((row) => ({
     outlet_id: Number(row.outlet_id),
     outlet_name: row.outlet_name,
     method: row.method,
@@ -592,7 +561,7 @@ function buildOutletInClauseForJournals(
 }
 
 export async function listJournalBatches(filter: JournalFilter) {
-  const pool = getDbPool();
+  const db = getDb();
   const outletClause = buildOutletInClauseForJournals(filter.outletIds, filter.includeUnassignedOutlet ?? true);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
   const asOf = filter.asOf ?? new Date().toISOString();
@@ -604,17 +573,14 @@ export async function listJournalBatches(filter: JournalFilter) {
     asOfSql
   ];
   const scopeValues: Array<number | string> = [...outletClause.values];
-  const connection = await pool.getConnection();
-  try {
-    const { rows, countRows, asOfId } = await withConsistentReadSnapshot(connection, async () => {
-      let asOfId = filter.asOfId ?? null;
-      if (asOfId == null) {
-        if (filter.outletIds.length === 0) {
-          asOfId = 0;
-        } else {
-        // Use Kysely for the simple asOfId lookup; keep the journal aggregation as raw SQL.
-        const kysely = newKyselyConnection(connection);
-        let query = kysely
+
+  return await db.transaction().execute(async (trx) => {
+    let asOfId = filter.asOfId ?? null;
+    if (asOfId == null) {
+      if (filter.outletIds.length === 0) {
+        asOfId = 0;
+      } else {
+        let query = trx
           .selectFrom("journal_batches as jb")
           .where("jb.company_id", "=", filter.companyId)
           .where("jb.posted_at", ">=", mysqlDateTimeToUtcDate(range.fromStart))
@@ -635,56 +601,53 @@ export async function listJournalBatches(filter: JournalFilter) {
           .executeTakeFirst();
 
         asOfId = Number(row?.as_of_id ?? 0);
-        }
       }
+    }
 
-      const [rows] = await connection.execute<JournalBatchRow[]>(
-        `SELECT jb.id,
-                jb.outlet_id,
-                o.name AS outlet_name,
-                jb.doc_type,
-                jb.doc_id,
-                jb.posted_at,
-                SUM(jl.debit) AS total_debit,
-                SUM(jl.credit) AS total_credit,
-                COUNT(jl.id) AS line_count
-         FROM journal_batches jb
-         INNER JOIN journal_lines jl ON jl.journal_batch_id = jb.id
-          LEFT JOIN outlets o ON o.id = jb.outlet_id
-          WHERE jb.company_id = ?
-            AND jb.posted_at >= ?
-            AND jb.posted_at < ?
-            AND jb.posted_at <= ?
-            AND jb.id <= ?${outletClause.sql}
-          GROUP BY jb.id, jb.outlet_id, o.name, jb.doc_type, jb.doc_id, jb.posted_at
-          ORDER BY jb.posted_at DESC, jb.id DESC
-         LIMIT ? OFFSET ?`,
-        [...coreValues, asOfId, ...scopeValues, filter.limit, filter.offset]
-      );
+    let listQuery = sql`SELECT jb.id,
+            jb.outlet_id,
+            o.name AS outlet_name,
+            jb.doc_type,
+            jb.doc_id,
+            jb.posted_at,
+            SUM(jl.debit) AS total_debit,
+            SUM(jl.credit) AS total_credit,
+            COUNT(jl.id) AS line_count
+     FROM journal_batches jb
+     INNER JOIN journal_lines jl ON jl.journal_batch_id = jb.id
+      LEFT JOIN outlets o ON o.id = jb.outlet_id
+      WHERE jb.company_id = ${filter.companyId}
+        AND jb.posted_at >= ${range.fromStart}
+        AND jb.posted_at < ${range.nextDayStart}
+        AND jb.posted_at <= ${asOfSql}
+        AND jb.id <= ${asOfId}`;
 
-      const [countRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) AS total
-         FROM journal_batches jb
-         WHERE jb.company_id = ?
-            AND jb.posted_at >= ?
-            AND jb.posted_at < ?
-            AND jb.posted_at <= ?
-            AND jb.id <= ?${outletClause.sql}`,
-        [...coreValues, asOfId, ...scopeValues]
-      );
+    if (outletClause.values.length > 0) {
+      listQuery = sql`${listQuery} AND (jb.outlet_id IS NULL OR jb.outlet_id IN (${sql.join(outletClause.values.map(v => sql`${v}`))}))`;
+    }
+    listQuery = sql`${listQuery} GROUP BY jb.id, jb.outlet_id, o.name, jb.doc_type, jb.doc_id, jb.posted_at ORDER BY jb.posted_at DESC, jb.id DESC LIMIT ${filter.limit} OFFSET ${filter.offset}`;
 
-      return {
-        rows,
-        countRows,
-        asOfId
-      };
-    });
+    const rows = await sql<JournalBatchRow>`${listQuery}`.execute(trx);
+
+    let countQuery = sql`SELECT COUNT(*) AS total
+     FROM journal_batches jb
+     WHERE jb.company_id = ${filter.companyId}
+        AND jb.posted_at >= ${range.fromStart}
+        AND jb.posted_at < ${range.nextDayStart}
+        AND jb.posted_at <= ${asOfSql}
+        AND jb.id <= ${asOfId}`;
+
+    if (outletClause.values.length > 0) {
+      countQuery = sql`${countQuery} AND (jb.outlet_id IS NULL OR jb.outlet_id IN (${sql.join(outletClause.values.map(v => sql`${v}`))}))`;
+    }
+
+    const countResult = await sql<{ total: number }>`${countQuery}`.execute(trx);
 
     return {
       as_of: asOf,
       as_of_id: asOfId,
-      total: Number(countRows[0]?.total ?? 0),
-      journals: rows.map((row) => ({
+      total: Number(countResult.rows[0]?.total ?? 0),
+      journals: rows.rows.map((row) => ({
         id: Number(row.id),
         outlet_id: row.outlet_id == null ? null : Number(row.outlet_id),
         outlet_name: row.outlet_name,
@@ -696,13 +659,11 @@ export async function listJournalBatches(filter: JournalFilter) {
         line_count: Number(row.line_count)
       }))
     };
-  } finally {
-    connection.release();
-  }
+  });
 }
 
 export async function getTrialBalance(filter: TrialBalanceFilter) {
-  const pool = getDbPool();
+  const db = getDb();
 
   if (filter.outletIds.length === 0) {
     return [];
@@ -713,10 +674,9 @@ export async function getTrialBalance(filter: TrialBalanceFilter) {
     ? `(jl.outlet_id IS NULL OR jl.outlet_id IN (${placeholders}))`
     : `jl.outlet_id IN (${placeholders})`;
   const asOfDate = filter.asOf ? filter.asOf.slice(0, 10) : filter.dateTo;
-  const connection = await pool.getConnection();
-  try {
-    const kysely = newKyselyConnection(connection);
-    const accounts = await kysely
+
+  return await db.transaction().execute(async (trx) => {
+    const accounts = await trx
       .selectFrom("accounts")
       .where("company_id", "=", filter.companyId)
       .where("is_group", "=", 0)
@@ -729,25 +689,31 @@ export async function getTrialBalance(filter: TrialBalanceFilter) {
 
     const accountIds = accounts.map((account) => Number(account.id));
     const accountPlaceholders = accountIds.map(() => "?").join(", ");
-    const [rows] = await connection.execute<TrialBalanceRow[]>(
-      `SELECT jl.account_id,
-              a.code AS account_code,
-              a.name AS account_name,
-              SUM(jl.debit) AS total_debit,
-              SUM(jl.credit) AS total_credit,
-              SUM(jl.debit - jl.credit) AS balance
-       FROM journal_lines jl
-        INNER JOIN accounts a ON a.id = jl.account_id
-        WHERE jl.company_id = ?
-          AND jl.line_date BETWEEN ? AND ?
-          AND jl.account_id IN (${accountPlaceholders})
-          AND ${outletPredicate}
-        GROUP BY jl.account_id, a.code, a.name
-        ORDER BY a.code ASC`,
-      [filter.companyId, filter.dateFrom, asOfDate, ...accountIds, ...filter.outletIds]
-    );
+    
+    let query = sql`SELECT jl.account_id,
+            a.code AS account_code,
+            a.name AS account_name,
+            SUM(jl.debit) AS total_debit,
+            SUM(jl.credit) AS total_credit,
+            SUM(jl.debit - jl.credit) AS balance
+     FROM journal_lines jl
+      INNER JOIN accounts a ON a.id = jl.account_id
+      WHERE jl.company_id = ${filter.companyId}
+        AND jl.line_date BETWEEN ${filter.dateFrom} AND ${asOfDate}
+        AND jl.account_id IN (${sql.join(accountIds.map(id => sql`${id}`))})`;
 
-    return rows.map((row) => ({
+    // Add outlet predicate
+    if (filter.includeUnassignedOutlet ?? true) {
+      query = sql`${query} AND (jl.outlet_id IS NULL OR jl.outlet_id IN (${sql.join(filter.outletIds.map(id => sql`${id}`))}))`;
+    } else {
+      query = sql`${query} AND jl.outlet_id IN (${sql.join(filter.outletIds.map(id => sql`${id}`))})`;
+    }
+    
+    query = sql`${query} GROUP BY jl.account_id, a.code, a.name ORDER BY a.code ASC`;
+
+    const rows = await sql<TrialBalanceRow>`${query}`.execute(trx);
+
+    return rows.rows.map((row) => ({
       account_id: Number(row.account_id),
       account_code: row.account_code,
       account_name: row.account_name,
@@ -755,101 +721,63 @@ export async function getTrialBalance(filter: TrialBalanceFilter) {
       total_credit: toNumber(row.total_credit),
       balance: toNumber(row.balance)
     }));
-  } finally {
-    connection.release();
-  }
+  });
 }
 
 export async function getGeneralLedgerDetail(filter: GeneralLedgerFilter) {
-  const pool = getDbPool();
+  const db = getDb();
 
   if (filter.outletIds.length === 0) {
     return [];
   }
 
-  const outletClause = buildOutletPredicate(
-    "jl.outlet_id",
-    filter.outletIds,
-    filter.includeUnassignedOutlet ?? true
-  );
-
-  const accountClause = typeof filter.accountId === "number"
-    ? { sql: "AND a.id = ?", values: [filter.accountId] }
-    : { sql: "", values: [] as number[] };
-
-  const lineAccountClause = typeof filter.accountId === "number"
-    ? { sql: "AND jl.account_id = ?", values: [filter.accountId] }
-    : { sql: "", values: [] as number[] };
-
   const shouldLimitLines = typeof filter.accountId === "number" && typeof filter.lineLimit === "number";
   const lineOffset = filter.lineOffset ?? 0;
-  const lineLimitClause = shouldLimitLines ? "LIMIT ? OFFSET ?" : "";
-  const lineLimitValues = shouldLimitLines
-    ? [filter.lineLimit as number, lineOffset]
-    : [];
 
-  let pagedOpeningDelta = 0;
-  if (shouldLimitLines && lineOffset > 0) {
-    const [priorRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT COALESCE(SUM(prior.debit - prior.credit), 0) AS balance
-       FROM (
-         SELECT jl.debit, jl.credit
-         FROM journal_lines jl
-         WHERE jl.company_id = ?
-           AND jl.line_date BETWEEN ? AND ?
-           AND ${outletClause.sql}
-           ${lineAccountClause.sql}
-         ORDER BY jl.line_date ASC, jl.id ASC
-         LIMIT ?
-       ) prior`,
-      [
-        filter.companyId,
-        filter.dateFrom,
-        filter.dateTo,
-        ...outletClause.values,
-        ...lineAccountClause.values,
-        lineOffset
-      ]
-    );
-    pagedOpeningDelta = toNumber(priorRows[0]?.balance);
-  }
+  return await db.transaction().execute(async (trx) => {
+    let pagedOpeningDelta = 0;
+    if (shouldLimitLines && lineOffset > 0) {
+      const includeUnassigned = filter.includeUnassignedOutlet ?? true;
+      const outletInClause = sql.join(filter.outletIds.map(id => sql`${id}`));
+      const priorQuery = sql`SELECT COALESCE(SUM(prior.debit - prior.credit), 0) AS balance
+        FROM (
+          SELECT jl.debit, jl.credit
+          FROM journal_lines jl
+          WHERE jl.company_id = ${filter.companyId}
+            AND jl.line_date BETWEEN ${filter.dateFrom} AND ${filter.dateTo}
+            AND (jl.outlet_id IS NULL OR jl.outlet_id IN (${outletInClause}))
+            ${filter.accountId != null ? sql`AND jl.account_id = ${filter.accountId}` : sql``}
+          ORDER BY jl.line_date ASC, jl.id ASC
+          LIMIT ${lineOffset}
+        ) prior`;
+      const priorResult = await priorQuery.execute(trx);
+      pagedOpeningDelta = toNumber((priorResult.rows[0] as { balance?: number })?.balance ?? 0);
+    }
 
-  const [rows] = await pool.execute<GeneralLedgerRow[]>(
-    `SELECT a.id AS account_id,
+    const outletInClause = sql.join(filter.outletIds.map(id => sql`${id}`));
+    let accountsQuery = sql`SELECT a.id AS account_id,
             a.code AS account_code,
             a.name AS account_name,
             a.report_group,
             a.normal_balance,
-            SUM(CASE WHEN jl.line_date < ? THEN jl.debit ELSE 0 END) AS opening_debit,
-            SUM(CASE WHEN jl.line_date < ? THEN jl.credit ELSE 0 END) AS opening_credit,
-            SUM(CASE WHEN jl.line_date BETWEEN ? AND ? THEN jl.debit ELSE 0 END) AS period_debit,
-            SUM(CASE WHEN jl.line_date BETWEEN ? AND ? THEN jl.credit ELSE 0 END) AS period_credit
+            SUM(CASE WHEN jl.line_date < ${filter.dateFrom} THEN jl.debit ELSE 0 END) AS opening_debit,
+            SUM(CASE WHEN jl.line_date < ${filter.dateFrom} THEN jl.credit ELSE 0 END) AS opening_credit,
+            SUM(CASE WHEN jl.line_date BETWEEN ${filter.dateFrom} AND ${filter.dateTo} THEN jl.debit ELSE 0 END) AS period_debit,
+            SUM(CASE WHEN jl.line_date BETWEEN ${filter.dateFrom} AND ${filter.dateTo} THEN jl.credit ELSE 0 END) AS period_credit
      FROM accounts a
       LEFT JOIN journal_lines jl
         ON jl.account_id = a.id
-       AND jl.company_id = ?
-       AND ${outletClause.sql}
-     WHERE a.company_id = ?
+       AND jl.company_id = ${filter.companyId}
+       AND (jl.outlet_id IS NULL OR jl.outlet_id IN (${outletInClause}))
+     WHERE a.company_id = ${filter.companyId}
        AND a.is_group = 0
-       ${accountClause.sql}
+       ${filter.accountId != null ? sql`AND a.id = ${filter.accountId}` : sql``}
       GROUP BY a.id, a.code, a.name, a.report_group, a.normal_balance
-      ORDER BY a.code ASC`,
-    [
-      filter.dateFrom,
-      filter.dateFrom,
-      filter.dateFrom,
-      filter.dateTo,
-      filter.dateFrom,
-      filter.dateTo,
-      filter.companyId,
-      ...outletClause.values,
-      filter.companyId,
-      ...accountClause.values
-    ]
-  );
+      ORDER BY a.code ASC`;
+    const accountsResult = await accountsQuery.execute(trx);
+    const rows = accountsResult.rows as GeneralLedgerRow[];
 
-  const [lineRows] = await pool.execute<GeneralLedgerLineRow[]>(
-    `SELECT jl.id AS line_id,
+    let linesQuery = sql`SELECT jl.id AS line_id,
             jl.account_id,
             a.code AS account_code,
             a.name AS account_name,
@@ -867,81 +795,75 @@ export async function getGeneralLedgerDetail(filter: GeneralLedgerFilter) {
       INNER JOIN accounts a ON a.id = jl.account_id
       INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
       LEFT JOIN outlets o ON o.id = jl.outlet_id
-     WHERE jl.company_id = ?
-       AND jl.line_date BETWEEN ? AND ?
-       AND ${outletClause.sql}
-       ${lineAccountClause.sql}
+     WHERE jl.company_id = ${filter.companyId}
+       AND jl.line_date BETWEEN ${filter.dateFrom} AND ${filter.dateTo}
+       AND (jl.outlet_id IS NULL OR jl.outlet_id IN (${outletInClause}))
+       ${filter.accountId != null ? sql`AND jl.account_id = ${filter.accountId}` : sql``}
      ORDER BY a.code ASC, jl.line_date ASC, jl.id ASC
-     ${lineLimitClause}`,
-    [
-      filter.companyId,
-      filter.dateFrom,
-      filter.dateTo,
-      ...outletClause.values,
-      ...lineAccountClause.values,
-      ...lineLimitValues
-    ]
-  );
+     ${shouldLimitLines ? sql`LIMIT ${filter.lineLimit} OFFSET ${lineOffset}` : sql``}`;
+    const linesResult = await linesQuery.execute(trx);
+    const lineRows = linesResult.rows as GeneralLedgerLineRow[];
 
-  const linesByAccount = new Map<number, GeneralLedgerLineRow[]>();
-  for (const line of lineRows) {
-    const bucket = linesByAccount.get(line.account_id);
-    if (bucket) {
-      bucket.push(line);
-    } else {
-      linesByAccount.set(line.account_id, [line]);
+    const linesByAccount = new Map<number, GeneralLedgerLineRow[]>();
+    for (const line of lineRows) {
+      const bucket = linesByAccount.get(line.account_id);
+      if (bucket) {
+        bucket.push(line);
+      } else {
+        linesByAccount.set(line.account_id, [line]);
+      }
     }
-  }
 
-  return rows.map((row) => {
-    const openingDebit = toNumber(row.opening_debit);
-    const openingCredit = toNumber(row.opening_credit);
-    const periodDebit = toNumber(row.period_debit);
-    const periodCredit = toNumber(row.period_credit);
-    const openingBalance = openingDebit - openingCredit;
-    const endingBalance = openingBalance + periodDebit - periodCredit;
-    const accountLines = linesByAccount.get(Number(row.account_id)) ?? [];
-    const isPagedAccount = typeof filter.accountId === "number" && Number(row.account_id) === filter.accountId;
-    let runningBalance = openingBalance + (isPagedAccount ? pagedOpeningDelta : 0);
-    const mappedLines = accountLines.map((line) => {
-      const debit = toNumber(line.debit);
-      const credit = toNumber(line.credit);
-      runningBalance += debit - credit;
+    return rows.map((row) => {
+      const openingDebit = toNumber(row.opening_debit);
+      const openingCredit = toNumber(row.opening_credit);
+      const periodDebit = toNumber(row.period_debit);
+      const periodCredit = toNumber(row.period_credit);
+      const openingBalance = openingDebit - openingCredit;
+      const endingBalance = openingBalance + periodDebit - periodCredit;
+      const accountLines = linesByAccount.get(Number(row.account_id)) ?? [];
+      const isPagedAccount = typeof filter.accountId === "number" && Number(row.account_id) === filter.accountId;
+      let runningBalance = openingBalance + (isPagedAccount ? pagedOpeningDelta : 0);
+      const mappedLines = accountLines.map((line) => {
+        const debit = toNumber(line.debit);
+        const credit = toNumber(line.credit);
+        runningBalance += debit - credit;
+        return {
+          line_id: Number(line.line_id),
+          line_date: toIsoDate(line.line_date),
+          description: line.description,
+          debit,
+          credit,
+          balance: runningBalance,
+          outlet_id: line.outlet_id == null ? null : Number(line.outlet_id),
+          outlet_name: line.outlet_name,
+          journal_batch_id: Number(line.journal_batch_id),
+          doc_type: line.doc_type,
+          doc_id: Number(line.doc_id),
+          posted_at: toIsoDateTime(line.posted_at)
+        };
+      });
+
       return {
-        line_id: Number(line.line_id),
-        line_date: toIsoDate(line.line_date),
-        description: line.description,
-        debit,
-        credit,
-        balance: runningBalance,
-        outlet_id: line.outlet_id == null ? null : Number(line.outlet_id),
-        outlet_name: line.outlet_name,
-        journal_batch_id: Number(line.journal_batch_id),
-        doc_type: line.doc_type,
-        doc_id: Number(line.doc_id),
-        posted_at: toIsoDateTime(line.posted_at)
+        account_id: Number(row.account_id),
+        account_code: row.account_code,
+        account_name: row.account_name,
+        report_group: row.report_group,
+        normal_balance: row.normal_balance,
+        opening_debit: openingDebit,
+        opening_credit: openingCredit,
+        period_debit: periodDebit,
+        period_credit: periodCredit,
+        opening_balance: openingBalance,
+        ending_balance: endingBalance,
+        lines: mappedLines
       };
     });
-
-    return {
-      account_id: Number(row.account_id),
-      account_code: row.account_code,
-      account_name: row.account_name,
-      report_group: row.report_group,
-      normal_balance: row.normal_balance,
-      opening_debit: openingDebit,
-      opening_credit: openingCredit,
-      period_debit: periodDebit,
-      period_credit: periodCredit,
-      opening_balance: openingBalance,
-      ending_balance: endingBalance,
-      lines: mappedLines
-    };
   });
 }
 
 export async function getProfitLoss(filter: ProfitLossFilter) {
-  const pool = getDbPool();
+  const db = getDb();
 
   if (filter.outletIds.length === 0) {
     return { rows: [], totals: { total_debit: 0, total_credit: 0, net: 0 } };
@@ -953,11 +875,8 @@ export async function getProfitLoss(filter: ProfitLossFilter) {
     filter.includeUnassignedOutlet ?? true
   );
 
-  const connection = await pool.getConnection();
-  let rows: ProfitLossRow[] = [];
-  try {
-    const kysely = newKyselyConnection(connection);
-    const accounts = await kysely
+  return await db.transaction().execute(async (trx) => {
+    const accounts = await trx
       .selectFrom("accounts as a")
       .leftJoin("account_types as at", (join) =>
         join
@@ -977,56 +896,57 @@ export async function getProfitLoss(filter: ProfitLossFilter) {
     }
 
     const accountIds = accounts.map((account) => Number(account.id));
-    const accountPlaceholders = accountIds.map(() => "?").join(", ");
 
-    [rows] = await connection.execute<ProfitLossRow[]>(
-      `SELECT a.id AS account_id,
-              a.code AS account_code,
-              a.name AS account_name,
-              SUM(jl.debit) AS total_debit,
-              SUM(jl.credit) AS total_credit
-       FROM journal_lines jl
-       INNER JOIN accounts a ON a.id = jl.account_id
-       LEFT JOIN account_types at
-         ON at.id = a.account_type_id
-        AND at.company_id = a.company_id
-       WHERE jl.company_id = ?
-         AND jl.line_date BETWEEN ? AND ?
-         AND jl.account_id IN (${accountPlaceholders})
-         AND COALESCE(a.report_group, at.report_group) IN ('PL', 'LR')
-         AND a.is_group = 0
-         AND ${outletClause.sql}
-       GROUP BY a.id, a.code, a.name
-       ORDER BY a.code ASC`,
-      [filter.companyId, filter.dateFrom, filter.dateTo, ...accountIds, ...outletClause.values]
+    let query = sql`SELECT a.id AS account_id,
+            a.code AS account_code,
+            a.name AS account_name,
+            SUM(jl.debit) AS total_debit,
+            SUM(jl.credit) AS total_credit
+     FROM journal_lines jl
+     INNER JOIN accounts a ON a.id = jl.account_id
+     LEFT JOIN account_types at
+       ON at.id = a.account_type_id
+      AND at.company_id = a.company_id
+     WHERE jl.company_id = ${filter.companyId}
+       AND jl.line_date BETWEEN ${filter.dateFrom} AND ${filter.dateTo}
+       AND jl.account_id IN (${sql.join(accountIds.map(id => sql`${id}`))})
+       AND COALESCE(a.report_group, at.report_group) IN ('PL', 'LR')
+       AND a.is_group = 0`;
+
+    if (filter.includeUnassignedOutlet ?? true) {
+      query = sql`${query} AND (jl.outlet_id IS NULL OR jl.outlet_id IN (${sql.join(filter.outletIds.map(id => sql`${id}`))}))`;
+    } else {
+      query = sql`${query} AND jl.outlet_id IN (${sql.join(filter.outletIds.map(id => sql`${id}`))})`;
+    }
+    query = sql`${query} GROUP BY a.id, a.code, a.name ORDER BY a.code ASC`;
+
+    const result = await sql<ProfitLossRow>`${query}`.execute(trx);
+    const rows = result.rows;
+
+    const mapped = rows.map((row) => ({
+      account_id: Number(row.account_id),
+      account_code: row.account_code,
+      account_name: row.account_name,
+      total_debit: toNumber(row.total_debit),
+      total_credit: toNumber(row.total_credit),
+      net: toNumber(row.total_credit) - toNumber(row.total_debit)
+    }));
+
+    const totals = mapped.reduce(
+      (acc, row) => ({
+        total_debit: acc.total_debit + row.total_debit,
+        total_credit: acc.total_credit + row.total_credit,
+        net: acc.net + row.net
+      }),
+      { total_debit: 0, total_credit: 0, net: 0 }
     );
-  } finally {
-    connection.release();
-  }
 
-  const mapped = rows.map((row) => ({
-    account_id: Number(row.account_id),
-    account_code: row.account_code,
-    account_name: row.account_name,
-    total_debit: toNumber(row.total_debit),
-    total_credit: toNumber(row.total_credit),
-    net: toNumber(row.total_credit) - toNumber(row.total_debit)
-  }));
-
-  const totals = mapped.reduce(
-    (acc, row) => ({
-      total_debit: acc.total_debit + row.total_debit,
-      total_credit: acc.total_credit + row.total_credit,
-      net: acc.net + row.net
-    }),
-    { total_debit: 0, total_credit: 0, net: 0 }
-  );
-
-  return { rows: mapped, totals };
+    return { rows: mapped, totals };
+  });
 }
 
 export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter) {
-  const pool = getDbPool();
+  const db = getDb();
 
   const outletIds = filter.outletIds ?? [];
   if (outletIds.length === 0) {
@@ -1043,35 +963,35 @@ export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter
     };
   }
 
-  const outletClause = buildOutletPredicate("i.outlet_id", outletIds, false);
-
-  let asOfUTC: string | undefined;
+  let asOfDate: string;
   if (filter.asOfDate) {
     if (filter.timezone && filter.timezone !== 'UTC') {
-      asOfUTC = normalizeDate(filter.asOfDate, filter.timezone, 'end');
+      asOfDate = normalizeDate(filter.asOfDate, filter.timezone, 'end');
     } else {
-      asOfUTC = filter.asOfDate + "T23:59:59.999Z";
+      asOfDate = filter.asOfDate + "T23:59:59.999Z";
     }
+  } else {
+    asOfDate = new Date().toISOString().slice(0, 10);
   }
 
-  const [rows] = await pool.execute<ReceivablesAgeingRow[]>(
-    `SELECT i.id AS invoice_id,
+  const outletInClause = sql.join(outletIds.map(id => sql`${id}`));
+  const query = sql`SELECT i.id AS invoice_id,
             i.invoice_no,
             i.outlet_id,
             o.name AS outlet_name,
             i.invoice_date,
             i.due_date,
             (i.grand_total - i.paid_total) AS outstanding_amount,
-            DATEDIFF(?, COALESCE(i.due_date, i.invoice_date)) AS days_overdue
+            DATEDIFF(${asOfDate}, COALESCE(i.due_date, i.invoice_date)) AS days_overdue
      FROM sales_invoices i
       LEFT JOIN outlets o ON o.id = i.outlet_id
-     WHERE i.company_id = ?
+     WHERE i.company_id = ${filter.companyId}
        AND i.status = 'POSTED'
        AND (i.grand_total - i.paid_total) > 0
-       AND ${outletClause.sql}
-     ORDER BY days_overdue DESC, i.invoice_date ASC, i.id ASC`,
-    [asOfUTC ?? new Date().toISOString().slice(0, 10), filter.companyId, ...outletClause.values]
-  );
+       AND i.outlet_id IN (${outletInClause})
+     ORDER BY days_overdue DESC, i.invoice_date ASC, i.id ASC`;
+  const result = await query.execute(db);
+  const rows = result.rows as ReceivablesAgeingRow[];
 
   const buckets = {
     current: 0,
@@ -1124,75 +1044,54 @@ export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter
 }
 
 export async function getTrialBalanceWorksheet(filter: WorksheetFilter) {
-  const pool = getDbPool();
+  const db = getDb();
 
   if (filter.outletIds.length === 0) {
     return [];
   }
 
-  const outletClause = buildOutletPredicate(
-    "jl.outlet_id",
-    filter.outletIds,
-    filter.includeUnassignedOutlet ?? true
-  );
+  const includeUnassigned = filter.includeUnassignedOutlet ?? true;
+  const outletInClause = sql.join(filter.outletIds.map(id => sql`${id}`));
 
-  const connection = await pool.getConnection();
-  let rows: WorksheetRow[] = [];
-  try {
-    const kysely = newKyselyConnection(connection);
-    const accounts = await kysely
-      .selectFrom("accounts")
-      .where("company_id", "=", filter.companyId)
-      .where("is_group", "=", 0)
-      .select(["id", "code", "name", "type_name", "report_group", "normal_balance"])
-      .execute();
+  // Get accounts first
+  const accountsQuery = sql`SELECT a.id, a.code, a.name, a.type_name, a.report_group, a.normal_balance
+    FROM accounts a
+    WHERE a.company_id = ${filter.companyId}
+      AND a.is_group = 0
+    ORDER BY a.code ASC`;
+  const accountsResult = await accountsQuery.execute(db);
+  const accounts = accountsResult.rows as Array<{ id: number; code: string; name: string; type_name: string; report_group: string; normal_balance: string }>;
 
-    if (accounts.length === 0) {
-      return [];
-    }
+  if (accounts.length === 0) {
+    return [];
+  }
 
-    const accountIds = accounts.map((account) => Number(account.id));
-    const accountPlaceholders = accountIds.map(() => "?").join(", ");
+  const accountIds = accounts.map((account) => Number(account.id));
+  const accountInClause = sql.join(accountIds.map(id => sql`${id}`));
 
-    [rows] = await connection.execute<WorksheetRow[]>(
-      `SELECT a.id AS account_id,
+  const worksheetQuery = sql`SELECT a.id AS account_id,
               a.code AS account_code,
               a.name AS account_name,
               a.type_name,
               a.report_group,
               a.normal_balance,
-              SUM(CASE WHEN jl.line_date < ? THEN jl.debit ELSE 0 END) AS opening_debit,
-              SUM(CASE WHEN jl.line_date < ? THEN jl.credit ELSE 0 END) AS opening_credit,
-              SUM(CASE WHEN jl.line_date BETWEEN ? AND ? THEN jl.debit ELSE 0 END) AS period_debit,
-              SUM(CASE WHEN jl.line_date BETWEEN ? AND ? THEN jl.credit ELSE 0 END) AS period_credit
+              SUM(CASE WHEN jl.line_date < ${filter.dateFrom} THEN jl.debit ELSE 0 END) AS opening_debit,
+              SUM(CASE WHEN jl.line_date < ${filter.dateFrom} THEN jl.credit ELSE 0 END) AS opening_credit,
+              SUM(CASE WHEN jl.line_date BETWEEN ${filter.dateFrom} AND ${filter.dateTo} THEN jl.debit ELSE 0 END) AS period_debit,
+              SUM(CASE WHEN jl.line_date BETWEEN ${filter.dateFrom} AND ${filter.dateTo} THEN jl.credit ELSE 0 END) AS period_credit
        FROM accounts a
         LEFT JOIN journal_lines jl
           ON jl.account_id = a.id
-         AND jl.company_id = ?
-         AND jl.line_date <= ?
-         AND ${outletClause.sql}
-       WHERE a.company_id = ?
+         AND jl.company_id = ${filter.companyId}
+         AND jl.line_date <= ${filter.dateTo}
+         AND (jl.outlet_id IS NULL OR jl.outlet_id IN (${outletInClause}))
+       WHERE a.company_id = ${filter.companyId}
          AND a.is_group = 0
-         AND a.id IN (${accountPlaceholders})
+         AND a.id IN (${accountInClause})
        GROUP BY a.id, a.code, a.name, a.type_name, a.report_group, a.normal_balance
-       ORDER BY a.code ASC`,
-      [
-        filter.dateFrom,
-        filter.dateFrom,
-        filter.dateFrom,
-        filter.dateTo,
-        filter.dateFrom,
-        filter.dateTo,
-        filter.companyId,
-        filter.dateTo,
-        ...outletClause.values,
-        filter.companyId,
-        ...accountIds
-      ]
-    );
-  } finally {
-    connection.release();
-  }
+       ORDER BY a.code ASC`;
+  const worksheetResult = await worksheetQuery.execute(db);
+  const rows = worksheetResult.rows as WorksheetRow[];
 
   return rows.map((row) => {
     const openingDebitTotal = toNumber(row.opening_debit);

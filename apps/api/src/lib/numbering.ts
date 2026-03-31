@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
-import { getDbPool } from "./db";
+import { getDb, type KyselySchema } from "./db";
+import { sql } from "kysely";
 
 export const DOCUMENT_TYPES = {
   SALES_INVOICE: "SALES_INVOICE",
@@ -28,7 +28,7 @@ export const RESET_PERIODS = {
 
 export type ResetPeriod = (typeof RESET_PERIODS)[keyof typeof RESET_PERIODS];
 
-type NumberingTemplateRow = RowDataPacket & {
+type NumberingTemplateRow = {
   id: number;
   company_id: number;
   outlet_id: number | null;
@@ -38,10 +38,6 @@ type NumberingTemplateRow = RowDataPacket & {
   current_value: number;
   last_reset: string | null;
   is_active: number;
-};
-
-type NumberingCheckRow = RowDataPacket & {
-  row_exists: number;
 };
 
 export class NumberingConflictError extends Error {
@@ -146,54 +142,55 @@ export async function generateDocumentNumber(
   docType: DocumentType,
   maxRetries = DEFAULT_MAX_RETRIES
 ): Promise<string> {
-  const pool = getDbPool();
+  const db = getDb();
   const attempts = Math.max(1, maxRetries);
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const connection = await pool.getConnection();
     try {
-      await connection.beginTransaction();
-      const [templates] = await connection.execute<NumberingTemplateRow[]>(
-        `SELECT * FROM numbering_templates 
-         WHERE company_id = ? AND doc_type = ? AND is_active = 1 
-           AND (outlet_id = ? OR outlet_id IS NULL)
-         ORDER BY outlet_id DESC 
-         LIMIT 1
-         FOR UPDATE`,
-        [companyId, docType, outletId]
-      );
+      const result = await db.transaction().execute(async (trx) => {
+        const templateRow = await sql<NumberingTemplateRow>`
+          SELECT * FROM numbering_templates 
+          WHERE company_id = ${companyId} AND doc_type = ${docType} AND is_active = 1 
+            AND (outlet_id = ${outletId} OR outlet_id IS NULL)
+          ORDER BY outlet_id DESC 
+          LIMIT 1
+          FOR UPDATE
+        `.execute(trx);
 
-      if (templates.length === 0) {
-        throw new NumberingTemplateNotFoundError(docType, outletId ?? undefined);
-      }
+        if (templateRow.rows.length === 0) {
+          throw new NumberingTemplateNotFoundError(docType, outletId ?? undefined);
+        }
 
-      const template = templates[0];
-      const now = new Date();
-      const shouldReset = needsReset(template.last_reset, template.reset_period as ResetPeriod, now);
+        const template = templateRow.rows[0];
+        const now = new Date();
+        const shouldReset = needsReset(template.last_reset, template.reset_period as ResetPeriod, now);
 
-      let newValue: number;
-      let newLastReset: string | null = template.last_reset
-        ? template.last_reset
-        : null;
+        let newValue: number;
+        let newLastReset: string | null = template.last_reset
+          ? template.last_reset
+          : null;
 
-      if (shouldReset) {
-        newValue = 1;
-        newLastReset = now.toISOString();
-      } else {
-        newValue = template.current_value + 1;
-      }
+        if (shouldReset) {
+          newValue = 1;
+          newLastReset = now.toISOString();
+        } else {
+          newValue = template.current_value + 1;
+        }
 
-      await connection.execute<ResultSetHeader>(
-        `UPDATE numbering_templates 
-         SET current_value = ?, last_reset = ?
-         WHERE id = ?`,
-        [newValue, newLastReset ?? now, template.id]
-      );
+        await trx
+          .updateTable('numbering_templates')
+          .set({
+            current_value: newValue,
+            last_reset: newLastReset ? new Date(newLastReset) : null
+          })
+          .where('id', '=', template.id)
+          .execute();
 
-      await connection.commit();
-      return applyPattern(template.pattern, newValue, now);
+        return { template, newValue, now };
+      });
+
+      return applyPattern(result.template.pattern, result.newValue, result.now);
     } catch (error) {
-      await connection.rollback();
       if (error instanceof NumberingTemplateNotFoundError) {
         throw error;
       }
@@ -201,8 +198,6 @@ export async function generateDocumentNumber(
         throw error;
       }
       await delay(Math.floor(Math.random() * MAX_RETRY_JITTER_MS));
-    } finally {
-      connection.release();
     }
   }
 
@@ -215,57 +210,47 @@ export async function reserveDocumentNumber(
   docType: DocumentType,
   requestedNumber: string
 ): Promise<string> {
-  const pool = getDbPool();
+  const db = getDb();
   const tableConfig = TABLE_CONFIG[docType];
   if (!tableConfig) {
     throw new Error(`Unknown document type: ${docType}`);
   }
 
   const manualSeq = parseTrailingSequence(requestedNumber);
-  const connection = await pool.getConnection();
 
-  try {
-    await connection.beginTransaction();
-    const [existing] = await connection.execute<NumberingCheckRow[]>(
-      `SELECT 1 as row_exists FROM ${tableConfig.table} 
-       WHERE company_id = ? AND ${tableConfig.numberColumn} = ?
-       LIMIT 1`,
-      [companyId, requestedNumber]
-    );
+  await db.transaction().execute(async (trx) => {
+    const existingRow = await sql`
+      SELECT 1 as row_exists FROM ${sql.table(tableConfig.table)}
+      WHERE company_id = ${companyId} AND ${sql.raw(tableConfig.numberColumn)} = ${requestedNumber}
+      LIMIT 1
+    `.execute(trx);
 
-    if (existing.length > 0) {
+    if (existingRow.rows.length > 0) {
       throw new NumberingConflictError(docType, requestedNumber);
     }
 
     if (manualSeq !== null) {
-      const [templates] = await connection.execute<NumberingTemplateRow[]>(
-        `SELECT id, current_value FROM numbering_templates
-         WHERE company_id = ? AND doc_type = ? AND is_active = 1
-           AND (outlet_id = ? OR outlet_id IS NULL)
-         ORDER BY outlet_id DESC
-         LIMIT 1
-         FOR UPDATE`,
-        [companyId, docType, outletId]
-      );
+      const templateRows = await sql<{ id: number; current_value: number }>`
+        SELECT id, current_value FROM numbering_templates
+        WHERE company_id = ${companyId} AND doc_type = ${docType} AND is_active = 1
+          AND (outlet_id = ${outletId} OR outlet_id IS NULL)
+        ORDER BY outlet_id DESC
+        LIMIT 1
+        FOR UPDATE
+      `.execute(trx);
 
-      if (templates.length > 0) {
-        await connection.execute<ResultSetHeader>(
-          `UPDATE numbering_templates
-           SET current_value = GREATEST(current_value, ?)
-           WHERE id = ?`,
-          [manualSeq, templates[0].id]
-        );
+      if (templateRows.rows.length > 0) {
+        const newCurrentValue = Math.max(templateRows.rows[0].current_value, manualSeq);
+        await trx
+          .updateTable('numbering_templates')
+          .set({ current_value: newCurrentValue })
+          .where('id', '=', templateRows.rows[0].id)
+          .execute();
       }
     }
+  });
 
-    await connection.commit();
-    return requestedNumber;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  return requestedNumber;
 }
 
 export async function getNextDocumentNumber(
@@ -293,22 +278,31 @@ const DEFAULT_TEMPLATES: Array<{
 ];
 
 export async function initializeDefaultTemplates(companyId: number): Promise<void> {
-  const pool = getDbPool();
+  const db = getDb();
   
   for (const template of DEFAULT_TEMPLATES) {
-    const [existing] = await pool.execute<NumberingTemplateRow[]>(
-      `SELECT id FROM numbering_templates 
-       WHERE company_id = ? AND outlet_id IS NULL AND doc_type = ?
-       LIMIT 1`,
-      [companyId, template.docType]
-    );
+    const existing = await db
+      .selectFrom('numbering_templates')
+      .where('company_id', '=', companyId)
+      .where('outlet_id', 'is', null)
+      .where('doc_type', '=', template.docType)
+      .select('id')
+      .executeTakeFirst();
     
-    if (existing.length === 0) {
-      await pool.execute(
-        `INSERT INTO numbering_templates (company_id, outlet_id, scope_key, doc_type, pattern, reset_period, current_value, is_active)
-         VALUES (?, NULL, 0, ?, ?, ?, 0, 1)`,
-        [companyId, template.docType, template.pattern, template.resetPeriod]
-      );
+    if (!existing) {
+      await db
+        .insertInto('numbering_templates')
+        .values({
+          company_id: companyId,
+          outlet_id: null,
+          scope_key: 0,
+          doc_type: template.docType,
+          pattern: template.pattern,
+          reset_period: template.resetPeriod,
+          current_value: 0,
+          is_active: 1
+        })
+        .execute();
     }
   }
 }

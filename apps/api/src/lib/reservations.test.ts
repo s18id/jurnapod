@@ -3,10 +3,9 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ResultSetHeader } from "mysql2";
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "./db";
+import { closeDbPool, getDb } from "./db";
 import {
   ReservationValidationError,
   ReservationConflictError,
@@ -35,26 +34,25 @@ type FixtureContext = {
 };
 
 async function resolveFixtureContext(): Promise<FixtureContext> {
-  const pool = getDbPool();
+  const db = getDb();
   const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
   const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
   const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT c.id AS company_id, o.id AS outlet_id, u.id AS user_id
+  const rows = await sql<{ company_id: number; outlet_id: number; user_id: number }>`
+    SELECT c.id AS company_id, o.id AS outlet_id, u.id AS user_id
      FROM companies c
      INNER JOIN outlets o ON o.company_id = c.id
      INNER JOIN users u ON u.company_id = c.id
      INNER JOIN user_outlets uo ON uo.user_id = u.id AND uo.outlet_id = o.id
-     WHERE c.code = ? AND o.code = ? AND u.email = ?
-     LIMIT 1`,
-    [companyCode, outletCode, ownerEmail]
-  );
+     WHERE c.code = ${companyCode} AND o.code = ${outletCode} AND u.email = ${ownerEmail}
+     LIMIT 1
+  `.execute(db);
 
-  assert.ok(rows.length > 0, "Fixture company/outlet/user not found; run seed first");
+  assert.ok(rows.rows.length > 0, "Fixture company/outlet/user not found; run seed first");
   return {
-    companyId: Number(rows[0].company_id),
-    outletId: Number(rows[0].outlet_id),
-    userId: Number(rows[0].user_id)
+    companyId: Number(rows.rows[0]!.company_id),
+    outletId: Number(rows.rows[0]!.outlet_id),
+    userId: Number(rows.rows[0]!.user_id)
   };
 }
 
@@ -63,22 +61,21 @@ async function readTableStatus(
   outletId: number,
   tableId: number
 ): Promise<string | null> {
-  const pool = getDbPool();
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT status FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id = ? LIMIT 1`,
-    [companyId, outletId, tableId]
-  );
-  if (rows.length === 0) {
+  const db = getDb();
+  const rows = await sql<{ status: string }>`
+    SELECT status FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id = ${tableId} LIMIT 1
+  `.execute(db);
+  if (rows.rows.length === 0) {
     return null;
   }
-  return String(rows[0].status);
+  return String(rows.rows[0]!.status);
 }
 
 test(
   "reservations enforce finalized immutability and table status transitions",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const openOrderId = `ord-${runId}-open`;
     const { companyId, outletId, userId } = await resolveFixtureContext();
@@ -198,8 +195,8 @@ test(
       createdReservationIds.push(reservationWithOpenOrder.reservation_id);
 
 const nowTs = Date.now();
-      await pool.execute(
-        `INSERT INTO pos_order_snapshots (
+      await sql`
+        INSERT INTO pos_order_snapshots (
            order_id,
            company_id,
            outlet_id,
@@ -220,18 +217,8 @@ const nowTs = Date.now();
             notes,
             updated_at,
             updated_at_ts
-           ) VALUES (?, ?, ?, 'DINE_IN', 'WALK_IN', 'DEFERRED', ?, ?, ?, 0, 'OPEN', 'OPEN', 0, NOW(), ?, NULL, NULL, NULL, NOW(), ?)`,
-        [
-          openOrderId,
-          companyId,
-          outletId,
-          table3.id,
-          reservationWithOpenOrder.reservation_id,
-          reservationWithOpenOrder.guest_count,
-          nowTs,
-          nowTs
-        ]
-      );
+           ) VALUES (${openOrderId}, ${companyId}, ${outletId}, 'DINE_IN', 'WALK_IN', 'DEFERRED', ${table3.id}, ${reservationWithOpenOrder.reservation_id}, ${reservationWithOpenOrder.guest_count}, 0, 'OPEN', 'OPEN', 0, NOW(), ${nowTs}, NULL, NULL, NULL, NOW(), ${nowTs})
+      `.execute(db);
 
       await updateReservation(companyId, reservationWithOpenOrder.reservation_id, {
         status: "ARRIVED"
@@ -250,26 +237,14 @@ const nowTs = Date.now();
         "table should remain OCCUPIED while open dine-in order exists"
       );
     } finally {
-      await pool.execute(`DELETE FROM pos_order_snapshots WHERE order_id = ? AND company_id = ? AND outlet_id = ?`, [
-        openOrderId,
-        companyId,
-        outletId
-      ]);
+      await sql`DELETE FROM pos_order_snapshots WHERE order_id = ${openOrderId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
 
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
 
       if (createdTableIds.length > 0) {
-        const placeholders = createdTableIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdTableIds]
-        );
+        await sql`DELETE FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdTableIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -279,7 +254,7 @@ test(
   "reservations reject missing table assignment on create and update",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const missingTableId = 987654321;
@@ -332,11 +307,7 @@ test(
       );
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -346,7 +317,7 @@ test(
   "reservations allow adjacent windows when first end equals second start",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdTableIds: number[] = [];
@@ -393,18 +364,17 @@ test(
       });
       createdReservationIds.push(secondReservation.id);
 
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id, reservation_start_ts, reservation_end_ts
+      const rows = await sql<{ id: bigint; reservation_start_ts: bigint; reservation_end_ts: bigint }>`
+        SELECT id, reservation_start_ts, reservation_end_ts
          FROM reservations
-         WHERE company_id = ? AND outlet_id = ? AND id IN (?, ?)
-         ORDER BY id ASC`,
-        [companyId, outletId, firstReservation.id, secondReservation.id]
-      );
+         WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${firstReservation.id}, ${secondReservation.id})
+         ORDER BY id ASC
+      `.execute(db);
 
-      assert.strictEqual(rows.length, 2, "both adjacent reservations should be persisted");
+      assert.strictEqual(rows.rows.length, 2, "both adjacent reservations should be persisted");
 
-      const firstRow = rows.find((row) => BigInt(row.id) === firstReservation.id);
-      const secondRow = rows.find((row) => BigInt(row.id) === secondReservation.id);
+      const firstRow = rows.rows.find((row) => row.id === firstReservation.id);
+      const secondRow = rows.rows.find((row) => row.id === secondReservation.id);
       assert.ok(firstRow, "first reservation row should exist");
       assert.ok(secondRow, "second reservation row should exist");
 
@@ -426,19 +396,11 @@ test(
       );
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
 
       if (createdTableIds.length > 0) {
-        const placeholders = createdTableIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdTableIds]
-        );
+        await sql`DELETE FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdTableIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -448,7 +410,7 @@ test(
   "reservations overlap detection handles mixed canonical and legacy interval rows",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdTableIds: number[] = [];
@@ -471,28 +433,16 @@ test(
       baseStartA.setSeconds(0, 0);
       const staleReservationAtA = new Date(baseStartA.getTime() - 5 * 60 * 60 * 1000);
 
-      const [insertA] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO reservations (
+      const insertAResult = await sql`
+        INSERT INTO reservations (
            company_id, outlet_id, table_id,
            customer_name, customer_phone, guest_count,
            reservation_at, reservation_start_ts, reservation_end_ts,
            duration_minutes, status, status_id, notes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1, ?)`,
-        [
-          companyId,
-          outletId,
-           Number(table.id),
-          `Mixed A ${runId}`,
-          null,
-          2,
-          staleReservationAtA,
-          baseStartA.getTime(),
-          null,
-          60,
-          "start_ts present, end_ts null"
-        ]
-      );
-      createdReservationIds.push(BigInt(insertA.insertId));
+         ) VALUES (${companyId}, ${outletId}, ${Number(table.id)}, ${`Mixed A ${runId}`}, null, 2, ${staleReservationAtA}, ${baseStartA.getTime()}, null, 60, 'BOOKED', 1, ${"start_ts present, end_ts null"})
+      `.execute(db);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createdReservationIds.push(BigInt((insertAResult as any).insertId ?? 0));
 
       await assert.rejects(
         async () => {
@@ -516,28 +466,16 @@ test(
       const baseStartB = new Date(baseStartA.getTime() + 4 * 60 * 60 * 1000);
       const staleReservationAtB = new Date(baseStartB.getTime() - 5 * 60 * 60 * 1000);
 
-      const [insertB] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO reservations (
+      const insertBResult = await sql`
+        INSERT INTO reservations (
            company_id, outlet_id, table_id,
            customer_name, customer_phone, guest_count,
            reservation_at, reservation_start_ts, reservation_end_ts,
            duration_minutes, status, status_id, notes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1, ?)`,
-        [
-          companyId,
-          outletId,
-           Number(table.id),
-          `Mixed B ${runId}`,
-          null,
-          2,
-          staleReservationAtB,
-          null,
-          baseStartB.getTime() + 60 * 60000,
-          60,
-          "start_ts null, end_ts present"
-        ]
-      );
-      createdReservationIds.push(BigInt(insertB.insertId));
+         ) VALUES (${companyId}, ${outletId}, ${Number(table.id)}, ${`Mixed B ${runId}`}, null, 2, ${staleReservationAtB}, null, ${baseStartB.getTime() + 60 * 60000}, 60, 'BOOKED', 1, ${"start_ts null, end_ts present"})
+      `.execute(db);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createdReservationIds.push(BigInt((insertBResult as any).insertId ?? 0));
 
       await assert.rejects(
         async () => {
@@ -561,28 +499,16 @@ test(
       const baseStartC = new Date(baseStartB.getTime() + 4 * 60 * 60 * 1000);
       const staleReservationAtC = new Date(baseStartC.getTime() - 6 * 60 * 60 * 1000);
 
-      const [insertC] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO reservations (
+      const insertCResult = await sql`
+        INSERT INTO reservations (
            company_id, outlet_id, table_id,
            customer_name, customer_phone, guest_count,
            reservation_at, reservation_start_ts, reservation_end_ts,
            duration_minutes, status, status_id, notes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1, ?)`,
-        [
-          companyId,
-          outletId,
-           Number(table.id),
-          `Mixed C ${runId}`,
-          null,
-          2,
-          staleReservationAtC,
-          baseStartC.getTime(),
-          null,
-          60,
-          "adjacent boundary mixed row"
-        ]
-      );
-      createdReservationIds.push(BigInt(insertC.insertId));
+         ) VALUES (${companyId}, ${outletId}, ${Number(table.id)}, ${`Mixed C ${runId}`}, null, 2, ${staleReservationAtC}, ${baseStartC.getTime()}, null, 60, 'BOOKED', 1, ${"adjacent boundary mixed row"})
+      `.execute(db);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createdReservationIds.push(BigInt((insertCResult as any).insertId ?? 0));
 
       const adjacentReservation = await createReservationV2({
         companyId: BigInt(companyId),
@@ -598,19 +524,11 @@ test(
       assert.ok(adjacentReservation.id > 0n, "adjacent mixed-state reservation should be created");
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
 
       if (createdTableIds.length > 0) {
-        const placeholders = createdTableIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdTableIds]
-        );
+        await sql`DELETE FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdTableIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -624,7 +542,7 @@ test(
   "Story 12.4: createReservationV2 creates reservation with generated code",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
@@ -662,11 +580,7 @@ test(
       assert.ok(reservation.updatedAt instanceof Date, "Updated at should be a Date");
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -676,7 +590,7 @@ test(
   "Story 12.4: createReservationV2 generates unique codes across multiple reservations",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
@@ -713,11 +627,7 @@ test(
       }
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -727,7 +637,7 @@ test(
   "Story 12.4: createReservationV2 handles minimal input",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
@@ -757,11 +667,7 @@ test(
       assert.equal(reservation.tableId, null, "Table ID should be null when not provided");
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -771,7 +677,7 @@ test(
   "Story 12.4: listReservationsV2 filters and paginates correctly",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
@@ -855,11 +761,7 @@ test(
 
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -869,7 +771,7 @@ test(
   "Story 12.4: updateReservationStatus validates transitions and handles side effects",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
@@ -987,19 +889,11 @@ test(
 
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
 
       if (createdTableIds.length > 0) {
-        const placeholders = createdTableIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdTableIds]
-        );
+        await sql`DELETE FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdTableIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -1009,7 +903,7 @@ test(
   "Story 12.4: generateReservationCode produces unique codes with fallback",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const generatedCodes: string[] = [];
 
@@ -1067,7 +961,7 @@ test(
   "Story 12.4: updateReservationStatus with cancellation reason and notes",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
@@ -1116,11 +1010,7 @@ test(
       // The update function handles this gracefully by checking column existence
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -1134,7 +1024,7 @@ test(
   "Story 17.4: listReservationsV2 uses canonical timestamps for date filtering",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
@@ -1233,11 +1123,7 @@ test(
 
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -1247,7 +1133,7 @@ test(
   "Story 17.4: listReservationsV2 calendar mode (useOverlapFilter) shows day-spanning reservations",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
@@ -1330,11 +1216,7 @@ test(
 
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -1344,7 +1226,7 @@ test(
   "Story 17.4: verify overlap rule preserves adjacency non-overlap semantics",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     const createdTableIds: number[] = [];
@@ -1381,13 +1263,12 @@ test(
       createdReservationIds.push(firstRes.id);
 
       // Verify first reservation timestamps
-      const [firstRow] = await pool.execute<RowDataPacket[]>(
-        `SELECT reservation_start_ts, reservation_end_ts FROM reservations WHERE id = ?`,
-        [firstRes.id]
-      );
-      assert.ok(firstRow.length > 0, "First reservation should exist in DB");
-      const firstStartTs = Number(firstRow[0].reservation_start_ts);
-      const firstEndTs = Number(firstRow[0].reservation_end_ts);
+      const firstRows = await sql<{ reservation_start_ts: bigint; reservation_end_ts: bigint }>`
+        SELECT reservation_start_ts, reservation_end_ts FROM reservations WHERE id = ${firstRes.id}
+      `.execute(db);
+      assert.ok(firstRows.rows.length > 0, "First reservation should exist in DB");
+      const firstStartTs = Number(firstRows.rows[0]!.reservation_start_ts);
+      const firstEndTs = Number(firstRows.rows[0]!.reservation_end_ts);
       assert.ok(firstEndTs > firstStartTs, "End must be after start");
       assert.strictEqual(firstEndTs - firstStartTs, firstDurationMinutes * 60000, "Duration should match");
 
@@ -1406,13 +1287,12 @@ test(
       createdReservationIds.push(secondRes.id);
 
       // Verify second reservation timestamps
-      const [secondRow] = await pool.execute<RowDataPacket[]>(
-        `SELECT reservation_start_ts, reservation_end_ts FROM reservations WHERE id = ?`,
-        [secondRes.id]
-      );
-      assert.ok(secondRow.length > 0, "Second reservation should exist in DB");
-      const secondStartTs = Number(secondRow[0].reservation_start_ts);
-      const secondEndTs = Number(secondRow[0].reservation_end_ts);
+      const secondRows = await sql<{ reservation_start_ts: bigint; reservation_end_ts: bigint }>`
+        SELECT reservation_start_ts, reservation_end_ts FROM reservations WHERE id = ${secondRes.id}
+      `.execute(db);
+      assert.ok(secondRows.rows.length > 0, "Second reservation should exist in DB");
+      const secondStartTs = Number(secondRows.rows[0]!.reservation_start_ts);
+      const secondEndTs = Number(secondRows.rows[0]!.reservation_end_ts);
 
       // Critical assertion: adjacent reservations should have end == next start
       assert.strictEqual(
@@ -1426,21 +1306,22 @@ test(
       // This is already proven by the successful creation of both reservations above.
       
       // Additional DB-level verification: query both reservations
-      const [bothReservations] = await pool.execute<RowDataPacket[]>(
-        `SELECT id, reservation_start_ts, reservation_end_ts
+      const bothReservationsResult = await sql<{ id: bigint; reservation_start_ts: bigint; reservation_end_ts: bigint }>`
+        SELECT id, reservation_start_ts, reservation_end_ts
          FROM reservations
-         WHERE company_id = ? AND outlet_id = ? AND table_id = ?
+         WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND table_id = ${table.id}
            AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
            AND reservation_start_ts IS NOT NULL
            AND reservation_end_ts IS NOT NULL
-         ORDER BY reservation_start_ts ASC`,
-        [companyId, outletId, table.id]
-      );
+         ORDER BY reservation_start_ts ASC
+      `.execute(db);
       
+      const bothReservations = bothReservationsResult.rows;
       assert.strictEqual(bothReservations.length, 2, "Should have exactly 2 reservations");
       
       // Verify timestamps are correctly stored and adjacent
-      const [res1, res2] = bothReservations;
+      const res1 = bothReservations[0]!;
+      const res2 = bothReservations[1]!;
       const storedFirstStart = Number(res1.reservation_start_ts);
       const storedFirstEnd = Number(res1.reservation_end_ts);
       const storedSecondStart = Number(res2.reservation_start_ts);
@@ -1457,46 +1338,36 @@ test(
       // For adjacency: first_end == second_start
       // Check: first_start < second_end AND first_end > second_start
       // Since first_end == second_start: first_end > second_start = FALSE
-      const [overlapForFirst] = await pool.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) as cnt
+      const overlapForFirstResult = await sql<{ cnt: number }>`
+        SELECT COUNT(*) as cnt
          FROM reservations
-         WHERE reservation_start_ts < ? AND reservation_end_ts > ? AND id = ?`,
-        [storedSecondEnd, storedSecondStart, res1.id]
-      );
+         WHERE reservation_start_ts < ${storedSecondEnd} AND reservation_end_ts > ${storedSecondStart} AND id = ${res1.id}
+      `.execute(db);
       assert.strictEqual(
-        Number(overlapForFirst[0].cnt),
+        Number(overlapForFirstResult.rows[0]!.cnt),
         0,
         "First reservation should NOT overlap with [second_start, second_end] interval"
       );
       
       // Check: second_start < first_end AND second_end > first_start
       // Since second_start == first_end: second_start < first_end = FALSE
-      const [overlapForSecond] = await pool.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) as cnt
+      const overlapForSecondResult = await sql<{ cnt: number }>`
+        SELECT COUNT(*) as cnt
          FROM reservations
-         WHERE reservation_start_ts < ? AND reservation_end_ts > ? AND id = ?`,
-        [storedFirstEnd, storedFirstStart, res2.id]
-      );
+         WHERE reservation_start_ts < ${storedFirstEnd} AND reservation_end_ts > ${storedFirstStart} AND id = ${res2.id}
+      `.execute(db);
       assert.strictEqual(
-        Number(overlapForSecond[0].cnt),
+        Number(overlapForSecondResult.rows[0]!.cnt),
         0,
         "Second reservation should NOT overlap with [first_start, first_end] interval"
       );
 
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
       if (createdTableIds.length > 0) {
-        const placeholders = createdTableIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdTableIds]
-        );
+        await sql`DELETE FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdTableIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }
@@ -1506,7 +1377,7 @@ test(
   "Story 17.4: timezone-prepared date boundaries preserve local-day classification",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId } = await resolveFixtureContext();
     const createdReservationIds: bigint[] = [];
@@ -1572,11 +1443,7 @@ test(
 
     } finally {
       if (createdReservationIds.length > 0) {
-        const placeholders = createdReservationIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdReservationIds]
-        );
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdReservationIds.map(id => sql`${id}`))})`.execute(db);
       }
     }
   }

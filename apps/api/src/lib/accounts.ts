@@ -12,9 +12,8 @@ import type {
   AccountListQuery,
   AccountTreeNode
 } from "@jurnapod/shared";
-import { getDbPool } from "./db";
+import { getDb } from "./db";
 import { getAuditService } from "./audit";
-import { DbConn } from "@jurnapod/db";
 
 /**
  * Audit service interface (matches AccountsService expectations)
@@ -97,8 +96,7 @@ class AuditServiceAdapter implements AuditServiceInterface {
  * Both services share the same db client to support transactions.
  */
 async function createAccountsService(): Promise<AccountsService> {
-  const pool = getDbPool();
-  const dbClient = new DbConn(pool);
+  const dbClient = getDb();
   
   // Import AuditService class using dynamic import
   const { AuditService } = await import("@jurnapod/modules-platform");

@@ -10,8 +10,8 @@
  * Used for simple duplicate detection without full idempotency hashing.
  */
 
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
-import { getDbPool } from "../db.js";
+import { getDb } from "../db.js";
+import type { KyselySchema } from "@jurnapod/db";
 
 // =============================================================================
 // Types
@@ -27,15 +27,6 @@ export interface DuplicateCheckResult {
 }
 
 // =============================================================================
-// Internal Types
-// =============================================================================
-
-interface PosTransactionRow extends RowDataPacket {
-  id: number;
-  created_at: Date;
-}
-
-// =============================================================================
 // Main Function
 // =============================================================================
 
@@ -47,33 +38,29 @@ interface PosTransactionRow extends RowDataPacket {
  * 
  * @param companyId - Company ID
  * @param clientTxId - Client transaction ID (UUID from POS)
- * @param connection - Optional database connection for transactions
+ * @param connection - Optional Kysely connection for transactions
  * @returns Duplicate check result with existing transaction details if found
  */
 export async function checkDuplicateClientTx(
   companyId: number,
   clientTxId: string,
-  connection?: PoolConnection
+  connection?: KyselySchema
 ): Promise<DuplicateCheckResult> {
-  const db = connection || getDbPool();
+  const db = connection || getDb();
 
-  const query = `
-    SELECT id, created_at
-    FROM pos_transactions
-    WHERE company_id = ?
-      AND client_tx_id = ?
-    LIMIT 1
-  `;
+  const row = await db
+    .selectFrom("pos_transactions")
+    .select(["id", "created_at"])
+    .where("company_id", "=", companyId)
+    .where("client_tx_id", "=", clientTxId)
+    .executeTakeFirst();
 
-  const [rows] = await db.execute<PosTransactionRow[]>(query, [companyId, clientTxId]);
-
-  if (rows.length === 0) {
+  if (!row) {
     return {
       isDuplicate: false
     };
   }
 
-  const row = rows[0];
   return {
     isDuplicate: true,
     existingId: row.id,

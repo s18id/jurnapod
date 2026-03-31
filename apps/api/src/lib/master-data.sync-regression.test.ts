@@ -14,14 +14,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "./db";
+import { closeDbPool, getDb } from "./db";
 import { buildSyncPullPayload } from "./sync/master-data";
 import { listActiveReservations } from "./sync/master-data";
 import { listItems } from "./sync/master-data";
 import { listItemGroups } from "./sync/master-data";
 import { listOutletTables } from "./sync/master-data";
 import { getCompanyDataVersion } from "./sync/master-data";
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
@@ -33,20 +33,18 @@ describe("Sync Pull Master Data — Regression Suite", { concurrency: false }, (
   let outletId = 0;
 
   test("setup: resolve test company and outlet fixtures", async () => {
-    const pool = getDbPool();
-    const [companyRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-      [TEST_COMPANY_CODE]
-    );
-    assert.ok(companyRows.length > 0, "Company fixture not found");
-    companyId = Number(companyRows[0].id);
+    const db = getDb();
+    const companyRows = await sql`
+      SELECT id FROM companies WHERE code = ${TEST_COMPANY_CODE} LIMIT 1
+    `.execute(db);
+    assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+    companyId = Number((companyRows.rows[0] as { id: number }).id);
 
-    const [outletRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
-      [companyId, TEST_OUTLET_CODE]
-    );
-    assert.ok(outletRows.length > 0, "Outlet fixture not found");
-    outletId = Number(outletRows[0].id);
+    const outletRows = await sql`
+      SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${TEST_OUTLET_CODE} LIMIT 1
+    `.execute(db);
+    assert.ok(outletRows.rows.length > 0, "Outlet fixture not found");
+    outletId = Number((outletRows.rows[0] as { id: number }).id);
   });
 
   // --------------------------------------------------------------------------

@@ -1,10 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { sql } from "kysely";
 import { toRfc3339Required } from "@jurnapod/shared";
-import { getDbPool } from "../db.js";
+import { getDb, type KyselySchema } from "../db.js";
 import { DatabaseConflictError } from "../master-data-errors.js";
 import {
   isMysqlError,
@@ -12,20 +11,7 @@ import {
   recordMasterDataAuditLog,
   withTransaction
 } from "../shared/master-data-utils.js";
-
-type SupplyRow = RowDataPacket & {
-  id: number;
-  company_id: number;
-  sku: string | null;
-  name: string;
-  unit: string;
-  is_active: number;
-  updated_at: string;
-};
-
-type QueryExecutor = {
-  execute: PoolConnection["execute"];
-};
+import type { Transaction } from "@jurnapod/db";
 
 type MutationAuditActor = {
   userId: number;
@@ -39,7 +25,7 @@ const supplyAuditActions = {
 } as const;
 
 async function recordSupplyAuditLog(
-  executor: QueryExecutor,
+  db: KyselySchema,
   input: {
     companyId: number;
     actor: MutationAuditActor | undefined;
@@ -47,7 +33,7 @@ async function recordSupplyAuditLog(
     payload: Record<string, unknown>;
   }
 ): Promise<void> {
-  await recordMasterDataAuditLog(executor, {
+  await recordMasterDataAuditLog(db, {
     companyId: input.companyId,
     outletId: null,
     actor: input.actor,
@@ -55,6 +41,16 @@ async function recordSupplyAuditLog(
     payload: input.payload
   });
 }
+
+type SupplyRow = {
+  id: number;
+  company_id: number;
+  sku: string | null;
+  name: string;
+  unit: string;
+  is_active: number;
+  updated_at: string;
+};
 
 function normalizeSupply(row: SupplyRow) {
   return {
@@ -69,49 +65,54 @@ function normalizeSupply(row: SupplyRow) {
 }
 
 async function findSupplyByIdWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   supplyId: number,
   options?: { forUpdate?: boolean }
 ) {
-  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
-  const [rows] = await executor.execute<SupplyRow[]>(
-    `SELECT id, company_id, sku, name, unit, is_active, updated_at
-     FROM supplies
-     WHERE company_id = ?
-       AND id = ?
-     LIMIT 1${forUpdateClause}`,
-    [companyId, supplyId]
-  );
+  const forUpdateClause = options?.forUpdate ? sql` FOR UPDATE` : sql``;
 
-  if (!rows[0]) {
+  const rows = await sql<SupplyRow>`
+    SELECT id, company_id, sku, name, unit, is_active, updated_at
+    FROM supplies
+    WHERE company_id = ${companyId}
+      AND id = ${supplyId}
+    LIMIT 1${forUpdateClause}
+  `.execute(db);
+
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  return normalizeSupply(rows[0]);
+  return normalizeSupply(rows.rows[0]!);
 }
 
 export async function listSupplies(companyId: number, filters?: { isActive?: boolean }) {
-  const pool = getDbPool();
-  const values: Array<number> = [companyId];
-
-  let sql =
-    "SELECT id, company_id, sku, name, unit, is_active, updated_at FROM supplies WHERE company_id = ?";
+  const db = getDb();
 
   if (typeof filters?.isActive === "boolean") {
-    sql += " AND is_active = ?";
-    values.push(filters.isActive ? 1 : 0);
+    const rows = await sql<SupplyRow>`
+      SELECT id, company_id, sku, name, unit, is_active, updated_at 
+      FROM supplies 
+      WHERE company_id = ${companyId} 
+        AND is_active = ${filters.isActive ? 1 : 0}
+      ORDER BY id ASC
+    `.execute(db);
+    return rows.rows.map(normalizeSupply);
   }
 
-  sql += " ORDER BY id ASC";
-
-  const [rows] = await pool.execute<SupplyRow[]>(sql, values);
-  return rows.map(normalizeSupply);
+  const rows = await sql<SupplyRow>`
+    SELECT id, company_id, sku, name, unit, is_active, updated_at 
+    FROM supplies 
+    WHERE company_id = ${companyId}
+    ORDER BY id ASC
+  `.execute(db);
+  return rows.rows.map(normalizeSupply);
 }
 
 export async function findSupplyById(companyId: number, supplyId: number) {
-  const pool = getDbPool();
-  return findSupplyByIdWithExecutor(pool, companyId, supplyId);
+  const db = getDb();
+  return findSupplyByIdWithExecutor(db, companyId, supplyId);
 }
 
 export async function createSupply(
@@ -124,20 +125,31 @@ export async function createSupply(
   },
   actor?: MutationAuditActor
 ) {
-  return withTransaction(async (connection) => {
+  const db = getDb();
+  return withTransaction(db, async (trx) => {
     try {
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO supplies (company_id, sku, name, unit, is_active)
-         VALUES (?, ?, ?, ?, ?)`,
-        [companyId, input.sku ?? null, input.name, input.unit?.trim() || "unit", input.is_active === false ? 0 : 1]
-      );
+      const result = await trx
+        .insertInto("supplies")
+        .values({
+          company_id: companyId,
+          sku: input.sku ?? null,
+          name: input.name,
+          unit: input.unit?.trim() || "unit",
+          is_active: input.is_active === false ? 0 : 1
+        })
+        .returningAll()
+        .executeTakeFirst();
 
-      const supply = await findSupplyByIdWithExecutor(connection, companyId, Number(result.insertId));
+      if (!result) {
+        throw new Error("Created supply not found");
+      }
+
+      const supply = await findSupplyByIdWithExecutor(trx, companyId, Number(result.id));
       if (!supply) {
         throw new Error("Created supply not found");
       }
 
-      await recordSupplyAuditLog(connection, {
+      await recordSupplyAuditLog(trx, {
         companyId,
         actor,
         action: supplyAuditActions.create,
@@ -169,58 +181,55 @@ export async function updateSupply(
   },
   actor?: MutationAuditActor
 ) {
-  const fields: string[] = [];
-  const values: Array<string | number | null> = [];
-
-  if (Object.hasOwn(input, "sku")) {
-    fields.push("sku = ?");
-    values.push(input.sku ?? null);
-  }
-
-  if (typeof input.name === "string") {
-    fields.push("name = ?");
-    values.push(input.name);
-  }
-
-  if (typeof input.unit === "string") {
-    fields.push("unit = ?");
-    values.push(input.unit.trim());
-  }
-
-  if (typeof input.is_active === "boolean") {
-    fields.push("is_active = ?");
-    values.push(input.is_active ? 1 : 0);
-  }
-
-  return withTransaction(async (connection) => {
-    const before = await findSupplyByIdWithExecutor(connection, companyId, supplyId, {
+  const db = getDb();
+  return withTransaction(db, async (trx) => {
+    const before = await findSupplyByIdWithExecutor(trx, companyId, supplyId, {
       forUpdate: true
     });
     if (!before) {
       return null;
     }
 
-    if (fields.length === 0) {
+    const fields: Record<string, unknown> = {};
+    const values: Array<string | number | null> = [];
+
+    if (Object.hasOwn(input, "sku")) {
+      fields["sku"] = input.sku ?? null;
+    }
+
+    if (typeof input.name === "string") {
+      fields["name"] = input.name;
+    }
+
+    if (typeof input.unit === "string") {
+      fields["unit"] = input.unit.trim();
+    }
+
+    if (typeof input.is_active === "boolean") {
+      fields["is_active"] = input.is_active ? 1 : 0;
+    }
+
+    if (Object.keys(fields).length === 0) {
       return before;
     }
 
-    values.push(companyId, supplyId);
-
     try {
-      await connection.execute<ResultSetHeader>(
-        `UPDATE supplies
-         SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ?
-           AND id = ?`,
-        values
-      );
+      await trx
+        .updateTable("supplies")
+        .set({
+          ...fields,
+          updated_at: new Date()
+        })
+        .where("company_id", "=", companyId)
+        .where("id", "=", supplyId)
+        .execute();
 
-      const supply = await findSupplyByIdWithExecutor(connection, companyId, supplyId);
+      const supply = await findSupplyByIdWithExecutor(trx, companyId, supplyId);
       if (!supply) {
         return null;
       }
 
-      await recordSupplyAuditLog(connection, {
+      await recordSupplyAuditLog(trx, {
         companyId,
         actor,
         action: supplyAuditActions.update,
@@ -247,22 +256,22 @@ export async function deleteSupply(
   supplyId: number,
   actor?: MutationAuditActor
 ): Promise<boolean> {
-  return withTransaction(async (connection) => {
-    const before = await findSupplyByIdWithExecutor(connection, companyId, supplyId, {
+  const db = getDb();
+  return withTransaction(db, async (trx) => {
+    const before = await findSupplyByIdWithExecutor(trx, companyId, supplyId, {
       forUpdate: true
     });
     if (!before) {
       return false;
     }
 
-    await connection.execute<ResultSetHeader>(
-      `DELETE FROM supplies
-       WHERE company_id = ?
-         AND id = ?`,
-      [companyId, supplyId]
-    );
+    await trx
+      .deleteFrom("supplies")
+      .where("company_id", "=", companyId)
+      .where("id", "=", supplyId)
+      .execute();
 
-    await recordSupplyAuditLog(connection, {
+    await recordSupplyAuditLog(trx, {
       companyId,
       actor,
       action: supplyAuditActions.delete,

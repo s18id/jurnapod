@@ -4,7 +4,7 @@
 /**
  * Import Session Store
  *
- * MySQL-backed persistent storage for import upload sessions.
+ * Kysely-backed persistent storage for import upload sessions.
  * Replaces the in-memory Map that was not safe for multi-instance deployments.
  *
  * Sessions expire after 30 minutes (enforced via `expires_at` column).
@@ -15,8 +15,9 @@
  * - file_hash: SHA-256 hash for file integrity on resume
  */
 
-import type { Pool, RowDataPacket } from "mysql2/promise";
 import { createHash } from "node:crypto";
+import { sql } from "kysely";
+import { getDb } from "../db.js";
 
 // Session TTL: 30 minutes in milliseconds
 export const SESSION_TTL_MS = 30 * 60 * 1000;
@@ -48,20 +49,19 @@ export interface StoredSession {
  * Returns the session ID.
  */
 export async function createSession(
-  pool: Pool,
   sessionId: string,
   companyId: number,
   entityType: string,
   payload: Record<string, unknown>
 ): Promise<void> {
+  const db = getDb();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
 
-  await pool.execute(
-    `INSERT INTO import_sessions (session_id, company_id, entity_type, payload, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [sessionId, companyId, entityType, JSON.stringify(payload), now, expiresAt]
-  );
+  await sql`
+    INSERT INTO import_sessions (session_id, company_id, entity_type, payload, created_at, expires_at)
+    VALUES (${sessionId}, ${companyId}, ${entityType}, ${JSON.stringify(payload)}, ${now}, ${expiresAt})
+  `.execute(db);
 }
 
 /**
@@ -70,22 +70,22 @@ export async function createSession(
  * Enforces company-scoped isolation.
  */
 export async function getSession(
-  pool: Pool,
   sessionId: string,
   companyId: number
 ): Promise<StoredSession | null> {
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT session_id, company_id, entity_type, payload, checkpoint_data, file_hash, created_at, expires_at
-     FROM import_sessions
-     WHERE session_id = ? AND company_id = ? AND expires_at > NOW()`,
-    [sessionId, companyId]
-  );
+  const db = getDb();
 
-  if (rows.length === 0) {
+  const rows = await sql`
+    SELECT session_id, company_id, entity_type, payload, checkpoint_data, file_hash, created_at, expires_at
+    FROM import_sessions
+    WHERE session_id = ${sessionId} AND company_id = ${companyId} AND expires_at > NOW()
+  `.execute(db);
+
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  const row = rows[0];
+  const row = rows.rows[0] as Record<string, unknown>;
   return {
     sessionId: String(row.session_id),
     companyId: Number(row.company_id),
@@ -95,8 +95,8 @@ export async function getSession(
       ? (typeof row.checkpoint_data === "string" ? JSON.parse(row.checkpoint_data) : row.checkpoint_data)
       : null,
     fileHash: row.file_hash ? String(row.file_hash) : null,
-    createdAt: new Date(row.created_at),
-    expiresAt: new Date(row.expires_at),
+    createdAt: new Date(row.created_at as string | number | Date),
+    expiresAt: new Date(row.expires_at as string | number | Date),
   };
 }
 
@@ -105,54 +105,54 @@ export async function getSession(
  * Does not extend TTL — sessions have a fixed expiry from creation.
  */
 export async function updateSession(
-  pool: Pool,
   sessionId: string,
   companyId: number,
   payload: Record<string, unknown>
 ): Promise<void> {
-  await pool.execute(
-    `UPDATE import_sessions SET payload = ? WHERE session_id = ? AND company_id = ? AND expires_at > NOW()`,
-    [JSON.stringify(payload), sessionId, companyId]
-  );
+  const db = getDb();
+
+  await sql`
+    UPDATE import_sessions SET payload = ${JSON.stringify(payload)} 
+    WHERE session_id = ${sessionId} AND company_id = ${companyId} AND expires_at > NOW()
+  `.execute(db);
 }
 
 /**
  * Update checkpoint data after a successful batch commit.
  * Records batch number, row count, and timestamp.
- * 
- * @param pool - Database pool
+ *
  * @param sessionId - Session ID
  * @param companyId - Company ID for tenant isolation
  * @param checkpoint - Checkpoint data to persist
  */
 export async function updateCheckpoint(
-  pool: Pool,
   sessionId: string,
   companyId: number,
   checkpoint: CheckpointData
 ): Promise<void> {
-  await pool.execute(
-    `UPDATE import_sessions 
-     SET checkpoint_data = ? 
-     WHERE session_id = ? AND company_id = ? AND expires_at > NOW()`,
-    [JSON.stringify(checkpoint), sessionId, companyId]
-  );
+  const db = getDb();
+
+  await sql`
+    UPDATE import_sessions 
+    SET checkpoint_data = ${JSON.stringify(checkpoint)}
+    WHERE session_id = ${sessionId} AND company_id = ${companyId} AND expires_at > NOW()
+  `.execute(db);
 }
 
 /**
  * Clear checkpoint data (after successful completion or explicit cancel).
  */
 export async function clearCheckpoint(
-  pool: Pool,
   sessionId: string,
   companyId: number
 ): Promise<void> {
-  await pool.execute(
-    `UPDATE import_sessions 
-     SET checkpoint_data = NULL 
-     WHERE session_id = ? AND company_id = ?`,
-    [sessionId, companyId]
-  );
+  const db = getDb();
+
+  await sql`
+    UPDATE import_sessions 
+    SET checkpoint_data = NULL 
+    WHERE session_id = ${sessionId} AND company_id = ${companyId}
+  `.execute(db);
 }
 
 /**
@@ -160,17 +160,17 @@ export async function clearCheckpoint(
  * Should be called during upload phase.
  */
 export async function updateFileHash(
-  pool: Pool,
   sessionId: string,
   companyId: number,
   fileHash: string
 ): Promise<void> {
-  await pool.execute(
-    `UPDATE import_sessions 
-     SET file_hash = ? 
-     WHERE session_id = ? AND company_id = ?`,
-    [fileHash, sessionId, companyId]
-  );
+  const db = getDb();
+
+  await sql`
+    UPDATE import_sessions 
+    SET file_hash = ${fileHash}
+    WHERE session_id = ${sessionId} AND company_id = ${companyId}
+  `.execute(db);
 }
 
 /**
@@ -186,43 +186,43 @@ export function computeFileHash(buffer: Buffer): string {
  * Returns the checkpoint data if resumable.
  */
 export async function getCheckpoint(
-  pool: Pool,
   sessionId: string,
   companyId: number
 ): Promise<CheckpointData | null> {
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT checkpoint_data, expires_at 
-     FROM import_sessions 
-     WHERE session_id = ? AND company_id = ? AND expires_at > NOW()`,
-    [sessionId, companyId]
-  );
+  const db = getDb();
 
-  if (rows.length === 0) {
+  const rows = await sql`
+    SELECT checkpoint_data, expires_at 
+    FROM import_sessions 
+    WHERE session_id = ${sessionId} AND company_id = ${companyId} AND expires_at > NOW()
+  `.execute(db);
+
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  const row = rows[0];
+  const row = rows.rows[0] as Record<string, unknown>;
   if (!row.checkpoint_data) {
     return null;
   }
 
   return typeof row.checkpoint_data === "string"
-    ? JSON.parse(row.checkpoint_data)
-    : row.checkpoint_data;
+    ? JSON.parse(row.checkpoint_data) as CheckpointData
+    : (row.checkpoint_data as CheckpointData);
 }
 
 /**
  * Delete a session explicitly (e.g., after successful apply).
  */
 export async function deleteSession(
-  pool: Pool,
   sessionId: string,
   companyId: number
 ): Promise<void> {
-  await pool.execute(
-    `DELETE FROM import_sessions WHERE session_id = ? AND company_id = ?`,
-    [sessionId, companyId]
-  );
+  const db = getDb();
+
+  await sql`
+    DELETE FROM import_sessions WHERE session_id = ${sessionId} AND company_id = ${companyId}
+  `.execute(db);
 }
 
 /**
@@ -230,12 +230,14 @@ export async function deleteSession(
  * Should be called at API startup and periodically.
  * Returns the number of rows deleted.
  */
-export async function cleanupExpiredSessions(pool: Pool): Promise<number> {
-  const [result] = await pool.execute(
-    `DELETE FROM import_sessions WHERE expires_at <= NOW()`
-  ) as [{ affectedRows: number }, unknown];
+export async function cleanupExpiredSessions(): Promise<number> {
+  const db = getDb();
 
-  const count = result.affectedRows;
+  const result = await sql`
+    DELETE FROM import_sessions WHERE expires_at <= NOW()
+  `.execute(db);
+
+  const count = Number(result.numAffectedRows ?? 0);
   if (count > 0) {
     console.info(`[import-sessions] Cleaned up ${count} expired session(s)`);
   }

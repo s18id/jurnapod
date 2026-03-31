@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { RowDataPacket } from "mysql2";
 import type { ServiceSessionStatusType } from "@jurnapod/shared";
 
 // ============================================================================
@@ -235,7 +234,7 @@ export interface AdjustSessionLineResult {
 // DATABASE ROW TYPES
 // ============================================================================
 
-export interface ServiceSessionDbRow extends RowDataPacket {
+export interface ServiceSessionDbRow {
   id: number;
   company_id: number;
   outlet_id: number;
@@ -259,7 +258,7 @@ export interface ServiceSessionDbRow extends RowDataPacket {
   updated_at: string;
 }
 
-export interface SessionLineDbRow extends RowDataPacket {
+export interface SessionLineDbRow {
   id: number;
   session_id: number;
   line_number: number;

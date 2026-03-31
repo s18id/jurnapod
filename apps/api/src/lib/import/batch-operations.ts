@@ -5,11 +5,9 @@
  * Import Batch Operations Library
  *
  * Batch database operations for import functionality.
- * All functions require a connection for transaction support.
  */
 
-import type { PoolConnection } from "mysql2/promise";
-import { newKyselyConnection } from "@jurnapod/db";
+import { getDb } from "@/lib/db";
 
 // ============================================================================
 // Types
@@ -80,13 +78,11 @@ export interface BatchLookupResult {
  *
  * @param companyId - Company ID to scope the query
  * @param skus - Array of SKUs to look up
- * @param connection - Database connection (required, for transaction)
  * @returns Map of SKU to item ID
  */
 export async function batchFindItemsBySkus(
   companyId: number,
-  skus: string[],
-  connection: PoolConnection
+  skus: string[]
 ): Promise<Map<string, number>> {
   const result = new Map<string, number>();
 
@@ -94,8 +90,8 @@ export async function batchFindItemsBySkus(
     return result;
   }
 
-  const kysely = newKyselyConnection(connection);
-  const rows = await kysely
+  const db = getDb();
+  const rows = await db
     .selectFrom("items")
     .select(["sku", "id"])
     .where("company_id", "=", companyId)
@@ -115,22 +111,19 @@ export async function batchFindItemsBySkus(
 
 /**
  * Update items in batch.
- * All updates happen within the provided transaction.
  *
  * @param updates - Array of item updates
- * @param connection - Database connection (required, for transaction)
  * @returns Number of rows updated
  */
 export async function batchUpdateItems(
-  updates: BatchItemUpdate[],
-  connection: PoolConnection
+  updates: BatchItemUpdate[]
 ): Promise<number> {
   let updated = 0;
 
-  const kysely = newKyselyConnection(connection);
+  const db = getDb();
 
   for (const item of updates) {
-    const result = await kysely
+    const result = await db
       .updateTable("items")
       .set({
         name: item.name,
@@ -153,24 +146,21 @@ export async function batchUpdateItems(
 
 /**
  * Insert items in batch.
- * All inserts happen within the provided transaction.
  *
  * @param companyId - Company ID for the items
  * @param items - Array of items to insert
- * @param connection - Database connection (required, for transaction)
  * @returns Array of inserted item IDs
  */
 export async function batchInsertItems(
   companyId: number,
-  items: BatchItemInsert[],
-  connection: PoolConnection
+  items: BatchItemInsert[]
 ): Promise<number[]> {
   const ids: number[] = [];
 
-  const kysely = newKyselyConnection(connection);
+  const db = getDb();
 
   for (const item of items) {
-    const result = await kysely
+    const result = await db
       .insertInto("items")
       .values({
         company_id: companyId,
@@ -201,13 +191,11 @@ export async function batchInsertItems(
  *
  * @param companyId - Company ID to scope the query
  * @param itemIds - Array of item IDs to look up
- * @param connection - Database connection (required, for transaction)
  * @returns Map of "itemId:outletId" to price ID
  */
 export async function batchFindPricesByItemIds(
   companyId: number,
-  itemIds: number[],
-  connection: PoolConnection
+  itemIds: number[]
 ): Promise<Map<string, number>> {
   const result = new Map<string, number>();
 
@@ -215,8 +203,8 @@ export async function batchFindPricesByItemIds(
     return result;
   }
 
-  const kysely = newKyselyConnection(connection);
-  const rows = await kysely
+  const db = getDb();
+  const rows = await db
     .selectFrom("item_prices")
     .select(["item_id", "outlet_id", "id"])
     .where("company_id", "=", companyId)
@@ -237,22 +225,19 @@ export async function batchFindPricesByItemIds(
 
 /**
  * Update prices in batch.
- * All updates happen within the provided transaction.
  *
  * @param updates - Array of price updates
- * @param connection - Database connection (required, for transaction)
  * @returns Number of rows updated
  */
 export async function batchUpdatePrices(
-  updates: BatchPriceUpdate[],
-  connection: PoolConnection
+  updates: BatchPriceUpdate[]
 ): Promise<number> {
   let updated = 0;
 
-  const kysely = newKyselyConnection(connection);
+  const db = getDb();
 
   for (const price of updates) {
-    const result = await kysely
+    const result = await db
       .updateTable("item_prices")
       .set({
         price: price.price,
@@ -270,24 +255,21 @@ export async function batchUpdatePrices(
 
 /**
  * Insert prices in batch.
- * All inserts happen within the provided transaction.
  *
  * @param companyId - Company ID for the prices
  * @param prices - Array of prices to insert
- * @param connection - Database connection (required, for transaction)
  * @returns Array of inserted price IDs
  */
 export async function batchInsertPrices(
   companyId: number,
-  prices: BatchPriceInsert[],
-  connection: PoolConnection
+  prices: BatchPriceInsert[]
 ): Promise<number[]> {
   const ids: number[] = [];
 
-  const kysely = newKyselyConnection(connection);
+  const db = getDb();
 
   for (const price of prices) {
-    const result = await kysely
+    const result = await db
       .insertInto("item_prices")
       .values({
         item_id: price.item_id,

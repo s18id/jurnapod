@@ -15,8 +15,8 @@
  * - Effective date support
  */
 
-import type { RowDataPacket } from "mysql2";
-import { getDbPool } from "../db.js";
+import { sql } from "kysely";
+import { getDb, type KyselySchema } from "../db.js";
 
 export interface ResolvedPrice {
   price: number;
@@ -134,6 +134,281 @@ export function getCacheSize(): number {
   return priceCache.size;
 }
 
+interface PriceRow {
+  id: number;
+  price: string;
+  is_active: number;
+}
+
+async function findVariantOutletPrice(
+  db: KyselySchema,
+  companyId: number,
+  itemId: number,
+  variantId: number,
+  outletId: number,
+  date: Date
+): Promise<ResolvedPriceData | null> {
+  let query = sql<PriceRow>`
+    SELECT id, price, is_active
+    FROM item_prices
+    WHERE company_id = ${companyId}
+      AND item_id = ${itemId}
+      AND variant_id = ${variantId}
+      AND outlet_id = ${outletId}
+      AND is_active = 1
+  `;
+
+  if (effectiveDateFilterEnabled) {
+    const now = date.getTime();
+    query = sql<PriceRow>`
+      SELECT id, price, is_active
+      FROM item_prices
+      WHERE company_id = ${companyId}
+        AND item_id = ${itemId}
+        AND variant_id = ${variantId}
+        AND outlet_id = ${outletId}
+        AND is_active = 1
+        AND effective_from <= ${now}
+        AND (effective_to = 0 OR effective_to >= ${now})
+    `;
+  }
+
+  const rows = await query.execute(db);
+
+  if (rows.rows.length === 0) {
+    return null;
+  }
+
+  const row = rows.rows[0];
+  return {
+    price: Number(row.price),
+    price_id: Number(row.id),
+    is_override: true,
+    is_variant_specific: true
+  };
+}
+
+async function findItemOutletPrice(
+  db: KyselySchema,
+  companyId: number,
+  itemId: number,
+  outletId: number,
+  date: Date
+): Promise<ResolvedPriceData | null> {
+  let query = sql<PriceRow>`
+    SELECT id, price, is_active
+    FROM item_prices
+    WHERE company_id = ${companyId}
+      AND item_id = ${itemId}
+      AND variant_id IS NULL
+      AND outlet_id = ${outletId}
+      AND is_active = 1
+  `;
+
+  if (effectiveDateFilterEnabled) {
+    const now = date.getTime();
+    query = sql<PriceRow>`
+      SELECT id, price, is_active
+      FROM item_prices
+      WHERE company_id = ${companyId}
+        AND item_id = ${itemId}
+        AND variant_id IS NULL
+        AND outlet_id = ${outletId}
+        AND is_active = 1
+        AND effective_from <= ${now}
+        AND (effective_to = 0 OR effective_to >= ${now})
+    `;
+  }
+
+  const rows = await query.execute(db);
+
+  if (rows.rows.length === 0) {
+    return null;
+  }
+
+  const row = rows.rows[0];
+  return {
+    price: Number(row.price),
+    price_id: Number(row.id),
+    is_override: true,
+    is_variant_specific: false
+  };
+}
+
+async function findVariantDefaultPrice(
+  db: KyselySchema,
+  companyId: number,
+  itemId: number,
+  variantId: number,
+  date: Date
+): Promise<ResolvedPriceData | null> {
+  let query = sql<PriceRow>`
+    SELECT id, price, is_active
+    FROM item_prices
+    WHERE company_id = ${companyId}
+      AND item_id = ${itemId}
+      AND variant_id = ${variantId}
+      AND outlet_id IS NULL
+      AND is_active = 1
+  `;
+
+  if (effectiveDateFilterEnabled) {
+    const now = date.getTime();
+    query = sql<PriceRow>`
+      SELECT id, price, is_active
+      FROM item_prices
+      WHERE company_id = ${companyId}
+        AND item_id = ${itemId}
+        AND variant_id = ${variantId}
+        AND outlet_id IS NULL
+        AND is_active = 1
+        AND effective_from <= ${now}
+        AND (effective_to = 0 OR effective_to >= ${now})
+    `;
+  }
+
+  const rows = await query.execute(db);
+
+  if (rows.rows.length === 0) {
+    return null;
+  }
+
+  const row = rows.rows[0];
+  return {
+    price: Number(row.price),
+    price_id: Number(row.id),
+    is_override: false,
+    is_variant_specific: true
+  };
+}
+
+async function findItemDefaultPrice(
+  db: KyselySchema,
+  companyId: number,
+  itemId: number,
+  date: Date
+): Promise<ResolvedPriceData | null> {
+  let query = sql<PriceRow>`
+    SELECT id, price, is_active
+    FROM item_prices
+    WHERE company_id = ${companyId}
+      AND item_id = ${itemId}
+      AND variant_id IS NULL
+      AND outlet_id IS NULL
+      AND is_active = 1
+  `;
+
+  if (effectiveDateFilterEnabled) {
+    const now = date.getTime();
+    query = sql<PriceRow>`
+      SELECT id, price, is_active
+      FROM item_prices
+      WHERE company_id = ${companyId}
+        AND item_id = ${itemId}
+        AND variant_id IS NULL
+        AND outlet_id IS NULL
+        AND is_active = 1
+        AND effective_from <= ${now}
+        AND (effective_to = 0 OR effective_to >= ${now})
+    `;
+  }
+
+  const rows = await query.execute(db);
+
+  if (rows.rows.length === 0) {
+    return null;
+  }
+
+  const row = rows.rows[0];
+  return {
+    price: Number(row.price),
+    price_id: Number(row.id),
+    is_override: false,
+    is_variant_specific: false
+  };
+}
+
+interface BatchPriceRow {
+  lookup_key: string;
+  id: number;
+  price: string;
+  is_active: number;
+}
+
+async function findPricesBatch(
+  db: KyselySchema,
+  companyId: number,
+  requests: Array<{
+    itemId: number;
+    variantId?: number | null;
+    outletId?: number | null;
+  }>,
+  date: Date
+): Promise<Map<string, ResolvedPriceData>> {
+  const results = new Map<string, ResolvedPriceData>();
+  
+  if (requests.length === 0) {
+    return results;
+  }
+
+  // Build the query with all lookup keys using UNION ALL
+  // Date filter for queries
+  const dateCondition = effectiveDateFilterEnabled
+    ? ` AND effective_from <= ${date.getTime()} AND (effective_to = 0 OR effective_to >= ${date.getTime()})`
+    : '';
+
+  const parts: string[] = [];
+
+  for (const req of requests) {
+    const variantId = req.variantId ?? null;
+    const outletId = req.outletId ?? null;
+
+    if (variantId !== null && outletId !== null) {
+      parts.push(
+        `SELECT 'vo:${companyId}:${req.itemId}:${variantId}:${outletId}' AS lookup_key, id, price, is_active ` +
+        `FROM item_prices WHERE company_id = ${companyId} AND item_id = ${req.itemId} AND variant_id = ${variantId} AND outlet_id = ${outletId} AND is_active = 1${dateCondition} LIMIT 1`
+      );
+    }
+
+    if (outletId !== null) {
+      parts.push(
+        `SELECT 'io:${companyId}:${req.itemId}:${outletId}' AS lookup_key, id, price, is_active ` +
+        `FROM item_prices WHERE company_id = ${companyId} AND item_id = ${req.itemId} AND variant_id IS NULL AND outlet_id = ${outletId} AND is_active = 1${dateCondition} LIMIT 1`
+      );
+    }
+
+    if (variantId !== null) {
+      parts.push(
+        `SELECT 'vd:${companyId}:${req.itemId}:${variantId}' AS lookup_key, id, price, is_active ` +
+        `FROM item_prices WHERE company_id = ${companyId} AND item_id = ${req.itemId} AND variant_id = ${variantId} AND outlet_id IS NULL AND is_active = 1${dateCondition} LIMIT 1`
+      );
+    }
+
+    parts.push(
+      `SELECT 'id:${companyId}:${req.itemId}' AS lookup_key, id, price, is_active ` +
+      `FROM item_prices WHERE company_id = ${companyId} AND item_id = ${req.itemId} AND variant_id IS NULL AND outlet_id IS NULL AND is_active = 1${dateCondition} LIMIT 1`
+    );
+  }
+
+  if (parts.length === 0) {
+    return results;
+  }
+
+  const sqlQuery = parts.join('\nUNION ALL\n');
+  const rows = await sql<BatchPriceRow>`${sqlQuery}`.execute(db);
+
+  for (const row of rows.rows) {
+    results.set(row.lookup_key, {
+      price: Number(row.price),
+      price_id: Number(row.id),
+      is_override: row.lookup_key.startsWith("vo:") || row.lookup_key.startsWith("io:"),
+      is_variant_specific: row.lookup_key.startsWith("vo:") || row.lookup_key.startsWith("vd:")
+    });
+  }
+
+  return results;
+}
+
 /**
  * Resolve the effective price for an item/variant combination.
  * 
@@ -169,13 +444,13 @@ export async function resolvePrice(
     return cachedPrice;
   }
 
-  const pool = getDbPool();
+  const db = getDb();
   const effectiveDate = date ?? new Date();
 
   // Try variant-specific price for outlet first
   if (variantId !== null && outletId !== null) {
     const variantOutletPrice = await findVariantOutletPrice(
-      pool,
+      db,
       companyId,
       itemId,
       variantId,
@@ -195,7 +470,7 @@ export async function resolvePrice(
   // Try item-outlet price (outlet override)
   if (outletId !== null) {
     const itemOutletPrice = await findItemOutletPrice(
-      pool,
+      db,
       companyId,
       itemId,
       outletId,
@@ -214,7 +489,7 @@ export async function resolvePrice(
   // Try variant-default price (variant with no outlet)
   if (variantId !== null) {
     const variantDefaultPrice = await findVariantDefaultPrice(
-      pool,
+      db,
       companyId,
       itemId,
       variantId,
@@ -232,7 +507,7 @@ export async function resolvePrice(
 
   // Try item-default price (company default for item)
   const itemDefaultPrice = await findItemDefaultPrice(
-    pool,
+    db,
     companyId,
     itemId,
     effectiveDate
@@ -297,11 +572,11 @@ export async function resolvePricesBatch(
     return results;
   }
 
-  const pool = getDbPool();
+  const db = getDb();
   const effectiveDate = date ?? new Date();
 
   // Build batch query for all uncached requests
-  const prices = await findPricesBatch(pool, companyId, uncachedRequests, effectiveDate);
+  const prices = await findPricesBatch(db, companyId, uncachedRequests, effectiveDate);
 
   // Resolve each uncached request
   for (const req of uncachedRequests) {
@@ -367,264 +642,6 @@ export async function resolvePricesBatch(
     };
     cachePrice(cacheKey, result, options?.ttlMs ?? DEFAULT_TTL_MS);
     results.set(cacheKey, result);
-  }
-
-  return results;
-}
-
-type PriceRow = RowDataPacket & {
-  id: number;
-  price: string;
-  is_active: number;
-};
-
-async function findVariantOutletPrice(
-  pool: ReturnType<typeof getDbPool>,
-  companyId: number,
-  itemId: number,
-  variantId: number,
-  outletId: number,
-  date: Date
-): Promise<ResolvedPriceData | null> {
-  let sql = `SELECT id, price, is_active
-     FROM item_prices
-     WHERE company_id = ?
-       AND item_id = ?
-       AND variant_id = ?
-       AND outlet_id = ?
-       AND is_active = 1`;
-  const params: (string | number)[] = [companyId, itemId, variantId, outletId];
-
-  if (effectiveDateFilterEnabled) {
-    const now = date.getTime();
-    sql += ` AND effective_from <= ? AND (effective_to = 0 OR effective_to >= ?)`;
-    params.push(now, now);
-  }
-
-  sql += ` LIMIT 1`;
-
-  const [rows] = await pool.execute<PriceRow[]>(sql, params);
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  return {
-    price: Number(rows[0].price),
-    price_id: Number(rows[0].id),
-    is_override: true,
-    is_variant_specific: true
-  };
-}
-
-async function findItemOutletPrice(
-  pool: ReturnType<typeof getDbPool>,
-  companyId: number,
-  itemId: number,
-  outletId: number,
-  date: Date
-): Promise<ResolvedPriceData | null> {
-  let sql = `SELECT id, price, is_active
-     FROM item_prices
-     WHERE company_id = ?
-       AND item_id = ?
-       AND variant_id IS NULL
-       AND outlet_id = ?
-       AND is_active = 1`;
-  const params: (string | number)[] = [companyId, itemId, outletId];
-
-  if (effectiveDateFilterEnabled) {
-    const now = date.getTime();
-    sql += ` AND effective_from <= ? AND (effective_to = 0 OR effective_to >= ?)`;
-    params.push(now, now);
-  }
-
-  sql += ` LIMIT 1`;
-
-  const [rows] = await pool.execute<PriceRow[]>(sql, params);
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  return {
-    price: Number(rows[0].price),
-    price_id: Number(rows[0].id),
-    is_override: true,
-    is_variant_specific: false
-  };
-}
-
-async function findVariantDefaultPrice(
-  pool: ReturnType<typeof getDbPool>,
-  companyId: number,
-  itemId: number,
-  variantId: number,
-  date: Date
-): Promise<ResolvedPriceData | null> {
-  let sql = `SELECT id, price, is_active
-     FROM item_prices
-     WHERE company_id = ?
-       AND item_id = ?
-       AND variant_id = ?
-       AND outlet_id IS NULL
-       AND is_active = 1`;
-  const params: (string | number)[] = [companyId, itemId, variantId];
-
-  if (effectiveDateFilterEnabled) {
-    const now = date.getTime();
-    sql += ` AND effective_from <= ? AND (effective_to = 0 OR effective_to >= ?)`;
-    params.push(now, now);
-  }
-
-  sql += ` LIMIT 1`;
-
-  const [rows] = await pool.execute<PriceRow[]>(sql, params);
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  return {
-    price: Number(rows[0].price),
-    price_id: Number(rows[0].id),
-    is_override: false,
-    is_variant_specific: true
-  };
-}
-
-async function findItemDefaultPrice(
-  pool: ReturnType<typeof getDbPool>,
-  companyId: number,
-  itemId: number,
-  date: Date
-): Promise<ResolvedPriceData | null> {
-  let sql = `SELECT id, price, is_active
-     FROM item_prices
-     WHERE company_id = ?
-       AND item_id = ?
-       AND variant_id IS NULL
-       AND outlet_id IS NULL
-       AND is_active = 1`;
-  const params: (string | number)[] = [companyId, itemId];
-
-  if (effectiveDateFilterEnabled) {
-    const now = date.getTime();
-    sql += ` AND effective_from <= ? AND (effective_to = 0 OR effective_to >= ?)`;
-    params.push(now, now);
-  }
-
-  sql += ` LIMIT 1`;
-
-  const [rows] = await pool.execute<PriceRow[]>(sql, params);
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  return {
-    price: Number(rows[0].price),
-    price_id: Number(rows[0].id),
-    is_override: false,
-    is_variant_specific: false
-  };
-}
-
-type BatchPriceRow = RowDataPacket & {
-  lookup_key: string;
-  id: number;
-  price: string;
-  is_active: number;
-};
-
-async function findPricesBatch(
-  pool: ReturnType<typeof getDbPool>,
-  companyId: number,
-  requests: Array<{
-    itemId: number;
-    variantId?: number | null;
-    outletId?: number | null;
-  }>,
-  date: Date
-): Promise<Map<string, ResolvedPriceData>> {
-  const results = new Map<string, ResolvedPriceData>();
-  
-  if (requests.length === 0) {
-    return results;
-  }
-
-  // Build the query with all lookup keys
-  // We'll use a single query with UNION ALL for efficiency
-  
-  const queries: string[] = [];
-  const params: (string | number)[] = [];
-
-  // Date filter clause (only applied if effectiveDateFilterEnabled)
-  let dateFilterClause = "";
-  let dateParams: number[] = [];
-  if (effectiveDateFilterEnabled) {
-    const now = date.getTime();
-    dateFilterClause = " AND effective_from <= ? AND (effective_to = 0 OR effective_to >= ?)";
-    dateParams = [now, now];
-  }
-
-  for (const req of requests) {
-    const variantId = req.variantId ?? null;
-    const outletId = req.outletId ?? null;
-
-    if (variantId !== null && outletId !== null) {
-      queries.push(
-        `(SELECT 'vo:${companyId}:${req.itemId}:${variantId}:${outletId}' AS lookup_key, id, price, is_active
-         FROM item_prices
-         WHERE company_id = ? AND item_id = ? AND variant_id = ? AND outlet_id = ? AND is_active = 1${dateFilterClause}
-         LIMIT 1)`
-      );
-      params.push(companyId, req.itemId, variantId, outletId, ...dateParams);
-    }
-
-    if (outletId !== null) {
-      queries.push(
-        `(SELECT 'io:${companyId}:${req.itemId}:${outletId}' AS lookup_key, id, price, is_active
-         FROM item_prices
-         WHERE company_id = ? AND item_id = ? AND variant_id IS NULL AND outlet_id = ? AND is_active = 1${dateFilterClause}
-         LIMIT 1)`
-      );
-      params.push(companyId, req.itemId, outletId, ...dateParams);
-    }
-
-    if (variantId !== null) {
-      queries.push(
-        `(SELECT 'vd:${companyId}:${req.itemId}:${variantId}' AS lookup_key, id, price, is_active
-         FROM item_prices
-         WHERE company_id = ? AND item_id = ? AND variant_id = ? AND outlet_id IS NULL AND is_active = 1${dateFilterClause}
-         LIMIT 1)`
-      );
-      params.push(companyId, req.itemId, variantId, ...dateParams);
-    }
-
-    queries.push(
-      `(SELECT 'id:${companyId}:${req.itemId}' AS lookup_key, id, price, is_active
-       FROM item_prices
-       WHERE company_id = ? AND item_id = ? AND variant_id IS NULL AND outlet_id IS NULL AND is_active = 1${dateFilterClause}
-       LIMIT 1)`
-    );
-    params.push(companyId, req.itemId, ...dateParams);
-  }
-
-  if (queries.length === 0) {
-    return results;
-  }
-
-  const sql = queries.join("\nUNION ALL\n");
-  const [rows] = await pool.execute<BatchPriceRow[]>(sql, params);
-
-  for (const row of rows) {
-    results.set(row.lookup_key, {
-      price: Number(row.price),
-      price_id: Number(row.id),
-      is_override: row.lookup_key.startsWith("vo:") || row.lookup_key.startsWith("io:"),
-      is_variant_specific: row.lookup_key.startsWith("vo:") || row.lookup_key.startsWith("vd:")
-    });
   }
 
   return results;

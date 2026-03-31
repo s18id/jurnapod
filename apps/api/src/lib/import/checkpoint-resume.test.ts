@@ -19,7 +19,8 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { randomUUID } from "node:crypto";
-import { closeDbPool, getDbPool } from "../../lib/db.js";
+import { closeDbPool, getDb } from "../../lib/db.js";
+import { sql } from "kysely";
 import {
   createSession,
   getSession,
@@ -32,7 +33,6 @@ import {
   type CheckpointData,
   SESSION_TTL_MS,
 } from "./session-store.js";
-import type { Pool } from "mysql2/promise";
 
 const COMPANY_ID = 1;
 const SAMPLE_PAYLOAD = {
@@ -49,10 +49,9 @@ const SAMPLE_PAYLOAD = {
 };
 
 describe("Import Checkpoint/Resume - Session Store", () => {
-  let pool: Pool;
-
   before(() => {
-    pool = getDbPool();
+    // Warm up the db connection
+    getDb();
   });
 
   after(async () => {
@@ -73,20 +72,20 @@ describe("Import Checkpoint/Resume - Session Store", () => {
       };
 
       // Create session
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
 
       // Update checkpoint
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
       // Verify checkpoint was stored
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.ok(stored, "Session should exist");
       assert.ok(stored!.checkpointData, "Checkpoint data should exist");
       assert.equal(stored!.checkpointData!.lastSuccessfulBatchNumber, 0);
       assert.equal(stored!.checkpointData!.rowsCommitted, 100);
 
       // Cleanup
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("updates checkpoint with new batch number", async () => {
@@ -102,19 +101,19 @@ describe("Import Checkpoint/Resume - Session Store", () => {
         timestamp: new Date().toISOString(),
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint1);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint1);
 
       // Update to new checkpoint
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint2);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint2);
 
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.ok(stored);
       assert.ok(stored!.checkpointData);
       assert.equal(stored!.checkpointData!.lastSuccessfulBatchNumber, 1);
       assert.equal(stored!.checkpointData!.rowsCommitted, 200);
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("checkpoint persists with session within TTL", async () => {
@@ -125,15 +124,15 @@ describe("Import Checkpoint/Resume - Session Store", () => {
         timestamp: new Date().toISOString(),
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
       // Session should still be valid
-      const retrieved = await getCheckpoint(pool, sessionId, COMPANY_ID);
+      const retrieved = await getCheckpoint(sessionId, COMPANY_ID);
       assert.ok(retrieved, "Checkpoint should be retrievable");
       assert.equal(retrieved!.lastSuccessfulBatchNumber, 5);
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("clearCheckpoint removes checkpoint data", async () => {
@@ -144,15 +143,15 @@ describe("Import Checkpoint/Resume - Session Store", () => {
         timestamp: new Date().toISOString(),
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
-      await clearCheckpoint(pool, sessionId, COMPANY_ID);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
+      await clearCheckpoint(sessionId, COMPANY_ID);
 
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.ok(stored, "Session should still exist");
       assert.equal(stored!.checkpointData, null, "Checkpoint should be cleared");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
   });
 
@@ -195,15 +194,15 @@ describe("Import Checkpoint/Resume - Session Store", () => {
       const sessionId = randomUUID();
       const fileHash = computeFileHash(Buffer.from("test file content"));
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateFileHash(pool, sessionId, COMPANY_ID, fileHash);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateFileHash(sessionId, COMPANY_ID, fileHash);
 
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.ok(stored);
       assert.ok(stored!.fileHash, "File hash should exist");
       assert.equal(stored!.fileHash, fileHash);
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("file hash mismatch detection", async () => {
@@ -211,10 +210,10 @@ describe("Import Checkpoint/Resume - Session Store", () => {
       const originalHash = computeFileHash(Buffer.from("original file content"));
       const tamperedHash = computeFileHash(Buffer.from("tampered file content"));
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateFileHash(pool, sessionId, COMPANY_ID, originalHash);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateFileHash(sessionId, COMPANY_ID, originalHash);
 
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.ok(stored);
       assert.ok(stored!.fileHash);
 
@@ -222,7 +221,7 @@ describe("Import Checkpoint/Resume - Session Store", () => {
       const hashesMatch = stored!.fileHash === tamperedHash;
       assert.equal(hashesMatch, false, "Tampered file should have different hash");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
   });
 
@@ -234,12 +233,12 @@ describe("Import Checkpoint/Resume - Session Store", () => {
     test("getCheckpoint returns null when no checkpoint exists", async () => {
       const sessionId = randomUUID();
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
 
-      const checkpoint = await getCheckpoint(pool, sessionId, COMPANY_ID);
+      const checkpoint = await getCheckpoint(sessionId, COMPANY_ID);
       assert.equal(checkpoint, null, "No checkpoint should exist for new session");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("getCheckpoint returns checkpoint within TTL window", async () => {
@@ -250,14 +249,14 @@ describe("Import Checkpoint/Resume - Session Store", () => {
         timestamp: new Date().toISOString(),
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
-      const retrieved = await getCheckpoint(pool, sessionId, COMPANY_ID);
+      const retrieved = await getCheckpoint(sessionId, COMPANY_ID);
       assert.ok(retrieved, "Checkpoint should be within TTL");
       assert.equal(retrieved!.lastSuccessfulBatchNumber, 4);
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("calculate startBatch from checkpoint", async () => {
@@ -268,11 +267,11 @@ describe("Import Checkpoint/Resume - Session Store", () => {
         timestamp: new Date().toISOString(),
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
       // Simulate resume logic: start from checkpoint + 1
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.ok(stored);
       const startBatch = stored!.checkpointData
         ? stored!.checkpointData!.lastSuccessfulBatchNumber + 1
@@ -280,7 +279,7 @@ describe("Import Checkpoint/Resume - Session Store", () => {
 
       assert.equal(startBatch, 8, "Should start from batch 8");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("resume only valid within session TTL window", async () => {
@@ -292,8 +291,8 @@ describe("Import Checkpoint/Resume - Session Store", () => {
         timestamp: oldTimestamp,
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
       // Check checkpoint age
       const checkpointTime = new Date(checkpoint.timestamp).getTime();
@@ -302,7 +301,7 @@ describe("Import Checkpoint/Resume - Session Store", () => {
 
       assert.equal(isWithinTTL, false, "Checkpoint should be expired");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
   });
 
@@ -319,18 +318,18 @@ describe("Import Checkpoint/Resume - Session Store", () => {
         timestamp: new Date().toISOString(),
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
       // Company B tries to access
-      const retrieved = await getSession(pool, sessionId, 999);
+      const retrieved = await getSession(sessionId, 999);
       assert.equal(retrieved, null, "Company B should not access Company A session");
 
       // Company A can access
-      const companyA = await getSession(pool, sessionId, COMPANY_ID);
+      const companyA = await getSession(sessionId, COMPANY_ID);
       assert.ok(companyA, "Company A should access its own session");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("company A cannot update company B checkpoint", async () => {
@@ -341,16 +340,16 @@ describe("Import Checkpoint/Resume - Session Store", () => {
         timestamp: new Date().toISOString(),
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
 
       // Company B tries to update checkpoint
-      await updateCheckpoint(pool, sessionId, 999, checkpoint);
+      await updateCheckpoint(sessionId, 999, checkpoint);
 
       // Check that no checkpoint exists for company B's access
-      const stored = await getSession(pool, sessionId, 999);
+      const stored = await getSession(sessionId, 999);
       assert.equal(stored, null, "Company B update should not affect Company A session");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
   });
 
@@ -367,18 +366,18 @@ describe("Import Checkpoint/Resume - Session Store", () => {
       const sessionId = randomUUID();
 
       // Insert session with past expires_at
-      await pool.execute(
-        `INSERT INTO import_sessions (session_id, company_id, entity_type, payload, created_at, expires_at)
-         VALUES (?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 1 HOUR))`,
-        [sessionId, COMPANY_ID, "items", JSON.stringify(SAMPLE_PAYLOAD)]
-      );
+      const db = getDb();
+      await sql`
+        INSERT INTO import_sessions (session_id, company_id, entity_type, payload, created_at, expires_at)
+        VALUES (${sessionId}, ${COMPANY_ID}, ${"items"}, ${JSON.stringify(SAMPLE_PAYLOAD)}, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 1 HOUR))
+      `.execute(db);
 
       // Session should not be retrievable (expired)
-      const retrieved = await getSession(pool, sessionId, COMPANY_ID);
+      const retrieved = await getSession(sessionId, COMPANY_ID);
       assert.equal(retrieved, null, "Expired session should not be retrievable");
 
       // Cleanup
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("checkpoint with expired session is not retrievable", async () => {
@@ -390,18 +389,18 @@ describe("Import Checkpoint/Resume - Session Store", () => {
       };
 
       // Insert with past expiry
-      await pool.execute(
-        `INSERT INTO import_sessions (session_id, company_id, entity_type, payload, checkpoint_data, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 1 HOUR))`,
-        [sessionId, COMPANY_ID, "items", JSON.stringify(SAMPLE_PAYLOAD), JSON.stringify(checkpoint)]
-      );
+      const db = getDb();
+      await sql`
+        INSERT INTO import_sessions (session_id, company_id, entity_type, payload, checkpoint_data, created_at, expires_at)
+        VALUES (${sessionId}, ${COMPANY_ID}, ${"items"}, ${JSON.stringify(SAMPLE_PAYLOAD)}, ${JSON.stringify(checkpoint)}, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 1 HOUR))
+      `.execute(db);
 
       // getCheckpoint should return null due to expiry
-      const retrieved = await getCheckpoint(pool, sessionId, COMPANY_ID);
+      const retrieved = await getCheckpoint(sessionId, COMPANY_ID);
       assert.equal(retrieved, null, "Checkpoint in expired session should not be retrievable");
 
       // Cleanup
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
   });
 
@@ -419,20 +418,20 @@ describe("Import Checkpoint/Resume - Session Store", () => {
         validationHash: "abc123",
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
       // Direct DB check to verify JSON validity
-      const [rows] = await pool.execute<any[]>(
-        `SELECT checkpoint_data FROM import_sessions WHERE session_id = ?`,
-        [sessionId]
-      );
+      const db = getDb();
+      const rows = await sql`
+        SELECT checkpoint_data FROM import_sessions WHERE session_id = ${sessionId}
+      `.execute(db);
 
-      assert.ok(rows.length > 0, "Row should exist");
-      const parsed = JSON.parse(rows[0].checkpoint_data);
+      assert.ok(rows.rows.length > 0, "Row should exist");
+      const parsed = JSON.parse((rows.rows[0] as Record<string, unknown>).checkpoint_data as string);
       assert.equal(parsed.lastSuccessfulBatchNumber, 10);
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("checkpoint preserves all fields", async () => {
@@ -444,26 +443,25 @@ describe("Import Checkpoint/Resume - Session Store", () => {
         validationHash: "hash-abc-123",
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
-      const retrieved = await getCheckpoint(pool, sessionId, COMPANY_ID);
+      const retrieved = await getCheckpoint(sessionId, COMPANY_ID);
       assert.ok(retrieved);
       assert.equal(retrieved!.lastSuccessfulBatchNumber, 15);
       assert.equal(retrieved!.rowsCommitted, 1500);
       assert.equal(retrieved!.timestamp, "2024-01-15T10:30:00.000Z");
       assert.equal(retrieved!.validationHash, "hash-abc-123");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
   });
 });
 
 describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
-  let pool: Pool;
-
   before(() => {
-    pool = getDbPool();
+    // Warm up the db connection
+    getDb();
   });
 
   after(async () => {
@@ -483,13 +481,13 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
         timestamp: new Date().toISOString(),
       };
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateFileHash(pool, sessionId, COMPANY_ID, computeFileHash(Buffer.from("test")));
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateFileHash(sessionId, COMPANY_ID, computeFileHash(Buffer.from("test")));
 
       // First apply fails at batch 4
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, initialCheckpoint);
+      await updateCheckpoint(sessionId, COMPANY_ID, initialCheckpoint);
 
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.ok(stored);
       assert.ok(stored!.checkpointData, "Checkpoint should exist after partial failure");
       assert.equal(stored!.checkpointData!.lastSuccessfulBatchNumber, 3, "Batch 3 should be recorded");
@@ -499,7 +497,7 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
       const resumeBatch = stored!.checkpointData!.lastSuccessfulBatchNumber + 1;
       assert.equal(resumeBatch, 4, "Should resume from batch 4");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("structured error response format for partial failure", async () => {
@@ -546,8 +544,8 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
       const rowsPerBatch = 100;
       const totalBatches = 10;
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateFileHash(pool, sessionId, COMPANY_ID, fileHash);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateFileHash(sessionId, COMPANY_ID, fileHash);
 
       // Simulate batches 0-3 committed successfully
       const committedThroughBatch = 3;
@@ -557,11 +555,11 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
           rowsCommitted: (batch + 1) * rowsPerBatch,
           timestamp: new Date().toISOString(),
         };
-        await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+        await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
       }
 
       // Verify checkpoint reflects batch 3 (4th batch)
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.ok(stored);
       assert.ok(stored!.checkpointData);
       assert.equal(stored!.checkpointData!.lastSuccessfulBatchNumber, 3);
@@ -571,15 +569,15 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
       const resumeBatch = stored!.checkpointData!.lastSuccessfulBatchNumber + 1;
       assert.equal(resumeBatch, 4, "Should resume from batch 4");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("scenario: resume from checkpoint completes successfully", async () => {
       const sessionId = randomUUID();
       const fileHash = computeFileHash(Buffer.from("resume-test-file"));
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateFileHash(pool, sessionId, COMPANY_ID, fileHash);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateFileHash(sessionId, COMPANY_ID, fileHash);
 
       // Simulate previous partial import
       const checkpoint: CheckpointData = {
@@ -587,10 +585,10 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
         rowsCommitted: 200,
         timestamp: new Date().toISOString(),
       };
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
       // Simulate resume
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.ok(stored);
       assert.ok(stored!.checkpointData, "Checkpoint should exist for resume");
       assert.equal(stored!.fileHash, fileHash, "File hash should match for resume");
@@ -602,12 +600,12 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
       assert.equal(skippedRows, 300, "Should skip 300 rows");
 
       // Simulate successful completion
-      await clearCheckpoint(pool, sessionId, COMPANY_ID);
-      const finalStored = await getSession(pool, sessionId, COMPANY_ID);
+      await clearCheckpoint(sessionId, COMPANY_ID);
+      const finalStored = await getSession(sessionId, COMPANY_ID);
       assert.ok(finalStored);
       assert.equal(finalStored!.checkpointData, null, "Checkpoint should be cleared after completion");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("scenario: hash mismatch detection rejects resume", async () => {
@@ -615,8 +613,8 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
       const originalHash = computeFileHash(Buffer.from("original file"));
       const tamperedHash = computeFileHash(Buffer.from("tampered file"));
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateFileHash(pool, sessionId, COMPANY_ID, originalHash);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateFileHash(sessionId, COMPANY_ID, originalHash);
 
       // Set checkpoint for resume
       const checkpoint: CheckpointData = {
@@ -624,10 +622,10 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
         rowsCommitted: 100,
         timestamp: new Date().toISOString(),
       };
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
       // Simulate client providing different hash (file was modified)
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.ok(stored);
       assert.ok(stored!.fileHash);
       const hashMismatch = stored!.fileHash !== tamperedHash;
@@ -635,13 +633,13 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
       assert.ok(hashMismatch, "Hash mismatch should be detected");
       assert.equal(stored!.fileHash, originalHash, "Original hash should be preserved");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("scenario: multiple resumes on same session work correctly", async () => {
       const sessionId = randomUUID();
 
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
 
       // First resume: batch 0 -> 1
       let checkpoint: CheckpointData = {
@@ -649,9 +647,9 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
         rowsCommitted: 100,
         timestamp: new Date().toISOString(),
       };
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
-      let retrieved = await getCheckpoint(pool, sessionId, COMPANY_ID);
+      let retrieved = await getCheckpoint(sessionId, COMPANY_ID);
       assert.ok(retrieved);
       assert.equal(retrieved!.lastSuccessfulBatchNumber, 0);
 
@@ -661,9 +659,9 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
         rowsCommitted: 200,
         timestamp: new Date().toISOString(),
       };
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
-      retrieved = await getCheckpoint(pool, sessionId, COMPANY_ID);
+      retrieved = await getCheckpoint(sessionId, COMPANY_ID);
       assert.ok(retrieved);
       assert.equal(retrieved!.lastSuccessfulBatchNumber, 1);
 
@@ -673,26 +671,26 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
         rowsCommitted: 300,
         timestamp: new Date().toISOString(),
       };
-      await updateCheckpoint(pool, sessionId, COMPANY_ID, checkpoint);
+      await updateCheckpoint(sessionId, COMPANY_ID, checkpoint);
 
-      retrieved = await getCheckpoint(pool, sessionId, COMPANY_ID);
+      retrieved = await getCheckpoint(sessionId, COMPANY_ID);
       assert.ok(retrieved);
       assert.equal(retrieved!.lastSuccessfulBatchNumber, 2);
 
       // Final resume: complete
-      await clearCheckpoint(pool, sessionId, COMPANY_ID);
-      retrieved = await getCheckpoint(pool, sessionId, COMPANY_ID);
+      await clearCheckpoint(sessionId, COMPANY_ID);
+      retrieved = await getCheckpoint(sessionId, COMPANY_ID);
       assert.equal(retrieved, null, "Checkpoint should be cleared");
 
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
 
     test("scenario: expired session cannot resume", async () => {
       const sessionId = randomUUID();
 
       // Create session and set checkpoint
-      await createSession(pool, sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
-      await updateFileHash(pool, sessionId, COMPANY_ID, computeFileHash(Buffer.from("file")));
+      await createSession(sessionId, COMPANY_ID, "items", SAMPLE_PAYLOAD);
+      await updateFileHash(sessionId, COMPANY_ID, computeFileHash(Buffer.from("file")));
 
       const checkpoint: CheckpointData = {
         lastSuccessfulBatchNumber: 1,
@@ -701,19 +699,19 @@ describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
       };
 
       // Insert directly with past expiry
-      await pool.execute(
-        `UPDATE import_sessions 
-         SET checkpoint_data = ?, expires_at = DATE_SUB(NOW(), INTERVAL 1 SECOND)
-         WHERE session_id = ? AND company_id = ?`,
-        [JSON.stringify(checkpoint), sessionId, COMPANY_ID]
-      );
+      const db = getDb();
+      await sql`
+        UPDATE import_sessions 
+        SET checkpoint_data = ${JSON.stringify(checkpoint)}, expires_at = DATE_SUB(NOW(), INTERVAL 1 SECOND)
+        WHERE session_id = ${sessionId} AND company_id = ${COMPANY_ID}
+      `.execute(db);
 
       // Check if can resume
-      const stored = await getSession(pool, sessionId, COMPANY_ID);
+      const stored = await getSession(sessionId, COMPANY_ID);
       assert.equal(stored, null, "Session should be expired");
 
       // Cleanup
-      await deleteSession(pool, sessionId, COMPANY_ID);
+      await deleteSession(sessionId, COMPANY_ID);
     });
   });
 });

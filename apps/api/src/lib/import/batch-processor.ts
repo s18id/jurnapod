@@ -8,7 +8,6 @@
  * progress tracking, and graceful error handling.
  */
 
-import type { Pool, PoolConnection } from 'mysql2/promise';
 import type {
   BatchOptions,
   BatchContext,
@@ -19,7 +18,8 @@ import type {
   ImportError,
   ProgressCallback,
 } from './types.js';
-import { getDbPool } from '../db.js';
+import { getDb } from '../db.js';
+import type { Kysely } from 'kysely';
 import { createValidationError } from './validator.js';
 
 // ============================================================================
@@ -186,7 +186,7 @@ export async function processBatches<T>(
  * Process batches with database transaction support
  * 
  * This function wraps processBatches and provides automatic transaction
- * management per batch.
+ * management per batch using Kysely transactions.
  */
 export async function processBatchesWithTransaction<T>(
   items: T[],
@@ -194,12 +194,8 @@ export async function processBatchesWithTransaction<T>(
   context: BatchContext,
   options: BatchOptions
 ): Promise<BatchProcessingResult<T>> {
-  const pool = getDbPool();
+  const db = getDb();
   const {
-    companyId,
-    outletId,
-    userId,
-    importSessionId,
     batchSize = DEFAULT_BATCH_SIZE,
     maxErrors = DEFAULT_MAX_ERRORS,
     continueOnError = DEFAULT_CONTINUE_ON_ERROR,
@@ -217,8 +213,6 @@ export async function processBatchesWithTransaction<T>(
   let batchesFailed = 0;
   let errorsEncountered = 0;
   let aborted = false;
-
-  let connection: PoolConnection | undefined;
 
   // Process items in batches
   for (let i = 0; i < items.length; i += batchSize) {
@@ -246,28 +240,23 @@ export async function processBatchesWithTransaction<T>(
     // Report progress
     onProgress?.(progress);
 
-    // Get connection from pool
-    connection = await pool.getConnection();
-
     let batchResult: BatchResult<T>;
 
     try {
-      // Begin transaction
-      await connection.beginTransaction();
-
-      // Process batch with connection
-      batchResult = await processor.processBatch(batchItems, { ...context, connection });
-      batchResult.durationMs = Date.now() - batchStartTime;
+      // Execute batch within a Kysely transaction
+      batchResult = await db.transaction().execute(async (trx) => {
+        // Process batch with transaction handle
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await processor.processBatch(batchItems, { ...context, connection: trx as any });
+        result.durationMs = Date.now() - batchStartTime;
+        return result;
+      });
 
       if (batchResult.committed) {
-        // Commit transaction
-        await connection.commit();
         batchesCompleted++;
         processed.push(...batchResult.processed);
         await processor.onBatchSuccess?.(batchResult.processed);
       } else {
-        // Rollback transaction
-        await connection.rollback();
         batchesFailed++;
 
         // Mark items as failed
@@ -282,11 +271,6 @@ export async function processBatchesWithTransaction<T>(
         }
       }
     } catch (error) {
-      // Rollback on unexpected error
-      if (connection) {
-        await connection.rollback();
-      }
-
       const importError = createValidationError(
         startRowNumber + i,
         'BATCH_PROCESSING_ERROR',
@@ -307,12 +291,6 @@ export async function processBatchesWithTransaction<T>(
       if (!continueOnError) {
         aborted = true;
         break;
-      }
-    } finally {
-      // Release connection back to pool
-      if (connection) {
-        connection.release();
-        connection = undefined;
       }
     }
 
@@ -346,7 +324,8 @@ export async function processBatchesWithTransaction<T>(
  * Create a simple batch processor that runs a function on each item
  */
 export function createSimpleBatchProcessor<T, R>(
-  processFn: (item: T, connection?: PoolConnection) => Promise<R>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  processFn: (item: T, connection?: import("kysely").Kysely<any>) => Promise<R>,
   options: {
     onSuccess?: (results: R[]) => Promise<void>;
     onError?: (error: Error, items: T[]) => Promise<void>;
@@ -358,7 +337,8 @@ export function createSimpleBatchProcessor<T, R>(
       const failed: Array<{ item: T; error: ImportError }> = [];
       const startTime = Date.now();
 
-      const connection = 'connection' in context ? context.connection as PoolConnection | undefined : undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const connection = 'connection' in context ? context.connection as import("kysely").Kysely<any> | undefined : undefined;
 
       for (const item of items) {
         try {
@@ -465,13 +445,16 @@ export function formatProgress(progress: ProgressInfo): string {
 /**
  * Extended batch context with database connection
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface BatchContextWithConnection extends BatchContext {
-  connection?: PoolConnection;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  connection?: import("kysely").Kysely<any>;
 }
 
 /**
  * Check if context has an active connection
  */
-export function hasConnection(context: BatchContext): context is BatchContext & { connection: PoolConnection } {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function hasConnection(context: BatchContext): context is BatchContext & { connection: import("kysely").Kysely<any> } {
   return 'connection' in context && context.connection !== undefined;
 }

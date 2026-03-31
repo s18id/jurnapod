@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "./db";
+import { closeDbPool, getDb } from "./db";
 import {
   listCompanyModules,
   getModuleIdByCode,
@@ -12,7 +12,7 @@ import {
   isModuleEnabled,
   ModuleNotFoundError
 } from "./settings-modules";
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
@@ -20,7 +20,7 @@ test(
   "settings-modules - listCompanyModules returns modules for company",
   { concurrency: false, timeout: 120000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -31,22 +31,21 @@ test(
 
     try {
       // Get company ID from fixtures
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT c.id
+      const companyRows = await sql`
+        SELECT c.id
          FROM companies c
          INNER JOIN users u ON u.company_id = c.id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows[0] as { id: number }).id);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
       // List modules for company
       const modules = await listCompanyModules(companyId);
@@ -74,7 +73,7 @@ test(
   "settings-modules - getModuleIdByCode returns correct ID or null",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
 
     // Test with valid module code
     const validModule = await getModuleIdByCode("platform");
@@ -94,7 +93,7 @@ test(
   "settings-modules - updateCompanyModule creates new record",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -106,29 +105,28 @@ test(
 
     try {
       // Get company ID from fixtures
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT c.id
+      const companyRows = await sql`
+        SELECT c.id
          FROM companies c
          INNER JOIN users u ON u.company_id = c.id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows[0] as { id: number }).id);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
       // Get a module ID to use
-      const [moduleRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM modules WHERE code = 'pos' LIMIT 1`
-      );
-      assert.ok(moduleRows.length > 0, "POS module should exist");
-      moduleId = Number((moduleRows[0] as { id: number }).id);
+      const moduleRows = await sql`
+        SELECT id FROM modules WHERE code = 'pos' LIMIT 1
+      `.execute(db);
+      assert.ok(moduleRows.rows.length > 0, "POS module should exist");
+      moduleId = Number((moduleRows.rows[0] as { id: number }).id);
 
       // Create test company module record
       const testConfig = JSON.stringify({ test_key: `value_${runId}` });
@@ -136,25 +134,23 @@ test(
       await updateCompanyModule(companyId, "pos", true, testConfig);
 
       // Verify the record was created/updated
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT enabled, config_json FROM company_modules
-         WHERE company_id = ? AND module_id = ?`,
-        [companyId, moduleId]
-      );
+      const rows = await sql`
+        SELECT enabled, config_json FROM company_modules
+         WHERE company_id = ${companyId} AND module_id = ${moduleId}
+      `.execute(db);
 
-      assert.ok(rows.length > 0, "Company module record should exist");
-      assert.strictEqual(Boolean((rows[0] as { enabled: number }).enabled), true, "Module should be enabled");
-      assert.strictEqual((rows[0] as { config_json: string }).config_json, testConfig, "Config should match");
+      assert.ok(rows.rows.length > 0, "Company module record should exist");
+      assert.strictEqual(Boolean((rows.rows[0] as { enabled: number }).enabled), true, "Module should be enabled");
+      assert.strictEqual((rows.rows[0] as { config_json: string }).config_json, testConfig, "Config should match");
 
       console.log("✅ updateCompanyModule create test passed");
     } finally {
       // Cleanup - reset to original state
       if (companyId > 0 && moduleId > 0) {
-        await pool.execute(
-          `UPDATE company_modules SET enabled = 1, config_json = '{"payment_methods":["CASH"]}'
-           WHERE company_id = ? AND module_id = ?`,
-          [companyId, moduleId]
-        );
+        await sql`
+          UPDATE company_modules SET enabled = 1, config_json = '{"payment_methods":["CASH"]}'
+           WHERE company_id = ${companyId} AND module_id = ${moduleId}
+        `.execute(db);
       }
     }
   }
@@ -164,7 +160,7 @@ test(
   "settings-modules - updateCompanyModule updates existing record",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -177,38 +173,36 @@ test(
 
     try {
       // Get company ID from fixtures
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT c.id
+      const companyRows = await sql`
+        SELECT c.id
          FROM companies c
          INNER JOIN users u ON u.company_id = c.id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows[0] as { id: number }).id);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
       // Get a module ID to use
-      const [moduleRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM modules WHERE code = 'pos' LIMIT 1`
-      );
-      assert.ok(moduleRows.length > 0, "POS module should exist");
-      moduleId = Number((moduleRows[0] as { id: number }).id);
+      const moduleRows = await sql`
+        SELECT id FROM modules WHERE code = 'pos' LIMIT 1
+      `.execute(db);
+      assert.ok(moduleRows.rows.length > 0, "POS module should exist");
+      moduleId = Number((moduleRows.rows[0] as { id: number }).id);
 
       // Capture original config
-      const [originalRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT config_json FROM company_modules
-         WHERE company_id = ? AND module_id = ?`,
-        [companyId, moduleId]
-      );
-      if (originalRows.length > 0) {
-        originalConfig = (originalRows[0] as { config_json: string }).config_json;
+      const originalRows = await sql`
+        SELECT config_json FROM company_modules
+         WHERE company_id = ${companyId} AND module_id = ${moduleId}
+      `.execute(db);
+      if (originalRows.rows.length > 0) {
+        originalConfig = (originalRows.rows[0] as { config_json: string }).config_json;
       }
 
       // First update - enable false
@@ -216,15 +210,14 @@ test(
       await updateCompanyModule(companyId, "pos", false, newConfig);
 
       // Verify first update
-      const [firstUpdate] = await pool.execute<RowDataPacket[]>(
-        `SELECT enabled, config_json FROM company_modules
-         WHERE company_id = ? AND module_id = ?`,
-        [companyId, moduleId]
-      );
+      const firstUpdate = await sql`
+        SELECT enabled, config_json FROM company_modules
+         WHERE company_id = ${companyId} AND module_id = ${moduleId}
+      `.execute(db);
 
-      assert.ok(firstUpdate.length > 0, "Record should exist after first update");
+      assert.ok(firstUpdate.rows.length > 0, "Record should exist after first update");
       assert.strictEqual(
-        Boolean((firstUpdate[0] as { enabled: number }).enabled),
+        Boolean((firstUpdate.rows[0] as { enabled: number }).enabled),
         false,
         "Module should be disabled after first update"
       );
@@ -233,15 +226,14 @@ test(
       await updateCompanyModule(companyId, "pos", true, JSON.stringify({ runId }));
 
       // Verify second update
-      const [secondUpdate] = await pool.execute<RowDataPacket[]>(
-        `SELECT enabled, config_json FROM company_modules
-         WHERE company_id = ? AND module_id = ?`,
-        [companyId, moduleId]
-      );
+      const secondUpdate = await sql`
+        SELECT enabled, config_json FROM company_modules
+         WHERE company_id = ${companyId} AND module_id = ${moduleId}
+      `.execute(db);
 
-      assert.ok(secondUpdate.length > 0, "Record should exist after second update");
+      assert.ok(secondUpdate.rows.length > 0, "Record should exist after second update");
       assert.strictEqual(
-        Boolean((secondUpdate[0] as { enabled: number }).enabled),
+        Boolean((secondUpdate.rows[0] as { enabled: number }).enabled),
         true,
         "Module should be enabled after second update"
       );
@@ -250,11 +242,10 @@ test(
     } finally {
       // Cleanup - restore original state
       if (companyId > 0 && moduleId > 0) {
-        await pool.execute(
-          `UPDATE company_modules SET enabled = 1, config_json = ?
-           WHERE company_id = ? AND module_id = ?`,
-          [originalConfig ?? '{"payment_methods":["CASH"]}', companyId, moduleId]
-        );
+        await sql`
+          UPDATE company_modules SET enabled = 1, config_json = ${originalConfig ?? '{"payment_methods":["CASH"]}'}
+           WHERE company_id = ${companyId} AND module_id = ${moduleId}
+        `.execute(db);
       }
     }
   }
@@ -264,7 +255,7 @@ test(
   "settings-modules - isModuleEnabled returns correct boolean",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -277,38 +268,36 @@ test(
 
     try {
       // Get company ID from fixtures
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT c.id
+      const companyRows = await sql`
+        SELECT c.id
          FROM companies c
          INNER JOIN users u ON u.company_id = c.id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows[0] as { id: number }).id);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
       // Get a module ID to use
-      const [moduleRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM modules WHERE code = 'pos' LIMIT 1`
-      );
-      assert.ok(moduleRows.length > 0, "POS module should exist");
-      moduleId = Number((moduleRows[0] as { id: number }).id);
+      const moduleRows = await sql`
+        SELECT id FROM modules WHERE code = 'pos' LIMIT 1
+      `.execute(db);
+      assert.ok(moduleRows.rows.length > 0, "POS module should exist");
+      moduleId = Number((moduleRows.rows[0] as { id: number }).id);
 
       // Capture original enabled state
-      const [originalRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT enabled FROM company_modules
-         WHERE company_id = ? AND module_id = ?`,
-        [companyId, moduleId]
-      );
-      if (originalRows.length > 0) {
-        originalEnabled = Boolean((originalRows[0] as { enabled: number }).enabled);
+      const originalRows = await sql`
+        SELECT enabled FROM company_modules
+         WHERE company_id = ${companyId} AND module_id = ${moduleId}
+      `.execute(db);
+      if (originalRows.rows.length > 0) {
+        originalEnabled = Boolean((originalRows.rows[0] as { enabled: number }).enabled);
       }
 
       // Initially check if enabled
@@ -316,21 +305,19 @@ test(
       assert.strictEqual(initialState, originalEnabled, "Initial state should match original");
 
       // Disable the module
-      await pool.execute(
-        `UPDATE company_modules SET enabled = 0
-         WHERE company_id = ? AND module_id = ?`,
-        [companyId, moduleId]
-      );
+      await sql`
+        UPDATE company_modules SET enabled = 0
+         WHERE company_id = ${companyId} AND module_id = ${moduleId}
+      `.execute(db);
 
       const disabledState = await isModuleEnabled(companyId, "pos");
       assert.strictEqual(disabledState, false, "Should return false when disabled");
 
       // Enable the module
-      await pool.execute(
-        `UPDATE company_modules SET enabled = 1
-         WHERE company_id = ? AND module_id = ?`,
-        [companyId, moduleId]
-      );
+      await sql`
+        UPDATE company_modules SET enabled = 1
+         WHERE company_id = ${companyId} AND module_id = ${moduleId}
+      `.execute(db);
 
       const enabledState = await isModuleEnabled(companyId, "pos");
       assert.strictEqual(enabledState, true, "Should return true when enabled");
@@ -343,11 +330,10 @@ test(
     } finally {
       // Cleanup - restore original state
       if (companyId > 0 && moduleId > 0) {
-        await pool.execute(
-          `UPDATE company_modules SET enabled = ?
-           WHERE company_id = ? AND module_id = ?`,
-          [originalEnabled ? 1 : 0, companyId, moduleId]
-        );
+        await sql`
+          UPDATE company_modules SET enabled = ${originalEnabled ? 1 : 0}
+           WHERE company_id = ${companyId} AND module_id = ${moduleId}
+        `.execute(db);
       }
     }
   }
@@ -357,7 +343,7 @@ test(
   "settings-modules - ModuleNotFoundError thrown when module doesn't exist",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
     const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
@@ -367,22 +353,21 @@ test(
 
     try {
       // Get company ID from fixtures
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT c.id
+      const companyRows = await sql`
+        SELECT c.id
          FROM companies c
          INNER JOIN users u ON u.company_id = c.id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows[0] as { id: number }).id);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
       // Attempt to update a non-existent module
       try {

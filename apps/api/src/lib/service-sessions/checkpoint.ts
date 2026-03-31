@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import { getDbPool } from "../db";
+import { sql } from "kysely";
+import { getDb, type KyselySchema } from "../db";
 import {
   ServiceSessionStatus,
   ServiceSessionLineState,
@@ -60,50 +60,44 @@ export {
 export async function finalizeSessionBatch(
   input: FinalizeSessionBatchInput
 ): Promise<FinalizeSessionBatchResult> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
 
-  try {
-    await connection.beginTransaction();
+  return await db.transaction().execute(async (trx) => {
+    const existingCheckpointRows = await sql<{ session_id: number; batch_no: number }>`
+      SELECT session_id, batch_no
+      FROM table_service_session_checkpoints
+      WHERE company_id = ${input.companyId}
+        AND outlet_id = ${input.outletId}
+        AND client_tx_id = ${input.clientTxId}
+      LIMIT 1
+    `.execute(trx);
 
-    const [existingCheckpointRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT session_id, batch_no
-       FROM table_service_session_checkpoints
-       WHERE company_id = ?
-         AND outlet_id = ?
-         AND client_tx_id = ?
-       LIMIT 1`,
-      [input.companyId, input.outletId, input.clientTxId]
-    );
-
-    if (existingCheckpointRows.length > 0) {
-      const batchNo = Number(existingCheckpointRows[0].batch_no);
+    if (existingCheckpointRows.rows.length > 0) {
+      const batchNo = Number(existingCheckpointRows.rows[0].batch_no);
       const sessionVersion = await getSessionVersionWithConnection(
-        connection,
+        trx,
         input.companyId,
         input.outletId,
-        BigInt(existingCheckpointRows[0].session_id)
+        BigInt(existingCheckpointRows.rows[0].session_id)
       );
-      const [countRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) AS count
-         FROM table_service_session_lines
-         WHERE session_id = ?
-           AND batch_no = ?
-           AND is_voided = 0`,
-        [input.sessionId, batchNo]
-      );
+      const countResult = await sql<{ count: number }>`
+        SELECT COUNT(*) AS count
+        FROM table_service_session_lines
+        WHERE session_id = ${input.sessionId}
+          AND batch_no = ${batchNo}
+          AND is_voided = 0
+      `.execute(trx);
 
-      await connection.commit();
       return {
         sessionId: input.sessionId,
         batchNo,
         sessionVersion,
-        syncedLinesCount: Number(countRows[0]?.count ?? 0)
+        syncedLinesCount: Number(countResult.rows[0]?.count ?? 0)
       };
     }
 
     const sessionRow = await getSessionWithConnection(
-      connection,
+      trx,
       input.companyId,
       input.outletId,
       input.sessionId
@@ -126,39 +120,31 @@ export async function finalizeSessionBatch(
       throw new SessionValidationError("Cannot finalize batch without linked pos order snapshot");
     }
 
-    const [batchRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT COALESCE(last_finalized_batch_no, 0) + 1 AS next_batch_no
-       FROM table_service_sessions
-       WHERE id = ?
-         AND company_id = ?
-         AND outlet_id = ?
-       LIMIT 1`,
-      [input.sessionId, input.companyId, input.outletId]
-    );
-    const nextBatchNo = Number(batchRows[0]?.next_batch_no ?? 1);
+    const batchResult = await sql<{ next_batch_no: number }>`
+      SELECT COALESCE(last_finalized_batch_no, 0) + 1 AS next_batch_no
+      FROM table_service_sessions
+      WHERE id = ${input.sessionId}
+        AND company_id = ${input.companyId}
+        AND outlet_id = ${input.outletId}
+      LIMIT 1
+    `.execute(trx);
+    const nextBatchNo = Number(batchResult.rows[0]?.next_batch_no ?? 1);
 
-    const [finalizeResult] = await connection.execute<ResultSetHeader>(
-      `UPDATE table_service_session_lines
-       SET batch_no = ?,
-           line_state = ?,
+    const finalizeResult = await sql`
+      UPDATE table_service_session_lines
+       SET batch_no = ${nextBatchNo},
+           line_state = ${ServiceSessionLineState.FINALIZED},
            updated_at = NOW()
-       WHERE session_id = ?
+       WHERE session_id = ${input.sessionId}
          AND is_voided = 0
-         AND COALESCE(line_state, ?) = ?`,
-      [
-        nextBatchNo,
-        ServiceSessionLineState.FINALIZED,
-        input.sessionId,
-        ServiceSessionLineState.OPEN,
-        ServiceSessionLineState.OPEN
-      ]
-    );
+         AND COALESCE(line_state, ${ServiceSessionLineState.OPEN}) = ${ServiceSessionLineState.OPEN}
+    `.execute(trx);
 
-    if (finalizeResult.affectedRows === 0) {
+    if (Number(finalizeResult.numAffectedRows ?? 0n) === 0) {
       throw new SessionValidationError("No open lines to finalize");
     }
 
-    const syncedLinesCount = await syncSnapshotLinesFromSession(connection, {
+    const syncedLinesCount = await syncSnapshotLinesFromSession(trx, {
       snapshotId,
       companyId: input.companyId,
       outletId: input.outletId,
@@ -166,41 +152,40 @@ export async function finalizeSessionBatch(
       onlyFinalized: true,
     });
 
-    await connection.execute(
-      `INSERT INTO table_service_session_checkpoints
+    await sql`
+      INSERT INTO table_service_session_checkpoints
        (company_id, outlet_id, session_id, batch_no, snapshot_id, finalized_at, finalized_by, client_tx_id)
-       VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)`,
-      [
-        input.companyId,
-        input.outletId,
-        input.sessionId,
-        nextBatchNo,
-        snapshotId,
-        input.updatedBy,
-        input.clientTxId
-      ]
-    );
+       VALUES (
+         ${input.companyId},
+         ${input.outletId},
+         ${input.sessionId},
+         ${nextBatchNo},
+         ${snapshotId},
+         NOW(),
+         ${input.updatedBy},
+         ${input.clientTxId}
+       )
+    `.execute(trx);
 
-    await connection.execute(
-      `UPDATE table_service_sessions
-       SET last_finalized_batch_no = ?,
+    await sql`
+      UPDATE table_service_sessions
+       SET last_finalized_batch_no = ${nextBatchNo},
            session_version = COALESCE(session_version, 1) + 1,
            updated_at = NOW(),
-           updated_by = ?
-       WHERE id = ?
-         AND company_id = ?
-         AND outlet_id = ?`,
-      [nextBatchNo, input.updatedBy, input.sessionId, input.companyId, input.outletId]
-    );
+           updated_by = ${input.updatedBy}
+       WHERE id = ${input.sessionId}
+         AND company_id = ${input.companyId}
+         AND outlet_id = ${input.outletId}
+    `.execute(trx);
 
     const sessionVersion = await getSessionVersionWithConnection(
-      connection,
+      trx,
       input.companyId,
       input.outletId,
       input.sessionId
     );
 
-    await logSessionEvent(connection, {
+    await logSessionEvent(trx, {
       companyId: input.companyId,
       outletId: input.outletId,
       tableId: BigInt(sessionRow.table_id),
@@ -216,20 +201,13 @@ export async function finalizeSessionBatch(
       createdBy: input.updatedBy,
     });
 
-    await connection.commit();
-
     return {
       sessionId: input.sessionId,
       batchNo: nextBatchNo,
       sessionVersion,
       syncedLinesCount,
     };
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }
 
 /**
@@ -241,29 +219,24 @@ export async function finalizeSessionBatch(
 export async function adjustSessionLine(
   input: AdjustSessionLineInput
 ): Promise<AdjustSessionLineResult> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
 
-  try {
-    await connection.beginTransaction();
-
-    const isDuplicate = await checkClientTxIdExists(connection, input.companyId, input.outletId, input.clientTxId);
+  return await db.transaction().execute(async (trx) => {
+    const isDuplicate = await checkClientTxIdExists(trx, input.companyId, input.outletId, input.clientTxId);
     if (isDuplicate) {
       const lineOnRetry = await getSessionLineWithConnection(
-        connection,
+        trx,
         input.companyId,
         input.outletId,
         input.sessionId,
         input.lineId
       );
       const sessionVersion = await getSessionVersionWithConnection(
-        connection,
+        trx,
         input.companyId,
         input.outletId,
         input.sessionId
       );
-
-      await connection.commit();
 
       if (!lineOnRetry) {
         throw new SessionConflictError("Duplicate adjust transaction but line not found");
@@ -275,7 +248,7 @@ export async function adjustSessionLine(
     }
 
     const sessionRow = await getSessionWithConnection(
-      connection,
+      trx,
       input.companyId,
       input.outletId,
       input.sessionId
@@ -294,7 +267,7 @@ export async function adjustSessionLine(
     }
 
     const existingLine = await getSessionLineWithConnection(
-      connection,
+      trx,
       input.companyId,
       input.outletId,
       input.sessionId,
@@ -312,16 +285,15 @@ export async function adjustSessionLine(
     const currentLineState = Number(existingLine.line_state ?? ServiceSessionLineState.OPEN);
 
     if (input.action === "CANCEL") {
-      await connection.execute(
-        `UPDATE table_service_session_lines
+      await sql`
+        UPDATE table_service_session_lines
          SET is_voided = 1,
              voided_at = NOW(),
-             void_reason = ?,
-             line_state = ?,
+             void_reason = ${input.reason},
+             line_state = ${ServiceSessionLineState.VOIDED},
              updated_at = NOW()
-         WHERE id = ?`,
-        [input.reason, ServiceSessionLineState.VOIDED, input.lineId]
-      );
+         WHERE id = ${input.lineId}
+      `.execute(trx);
     } else {
       if (!input.qtyDelta || input.qtyDelta <= 0) {
         throw new SessionValidationError("qtyDelta is required for REDUCE_QTY adjustment");
@@ -340,32 +312,30 @@ export async function adjustSessionLine(
       const newTax = perUnitTax * newQuantity;
       const newLineTotal = (newQuantity * unitPrice) - newDiscount + newTax;
 
-      await connection.execute(
-        `UPDATE table_service_session_lines
-         SET quantity = ?,
-             discount_amount = ?,
-             tax_amount = ?,
-             line_total = ?,
+      await sql`
+        UPDATE table_service_session_lines
+         SET quantity = ${newQuantity},
+             discount_amount = ${newDiscount},
+             tax_amount = ${newTax},
+             line_total = ${newLineTotal},
              updated_at = NOW()
-         WHERE id = ?`,
-        [newQuantity, newDiscount, newTax, newLineTotal, input.lineId]
-      );
+         WHERE id = ${input.lineId}
+      `.execute(trx);
     }
 
-    await connection.execute(
-      `UPDATE table_service_sessions
+    await sql`
+      UPDATE table_service_sessions
        SET session_version = COALESCE(session_version, 1) + 1,
            updated_at = NOW(),
-           updated_by = ?
-       WHERE id = ?
-         AND company_id = ?
-         AND outlet_id = ?`,
-      [input.updatedBy, input.sessionId, input.companyId, input.outletId]
-    );
+           updated_by = ${input.updatedBy}
+       WHERE id = ${input.sessionId}
+         AND company_id = ${input.companyId}
+         AND outlet_id = ${input.outletId}
+    `.execute(trx);
 
     const snapshotId = sessionRow.pos_order_snapshot_id;
     if (snapshotId && currentLineState === ServiceSessionLineState.FINALIZED) {
-      await syncSnapshotLinesFromSession(connection, {
+      await syncSnapshotLinesFromSession(trx, {
         snapshotId,
         companyId: input.companyId,
         outletId: input.outletId,
@@ -375,13 +345,13 @@ export async function adjustSessionLine(
     }
 
     const sessionVersion = await getSessionVersionWithConnection(
-      connection,
+      trx,
       input.companyId,
       input.outletId,
       input.sessionId
     );
 
-    await logSessionEvent(connection, {
+    await logSessionEvent(trx, {
       companyId: input.companyId,
       outletId: input.outletId,
       tableId: BigInt(sessionRow.table_id),
@@ -397,10 +367,8 @@ export async function adjustSessionLine(
       createdBy: input.updatedBy,
     });
 
-    await connection.commit();
-
     const updatedLine = await getSessionLineWithConnection(
-      connection,
+      trx,
       input.companyId,
       input.outletId,
       input.sessionId,
@@ -415,10 +383,5 @@ export async function adjustSessionLine(
       line: mapDbRowToSessionLine(updatedLine),
       sessionVersion,
     };
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }

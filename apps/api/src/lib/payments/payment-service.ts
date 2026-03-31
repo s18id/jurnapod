@@ -7,8 +7,8 @@
  * Payment CRUD operations extracted from sales.ts
  */
 
-import type { RowDataPacket, ResultSetHeader, PoolConnection } from "mysql2/promise";
-import { getDbPool } from "@/lib/db";
+import { getDb, type KyselySchema } from "@/lib/db";
+import { sql, type Expression } from "kysely";
 import { toMysqlDateTime, toMysqlDateTimeFromDateLike } from "@/lib/date-helpers";
 import { toRfc3339Required } from "@jurnapod/shared";
 import {
@@ -21,7 +21,7 @@ import {
   PaymentStatusError,
   PaymentAllocationError
 } from "@/lib/sales";
-import type { PaymentListFilters, QueryExecutor, MutationActor } from "./types";
+import type { PaymentListFilters, MutationActor } from "./types";
 import type { SalesPaymentRow } from "./types";
 import {
   normalizePayment,
@@ -35,39 +35,50 @@ import {
 } from "./payment-allocation";
 import {
   normalizeMoney,
-  withTransaction,
   getNumberWithConflictMapping,
   ensureCompanyOutletExists,
   ensureUserHasOutletAccess,
   isMysqlError,
   DatabaseConflictError,
-  DatabaseReferenceError
+  DatabaseReferenceError,
+  type QueryExecutor
 } from "@/lib/shared/common-utils";
 
+// =============================================================================
+// Transaction Helper
+// =============================================================================
+
+async function withTransaction<T>(operation: (db: KyselySchema) => Promise<T>): Promise<T> {
+  const db = getDb();
+  return db.transaction().execute(operation);
+}
+
+// =============================================================================
+// Query Helpers
+// =============================================================================
+
 async function findInvoiceByIdWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   invoiceId: number,
   options?: { forUpdate?: boolean }
 ): Promise<SalesInvoice | null> {
-  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, due_date, status, payment_status,
+  const forUpdateClause = options?.forUpdate ? sql` FOR UPDATE` : sql``;
+  const rows = await sql`SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, due_date, status, payment_status,
             subtotal, tax_amount, grand_total, paid_total,
             approved_by_user_id, approved_at,
             created_by_user_id, updated_by_user_id, created_at, updated_at
      FROM sales_invoices
-     WHERE company_id = ?
-       AND id = ?
-     LIMIT 1${forUpdateClause}`,
-    [companyId, invoiceId]
-  );
+     WHERE company_id = ${companyId}
+       AND id = ${invoiceId}
+     LIMIT 1
+     ${forUpdateClause}`.execute(db);
 
-  if (!rows[0]) {
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  const row = rows[0] as RowDataPacket & {
+  const row = rows.rows[0] as {
     id: number;
     company_id: number;
     outlet_id: number;
@@ -118,22 +129,20 @@ export async function findPaymentByIdWithExecutor(
   paymentId: number,
   options?: { forUpdate?: boolean; includeSplits?: boolean }
 ): Promise<SalesPayment | null> {
-  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
-  const [rows] = await executor.execute<SalesPaymentRow[]>(
-    `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
+  const forUpdateClause = options?.forUpdate ? sql` FOR UPDATE` : sql``;
+  const result = await sql`SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
             sp.account_id, a.name as account_name, sp.method, sp.status,
             sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
             sp.shortfall_settled_as_loss, sp.shortfall_reason, sp.shortfall_settled_by_user_id, sp.shortfall_settled_at,
             sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
      FROM sales_payments sp
      LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
-     WHERE sp.company_id = ?
-       AND sp.id = ?
-     LIMIT 1${forUpdateClause}`,
-    [companyId, paymentId]
-  );
+     WHERE sp.company_id = ${companyId}
+       AND sp.id = ${paymentId}
+     LIMIT 1${forUpdateClause}`.execute(executor);
 
-  if (!rows[0]) {
+  const rows = result.rows as SalesPaymentRow[];
+  if (rows.length === 0) {
     return null;
   }
 
@@ -155,16 +164,14 @@ export async function findPaymentByClientRefWithExecutor(
   companyId: number,
   clientRef: string
 ): Promise<SalesPayment | null> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id
+  const result = await sql`SELECT id
      FROM sales_payments
-     WHERE company_id = ?
-       AND client_ref = ?
-     LIMIT 1`,
-    [companyId, clientRef]
-  );
+     WHERE company_id = ${companyId}
+       AND client_ref = ${clientRef}
+     LIMIT 1`.execute(executor);
 
-  if (!rows[0]) {
+  const rows = result.rows as Array<{ id: number }>;
+  if (rows.length === 0) {
     return null;
   }
 
@@ -222,42 +229,54 @@ function toDateTimeRangeWithTimezone(dateFrom: string, dateTo: string, timezone:
 }
 
 export async function listPayments(companyId: number, filters: PaymentListFilters) {
-  const pool = getDbPool();
+  const db = getDb();
   const limit = filters.limit ?? 50;
   const offset = filters.offset ?? 0;
-  const where = buildPaymentWhereClause(companyId, filters);
 
-  if (where.isEmpty) {
-    return { total: 0, payments: [] };
+  // Build WHERE conditions dynamically
+  const conditions: Expression<any>[] = [sql`sp.company_id = ${companyId}`];
+
+  if (filters.outletIds && filters.outletIds.length > 0) {
+    conditions.push(sql`sp.outlet_id IN (${sql.join(filters.outletIds.map(id => sql`${id}`), sql`, `)})`);
   }
 
-  const [countRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) as total
-     FROM sales_payments sp
-     WHERE ${where.clause}`,
-    where.values
-  );
-  const total = Number(countRows[0]?.total ?? 0);
+  if (filters.status) {
+    conditions.push(sql`sp.status = ${filters.status}`);
+  }
 
-  const [rows] = await pool.execute<SalesPaymentRow[]>(
-    `SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
-            sp.account_id, a.name as account_name, sp.method, sp.status,
-            sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
-            sp.shortfall_settled_as_loss, sp.shortfall_reason, sp.shortfall_settled_by_user_id, sp.shortfall_settled_at,
-            sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
+  if (filters.dateFrom) {
+    conditions.push(sql`sp.payment_at >= ${filters.dateFrom}`);
+  }
+
+  if (filters.dateTo) {
+    conditions.push(sql`sp.payment_at <= ${filters.dateTo}`);
+  }
+
+  const whereClause = sql.join(conditions, sql` AND `);
+
+  const countResult = await sql`SELECT COUNT(*) as total
      FROM sales_payments sp
-     LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
-     WHERE ${where.clause}
-     ORDER BY sp.payment_at DESC, sp.id DESC
-     LIMIT ? OFFSET ?`,
-    [...where.values, limit, offset]
-  );
+     WHERE ${whereClause}`.execute(db);
+  const total = Number((countResult.rows[0] as { total?: number })?.total ?? 0);
+
+  const rowsResult = await sql<SalesPaymentRow>`SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
+          sp.account_id, a.name as account_name, sp.method, sp.status,
+          sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
+          sp.shortfall_settled_as_loss, sp.shortfall_reason, sp.shortfall_settled_by_user_id, sp.shortfall_settled_at,
+          sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
+   FROM sales_payments sp
+   LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
+   WHERE ${whereClause}
+   ORDER BY sp.payment_at DESC, sp.id DESC
+   LIMIT ${limit} OFFSET ${offset}`.execute(db);
+
+  const rows = rowsResult.rows as SalesPaymentRow[];
 
   // Phase 8: Batch fetch splits for all payments
-  const paymentIds = rows.map(r => Number(r.id));
-  const splitsByPaymentId = await fetchPaymentSplitsForMultiple(pool, companyId, paymentIds);
+  const paymentIds = rows.map((r: SalesPaymentRow) => Number(r.id));
+  const splitsByPaymentId = await fetchPaymentSplitsForMultiple(db, companyId, paymentIds);
 
-  const payments = rows.map(row => {
+  const payments = rows.map((row: SalesPaymentRow) => {
     const payment = normalizePayment(row);
     const splits = splitsByPaymentId.get(payment.id);
     if (splits && splits.length > 0) {
@@ -270,8 +289,8 @@ export async function listPayments(companyId: number, filters: PaymentListFilter
 }
 
 export async function getPayment(companyId: number, paymentId: number) {
-  const pool = getDbPool();
-  return findPaymentByIdWithExecutor(pool, companyId, paymentId);
+  const db = getDb();
+  return findPaymentByIdWithExecutor(db, companyId, paymentId);
 }
 
 export async function createPayment(
@@ -327,12 +346,10 @@ export async function createPayment(
 
       // Validate each split account is payable and belongs to company
       for (const split of input.splits!) {
-        const [accountRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id FROM accounts
-           WHERE id = ? AND company_id = ? AND is_payable = 1
-           LIMIT 1`,
-          [split.account_id, companyId]
-        );
+        const result = await sql`SELECT id FROM accounts
+           WHERE id = ${split.account_id} AND company_id = ${companyId} AND is_payable = 1
+           LIMIT 1`.execute(connection);
+        const accountRows = result.rows as Array<{ id: number }>;
         if (accountRows.length === 0) {
           throw new DatabaseReferenceError(`Account ${split.account_id} not found or not payable`);
         }
@@ -397,12 +414,10 @@ export async function createPayment(
     }
 
     // Verify header account exists, belongs to company, and is payable
-    const [accountRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT id FROM accounts
-       WHERE id = ? AND company_id = ? AND is_payable = 1
-       LIMIT 1`,
-      [effectiveAccountId, companyId]
-    );
+    const accountResult = await sql`SELECT id FROM accounts
+       WHERE id = ${effectiveAccountId} AND company_id = ${companyId} AND is_payable = 1
+       LIMIT 1`.execute(connection);
+    const accountRows = accountResult.rows as Array<{ id: number }>;
     if (accountRows.length === 0) {
       throw new DatabaseReferenceError("Account not found or not payable");
     }
@@ -428,8 +443,7 @@ export async function createPayment(
     );
 
     try {
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO sales_payments (
+      const result = await sql`INSERT INTO sales_payments (
            company_id,
            outlet_id,
            invoice_id,
@@ -443,41 +457,16 @@ export async function createPayment(
            payment_amount_idr,
            created_by_user_id,
            updated_by_user_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?)`,
-        [
-          companyId,
-          input.outlet_id,
-          input.invoice_id,
-          paymentNo,
-          input.client_ref ?? null,
-          paymentAt,
-          effectiveAccountId,
-          input.method ?? null,
-          amount,
-          effectivePaymentAmount,
-          actor?.userId ?? null,
-          actor?.userId ?? null
-        ]
-      );
+         ) VALUES (${companyId}, ${input.outlet_id}, ${input.invoice_id}, ${paymentNo}, ${input.client_ref ?? null}, ${paymentAt}, ${effectiveAccountId}, ${input.method ?? null}, 'DRAFT', ${amount}, ${effectivePaymentAmount}, ${actor?.userId ?? null}, ${actor?.userId ?? null})`.execute(connection);
 
       const paymentId = Number(result.insertId);
 
       // Phase 8: Insert split rows
       for (let i = 0; i < splitData.length; i++) {
         const split = splitData[i];
-        await connection.execute<ResultSetHeader>(
-          `INSERT INTO sales_payment_splits (
+        await sql`INSERT INTO sales_payment_splits (
              payment_id, company_id, outlet_id, split_index, account_id, amount
-           ) VALUES (?, ?, ?, ?, ?, ?)`,
-          [
-            paymentId,
-            companyId,
-            input.outlet_id,
-            i,
-            split.account_id,
-            normalizeMoney(split.amount)
-          ]
-        );
+           ) VALUES (${paymentId}, ${companyId}, ${input.outlet_id}, ${i}, ${split.account_id}, ${normalizeMoney(split.amount)})`.execute(connection);
       }
 
       const payment = await findPaymentByIdWithExecutor(connection, companyId, paymentId);
@@ -603,12 +592,10 @@ export async function updatePayment(
 
       // Validate each split account is payable and belongs to company
       for (const split of input.splits!) {
-        const [accountRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id FROM accounts
-           WHERE id = ? AND company_id = ? AND is_payable = 1
-           LIMIT 1`,
-          [split.account_id, companyId]
-        );
+        const result = await sql`SELECT id FROM accounts
+           WHERE id = ${split.account_id} AND company_id = ${companyId} AND is_payable = 1
+           LIMIT 1`.execute(connection);
+        const accountRows = result.rows as Array<{ id: number }>;
         if (accountRows.length === 0) {
           throw new DatabaseReferenceError(`Account ${split.account_id} not found or not payable`);
         }
@@ -642,12 +629,10 @@ export async function updatePayment(
 
     // Verify account if provided (and not already validated via splits)
     if (!hasSplits && typeof input.account_id === "number") {
-      const [accountRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM accounts
-         WHERE id = ? AND company_id = ? AND is_payable = 1
-         LIMIT 1`,
-        [input.account_id, companyId]
-      );
+      const result = await sql`SELECT id FROM accounts
+         WHERE id = ${input.account_id} AND company_id = ${companyId} AND is_payable = 1
+         LIMIT 1`.execute(connection);
+      const accountRows = result.rows as Array<{ id: number }>;
       if (accountRows.length === 0) {
         throw new DatabaseReferenceError("Account not found or not payable");
       }
@@ -673,60 +658,32 @@ export async function updatePayment(
     }
 
     try {
-      await connection.execute<ResultSetHeader>(
-        `UPDATE sales_payments
-         SET outlet_id = ?,
-             invoice_id = ?,
-             payment_no = ?,
-             payment_at = ?,
-             account_id = ?,
-             method = ?,
-             amount = ?,
-             payment_amount_idr = ?,
-             updated_by_user_id = ?,
+      await sql`UPDATE sales_payments
+         SET outlet_id = ${nextOutletId},
+             invoice_id = ${nextInvoiceId},
+             payment_no = ${nextPaymentNo},
+             payment_at = ${nextPaymentAt},
+             account_id = ${nextAccountId},
+             method = ${nextMethod ?? null},
+             amount = ${nextAmount},
+             payment_amount_idr = ${nextPaymentAmountIdr},
+             updated_by_user_id = ${actor?.userId ?? null},
              updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ?
-           AND id = ?`,
-        [
-          nextOutletId,
-          nextInvoiceId,
-          nextPaymentNo,
-          nextPaymentAt,
-          nextAccountId,
-          nextMethod ?? null,
-          nextAmount,
-          nextPaymentAmountIdr,
-          actor?.userId ?? null,
-          companyId,
-          paymentId
-        ]
-      );
+         WHERE company_id = ${companyId}
+           AND id = ${paymentId}`.execute(connection);
 
       // Phase 8: Update splits if provided
       if (hasSplits) {
         // Delete existing splits
-        await connection.execute(
-          `DELETE FROM sales_payment_splits
-           WHERE company_id = ? AND payment_id = ?`,
-          [companyId, paymentId]
-        );
+        await sql`DELETE FROM sales_payment_splits
+           WHERE company_id = ${companyId} AND payment_id = ${paymentId}`.execute(connection);
 
         // Insert new splits
         for (let i = 0; i < input.splits!.length; i++) {
           const split = input.splits![i];
-          await connection.execute<ResultSetHeader>(
-            `INSERT INTO sales_payment_splits (
+          await sql`INSERT INTO sales_payment_splits (
                payment_id, company_id, outlet_id, split_index, account_id, amount
-             ) VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-              paymentId,
-              companyId,
-              nextOutletId,
-              i,
-              split.account_id,
-              normalizeMoney(split.amount)
-            ]
-          );
+             ) VALUES (${paymentId}, ${companyId}, ${nextOutletId}, ${i}, ${split.account_id}, ${normalizeMoney(split.amount)})`.execute(connection);
         }
       }
 
@@ -815,31 +772,18 @@ export async function postPayment(
     const userId = actor?.userId ?? null;
     const shortfallSettledAt = options?.settle_shortfall_as_loss ? new Date() : null;
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_payments
+    await sql`UPDATE sales_payments
        SET status = 'POSTED',
-           invoice_amount_idr = ?,
-           payment_delta_idr = ?,
-           shortfall_settled_as_loss = ?,
-           shortfall_reason = ?,
-           shortfall_settled_by_user_id = ?,
-           shortfall_settled_at = ?,
-           updated_by_user_id = ?,
+           invoice_amount_idr = ${invoiceAmountApplied},
+           payment_delta_idr = ${delta},
+           shortfall_settled_as_loss = ${options?.settle_shortfall_as_loss ? 1 : 0},
+           shortfall_reason = ${options?.shortfall_reason ?? null},
+           shortfall_settled_by_user_id = ${options?.settle_shortfall_as_loss ? userId : null},
+           shortfall_settled_at = ${shortfallSettledAt},
+           updated_by_user_id = ${userId},
            updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ?
-         AND id = ?`,
-      [
-        invoiceAmountApplied,
-        delta,
-        options?.settle_shortfall_as_loss ? 1 : 0,
-        options?.shortfall_reason ?? null,
-        options?.settle_shortfall_as_loss ? userId : null,
-        shortfallSettledAt,
-        userId,
-        companyId,
-        paymentId
-      ]
-    );
+       WHERE company_id = ${companyId}
+         AND id = ${paymentId}`.execute(connection);
 
     const newPaidTotal = normalizeMoney(Math.min(invoice.grand_total, invoice.paid_total + invoiceAmountApplied));
     const newPaymentStatus =
@@ -849,16 +793,13 @@ export async function postPayment(
           ? "PARTIAL"
           : "UNPAID";
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE sales_invoices
-       SET paid_total = ?,
-           payment_status = ?,
-           updated_by_user_id = ?,
+    await sql`UPDATE sales_invoices
+       SET paid_total = ${newPaidTotal},
+           payment_status = ${newPaymentStatus},
+           updated_by_user_id = ${userId},
            updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = ?
-         AND id = ?`,
-      [newPaidTotal, newPaymentStatus, userId, companyId, invoice.id]
-    );
+       WHERE company_id = ${companyId}
+         AND id = ${invoice.id}`.execute(connection);
 
     const postedPayment = await findPaymentByIdWithExecutor(connection, companyId, paymentId);
     if (!postedPayment) {

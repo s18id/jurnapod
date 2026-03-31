@@ -7,16 +7,30 @@ import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-h
 import { listEffectiveItemPricesForOutlet } from "./item-prices/index.js";
 import { createItem } from "./items/index.js";
 import { createItemPrice } from "./item-prices/index.js";
-import { closeDbPool, getDbPool } from "./db";
-import type { RowDataPacket } from "mysql2";
+import { closeDbPool, getDb } from "./db";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
+
+type ItemPriceResult = {
+  id: number;
+  company_id: number;
+  outlet_id: number | null;
+  item_id: number;
+  variant_id: number | null;
+  price: number;
+  is_active: boolean;
+  updated_at: string;
+  item_group_id: number | null;
+  item_group_name: string | null;
+  is_override: boolean;
+};
 
 test(
   "listEffectiveItemPricesForOutlet - inactive override hides item from active prices",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -28,19 +42,19 @@ test(
 
     try {
       // Get company and outlet from fixtures
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
 
-      const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
-        [companyId, outletCode]
-      );
-      assert.ok(outletRows.length > 0, "Outlet fixture not found");
-      outletId = Number(outletRows[0].id);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
+
+      const outletRows = await sql`
+        SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+      `.execute(db);
+
+      assert.ok(outletRows.rows.length > 0, "Outlet fixture not found");
+      outletId = Number((outletRows.rows[0] as { id: number }).id);
 
       // Create test item using library function
       const item = await createItem(companyId, {
@@ -67,19 +81,19 @@ test(
 
       // Test: active filter should exclude the item (inactive override takes precedence)
       const activePrices = await listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true });
-      const itemInActive = activePrices.find(p => p.item_id === itemId);
+      const itemInActive = activePrices.find((p: ItemPriceResult) => p.item_id === itemId);
       assert.strictEqual(itemInActive, undefined, "Item should be excluded when override is inactive");
 
       // Test: unfiltered should include the item (inactive)
       const allPrices = await listEffectiveItemPricesForOutlet(companyId, outletId);
-      const itemInAll = allPrices.find(p => p.item_id === itemId);
+      const itemInAll = allPrices.find((p: ItemPriceResult) => p.item_id === itemId);
       assert.ok(itemInAll, "Item should be present in unfiltered results");
       assert.strictEqual(itemInAll!.is_active, false, "Item should be inactive");
 
     } finally {
       // Cleanup - use library function for items, direct SQL for prices (cascade handled)
       if (itemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
     }
   }
@@ -89,7 +103,7 @@ test(
   "listEffectiveItemPricesForOutlet - active override wins over default",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -100,17 +114,15 @@ test(
     const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
-      const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
-        [companyId, outletCode]
-      );
-      outletId = Number(outletRows[0].id);
+      const outletRows = await sql`
+        SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+      `.execute(db);
+      outletId = Number((outletRows.rows[0] as { id: number }).id);
 
       const item = await createItem(companyId, {
         name: `Test Item Override ${runId}`,
@@ -133,7 +145,7 @@ test(
       });
 
       const activePrices = await listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true });
-      const itemInActive = activePrices.find(p => p.item_id === itemId);
+      const itemInActive = activePrices.find((p: ItemPriceResult) => p.item_id === itemId);
 
       assert.ok(itemInActive, "Item should be present in active prices");
       assert.strictEqual(itemInActive!.price, 2000, "Override price should be used");
@@ -141,7 +153,7 @@ test(
 
     } finally {
       if (itemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
     }
   }
@@ -151,7 +163,7 @@ test(
   "listEffectiveItemPricesForOutlet - default fallback when no override exists",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -162,17 +174,15 @@ test(
     const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
-      const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
-        [companyId, outletCode]
-      );
-      outletId = Number(outletRows[0].id);
+      const outletRows = await sql`
+        SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+      `.execute(db);
+      outletId = Number((outletRows.rows[0] as { id: number }).id);
 
       const item = await createItem(companyId, {
         name: `Test Item Default ${runId}`,
@@ -188,7 +198,7 @@ test(
       });
 
       const activePrices = await listEffectiveItemPricesForOutlet(companyId, outletId, { isActive: true });
-      const itemInActive = activePrices.find(p => p.item_id === itemId);
+      const itemInActive = activePrices.find((p: ItemPriceResult) => p.item_id === itemId);
 
       assert.ok(itemInActive, "Item should be present in active prices");
       assert.strictEqual(itemInActive!.price, 1500, "Default price should be used");
@@ -196,7 +206,7 @@ test(
 
     } finally {
       if (itemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
     }
   }

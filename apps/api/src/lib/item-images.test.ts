@@ -3,14 +3,14 @@
 
 import { describe, it, test, before } from "node:test";
 import assert from "node:assert";
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
+import { sql } from "kysely";
 import {
   validateImageUpload,
   processImage,
   verifyItemOwnership,
   CrossTenantAccessError
 } from "./item-images";
-import { getDbPool, closeDbPool } from "./db";
+import { getDb, closeDbPool } from "./db";
 import { createCompanyBasic } from "./companies";
 import { createItem } from "./items/index.js";
 
@@ -145,7 +145,7 @@ describe("Image Processing with Sharp", () => {
 });
 
 describe("Tenant Scoping Security", () => {
-  const pool = getDbPool();
+  const db = getDb();
   let companyA: number;
   let companyB: number;
   let itemA: number;
@@ -153,13 +153,13 @@ describe("Tenant Scoping Security", () => {
   // Test companies and items
   before(async () => {
     // Get or create test companies
-    const [companyRows] = await pool.execute<RowDataPacket[]>(
-      "SELECT id, name FROM companies WHERE name IN ('Test Company A', 'Test Company B') ORDER BY name"
-    );
+    const companyRows = await sql<{ id: number; name: string }>`
+      SELECT id, name FROM companies WHERE name IN ('Test Company A', 'Test Company B') ORDER BY name
+    `.execute(db);
 
-    if (companyRows.length >= 2) {
-      companyA = companyRows[0].id;
-      companyB = companyRows[1].id;
+    if (companyRows.rows.length >= 2) {
+      companyA = companyRows.rows[0].id;
+      companyB = companyRows.rows[1].id;
     } else {
       // Insert test companies
       const companyAData = await createCompanyBasic({
@@ -178,13 +178,12 @@ describe("Tenant Scoping Security", () => {
     }
 
     // Create a test item for company A
-    const [itemRows] = await pool.execute<RowDataPacket[]>(
-      "SELECT id FROM items WHERE company_id = ? AND name = 'Tenant Test Item' LIMIT 1",
-      [companyA]
-    );
+    const itemRows = await sql<{ id: number }>`
+      SELECT id FROM items WHERE company_id = ${companyA} AND name = 'Tenant Test Item' LIMIT 1
+    `.execute(db);
 
-    if (itemRows.length > 0) {
-      itemA = itemRows[0].id;
+    if (itemRows.rows.length > 0) {
+      itemA = itemRows.rows[0].id;
     } else {
       const newItem = await createItem(companyA, {
         name: "Tenant Test Item",
@@ -197,14 +196,14 @@ describe("Tenant Scoping Security", () => {
 
   describe("verifyItemOwnership", () => {
     test("returns true when item belongs to caller company (happy path)", async () => {
-      const result = await verifyItemOwnership(pool, itemA, companyA);
+      const result = await verifyItemOwnership(db, itemA, companyA);
       assert.strictEqual(result, true, "Should allow access to own item");
     });
 
     test("throws CrossTenantAccessError for cross-tenant access (forbidden path)", async () => {
       await assert.rejects(
         async () => {
-          await verifyItemOwnership(pool, itemA, companyB);
+          await verifyItemOwnership(db, itemA, companyB);
         },
         (err: Error) => {
           assert.ok(err instanceof CrossTenantAccessError, "Should throw CrossTenantAccessError");
@@ -217,13 +216,13 @@ describe("Tenant Scoping Security", () => {
 
     test("returns false when item does not exist", async () => {
       const nonExistentItemId = 999999999;
-      const result = await verifyItemOwnership(pool, nonExistentItemId, companyA);
+      const result = await verifyItemOwnership(db, nonExistentItemId, companyA);
       assert.strictEqual(result, false, "Should return false for non-existent item");
     });
 
     test("cross-tenant error includes actual vs requested company info", async () => {
       try {
-        await verifyItemOwnership(pool, itemA, companyB);
+        await verifyItemOwnership(db, itemA, companyB);
         assert.fail("Should have thrown CrossTenantAccessError");
       } catch (err) {
         assert.ok(err instanceof CrossTenantAccessError);

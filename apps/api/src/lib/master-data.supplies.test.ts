@@ -6,8 +6,8 @@ import { test } from "node:test";
 import { loadEnvIfPresent } from "../../tests/integration/integration-harness.mjs";
 import { createSupply, deleteSupply, findSupplyById, listSupplies, updateSupply } from "./supplies/index.js";
 import { DatabaseConflictError } from "./master-data-errors.js";
-import { closeDbPool, getDbPool } from "./db";
-import type { RowDataPacket } from "mysql2";
+import { closeDbPool, getDb } from "./db";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
@@ -15,7 +15,7 @@ test(
   "listSupplies respects company scope and isActive filter",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -27,19 +27,17 @@ test(
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
-      const [otherCompanyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code != ? AND deleted_at IS NULL LIMIT 1`,
-        [companyCode]
-      );
-      if (otherCompanyRows.length > 0) {
-        otherCompanyId = Number(otherCompanyRows[0].id);
+      const otherCompanyRows = await sql`
+        SELECT id FROM companies WHERE code != ${companyCode} AND deleted_at IS NULL LIMIT 1
+      `.execute(db);
+      if (otherCompanyRows.rows.length > 0) {
+        otherCompanyId = Number((otherCompanyRows.rows[0] as { id: number }).id);
       }
 
       const supply1 = await createSupply(companyId, {
@@ -93,13 +91,13 @@ test(
       }
     } finally {
       if (supplyId1 > 0) {
-        await pool.execute(`DELETE FROM supplies WHERE id = ?`, [supplyId1]);
+        await sql`DELETE FROM supplies WHERE id = ${supplyId1}`.execute(db);
       }
       if (supplyId2 > 0) {
-        await pool.execute(`DELETE FROM supplies WHERE id = ?`, [supplyId2]);
+        await sql`DELETE FROM supplies WHERE id = ${supplyId2}`.execute(db);
       }
       if (supplyId3 > 0) {
-        await pool.execute(`DELETE FROM supplies WHERE id = ?`, [supplyId3]);
+        await sql`DELETE FROM supplies WHERE id = ${supplyId3}`.execute(db);
       }
     }
   }
@@ -109,7 +107,7 @@ test(
   "createSupply defaults unit='unit' and is_active=true when omitted",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -118,12 +116,11 @@ test(
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
       const supply = await createSupply(companyId, {
         name: `Default Test Supply ${runId}`
@@ -139,7 +136,7 @@ test(
       assert.equal(fromDb!.is_active, true);
     } finally {
       if (supplyId > 0) {
-        await pool.execute(`DELETE FROM supplies WHERE id = ?`, [supplyId]);
+        await sql`DELETE FROM supplies WHERE id = ${supplyId}`.execute(db);
       }
     }
   }
@@ -149,7 +146,7 @@ test(
   "createSupply duplicate sku throws DatabaseConflictError",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -158,12 +155,11 @@ test(
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
       const supply = await createSupply(companyId, {
         sku: `DUP-${runId}`,
@@ -187,7 +183,7 @@ test(
       assert.equal(conflictThrown, true, "Should throw DatabaseConflictError for duplicate SKU");
     } finally {
       if (supplyId > 0) {
-        await pool.execute(`DELETE FROM supplies WHERE id = ?`, [supplyId]);
+        await sql`DELETE FROM supplies WHERE id = ${supplyId}`.execute(db);
       }
     }
   }
@@ -197,7 +193,7 @@ test(
   "findSupplyById is tenant-scoped",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -207,19 +203,17 @@ test(
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
-      const [otherCompanyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code != ? AND deleted_at IS NULL LIMIT 1`,
-        [companyCode]
-      );
-      if (otherCompanyRows.length > 0) {
-        otherCompanyId = Number(otherCompanyRows[0].id);
+      const otherCompanyRows = await sql`
+        SELECT id FROM companies WHERE code != ${companyCode} AND deleted_at IS NULL LIMIT 1
+      `.execute(db);
+      if (otherCompanyRows.rows.length > 0) {
+        otherCompanyId = Number((otherCompanyRows.rows[0] as { id: number }).id);
       }
 
       if (otherCompanyId === 0) {
@@ -238,7 +232,7 @@ test(
       assert.equal(foundInOtherCompany, null, "Should NOT find supply in other company");
     } finally {
       if (supplyId > 0) {
-        await pool.execute(`DELETE FROM supplies WHERE id = ?`, [supplyId]);
+        await sql`DELETE FROM supplies WHERE id = ${supplyId}`.execute(db);
       }
     }
   }
@@ -248,19 +242,18 @@ test(
   "updateSupply returns null for missing id",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
 
     let companyId = 0;
 
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
       const result = await updateSupply(companyId, 999999999, {
         name: "Non-existent Supply"
@@ -275,19 +268,18 @@ test(
   "deleteSupply returns false for missing id",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
 
     let companyId = 0;
 
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
 
       const result = await deleteSupply(companyId, 999999999);
       assert.equal(result, false, "Should return false for non-existent supply");

@@ -3,13 +3,13 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { sql } from "kysely";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
 import { resolvePrice, resolvePricesBatch, clearPriceCache, getCacheSize } from "./variant-price-resolver.js";
-import { createItemPrice, deleteItemPrice, updateItemPrice } from "../item-prices/index.js";
-import { closeDbPool, getDbPool } from "../db.js";
+import { createItemPrice, deleteItemPrice } from "../item-prices/index.js";
+import { closeDbPool, getDb } from "../db.js";
 import { createCompanyBasic } from "../companies.js";
 import { createItem } from "../items/index.js";
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
 
 loadEnvIfPresent();
 
@@ -17,7 +17,7 @@ test(
   "resolvePrice - variant price overrides item price",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -32,20 +32,18 @@ test(
 
     try {
       // Get company
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      assert.ok(companyRows.length > 0, "Company fixture not found");
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyResult.rows.length > 0, "Company fixture not found");
+      companyId = Number(companyResult.rows[0].id);
 
       // Get outlet
-      const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
-        [companyId, outletCode]
-      );
-      assert.ok(outletRows.length > 0, "Outlet fixture not found");
-      outletId = Number(outletRows[0].id);
+      const outletResult = await sql<{ id: number }>`
+        SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+      `.execute(db);
+      assert.ok(outletResult.rows.length > 0, "Outlet fixture not found");
+      outletId = Number(outletResult.rows[0].id);
 
       // Create test item
       const item = await createItem(companyId, {
@@ -55,11 +53,10 @@ test(
       itemId = item.id;
 
       // Create variant
-      const [variantResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
-         VALUES (?, ?, ?, ?, TRUE)`,
-        [companyId, itemId, `SKU-VAR-${runId}`, `Test Variant`]
-      );
+      const variantResult = await sql`
+        INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
+        VALUES (${companyId}, ${itemId}, ${`SKU-VAR-${runId}`}, ${`Test Variant`}, TRUE)
+      `.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Create item price (outlet override)
@@ -100,10 +97,10 @@ test(
         await deleteItemPrice(companyId, itemPriceId);
       }
       if (variantId) {
-        await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
+        await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
       }
       if (itemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
     }
   }
@@ -113,7 +110,7 @@ test(
   "resolvePrice - missing variant price falls back to item price",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -126,17 +123,15 @@ test(
     const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number(companyResult.rows[0].id);
 
-      const [outletRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM outlets WHERE company_id = ? AND code = ? LIMIT 1`,
-        [companyId, outletCode]
-      );
-      outletId = Number(outletRows[0].id);
+      const outletResult = await sql<{ id: number }>`
+        SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+      `.execute(db);
+      outletId = Number(outletResult.rows[0].id);
 
       // Create test item
       const item = await createItem(companyId, {
@@ -146,11 +141,10 @@ test(
       itemId = item.id;
 
       // Create variant
-      const [variantResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
-         VALUES (?, ?, ?, ?, TRUE)`,
-        [companyId, itemId, `SKU-FALLBACK-${runId}`, `Fallback Variant`]
-      );
+      const variantResult = await sql`
+        INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
+        VALUES (${companyId}, ${itemId}, ${`SKU-FALLBACK-${runId}`}, ${`Fallback Variant`}, TRUE)
+      `.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Create item price only (no variant price)
@@ -176,10 +170,10 @@ test(
         await deleteItemPrice(companyId, itemPriceId);
       }
       if (variantId) {
-        await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
+        await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
       }
       if (itemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
     }
   }
@@ -189,7 +183,7 @@ test(
   "resolvePrice - company isolation - variant prices don't leak",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let company1Id = 0;
@@ -205,19 +199,17 @@ test(
 
     try {
       // Get first company
-      const [company1Rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      company1Id = Number(company1Rows[0].id);
+      const company1Result = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      company1Id = Number(company1Result.rows[0].id);
 
       // Get second company (different code or create one)
-      const [allCompanies] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code != ? ORDER BY id LIMIT 1`,
-        [companyCode]
-      );
-      if (allCompanies.length > 0) {
-        company2Id = Number(allCompanies[0].id);
+      const allCompaniesResult = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code != ${companyCode} ORDER BY id LIMIT 1
+      `.execute(db);
+      if (allCompaniesResult.rows.length > 0) {
+        company2Id = Number(allCompaniesResult.rows[0].id);
       } else {
         // Create second company for test
         const company2 = await createCompanyBasic({
@@ -241,18 +233,16 @@ test(
       item2Id = item2.id;
 
       // Create variants
-      const [variant1Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
-         VALUES (?, ?, ?, ?, TRUE)`,
-        [company1Id, item1Id, `SKU-C1-${runId}`, `Variant 1`]
-      );
+      const variant1Result = await sql`
+        INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
+        VALUES (${company1Id}, ${item1Id}, ${`SKU-C1-${runId}`}, ${`Variant 1`}, TRUE)
+      `.execute(db);
       variant1Id = Number(variant1Result.insertId);
 
-      const [variant2Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
-         VALUES (?, ?, ?, ?, TRUE)`,
-        [company2Id, item2Id, `SKU-C2-${runId}`, `Variant 2`]
-      );
+      const variant2Result = await sql`
+        INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
+        VALUES (${company2Id}, ${item2Id}, ${`SKU-C2-${runId}`}, ${`Variant 2`}, TRUE)
+      `.execute(db);
       variant2Id = Number(variant2Result.insertId);
 
       // Create prices
@@ -302,22 +292,22 @@ test(
       }
       // Delete item_variant_combinations first ( FK to variants)
       if (variant2Id) {
-        await pool.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variant2Id]);
+        await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variant2Id}`.execute(db);
       }
       if (variant1Id) {
-        await pool.execute(`DELETE FROM item_variant_combinations WHERE variant_id = ?`, [variant1Id]);
+        await sql`DELETE FROM item_variant_combinations WHERE variant_id = ${variant1Id}`.execute(db);
       }
       if (variant2Id) {
-        await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variant2Id]);
+        await sql`DELETE FROM item_variants WHERE id = ${variant2Id}`.execute(db);
       }
       if (variant1Id) {
-        await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variant1Id]);
+        await sql`DELETE FROM item_variants WHERE id = ${variant1Id}`.execute(db);
       }
       if (item2Id) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [item2Id]);
+        await sql`DELETE FROM items WHERE id = ${item2Id}`.execute(db);
       }
       if (item1Id) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [item1Id]);
+        await sql`DELETE FROM items WHERE id = ${item1Id}`.execute(db);
       }
       // Skip company deletion - companies may have module dependencies
       // Test data (items, variants, prices) is cleaned up above
@@ -329,7 +319,7 @@ test(
   "resolvePrice - variant default price (no outlet)",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -340,11 +330,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number(companyResult.rows[0].id);
 
       const item = await createItem(companyId, {
         name: `Variant Default Test ${runId}`,
@@ -352,11 +341,10 @@ test(
       });
       itemId = item.id;
 
-      const [variantResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
-         VALUES (?, ?, ?, ?, TRUE)`,
-        [companyId, itemId, `SKU-VD-${runId}`, `Variant Default`]
-      );
+      const variantResult = await sql`
+        INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
+        VALUES (${companyId}, ${itemId}, ${`SKU-VD-${runId}`}, ${`Variant Default`}, TRUE)
+      `.execute(db);
       variantId = Number(variantResult.insertId);
 
       // Create variant default price (no outlet)
@@ -382,10 +370,10 @@ test(
         await deleteItemPrice(companyId, priceId);
       }
       if (variantId) {
-        await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variantId]);
+        await sql`DELETE FROM item_variants WHERE id = ${variantId}`.execute(db);
       }
       if (itemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
     }
   }
@@ -395,7 +383,7 @@ test(
   "resolvePricesBatch - multiple items resolved efficiently",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -409,11 +397,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number(companyResult.rows[0].id);
 
       // Create items
       const item1 = await createItem(companyId, {
@@ -429,18 +416,16 @@ test(
       item2Id = item2.id;
 
       // Create variants
-      const [variant1Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
-         VALUES (?, ?, ?, ?, TRUE)`,
-        [companyId, item1Id, `SKU-B1-${runId}`, `Batch Variant 1`]
-      );
+      const variant1Result = await sql`
+        INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
+        VALUES (${companyId}, ${item1Id}, ${`SKU-B1-${runId}`}, ${`Batch Variant 1`}, TRUE)
+      `.execute(db);
       variant1Id = Number(variant1Result.insertId);
 
-      const [variant2Result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
-         VALUES (?, ?, ?, ?, TRUE)`,
-        [companyId, item2Id, `SKU-B2-${runId}`, `Batch Variant 2`]
-      );
+      const variant2Result = await sql`
+        INSERT INTO item_variants (company_id, item_id, sku, variant_name, is_active)
+        VALUES (${companyId}, ${item2Id}, ${`SKU-B2-${runId}`}, ${`Batch Variant 2`}, TRUE)
+      `.execute(db);
       variant2Id = Number(variant2Result.insertId);
 
       // Create prices
@@ -496,16 +481,16 @@ test(
         await deleteItemPrice(companyId, price1Id);
       }
       if (variant2Id) {
-        await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variant2Id]);
+        await sql`DELETE FROM item_variants WHERE id = ${variant2Id}`.execute(db);
       }
       if (variant1Id) {
-        await pool.execute(`DELETE FROM item_variants WHERE id = ?`, [variant1Id]);
+        await sql`DELETE FROM item_variants WHERE id = ${variant1Id}`.execute(db);
       }
       if (item2Id) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [item2Id]);
+        await sql`DELETE FROM items WHERE id = ${item2Id}`.execute(db);
       }
       if (item1Id) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [item1Id]);
+        await sql`DELETE FROM items WHERE id = ${item1Id}`.execute(db);
       }
     }
   }
@@ -515,7 +500,7 @@ test(
   "resolvePrice - cache TTL works correctly",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -525,11 +510,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number(companyResult.rows[0].id);
 
       const item = await createItem(companyId, {
         name: `Cache Test Item ${runId}`,
@@ -565,7 +549,7 @@ test(
         await deleteItemPrice(companyId, priceId);
       }
       if (itemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
     }
   }
@@ -575,7 +559,7 @@ test(
   "resolvePrice - no price returns global default (0)",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -584,11 +568,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number(companyResult.rows[0].id);
 
       // Create item WITHOUT any prices
       const item = await createItem(companyId, {
@@ -607,7 +590,7 @@ test(
 
     } finally {
       if (itemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
     }
   }
@@ -623,7 +606,7 @@ test(
   "resolvePrice - cache is invalidated when price is updated",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     let companyId = 0;
@@ -633,11 +616,10 @@ test(
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
     try {
-      const [companyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE code = ? LIMIT 1`,
-        [companyCode]
-      );
-      companyId = Number(companyRows[0].id);
+      const companyResult = await sql<{ id: number }>`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      companyId = Number(companyResult.rows[0].id);
 
       // Create test item
       const item = await createItem(companyId, {
@@ -662,7 +644,7 @@ test(
       assert.strictEqual(resolved1.price, 1000, "Initial resolution should return 1000");
 
       // Manually update the price directly in DB (simulating what updateItemPrice does)
-      await pool.execute(`UPDATE item_prices SET price = 2000 WHERE id = ?`, [priceId]);
+      await sql`UPDATE item_prices SET price = 2000 WHERE id = ${priceId}`.execute(db);
 
       // Without cache clear, should still return old cached price
       const resolved2 = await resolvePrice(companyId, itemId, null, null, undefined, { ttlMs: 60000 });
@@ -678,7 +660,7 @@ test(
         await deleteItemPrice(companyId, priceId);
       }
       if (itemId) {
-        await pool.execute(`DELETE FROM items WHERE id = ?`, [itemId]);
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
     }
   }

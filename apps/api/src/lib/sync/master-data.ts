@@ -13,30 +13,30 @@
  * - Sync-specific helpers (config, open orders): mixed approach
  */
 
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { sql } from "kysely";
 import { z } from "zod";
 import {
-  listCompanyDefaultTaxRates,
-  listCompanyTaxRates,
   resolveCombinedTaxConfig
 } from "../taxes.js";
+import {
+  listCompanyTaxRatesKysely,
+  listCompanyDefaultTaxRatesKysely
+} from "../tax-rates.js";
 import { listItems } from "../items/index.js";
 import { listItemGroups } from "../item-groups/index.js";
 import type { SyncPullPayload, SyncPullResponse, SyncPullVariantPrice } from "@jurnapod/shared";
 import { SyncPullConfigSchema } from "@jurnapod/shared";
-import { getDbPool } from "../db.js";
+import { getDb } from "../db.js";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 import { getVariantsForSync } from "../item-variants.js";
 import { getItemThumbnailsBatch } from "../item-images.js";
 import { listEffectiveItemPricesForOutlet } from "../item-prices/index.js";
-import { newKyselyConnection } from "@jurnapod/db";
 
 // =============================================================================
 // Types
 // =============================================================================
 
-type ItemRow = RowDataPacket & {
+type ItemRow = {
   id: number;
   company_id: number;
   sku: string | null;
@@ -50,7 +50,7 @@ type ItemRow = RowDataPacket & {
   updated_at: string;
 };
 
-type ItemGroupRow = RowDataPacket & {
+type ItemGroupRow = {
   id: number;
   company_id: number;
   parent_id: number | null;
@@ -60,7 +60,7 @@ type ItemGroupRow = RowDataPacket & {
   updated_at: string;
 };
 
-type OutletTableRow = RowDataPacket & {
+type OutletTableRow = {
   id: number;
   company_id: number;
   outlet_id: number;
@@ -72,7 +72,7 @@ type OutletTableRow = RowDataPacket & {
   updated_at: string;
 };
 
-type ReservationRow = RowDataPacket & {
+type ReservationRow = {
   id: number;
   company_id: number;
   outlet_id: number;
@@ -91,17 +91,13 @@ type ReservationRow = RowDataPacket & {
   updated_at: string;
 };
 
-type VersionRow = RowDataPacket & {
+type VersionRow = {
   current_version: number;
 };
 
-type CompanyModuleRow = RowDataPacket & {
+type CompanyModuleRow = {
   enabled: number | null;
   config_json: string | null;
-};
-
-type QueryExecutor = {
-  execute: PoolConnection["execute"];
 };
 
 // =============================================================================
@@ -145,19 +141,19 @@ function normalizePaymentMethods(value: unknown): string[] | null {
 }
 
 async function readLegacyPaymentMethods(
-  executor: QueryExecutor,
   companyId: number
 ): Promise<string[] | null> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT \`key\`, enabled, config_json
-     FROM feature_flags
-     WHERE company_id = ?
-       AND \`key\` IN ('pos.payment_methods', 'pos.config')`,
-    [companyId]
-  );
+  const db = getDb();
+
+  const rows = await sql<{ key: string; enabled: number; config_json: string | null }>`
+    SELECT \`key\`, enabled, config_json
+    FROM feature_flags
+    WHERE company_id = ${companyId}
+      AND \`key\` IN ('pos.payment_methods', 'pos.config')
+  `.execute(db);
 
   let resolved: string[] | null = null;
-  for (const row of rows as Array<{ key?: string; enabled?: number; config_json?: string }>) {
+  for (const row of rows.rows) {
     if (row.enabled !== 1 || typeof row.key !== "string") {
       continue;
     }
@@ -258,32 +254,25 @@ export { listItemGroups };
  * Uses Kysely for type-safe queries.
  */
 export async function listOutletTables(companyId: number, outletId: number) {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
 
-  try {
-    const kysely = newKyselyConnection(connection);
+  const rows = await db
+    .selectFrom("outlet_tables")
+    .where("company_id", "=", companyId)
+    .where("outlet_id", "=", outletId)
+    .select(["id", "company_id", "outlet_id", "code", "name", "zone", "capacity", "status", "updated_at"])
+    .orderBy("code", "asc")
+    .execute();
 
-    const rows = await kysely
-      .selectFrom("outlet_tables")
-      .where("company_id", "=", companyId)
-      .where("outlet_id", "=", outletId)
-      .select(["id", "company_id", "outlet_id", "code", "name", "zone", "capacity", "status", "updated_at"])
-      .orderBy("code", "asc")
-      .execute();
-
-    return rows.map((row) => ({
-      table_id: Number(row.id),
-      code: row.code,
-      name: row.name,
-      zone: row.zone,
-      capacity: row.capacity == null ? null : Number(row.capacity),
-      status: row.status as OutletTableRow["status"],
-      updated_at: toRfc3339Required(row.updated_at)
-    }));
-  } finally {
-    connection.release();
-  }
+  return rows.map((row) => ({
+    table_id: Number(row.id),
+    code: row.code,
+    name: row.name,
+    zone: row.zone,
+    capacity: row.capacity == null ? null : Number(row.capacity),
+    status: row.status as OutletTableRow["status"],
+    updated_at: toRfc3339Required(row.updated_at)
+  }));
 }
 
 /**
@@ -291,57 +280,50 @@ export async function listOutletTables(companyId: number, outletId: number) {
  * Uses Kysely for type-safe queries.
  */
 export async function listActiveReservations(companyId: number, outletId: number) {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
 
-  try {
-    const kysely = newKyselyConnection(connection);
+  const rows = await db
+    .selectFrom("reservations")
+    .where("company_id", "=", companyId)
+    .where("outlet_id", "=", outletId)
+    .where("status", "in", ["BOOKED", "CONFIRMED", "ARRIVED", "SEATED"])
+    .select([
+      "id",
+      "company_id",
+      "outlet_id",
+      "table_id",
+      "customer_name",
+      "customer_phone",
+      "guest_count",
+      "reservation_at",
+      "duration_minutes",
+      "status",
+      "notes",
+      "linked_order_id",
+      "arrived_at",
+      "seated_at",
+      "cancelled_at",
+      "updated_at"
+    ])
+    .orderBy("reservation_at", "asc")
+    .execute();
 
-    const rows = await kysely
-      .selectFrom("reservations")
-      .where("company_id", "=", companyId)
-      .where("outlet_id", "=", outletId)
-      .where("status", "in", ["BOOKED", "CONFIRMED", "ARRIVED", "SEATED"])
-      .select([
-        "id",
-        "company_id",
-        "outlet_id",
-        "table_id",
-        "customer_name",
-        "customer_phone",
-        "guest_count",
-        "reservation_at",
-        "duration_minutes",
-        "status",
-        "notes",
-        "linked_order_id",
-        "arrived_at",
-        "seated_at",
-        "cancelled_at",
-        "updated_at"
-      ])
-      .orderBy("reservation_at", "asc")
-      .execute();
-
-    return rows.map((row) => ({
-      reservation_id: Number(row.id),
-      table_id: row.table_id == null ? null : Number(row.table_id),
-      customer_name: row.customer_name,
-      customer_phone: row.customer_phone,
-      guest_count: Number(row.guest_count),
-      reservation_at: toMySqlDateTime(row.reservation_at),
-      duration_minutes: row.duration_minutes == null ? null : Number(row.duration_minutes),
-      status: row.status as ReservationRow["status"],
-      notes: row.notes,
-      linked_order_id: row.linked_order_id,
-      arrived_at: row.arrived_at ? toRfc3339(row.arrived_at) : null,
-      seated_at: row.seated_at ? toRfc3339(row.seated_at) : null,
-      cancelled_at: row.cancelled_at ? toRfc3339(row.cancelled_at) : null,
-      updated_at: toRfc3339Required(row.updated_at)
-    }));
-  } finally {
-    connection.release();
-  }
+  return rows.map((row) => ({
+    reservation_id: Number(row.id),
+    table_id: row.table_id == null ? null : Number(row.table_id),
+    customer_name: row.customer_name,
+    customer_phone: row.customer_phone,
+    guest_count: Number(row.guest_count),
+    reservation_at: toMySqlDateTime(row.reservation_at),
+    duration_minutes: row.duration_minutes == null ? null : Number(row.duration_minutes),
+    status: row.status as ReservationRow["status"],
+    notes: row.notes,
+    linked_order_id: row.linked_order_id,
+    arrived_at: row.arrived_at ? toRfc3339(row.arrived_at) : null,
+    seated_at: row.seated_at ? toRfc3339(row.seated_at) : null,
+    cancelled_at: row.cancelled_at ? toRfc3339(row.cancelled_at) : null,
+    updated_at: toRfc3339Required(row.updated_at)
+  }));
 }
 
 /**
@@ -349,22 +331,15 @@ export async function listActiveReservations(companyId: number, outletId: number
  * Uses Kysely for type-safe queries.
  */
 export async function getCompanyDataVersion(companyId: number): Promise<number> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
 
-  try {
-    const kysely = newKyselyConnection(connection);
+  const row = await db
+    .selectFrom("sync_data_versions")
+    .where("company_id", "=", companyId)
+    .select(["current_version"])
+    .executeTakeFirst();
 
-    const row = await kysely
-      .selectFrom("sync_data_versions")
-      .where("company_id", "=", companyId)
-      .select(["current_version"])
-      .executeTakeFirst();
-
-    return Number(row?.current_version ?? 0);
-  } finally {
-    connection.release();
-  }
+  return Number(row?.current_version ?? 0);
 }
 
 /**
@@ -375,30 +350,37 @@ async function getVariantPricesForSync(
   companyId: number,
   outletId: number
 ): Promise<SyncPullVariantPrice[]> {
-  const pool = getDbPool();
+  const db = getDb();
   
   try {
     // Get all variant prices:
     // 1. Variant-specific prices for this outlet
     // 2. Variant default prices (no outlet)
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT 
+    const rows = await sql<{
+      id: number;
+      item_id: number;
+      variant_id: number | null;
+      outlet_id: number | null;
+      price: number;
+      is_active: number;
+      updated_at: string;
+    }>`
+      SELECT 
         ip.id,
         ip.item_id,
         ip.variant_id,
-        COALESCE(ip.outlet_id, ?) AS outlet_id,
+        COALESCE(ip.outlet_id, ${outletId}) AS outlet_id,
         ip.price,
         ip.is_active,
         ip.updated_at
        FROM item_prices ip
-       WHERE ip.company_id = ?
+       WHERE ip.company_id = ${companyId}
          AND ip.variant_id IS NOT NULL
          AND ip.is_active = 1
-         AND (ip.outlet_id = ? OR ip.outlet_id IS NULL)`,
-      [outletId, companyId, outletId]
-    );
+         AND (ip.outlet_id = ${outletId} OR ip.outlet_id IS NULL)
+    `.execute(db);
 
-    return rows.map((row) => ({
+    return rows.rows.map((row) => ({
       id: Number(row.id),
       item_id: Number(row.item_id),
       variant_id: row.variant_id == null ? null : Number(row.variant_id),
@@ -426,80 +408,73 @@ async function getVariantPricesForSync(
  * Uses Kysely for module lookup, raw SQL for feature flags.
  */
 async function readSyncConfig(companyId: number): Promise<SyncPullResponse["data"]["config"]> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
 
-  try {
-    const kysely = newKyselyConnection(connection);
+  const posRow = await db
+    .selectFrom("company_modules as cm")
+    .innerJoin("modules as m", "m.id", "cm.module_id")
+    .where("cm.company_id", "=", companyId)
+    .where("m.code", "=", "pos")
+    .select(["cm.enabled", "cm.config_json"])
+    .executeTakeFirst();
 
-    const posRow = await kysely
-      .selectFrom("company_modules as cm")
-      .innerJoin("modules as m", "m.id", "cm.module_id")
-      .where("cm.company_id", "=", companyId)
-      .where("m.code", "=", "pos")
-      .select(["cm.enabled", "cm.config_json"])
-      .executeTakeFirst();
+  const [taxRates, defaultTaxRates] = await Promise.all([
+    listCompanyTaxRatesKysely(companyId),
+    listCompanyDefaultTaxRatesKysely(companyId)
+  ]);
 
-    const [taxRates, defaultTaxRates] = await Promise.all([
-      listCompanyTaxRates(connection, companyId),
-      listCompanyDefaultTaxRates(connection, companyId)
-    ]);
+  const activeTaxRates = taxRates.filter((rate: { is_active: boolean }) => rate.is_active);
+  const defaultTaxRateIds = defaultTaxRates.map((rate: { id: number }) => rate.id);
+  const combinedTax = resolveCombinedTaxConfig(defaultTaxRates);
 
-    const activeTaxRates = taxRates.filter((rate: { is_active: boolean }) => rate.is_active);
-    const defaultTaxRateIds = defaultTaxRates.map((rate: { id: number }) => rate.id);
-    const combinedTax = resolveCombinedTaxConfig(defaultTaxRates);
+  let taxRate = combinedTax.rate;
+  let taxInclusive = combinedTax.inclusive;
+  let paymentMethods: Array<string | z.infer<typeof paymentMethodConfigSchema>> = ["CASH"];
+  let resolvedPaymentMethods = false;
 
-    let taxRate = combinedTax.rate;
-    let taxInclusive = combinedTax.inclusive;
-    let paymentMethods: Array<string | z.infer<typeof paymentMethodConfigSchema>> = ["CASH"];
-    let resolvedPaymentMethods = false;
-
-    if (posRow && posRow.enabled === 1) {
-      let parsed: unknown = null;
-      try {
-        parsed = typeof posRow.config_json === "string" ? JSON.parse(posRow.config_json) : null;
-      } catch {
-        parsed = null;
-      }
-
-      const candidate =
-        parsed && typeof parsed === "object" && !Array.isArray(parsed)
-          ? (parsed as Record<string, unknown>).payment_methods ?? parsed
-          : parsed;
-      const normalized = normalizePaymentMethods(candidate);
-      if (normalized) {
-        paymentMethods = normalized;
-        resolvedPaymentMethods = true;
-      }
+  if (posRow && posRow.enabled === 1) {
+    let parsed: unknown = null;
+    try {
+      parsed = typeof posRow.config_json === "string" ? JSON.parse(posRow.config_json) : null;
+    } catch {
+      parsed = null;
     }
 
-    if ((!posRow || (posRow.enabled === 1 && !resolvedPaymentMethods)) && !resolvedPaymentMethods) {
-      const legacyPaymentMethods = await readLegacyPaymentMethods(connection, companyId);
-      if (legacyPaymentMethods) {
-        paymentMethods = legacyPaymentMethods;
-      }
+    const candidate =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>).payment_methods ?? parsed
+        : parsed;
+    const normalized = normalizePaymentMethods(candidate);
+    if (normalized) {
+      paymentMethods = normalized;
+      resolvedPaymentMethods = true;
     }
-
-    return SyncPullConfigSchema.parse({
-      tax: {
-        rate: taxRate,
-        inclusive: taxInclusive
-      },
-      tax_rates: activeTaxRates.map((rate: { id: number; code: string; name: string; rate_percent: number; account_id: number | null; is_inclusive: boolean; is_active: boolean }) => ({
-        id: rate.id,
-        code: rate.code,
-        name: rate.name,
-        rate_percent: rate.rate_percent,
-        account_id: rate.account_id,
-        is_inclusive: rate.is_inclusive,
-        is_active: rate.is_active
-      })),
-      default_tax_rate_ids: defaultTaxRateIds,
-      payment_methods: paymentMethods
-    });
-  } finally {
-    connection.release();
   }
+
+  if ((!posRow || (posRow.enabled === 1 && !resolvedPaymentMethods)) && !resolvedPaymentMethods) {
+    const legacyPaymentMethods = await readLegacyPaymentMethods(companyId);
+    if (legacyPaymentMethods) {
+      paymentMethods = legacyPaymentMethods;
+    }
+  }
+
+  return SyncPullConfigSchema.parse({
+    tax: {
+      rate: taxRate,
+      inclusive: taxInclusive
+    },
+    tax_rates: activeTaxRates.map((rate: { id: number; code: string; name: string; rate_percent: number; account_id: number | null; is_inclusive: boolean; is_active: boolean }) => ({
+      id: rate.id,
+      code: rate.code,
+      name: rate.name,
+      rate_percent: rate.rate_percent,
+      account_id: rate.account_id,
+      is_inclusive: rate.is_inclusive,
+      is_active: rate.is_active
+    })),
+    default_tax_rate_ids: defaultTaxRateIds,
+    payment_methods: paymentMethods
+  });
 }
 
 /**
@@ -516,41 +491,83 @@ async function readOpenOrderSyncPayload(
   order_updates: SyncPullPayload["order_updates"];
   orders_cursor: number;
 }> {
-  const pool = getDbPool();
+  const db = getDb();
 
   try {
-    const [ordersRows, linesRows, updatesRows] = await Promise.all([
-      pool.execute<RowDataPacket[]>(
-        `SELECT order_id, company_id, outlet_id, service_type, source_flow, settlement_flow, table_id, reservation_id, guest_count,
+    const [ordersResult, linesResult, updatesResult] = await Promise.all([
+      sql<{
+        order_id: string;
+        company_id: number;
+        outlet_id: number;
+        service_type: string;
+        source_flow: string | null;
+        settlement_flow: string | null;
+        table_id: number | null;
+        reservation_id: number | null;
+        guest_count: number | null;
+        is_finalized: number;
+        order_status: string;
+        order_state: string;
+        paid_amount: number;
+        opened_at: string;
+        closed_at: string | null;
+        notes: string | null;
+        updated_at: string;
+      }>`
+        SELECT order_id, company_id, outlet_id, service_type, source_flow, settlement_flow, table_id, reservation_id, guest_count,
                 is_finalized, order_status, order_state, paid_amount, opened_at, closed_at, notes, updated_at
          FROM pos_order_snapshots
-         WHERE company_id = ?
-           AND outlet_id = ?
+         WHERE company_id = ${companyId}
+           AND outlet_id = ${outletId}
            AND order_state = 'OPEN'
-         ORDER BY updated_at DESC`,
-        [companyId, outletId]
-      ),
-      pool.execute<RowDataPacket[]>(
-        `SELECT order_id, company_id, outlet_id, item_id, sku_snapshot, name_snapshot, item_type_snapshot,
+         ORDER BY updated_at DESC
+      `.execute(db),
+      sql<{
+        order_id: string;
+        company_id: number;
+        outlet_id: number;
+        item_id: number;
+        sku_snapshot: string | null;
+        name_snapshot: string;
+        item_type_snapshot: string;
+        unit_price_snapshot: number;
+        qty: number;
+        discount_amount: number;
+        variant_id: number | null;
+        variant_name_snapshot: string | null;
+        updated_at: string;
+      }>`
+        SELECT order_id, company_id, outlet_id, item_id, sku_snapshot, name_snapshot, item_type_snapshot,
                 unit_price_snapshot, qty, discount_amount, variant_id, variant_name_snapshot, updated_at
          FROM pos_order_snapshot_lines
-         WHERE company_id = ?
-           AND outlet_id = ?`,
-        [companyId, outletId]
-      ),
-      pool.execute<RowDataPacket[]>(
-        `SELECT sequence_no, update_id, order_id, company_id, outlet_id, base_order_updated_at, event_type,
+         WHERE company_id = ${companyId}
+           AND outlet_id = ${outletId}
+      `.execute(db),
+      sql<{
+        sequence_no: number;
+        update_id: string;
+        order_id: string;
+        company_id: number;
+        outlet_id: number;
+        base_order_updated_at: string | null;
+        event_type: string;
+        delta_json: string;
+        actor_user_id: number | null;
+        device_id: string;
+        event_at: string;
+        created_at: string;
+      }>`
+        SELECT sequence_no, update_id, order_id, company_id, outlet_id, base_order_updated_at, event_type,
                 delta_json, actor_user_id, device_id, event_at, created_at
          FROM pos_order_updates
-         WHERE company_id = ?
-           AND outlet_id = ?
-           AND sequence_no > ?
-         ORDER BY sequence_no ASC`,
-        [companyId, outletId, ordersCursor]
-      )
+         WHERE company_id = ${companyId}
+           AND outlet_id = ${outletId}
+           AND sequence_no > ${ordersCursor}
+         ORDER BY sequence_no ASC
+      `.execute(db)
     ]);
 
-    const orderUpdates = (updatesRows[0] as RowDataPacket[]).map((row) => ({
+    const orderUpdates = updatesResult.rows.map((row) => ({
       sequence_no: Number(row.sequence_no),
       update_id: String(row.update_id),
       order_id: String(row.order_id),
@@ -568,7 +585,7 @@ async function readOpenOrderSyncPayload(
     const nextCursor = orderUpdates.length > 0 ? orderUpdates[orderUpdates.length - 1].sequence_no : ordersCursor;
 
     return {
-      open_orders: (ordersRows[0] as RowDataPacket[]).map((row) => ({
+      open_orders: ordersResult.rows.map((row) => ({
         order_id: String(row.order_id),
         company_id: Number(row.company_id),
         outlet_id: Number(row.outlet_id),
@@ -587,7 +604,7 @@ async function readOpenOrderSyncPayload(
         notes: row.notes == null ? null : String(row.notes),
         updated_at: toRfc3339Required(row.updated_at)
       })),
-      open_order_lines: (linesRows[0] as RowDataPacket[]).map((row) => ({
+      open_order_lines: linesResult.rows.map((row) => ({
         order_id: String(row.order_id),
         company_id: Number(row.company_id),
         outlet_id: Number(row.outlet_id),

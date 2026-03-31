@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { getDbPool } from "./db";
-import type { RowDataPacket } from "mysql2";
+import { getDb } from "./db";
+import { sql } from "kysely";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 export type SettingValueType = "string" | "number" | "boolean" | "json";
@@ -142,36 +142,33 @@ function deserializeValue(valueJson: string, valueType: SettingValueType): strin
 }
 
 export async function listSettings(params: ListSettingsParams): Promise<CompanySettingWithValue[]> {
-  const pool = getDbPool();
+  const db = getDb();
   const { companyId, outletId, search } = params;
 
-  let query = `
+  let query = sql`
     SELECT id, company_id, outlet_id, \`key\`, value_type, value_json,
            created_by_user_id, updated_by_user_id, created_at, updated_at
     FROM company_settings
-    WHERE company_id = ?
+    WHERE company_id = ${companyId}
   `;
-  const queryParams: (number | string)[] = [companyId];
 
   if (outletId !== undefined) {
     if (outletId === null) {
-      query += ` AND outlet_id IS NULL`;
+      query = sql`${query} AND outlet_id IS NULL`;
     } else {
-      query += ` AND (outlet_id = ? OR outlet_id IS NULL)`;
-      queryParams.push(outletId);
+      query = sql`${query} AND (outlet_id = ${outletId} OR outlet_id IS NULL)`;
     }
   }
 
   if (search && search.trim()) {
-    query += ` AND \`key\` LIKE ?`;
-    queryParams.push(`%${search.trim()}%`);
+    query = sql`${query} AND \`key\` LIKE ${`%${search.trim()}%`}`;
   }
 
-  query += ` ORDER BY outlet_id DESC, \`key\` ASC`;
+  query = sql`${query} ORDER BY outlet_id DESC, \`key\` ASC`;
 
-  const [rows] = await pool.execute<(CompanySetting & RowDataPacket)[]>(query, queryParams);
+  const rows = await sql<CompanySetting>`${query}`.execute(db);
 
-  return rows.map((row) => ({
+  return rows.rows.map((row) => ({
     id: row.id,
     company_id: row.company_id,
     outlet_id: row.outlet_id,
@@ -186,33 +183,31 @@ export async function listSettings(params: ListSettingsParams): Promise<CompanyS
 }
 
 export async function getSetting(params: GetSettingParams): Promise<CompanySettingWithValue | null> {
-  const pool = getDbPool();
+  const db = getDb();
   const { companyId, key, outletId } = params;
 
-  let query = `
+  let query = sql`
     SELECT id, company_id, outlet_id, \`key\`, value_type, value_json,
            created_by_user_id, updated_by_user_id, created_at, updated_at
     FROM company_settings
-    WHERE company_id = ? AND \`key\` = ?
+    WHERE company_id = ${companyId} AND \`key\` = ${key}
   `;
-  const queryParams: (number | string)[] = [companyId, key];
 
   if (outletId === null) {
-    query += ` AND outlet_id IS NULL`;
+    query = sql`${query} AND outlet_id IS NULL`;
   } else if (outletId !== undefined) {
-    query += ` AND (outlet_id = ? OR outlet_id IS NULL)`;
-    queryParams.push(outletId);
+    query = sql`${query} AND (outlet_id = ${outletId} OR outlet_id IS NULL)`;
   }
 
-  query += ` LIMIT 1`;
+  query = sql`${query} LIMIT 1`;
 
-  const [rows] = await pool.execute<(CompanySetting & RowDataPacket)[]>(query, queryParams);
+  const rows = await sql<CompanySetting>`${query}`.execute(db);
 
-  if (rows.length === 0) {
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  const row = rows[0];
+  const row = rows.rows[0];
   return {
     id: row.id,
     company_id: row.company_id,
@@ -228,7 +223,7 @@ export async function getSetting(params: GetSettingParams): Promise<CompanySetti
 }
 
 export async function setSetting(params: SetSettingParams): Promise<CompanySettingWithValue> {
-  const pool = getDbPool();
+  const db = getDb();
   const { companyId, key, value, valueType, outletId, actor } = params;
 
   validateKey(key);
@@ -236,29 +231,28 @@ export async function setSetting(params: SetSettingParams): Promise<CompanySetti
 
   const valueJson = serializeValue(value, valueType);
 
-  let existingQuery = `SELECT id FROM company_settings WHERE company_id = ? AND \`key\` = ?`;
-  const existingParams: (number | string | null)[] = [companyId, key];
+  let existingQuery = sql`SELECT id FROM company_settings WHERE company_id = ${companyId} AND \`key\` = ${key}`;
 
   if (outletId === null) {
-    existingQuery += ` AND outlet_id IS NULL`;
+    existingQuery = sql`${existingQuery} AND outlet_id IS NULL`;
   } else if (outletId !== undefined) {
-    existingQuery += ` AND (outlet_id = ? OR outlet_id IS NULL)`;
-    existingParams.push(outletId);
+    existingQuery = sql`${existingQuery} AND (outlet_id = ${outletId} OR outlet_id IS NULL)`;
   }
 
-  const [existing] = await pool.execute<(CompanySetting & RowDataPacket)[]>(existingQuery, existingParams);
+  const existing = await sql<{ id: number }>`${existingQuery}`.execute(db);
 
-  if (existing.length > 0) {
-    const settingId = existing[0].id;
-    await pool.execute(
-      `UPDATE company_settings SET value_type = ?, value_json = ?, updated_by_user_id = ?, updated_at = NOW() WHERE id = ?`,
-      [valueType, valueJson, actor.userId, settingId]
-    );
+  if (existing.rows.length > 0) {
+    const settingId = existing.rows[0].id;
+    await sql`
+      UPDATE company_settings 
+      SET value_type = ${valueType}, value_json = ${valueJson}, updated_by_user_id = ${actor.userId}, updated_at = NOW() 
+      WHERE id = ${settingId}
+    `.execute(db);
   } else {
-    await pool.execute(
-      `INSERT INTO company_settings (company_id, outlet_id, \`key\`, value_type, value_json, created_by_user_id, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [companyId, outletId ?? null, key, valueType, valueJson, actor.userId, actor.userId]
-    );
+    await sql`
+      INSERT INTO company_settings (company_id, outlet_id, \`key\`, value_type, value_json, created_by_user_id, updated_by_user_id) 
+      VALUES (${companyId}, ${outletId ?? null}, ${key}, ${valueType}, ${valueJson}, ${actor.userId}, ${actor.userId})
+    `.execute(db);
   }
 
   const updated = await getSetting({ companyId, key, outletId });
@@ -270,23 +264,21 @@ export async function setSetting(params: SetSettingParams): Promise<CompanySetti
 }
 
 export async function deleteSetting(params: DeleteSettingParams): Promise<void> {
-  const pool = getDbPool();
+  const db = getDb();
   const { companyId, key, outletId } = params;
 
-  let deleteQuery = `DELETE FROM company_settings WHERE company_id = ? AND \`key\` = ?`;
-  const deleteParams: (number | string | null)[] = [companyId, key];
+  let deleteQuery = sql`DELETE FROM company_settings WHERE company_id = ${companyId} AND \`key\` = ${key}`;
 
   if (outletId === null) {
-    deleteQuery += ` AND outlet_id IS NULL`;
+    deleteQuery = sql`${deleteQuery} AND outlet_id IS NULL`;
   } else if (outletId !== undefined) {
-    deleteQuery += ` AND (outlet_id = ? OR outlet_id IS NULL)`;
-    deleteParams.push(outletId);
+    deleteQuery = sql`${deleteQuery} AND (outlet_id = ${outletId} OR outlet_id IS NULL)`;
   }
 
-  const [result] = await pool.execute(deleteQuery, deleteParams);
+  const result = await sql`${deleteQuery}`.execute(db);
 
-  const affectedRows = (result as { affectedRows: number }).affectedRows;
-  if (affectedRows === 0) {
+  const affectedRows = result.numAffectedRows ?? BigInt(0);
+  if (affectedRows === BigInt(0)) {
     throw new SettingNotFoundError(`Setting '${key}' not found`);
   }
 }

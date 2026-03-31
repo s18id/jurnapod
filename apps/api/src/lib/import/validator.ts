@@ -8,7 +8,8 @@
  * type checking, format validation, and duplicate detection.
  */
 
-import type { Pool, RowDataPacket } from "mysql2/promise";
+import { sql } from "kysely";
+import { getDb } from "../db.js";
 import type {
   ImportRow,
   ImportError,
@@ -615,9 +616,9 @@ export function formatValidationErrors(
  * ```
  */
 export async function batchValidateForeignKeys(
-  requests: FkLookupRequest[],
-  pool: Pool
+  requests: FkLookupRequest[]
 ): Promise<FkLookupResults> {
+  const db = getDb();
   const results: FkLookupResults = new Map();
   
   // Filter out empty ID sets and group by table
@@ -651,18 +652,16 @@ export async function batchValidateForeignKeys(
       continue;
     }
     
-    // Execute single query with IN clause
+    // Execute single query with IN clause using Kysely
     // WARNING: MySQL IN clause has limits - for very large sets (>10k), consider batching
-    const placeholders = allIds.size === 1 ? '?' : allIds.size <= 100 ? `?${',?'.repeat(allIds.size - 1)}` : null;
-    
-    if (placeholders) {
-      const query = `SELECT id FROM \`${table}\` WHERE company_id = ? AND id IN (${placeholders})`;
-      const [rows] = await pool.execute<RowDataPacket[]>(query, [companyId, ...allIds]);
+    if (allIds.size <= 100) {
+      // Single query for smaller sets
+      const rows = await sql`SELECT id FROM ${sql.table(table)} WHERE company_id = ${companyId} AND id IN (${sql.join([...allIds].map(id => sql`${id}`))})`.execute(db);
       
       // Build existence map for O(1) lookup
-      const existingIds = new Map<number, boolean>();
-      for (const row of rows) {
-        existingIds.set(row.id, true);
+      const existingIds = new Set<number>();
+      for (const row of rows.rows) {
+        existingIds.add(Number((row as { id: number }).id));
       }
       
       // Mark all requested IDs - found or not found
@@ -679,12 +678,10 @@ export async function batchValidateForeignKeys(
       
       for (let i = 0; i < idArray.length; i += BATCH_SIZE) {
         const batch = idArray.slice(i, i + BATCH_SIZE);
-        const batchPlaceholders = batch.map(() => '?').join(',');
-        const query = `SELECT id FROM \`${table}\` WHERE company_id = ? AND id IN (${batchPlaceholders})`;
-        const [rows] = await pool.execute<RowDataPacket[]>(query, [companyId, ...batch]);
+        const rows = await sql`SELECT id FROM ${sql.table(table)} WHERE company_id = ${companyId} AND id IN (${sql.join(batch.map(id => sql`${id}`))})`.execute(db);
         
-        for (const row of rows) {
-          existingIds.add(row.id);
+        for (const row of rows.rows) {
+          existingIds.add(Number((row as { id: number }).id));
         }
       }
       

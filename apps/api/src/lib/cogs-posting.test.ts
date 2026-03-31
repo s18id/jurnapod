@@ -3,9 +3,9 @@
 
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
-import { getDbPool, closeDbPool } from "./db";
-import type { PoolConnection } from "mysql2/promise";
-import type { RowDataPacket } from "mysql2";
+import { getDb, closeDbPool } from "./db";
+import type { KyselySchema } from "@/lib/db";
+import { sql } from "kysely";
 import {
   calculateSaleCogs,
   getItemAccounts,
@@ -29,8 +29,7 @@ let TEST_USER_ID: number;
 const RUN_ID = Date.now().toString(36);
 
 // Shared state
-let pool: ReturnType<typeof getDbPool>;
-let conn: PoolConnection;
+let db: KyselySchema;
 let supportsUnitCost: boolean;
 let supportsMappingTypeId: boolean;
 let cogsAccountId: number;
@@ -39,42 +38,37 @@ let testItemId: number;
 
 // Test helpers
 async function createTestAccount(
-  conn: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   code: string,
   name: string,
   accountType: string,
   normalBalance: 'D' | 'C'
 ): Promise<number> {
-  let [typeRows] = await conn.execute(
-    `SELECT id FROM account_types WHERE UPPER(name) = ?`,
-    [accountType.toUpperCase()]
-  );
+  const typeResult = await sql`
+    SELECT id FROM account_types WHERE UPPER(name) = ${accountType.toUpperCase()}
+  `.execute(db);
 
-  if ((typeRows as any[]).length === 0) {
-    await conn.execute(
-      `INSERT INTO account_types (company_id, name, category, normal_balance, report_group, is_active)
-       VALUES (?, ?, ?, ?, ?, 1)`,
-      [
-        companyId,
-        accountType.toUpperCase(),
-        accountType.toUpperCase(),
-        normalBalance,
-        accountType.toUpperCase() === "REVENUE" || accountType.toUpperCase() === "EXPENSE" ? "PL" : "NRC"
-      ]
-    );
+  if ((typeResult.rows as any[]).length === 0) {
+    await sql`
+      INSERT INTO account_types (company_id, name, category, normal_balance, report_group, is_active)
+      VALUES (${companyId}, ${accountType.toUpperCase()}, ${accountType.toUpperCase()}, ${normalBalance}, ${accountType.toUpperCase() === "REVENUE" || accountType.toUpperCase() === "EXPENSE" ? "PL" : "NRC"}, 1)
+    `.execute(db);
 
-    [typeRows] = await conn.execute(
-      `SELECT id FROM account_types WHERE company_id = ? AND UPPER(name) = ? LIMIT 1`,
-      [companyId, accountType.toUpperCase()]
-    );
+    const rows = await sql`
+      SELECT id FROM account_types WHERE company_id = ${companyId} AND UPPER(name) = ${accountType.toUpperCase()} LIMIT 1
+    `.execute(db);
   }
 
-  if ((typeRows as any[]).length === 0) {
+  const accountTypeResult = await sql`
+    SELECT id FROM account_types WHERE company_id = ${companyId} AND UPPER(name) = ${accountType.toUpperCase()} LIMIT 1
+  `.execute(db);
+
+  if ((accountTypeResult.rows as any[]).length === 0) {
     throw new Error(`Account type ${accountType} not found`);
   }
   
-  const accountTypeId = (typeRows as any[])[0].id;
+  const accountTypeId = (accountTypeResult.rows as any[])[0].id;
   
   // Map 'C' to 'K' for schema compatibility (schema uses 'K' for Kredit/Credit)
   const mappedNormalBalance = normalBalance === 'C' ? 'K' : normalBalance;
@@ -95,104 +89,101 @@ async function createTestAccount(
 }
 
 async function createInventoryTransaction(
-  conn: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   productId: number,
   quantityDelta: number,
   unitCost: number
 ): Promise<number> {
-  const [columnRows] = await conn.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) AS column_exists
-     FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'inventory_transactions'
-       AND COLUMN_NAME = 'unit_cost'`
-  );
-  const hasUnitCost = Number(columnRows[0]?.column_exists ?? 0) > 0;
+  const columnResult = await sql`
+    SELECT COUNT(*) AS column_exists
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'inventory_transactions'
+      AND COLUMN_NAME = 'unit_cost'
+  `.execute(db);
+  const hasUnitCost = Number((columnResult.rows[0] as any)?.column_exists ?? 0) > 0;
 
-  const [result] = hasUnitCost
-    ? await conn.execute(
-        `INSERT INTO inventory_transactions 
-         (company_id, product_id, transaction_type, quantity_delta, unit_cost, created_at)
-         VALUES (?, ?, 6, ?, ?, NOW())`,
-        [companyId, productId, quantityDelta, unitCost]
-      )
-    : await conn.execute(
-        `INSERT INTO inventory_transactions 
-         (company_id, product_id, transaction_type, quantity_delta, created_at)
-         VALUES (?, ?, 6, ?, NOW())`,
-        [companyId, productId, quantityDelta]
-      );
+  const result = hasUnitCost
+    ? await sql`
+        INSERT INTO inventory_transactions 
+        (company_id, product_id, transaction_type, quantity_delta, unit_cost, created_at)
+        VALUES (${companyId}, ${productId}, 6, ${quantityDelta}, ${unitCost}, NOW())
+      `.execute(db)
+    : await sql`
+        INSERT INTO inventory_transactions 
+        (company_id, product_id, transaction_type, quantity_delta, created_at)
+        VALUES (${companyId}, ${productId}, 6, ${quantityDelta}, NOW())
+      `.execute(db);
   
-  return (result as any).insertId;
+  return Number(result.insertId);
 }
 
-async function cleanupTestData(conn: PoolConnection, companyId: number): Promise<void> {
+async function cleanupTestData(db: KyselySchema, companyId: number): Promise<void> {
   // Note: journal_lines and journal_batches are immutable - they use VOID patterns
   // So we only clean up the mutable tables
   
   try {
-    await conn.execute(`DELETE FROM inventory_transactions WHERE company_id = ?`, [companyId]);
+    await sql`DELETE FROM inventory_transactions WHERE company_id = ${companyId}`.execute(db);
   } catch (e) {
     // May fail if table doesn't exist or has constraints
   }
   
   try {
-    await conn.execute(`DELETE FROM item_prices WHERE company_id = ?`, [companyId]);
+    await sql`DELETE FROM item_prices WHERE company_id = ${companyId}`.execute(db);
   } catch (e) {
     // May fail if table doesn't exist
   }
   
-  await conn.execute(`DELETE FROM items WHERE company_id = ?`, [companyId]);
+  await sql`DELETE FROM items WHERE company_id = ${companyId}`.execute(db);
   
   try {
-    await conn.execute(`DELETE FROM company_account_mappings WHERE company_id = ?`, [companyId]);
+    await sql`DELETE FROM company_account_mappings WHERE company_id = ${companyId}`.execute(db);
   } catch (e) {
     // May fail if table doesn't exist
   }
   
   // Accounts may have journal_lines referencing them - use try/catch
   try {
-    await conn.execute(`DELETE FROM accounts WHERE company_id = ?`, [companyId]);
+    await sql`DELETE FROM accounts WHERE company_id = ${companyId}`.execute(db);
   } catch (e) {
     // May fail if journal_lines reference these accounts
   }
   
   try {
-    await conn.execute(`DELETE FROM account_types WHERE company_id = ?`, [companyId]);
+    await sql`DELETE FROM account_types WHERE company_id = ${companyId}`.execute(db);
   } catch (e) {
     // May fail if table doesn't exist
   }
   
-  await conn.execute(`DELETE FROM outlets WHERE company_id = ?`, [companyId]);
-  await conn.execute(`DELETE FROM users WHERE company_id = ?`, [companyId]);
-  await conn.execute(`DELETE FROM companies WHERE id = ?`, [companyId]);
+  await sql`DELETE FROM outlets WHERE company_id = ${companyId}`.execute(db);
+  await sql`DELETE FROM users WHERE company_id = ${companyId}`.execute(db);
+  await sql`DELETE FROM companies WHERE id = ${companyId}`.execute(db);
 }
 
 // Setup
 before(async () => {
-  pool = getDbPool();
-  conn = await pool.getConnection();
+  db = getDb();
   
-  const [unitCostColumnRows] = await conn.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) AS column_exists
-     FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'inventory_transactions'
-       AND COLUMN_NAME = 'unit_cost'`
-  );
-  supportsUnitCost = Number(unitCostColumnRows[0]?.column_exists ?? 0) > 0;
+  const unitCostColumnResult = await sql`
+    SELECT COUNT(*) AS column_exists
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'inventory_transactions'
+      AND COLUMN_NAME = 'unit_cost'
+  `.execute(db);
+  supportsUnitCost = Number((unitCostColumnResult.rows[0] as any)?.column_exists ?? 0) > 0;
   
-  const [mappingTypeColumnRows] = await conn.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) AS column_exists
-     FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'company_account_mappings'
-       AND COLUMN_NAME = 'mapping_type_id'`
-  );
-  supportsMappingTypeId = Number(mappingTypeColumnRows[0]?.column_exists ?? 0) > 0;
+  const mappingTypeColumnResult = await sql`
+    SELECT COUNT(*) AS column_exists
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'company_account_mappings'
+      AND COLUMN_NAME = 'mapping_type_id'
+  `.execute(db);
+  supportsMappingTypeId = Number((mappingTypeColumnResult.rows[0] as any)?.column_exists ?? 0) > 0;
 
-  await cleanupTestData(conn, 0);
+  await cleanupTestData(db, 0);
 
   // Create company dynamically
   const company = await createCompanyBasic({
@@ -218,29 +209,24 @@ before(async () => {
   });
   TEST_USER_ID = user.id;
 
-  cogsAccountId = await createTestAccount(conn, TEST_COMPANY_ID, '6100-TEST', 'Test COGS', 'EXPENSE', 'D');
-  inventoryAccountId = await createTestAccount(conn, TEST_COMPANY_ID, '1100-TEST', 'Test Inventory', 'ASSET', 'D');
+  cogsAccountId = await createTestAccount(db, TEST_COMPANY_ID, '6100-TEST', 'Test COGS', 'EXPENSE', 'D');
+  inventoryAccountId = await createTestAccount(db, TEST_COMPANY_ID, '1100-TEST', 'Test Inventory', 'ASSET', 'D');
 
   if (supportsMappingTypeId) {
-    await conn.execute(
-      `INSERT INTO company_account_mappings (company_id, mapping_key, mapping_type_id, account_id)
-       VALUES (?, 'COGS_DEFAULT', 7, ?), (?, 'INVENTORY_ASSET_DEFAULT', 8, ?)`,
-      [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
-    );
+    await sql`
+      INSERT INTO company_account_mappings (company_id, mapping_key, mapping_type_id, account_id)
+      VALUES (${TEST_COMPANY_ID}, ${'COGS_DEFAULT'}, 7, ${cogsAccountId}), (${TEST_COMPANY_ID}, ${'INVENTORY_ASSET_DEFAULT'}, 8, ${inventoryAccountId})
+    `.execute(db);
   } else {
-    await conn.execute(
-      `INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
-       VALUES (?, 'COGS_DEFAULT', ?), (?, 'INVENTORY_ASSET_DEFAULT', ?)`,
-      [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
-    );
+    await sql`
+      INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
+      VALUES (${TEST_COMPANY_ID}, ${'COGS_DEFAULT'}, ${cogsAccountId}), (${TEST_COMPANY_ID}, ${'INVENTORY_ASSET_DEFAULT'}, ${inventoryAccountId})
+    `.execute(db);
   }
 });
 
 // Cleanup
 after(async () => {
-  if (conn) {
-    conn.release();
-  }
   await closeDbPool();
 });
 
@@ -256,10 +242,10 @@ test("calculateSaleCogs - should calculate COGS using inventory average cost", a
     track_stock: true
   });
   testItemId = coffeeItem.id;
-  await createInventoryTransaction(conn, TEST_COMPANY_ID, testItemId, 10, 5.0);
+  await createInventoryTransaction(db, TEST_COMPANY_ID, testItemId, 10, 5.0);
   
   const saleItems = [{ itemId: testItemId, quantity: 3 }];
-  const cogsDetails = await calculateSaleCogs(TEST_COMPANY_ID, saleItems, conn);
+  const cogsDetails = await calculateSaleCogs(TEST_COMPANY_ID, saleItems, db);
   
   assert.strictEqual(cogsDetails.length, 1);
   assert.strictEqual(cogsDetails[0].itemId, testItemId);
@@ -286,15 +272,15 @@ test("calculateSaleCogs - should calculate COGS for multiple items", async () =>
   });
   const item2Id = sandwichItem.id;
   
-  await createInventoryTransaction(conn, TEST_COMPANY_ID, item1Id, 10, 2.0);
-  await createInventoryTransaction(conn, TEST_COMPANY_ID, item2Id, 5, 3.5);
+  await createInventoryTransaction(db, TEST_COMPANY_ID, item1Id, 10, 2.0);
+  await createInventoryTransaction(db, TEST_COMPANY_ID, item2Id, 5, 3.5);
   
   const saleItems = [
     { itemId: item1Id, quantity: 2 },
     { itemId: item2Id, quantity: 1 }
   ];
   
-  const cogsDetails = await calculateSaleCogs(TEST_COMPANY_ID, saleItems, conn);
+  const cogsDetails = await calculateSaleCogs(TEST_COMPANY_ID, saleItems, db);
   
   assert.strictEqual(cogsDetails.length, 2);
   assert.strictEqual(cogsDetails[0].totalCost, 4.0);
@@ -310,7 +296,7 @@ test("calculateSaleCogs - should throw error when cost cannot be determined", as
   const itemId = noCostItem.id;
   
   await assert.rejects(
-    async () => await calculateSaleCogs(TEST_COMPANY_ID, [{ itemId, quantity: 1 }], conn),
+    async () => await calculateSaleCogs(TEST_COMPANY_ID, [{ itemId, quantity: 1 }], db),
     CogsCalculationError
   );
 });
@@ -330,7 +316,7 @@ test("calculateSaleCogs - should fall back to base_cost from item_prices", async
   });
   
   const saleItems = [{ itemId, quantity: 2 }];
-  const cogsDetails = await calculateSaleCogs(TEST_COMPANY_ID, saleItems, conn);
+  const cogsDetails = await calculateSaleCogs(TEST_COMPANY_ID, saleItems, db);
   
   assert.strictEqual(cogsDetails[0].unitCost, 7.5);
   assert.strictEqual(cogsDetails[0].totalCost, 15.0);
@@ -351,7 +337,7 @@ test("calculateSaleCogs - should batch mixed inventory and fallback price lookup
   const fallbackPriceItemId = priceItem.id;
 
   if (supportsUnitCost) {
-    await createInventoryTransaction(conn, TEST_COMPANY_ID, inventoryItemId, 8, 2.5);
+    await createInventoryTransaction(db, TEST_COMPANY_ID, inventoryItemId, 8, 2.5);
   } else {
     await createItemPrice(TEST_COMPANY_ID, {
       item_id: inventoryItemId,
@@ -372,7 +358,7 @@ test("calculateSaleCogs - should batch mixed inventory and fallback price lookup
       { itemId: inventoryItemId, quantity: 2 },
       { itemId: fallbackPriceItemId, quantity: 3 }
     ],
-    conn
+    db
   );
 
   assert.strictEqual(cogsDetails.length, 2);
@@ -386,8 +372,8 @@ test("calculateSaleCogs - should batch mixed inventory and fallback price lookup
 });
 
 test("getItemAccounts - should return item-specific accounts when configured", async () => {
-  const itemCogsId = await createTestAccount(conn, TEST_COMPANY_ID, '6101-ITEM', 'Item COGS', 'EXPENSE', 'D');
-  const itemInvId = await createTestAccount(conn, TEST_COMPANY_ID, '1101-ITEM', 'Item Inventory', 'ASSET', 'D');
+  const itemCogsId = await createTestAccount(db, TEST_COMPANY_ID, '6101-ITEM', 'Item COGS', 'EXPENSE', 'D');
+  const itemInvId = await createTestAccount(db, TEST_COMPANY_ID, '1101-ITEM', 'Item Inventory', 'ASSET', 'D');
   
   const accountedItem = await createItem(TEST_COMPANY_ID, {
     name: 'Accounted Item',
@@ -398,7 +384,7 @@ test("getItemAccounts - should return item-specific accounts when configured", a
   });
   const itemId = accountedItem.id;
   
-  const accounts = await getItemAccounts(TEST_COMPANY_ID, itemId, conn);
+  const accounts = await getItemAccounts(TEST_COMPANY_ID, itemId, db);
   
   assert.strictEqual(accounts.cogsAccountId, itemCogsId);
   assert.strictEqual(accounts.inventoryAssetAccountId, itemInvId);
@@ -412,14 +398,14 @@ test("getItemAccounts - should fall back to company defaults when item accounts 
   });
   const itemId = defaultAccountItem.id;
   
-  const accounts = await getItemAccounts(TEST_COMPANY_ID, itemId, conn);
+  const accounts = await getItemAccounts(TEST_COMPANY_ID, itemId, db);
   
   assert.strictEqual(accounts.cogsAccountId, cogsAccountId);
   assert.strictEqual(accounts.inventoryAssetAccountId, inventoryAccountId);
 });
 
 test("getItemAccounts - should throw error when COGS account is not expense type", async () => {
-  const wrongTypeAccount = await createTestAccount(conn, TEST_COMPANY_ID, '5100-WRONG', 'Wrong Type', 'REVENUE', 'C');
+  const wrongTypeAccount = await createTestAccount(db, TEST_COMPANY_ID, '5100-WRONG', 'Wrong Type', 'REVENUE', 'C');
   
   const wrongTypeItem = await createItem(TEST_COMPANY_ID, {
     name: 'Wrong Type Item',
@@ -431,13 +417,13 @@ test("getItemAccounts - should throw error when COGS account is not expense type
   const itemId = wrongTypeItem.id;
   
   await assert.rejects(
-    async () => await getItemAccounts(TEST_COMPANY_ID, itemId, conn),
+    async () => await getItemAccounts(TEST_COMPANY_ID, itemId, db),
     CogsAccountConfigError
   );
 });
 
 test("getItemAccounts - should throw error when inventory account is not asset type", async () => {
-  const wrongTypeAccount = await createTestAccount(conn, TEST_COMPANY_ID, '2100-WRONG', 'Wrong Type', 'LIABILITY', 'C');
+  const wrongTypeAccount = await createTestAccount(db, TEST_COMPANY_ID, '2100-WRONG', 'Wrong Type', 'LIABILITY', 'C');
   
   const wrongInvItem = await createItem(TEST_COMPANY_ID, {
     name: 'Wrong Type Item',
@@ -449,16 +435,13 @@ test("getItemAccounts - should throw error when inventory account is not asset t
   const itemId = wrongInvItem.id;
   
   await assert.rejects(
-    async () => await getItemAccounts(TEST_COMPANY_ID, itemId, conn),
+    async () => await getItemAccounts(TEST_COMPANY_ID, itemId, db),
     CogsAccountConfigError
   );
 });
 
 test("getItemAccounts - should throw error when no accounts are configured", async () => {
-  await conn.execute(
-    `DELETE FROM company_account_mappings WHERE company_id = ?`,
-    [TEST_COMPANY_ID]
-  );
+  await sql`DELETE FROM company_account_mappings WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
   
   const noAccountItem = await createItem(TEST_COMPANY_ID, {
     name: 'No Account Item',
@@ -468,29 +451,27 @@ test("getItemAccounts - should throw error when no accounts are configured", asy
   const itemId = noAccountItem.id;
   
   await assert.rejects(
-    async () => await getItemAccounts(TEST_COMPANY_ID, itemId, conn),
+    async () => await getItemAccounts(TEST_COMPANY_ID, itemId, db),
     CogsAccountConfigError
   );
   
   // Restore defaults
   if (supportsMappingTypeId) {
-    await conn.execute(
-      `INSERT INTO company_account_mappings (company_id, mapping_key, mapping_type_id, account_id)
-       VALUES (?, 'COGS_DEFAULT', 7, ?), (?, 'INVENTORY_ASSET_DEFAULT', 8, ?)`,
-      [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
-    );
+    await sql`
+      INSERT INTO company_account_mappings (company_id, mapping_key, mapping_type_id, account_id)
+      VALUES (${TEST_COMPANY_ID}, ${'COGS_DEFAULT'}, 7, ${cogsAccountId}), (${TEST_COMPANY_ID}, ${'INVENTORY_ASSET_DEFAULT'}, 8, ${inventoryAccountId})
+    `.execute(db);
   } else {
-    await conn.execute(
-      `INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
-       VALUES (?, 'COGS_DEFAULT', ?), (?, 'INVENTORY_ASSET_DEFAULT', ?)`,
-      [TEST_COMPANY_ID, cogsAccountId, TEST_COMPANY_ID, inventoryAccountId]
-    );
+    await sql`
+      INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
+      VALUES (${TEST_COMPANY_ID}, ${'COGS_DEFAULT'}, ${cogsAccountId}), (${TEST_COMPANY_ID}, ${'INVENTORY_ASSET_DEFAULT'}, ${inventoryAccountId})
+    `.execute(db);
   }
 });
 
 test("getItemAccountsBatch - should resolve mixed item-specific and default accounts in one call", async () => {
-  const itemSpecificCogsId = await createTestAccount(conn, TEST_COMPANY_ID, '6102-BATCH', 'Batch COGS', 'EXPENSE', 'D');
-  const itemSpecificInvId = await createTestAccount(conn, TEST_COMPANY_ID, '1102-BATCH', 'Batch Inventory', 'ASSET', 'D');
+  const itemSpecificCogsId = await createTestAccount(db, TEST_COMPANY_ID, '6102-BATCH', 'Batch COGS', 'EXPENSE', 'D');
+  const itemSpecificInvId = await createTestAccount(db, TEST_COMPANY_ID, '1102-BATCH', 'Batch Inventory', 'ASSET', 'D');
 
   const specificItem = await createItem(TEST_COMPANY_ID, {
     name: 'Batch Specific Item',
@@ -510,7 +491,7 @@ test("getItemAccountsBatch - should resolve mixed item-specific and default acco
   const accountsByItemId = await getItemAccountsBatch(
     TEST_COMPANY_ID,
     [itemWithSpecificAccounts, itemUsingDefaults],
-    conn
+    db
   );
 
   assert.deepStrictEqual(accountsByItemId.get(itemWithSpecificAccounts), {
@@ -518,7 +499,7 @@ test("getItemAccountsBatch - should resolve mixed item-specific and default acco
     inventoryAssetAccountId: itemSpecificInvId
   });
   assert.deepStrictEqual(accountsByItemId.get(itemUsingDefaults), {
-    cogsAccountId,
+    cogsAccountId: cogsAccountId,
     inventoryAssetAccountId: inventoryAccountId
   });
 });
@@ -535,7 +516,7 @@ test("postCogsForSale - should successfully post COGS journal for sale", async (
   });
   const itemId = saleItem.id;
   if (supportsUnitCost) {
-    await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 10, 5.0);
+    await createInventoryTransaction(db, TEST_COMPANY_ID, itemId, 10, 5.0);
   }
   
   const cogsResult = await postCogsForSale({
@@ -547,7 +528,7 @@ test("postCogsForSale - should successfully post COGS journal for sale", async (
       : [{ itemId, quantity: 2, unitCost: 5, totalCost: 10 }],
     saleDate,
     postedBy: TEST_USER_ID
-  }, conn);
+  }, db);
   
   assert.strictEqual(cogsResult.success, true, JSON.stringify(cogsResult.errors));
   assert.strictEqual(cogsResult.totalCogs, 10.0);
@@ -555,17 +536,11 @@ test("postCogsForSale - should successfully post COGS journal for sale", async (
   
   const batchId = cogsResult.journalBatchId!;
   
-  const [batchRows] = await conn.execute<RowDataPacket[]>(
-    `SELECT * FROM journal_batches WHERE id = ?`,
-    [batchId]
-  );
-  assert.strictEqual(batchRows.length, 1);
+  const batchResult = await sql`SELECT * FROM journal_batches WHERE id = ${batchId}`.execute(db);
+  assert.strictEqual((batchResult.rows as any[]).length, 1);
   
-  const [lineRows] = await conn.execute<RowDataPacket[]>(
-    `SELECT * FROM journal_lines WHERE journal_batch_id = ? ORDER BY id`,
-    [batchId]
-  );
-  const lines = lineRows as any[];
+  const lineResult = await sql`SELECT * FROM journal_lines WHERE journal_batch_id = ${batchId} ORDER BY id`.execute(db);
+  const lines = lineResult.rows as any[];
   assert.strictEqual(lines.length, 2);
   
   assert.strictEqual(Number(lines[0].debit), 10.0);
@@ -589,7 +564,7 @@ test("postCogsForSale - should calculate costs when not provided", async () => {
   });
   const itemId = item.id;
   if (supportsUnitCost) {
-    await createInventoryTransaction(conn, TEST_COMPANY_ID, itemId, 10, 3.0);
+    await createInventoryTransaction(db, TEST_COMPANY_ID, itemId, 10, 3.0);
   } else {
     await createItemPrice(TEST_COMPANY_ID, {
       item_id: itemId,
@@ -605,7 +580,7 @@ test("postCogsForSale - should calculate costs when not provided", async () => {
     items: [{ itemId, quantity: 5 }],
     saleDate: new Date(),
     postedBy: TEST_USER_ID
-  }, conn);
+  }, db);
   
   assert.strictEqual(result.success, true, JSON.stringify(result.errors));
   assert.strictEqual(result.totalCogs, 15.0);
@@ -619,7 +594,7 @@ test("postCogsForSale - should return success with zero COGS for empty items", a
     items: [],
     saleDate: new Date(),
     postedBy: TEST_USER_ID
-  }, conn);
+  }, db);
   
   assert.strictEqual(result.success, true, JSON.stringify(result.errors));
   assert.strictEqual(result.totalCogs, 0);
@@ -641,7 +616,7 @@ test("postCogsForSale - should return failure when account config is missing", a
     items: [{ itemId, quantity: 1 }],
     saleDate: new Date(),
     postedBy: TEST_USER_ID
-  }, conn);
+  }, db);
   
   assert.strictEqual(result.success, false);
   assert.ok(result.errors);
@@ -667,8 +642,8 @@ test("postCogsForSale - should post COGS for multiple items", async () => {
   const item2Id = item2.id;
   
   if (supportsUnitCost) {
-    await createInventoryTransaction(conn, TEST_COMPANY_ID, item1Id, 10, 2.0);
-    await createInventoryTransaction(conn, TEST_COMPANY_ID, item2Id, 5, 4.0);
+    await createInventoryTransaction(db, TEST_COMPANY_ID, item1Id, 10, 2.0);
+    await createInventoryTransaction(db, TEST_COMPANY_ID, item2Id, 5, 4.0);
   }
   
   const result = await postCogsForSale({
@@ -686,7 +661,7 @@ test("postCogsForSale - should post COGS for multiple items", async () => {
         ],
     saleDate: new Date(),
     postedBy: TEST_USER_ID
-  }, conn);
+  }, db);
   
   assert.strictEqual(result.success, true, JSON.stringify(result.errors));
   assert.strictEqual(result.totalCogs, 14.0);

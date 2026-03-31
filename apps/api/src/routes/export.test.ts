@@ -11,9 +11,9 @@
 
 import assert from "node:assert/strict";
 import { describe, test, after } from "node:test";
-import { closeDbPool, getDbPool } from "../lib/db.js";
+import { closeDbPool, getDb } from "../lib/db.js";
 import { SETTINGS_REGISTRY, SettingKey } from "@jurnapod/shared";
-import type { RowDataPacket } from "mysql2/promise";
+import { sql } from "kysely";
 import {
   parseExportParams,
   getColumnsForEntity,
@@ -508,25 +508,19 @@ describe("Export Routes - Settings Registry", () => {
 // =============================================================================
 
 describe("Export Routes - Database Pool", () => {
-  test("getDbPool returns a valid pool", () => {
-    const pool = getDbPool();
-    assert.ok(pool !== null);
-    assert.ok(pool !== undefined);
+  test("getDb returns a valid db instance", () => {
+    const db = getDb();
+    assert.ok(db !== null);
+    assert.ok(db !== undefined);
   });
 
-  test("can acquire and release connection", async () => {
-    const pool = getDbPool();
-    const conn = await pool.getConnection();
+  test("can execute query", async () => {
+    const db = getDb();
     
-    assert.ok(conn !== null);
-    assert.ok(conn !== undefined);
-    
-    // Verify connection is usable with a simple query
-    const [rows] = await conn.execute<RowDataPacket[]>("SELECT 1 as test");
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].test, 1);
-    
-    conn.release();
+    // Verify db is usable with a simple query
+    const result = await sql<{ test: number }>`SELECT 1 as test`.execute(db);
+    assert.ok(result.rows.length > 0);
+    assert.equal(result.rows[0].test, 1);
   });
 });
 

@@ -9,6 +9,51 @@
  */
 
 import { register } from "prom-client";
+import { getDb } from "../../lib/db.js";
+
+/**
+ * Database health status
+ */
+export interface DatabaseHealthStatus {
+  status: "healthy" | "degraded" | "unhealthy";
+  latencyMs?: number;
+  message?: string;
+  details?: unknown;
+}
+
+/**
+ * Check database connection health by executing a simple query.
+ * Uses the singleton Kysely instance internally.
+ */
+export async function checkDatabaseHealth(): Promise<DatabaseHealthStatus> {
+  const startTime = Date.now();
+  const db = getDb();
+
+  try {
+    // Execute a simple query to verify connectivity
+    await db
+      .selectFrom('companies')
+      .select('id')
+      .limit(1)
+      .executeTakeFirst();
+
+    const latencyMs = Date.now() - startTime;
+
+    return {
+      status: "healthy",
+      latencyMs,
+      details: {
+        poolStatus: "active",
+      },
+    };
+  } catch (error) {
+    return {
+      status: "unhealthy",
+      latencyMs: Date.now() - startTime,
+      message: error instanceof Error ? error.message : "Database connection failed",
+    };
+  }
+}
 
 /**
  * Import metrics snapshot

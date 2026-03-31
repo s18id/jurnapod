@@ -205,17 +205,17 @@ development_status:
   18-7-migrate-modules-platform: done
 
   # Epic 19: Pure Kysely Migration (API)
-  epic-19: backlog
-  19-1-migrate-api-lib-shared: backlog
-  19-2-migrate-api-lib-foundation: backlog
-  19-3-migrate-api-lib-items: backlog
-  19-4-migrate-api-lib-business: backlog
-  19-5-migrate-api-lib-accounting: backlog
-  19-6-migrate-api-lib-operations: backlog
-  19-7-migrate-api-lib-settings: backlog
-  19-8-migrate-api-lib-email: backlog
-  19-9-migrate-api-lib-fiscal: backlog
-  19-10-migrate-api-lib-cost-recipe: backlog
-  19-11-migrate-api-lib-reports: backlog
-  19-12-migrate-api-routes: backlog
-  19-13-final-verification: backlog
+  epic-19: done
+  19-1-migrate-api-lib-shared: done
+  19-2-migrate-api-lib-foundation: done
+  19-3-migrate-api-lib-items: done
+  19-4-migrate-api-lib-business: done
+  19-5-migrate-api-lib-accounting: done
+  19-6-migrate-api-lib-operations: done
+  19-7-migrate-api-lib-settings: done
+  19-8-migrate-api-lib-email: done
+  19-9-migrate-api-lib-fiscal: done
+  19-10-migrate-api-lib-cost-recipe: done
+  19-11-migrate-api-lib-reports: done
+  19-12-migrate-api-routes: done
+  19-13-final-verification: done (0 type errors)

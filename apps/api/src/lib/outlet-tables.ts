@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { sql } from "kysely";
+import { getDb, type KyselySchema } from "./db";
+import { withTransaction } from "@jurnapod/db";
 import { AuditService } from "@jurnapod/modules-platform";
-import { getDbPool } from "./db";
 import {
   TableOccupancyStatus,
   type OutletTableStatusIdType,
@@ -12,7 +12,6 @@ import {
   outletTableStatusToId,
   toRfc3339Required
 } from "@jurnapod/shared";
-import { newKyselyConnection } from "@jurnapod/db";
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 
@@ -42,7 +41,7 @@ export type OutletTableFullResponse = {
   updated_at: string;
 };
 
-type OutletTableRow = RowDataPacket & {
+interface OutletTableRow {
   id: number;
   company_id: number;
   outlet_id: number;
@@ -52,60 +51,19 @@ type OutletTableRow = RowDataPacket & {
   capacity: number | null;
   status: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
   status_id: OutletTableStatusIdType | null;
-  created_at: string;
-  updated_at: string;
-};
+  created_at: Date;
+  updated_at: Date;
+}
 
-type OutletTableCodeRow = RowDataPacket & {
+interface OutletTableCodeRow {
   code: string;
-};
+}
 
 type OutletTableActor = {
   userId: number;
   outletId?: number | null;
   ipAddress?: string | null;
 };
-
-class ConnectionAuditDbClient {
-  constructor(private readonly connection: PoolConnection) {}
-
-  get kysely() {
-    return newKyselyConnection(this.connection);
-  }
-
-  async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
-    const [rows] = await this.connection.execute<RowDataPacket[]>(sql, params || []);
-    return rows as T[];
-  }
-
-  async execute(
-    sql: string,
-    params?: any[]
-  ): Promise<{ affectedRows: number; insertId?: number }> {
-    const [result] = await this.connection.execute<ResultSetHeader>(sql, params || []);
-    return {
-      affectedRows: result.affectedRows,
-      insertId: result.insertId
-    };
-  }
-
-  async begin(): Promise<void> {
-    // No-op: transaction is managed by caller.
-  }
-
-  async commit(): Promise<void> {
-    // No-op: transaction is managed by caller.
-  }
-
-  async rollback(): Promise<void> {
-    // No-op: transaction is managed by caller.
-  }
-}
-
-function createAuditServiceForConnection(connection: PoolConnection): AuditService {
-  const dbClient = new ConnectionAuditDbClient(connection);
-  return new AuditService(dbClient);
-}
 
 function buildAuditContext(companyId: number, actor: OutletTableActor) {
   return {
@@ -160,68 +118,65 @@ function normalizeTableCode(value: string): string {
 }
 
 async function hasOpenDineInOrders(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   tableId: number
 ): Promise<boolean> {
-  const [rows] = await connection.execute<Array<RowDataPacket & { count_open: number }>>(
-    `SELECT COUNT(*) AS count_open
-     FROM pos_order_snapshots
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND table_id = ?
-       AND order_state = 'OPEN'
-       AND service_type = 'DINE_IN'`,
-    [companyId, outletId, tableId]
-  );
+  const result = await sql<{ count_open: number }>`
+    SELECT COUNT(*) AS count_open
+    FROM pos_order_snapshots
+    WHERE company_id = ${companyId}
+      AND outlet_id = ${outletId}
+      AND table_id = ${tableId}
+      AND order_state = 'OPEN'
+      AND service_type = 'DINE_IN'
+  `.execute(db);
 
-  return Number(rows[0]?.count_open ?? 0) > 0;
+  return Number(result.rows[0]?.count_open ?? 0) > 0;
 }
 
 async function hasActiveServiceSessions(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   tableId: number
 ): Promise<boolean> {
-  const [rows] = await connection.execute<Array<RowDataPacket & { count_active: number }>>(
-    `SELECT COUNT(*) AS count_active
-     FROM table_service_sessions
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND table_id = ?
-       AND status_id IN (1, 2)`,
-    [companyId, outletId, tableId]
-  );
+  const result = await sql<{ count_active: number }>`
+    SELECT COUNT(*) AS count_active
+    FROM table_service_sessions
+    WHERE company_id = ${companyId}
+      AND outlet_id = ${outletId}
+      AND table_id = ${tableId}
+      AND status_id IN (1, 2)
+  `.execute(db);
 
-  return Number(rows[0]?.count_active ?? 0) > 0;
+  return Number(result.rows[0]?.count_active ?? 0) > 0;
 }
 
 async function hasBlockingReservations(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   tableId: number
 ): Promise<boolean> {
-  const [rows] = await connection.execute<Array<RowDataPacket & { count_blocking: number }>>(
-    `SELECT COUNT(*) AS count_blocking
-     FROM reservations
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND table_id = ?
-       AND (
-         status_id IN (1, 2, 3, 4)
-         OR status IN ('BOOKED', 'CONFIRMED', 'ARRIVED', 'SEATED')
-       )`,
-    [companyId, outletId, tableId]
-  );
+  const result = await sql<{ count_blocking: number }>`
+    SELECT COUNT(*) AS count_blocking
+    FROM reservations
+    WHERE company_id = ${companyId}
+      AND outlet_id = ${outletId}
+      AND table_id = ${tableId}
+      AND (
+        status_id IN (1, 2, 3, 4)
+        OR status IN ('BOOKED', 'CONFIRMED', 'ARRIVED', 'SEATED')
+      )
+  `.execute(db);
 
-  return Number(rows[0]?.count_blocking ?? 0) > 0;
+  return Number(result.rows[0]?.count_blocking ?? 0) > 0;
 }
 
 async function syncOperationalStatusToOccupancy(
-  connection: PoolConnection,
+  db: KyselySchema,
   params: {
     companyId: number;
     outletId: number;
@@ -232,9 +187,9 @@ async function syncOperationalStatusToOccupancy(
 ): Promise<void> {
   if (params.status === "AVAILABLE") {
     const [hasOpenOrders, hasActiveSessions, hasBlockingResv] = await Promise.all([
-      hasOpenDineInOrders(connection, params.companyId, params.outletId, params.tableId),
-      hasActiveServiceSessions(connection, params.companyId, params.outletId, params.tableId),
-      hasBlockingReservations(connection, params.companyId, params.outletId, params.tableId)
+      hasOpenDineInOrders(db, params.companyId, params.outletId, params.tableId),
+      hasActiveServiceSessions(db, params.companyId, params.outletId, params.tableId),
+      hasBlockingReservations(db, params.companyId, params.outletId, params.tableId)
     ]);
 
     if (hasOpenOrders || hasActiveSessions || hasBlockingResv) {
@@ -243,52 +198,36 @@ async function syncOperationalStatusToOccupancy(
       );
     }
 
-    await connection.execute(
-      `INSERT INTO table_occupancy
-       (company_id, outlet_id, table_id, status_id, version, service_session_id, reservation_id,
-        occupied_at, reserved_until, guest_count, notes, created_by, updated_by)
-       VALUES (?, ?, ?, ?, 1, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         status_id = VALUES(status_id),
-         version = version + 1,
-         service_session_id = NULL,
-         reservation_id = NULL,
-         occupied_at = NULL,
-         reserved_until = NULL,
-         guest_count = NULL,
-         notes = NULL,
-         updated_by = VALUES(updated_by),
-         updated_at = CURRENT_TIMESTAMP`,
-      [
-        params.companyId,
-        params.outletId,
-        params.tableId,
-        TableOccupancyStatus.AVAILABLE,
-        String(params.actorUserId),
-        String(params.actorUserId)
-      ]
-    );
+    await sql`
+      INSERT INTO table_occupancy
+        (company_id, outlet_id, table_id, status_id, version, service_session_id, reservation_id,
+         occupied_at, reserved_until, guest_count, notes, created_by, updated_by)
+      VALUES (${params.companyId}, ${params.outletId}, ${params.tableId}, ${TableOccupancyStatus.AVAILABLE}, 1, NULL, NULL, NULL, NULL, NULL, NULL, ${params.actorUserId}, ${params.actorUserId})
+      ON DUPLICATE KEY UPDATE
+        status_id = VALUES(status_id),
+        version = version + 1,
+        service_session_id = NULL,
+        reservation_id = NULL,
+        occupied_at = NULL,
+        reserved_until = NULL,
+        guest_count = NULL,
+        notes = NULL,
+        updated_by = VALUES(updated_by),
+        updated_at = CURRENT_TIMESTAMP
+    `.execute(db);
     return;
   }
 
-  await connection.execute(
-    `INSERT INTO table_occupancy
-     (company_id, outlet_id, table_id, status_id, version, created_by, updated_by)
-     VALUES (?, ?, ?, ?, 1, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       status_id = VALUES(status_id),
-       version = version + 1,
-       updated_by = VALUES(updated_by),
-       updated_at = CURRENT_TIMESTAMP`,
-    [
-      params.companyId,
-      params.outletId,
-      params.tableId,
-      TableOccupancyStatus.OUT_OF_SERVICE,
-      String(params.actorUserId),
-      String(params.actorUserId)
-    ]
-  );
+  await sql`
+    INSERT INTO table_occupancy
+      (company_id, outlet_id, table_id, status_id, version, created_by, updated_by)
+    VALUES (${params.companyId}, ${params.outletId}, ${params.tableId}, ${TableOccupancyStatus.OUT_OF_SERVICE}, 1, ${params.actorUserId}, ${params.actorUserId})
+    ON DUPLICATE KEY UPDATE
+      status_id = VALUES(status_id),
+      version = version + 1,
+      updated_by = VALUES(updated_by),
+      updated_at = CURRENT_TIMESTAMP
+  `.execute(db);
 }
 
 /**
@@ -298,16 +237,15 @@ export async function listOutletTablesByOutlet(
   companyId: number,
   outletId: number
 ): Promise<OutletTableFullResponse[]> {
-  const pool = getDbPool();
-  const [rows] = await pool.execute<OutletTableRow[]>(
-    `SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
-     FROM outlet_tables
-     WHERE company_id = ? AND outlet_id = ?
-     ORDER BY zone ASC, code ASC`,
-    [companyId, outletId]
-  );
+  const db = getDb();
+  const rows = await sql<OutletTableRow>`
+    SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
+    FROM outlet_tables
+    WHERE company_id = ${companyId} AND outlet_id = ${outletId}
+    ORDER BY zone ASC, code ASC
+  `.execute(db);
 
-  return rows.map(normalizeOutletTable);
+  return rows.rows.map(normalizeOutletTable);
 }
 
 /**
@@ -318,19 +256,18 @@ export async function getOutletTable(
   outletId: number,
   tableId: number
 ): Promise<OutletTableFullResponse> {
-  const pool = getDbPool();
-  const [rows] = await pool.execute<OutletTableRow[]>(
-    `SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
-     FROM outlet_tables
-     WHERE id = ? AND company_id = ? AND outlet_id = ?`,
-    [tableId, companyId, outletId]
-  );
+  const db = getDb();
+  const rows = await sql<OutletTableRow>`
+    SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
+    FROM outlet_tables
+    WHERE id = ${tableId} AND company_id = ${companyId} AND outlet_id = ${outletId}
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (rows.rows.length === 0) {
     throw new OutletTableNotFoundError(`Table with id ${tableId} not found`);
   }
 
-  return normalizeOutletTable(rows[0]);
+  return normalizeOutletTable(rows.rows[0]);
 }
 
 /**
@@ -347,50 +284,36 @@ export async function createOutletTable(params: {
   status_id?: OutletTableStatusIdType;
   actor: OutletTableActor;
 }): Promise<OutletTableFullResponse> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-  const auditService = createAuditServiceForConnection(connection);
+  const db = getDb();
 
-  try {
-    await connection.beginTransaction();
+  // Check if code already exists for this outlet
+  const normalizedCode = normalizeTableCode(params.code);
+  const normalizedStatus = resolveOperationalStatusInput({
+    status: params.status,
+    status_id: params.status_id
+  });
 
-    // Check if code already exists for this outlet
-    const normalizedCode = normalizeTableCode(params.code);
-    const normalizedStatus = resolveOperationalStatusInput({
-      status: params.status,
-      status_id: params.status_id
-    });
+  const existing = await sql<{ id: number }>`
+    SELECT id FROM outlet_tables WHERE company_id = ${params.company_id} AND outlet_id = ${params.outlet_id} AND code = ${normalizedCode}
+  `.execute(db);
 
-    const [existing] = await connection.execute<OutletTableRow[]>(
-      `SELECT id FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND code = ?`,
-      [params.company_id, params.outlet_id, normalizedCode]
+  if (existing.rows.length > 0) {
+    throw new OutletTableCodeExistsError(
+      `Table with code ${params.code} already exists for this outlet`
     );
+  }
 
-    if (existing.length > 0) {
-      throw new OutletTableCodeExistsError(
-        `Table with code ${params.code} already exists for this outlet`
-      );
-    }
+  // Insert table
+  const insertResult = await sql`
+    INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+    VALUES (${params.company_id}, ${params.outlet_id}, ${normalizedCode}, ${params.name}, ${params.zone ?? null}, ${params.capacity ?? null}, ${normalizedStatus.status}, ${normalizedStatus.status_id})
+  `.execute(db);
 
-    // Insert table
-    const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        params.company_id,
-        params.outlet_id,
-        normalizedCode,
-        params.name,
-        params.zone ?? null,
-        params.capacity ?? null,
-        normalizedStatus.status,
-        normalizedStatus.status_id
-      ]
-    );
+  const tableId = Number(insertResult.insertId);
 
-    const tableId = Number(result.insertId);
-
-    await syncOperationalStatusToOccupancy(connection, {
+  // Use withTransaction for the rest of the operations
+  return await withTransaction(db, async (trx) => {
+    await syncOperationalStatusToOccupancy(trx, {
       companyId: params.company_id,
       outletId: params.outlet_id,
       tableId,
@@ -399,6 +322,7 @@ export async function createOutletTable(params: {
     });
 
     const auditContext = buildAuditContext(params.company_id, params.actor);
+    const auditService = new AuditService(trx);
 
     await auditService.logCreate(auditContext, "outlet_table", tableId, {
       code: normalizedCode,
@@ -409,26 +333,18 @@ export async function createOutletTable(params: {
       status_id: normalizedStatus.status_id
     });
 
-    const [rows] = await connection.execute<OutletTableRow[]>(
-      `SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
-       FROM outlet_tables
-       WHERE id = ? AND company_id = ? AND outlet_id = ?`,
-      [tableId, params.company_id, params.outlet_id]
-    );
+    const rows = await sql<OutletTableRow>`
+      SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
+      FROM outlet_tables
+      WHERE id = ${tableId} AND company_id = ${params.company_id} AND outlet_id = ${params.outlet_id}
+    `.execute(trx);
 
-    if (rows.length === 0) {
+    if (rows.rows.length === 0) {
       throw new OutletTableNotFoundError(`Table with id ${tableId} not found`);
     }
 
-    await connection.commit();
-
-    return normalizeOutletTable(rows[0]);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+    return normalizeOutletTable(rows.rows[0]);
+  });
 }
 
 export async function createOutletTablesBulk(params: {
@@ -444,92 +360,82 @@ export async function createOutletTablesBulk(params: {
   status_id?: OutletTableStatusIdType;
   actor: OutletTableActor;
 }): Promise<OutletTableFullResponse[]> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-  const auditService = createAuditServiceForConnection(connection);
+  const db = getDb();
 
-  try {
-    await connection.beginTransaction();
-    const normalizedStatus = resolveOperationalStatusInput({
-      status: params.status,
-      status_id: params.status_id
-    });
+  const normalizedStatus = resolveOperationalStatusInput({
+    status: params.status,
+    status_id: params.status_id
+  });
 
-    const generated = Array.from({ length: params.count }, (_, index) => {
-      const seq = params.start_seq + index;
-      const code = normalizeTableCode(params.code_template.replaceAll("{seq}", String(seq)));
-      const name = params.name_template.replaceAll("{seq}", String(seq)).trim();
+  const generated = Array.from({ length: params.count }, (_, index) => {
+    const seq = params.start_seq + index;
+    const code = normalizeTableCode(params.code_template.replaceAll("{seq}", String(seq)));
+    const name = params.name_template.replaceAll("{seq}", String(seq)).trim();
 
-      if (code.length === 0 || code.length > 32) {
-        throw new Error(`Generated table code is invalid for seq ${seq}`);
-      }
-
-      if (name.length === 0 || name.length > 191) {
-        throw new Error(`Generated table name is invalid for seq ${seq}`);
-      }
-
-      return {
-        seq,
-        code,
-        name
-      };
-    });
-
-    const requestCodeSet = new Set<string>();
-    const duplicateRequestCodes: string[] = [];
-    for (const item of generated) {
-      if (requestCodeSet.has(item.code)) {
-        duplicateRequestCodes.push(item.code);
-      } else {
-        requestCodeSet.add(item.code);
-      }
+    if (code.length === 0 || code.length > 32) {
+      throw new Error(`Generated table code is invalid for seq ${seq}`);
     }
 
-    if (duplicateRequestCodes.length > 0) {
-      const uniqueDuplicates = [...new Set(duplicateRequestCodes)].sort();
-      throw new OutletTableBulkConflictError(
-        `Generated duplicate table codes in request: ${uniqueDuplicates.join(", ")}`,
-        uniqueDuplicates
-      );
+    if (name.length === 0 || name.length > 191) {
+      throw new Error(`Generated table name is invalid for seq ${seq}`);
     }
 
-    const generatedCodes = generated.map((item) => item.code);
-    const placeholders = generatedCodes.map(() => "?").join(", ");
-    const [existingRows] = await connection.execute<OutletTableCodeRow[]>(
-      `SELECT code FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND code IN (${placeholders})`,
-      [params.company_id, params.outlet_id, ...generatedCodes]
+    return {
+      seq,
+      code,
+      name
+    };
+  });
+
+  const requestCodeSet = new Set<string>();
+  const duplicateRequestCodes: string[] = [];
+  for (const item of generated) {
+    if (requestCodeSet.has(item.code)) {
+      duplicateRequestCodes.push(item.code);
+    } else {
+      requestCodeSet.add(item.code);
+    }
+  }
+
+  if (duplicateRequestCodes.length > 0) {
+    const uniqueDuplicates = [...new Set(duplicateRequestCodes)].sort();
+    throw new OutletTableBulkConflictError(
+      `Generated duplicate table codes in request: ${uniqueDuplicates.join(", ")}`,
+      uniqueDuplicates
     );
+  }
 
-    if (existingRows.length > 0) {
-      const conflicts = [...new Set(existingRows.map((row) => row.code))].sort();
-      throw new OutletTableBulkConflictError(
-        `Table code already exists for this outlet: ${conflicts.join(", ")}`,
-        conflicts
-      );
-    }
+  const generatedCodes = generated.map((item) => item.code);
+  const existingRows = await sql<OutletTableCodeRow>`
+    SELECT code FROM outlet_tables 
+    WHERE company_id = ${params.company_id} 
+      AND outlet_id = ${params.outlet_id} 
+      AND code IN (${sql.join(generatedCodes.map(c => sql`${c}`), sql`, `)})
+  `.execute(db);
 
+  if (existingRows.rows.length > 0) {
+    const conflicts = [...new Set(existingRows.rows.map((row: OutletTableCodeRow) => row.code))].sort();
+    throw new OutletTableBulkConflictError(
+      `Table code already exists for this outlet: ${conflicts.join(", ")}`,
+      conflicts
+    );
+  }
+
+  return await withTransaction(db, async (trx) => {
+    const auditService = new AuditService(trx);
     const insertedIds: number[] = [];
+
     for (const item of generated) {
       try {
-        const [insertResult] = await connection.execute<ResultSetHeader>(
-          `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            params.company_id,
-            params.outlet_id,
-            item.code,
-            item.name,
-            params.zone ?? null,
-            params.capacity ?? null,
-            normalizedStatus.status,
-            normalizedStatus.status_id
-          ]
-        );
+        const insertResult = await sql`
+          INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+          VALUES (${params.company_id}, ${params.outlet_id}, ${item.code}, ${item.name}, ${params.zone ?? null}, ${params.capacity ?? null}, ${normalizedStatus.status}, ${normalizedStatus.status_id})
+        `.execute(trx);
 
         const tableId = Number(insertResult.insertId);
         insertedIds.push(tableId);
 
-        await syncOperationalStatusToOccupancy(connection, {
+        await syncOperationalStatusToOccupancy(trx, {
           companyId: params.company_id,
           outletId: params.outlet_id,
           tableId,
@@ -546,8 +452,9 @@ export async function createOutletTablesBulk(params: {
           status: normalizedStatus.status,
           status_id: normalizedStatus.status_id
         });
-      } catch (insertError: any) {
-        const errno = insertError?.errno;
+      } catch (insertError: unknown) {
+        const mysqlError = insertError as { errno?: number };
+        const errno = mysqlError?.errno;
         if (errno === MYSQL_DUPLICATE_ERROR_CODE) {
           throw new OutletTableBulkConflictError(
             `Table code already exists for this outlet: ${item.code}`,
@@ -558,23 +465,15 @@ export async function createOutletTablesBulk(params: {
       }
     }
 
-    const idPlaceholders = insertedIds.map(() => "?").join(", ");
-    const [rows] = await connection.execute<OutletTableRow[]>(
-      `SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
-       FROM outlet_tables
-       WHERE company_id = ? AND outlet_id = ? AND id IN (${idPlaceholders})
-       ORDER BY code ASC`,
-      [params.company_id, params.outlet_id, ...insertedIds]
-    );
+    const rows = await sql<OutletTableRow>`
+      SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
+      FROM outlet_tables
+      WHERE company_id = ${params.company_id} AND outlet_id = ${params.outlet_id} AND id IN (${sql.join(insertedIds.map(id => sql`${id}`), sql`, `)})
+      ORDER BY code ASC
+    `.execute(trx);
 
-    await connection.commit();
-    return rows.map(normalizeOutletTable);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+    return rows.rows.map(normalizeOutletTable);
+  });
 }
 
 /**
@@ -592,162 +491,141 @@ export async function updateOutletTable(params: {
   status_id?: OutletTableStatusIdType;
   actor: OutletTableActor;
 }): Promise<OutletTableFullResponse> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-  const auditService = createAuditServiceForConnection(connection);
+  const db = getDb();
 
-  try {
-    await connection.beginTransaction();
+  // Get current table
+  const rows = await sql<OutletTableRow>`
+    SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
+    FROM outlet_tables
+    WHERE id = ${params.tableId} AND company_id = ${params.companyId} AND outlet_id = ${params.outletId}
+  `.execute(db);
 
-    // Get current table
-    const [rows] = await connection.execute<OutletTableRow[]>(
-      `SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
-       FROM outlet_tables
-       WHERE id = ? AND company_id = ? AND outlet_id = ?`,
-      [params.tableId, params.companyId, params.outletId]
-    );
+  if (rows.rows.length === 0) {
+    throw new OutletTableNotFoundError(`Table with id ${params.tableId} not found`);
+  }
 
-    if (rows.length === 0) {
+  const currentTable = rows.rows[0];
+  const oldData: Record<string, unknown> = {};
+  const newData: Record<string, unknown> = {};
+  let hasChanges = false;
+
+  // Build update query dynamically
+  const updates: ReturnType<typeof sql>[] = [];
+
+  if (params.code !== undefined) {
+    const normalizedCode = normalizeTableCode(params.code);
+
+    if (normalizedCode !== currentTable.code) {
+      const codeRows = await sql<{ id: number }>`
+        SELECT id FROM outlet_tables
+        WHERE company_id = ${params.companyId} AND outlet_id = ${params.outletId} AND code = ${normalizedCode} AND id <> ${params.tableId}
+        LIMIT 1
+      `.execute(db);
+
+      if (codeRows.rows.length > 0) {
+        throw new OutletTableCodeExistsError(
+          `Table with code ${normalizedCode} already exists for this outlet`
+        );
+      }
+
+      updates.push(sql`code = ${normalizedCode}`);
+      oldData.code = currentTable.code;
+      newData.code = normalizedCode;
+      hasChanges = true;
+    }
+  }
+
+  if (params.name !== undefined && params.name !== currentTable.name) {
+    updates.push(sql`name = ${params.name}`);
+    oldData.name = currentTable.name;
+    newData.name = params.name;
+    hasChanges = true;
+  }
+
+  if (params.zone !== undefined && params.zone !== currentTable.zone) {
+    updates.push(sql`zone = ${params.zone}`);
+    oldData.zone = currentTable.zone;
+    newData.zone = params.zone;
+    hasChanges = true;
+  }
+
+  if (params.capacity !== undefined && params.capacity !== currentTable.capacity) {
+    updates.push(sql`capacity = ${params.capacity}`);
+    oldData.capacity = currentTable.capacity;
+    newData.capacity = params.capacity;
+    hasChanges = true;
+  }
+
+  const currentOperationalStatus =
+    currentTable.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE";
+  const currentOperationalStatusId =
+    currentOperationalStatus === "UNAVAILABLE" ? 7 : 1;
+
+  const resolvedRequestStatus =
+    params.status_id !== undefined
+      ? resolveOperationalStatusInput({ status_id: params.status_id })
+      : params.status !== undefined
+        ? resolveOperationalStatusInput({ status: params.status })
+        : undefined;
+
+  if (
+    resolvedRequestStatus !== undefined &&
+    (
+      resolvedRequestStatus.status !== currentOperationalStatus ||
+      resolvedRequestStatus.status_id !== currentOperationalStatusId
+    )
+  ) {
+    const requestedStatus = resolvedRequestStatus.status;
+    const requestedStatusId = resolvedRequestStatus.status_id;
+    updates.push(sql`status = ${requestedStatus}`);
+    updates.push(sql`status_id = ${requestedStatusId}`);
+    oldData.status = currentTable.status;
+    newData.status = requestedStatus;
+    oldData.status_id = currentTable.status_id ?? outletTableStatusToId(currentTable.status as "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE");
+    newData.status_id = requestedStatusId;
+    hasChanges = true;
+
+    await syncOperationalStatusToOccupancy(db, {
+      companyId: params.companyId,
+      outletId: params.outletId,
+      tableId: params.tableId,
+      status: requestedStatus,
+      actorUserId: params.actor.userId
+    });
+  }
+
+  let outletTableForResponse = currentTable;
+
+  if (hasChanges) {
+    updates.push(sql`updated_at = CURRENT_TIMESTAMP`);
+
+    await sql`
+      UPDATE outlet_tables
+      SET ${sql.join(updates, sql`, `)}
+      WHERE id = ${params.tableId} AND company_id = ${params.companyId} AND outlet_id = ${params.outletId}
+    `.execute(db);
+
+    const updatedRows = await sql<OutletTableRow>`
+      SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
+      FROM outlet_tables
+      WHERE id = ${params.tableId} AND company_id = ${params.companyId} AND outlet_id = ${params.outletId}
+    `.execute(db);
+
+    if (updatedRows.rows.length === 0) {
       throw new OutletTableNotFoundError(`Table with id ${params.tableId} not found`);
     }
 
-    const currentTable = rows[0];
-    const oldData: Record<string, any> = {};
-    const newData: Record<string, any> = {};
-    let hasChanges = false;
+    outletTableForResponse = updatedRows.rows[0];
 
-    // Build update query dynamically
-    const updates: string[] = [];
-    const values: any[] = [];
-
-    if (params.code !== undefined) {
-      const normalizedCode = normalizeTableCode(params.code);
-
-      if (normalizedCode !== currentTable.code) {
-        const [codeRows] = await connection.execute<OutletTableRow[]>(
-          `SELECT id FROM outlet_tables
-           WHERE company_id = ? AND outlet_id = ? AND code = ? AND id <> ?
-           LIMIT 1`,
-          [params.companyId, params.outletId, normalizedCode, params.tableId]
-        );
-
-        if (codeRows.length > 0) {
-          throw new OutletTableCodeExistsError(
-            `Table with code ${normalizedCode} already exists for this outlet`
-          );
-        }
-
-        updates.push("code = ?");
-        values.push(normalizedCode);
-        oldData.code = currentTable.code;
-        newData.code = normalizedCode;
-        hasChanges = true;
-      }
-    }
-
-    if (params.name !== undefined && params.name !== currentTable.name) {
-      updates.push("name = ?");
-      values.push(params.name);
-      oldData.name = currentTable.name;
-      newData.name = params.name;
-      hasChanges = true;
-    }
-
-    if (params.zone !== undefined && params.zone !== currentTable.zone) {
-      updates.push("zone = ?");
-      values.push(params.zone);
-      oldData.zone = currentTable.zone;
-      newData.zone = params.zone;
-      hasChanges = true;
-    }
-
-    if (params.capacity !== undefined && params.capacity !== currentTable.capacity) {
-      updates.push("capacity = ?");
-      values.push(params.capacity);
-      oldData.capacity = currentTable.capacity;
-      newData.capacity = params.capacity;
-      hasChanges = true;
-    }
-
-    const currentOperationalStatus =
-      currentTable.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE";
-    const currentOperationalStatusId =
-      currentOperationalStatus === "UNAVAILABLE" ? 7 : 1;
-
-    const resolvedRequestStatus =
-      params.status_id !== undefined
-        ? resolveOperationalStatusInput({ status_id: params.status_id })
-        : params.status !== undefined
-          ? resolveOperationalStatusInput({ status: params.status })
-          : undefined;
-
-    if (
-      resolvedRequestStatus !== undefined &&
-      (
-        resolvedRequestStatus.status !== currentOperationalStatus ||
-        resolvedRequestStatus.status_id !== currentOperationalStatusId
-      )
-    ) {
-      const requestedStatus = resolvedRequestStatus.status;
-      const requestedStatusId = resolvedRequestStatus.status_id;
-      updates.push("status = ?");
-      values.push(requestedStatus);
-      updates.push("status_id = ?");
-      values.push(requestedStatusId);
-      oldData.status = currentTable.status;
-      newData.status = requestedStatus;
-      oldData.status_id = currentTable.status_id ?? outletTableStatusToId(currentTable.status);
-      newData.status_id = requestedStatusId;
-      hasChanges = true;
-
-      await syncOperationalStatusToOccupancy(connection, {
-        companyId: params.companyId,
-        outletId: params.outletId,
-        tableId: params.tableId,
-        status: requestedStatus,
-        actorUserId: params.actor.userId
-      });
-    }
-
-    let outletTableForResponse = currentTable;
-
-    if (hasChanges) {
-      updates.push("updated_at = CURRENT_TIMESTAMP");
-      values.push(params.tableId, params.companyId, params.outletId);
-
-      await connection.execute(
-        `UPDATE outlet_tables
-         SET ${updates.join(", ")}
-         WHERE id = ? AND company_id = ? AND outlet_id = ?`,
-        values
-      );
-
+    // Log audit within transaction
+    await withTransaction(db, async (trx) => {
       const auditContext = buildAuditContext(params.companyId, params.actor);
+      const auditService = new AuditService(trx);
       await auditService.logUpdate(auditContext, "outlet_table", params.tableId, oldData, newData);
-
-      const [updatedRows] = await connection.execute<OutletTableRow[]>(
-        `SELECT id, company_id, outlet_id, code, name, zone, capacity, status, status_id, created_at, updated_at
-         FROM outlet_tables
-         WHERE id = ? AND company_id = ? AND outlet_id = ?`,
-        [params.tableId, params.companyId, params.outletId]
-      );
-
-      if (updatedRows.length === 0) {
-        throw new OutletTableNotFoundError(`Table with id ${params.tableId} not found`);
-      }
-
-      outletTableForResponse = updatedRows[0];
-    }
-
-    await connection.commit();
-
-    return normalizeOutletTable(outletTableForResponse);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
+    });
   }
+
+  return normalizeOutletTable(outletTableForResponse);
 }
 
 /**
@@ -759,61 +637,52 @@ export async function deleteOutletTable(params: {
   tableId: number;
   actor: OutletTableActor;
 }): Promise<void> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-  const auditService = createAuditServiceForConnection(connection);
+  const db = getDb();
 
-  try {
-    await connection.beginTransaction();
+  // Get current table
+  const rows = await sql<OutletTableRow>`
+    SELECT id, code, name, zone, capacity, status, status_id
+    FROM outlet_tables
+    WHERE id = ${params.tableId} AND company_id = ${params.companyId} AND outlet_id = ${params.outletId}
+  `.execute(db);
 
-    // Get current table
-    const [rows] = await connection.execute<OutletTableRow[]>(
-      `SELECT id, code, name, zone, capacity, status, status_id
-       FROM outlet_tables
-       WHERE id = ? AND company_id = ? AND outlet_id = ?`,
-      [params.tableId, params.companyId, params.outletId]
+  if (rows.rows.length === 0) {
+    throw new OutletTableNotFoundError(`Table with id ${params.tableId} not found`);
+  }
+
+  // Check if table is in use (has reservations or active orders)
+  const openOrders = await sql<{ count: number }>`
+    SELECT COUNT(*) as count FROM pos_order_snapshots
+    WHERE company_id = ${params.companyId} AND outlet_id = ${params.outletId} AND table_id = ${params.tableId}
+    AND order_state = 'OPEN' AND service_type = 'DINE_IN'
+  `.execute(db);
+
+  if (openOrders.rows[0]?.count && openOrders.rows[0].count > 0) {
+    throw new Error(
+      `Cannot delete table: ${openOrders.rows[0].count} active dine-in orders are linked to this table`
     );
+  }
 
-    if (rows.length === 0) {
-      throw new OutletTableNotFoundError(`Table with id ${params.tableId} not found`);
-    }
+  const reservations = await sql<{ count: number }>`
+    SELECT COUNT(*) as count FROM reservations
+    WHERE company_id = ${params.companyId} AND outlet_id = ${params.outletId} AND table_id = ${params.tableId}
+  `.execute(db);
 
-    // Check if table is in use (has reservations or active orders)
-    const [openOrders] = await connection.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM pos_order_snapshots
-       WHERE company_id = ? AND outlet_id = ? AND table_id = ?
-       AND order_state = 'OPEN' AND service_type = 'DINE_IN'`,
-      [params.companyId, params.outletId, params.tableId]
+  if (reservations.rows[0]?.count && reservations.rows[0].count > 0) {
+    throw new Error(
+      `Cannot delete table: ${reservations.rows[0].count} reservations are linked to this table`
     );
+  }
 
-    if (openOrders[0].count > 0) {
-      throw new Error(
-        `Cannot delete table: ${openOrders[0].count} active dine-in orders are linked to this table`
-      );
-    }
+  if (rows.rows[0].status !== "UNAVAILABLE") {
+    await sql`
+      UPDATE outlet_tables
+      SET status = 'UNAVAILABLE', status_id = 7, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${params.tableId} AND company_id = ${params.companyId} AND outlet_id = ${params.outletId}
+    `.execute(db);
 
-    const [reservations] = await connection.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM reservations
-       WHERE company_id = ? AND outlet_id = ? AND table_id = ?`,
-      [params.companyId, params.outletId, params.tableId]
-    );
-
-    if (reservations[0].count > 0) {
-      throw new Error(
-        `Cannot delete table: ${reservations[0].count} reservations are linked to this table`
-      );
-    }
-
-    const auditContext = buildAuditContext(params.companyId, params.actor);
-    if (rows[0].status !== "UNAVAILABLE") {
-      await connection.execute(
-        `UPDATE outlet_tables
-         SET status = 'UNAVAILABLE', status_id = 7, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND company_id = ? AND outlet_id = ?`,
-        [params.tableId, params.companyId, params.outletId]
-      );
-
-      await syncOperationalStatusToOccupancy(connection, {
+    await withTransaction(db, async (trx) => {
+      await syncOperationalStatusToOccupancy(trx, {
         companyId: params.companyId,
         outletId: params.outletId,
         tableId: params.tableId,
@@ -821,23 +690,18 @@ export async function deleteOutletTable(params: {
         actorUserId: params.actor.userId
       });
 
+      const auditContext = buildAuditContext(params.companyId, params.actor);
+      const auditService = new AuditService(trx);
       await auditService.logUpdate(
         auditContext,
         "outlet_table",
         params.tableId,
         {
-          status: rows[0].status,
-          status_id: rows[0].status_id ?? outletTableStatusToId(rows[0].status)
+          status: rows.rows[0].status,
+          status_id: rows.rows[0].status_id ?? outletTableStatusToId(rows.rows[0].status as "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE")
         },
         { status: "UNAVAILABLE", status_id: 7 }
       );
-    }
-
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
+    });
   }
 }

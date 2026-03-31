@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
-import { getDbPool } from "./db";
+import { sql } from "kysely";
+import { getDb, type KyselySchema } from "./db";
 import { postDepreciationRunToJournal } from "./depreciation-posting";
+import { ensureUserHasOutletAccess as commonUtilsEnsureUserHasOutletAccess } from "./shared/common-utils.js";
 
 const FA_ACQUISITION = "ACQUISITION";
 const FA_DEPRECIATION = "DEPRECIATION";
@@ -18,16 +18,16 @@ function isDepreciationType(t: string): boolean { return t === "DEPRECIATION" ||
 function isImpairmentType(t: string): boolean { return t === "IMPAIRMENT" || t === "FA_IMPAIRMENT"; }
 function isDisposalType(t: string): boolean { return t === "DISPOSAL" || t === "FA_DISPOSAL"; }
 
-type FixedAssetRow = RowDataPacket & {
+type FixedAssetRow = {
   id: number;
   company_id: number;
   outlet_id: number | null;
   name: string;
   purchase_cost: string | number | null;
-  disposed_at: string | null;
+  disposed_at: Date | string | null;
 };
 
-type FixedAssetBookRow = RowDataPacket & {
+type FixedAssetBookRow = {
   id: number;
   company_id: number;
   asset_id: number;
@@ -35,33 +35,25 @@ type FixedAssetBookRow = RowDataPacket & {
   accum_depreciation: string | number;
   accum_impairment: string | number;
   carrying_amount: string | number;
-  as_of_date: string;
+  as_of_date: Date | string;
   last_event_id: number;
 };
 
-type FixedAssetEventRow = RowDataPacket & {
+type FixedAssetEventRow = {
   id: number;
   company_id: number;
   asset_id: number;
   event_type: string;
-  event_date: string;
+  event_date: Date | string;
   outlet_id: number | null;
   journal_batch_id: number | null;
   status: string;
   idempotency_key: string;
   event_data: string;
-  created_at: string;
+  created_at: Date | string;
   created_by: number;
   voided_by: number | null;
-  voided_at: string | null;
-};
-
-type AccessCheckRow = RowDataPacket & {
-  id: number;
-};
-
-type QueryExecutor = {
-  execute: PoolConnection["execute"];
+  voided_at: Date | string | null;
 };
 
 type MutationActor = {
@@ -89,21 +81,9 @@ function isMysqlError(error: unknown): error is { errno?: number } {
   return typeof error === "object" && error !== null && "errno" in error;
 }
 
-async function withTransaction<T>(operation: (connection: PoolConnection) => Promise<T>): Promise<T> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-    const result = await operation(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+async function withTransaction<T>(operation: (trx: KyselySchema) => Promise<T>): Promise<T> {
+  const db = getDb();
+  return db.transaction().execute(operation);
 }
 
 export class FixedAssetLifecycleError extends Error {
@@ -152,101 +132,113 @@ export class FixedAssetDuplicateEventError extends FixedAssetLifecycleError {
 }
 
 async function ensureCompanyOutletExists(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   outletId: number
 ): Promise<void> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id FROM outlets WHERE id = ? AND company_id = ? LIMIT 1`,
-    [outletId, companyId]
-  );
-  if (rows.length === 0) {
+  const row = await db
+    .selectFrom("outlets")
+    .where("id", "=", outletId)
+    .where("company_id", "=", companyId)
+    .limit(1)
+    .select("id")
+    .executeTakeFirst();
+  if (!row) {
     throw new FixedAssetLifecycleError("Outlet not found for company", "INVALID_REFERENCE");
   }
 }
 
 async function ensureCompanyAccountExists(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   accountId: number
 ): Promise<void> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id FROM accounts WHERE id = ? AND company_id = ? LIMIT 1`,
-    [accountId, companyId]
-  );
-  if (rows.length === 0) {
+  const row = await db
+    .selectFrom("accounts")
+    .where("id", "=", accountId)
+    .where("company_id", "=", companyId)
+    .limit(1)
+    .select("id")
+    .executeTakeFirst();
+  if (!row) {
     throw new FixedAssetLifecycleError("Account not found for company", "INVALID_REFERENCE");
   }
 }
 
 async function ensureUserHasOutletAccess(
-  executor: QueryExecutor,
+  db: KyselySchema,
   userId: number,
   companyId: number,
   outletId: number
 ): Promise<void> {
-  const [rows] = await executor.execute<AccessCheckRow[]>(
-    `SELECT 1
-     FROM users u
-     WHERE u.id = ?
-       AND u.company_id = ?
-       AND u.is_active = 1
-       AND (
-         EXISTS (
-           SELECT 1 FROM user_role_assignments ura
-           INNER JOIN roles r ON r.id = ura.role_id
-           WHERE ura.user_id = u.id AND r.is_global = 1 AND ura.outlet_id IS NULL
-         )
-         OR EXISTS (
-           SELECT 1 FROM user_role_assignments ura
-           WHERE ura.user_id = u.id AND ura.outlet_id = ?
-         )
-       )
-     LIMIT 1`,
-    [userId, companyId, outletId]
-  );
-  if (rows.length === 0) {
+  const row = await db
+    .selectFrom("users as u")
+    .where("u.id", "=", userId)
+    .where("u.company_id", "=", companyId)
+    .where("u.is_active", "=", 1)
+    .where((eb) => eb.or([
+      eb.exists(
+        eb.selectFrom("user_role_assignments as ura")
+          .innerJoin("roles as r", "r.id", "ura.role_id")
+          .where("ura.user_id", "=", userId)
+          .where("r.is_global", "=", 1)
+          .where("ura.outlet_id", "is", null)
+      ),
+      eb.exists(
+        eb.selectFrom("user_role_assignments as ura")
+          .where("ura.user_id", "=", userId)
+          .where("ura.outlet_id", "=", outletId)
+      )
+    ]))
+    .limit(1)
+    .select("u.id")
+    .executeTakeFirst();
+  if (!row) {
     throw new FixedAssetLifecycleError("User cannot access outlet", "FORBIDDEN");
   }
 }
 
 async function findFixedAssetWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   assetId: number
 ): Promise<FixedAssetRow | null> {
-  const [rows] = await executor.execute<FixedAssetRow[]>(
-    `SELECT id, company_id, outlet_id, name, purchase_cost, disposed_at
-     FROM fixed_assets WHERE company_id = ? AND id = ? LIMIT 1`,
-    [companyId, assetId]
-  );
-  return rows[0] ?? null;
+  const row = await db
+    .selectFrom("fixed_assets")
+    .where("company_id", "=", companyId)
+    .where("id", "=", assetId)
+    .limit(1)
+    .select(["id", "company_id", "outlet_id", "name", "purchase_cost", "disposed_at"])
+    .executeTakeFirst();
+  return row ?? null;
 }
 
 async function findAssetBookWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   assetId: number
 ): Promise<FixedAssetBookRow | null> {
-  const [rows] = await executor.execute<FixedAssetBookRow[]>(
-    `SELECT id, company_id, asset_id, cost_basis, accum_depreciation, accum_impairment, carrying_amount, as_of_date, last_event_id
-     FROM fixed_asset_books WHERE asset_id = ? LIMIT 1`,
-    [assetId]
-  );
-  return rows[0] ?? null;
+  const row = await db
+    .selectFrom("fixed_asset_books")
+    .where("asset_id", "=", assetId)
+    .limit(1)
+    .select(["id", "company_id", "asset_id", "cost_basis", "accum_depreciation", "accum_impairment", "carrying_amount", "as_of_date", "last_event_id"])
+    .executeTakeFirst();
+  return row ?? null;
 }
 
 async function findEventByIdWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   eventId: number
 ): Promise<FixedAssetEventRow | null> {
-  const [rows] = await executor.execute<FixedAssetEventRow[]>(
-    `SELECT id, company_id, asset_id, event_type, event_date, outlet_id, journal_batch_id, status, idempotency_key, event_data, created_at, created_by, voided_by, voided_at
-     FROM fixed_asset_events WHERE company_id = ? AND id = ? LIMIT 1`,
-    [companyId, eventId]
-  );
-  if (rows.length === 0) return null;
-  const row = rows[0];
+  const row = await db
+    .selectFrom("fixed_asset_events")
+    .where("company_id", "=", companyId)
+    .where("id", "=", eventId)
+    .limit(1)
+    .select(["id", "company_id", "asset_id", "event_type", "event_date", "outlet_id", "journal_batch_id", "status", "idempotency_key", "event_data", "created_at", "created_by", "voided_by", "voided_at"])
+    .executeTakeFirst();
+  if (!row) return null;
   return {
     ...row,
     event_data: typeof row.event_data === "string" ? JSON.parse(row.event_data) : row.event_data
@@ -254,17 +246,18 @@ async function findEventByIdWithExecutor(
 }
 
 async function findExistingEventByIdempotencyKey(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   idempotencyKey: string
 ): Promise<FixedAssetEventRow | null> {
-  const [rows] = await executor.execute<FixedAssetEventRow[]>(
-    `SELECT id, company_id, asset_id, event_type, event_date, outlet_id, journal_batch_id, status, idempotency_key, event_data, created_at, created_by, voided_by, voided_at
-     FROM fixed_asset_events WHERE company_id = ? AND idempotency_key = ? LIMIT 1`,
-    [companyId, idempotencyKey]
-  );
-  if (rows.length === 0) return null;
-  const row = rows[0];
+  const row = await db
+    .selectFrom("fixed_asset_events")
+    .where("company_id", "=", companyId)
+    .where("idempotency_key", "=", idempotencyKey)
+    .limit(1)
+    .select(["id", "company_id", "asset_id", "event_type", "event_date", "outlet_id", "journal_batch_id", "status", "idempotency_key", "event_data", "created_at", "created_by", "voided_by", "voided_at"])
+    .executeTakeFirst();
+  if (!row) return null;
   return {
     ...row,
     event_data: typeof row.event_data === "string" ? JSON.parse(row.event_data) : row.event_data
@@ -272,7 +265,7 @@ async function findExistingEventByIdempotencyKey(
 }
 
 async function insertEvent(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   assetId: number,
   eventType: string,
@@ -284,17 +277,26 @@ async function insertEvent(
   eventData: Record<string, unknown>,
   createdBy: number
 ): Promise<number> {
-  const [result] = await executor.execute<ResultSetHeader>(
-    `INSERT INTO fixed_asset_events (
-      company_id, asset_id, event_type, event_date, outlet_id, journal_batch_id, status, idempotency_key, event_data, created_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [companyId, assetId, eventType, eventDate, outletId, journalBatchId, status, idempotencyKey, JSON.stringify(eventData), createdBy]
-  );
+  const result = await db
+    .insertInto("fixed_asset_events")
+    .values({
+      company_id: companyId,
+      asset_id: assetId,
+      event_type: eventType,
+      event_date: eventDate as any,
+      outlet_id: outletId,
+      journal_batch_id: journalBatchId,
+      status: status,
+      idempotency_key: idempotencyKey,
+      event_data: JSON.stringify(eventData),
+      created_by: createdBy
+    })
+    .executeTakeFirst();
   return Number(result.insertId);
 }
 
 async function updateAssetBook(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   assetId: number,
   costBasis: number,
@@ -304,29 +306,47 @@ async function updateAssetBook(
   asOfDate: string,
   lastEventId: number
 ): Promise<void> {
-  const existing = await findAssetBookWithExecutor(executor, assetId);
+  const existing = await findAssetBookWithExecutor(db, assetId);
   if (existing) {
-    await executor.execute<ResultSetHeader>(
-      `UPDATE fixed_asset_books SET cost_basis = ?, accum_depreciation = ?, accum_impairment = ?, carrying_amount = ?, as_of_date = ?, last_event_id = ? WHERE asset_id = ?`,
-      [costBasis, accumDepreciation, accumImpairment, carryingAmount, asOfDate, lastEventId, assetId]
-    );
+    await db
+      .updateTable("fixed_asset_books")
+      .set({
+        cost_basis: costBasis,
+        accum_depreciation: accumDepreciation,
+        accum_impairment: accumImpairment,
+        carrying_amount: carryingAmount,
+        as_of_date: asOfDate as any,
+        last_event_id: lastEventId
+      })
+      .where("asset_id", "=", assetId)
+      .execute();
   } else {
-    await executor.execute<ResultSetHeader>(
-      `INSERT INTO fixed_asset_books (company_id, asset_id, cost_basis, accum_depreciation, accum_impairment, carrying_amount, as_of_date, last_event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [companyId, assetId, costBasis, accumDepreciation, accumImpairment, carryingAmount, asOfDate, lastEventId]
-    );
+    await db
+      .insertInto("fixed_asset_books")
+      .values({
+        company_id: companyId,
+        asset_id: assetId,
+        cost_basis: costBasis,
+        accum_depreciation: accumDepreciation,
+        accum_impairment: accumImpairment,
+        carrying_amount: carryingAmount,
+        as_of_date: asOfDate as any,
+        last_event_id: lastEventId
+      })
+      .execute();
   }
 }
 
 async function markAssetDisposed(
-  executor: QueryExecutor,
+  db: KyselySchema,
   assetId: number,
   disposedAt: Date
 ): Promise<void> {
-  await executor.execute<ResultSetHeader>(
-    `UPDATE fixed_assets SET disposed_at = ? WHERE id = ?`,
-    [disposedAt.toISOString().slice(0, 19).replace("T", " "), assetId]
-  );
+  await db
+    .updateTable("fixed_assets")
+    .set({ disposed_at: disposedAt as any })
+    .where("id", "=", assetId)
+    .execute();
 }
 
 interface DisposalSnapshot {
@@ -336,40 +356,47 @@ interface DisposalSnapshot {
 }
 
 async function findDisposalSnapshotByEventId(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   eventId: number
 ): Promise<DisposalSnapshot | null> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT proceeds, cost_removed, gain_loss FROM fixed_asset_disposals WHERE company_id = ? AND event_id = ?`,
-    [companyId, eventId]
-  );
-  if (rows.length === 0) return null;
+  const row = await db
+    .selectFrom("fixed_asset_disposals")
+    .where("company_id", "=", companyId)
+    .where("event_id", "=", eventId)
+    .select(["proceeds", "cost_removed", "gain_loss"])
+    .executeTakeFirst();
+  if (!row) return null;
   return {
-    proceeds: Number(rows[0].proceeds),
-    cost_removed: Number(rows[0].cost_removed),
-    gain_loss: Number(rows[0].gain_loss)
+    proceeds: Number(row.proceeds),
+    cost_removed: Number(row.cost_removed),
+    gain_loss: Number(row.gain_loss)
   };
 }
 
 function ensureDateWithinOpenFiscalYear(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   eventDate: string
 ): Promise<void> {
-  return ensureDateWithinOpenFiscalYearWithExecutor(executor, companyId, eventDate);
+  return ensureDateWithinOpenFiscalYearWithExecutor(db, companyId, eventDate);
 }
 
 async function ensureDateWithinOpenFiscalYearWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   eventDate: string
 ): Promise<void> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id FROM fiscal_years WHERE company_id = ? AND start_date <= ? AND end_date >= ? AND status = 'OPEN' LIMIT 1`,
-    [companyId, eventDate, eventDate]
-  );
-  if (rows.length === 0) {
+  const row = await db
+    .selectFrom("fiscal_years")
+    .where("company_id", "=", companyId)
+    .where("start_date", "<=", eventDate as any)
+    .where("end_date", ">=", eventDate as any)
+    .where("status", "=", "OPEN")
+    .limit(1)
+    .select("id")
+    .executeTakeFirst();
+  if (!row) {
     throw new FixedAssetLifecycleError("Event date is outside any open fiscal year", "FISCAL_YEAR_CLOSED");
   }
 }
@@ -386,19 +413,19 @@ function assertJournalBalanced(lines: Array<{ debit: number; credit: number }>):
 }
 
 async function ensureUserCanAccessAssetOutlet(
-  executor: QueryExecutor,
+  db: KyselySchema,
   userId: number,
   companyId: number,
   assetId: number
 ): Promise<void> {
-  const asset = await findFixedAssetWithExecutor(executor, companyId, assetId);
+  const asset = await findFixedAssetWithExecutor(db, companyId, assetId);
   if (!asset) {
     throw new FixedAssetNotFoundError();
   }
 
   if (asset.outlet_id) {
     try {
-      await ensureUserHasOutletAccess(executor, userId, companyId, asset.outlet_id);
+      await ensureUserHasOutletAccess(db, userId, companyId, asset.outlet_id);
     } catch (error) {
       const err = error as { code?: string };
       if (err.code === "FORBIDDEN") throw new FixedAssetNotFoundError();
@@ -408,7 +435,7 @@ async function ensureUserCanAccessAssetOutlet(
 }
 
 async function insertEventWithIdempotency(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   assetId: number,
   eventType: string,
@@ -422,7 +449,7 @@ async function insertEventWithIdempotency(
 ): Promise<{ eventId: number; isDuplicate: boolean }> {
   try {
     const eventId = await insertEvent(
-      executor,
+      db,
       companyId,
       assetId,
       eventType,
@@ -437,7 +464,7 @@ async function insertEventWithIdempotency(
     return { eventId, isDuplicate: false };
   } catch (error) {
     if (isMysqlError(error) && error.errno === 1062) {
-      const existing = await findExistingEventByIdempotencyKey(executor, companyId, idempotencyKey);
+      const existing = await findExistingEventByIdempotencyKey(db, companyId, idempotencyKey);
       if (existing) {
         return { eventId: existing.id, isDuplicate: true };
       }
@@ -447,20 +474,21 @@ async function insertEventWithIdempotency(
 }
 
 async function attachJournalBatchToEvent(
-  executor: QueryExecutor,
+  db: KyselySchema,
   eventId: number,
   journalBatchId: number | null
 ): Promise<void> {
   if (journalBatchId) {
-    await executor.execute<ResultSetHeader>(
-      `UPDATE fixed_asset_events SET journal_batch_id = ? WHERE id = ?`,
-      [journalBatchId, eventId]
-    );
+    await db
+      .updateTable("fixed_asset_events")
+      .set({ journal_batch_id: journalBatchId })
+      .where("id", "=", eventId)
+      .execute();
   }
 }
 
 async function recomputeAssetBookFromEvents(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   assetId: number
 ): Promise<{
@@ -470,13 +498,15 @@ async function recomputeAssetBookFromEvents(
   carrying_amount: number;
   disposed_at: string | null;
 }> {
-  const [events] = await executor.execute<FixedAssetEventRow[]>(
-    `SELECT id, company_id, asset_id, event_type, event_date, outlet_id, journal_batch_id, status, idempotency_key, event_data, created_at, created_by, voided_by, voided_at
-     FROM fixed_asset_events
-     WHERE company_id = ? AND asset_id = ? AND status = 'POSTED'
-     ORDER BY event_date ASC, id ASC`,
-    [companyId, assetId]
-  );
+  const events = await db
+    .selectFrom("fixed_asset_events")
+    .where("company_id", "=", companyId)
+    .where("asset_id", "=", assetId)
+    .where("status", "=", "POSTED")
+    .orderBy("event_date", "asc")
+    .orderBy("id", "asc")
+    .select(["id", "company_id", "asset_id", "event_type", "event_date", "outlet_id", "journal_batch_id", "status", "idempotency_key", "event_data", "created_at", "created_by", "voided_by", "voided_at"])
+    .execute();
 
   let costBasis = 0;
   let acquisitionSalvage = 0;
@@ -553,8 +583,8 @@ export async function recordAcquisition(
   input: AcquisitionInput,
   actor: MutationActor
 ): Promise<AcquisitionResult> {
-  return withTransaction(async (connection) => {
-    const asset = await findFixedAssetWithExecutor(connection, companyId, assetId);
+  return withTransaction(async (trx) => {
+    const asset = await findFixedAssetWithExecutor(trx, companyId, assetId);
     if (!asset) {
       throw new FixedAssetNotFoundError();
     }
@@ -562,10 +592,10 @@ export async function recordAcquisition(
       throw new FixedAssetDisposedError();
     }
 
-    await ensureUserCanAccessAssetOutlet(connection, actor.userId, companyId, assetId);
+    await ensureUserCanAccessAssetOutlet(trx, actor.userId, companyId, assetId);
 
     const idempotencyKey = input.idempotency_key ?? generateIdempotencyKey();
-    const existingEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+    const existingEvent = await findExistingEventByIdempotencyKey(trx, companyId, idempotencyKey);
     if (existingEvent) {
       if (Number(existingEvent.asset_id) !== assetId) {
         throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
@@ -573,7 +603,7 @@ export async function recordAcquisition(
       if (!isAcquisitionType(existingEvent.event_type)) {
         throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
       }
-      const book = await findAssetBookWithExecutor(connection, assetId);
+      const book = await findAssetBookWithExecutor(trx, assetId);
       return {
         event_id: existingEvent.id,
         journal_batch_id: existingEvent.journal_batch_id ?? 0,
@@ -585,15 +615,15 @@ export async function recordAcquisition(
       };
     }
 
-    await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, input.event_date);
-    await ensureCompanyAccountExists(connection, companyId, input.asset_account_id);
-    await ensureCompanyAccountExists(connection, companyId, input.offset_account_id);
+    await ensureDateWithinOpenFiscalYearWithExecutor(trx, companyId, input.event_date);
+    await ensureCompanyAccountExists(trx, companyId, input.asset_account_id);
+    await ensureCompanyAccountExists(trx, companyId, input.offset_account_id);
 
     let outletId = input.outlet_id ?? asset.outlet_id ?? null;
     if (typeof outletId === "number") {
-      await ensureCompanyOutletExists(connection, companyId, outletId);
+      await ensureCompanyOutletExists(trx, companyId, outletId);
       try {
-        await ensureUserHasOutletAccess(connection, actor.userId, companyId, outletId);
+        await ensureUserHasOutletAccess(trx, actor.userId, companyId, outletId);
       } catch (error) {
         const err = error as { code?: string };
         if (err.code === "FORBIDDEN") throw new FixedAssetNotFoundError();
@@ -609,7 +639,7 @@ export async function recordAcquisition(
 
     // Reserve event first for idempotency
     const eventIdResult = await insertEventWithIdempotency(
-      connection,
+      trx,
       companyId,
       assetId,
       FA_ACQUISITION,
@@ -630,7 +660,7 @@ export async function recordAcquisition(
     );
 
     if (eventIdResult.isDuplicate) {
-      const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+      const dupEvent = await findExistingEventByIdempotencyKey(trx, companyId, idempotencyKey);
       if (dupEvent) {
         if (Number(dupEvent.asset_id) !== assetId) {
           throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
@@ -638,7 +668,7 @@ export async function recordAcquisition(
         if (!isAcquisitionType(dupEvent.event_type)) {
           throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
         }
-        const book = await findAssetBookWithExecutor(connection, assetId);
+        const book = await findAssetBookWithExecutor(trx, assetId);
         return {
           event_id: dupEvent.id,
           journal_batch_id: dupEvent.journal_batch_id ?? 0,
@@ -654,7 +684,7 @@ export async function recordAcquisition(
 
     // Post journal after event reservation
     const journalBatchId = await postAcquisitionToJournal(
-      connection,
+      trx,
       companyId,
       assetId,
       outletId,
@@ -664,10 +694,10 @@ export async function recordAcquisition(
       input.offset_account_id
     );
 
-    await attachJournalBatchToEvent(connection, eventIdResult.eventId, journalBatchId);
+    await attachJournalBatchToEvent(trx, eventIdResult.eventId, journalBatchId);
 
     await updateAssetBook(
-      connection,
+      trx,
       companyId,
       assetId,
       input.cost,
@@ -691,7 +721,7 @@ export async function recordAcquisition(
 }
 
 async function postAcquisitionToJournal(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   assetId: number,
   outletId: number | null,
@@ -700,12 +730,18 @@ async function postAcquisitionToJournal(
   assetAccountId: number,
   offsetAccountId: number
 ): Promise<number> {
-  await ensureDateWithinOpenFiscalYearWithExecutor(executor, companyId, eventDate);
+  await ensureDateWithinOpenFiscalYearWithExecutor(db, companyId, eventDate);
 
-  const [batchResult] = await executor.execute<ResultSetHeader>(
-    `INSERT INTO journal_batches (company_id, outlet_id, doc_type, doc_id, posted_at) VALUES (?, ?, ?, ?, ?)`,
-    [companyId, outletId, FA_ACQUISITION, assetId, eventDate]
-  );
+  const batchResult = await db
+    .insertInto("journal_batches")
+    .values({
+      company_id: companyId,
+      outlet_id: outletId,
+      doc_type: FA_ACQUISITION,
+      doc_id: assetId,
+      posted_at: eventDate as any
+    })
+    .executeTakeFirst();
   const journalBatchId = Number(batchResult.insertId);
 
   assertJournalBalanced([
@@ -713,13 +749,31 @@ async function postAcquisitionToJournal(
     { debit: 0, credit: cost }
   ]);
 
-  await executor.execute(
-    `INSERT INTO journal_lines (journal_batch_id, company_id, outlet_id, account_id, line_date, debit, credit, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      journalBatchId, companyId, outletId, assetAccountId, eventDate, cost, 0, `Fixed Asset Acquisition - Cost`,
-      journalBatchId, companyId, outletId, offsetAccountId, eventDate, 0, cost, `Fixed Asset Acquisition - Offset`
-    ]
-  );
+  await db
+    .insertInto("journal_lines")
+    .values([
+      {
+        journal_batch_id: journalBatchId,
+        company_id: companyId,
+        outlet_id: outletId,
+        account_id: assetAccountId,
+        line_date: eventDate as any,
+        debit: cost,
+        credit: 0,
+        description: "Fixed Asset Acquisition - Cost"
+      },
+      {
+        journal_batch_id: journalBatchId,
+        company_id: companyId,
+        outlet_id: outletId,
+        account_id: offsetAccountId,
+        line_date: eventDate as any,
+        debit: 0,
+        credit: cost,
+        description: "Fixed Asset Acquisition - Offset"
+      }
+    ])
+    .execute();
 
   return journalBatchId;
 }
@@ -744,8 +798,8 @@ export async function recordTransfer(
   input: TransferInput,
   actor: MutationActor
 ): Promise<TransferResult> {
-  return withTransaction(async (connection) => {
-    const asset = await findFixedAssetWithExecutor(connection, companyId, assetId);
+  return withTransaction(async (trx) => {
+    const asset = await findFixedAssetWithExecutor(trx, companyId, assetId);
     if (!asset) {
       throw new FixedAssetNotFoundError();
     }
@@ -756,7 +810,7 @@ export async function recordTransfer(
     const fromOutletId = asset.outlet_id;
     if (fromOutletId) {
       try {
-        await ensureUserHasOutletAccess(connection, actor.userId, companyId, fromOutletId);
+        await ensureUserHasOutletAccess(trx, actor.userId, companyId, fromOutletId);
       } catch (error) {
         const err = error as { code?: string };
         if (err.code === "FORBIDDEN") throw new FixedAssetNotFoundError();
@@ -765,7 +819,7 @@ export async function recordTransfer(
     }
 
     const idempotencyKey = input.idempotency_key ?? generateIdempotencyKey();
-    const existingEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+    const existingEvent = await findExistingEventByIdempotencyKey(trx, companyId, idempotencyKey);
     if (existingEvent) {
       if (Number(existingEvent.asset_id) !== assetId) {
         throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
@@ -788,10 +842,10 @@ export async function recordTransfer(
       };
     }
 
-    await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, input.transfer_date);
-    await ensureCompanyOutletExists(connection, companyId, input.to_outlet_id);
+    await ensureDateWithinOpenFiscalYearWithExecutor(trx, companyId, input.transfer_date);
+    await ensureCompanyOutletExists(trx, companyId, input.to_outlet_id);
     try {
-      await ensureUserHasOutletAccess(connection, actor.userId, companyId, input.to_outlet_id);
+      await ensureUserHasOutletAccess(trx, actor.userId, companyId, input.to_outlet_id);
     } catch (error) {
       const err = error as { code?: string };
       if (err.code === "FORBIDDEN") throw new FixedAssetNotFoundError();
@@ -802,7 +856,7 @@ export async function recordTransfer(
 
     // Reserve event first for idempotency
     const eventIdResult = await insertEventWithIdempotency(
-      connection,
+      trx,
       companyId,
       assetId,
       FA_TRANSFER,
@@ -820,7 +874,7 @@ export async function recordTransfer(
     );
 
     if (eventIdResult.isDuplicate) {
-      const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+      const dupEvent = await findExistingEventByIdempotencyKey(trx, companyId, idempotencyKey);
       if (dupEvent) {
         if (Number(dupEvent.asset_id) !== assetId) {
           throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
@@ -846,10 +900,11 @@ export async function recordTransfer(
     }
 
     // Update asset outlet after successful event reservation
-    await connection.execute<ResultSetHeader>(
-      `UPDATE fixed_assets SET outlet_id = ? WHERE id = ?`,
-      [toOutletId, assetId]
-    );
+    await trx
+      .updateTable("fixed_assets")
+      .set({ outlet_id: toOutletId })
+      .where("id", "=", assetId)
+      .execute();
 
     return {
       event_id: eventIdResult.eventId,
@@ -885,8 +940,8 @@ export async function recordImpairment(
   input: ImpairmentInput,
   actor: MutationActor
 ): Promise<ImpairmentResult> {
-  return withTransaction(async (connection) => {
-    const asset = await findFixedAssetWithExecutor(connection, companyId, assetId);
+  return withTransaction(async (trx) => {
+    const asset = await findFixedAssetWithExecutor(trx, companyId, assetId);
     if (!asset) {
       throw new FixedAssetNotFoundError();
     }
@@ -894,15 +949,15 @@ export async function recordImpairment(
       throw new FixedAssetDisposedError();
     }
 
-    await ensureUserCanAccessAssetOutlet(connection, actor.userId, companyId, assetId);
+    await ensureUserCanAccessAssetOutlet(trx, actor.userId, companyId, assetId);
 
-    const book = await findAssetBookWithExecutor(connection, assetId);
+    const book = await findAssetBookWithExecutor(trx, assetId);
     if (!book) {
       throw new FixedAssetLifecycleError("Asset has no book value - must acquire first", "INVALID_STATE");
     }
 
     const idempotencyKey = input.idempotency_key ?? generateIdempotencyKey();
-    const existingEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+    const existingEvent = await findExistingEventByIdempotencyKey(trx, companyId, idempotencyKey);
     if (existingEvent) {
       return {
         event_id: existingEvent.id,
@@ -915,9 +970,9 @@ export async function recordImpairment(
       };
     }
 
-    await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, input.impairment_date);
-    await ensureCompanyAccountExists(connection, companyId, input.expense_account_id);
-    await ensureCompanyAccountExists(connection, companyId, input.accum_impairment_account_id);
+    await ensureDateWithinOpenFiscalYearWithExecutor(trx, companyId, input.impairment_date);
+    await ensureCompanyAccountExists(trx, companyId, input.expense_account_id);
+    await ensureCompanyAccountExists(trx, companyId, input.accum_impairment_account_id);
 
     const currentCarryingAmount = Number(book.carrying_amount);
     const newImpairment = Math.min(input.impairment_amount, currentCarryingAmount);
@@ -926,7 +981,7 @@ export async function recordImpairment(
 
     // Reserve event first for idempotency
     const eventIdResult = await insertEventWithIdempotency(
-      connection,
+      trx,
       companyId,
       assetId,
       FA_IMPAIRMENT,
@@ -945,9 +1000,9 @@ export async function recordImpairment(
     );
 
     if (eventIdResult.isDuplicate) {
-      const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+      const dupEvent = await findExistingEventByIdempotencyKey(trx, companyId, idempotencyKey);
       if (dupEvent) {
-        const book = await findAssetBookWithExecutor(connection, assetId);
+        const book = await findAssetBookWithExecutor(trx, assetId);
         return {
           event_id: dupEvent.id,
           journal_batch_id: dupEvent.journal_batch_id ?? 0,
@@ -963,7 +1018,7 @@ export async function recordImpairment(
 
     // Post journal after event reservation
     const journalBatchId = await postImpairmentToJournal(
-      connection,
+      trx,
       companyId,
       assetId,
       asset.outlet_id,
@@ -973,10 +1028,10 @@ export async function recordImpairment(
       input.accum_impairment_account_id
     );
 
-    await attachJournalBatchToEvent(connection, eventIdResult.eventId, journalBatchId);
+    await attachJournalBatchToEvent(trx, eventIdResult.eventId, journalBatchId);
 
     await updateAssetBook(
-      connection,
+      trx,
       companyId,
       assetId,
       Number(book.cost_basis),
@@ -1000,7 +1055,7 @@ export async function recordImpairment(
 }
 
 async function postImpairmentToJournal(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   assetId: number,
   outletId: number | null,
@@ -1009,12 +1064,18 @@ async function postImpairmentToJournal(
   expenseAccountId: number,
   accumImpairmentAccountId: number
 ): Promise<number> {
-  await ensureDateWithinOpenFiscalYearWithExecutor(executor, companyId, eventDate);
+  await ensureDateWithinOpenFiscalYearWithExecutor(db, companyId, eventDate);
 
-  const [batchResult] = await executor.execute<ResultSetHeader>(
-    `INSERT INTO journal_batches (company_id, outlet_id, doc_type, doc_id, posted_at) VALUES (?, ?, ?, ?, ?)`,
-    [companyId, outletId, FA_IMPAIRMENT, assetId, eventDate]
-  );
+  const batchResult = await db
+    .insertInto("journal_batches")
+    .values({
+      company_id: companyId,
+      outlet_id: outletId,
+      doc_type: FA_IMPAIRMENT,
+      doc_id: assetId,
+      posted_at: eventDate as any
+    })
+    .executeTakeFirst();
   const journalBatchId = Number(batchResult.insertId);
 
   assertJournalBalanced([
@@ -1022,13 +1083,31 @@ async function postImpairmentToJournal(
     { debit: 0, credit: impairmentAmount }
   ]);
 
-  await executor.execute(
-    `INSERT INTO journal_lines (journal_batch_id, company_id, outlet_id, account_id, line_date, debit, credit, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      journalBatchId, companyId, outletId, expenseAccountId, eventDate, impairmentAmount, 0, `Fixed Asset Impairment - Expense`,
-      journalBatchId, companyId, outletId, accumImpairmentAccountId, eventDate, 0, impairmentAmount, `Fixed Asset Impairment - Accum`
-    ]
-  );
+  await db
+    .insertInto("journal_lines")
+    .values([
+      {
+        journal_batch_id: journalBatchId,
+        company_id: companyId,
+        outlet_id: outletId,
+        account_id: expenseAccountId,
+        line_date: eventDate as any,
+        debit: impairmentAmount,
+        credit: 0,
+        description: "Fixed Asset Impairment - Expense"
+      },
+      {
+        journal_batch_id: journalBatchId,
+        company_id: companyId,
+        outlet_id: outletId,
+        account_id: accumImpairmentAccountId,
+        line_date: eventDate as any,
+        debit: 0,
+        credit: impairmentAmount,
+        description: "Fixed Asset Impairment - Accum"
+      }
+    ])
+    .execute();
 
   return journalBatchId;
 }
@@ -1069,22 +1148,22 @@ export async function recordDisposal(
   input: DisposalInput,
   actor: MutationActor
 ): Promise<DisposalResult> {
-  return withTransaction(async (connection) => {
-    const asset = await findFixedAssetWithExecutor(connection, companyId, assetId);
+  return withTransaction(async (trx) => {
+    const asset = await findFixedAssetWithExecutor(trx, companyId, assetId);
     if (!asset) {
       throw new FixedAssetNotFoundError();
     }
 
-    await ensureUserCanAccessAssetOutlet(connection, actor.userId, companyId, assetId);
+    await ensureUserCanAccessAssetOutlet(trx, actor.userId, companyId, assetId);
 
     const idempotencyKey = input.idempotency_key ?? generateIdempotencyKey();
-    const existingEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+    const existingEvent = await findExistingEventByIdempotencyKey(trx, companyId, idempotencyKey);
     if (existingEvent) {
       if (Number(existingEvent.asset_id) !== assetId) {
         throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
       }
-      const book = await findAssetBookWithExecutor(connection, assetId);
-      const snapshot = await findDisposalSnapshotByEventId(connection, companyId, existingEvent.id);
+      const book = await findAssetBookWithExecutor(trx, assetId);
+      const snapshot = await findDisposalSnapshotByEventId(trx, companyId, existingEvent.id);
       if (snapshot) {
         return {
           event_id: existingEvent.id,
@@ -1118,26 +1197,26 @@ export async function recordDisposal(
       throw new FixedAssetDisposedError();
     }
 
-    const book = await findAssetBookWithExecutor(connection, assetId);
+    const book = await findAssetBookWithExecutor(trx, assetId);
     if (!book) {
       throw new FixedAssetLifecycleError("Asset has no book value - must acquire first", "INVALID_STATE");
     }
 
-    await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, input.disposal_date);
-    await ensureCompanyAccountExists(connection, companyId, input.cash_account_id);
-    await ensureCompanyAccountExists(connection, companyId, input.asset_account_id);
-    await ensureCompanyAccountExists(connection, companyId, input.accum_depr_account_id);
+    await ensureDateWithinOpenFiscalYearWithExecutor(trx, companyId, input.disposal_date);
+    await ensureCompanyAccountExists(trx, companyId, input.cash_account_id);
+    await ensureCompanyAccountExists(trx, companyId, input.asset_account_id);
+    await ensureCompanyAccountExists(trx, companyId, input.accum_depr_account_id);
     if (input.accum_impairment_account_id) {
-      await ensureCompanyAccountExists(connection, companyId, input.accum_impairment_account_id);
+      await ensureCompanyAccountExists(trx, companyId, input.accum_impairment_account_id);
     }
     if (input.gain_account_id) {
-      await ensureCompanyAccountExists(connection, companyId, input.gain_account_id);
+      await ensureCompanyAccountExists(trx, companyId, input.gain_account_id);
     }
     if (input.loss_account_id) {
-      await ensureCompanyAccountExists(connection, companyId, input.loss_account_id);
+      await ensureCompanyAccountExists(trx, companyId, input.loss_account_id);
     }
     if (input.disposal_expense_account_id) {
-      await ensureCompanyAccountExists(connection, companyId, input.disposal_expense_account_id);
+      await ensureCompanyAccountExists(trx, companyId, input.disposal_expense_account_id);
     }
 
     const proceeds = input.proceeds ?? 0;
@@ -1171,7 +1250,7 @@ export async function recordDisposal(
 
     // Reserve event first for idempotency
     const eventIdResult = await insertEventWithIdempotency(
-      connection,
+      trx,
       companyId,
       assetId,
       FA_DISPOSAL,
@@ -1201,13 +1280,13 @@ export async function recordDisposal(
     );
 
     if (eventIdResult.isDuplicate) {
-      const dupEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+      const dupEvent = await findExistingEventByIdempotencyKey(trx, companyId, idempotencyKey);
       if (dupEvent) {
         if (Number(dupEvent.asset_id) !== assetId) {
           throw new FixedAssetLifecycleError("Idempotency conflict", "DUPLICATE_EVENT");
         }
-        const book = await findAssetBookWithExecutor(connection, assetId);
-        const snapshot = await findDisposalSnapshotByEventId(connection, companyId, dupEvent.id);
+        const book = await findAssetBookWithExecutor(trx, assetId);
+        const snapshot = await findDisposalSnapshotByEventId(trx, companyId, dupEvent.id);
         if (snapshot) {
           return {
             event_id: dupEvent.id,
@@ -1241,7 +1320,7 @@ export async function recordDisposal(
 
     // Post journal after event reservation
     const journalResult = await postDisposalToJournal(
-      connection,
+      trx,
       companyId,
       assetId,
       asset.outlet_id,
@@ -1261,25 +1340,36 @@ export async function recordDisposal(
       input.disposal_expense_account_id
     );
 
-    await attachJournalBatchToEvent(connection, eventIdResult.eventId, journalResult.journalBatchId);
+    await attachJournalBatchToEvent(trx, eventIdResult.eventId, journalResult.journalBatchId);
 
     // Use the actual posted gain/loss from the journal
     const postedGainLoss = journalResult.gainLoss;
 
-    await connection.execute<ResultSetHeader>(
-      `INSERT INTO fixed_asset_disposals (
-        company_id, event_id, asset_id, proceeds, cost_removed, depr_removed, impairment_removed, disposal_cost, gain_loss, disposal_type, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [companyId, eventIdResult.eventId, assetId, proceeds, costBasis, accumDepreciation, accumImpairment, disposalCost, postedGainLoss, input.disposal_type, input.notes ?? null]
-    );
+    await trx
+      .insertInto("fixed_asset_disposals")
+      .values({
+        company_id: companyId,
+        event_id: eventIdResult.eventId,
+        asset_id: assetId,
+        proceeds: proceeds,
+        cost_removed: costBasis,
+        depr_removed: accumDepreciation,
+        impairment_removed: accumImpairment,
+        disposal_cost: disposalCost,
+        gain_loss: postedGainLoss,
+        disposal_type: input.disposal_type,
+        notes: input.notes ?? null
+      })
+      .execute();
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE fixed_asset_events SET event_data = JSON_SET(event_data, '$.gain_loss', ?) WHERE id = ?`,
-      [postedGainLoss, eventIdResult.eventId]
-    );
+    await trx
+      .updateTable("fixed_asset_events")
+      .set({ event_data: JSON.stringify({ gain_loss: postedGainLoss }) })
+      .where("id", "=", eventIdResult.eventId)
+      .execute();
 
     await updateAssetBook(
-      connection,
+      trx,
       companyId,
       assetId,
       0,
@@ -1290,7 +1380,7 @@ export async function recordDisposal(
       eventIdResult.eventId
     );
 
-    await markAssetDisposed(connection, assetId, new Date(input.disposal_date));
+    await markAssetDisposed(trx, assetId, new Date(input.disposal_date));
 
     return {
       event_id: eventIdResult.eventId,
@@ -1307,7 +1397,7 @@ export async function recordDisposal(
 }
 
 async function postDisposalToJournal(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   assetId: number,
   outletId: number | null,
@@ -1326,45 +1416,62 @@ async function postDisposalToJournal(
   lossAccountId: number | undefined,
   disposalExpenseAccountId: number | undefined
 ): Promise<{ journalBatchId: number; gainLoss: number }> {
-  await ensureDateWithinOpenFiscalYearWithExecutor(executor, companyId, eventDate);
+  await ensureDateWithinOpenFiscalYearWithExecutor(db, companyId, eventDate);
 
-  const [batchResult] = await executor.execute<ResultSetHeader>(
-    `INSERT INTO journal_batches (company_id, outlet_id, doc_type, doc_id, posted_at) VALUES (?, ?, ?, ?, ?)`,
-    [companyId, outletId, FA_DISPOSAL, assetId, eventDate]
-  );
+  const batchResult = await db
+    .insertInto("journal_batches")
+    .values({
+      company_id: companyId,
+      outlet_id: outletId,
+      doc_type: FA_DISPOSAL,
+      doc_id: assetId,
+      posted_at: eventDate as any
+    })
+    .executeTakeFirst();
   const journalBatchId = Number(batchResult.insertId);
 
-  const lines: Array<[number, number, number | null, number, string, number, number, string]> = [];
+  interface JournalLine {
+    journal_batch_id: number;
+    company_id: number;
+    outlet_id: number | null;
+    account_id: number;
+    line_date: any;
+    debit: number;
+    credit: number;
+    description: string;
+  }
+
+  const lines: JournalLine[] = [];
 
   // Build base disposal lines
   if (disposalType === "SALE" && proceeds > 0) {
-    lines.push([journalBatchId, companyId, outletId, cashAccountId, eventDate, proceeds, 0, "Disposal Proceeds"]);
+    lines.push({ journal_batch_id: journalBatchId, company_id: companyId, outlet_id: outletId, account_id: cashAccountId, line_date: eventDate as any, debit: proceeds, credit: 0, description: "Disposal Proceeds" });
   }
 
   if (accumDepreciation > 0) {
-    lines.push([journalBatchId, companyId, outletId, accumDeprAccountId, eventDate, accumDepreciation, 0, "Accumulated Depreciation Removed"]);
+    lines.push({ journal_batch_id: journalBatchId, company_id: companyId, outlet_id: outletId, account_id: accumDeprAccountId, line_date: eventDate, debit: accumDepreciation, credit: 0, description: "Accumulated Depreciation Removed" });
   }
 
   if (accumImpairment > 0 && accumImpairmentAccountId) {
-    lines.push([journalBatchId, companyId, outletId, accumImpairmentAccountId, eventDate, accumImpairment, 0, "Accumulated Impairment Removed"]);
+    lines.push({ journal_batch_id: journalBatchId, company_id: companyId, outlet_id: outletId, account_id: accumImpairmentAccountId, line_date: eventDate, debit: accumImpairment, credit: 0, description: "Accumulated Impairment Removed" });
   }
 
   if (costBasis > 0) {
-    lines.push([journalBatchId, companyId, outletId, assetAccountId, eventDate, 0, costBasis, "Fixed Asset Cost Removed"]);
+    lines.push({ journal_batch_id: journalBatchId, company_id: companyId, outlet_id: outletId, account_id: assetAccountId, line_date: eventDate, debit: 0, credit: costBasis, description: "Fixed Asset Cost Removed" });
   }
 
   // Disposal cost is a separate expense + cash outflow
   if (disposalCost > 0 && disposalExpenseAccountId) {
-    lines.push([journalBatchId, companyId, outletId, disposalExpenseAccountId, eventDate, disposalCost, 0, "Disposal Costs"]);
-    lines.push([journalBatchId, companyId, outletId, cashAccountId, eventDate, 0, disposalCost, "Disposal Costs Payment"]);
+    lines.push({ journal_batch_id: journalBatchId, company_id: companyId, outlet_id: outletId, account_id: disposalExpenseAccountId, line_date: eventDate, debit: disposalCost, credit: 0, description: "Disposal Costs" });
+    lines.push({ journal_batch_id: journalBatchId, company_id: companyId, outlet_id: outletId, account_id: cashAccountId, line_date: eventDate, debit: 0, credit: disposalCost, description: "Disposal Costs Payment" });
   }
 
   // Calculate gain/loss from delta after base lines
   let totalDebit = 0;
   let totalCredit = 0;
   for (const line of lines) {
-    totalDebit += line[5];
-    totalCredit += line[6];
+    totalDebit += line.debit;
+    totalCredit += line.credit;
   }
   
   // Compute actual gain/loss from the delta
@@ -1376,7 +1483,7 @@ async function postDisposalToJournal(
       // Debit > Credit (debit-heavy) = gain to balance the journal (add credit)
       actualGainLoss = delta;
       if (gainAccountId) {
-        lines.push([journalBatchId, companyId, outletId, gainAccountId, eventDate, 0, actualGainLoss, "Gain on Disposal"]);
+        lines.push({ journal_batch_id: journalBatchId, company_id: companyId, outlet_id: outletId, account_id: gainAccountId, line_date: eventDate, debit: 0, credit: actualGainLoss, description: "Gain on Disposal" });
       } else {
         throw new FixedAssetLifecycleError("Gain account required when disposal results in gain", "INVALID_REFERENCE");
       }
@@ -1384,7 +1491,7 @@ async function postDisposalToJournal(
       // Credit > Debit (credit-heavy) = loss to balance the journal (add debit)
       actualGainLoss = delta; // Already negative
       if (lossAccountId) {
-        lines.push([journalBatchId, companyId, outletId, lossAccountId, eventDate, Math.abs(actualGainLoss), 0, "Loss on Disposal"]);
+        lines.push({ journal_batch_id: journalBatchId, company_id: companyId, outlet_id: outletId, account_id: lossAccountId, line_date: eventDate, debit: Math.abs(actualGainLoss), credit: 0, description: "Loss on Disposal" });
       } else {
         throw new FixedAssetLifecycleError("Loss account required when disposal results in loss", "INVALID_REFERENCE");
       }
@@ -1393,12 +1500,10 @@ async function postDisposalToJournal(
 
   // Final balance check
   if (lines.length > 0) {
-    const journalLines = lines.map(l => ({ debit: l[5], credit: l[6] }));
+    const journalLines = lines.map(l => ({ debit: l.debit, credit: l.credit }));
     assertJournalBalanced(journalLines);
 
-    const placeholders = lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-    const values = lines.flat();
-    await executor.execute(`INSERT INTO journal_lines (journal_batch_id, company_id, outlet_id, account_id, line_date, debit, credit, description) VALUES ${placeholders}`, values);
+    await db.insertInto("journal_lines").values(lines).execute();
   }
 
   return { journalBatchId, gainLoss: actualGainLoss };
@@ -1426,8 +1531,8 @@ export async function voidEvent(
   input: VoidEventInput,
   actor: MutationActor
 ): Promise<VoidResult> {
-  return withTransaction(async (connection) => {
-    const event = await findEventByIdWithExecutor(connection, companyId, eventId);
+  return withTransaction(async (trx) => {
+    const event = await findEventByIdWithExecutor(trx, companyId, eventId);
     if (!event) {
       throw new FixedAssetEventNotFoundError();
     }
@@ -1441,7 +1546,7 @@ export async function voidEvent(
     // Check outlet access for the event
     if (event.outlet_id) {
       try {
-        await ensureUserHasOutletAccess(connection, actor.userId, companyId, event.outlet_id);
+        await ensureUserHasOutletAccess(trx, actor.userId, companyId, event.outlet_id);
       } catch (error) {
         const err = error as { code?: string };
         if (err.code === "FORBIDDEN") throw new FixedAssetEventNotFoundError();
@@ -1450,7 +1555,7 @@ export async function voidEvent(
     }
 
     const idempotencyKey = input.idempotency_key ?? `void-${generateIdempotencyKey()}`;
-    const existingEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+    const existingEvent = await findExistingEventByIdempotencyKey(trx, companyId, idempotencyKey);
     if (existingEvent) {
       return {
         void_event_id: existingEvent.id,
@@ -1460,11 +1565,11 @@ export async function voidEvent(
       };
     }
 
-    await ensureDateWithinOpenFiscalYearWithExecutor(connection, companyId, formatDateOnly(new Date()));
+    await ensureDateWithinOpenFiscalYearWithExecutor(trx, companyId, formatDateOnly(new Date()));
 
     // Reserve void event first for idempotency
     const voidEventResult = await insertEventWithIdempotency(
-      connection,
+      trx,
       companyId,
       event.asset_id,
       FA_VOID,
@@ -1481,7 +1586,7 @@ export async function voidEvent(
     );
 
     if (voidEventResult.isDuplicate) {
-      const dupVoidEvent = await findExistingEventByIdempotencyKey(connection, companyId, idempotencyKey);
+      const dupVoidEvent = await findExistingEventByIdempotencyKey(trx, companyId, idempotencyKey);
       if (dupVoidEvent) {
         return {
           void_event_id: dupVoidEvent.id,
@@ -1496,22 +1601,27 @@ export async function voidEvent(
     // Post reversal journal if original had journal batch
     let journalBatchId: number | null = null;
     if (event.journal_batch_id) {
-      journalBatchId = await postVoidToJournal(connection, companyId, eventId, event.asset_id, event.outlet_id, formatDateOnly(new Date()));
+      journalBatchId = await postVoidToJournal(trx, companyId, eventId, event.asset_id, event.outlet_id, formatDateOnly(new Date()));
     }
 
-    await attachJournalBatchToEvent(connection, voidEventResult.eventId, journalBatchId);
+    await attachJournalBatchToEvent(trx, voidEventResult.eventId, journalBatchId);
 
     // Mark original event as voided
-    await connection.execute<ResultSetHeader>(
-      `UPDATE fixed_asset_events SET status = 'VOIDED', voided_by = ?, voided_at = NOW() WHERE id = ?`,
-      [actor.userId, eventId]
-    );
+    await trx
+      .updateTable("fixed_asset_events")
+      .set({ 
+        status: "VOIDED", 
+        voided_by: actor.userId, 
+        voided_at: new Date() 
+      })
+      .where("id", "=", eventId)
+      .execute();
 
     // Recompute book from remaining posted events
-    const recomputed = await recomputeAssetBookFromEvents(connection, companyId, event.asset_id);
+    const recomputed = await recomputeAssetBookFromEvents(trx, companyId, event.asset_id);
 
     await updateAssetBook(
-      connection,
+      trx,
       companyId,
       event.asset_id,
       recomputed.cost_basis,
@@ -1522,10 +1632,11 @@ export async function voidEvent(
       voidEventResult.eventId
     );
 
-    await connection.execute<ResultSetHeader>(
-      `UPDATE fixed_assets SET disposed_at = ? WHERE id = ?`,
-      [recomputed.disposed_at ? formatDateOnly(recomputed.disposed_at) : null, event.asset_id]
-    );
+    await trx
+      .updateTable("fixed_assets")
+      .set({ disposed_at: recomputed.disposed_at ? formatDateOnly(recomputed.disposed_at) as any : null })
+      .where("id", "=", event.asset_id)
+      .execute();
 
     return {
       void_event_id: voidEventResult.eventId,
@@ -1537,34 +1648,54 @@ export async function voidEvent(
 }
 
 async function postVoidToJournal(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   originalEventId: number,
   assetId: number,
   outletId: number | null,
   eventDate: string
 ): Promise<number> {
-  await ensureDateWithinOpenFiscalYearWithExecutor(executor, companyId, eventDate);
+  await ensureDateWithinOpenFiscalYearWithExecutor(db, companyId, eventDate);
 
-  const [batchResult] = await executor.execute<ResultSetHeader>(
-    `INSERT INTO journal_batches (company_id, outlet_id, doc_type, doc_id, posted_at) VALUES (?, ?, ?, ?, ?)`,
-    [companyId, outletId, FA_VOID, originalEventId, eventDate]
-  );
+  const batchResult = await db
+    .insertInto("journal_batches")
+    .values({
+      company_id: companyId,
+      outlet_id: outletId,
+      doc_type: FA_VOID,
+      doc_id: originalEventId,
+      posted_at: eventDate as any
+    })
+    .executeTakeFirst();
   const journalBatchId = Number(batchResult.insertId);
 
-  const [originalLines] = await executor.execute<RowDataPacket[]>(
-    `SELECT account_id, debit, credit FROM journal_lines WHERE journal_batch_id = (SELECT journal_batch_id FROM fixed_asset_events WHERE id = ?)`,
-    [originalEventId]
-  );
+  const originalLines = await db
+    .selectFrom("journal_lines")
+    .where("journal_batch_id", "=", 
+      db.selectFrom("fixed_asset_events")
+        .where("id", "=", originalEventId)
+        .select("journal_batch_id")
+    )
+    .select(["account_id", "debit", "credit"])
+    .execute();
 
   for (const line of originalLines) {
     const debit = Number(line.credit);
     const credit = Number(line.debit);
     if (debit > 0 || credit > 0) {
-      await executor.execute(
-        `INSERT INTO journal_lines (journal_batch_id, company_id, outlet_id, account_id, line_date, debit, credit, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [journalBatchId, companyId, outletId, line.account_id, eventDate, debit, credit, `Void of event ${originalEventId}`]
-      );
+      await db
+        .insertInto("journal_lines")
+        .values({
+          journal_batch_id: journalBatchId,
+          company_id: companyId,
+          outlet_id: outletId,
+          account_id: line.account_id,
+          line_date: eventDate as any,
+          debit: debit,
+          credit: credit,
+          description: `Void of event ${originalEventId}`
+        })
+        .execute();
     }
   }
 
@@ -1586,9 +1717,15 @@ export interface LedgerResult {
 }
 
 export async function getAssetLedger(companyId: number, assetId: number, actor: MutationActor): Promise<LedgerResult> {
-  const pool = getDbPool();
+  const db = getDb();
 
-  const asset = await findFixedAssetWithExecutor(pool, companyId, assetId);
+  const asset = await db
+    .selectFrom("fixed_assets")
+    .select(["outlet_id"])
+    .where("company_id", "=", companyId)
+    .where("id", "=", assetId)
+    .executeTakeFirst();
+
   if (!asset) {
     throw new FixedAssetNotFoundError();
   }
@@ -1600,7 +1737,7 @@ export async function getAssetLedger(companyId: number, assetId: number, actor: 
       throw new FixedAssetNotFoundError();
     }
     try {
-      await ensureUserHasOutletAccess(pool, actor.userId, companyId, outletId);
+      await commonUtilsEnsureUserHasOutletAccess(actor.userId, companyId, outletId);
     } catch (error) {
       const err = error as { code?: string };
       if (err.code === "FORBIDDEN") {
@@ -1610,18 +1747,42 @@ export async function getAssetLedger(companyId: number, assetId: number, actor: 
     }
   }
 
-  const [rows] = await pool.execute<FixedAssetEventRow[]>(
-    `SELECT id, company_id, asset_id, event_type, event_date, outlet_id, journal_batch_id, status, idempotency_key, event_data, created_at, created_by, voided_by, voided_at
-     FROM fixed_asset_events WHERE asset_id = ? ORDER BY event_date ASC, id ASC`,
-    [assetId]
-  );
+  const rows = await db
+    .selectFrom("fixed_asset_events")
+    .select([
+      "id",
+      "company_id",
+      "asset_id",
+      "event_type",
+      "event_date",
+      "outlet_id",
+      "journal_batch_id",
+      "status",
+      "idempotency_key",
+      "event_data",
+      "created_at",
+      "created_by",
+      "voided_by",
+      "voided_at"
+    ])
+    .where("asset_id", "=", assetId)
+    .orderBy("event_date", "asc")
+    .orderBy("id", "asc")
+    .execute();
 
-  const events: LedgerEntry[] = rows.map((row) => ({
+  const events: LedgerEntry[] = rows.map((row: {
+    id: number;
+    event_type: string;
+    event_date: Date | string;
+    journal_batch_id: number | null;
+    status: string;
+    event_data: string;
+  }) => ({
     id: row.id,
     event_type: row.event_type,
     event_date: formatDateOnly(row.event_date),
     journal_batch_id: row.journal_batch_id,
-    status: row.status,
+    status: row.status as string,
     event_data: typeof row.event_data === "string" ? JSON.parse(row.event_data) : row.event_data
   }));
 
@@ -1639,9 +1800,15 @@ export interface BookResult {
 }
 
 export async function getAssetBook(companyId: number, assetId: number, actor: MutationActor): Promise<BookResult> {
-  const pool = getDbPool();
+  const db = getDb();
 
-  const asset = await findFixedAssetWithExecutor(pool, companyId, assetId);
+  const asset = await db
+    .selectFrom("fixed_assets")
+    .select(["outlet_id"])
+    .where("company_id", "=", companyId)
+    .where("id", "=", assetId)
+    .executeTakeFirst();
+
   if (!asset) {
     throw new FixedAssetNotFoundError();
   }
@@ -1653,7 +1820,7 @@ export async function getAssetBook(companyId: number, assetId: number, actor: Mu
       throw new FixedAssetNotFoundError();
     }
     try {
-      await ensureUserHasOutletAccess(pool, actor.userId, companyId, outletId);
+      await commonUtilsEnsureUserHasOutletAccess(actor.userId, companyId, outletId);
     } catch (error) {
       const err = error as { code?: string };
       if (err.code === "FORBIDDEN") {
@@ -1663,7 +1830,20 @@ export async function getAssetBook(companyId: number, assetId: number, actor: Mu
     }
   }
 
-  const book = await findAssetBookWithExecutor(pool, assetId);
+  const book = await db
+    .selectFrom("fixed_asset_books")
+    .select([
+      "asset_id",
+      "cost_basis",
+      "accum_depreciation",
+      "accum_impairment",
+      "carrying_amount",
+      "as_of_date",
+      "last_event_id"
+    ])
+    .where("asset_id", "=", assetId)
+    .executeTakeFirst();
+
   if (!book) {
     return {
       asset_id: assetId,
@@ -1677,12 +1857,12 @@ export async function getAssetBook(companyId: number, assetId: number, actor: Mu
   }
 
   return {
-    asset_id: book.asset_id,
+    asset_id: Number(book.asset_id),
     cost_basis: Number(book.cost_basis),
     accum_depreciation: Number(book.accum_depreciation),
     accum_impairment: Number(book.accum_impairment),
     carrying_amount: Number(book.carrying_amount),
     as_of_date: formatDateOnly(book.as_of_date),
-    last_event_id: book.last_event_id
+    last_event_id: Number(book.last_event_id)
   };
 }

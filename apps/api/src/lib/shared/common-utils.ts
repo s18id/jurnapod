@@ -9,9 +9,9 @@
  * to maintain a single source of truth.
  */
 
-import type { PoolConnection } from "mysql2/promise";
-import type { RowDataPacket } from "mysql2";
-import { getDbPool } from "@/lib/db";
+import type { KyselySchema } from "@/lib/db";
+import { getDb } from "@/lib/db";
+import type { Sql } from "kysely";
 import {
   getNextDocumentNumber,
   NumberingConflictError,
@@ -37,9 +37,7 @@ import {
  * Common query executor interface used across sales services.
  * Abstracts the database connection's execute method.
  */
-export type QueryExecutor = {
-  execute: PoolConnection["execute"];
-};
+export type QueryExecutor = KyselySchema;
 
 // =============================================================================
 // Constants
@@ -77,25 +75,12 @@ export function sumMoney(values: readonly number[]): number {
 /**
  * Execute a function within a database transaction.
  * Automatically commits on success, rolls back on error.
- * Always releases the connection back to the pool.
  */
 export async function withTransaction<T>(
-  operation: (connection: PoolConnection) => Promise<T>
+  operation: (trx: KyselySchema) => Promise<T>
 ): Promise<T> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-    const result = await operation(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  const db = getDb();
+  return db.transaction().execute(operation);
 }
 
 // =============================================================================
@@ -153,16 +138,14 @@ export async function ensureCompanyOutletExists(
   companyId: number,
   outletId: number
 ): Promise<void> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id
-     FROM outlets
-     WHERE id = ?
-       AND company_id = ?
-     LIMIT 1`,
-    [outletId, companyId]
-  );
+  const row = await executor
+    .selectFrom('outlets')
+    .where('id', '=', outletId)
+    .where('company_id', '=', companyId)
+    .select('id')
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     throw new DatabaseReferenceError("Outlet not found for company");
   }
 }

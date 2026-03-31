@@ -19,13 +19,6 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import { 
-  listCompanyTaxRates, 
-  listCompanyDefaultTaxRates, 
-  setCompanyDefaultTaxRates,
-  listCompanyDefaultTaxRateIds
-} from "../lib/taxes.js";
-import { getDbPool } from "../lib/db.js";
 import {
   createTaxRate,
   updateTaxRate,
@@ -35,7 +28,12 @@ import {
   TaxRateNotFoundError,
   TaxRateConflictError,
   TaxRateValidationError,
-  TaxRateReferenceError
+  TaxRateReferenceError,
+  // Kysely-based functions (library-first pattern)
+  listCompanyTaxRatesKysely,
+  listCompanyDefaultTaxRatesKysely,
+  listCompanyDefaultTaxRateIdsKysely,
+  setCompanyDefaultTaxRatesKysely
 } from "../lib/tax-rates.js";
 
 declare module "hono" {
@@ -107,8 +105,7 @@ taxRatesRoutes.get("/", async (c) => {
   }
 
   try {
-    const dbPool = getDbPool();
-    const taxRates = await listCompanyTaxRates(dbPool, auth.companyId);
+    const taxRates = await listCompanyTaxRatesKysely(auth.companyId);
 
     return successResponse(taxRates);
   } catch (error) {
@@ -133,8 +130,7 @@ taxRatesRoutes.get("/default", async (c) => {
   }
 
   try {
-    const dbPool = getDbPool();
-    const defaultTaxRates = await listCompanyDefaultTaxRates(dbPool, auth.companyId);
+    const defaultTaxRates = await listCompanyDefaultTaxRatesKysely(auth.companyId);
 
     return successResponse(defaultTaxRates);
   } catch (error) {
@@ -210,8 +206,7 @@ taxRatesRoutes.get("/defaults", async (c) => {
   }
 
   try {
-    const dbPool = getDbPool();
-    const defaultTaxRateIds = await listCompanyDefaultTaxRateIds(dbPool, auth.companyId);
+    const defaultTaxRateIds = await listCompanyDefaultTaxRateIdsKysely(auth.companyId);
 
     return successResponse(defaultTaxRateIds);
   } catch (error) {
@@ -238,9 +233,7 @@ taxRatesRoutes.put("/defaults", async (c) => {
     const payload = await c.req.json();
     const input = TaxDefaultsUpdateSchema.parse(payload);
 
-    const dbPool = getDbPool();
-    const defaultTaxRateIds = await setCompanyDefaultTaxRates(
-      dbPool,
+    const defaultTaxRateIds = await setCompanyDefaultTaxRatesKysely(
       auth.companyId,
       input.tax_rate_ids,
       auth.userId

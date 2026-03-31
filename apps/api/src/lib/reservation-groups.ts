@@ -1,20 +1,12 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
-import { getDbPool } from "./db";
+import { sql } from "kysely";
+import { getDb, type KyselySchema } from "./db";
 import type {
   ReservationGroupDetail,
   TableSuggestion
 } from "@jurnapod/shared";
-
-/**
- * Get database connection from pool
- */
-async function getConnection(): Promise<PoolConnection> {
-  const pool = getDbPool();
-  return pool.getConnection();
-}
 
 /**
  * Convert ISO 8601 datetime string to Unix milliseconds
@@ -53,106 +45,93 @@ export async function createReservationGroupWithTables(input: {
     throw new Error("Cannot reserve more than 10 tables at once");
   }
 
-  const conn = await getConnection();
-  try {
-    await conn.beginTransaction();
+  const db = getDb();
 
-    // Calculate canonical Unix timestamps
-    const startTs = toUnixMs(input.reservationAt);
-    const durationMs = (input.durationMinutes ?? 120) * 60 * 1000;
-    const endTs = startTs + durationMs;
+  // Calculate canonical Unix timestamps
+  const startTs = toUnixMs(input.reservationAt);
+  const durationMs = (input.durationMinutes ?? 120) * 60 * 1000;
+  const endTs = startTs + durationMs;
 
+  return db.transaction().execute(async (trx) => {
     // 1. Lock selected table rows to prevent concurrent modifications
     //    This also serializes concurrent group bookings that share tables.
-    const placeholders = input.tableIds.map(() => "?").join(",");
-    const [lockedTables] = await conn.execute<Array<RowDataPacket>>(
-      `SELECT id FROM outlet_tables
-       WHERE company_id = ?
-         AND outlet_id = ?
-         AND id IN (${placeholders})
-         AND status = 'AVAILABLE'
-       FOR UPDATE`,
-      [input.companyId, input.outletId, ...input.tableIds]
-    );
+    const lockedTables = await sql`
+      SELECT id FROM outlet_tables
+      WHERE company_id = ${input.companyId}
+        AND outlet_id = ${input.outletId}
+        AND id IN (${sql.join(input.tableIds.map(id => sql`${id}`))})
+        AND status = 'AVAILABLE'
+      FOR UPDATE
+    `.execute(trx);
 
-    if (lockedTables.length !== input.tableIds.length) {
+    if (lockedTables.rows.length !== input.tableIds.length) {
       // One or more tables unavailable or not found
-      await conn.rollback();
       throw new Error("One or more tables are not available");
     }
 
     // 2. Re-check for overlapping reservations inside the transaction.
     //    This is the authoritative conflict gate — no TOCTTOU window exists
     //    because we hold row locks on the tables until commit.
-    const [conflicts] = await conn.execute<Array<RowDataPacket>>(
-      `SELECT r.id, r.table_id, t.code as table_code, t.name as table_name,
+    const conflicts = await sql`
+      SELECT r.id, r.table_id, t.code as table_code, t.name as table_name,
               r.reservation_start_ts, r.reservation_end_ts
        FROM reservations r
        JOIN outlet_tables t ON r.table_id = t.id
-       WHERE r.company_id = ?
-         AND r.outlet_id = ?
-         AND r.table_id IN (${placeholders})
+       WHERE r.company_id = ${input.companyId}
+         AND r.outlet_id = ${input.outletId}
+         AND r.table_id IN (${sql.join(input.tableIds.map(id => sql`${id}`))})
          AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
          AND r.reservation_start_ts IS NOT NULL
          AND r.reservation_end_ts IS NOT NULL
-         AND r.reservation_start_ts < ?
-         AND r.reservation_end_ts > ?
-       FOR UPDATE`,
-      [input.companyId, input.outletId, ...input.tableIds, endTs, startTs]
-    );
+         AND r.reservation_start_ts < ${endTs}
+         AND r.reservation_end_ts > ${startTs}
+       FOR UPDATE
+    `.execute(trx);
 
-    if (conflicts.length > 0) {
-      await conn.rollback();
-      const conflictTables = [...new Set(conflicts.map(c => (c as { table_code: string }).table_code))];
+    if (conflicts.rows.length > 0) {
+      const conflictTables = [...new Set(conflicts.rows.map(c => (c as { table_code: string }).table_code))];
       throw new Error(`Tables not available: ${conflictTables.join(", ")}`);
     }
 
     // 3. Create reservation group
-    const [groupResult] = await conn.execute<ResultSetHeader>(
-      `INSERT INTO reservation_groups (company_id, outlet_id, total_guest_count)
-       VALUES (?, ?, ?)`,
-      [input.companyId, input.outletId, input.guestCount]
-    );
+    const groupResult = await sql`
+      INSERT INTO reservation_groups (company_id, outlet_id, total_guest_count)
+      VALUES (${input.companyId}, ${input.outletId}, ${input.guestCount})
+    `.execute(trx);
 
-    const groupId = groupResult.insertId;
+    const groupId = Number(groupResult.insertId);
     const reservationIds: number[] = [];
 
     // 4. Create individual reservations (one per table)
     for (const tableId of input.tableIds) {
-      const [resResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO reservations
-         (company_id, outlet_id, reservation_group_id, table_id,
-          customer_name, customer_phone, guest_count,
-          reservation_at, reservation_start_ts, reservation_end_ts,
-          duration_minutes, notes, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1)`,
-        [
-          input.companyId,
-          input.outletId,
-          groupId,
-          tableId,
-          input.customerName,
-          input.customerPhone,
-          input.guestCount,
-          input.reservationAt, // Legacy DATETIME
-          startTs, // Canonical start (Unix ms)
-          endTs, // Canonical end (Unix ms)
-          input.durationMinutes ?? 120,
-          input.notes
-        ]
-      );
-      reservationIds.push(resResult.insertId);
+      const resResult = await sql`
+        INSERT INTO reservations
+        (company_id, outlet_id, reservation_group_id, table_id,
+         customer_name, customer_phone, guest_count,
+         reservation_at, reservation_start_ts, reservation_end_ts,
+         duration_minutes, notes, status, status_id)
+        VALUES (
+          ${input.companyId},
+          ${input.outletId},
+          ${groupId},
+          ${tableId},
+          ${input.customerName},
+          ${input.customerPhone},
+          ${input.guestCount},
+          ${input.reservationAt},
+          ${startTs},
+          ${endTs},
+          ${input.durationMinutes ?? 120},
+          ${input.notes},
+          'BOOKED',
+          1
+        )
+      `.execute(trx);
+      reservationIds.push(Number(resResult.insertId));
     }
 
-    await conn.commit();
     return { groupId, reservationIds };
-
-  } catch (error) {
-    await conn.rollback();
-    throw error;
-  } finally {
-    conn.release();
-  }
+  });
 }
 
 /**
@@ -186,88 +165,65 @@ export async function checkMultiTableAvailability(input: {
   }>;
   totalCapacity: number;
 }> {
-  const conn = await getConnection();
-  try {
-    // 1. Get table details (tenant-scoped)
-    const [tables] = await conn.execute<Array<RowDataPacket & {
-      id: number;
-      code: string;
-      name: string;
-      capacity: number;
-    }>>(
-      `SELECT ot.id, ot.code, ot.name, ot.capacity
-       FROM outlet_tables ot
-       JOIN outlets o ON ot.outlet_id = o.id
-       WHERE o.company_id = ?
-         AND ot.outlet_id = ?
-         AND ot.id IN (?)
-         AND ot.status = 'AVAILABLE'`,
-      [input.companyId, input.outletId, input.tableIds]
-    );
+  const db = getDb();
 
-    const totalCapacity = tables.reduce((sum, t) => sum + t.capacity, 0);
+  // 1. Get table details (tenant-scoped)
+  const tablesResult = await sql`
+    SELECT ot.id, ot.code, ot.name, ot.capacity
+    FROM outlet_tables ot
+    JOIN outlets o ON ot.outlet_id = o.id
+    WHERE o.company_id = ${input.companyId}
+      AND ot.outlet_id = ${input.outletId}
+      AND ot.id IN (${sql.join(input.tableIds.map(id => sql`${id}`))})
+      AND ot.status = 'AVAILABLE'
+  `.execute(db);
 
-    // 2. Check for conflicts using canonical timestamps
-    // Overlap logic: a_start < b_end AND b_start < a_end
-    const excludeClause = input.excludeReservationIds?.length
-      ? `AND r.id NOT IN (${input.excludeReservationIds.map(() => '?').join(',')})`
-      : '';
+  const tables = tablesResult.rows.map(row => ({
+    id: (row as { id: number }).id,
+    code: (row as { code: string }).code,
+    name: (row as { name: string }).name,
+    capacity: (row as { capacity: number }).capacity
+  }));
 
-    const params = [
-      input.companyId,
-      input.outletId,
-      input.tableIds,
-      input.endTs, // reservation starts before our end
-      input.startTs, // reservation ends after our start
-      ...(input.excludeReservationIds ?? [])
-    ];
+  const totalCapacity = tables.reduce((sum, t) => sum + t.capacity, 0);
 
-    const [conflicts] = await conn.execute<Array<RowDataPacket & {
-      id: number;
-      table_id: number;
-      reservation_start_ts: number;
-      reservation_end_ts: number;
-      table_code: string;
-      table_name: string;
-    }>>(
-      `SELECT r.id, r.table_id, r.reservation_start_ts, r.reservation_end_ts,
-              t.code as table_code, t.name as table_name
-       FROM reservations r
-       JOIN outlet_tables t ON r.table_id = t.id
-       WHERE r.company_id = ?
-         AND r.outlet_id = ?
-         AND r.table_id IN (?)
-         AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
-         AND r.reservation_start_ts IS NOT NULL
-         AND r.reservation_end_ts IS NOT NULL
-         AND r.reservation_start_ts < ?
-         AND r.reservation_end_ts > ?
-         ${excludeClause}`,
-      params
-    );
+  // 2. Check for conflicts using canonical timestamps
+  // Overlap logic: a_start < b_end AND b_start < a_end
+  const excludeClause = input.excludeReservationIds?.length
+    ? sql`AND r.id NOT IN (${sql.join(input.excludeReservationIds!.map(id => sql`${id}`))})`
+    : sql``;
 
-    return {
-      available: conflicts.length === 0,
-      conflicts: conflicts.map(c => ({
-        tableId: c.table_id,
-        tableName: c.table_name,
-        tableCode: c.table_code,
-        conflictingReservationId: c.id,
-        conflictStart: c.reservation_start_ts,
-        conflictEnd: c.reservation_end_ts
-      })),
-      tables: tables.map(t => ({
-        id: t.id,
-        code: t.code,
-        name: t.name,
-        capacity: t.capacity
-      })),
-      totalCapacity
-    };
+  const conflictsResult = await sql`
+    SELECT r.id, r.table_id, r.reservation_start_ts, r.reservation_end_ts,
+            t.code as table_code, t.name as table_name
+     FROM reservations r
+     JOIN outlet_tables t ON r.table_id = t.id
+     WHERE r.company_id = ${input.companyId}
+       AND r.outlet_id = ${input.outletId}
+       AND r.table_id IN (${sql.join(input.tableIds.map(id => sql`${id}`))})
+       AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
+       AND r.reservation_start_ts IS NOT NULL
+       AND r.reservation_end_ts IS NOT NULL
+       AND r.reservation_start_ts < ${input.endTs}
+       AND r.reservation_end_ts > ${input.startTs}
+       ${excludeClause}
+  `.execute(db);
 
-  } finally {
-    conn.release();
-  }
+  const conflicts = conflictsResult.rows.map(c => ({
+    tableId: (c as { table_id: number }).table_id,
+    tableName: (c as { table_name: string }).table_name,
+    tableCode: (c as { table_code: string }).table_code,
+    conflictingReservationId: (c as { id: number }).id,
+    conflictStart: (c as { reservation_start_ts: number }).reservation_start_ts,
+    conflictEnd: (c as { reservation_end_ts: number }).reservation_end_ts
+  }));
+
+  return {
+    available: conflicts.length === 0,
+    conflicts,
+    tables,
+    totalCapacity
+  };
 }
 
 /**
@@ -317,83 +273,89 @@ export async function suggestTableCombinations(input: {
   endTs: number; // Unix ms
   maxSuggestions?: number;
 }): Promise<TableSuggestion[]> {
-  const conn = await getConnection();
-  try {
-    // 1. Get all available tables (not in conflict during time range)
-    const [availableTables] = await conn.execute<Array<RowDataPacket & {
-      id: number;
-      code: string;
-      name: string;
-      capacity: number;
-      zone: string | null;
-    }>>(
-      `SELECT t.id, t.code, t.name, t.capacity, t.zone
-       FROM outlet_tables t
-       WHERE t.company_id = ?
-         AND t.outlet_id = ?
-         AND t.status = 'AVAILABLE'
-         AND t.id NOT IN (
-           SELECT DISTINCT r.table_id
-           FROM reservations r
-           WHERE r.company_id = ?
-             AND r.outlet_id = ?
-             AND r.table_id IS NOT NULL
-             AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
-             AND r.reservation_start_ts IS NOT NULL
-             AND r.reservation_end_ts IS NOT NULL
-             AND r.reservation_start_ts < ?
-             AND r.reservation_end_ts > ?
-         )
-       ORDER BY t.capacity DESC, t.id ASC`,
-      [input.companyId, input.outletId, input.companyId, input.outletId, input.endTs, input.startTs]
-    );
+  const db = getDb();
 
-    if (availableTables.length === 0) {
-      return [];
-    }
+  // 1. Get all available tables (not in conflict during time range)
+  const availableTablesResult = await sql`
+    SELECT t.id, t.code, t.name, t.capacity, t.zone
+    FROM outlet_tables t
+    WHERE t.company_id = ${input.companyId}
+      AND t.outlet_id = ${input.outletId}
+      AND t.status = 'AVAILABLE'
+      AND t.id NOT IN (
+        SELECT DISTINCT r.table_id
+        FROM reservations r
+        WHERE r.company_id = ${input.companyId}
+          AND r.outlet_id = ${input.outletId}
+          AND r.table_id IS NOT NULL
+          AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
+          AND r.reservation_start_ts IS NOT NULL
+          AND r.reservation_end_ts IS NOT NULL
+          AND r.reservation_start_ts < ${input.endTs}
+          AND r.reservation_end_ts > ${input.startTs}
+      )
+    ORDER BY t.capacity DESC, t.id ASC
+  `.execute(db);
 
-    // 2. Generate valid combinations
-    const minTables = Math.ceil(input.guestCount / Math.max(...availableTables.map(t => t.capacity)));
-    const maxTables = Math.min(5, availableTables.length);
+  interface TableRow {
+    id: number;
+    code: string;
+    name: string;
+    capacity: number;
+    zone: string | null;
+  }
 
-    const allCombinations: Array<Array<typeof availableTables[0]>> = [];
+  const availableTables: TableRow[] = availableTablesResult.rows.map(row => ({
+    id: (row as TableRow).id,
+    code: (row as TableRow).code,
+    name: (row as TableRow).name,
+    capacity: (row as TableRow).capacity,
+    zone: (row as TableRow).zone
+  }));
 
-    for (let count = minTables; count <= maxTables; count++) {
-      const combos = getCombinations(availableTables, count);
-      for (const combo of combos) {
-        const totalCapacity = combo.reduce((sum, t) => sum + t.capacity, 0);
-        // Accept if capacity is sufficient (up to 50% excess allowed)
-        if (totalCapacity >= input.guestCount && totalCapacity <= input.guestCount * 1.5) {
-          allCombinations.push(combo);
-        }
+  if (availableTables.length === 0) {
+    return [];
+  }
+
+  // 2. Generate valid combinations
+  const maxCapacity = Math.max(...availableTables.map(t => t.capacity));
+  const minTables = Math.ceil(input.guestCount / maxCapacity);
+  const maxTables = Math.min(5, availableTables.length);
+
+  const allCombinations: TableRow[][] = [];
+
+  for (let count = minTables; count <= maxTables; count++) {
+    const combos = getCombinations(availableTables, count);
+    for (const combo of combos) {
+      const totalCapacity = combo.reduce((sum, t) => sum + t.capacity, 0);
+      // Accept if capacity is sufficient (up to 50% excess allowed)
+      if (totalCapacity >= input.guestCount && totalCapacity <= input.guestCount * 1.5) {
+        allCombinations.push(combo);
       }
     }
-
-    // 3. Score and sort
-    const suggestions = allCombinations
-      .map(combo => {
-        const totalCapacity = combo.reduce((sum, t) => sum + t.capacity, 0);
-        return {
-          tables: combo.map(t => ({
-            id: t.id,
-            code: t.code,
-            name: t.name,
-            capacity: t.capacity,
-            zone: t.zone
-          })),
-          total_capacity: totalCapacity,
-          excess_capacity: totalCapacity - input.guestCount,
-          score: scoreCombination(combo, input.guestCount)
-        };
-      })
-      .sort((a, b) => a.score - b.score)
-      .slice(0, input.maxSuggestions ?? 5);
-
-    return suggestions;
-
-  } finally {
-    conn.release();
   }
+
+  // 3. Score and sort
+  const suggestions = allCombinations
+    .map(combo => {
+      const totalCapacity = combo.reduce((sum, t) => sum + t.capacity, 0);
+      return {
+        tables: combo.map(t => ({
+          id: t.id,
+          code: t.code,
+          name: t.name,
+          capacity: t.capacity,
+          zone: t.zone
+        })),
+        total_capacity: totalCapacity,
+        excess_capacity: totalCapacity - input.guestCount,
+        score: scoreCombination(combo, input.guestCount)
+      };
+    })
+    .sort((a, b) => a.score - b.score)
+    .slice(0, input.maxSuggestions ?? 5);
+
+  return suggestions;
 }
 
 /**
@@ -403,81 +365,68 @@ export async function getReservationGroup(input: {
   companyId: number;
   groupId: number;
 }): Promise<ReservationGroupDetail | null> {
-  const conn = await getConnection();
-  try {
-    // 1. Get group
-    const [groups] = await conn.execute<Array<RowDataPacket & {
-      id: number;
-      company_id: number;
-      outlet_id: number;
-      group_name: string | null;
-      total_guest_count: number;
-      created_at: string;
-      updated_at: string;
-    }>>(
-      `SELECT * FROM reservation_groups WHERE id = ? AND company_id = ?`,
-      [input.groupId, input.companyId]
-    );
+  const db = getDb();
 
-    if (groups.length === 0) {
-      return null;
-    }
+  // 1. Get group
+  const groupsResult = await sql`
+    SELECT * FROM reservation_groups WHERE id = ${input.groupId} AND company_id = ${input.companyId}
+  `.execute(db);
 
-    const group = groups[0]!;
-
-    // 2. Get all reservations in group with table details
-    //    Strictly scoped to the group's company + outlet to prevent data-integrity drift leakage.
-    const [reservations] = await conn.execute<Array<RowDataPacket & {
-      reservation_id: number;
-      table_id: number;
-      table_code: string;
-      table_name: string;
-      status: string;
-      reservation_at: string;
-      reservation_start_ts: number | null;
-      reservation_end_ts: number | null;
-    }>>(
-      `SELECT
-         r.id as reservation_id,
-         r.table_id,
-         t.code as table_code,
-         t.name as table_name,
-         r.status,
-         r.reservation_at,
-         r.reservation_start_ts,
-         r.reservation_end_ts
-       FROM reservations r
-       JOIN outlet_tables t ON r.table_id = t.id
-       WHERE r.reservation_group_id = ?
-         AND r.company_id = ?
-         AND r.outlet_id = ?
-       ORDER BY t.id ASC`,
-      [group.id, group.company_id, group.outlet_id]
-    );
-
-    return {
-      id: group.id,
-      company_id: group.company_id,
-      outlet_id: group.outlet_id,
-      group_name: group.group_name,
-      total_guest_count: group.total_guest_count,
-      created_at: group.created_at,
-      updated_at: group.updated_at,
-      reservations: reservations.map(r => ({
-        reservation_id: r.reservation_id,
-        table_id: r.table_id,
-        table_code: r.table_code,
-        table_name: r.table_name,
-        status: r.status,
-        reservation_at: r.reservation_at
-        // reservation_start_ts and reservation_end_ts omitted from public contract
-        // (internal machine-time fields for overlap/range queries only)
-      }))
-    };
-
-  } finally {
-    conn.release();
+  if (groupsResult.rows.length === 0) {
+    return null;
   }
+
+  const group = groupsResult.rows[0] as {
+    id: number;
+    company_id: number;
+    outlet_id: number;
+    group_name: string | null;
+    total_guest_count: number;
+    created_at: string;
+    updated_at: string;
+  };
+
+  // 2. Get all reservations in group with table details
+  //    Strictly scoped to the group's company + outlet to prevent data-integrity drift leakage.
+  const reservationsResult = await sql`
+    SELECT
+       r.id as reservation_id,
+       r.table_id,
+       t.code as table_code,
+       t.name as table_name,
+       r.status,
+       r.reservation_at,
+       r.reservation_start_ts,
+       r.reservation_end_ts
+     FROM reservations r
+     JOIN outlet_tables t ON r.table_id = t.id
+     WHERE r.reservation_group_id = ${group.id}
+       AND r.company_id = ${group.company_id}
+       AND r.outlet_id = ${group.outlet_id}
+     ORDER BY t.id ASC
+  `.execute(db);
+
+  const reservations = reservationsResult.rows.map(r => ({
+    reservation_id: (r as { reservation_id: number }).reservation_id,
+    table_id: (r as { table_id: number }).table_id,
+    table_code: (r as { table_code: string }).table_code,
+    table_name: (r as { table_name: string }).table_name,
+    status: (r as { status: string }).status,
+    reservation_at: (r as { reservation_at: string }).reservation_at
+    // reservation_start_ts and reservation_end_ts omitted from public contract
+    // (internal machine-time fields for overlap/range queries only)
+  }));
+
+  return {
+    id: group.id,
+    company_id: group.company_id,
+    outlet_id: group.outlet_id,
+    group_name: group.group_name,
+    total_guest_count: group.total_guest_count,
+    created_at: group.created_at,
+    updated_at: group.updated_at,
+    reservations
+  };
 }
 
 /**
@@ -490,36 +439,32 @@ export async function getReservationGroup(input: {
  * 4. Delete the group
  * 
  * @returns Deletion result with count of ungrouped reservations
-  */
+   */
 export async function deleteReservationGroupSafe(input: {
   companyId: number;
   groupId: number;
 }): Promise<{ deleted: boolean; ungroupedCount: number }> {
-  const conn = await getConnection();
-  try {
-    await conn.beginTransaction();
+  const db = getDb();
 
+  return db.transaction().execute(async (trx) => {
     // 1. Verify group exists and belongs to company
-    const [groups] = await conn.execute<Array<RowDataPacket>>(
-      `SELECT id FROM reservation_groups WHERE id = ? AND company_id = ?`,
-      [input.groupId, input.companyId]
-    );
+    const groups = await sql`
+      SELECT id FROM reservation_groups WHERE id = ${input.groupId} AND company_id = ${input.companyId}
+    `.execute(trx);
 
-    if (groups.length === 0) {
+    if (groups.rows.length === 0) {
       throw new Error("Reservation group not found or access denied");
     }
 
     // 2. Check all reservations in group are cancellable (only BOOKED/CONFIRMED allowed)
-    const [reservations] = await conn.execute<Array<RowDataPacket & {
-      id: number;
-      status: string;
-    }>>(
-      `SELECT id, status FROM reservations
-       WHERE reservation_group_id = ? AND company_id = ?`,
-      [input.groupId, input.companyId]
-    );
+    const reservations = await sql`
+      SELECT id, status FROM reservations
+      WHERE reservation_group_id = ${input.groupId} AND company_id = ${input.companyId}
+    `.execute(trx);
 
-    const hasNonCancellableStatus = reservations.some(
+    const reservationRows = reservations.rows as Array<{ id: number; status: string }>;
+
+    const hasNonCancellableStatus = reservationRows.some(
       r => ['ARRIVED', 'SEATED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(r.status)
     );
 
@@ -527,7 +472,7 @@ export async function deleteReservationGroupSafe(input: {
       throw new Error("Cannot cancel group with reservations that have already started");
     }
 
-    const hasUnprocessableStatus = reservations.some(
+    const hasUnprocessableStatus = reservationRows.some(
       r => !['BOOKED', 'CONFIRMED'].includes(r.status)
     );
 
@@ -536,34 +481,24 @@ export async function deleteReservationGroupSafe(input: {
     }
 
     // 3. Cancel all linked reservations (set status + timestamp, then unlink)
-    await conn.execute(
-      `UPDATE reservations
-       SET status = 'CANCELLED',
-           cancelled_at = NOW(),
-           reservation_group_id = NULL,
-           updated_at = NOW()
-       WHERE reservation_group_id = ? AND company_id = ?`,
-      [input.groupId, input.companyId]
-    );
+    await sql`
+      UPDATE reservations
+      SET status = 'CANCELLED',
+          cancelled_at = NOW(),
+          reservation_group_id = NULL,
+          updated_at = NOW()
+      WHERE reservation_group_id = ${input.groupId} AND company_id = ${input.companyId}
+    `.execute(trx);
 
-    const ungroupedCount = reservations.length;
+    const ungroupedCount = reservationRows.length;
 
     // 4. Delete the group
-    await conn.execute(
-      `DELETE FROM reservation_groups WHERE id = ? AND company_id = ?`,
-      [input.groupId, input.companyId]
-    );
-
-    await conn.commit();
+    await sql`
+      DELETE FROM reservation_groups WHERE id = ${input.groupId} AND company_id = ${input.companyId}
+    `.execute(trx);
 
     return { deleted: true, ungroupedCount };
-
-  } catch (error) {
-    await conn.rollback();
-    throw error;
-  } finally {
-    conn.release();
-  }
+  });
 }
 
 /**
@@ -598,37 +533,44 @@ export async function updateReservationGroup(input: {
   updatedTables: number[];
   removedTables: number[];
 }> {
-  const conn = await getConnection();
-  try {
-    await conn.beginTransaction();
+  const db = getDb();
 
+  return db.transaction().execute(async (trx) => {
     // 1. Lock group + all linked reservations FOR UPDATE
-    const [groups] = await conn.execute<Array<RowDataPacket>>(
-      `SELECT id, company_id, outlet_id, total_guest_count 
-       FROM reservation_groups 
-       WHERE id = ? AND company_id = ? AND outlet_id = ?
-       FOR UPDATE`,
-      [input.groupId, input.companyId, input.outletId]
-    );
+    const groups = await sql`
+      SELECT id, company_id, outlet_id, total_guest_count 
+      FROM reservation_groups 
+      WHERE id = ${input.groupId} AND company_id = ${input.companyId} AND outlet_id = ${input.outletId}
+      FOR UPDATE
+    `.execute(trx);
 
-    if (groups.length === 0) {
-      await conn.rollback();
+    if (groups.rows.length === 0) {
       throw new Error("Reservation group not found or access denied");
     }
 
-    const group = groups[0]!;
+    const group = groups.rows[0] as {
+      id: number;
+      company_id: number;
+      outlet_id: number;
+      total_guest_count: number;
+    };
 
     // 2. Get current reservations in group (locked)
-    const [currentReservations] = await conn.execute<Array<RowDataPacket & {
+    const currentReservationsResult = await sql`
+      SELECT id, table_id, status 
+      FROM reservations 
+      WHERE reservation_group_id = ${input.groupId} AND company_id = ${input.companyId}
+      FOR UPDATE
+    `.execute(trx);
+
+    interface ReservationRow {
       id: number;
       table_id: number;
       status: string;
-    }>>(
-      `SELECT id, table_id, status 
-       FROM reservations 
-       WHERE reservation_group_id = ? AND company_id = ? 
-       FOR UPDATE`,
-      [input.groupId, input.companyId]
+    }
+
+    const currentReservations: ReservationRow[] = currentReservationsResult.rows.map(
+      row => row as ReservationRow
     );
 
     // 3. Validate no reservations have started
@@ -637,7 +579,6 @@ export async function updateReservationGroup(input: {
     );
 
     if (hasStartedReservations) {
-      await conn.rollback();
       throw new Error("Cannot edit group with reservations that have already started");
     }
 
@@ -650,11 +591,9 @@ export async function updateReservationGroup(input: {
     if (input.updates.tableIds !== undefined) {
       // Validate table count
       if (input.updates.tableIds.length < 2) {
-        await conn.rollback();
         throw new Error("Multi-table reservation requires at least 2 tables");
       }
       if (input.updates.tableIds.length > 10) {
-        await conn.rollback();
         throw new Error("Cannot reserve more than 10 tables");
       }
 
@@ -664,59 +603,55 @@ export async function updateReservationGroup(input: {
 
       // Calculate time range for conflict check
       const reservationAt = input.updates.reservationAt ?? 
-        (await getFirstReservationTime(conn, input.groupId));
+        (await getFirstReservationTime(trx, input.groupId));
       const startTs = toUnixMs(reservationAt);
       const durationMs = (input.updates.durationMinutes ?? 120) * 60 * 1000;
       const endTs = startTs + durationMs;
 
       // Lock and validate new tables
       if (addedTableIds.length > 0) {
-        const addPlaceholders = addedTableIds.map(() => '?').join(',');
-        const [lockedTables] = await conn.execute<Array<RowDataPacket>>(
-          `SELECT id FROM outlet_tables
-           WHERE company_id = ? AND outlet_id = ? AND id IN (${addPlaceholders}) 
-             AND status = 'AVAILABLE'
-           FOR UPDATE`,
-          [input.companyId, group.outlet_id, ...addedTableIds]
-        );
+        const lockedTables = await sql`
+          SELECT id FROM outlet_tables
+          WHERE company_id = ${input.companyId} AND outlet_id = ${group.outlet_id} 
+            AND id IN (${sql.join(addedTableIds.map(id => sql`${id}`))})
+            AND status = 'AVAILABLE'
+          FOR UPDATE
+        `.execute(trx);
 
-        if (lockedTables.length !== addedTableIds.length) {
-          await conn.rollback();
+        if (lockedTables.rows.length !== addedTableIds.length) {
           throw new Error("One or more new tables are not available");
         }
 
         // Check conflicts on new tables
-        const [conflicts] = await conn.execute<Array<RowDataPacket>>(
-          `SELECT r.id, t.code as table_code 
-           FROM reservations r
-           JOIN outlet_tables t ON r.table_id = t.id
-           WHERE r.company_id = ? AND r.outlet_id = ? AND r.table_id IN (${addPlaceholders})
-             AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
-             AND r.reservation_start_ts < ? AND r.reservation_end_ts > ?
-           FOR UPDATE`,
-          [input.companyId, group.outlet_id, ...addedTableIds, endTs, startTs]
-        );
+        const conflicts = await sql`
+          SELECT r.id, t.code as table_code 
+          FROM reservations r
+          JOIN outlet_tables t ON r.table_id = t.id
+          WHERE r.company_id = ${input.companyId} AND r.outlet_id = ${group.outlet_id} 
+            AND r.table_id IN (${sql.join(addedTableIds.map(id => sql`${id}`))})
+            AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
+            AND r.reservation_start_ts < ${endTs} AND r.reservation_end_ts > ${startTs}
+          FOR UPDATE
+        `.execute(trx);
 
-        if (conflicts.length > 0) {
-          await conn.rollback();
-          const conflictCodes = [...new Set(conflicts.map(c => (c as { table_code: string }).table_code))];
+        if (conflicts.rows.length > 0) {
+          const conflictCodes = [...new Set(conflicts.rows.map(c => (c as { table_code: string }).table_code))];
           throw new Error(`New tables not available during requested time: ${conflictCodes.join(', ')}`);
         }
       }
 
       // Validate capacity after table changes
-      const [tableCapacities] = await conn.execute<Array<RowDataPacket>>(
-        `SELECT SUM(capacity) as capacity 
-         FROM outlet_tables 
-         WHERE company_id = ? AND outlet_id = ? AND id IN (${finalTableIds.map(() => '?').join(',')})`,
-        [input.companyId, group.outlet_id, ...finalTableIds]
-      );
+      const tableCapacities = await sql`
+        SELECT SUM(capacity) as capacity 
+        FROM outlet_tables 
+        WHERE company_id = ${input.companyId} AND outlet_id = ${group.outlet_id} 
+          AND id IN (${sql.join(finalTableIds.map(id => sql`${id}`))})
+      `.execute(trx);
 
-      const totalCapacity = (tableCapacities[0] as { capacity: number } | undefined)?.capacity ?? 0;
+      const totalCapacity = (tableCapacities.rows[0] as { capacity: number } | undefined)?.capacity ?? 0;
       const requiredGuests = input.updates.guestCount ?? group.total_guest_count;
 
       if (totalCapacity < requiredGuests) {
-        await conn.rollback();
         throw new Error(`Insufficient capacity: ${totalCapacity} seats for ${requiredGuests} guests`);
       }
     }
@@ -724,102 +659,93 @@ export async function updateReservationGroup(input: {
     // 5. Handle time/duration changes (conflict check on ALL tables)
     if (input.updates.reservationAt !== undefined || input.updates.durationMinutes !== undefined) {
       const reservationAt = input.updates.reservationAt ?? 
-        (await getFirstReservationTime(conn, input.groupId));
+        (await getFirstReservationTime(trx, input.groupId));
       const startTs = toUnixMs(reservationAt);
       const durationMs = (input.updates.durationMinutes ?? 120) * 60 * 1000;
       const endTs = startTs + durationMs;
 
       // Check conflicts on ALL final tables (excluding current reservations)
       const currentResIds = currentReservations.map(r => r.id);
-      const excludeClause = currentResIds.length > 0 
-        ? `AND r.id NOT IN (${currentResIds.map(() => '?').join(',')})` 
-        : '';
+      
+      let conflicts;
+      if (currentResIds.length > 0) {
+        conflicts = await sql`
+          SELECT r.id, t.code as table_code 
+          FROM reservations r
+          JOIN outlet_tables t ON r.table_id = t.id
+          WHERE r.company_id = ${input.companyId} AND r.outlet_id = ${group.outlet_id} 
+            AND r.table_id IN (${sql.join(finalTableIds.map(id => sql`${id}`))})
+            AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
+            AND r.reservation_start_ts < ${endTs} AND r.reservation_end_ts > ${startTs}
+            AND r.id NOT IN (${sql.join(currentResIds.map(id => sql`${id}`))})
+        `.execute(trx);
+      } else {
+        conflicts = await sql`
+          SELECT r.id, t.code as table_code 
+          FROM reservations r
+          JOIN outlet_tables t ON r.table_id = t.id
+          WHERE r.company_id = ${input.companyId} AND r.outlet_id = ${group.outlet_id} 
+            AND r.table_id IN (${sql.join(finalTableIds.map(id => sql`${id}`))})
+            AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
+            AND r.reservation_start_ts < ${endTs} AND r.reservation_end_ts > ${startTs}
+        `.execute(trx);
+      }
 
-      const [conflicts] = await conn.execute<Array<RowDataPacket>>(
-        `SELECT r.id, t.code as table_code 
-         FROM reservations r
-         JOIN outlet_tables t ON r.table_id = t.id
-         WHERE r.company_id = ? AND r.outlet_id = ? AND r.table_id IN (${finalTableIds.map(() => '?').join(',')})
-           AND r.status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
-           AND r.reservation_start_ts < ? AND r.reservation_end_ts > ?
-           ${excludeClause}`,
-        currentResIds.length > 0
-          ? [input.companyId, group.outlet_id, ...finalTableIds, endTs, startTs, ...currentResIds]
-          : [input.companyId, group.outlet_id, ...finalTableIds, endTs, startTs]
-      );
-
-      if (conflicts.length > 0) {
-        await conn.rollback();
-        const conflictCodes = [...new Set(conflicts.map(c => (c as { table_code: string }).table_code))];
+      if (conflicts.rows.length > 0) {
+        const conflictCodes = [...new Set(conflicts.rows.map(c => (c as { table_code: string }).table_code))];
         throw new Error(`Time conflict detected on: ${conflictCodes.join(', ')}`);
       }
     }
 
     // 6. Update group metadata
-    const updateFields: string[] = [];
-    const updateParams: (string | number | null)[] = [];
-
     if (input.updates.guestCount !== undefined) {
-      updateFields.push('total_guest_count = ?');
-      updateParams.push(input.updates.guestCount);
-    }
-
-    if (updateFields.length > 0) {
-      updateParams.push(input.groupId, input.companyId);
-      await conn.execute(
-        `UPDATE reservation_groups SET ${updateFields.join(', ')}, updated_at = NOW() 
-         WHERE id = ? AND company_id = ?`,
-        updateParams
-      );
+      await sql`
+        UPDATE reservation_groups 
+        SET total_guest_count = ${input.updates.guestCount}, updated_at = NOW() 
+        WHERE id = ${input.groupId} AND company_id = ${input.companyId}
+      `.execute(trx);
     }
 
     // 7. Update all existing reservations (metadata + time changes)
-    const resUpdateFields: string[] = [];
-    const resUpdateParams: (string | number | null)[] = [];
-
-    if (input.updates.customerName) {
-      resUpdateFields.push('customer_name = ?');
-      resUpdateParams.push(input.updates.customerName);
-    }
-    if (input.updates.customerPhone !== undefined) {
-      resUpdateFields.push('customer_phone = ?');
-      resUpdateParams.push(input.updates.customerPhone);
-    }
-    if (input.updates.guestCount) {
-      resUpdateFields.push('guest_count = ?');
-      resUpdateParams.push(input.updates.guestCount);
-    }
-    if (input.updates.reservationAt) {
-      const startTs = toUnixMs(input.updates.reservationAt);
-      const durationMs = (input.updates.durationMinutes ?? 120) * 60 * 1000;
-      const endTs = startTs + durationMs;
-
-      resUpdateFields.push('reservation_at = ?', 'reservation_start_ts = ?', 'reservation_end_ts = ?', 'duration_minutes = ?');
-      resUpdateParams.push(input.updates.reservationAt, startTs, endTs, input.updates.durationMinutes ?? 120);
-    }
-    if (input.updates.notes !== undefined) {
-      resUpdateFields.push('notes = ?');
-      resUpdateParams.push(input.updates.notes);
-    }
-
-    if (resUpdateFields.length > 0) {
-      resUpdateParams.push(input.groupId, input.companyId);
-      await conn.execute(
-        `UPDATE reservations SET ${resUpdateFields.join(', ')}, updated_at = NOW() 
-         WHERE reservation_group_id = ? AND company_id = ?`,
-        resUpdateParams
-      );
+    if (input.updates.customerName || input.updates.customerPhone !== undefined || 
+        input.updates.guestCount || input.updates.reservationAt || input.updates.notes !== undefined) {
+      
+      let updateQuery = sql`UPDATE reservations SET updated_at = NOW()`;
+      
+      if (input.updates.customerName) {
+        updateQuery = sql`${updateQuery}, customer_name = ${input.updates.customerName}`;
+      }
+      if (input.updates.customerPhone !== undefined) {
+        updateQuery = sql`${updateQuery}, customer_phone = ${input.updates.customerPhone}`;
+      }
+      if (input.updates.guestCount) {
+        updateQuery = sql`${updateQuery}, guest_count = ${input.updates.guestCount}`;
+      }
+      if (input.updates.reservationAt) {
+        const startTs = toUnixMs(input.updates.reservationAt);
+        const durationMs = (input.updates.durationMinutes ?? 120) * 60 * 1000;
+        const endTs = startTs + durationMs;
+        updateQuery = sql`${updateQuery}, reservation_at = ${input.updates.reservationAt}`;
+        updateQuery = sql`${updateQuery}, reservation_start_ts = ${startTs}`;
+        updateQuery = sql`${updateQuery}, reservation_end_ts = ${endTs}`;
+        updateQuery = sql`${updateQuery}, duration_minutes = ${input.updates.durationMinutes ?? 120}`;
+      }
+      if (input.updates.notes !== undefined) {
+        updateQuery = sql`${updateQuery}, notes = ${input.updates.notes}`;
+      }
+      
+      updateQuery = sql`${updateQuery} WHERE reservation_group_id = ${input.groupId} AND company_id = ${input.companyId}`;
+      await updateQuery.execute(trx);
     }
 
     // 8. Handle removed tables (unlink from group)
     if (removedTableIds.length > 0) {
-      const removePlaceholders = removedTableIds.map(() => '?').join(',');
-      await conn.execute(
-        `UPDATE reservations 
-         SET reservation_group_id = NULL, updated_at = NOW() 
-         WHERE reservation_group_id = ? AND company_id = ? AND table_id IN (${removePlaceholders})`,
-        [input.groupId, input.companyId, ...removedTableIds]
-      );
+      await sql`
+        UPDATE reservations 
+        SET reservation_group_id = NULL, updated_at = NOW() 
+        WHERE reservation_group_id = ${input.groupId} AND company_id = ${input.companyId} 
+          AND table_id IN (${sql.join(removedTableIds.map(id => sql`${id}`))})
+      `.execute(trx);
     }
 
     // 9. Add new tables (create new reservation rows)
@@ -828,46 +754,50 @@ export async function updateReservationGroup(input: {
 
     if (addedTableIds.length > 0) {
       const reservationAt = input.updates.reservationAt ?? 
-        (await getFirstReservationTime(conn, input.groupId));
+        (await getFirstReservationTime(trx, input.groupId));
       const startTs = toUnixMs(reservationAt);
       const durationMs = (input.updates.durationMinutes ?? 120) * 60 * 1000;
       const endTs = startTs + durationMs;
 
       // Get current customer info from first reservation
-      const [firstRes] = await conn.execute<Array<RowDataPacket>>(
-        `SELECT customer_name, customer_phone, notes FROM reservations WHERE reservation_group_id = ? LIMIT 1`,
-        [input.groupId]
-      );
-      const firstReservation = firstRes[0] as { customer_name: string; customer_phone: string | null; notes: string | null } | undefined;
+      const firstRes = await sql`
+        SELECT customer_name, customer_phone, notes FROM reservations 
+        WHERE reservation_group_id = ${input.groupId} LIMIT 1
+      `.execute(trx);
+      
+      const firstReservation = firstRes.rows[0] as { 
+        customer_name: string; 
+        customer_phone: string | null; 
+        notes: string | null 
+      } | undefined;
 
       for (const tableId of addedTableIds) {
-        const [resResult] = await conn.execute<ResultSetHeader>(
-          `INSERT INTO reservations
-           (company_id, outlet_id, reservation_group_id, table_id,
-            customer_name, customer_phone, guest_count,
-            reservation_at, reservation_start_ts, reservation_end_ts,
-            duration_minutes, notes, status, status_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', 1)`,
-          [
-            input.companyId, 
-            group.outlet_id, 
-            input.groupId, 
-            tableId,
-            input.updates.customerName ?? firstReservation?.customer_name ?? 'Group Reservation',
-            input.updates.customerPhone !== undefined ? input.updates.customerPhone : (firstReservation?.customer_phone ?? null),
-            input.updates.guestCount ?? group.total_guest_count,
-            reservationAt, 
-            startTs, 
-            endTs,
-            input.updates.durationMinutes ?? 120,
-            input.updates.notes !== undefined ? input.updates.notes : (firstReservation?.notes ?? null)
-          ]
-        );
-        newReservationIds.push(resResult.insertId);
+        const resResult = await sql`
+          INSERT INTO reservations
+          (company_id, outlet_id, reservation_group_id, table_id,
+           customer_name, customer_phone, guest_count,
+           reservation_at, reservation_start_ts, reservation_end_ts,
+           duration_minutes, notes, status, status_id)
+          VALUES (
+            ${input.companyId}, 
+            ${group.outlet_id}, 
+            ${input.groupId}, 
+            ${tableId},
+            ${input.updates.customerName ?? firstReservation?.customer_name ?? 'Group Reservation'},
+            ${input.updates.customerPhone !== undefined ? input.updates.customerPhone : (firstReservation?.customer_phone ?? null)},
+            ${input.updates.guestCount ?? group.total_guest_count},
+            ${reservationAt}, 
+            ${startTs}, 
+            ${endTs},
+            ${input.updates.durationMinutes ?? 120},
+            ${input.updates.notes !== undefined ? input.updates.notes : (firstReservation?.notes ?? null)},
+            'BOOKED',
+            1
+          )
+        `.execute(trx);
+        newReservationIds.push(Number(resResult.insertId));
       }
     }
-
-    await conn.commit();
 
     return {
       groupId: input.groupId,
@@ -878,33 +808,29 @@ export async function updateReservationGroup(input: {
       updatedTables: finalTableIds,
       removedTables: removedTableIds
     };
-
-  } catch (error) {
-    await conn.rollback();
-    throw error;
-  } finally {
-    conn.release();
-  }
+  });
 }
 
 /**
  * Get the reservation time from the first reservation in a group.
  * Used when time is not provided in update request.
  *
- * @param conn - Active database connection
+ * @param trx - Transaction or database instance
  * @param groupId - Reservation group ID
  * @returns ISO 8601 datetime string
  * @throws Error if group has no reservations (data integrity violation)
  */
-async function getFirstReservationTime(conn: PoolConnection, groupId: number): Promise<string> {
-  const [rows] = await conn.execute<Array<RowDataPacket & { reservation_at: string }>>(
-    `SELECT reservation_at FROM reservations WHERE reservation_group_id = ? LIMIT 1`,
-    [groupId]
-  );
+async function getFirstReservationTime(
+  trx: KyselySchema,
+  groupId: number
+): Promise<string> {
+  const rows = await sql`
+    SELECT reservation_at FROM reservations WHERE reservation_group_id = ${groupId} LIMIT 1
+  `.execute(trx);
 
-  if (!rows[0]) {
+  if (!rows.rows[0]) {
     throw new Error(`Reservation group ${groupId} has no reservations - data integrity violation`);
   }
 
-  return rows[0].reservation_at;
+  return (rows.rows[0] as { reservation_at: string }).reservation_at;
 }

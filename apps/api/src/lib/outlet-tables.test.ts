@@ -3,9 +3,9 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
+import { sql } from "kysely";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { getDbPool, closeDbPool } from "./db";
+import { getDb, closeDbPool } from "./db";
 import { createOutletTablesBulk, deleteOutletTable, OutletTableBulkConflictError } from "./outlet-tables";
 import { OutletTableBulkCreateRequestSchema } from "@jurnapod/shared";
 
@@ -18,42 +18,41 @@ type FixtureContext = {
 };
 
 async function resolveFixtureContext(): Promise<FixtureContext> {
-  const pool = getDbPool();
+  const db = getDb();
   const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
   const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
   const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT c.id AS company_id, o.id AS outlet_id, u.id AS user_id
+  const rows = await sql`
+    SELECT c.id AS company_id, o.id AS outlet_id, u.id AS user_id
      FROM companies c
      INNER JOIN outlets o ON o.company_id = c.id
      INNER JOIN users u ON u.company_id = c.id
      INNER JOIN user_outlets uo ON uo.user_id = u.id AND uo.outlet_id = o.id
-     WHERE c.code = ? AND o.code = ? AND u.email = ?
-     LIMIT 1`,
-    [companyCode, outletCode, ownerEmail]
-  );
+     WHERE c.code = ${companyCode} AND o.code = ${outletCode} AND u.email = ${ownerEmail}
+     LIMIT 1
+  `.execute(db);
 
-  assert.ok(rows.length > 0, "Fixture company/outlet/user not found; run seed first");
+  assert.ok(rows.rows.length > 0, "Fixture company/outlet/user not found; run seed first");
+  const row = rows.rows[0] as { company_id: number; outlet_id: number; user_id: number };
   return {
-    companyId: Number(rows[0].company_id),
-    outletId: Number(rows[0].outlet_id),
-    userId: Number(rows[0].user_id)
+    companyId: Number(row.company_id),
+    outletId: Number(row.outlet_id),
+    userId: Number(row.user_id)
   };
 }
 
 async function readTableStatus(companyId: number, outletId: number, tableId: number): Promise<string | null> {
-  const pool = getDbPool();
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT status FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id = ? LIMIT 1`,
-    [companyId, outletId, tableId]
-  );
+  const db = getDb();
+  const rows = await sql`
+    SELECT status FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id = ${tableId} LIMIT 1
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  return String(rows[0].status);
+  return String((rows.rows[0] as { status: string }).status);
 }
 
 const VALID_OUTLET_ID = 1;
@@ -75,24 +74,23 @@ test(
   "deleteOutletTable rejects tables with active dine-in orders",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const orderId = `ord-del-${runId}`;
     const { companyId, outletId, userId } = await resolveFixtureContext();
     let tableId: number | null = null;
 
     try {
-      const [tableInsert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
-        [companyId, outletId, `TD-${runId}`.slice(0, 32), `Delete Guard ${runId}`, "Main", 4]
-      );
+      const tableInsert = await sql`
+        INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (${companyId}, ${outletId}, ${`TD-${runId}`.slice(0, 32)}, ${`Delete Guard ${runId}`}, "Main", 4, 'AVAILABLE', 1)
+      `.execute(db);
       tableId = Number(tableInsert.insertId);
       const createdTableId = tableId;
 
       const nowTs = Date.now();
-      await pool.execute(
-        `INSERT INTO pos_order_snapshots (
+      await sql`
+        INSERT INTO pos_order_snapshots (
            order_id,
            company_id,
            outlet_id,
@@ -113,9 +111,8 @@ test(
             notes,
             updated_at,
             updated_at_ts
-         ) VALUES (?, ?, ?, 'DINE_IN', 'WALK_IN', 'DEFERRED', ?, NULL, 2, 0, 'OPEN', 'OPEN', 0, NOW(), ?, NULL, NULL, NULL, NOW(), ?)`,
-        [orderId, companyId, outletId, createdTableId, nowTs, nowTs]
-      );
+          ) VALUES (${orderId}, ${companyId}, ${outletId}, 'DINE_IN', 'WALK_IN', 'DEFERRED', ${createdTableId}, NULL, 2, 0, 'OPEN', 'OPEN', 0, NOW(), ${nowTs}, NULL, NULL, NULL, NOW(), ${nowTs})
+      `.execute(db);
 
       await assert.rejects(
         async () => {
@@ -139,18 +136,10 @@ test(
 
       assert.equal(await readTableStatus(companyId, outletId, createdTableId), "AVAILABLE");
     } finally {
-      await pool.execute(`DELETE FROM pos_order_snapshots WHERE order_id = ? AND company_id = ? AND outlet_id = ?`, [
-        orderId,
-        companyId,
-        outletId
-      ]);
+      await sql`DELETE FROM pos_order_snapshots WHERE order_id = ${orderId} AND company_id = ${companyId} AND outlet_id = ${outletId}`.execute(db);
 
       if (tableId !== null) {
-        await pool.execute(`DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id = ?`, [
-          companyId,
-          outletId,
-          tableId
-        ]);
+        await sql`DELETE FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id = ${tableId}`.execute(db);
       }
     }
   }
@@ -160,22 +149,21 @@ test(
   "deleteOutletTable rejects tables with reservation history",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     let tableId: number | null = null;
     let reservationId: number | null = null;
 
     try {
-      const [tableInsert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
-        [companyId, outletId, `TR-${runId}`.slice(0, 32), `History Guard ${runId}`, "Main", 4]
-      );
+      const tableInsert = await sql`
+        INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (${companyId}, ${outletId}, ${`TR-${runId}`.slice(0, 32)}, ${`History Guard ${runId}`}, "Main", 4, 'AVAILABLE', 1)
+      `.execute(db);
       tableId = Number(tableInsert.insertId);
 
-      const [reservationInsert] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO reservations (
+      const reservationInsert = await sql`
+        INSERT INTO reservations (
            company_id,
            outlet_id,
            table_id,
@@ -187,9 +175,8 @@ test(
            status,
            status_id,
            notes
-        ) VALUES (?, ?, ?, ?, NULL, 2, NOW(), 90, 'COMPLETED', 6, NULL)`,
-        [companyId, outletId, tableId, `History ${runId}`]
-      );
+        ) VALUES (${companyId}, ${outletId}, ${tableId}, ${`History ${runId}`}, NULL, 2, NOW(), 90, 'COMPLETED', 6, NULL)
+      `.execute(db);
       reservationId = Number(reservationInsert.insertId);
 
       await assert.rejects(
@@ -215,19 +202,11 @@ test(
       assert.equal(await readTableStatus(companyId, outletId, tableId), "AVAILABLE");
     } finally {
       if (reservationId !== null) {
-        await pool.execute(`DELETE FROM reservations WHERE company_id = ? AND outlet_id = ? AND id = ?`, [
-          companyId,
-          outletId,
-          reservationId
-        ]);
+        await sql`DELETE FROM reservations WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id = ${reservationId}`.execute(db);
       }
 
       if (tableId !== null) {
-        await pool.execute(`DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id = ?`, [
-          companyId,
-          outletId,
-          tableId
-        ]);
+        await sql`DELETE FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id = ${tableId}`.execute(db);
       }
     }
   }
@@ -259,7 +238,7 @@ test(
   "bulk create duplicate generated codes returns 409",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     let createdTableIds: number[] = [];
@@ -268,11 +247,10 @@ test(
       const collisionPrefix = `TC-${runId.toUpperCase()}`;
       const collisionCode = `${collisionPrefix}-1`;
 
-      const [existingTable] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1)`,
-        [companyId, outletId, collisionCode, `Existing ${runId}`, "Test", 4]
-      );
+      const existingTable = await sql`
+        INSERT INTO outlet_tables (company_id, outlet_id, code, name, zone, capacity, status, status_id)
+         VALUES (${companyId}, ${outletId}, ${collisionCode}, ${`Existing ${runId}`}, "Test", 4, 'AVAILABLE', 1)
+      `.execute(db);
       createdTableIds.push(Number(existingTable.insertId));
 
       await assert.rejects(
@@ -302,11 +280,7 @@ test(
       );
     } finally {
       if (createdTableIds.length > 0) {
-        const placeholders = createdTableIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdTableIds]
-        );
+        await sql`DELETE FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdTableIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
       }
     }
   }
@@ -316,7 +290,7 @@ test(
   "bulk create succeeds with operational status only",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const { companyId, outletId, userId } = await resolveFixtureContext();
     let createdTableIds: number[] = [];
@@ -350,11 +324,7 @@ test(
 
     } finally {
       if (createdTableIds.length > 0) {
-        const placeholders = createdTableIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM outlet_tables WHERE company_id = ? AND outlet_id = ? AND id IN (${placeholders})`,
-          [companyId, outletId, ...createdTableIds]
-        );
+        await sql`DELETE FROM outlet_tables WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id IN (${sql.join(createdTableIds.map(id => sql`${id}`), sql`, `)})`.execute(db);
       }
     }
   }

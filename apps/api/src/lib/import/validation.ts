@@ -8,8 +8,7 @@
  * Separates validation concerns from import route.
  */
 
-import { withKysely } from "../db.js";
-import type { PoolConnection } from "mysql2/promise";
+import { getDb } from "../db.js";
 
 // ============================================================================
 // Types
@@ -41,31 +40,29 @@ export interface ItemCheckResult {
  *
  * @param companyId - Company ID to scope the check
  * @param sku - SKU to check
- * @param connection - Optional database connection for transactions
  * @returns Result with exists flag and item ID if found
  */
 export async function checkSkuExists(
   companyId: number,
-  sku: string,
-  connection?: PoolConnection
+  sku: string
 ): Promise<SkuCheckResult> {
-  return withKysely(async (db) => {
-    const row = await db
-      .selectFrom("items")
-      .select(["id"])
-      .where("company_id", "=", companyId)
-      .where("sku", "=", sku)
-      .executeTakeFirst();
+  const db = getDb();
 
-    if (!row) {
-      return { exists: false };
-    }
+  const row = await db
+    .selectFrom("items")
+    .select(["id"])
+    .where("company_id", "=", companyId)
+    .where("sku", "=", sku)
+    .executeTakeFirst();
 
-    return {
-      exists: true,
-      itemId: row.id
-    };
-  }, connection);
+  if (!row) {
+    return { exists: false };
+  }
+
+  return {
+    exists: true,
+    itemId: row.id
+  };
 }
 
 // ============================================================================
@@ -78,16 +75,14 @@ export async function checkSkuExists(
  *
  * @param companyId - Company ID to scope the check
  * @param sku - Item SKU to check
- * @param connection - Optional database connection for transactions
  * @returns Result with exists flag and item ID if found
  */
 export async function checkItemExistsBySku(
   companyId: number,
-  sku: string,
-  connection?: PoolConnection
+  sku: string
 ): Promise<ItemCheckResult> {
   // Same implementation as checkSkuExists but semantically different use case
-  const result = await checkSkuExists(companyId, sku, connection);
+  const result = await checkSkuExists(companyId, sku);
   return {
     exists: result.exists,
     itemId: result.itemId
@@ -104,34 +99,31 @@ export async function checkItemExistsBySku(
  *
  * @param companyId - Company ID to scope the check
  * @param skus - Array of SKUs to check
- * @param connection - Optional database connection for transactions
  * @returns Map of SKU to item ID (only existing SKUs are in the map)
  */
 export async function batchCheckSkusExist(
   companyId: number,
-  skus: string[],
-  connection?: PoolConnection
+  skus: string[]
 ): Promise<Map<string, number>> {
-  return withKysely(async (db) => {
-    const result = new Map<string, number>();
+  const db = getDb();
+  const result = new Map<string, number>();
 
-    if (skus.length === 0) {
-      return result;
-    }
-
-    const rows = await db
-      .selectFrom("items")
-      .select(["sku", "id"])
-      .where("company_id", "=", companyId)
-      .where("sku", "in", skus)
-      .execute();
-
-    for (const row of rows) {
-      if (row.sku !== null) {
-        result.set(row.sku, row.id);
-      }
-    }
-
+  if (skus.length === 0) {
     return result;
-  }, connection);
+  }
+
+  const rows = await db
+    .selectFrom("items")
+    .select(["sku", "id"])
+    .where("company_id", "=", companyId)
+    .where("sku", "in", skus)
+    .execute();
+
+  for (const row of rows) {
+    if (row.sku !== null) {
+      result.set(row.sku, row.id);
+    }
+  }
+
+  return result;
 }

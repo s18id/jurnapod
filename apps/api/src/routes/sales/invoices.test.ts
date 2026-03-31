@@ -16,9 +16,9 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../../lib/db";
+import { closeDbPool, getDb } from "../../lib/db";
 import { createInvoice, listInvoices, postInvoice, type SalesInvoiceDetail } from "../../lib/sales";
-import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
@@ -27,53 +27,47 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Sales Invoice Routes", { concurrency: false }, () => {
-  let connection: PoolConnection;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
   let testInvoiceId = 0;
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    const db = getDb();
 
     // Find test user fixture
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+    const userRows = await sql<{ user_id: number; company_id: number; outlet_id: number }>`
+      SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
        FROM users u
        INNER JOIN companies c ON c.id = u.company_id
        INNER JOIN user_outlets uo ON uo.user_id = u.id
        INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE c.code = ?
-         AND u.email = ?
+       WHERE c.code = ${TEST_COMPANY_CODE}
+         AND u.email = ${TEST_OWNER_EMAIL}
          AND u.is_active = 1
-         AND o.code = ?
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL, TEST_OUTLET_CODE]
-    );
+         AND o.code = ${TEST_OUTLET_CODE}
+       LIMIT 1
+    `.execute(db);
 
     assert.ok(
-      userRows.length > 0,
+      userRows.rows.length > 0,
       `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`
     );
-    testUserId = Number(userRows[0].user_id);
-    testCompanyId = Number(userRows[0].company_id);
-    testOutletId = Number(userRows[0].outlet_id);
+    testUserId = Number(userRows.rows[0].user_id);
+    testCompanyId = Number(userRows.rows[0].company_id);
+    testOutletId = Number(userRows.rows[0].outlet_id);
   });
 
   after(async () => {
+    const db = getDb();
     // Cleanup: delete test invoice if created
     if (testInvoiceId > 0) {
       try {
-        await connection.execute(
-          `DELETE FROM sales_invoices WHERE id = ? AND company_id = ?`,
-          [testInvoiceId, testCompanyId]
-        );
+        await sql`DELETE FROM sales_invoices WHERE id = ${testInvoiceId} AND company_id = ${testCompanyId}`.execute(db);
       } catch (error) {
         console.error("Cleanup failed for test invoice:", error);
       }
     }
-    connection.release();
     await closeDbPool();
   });
 
@@ -83,12 +77,13 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
   describe("Invoice Data Structure", () => {
     test("sales_invoices table exists with required columns", async () => {
-      const [columns] = await connection.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales_invoices'`
-      );
+      const db = getDb();
+      const columns = await sql<{ COLUMN_NAME: string }>`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales_invoices'
+      `.execute(db);
 
-      const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+      const columnNames = columns.rows.map(r => r.COLUMN_NAME);
       assert.ok(columnNames.includes("id"), "Should have id column");
       assert.ok(columnNames.includes("company_id"), "Should have company_id column");
       assert.ok(columnNames.includes("outlet_id"), "Should have outlet_id column");
@@ -100,12 +95,13 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
     });
 
     test("sales_invoice_lines table exists with required columns", async () => {
-      const [columns] = await connection.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales_invoice_lines'`
-      );
+      const db = getDb();
+      const columns = await sql<{ COLUMN_NAME: string }>`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales_invoice_lines'
+      `.execute(db);
 
-      const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+      const columnNames = columns.rows.map(r => r.COLUMN_NAME);
       assert.ok(columnNames.includes("id"), "Should have id column");
       assert.ok(columnNames.includes("invoice_id"), "Should have invoice_id column");
       assert.ok(columnNames.includes("line_type"), "Should have line_type column");
@@ -115,12 +111,13 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
     });
 
     test("sales_invoice_taxes table exists with required columns", async () => {
-      const [columns] = await connection.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales_invoice_taxes'`
-      );
+      const db = getDb();
+      const columns = await sql<{ COLUMN_NAME: string }>`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales_invoice_taxes'
+      `.execute(db);
 
-      const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+      const columnNames = columns.rows.map(r => r.COLUMN_NAME);
       assert.ok(columnNames.includes("id"), "Should have id column");
       assert.ok(columnNames.includes("sales_invoice_id"), "Should have sales_invoice_id column");
       assert.ok(columnNames.includes("tax_rate_id"), "Should have tax_rate_id column");
@@ -363,15 +360,15 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
         assert.equal(postedInvoice.status, "POSTED", "Invoice should be POSTED status");
 
         // Verify journal batch was created (if GL accounts are configured)
-        const [batchRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id, doc_type, doc_id, total_debit, total_credit
+        const db = getDb();
+        const batchRows = await sql<{ id: number; doc_type: string; doc_id: number; total_debit: string; total_credit: string }>`
+          SELECT id, doc_type, doc_id, total_debit, total_credit
            FROM journal_batches 
-           WHERE company_id = ? AND doc_type = 'SALES_INVOICE' AND doc_id = ?`,
-          [testCompanyId, invoice.id]
-        );
+           WHERE company_id = ${testCompanyId} AND doc_type = 'SALES_INVOICE' AND doc_id = ${invoice.id}
+        `.execute(db);
 
-        if (batchRows.length > 0) {
-          const batch = batchRows[0] as any;
+        if (batchRows.rows.length > 0) {
+          const batch = batchRows.rows[0];
           assert.equal(batch.doc_type, "SALES_INVOICE", "Should have correct doc_type");
           assert.equal(Number(batch.doc_id), invoice.id, "Should reference invoice ID");
 

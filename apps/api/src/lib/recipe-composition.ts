@@ -1,52 +1,19 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
-import { getDbPool } from "./db";
+import { sql, type Sql } from "kysely";
+import { getDb, type KyselySchema } from "./db";
 import { toRfc3339Required } from "@jurnapod/shared";
+import { withTransaction } from "@jurnapod/db";
+import {
+  mysqlDuplicateErrorCode,
+  isMysqlError
+} from "./shared/master-data-utils";
 
 const MONEY_SCALE = 100;
 
-type SqlExecutor = {
-  execute: PoolConnection["execute"];
-};
-
 let itemPriceCostColumnPromise: Promise<"base_cost" | "price"> | null = null;
 let inventoryTxHasUnitCostPromise: Promise<boolean> | null = null;
-
-// Row type definitions
-type RecipeIngredientRow = RowDataPacket & {
-  id: number;
-  company_id: number;
-  recipe_item_id: number;
-  ingredient_item_id: number;
-  quantity: string | number;
-  unit_of_measure: string;
-  is_active: number;
-  created_at: string;
-  updated_at: string;
-};
-
-type ItemRow = RowDataPacket & {
-  id: number;
-  company_id: number;
-  name: string;
-  sku: string | null;
-  item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
-  is_active: number;
-};
-
-type IngredientInventoryCostRow = RowDataPacket & {
-  product_id: number;
-  inbound_quantity: number | string;
-  inbound_total_cost: number | string;
-};
-
-type IngredientPriceRow = RowDataPacket & {
-  item_id: number;
-  unit_cost: number | string;
-};
 
 // Custom error classes
 export class DatabaseConflictError extends Error {
@@ -70,33 +37,37 @@ export class DatabaseForbiddenError extends Error {
   }
 }
 
-// MySQL error codes
-const mysqlDuplicateErrorCode = 1062;
-const mysqlForeignKeyErrorCode = 1452;
-
-// Type guard for MySQL errors
-function isMysqlError(error: unknown): error is { errno?: number } {
-  return typeof error === "object" && error !== null && "errno" in error;
+// Row type definitions using Kysely types
+interface RecipeIngredientRow {
+  id: number;
+  company_id: number;
+  recipe_item_id: number;
+  ingredient_item_id: number;
+  quantity: string | number;
+  unit_of_measure: string;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
 }
 
-// Transaction wrapper pattern
-async function withTransaction<T>(
-  operation: (connection: PoolConnection) => Promise<T>
-): Promise<T> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+interface ItemRow {
+  id: number;
+  company_id: number;
+  name: string;
+  sku: string | null;
+  item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+  is_active: number;
+}
 
-  try {
-    await connection.beginTransaction();
-    const result = await operation(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+interface IngredientInventoryCostRow {
+  product_id: number;
+  inbound_quantity: number | string;
+  inbound_total_cost: number | string;
+}
+
+interface IngredientPriceRow {
+  item_id: number;
+  unit_cost: number | string;
 }
 
 // Normalization function
@@ -118,17 +89,23 @@ function normalizeMoney(value: number): number {
   return Math.round(value * MONEY_SCALE) / MONEY_SCALE;
 }
 
+// Helper to build IN clause with sql template
+function buildInClause(values: readonly number[]) {
+  if (values.length === 0) return null;
+  return sql.join(values.map(v => sql`${v}`));
+}
+
 async function resolveIngredientUnitCost(
-  executor: SqlExecutor,
+  db: KyselySchema,
   companyId: number,
   itemId: number
 ): Promise<number> {
-  const costs = await resolveIngredientUnitCosts(executor, companyId, [itemId]);
+  const costs = await resolveIngredientUnitCosts(db, companyId, [itemId]);
   return costs.get(itemId) ?? 0;
 }
 
 async function resolveIngredientUnitCosts(
-  executor: SqlExecutor,
+  db: KyselySchema,
   companyId: number,
   itemIds: readonly number[]
 ): Promise<Map<number, number>> {
@@ -137,63 +114,68 @@ async function resolveIngredientUnitCosts(
     return new Map();
   }
 
-  const hasInventoryUnitCost = await hasInventoryTransactionUnitCostColumn(executor);
+  const hasInventoryUnitCost = await hasInventoryTransactionUnitCostColumn(db);
   const resolvedCosts = new Map<number, number>();
 
   if (hasInventoryUnitCost) {
-    const placeholders = uniqueItemIds.map(() => "?").join(", ");
-    const [inventoryRows] = await executor.execute<IngredientInventoryCostRow[]>(
-      `SELECT
-         product_id,
-         COALESCE(SUM(quantity_delta), 0) AS inbound_quantity,
-         COALESCE(SUM(quantity_delta * unit_cost), 0) AS inbound_total_cost
-       FROM inventory_transactions
-       WHERE company_id = ?
-         AND product_id IN (${placeholders})
-         AND quantity_delta > 0
-       GROUP BY product_id`,
-      [companyId, ...uniqueItemIds]
-    );
+    const inClause = buildInClause(uniqueItemIds);
+    if (inClause) {
+      const inventoryRows = await sql<IngredientInventoryCostRow>`
+        SELECT
+          product_id,
+          COALESCE(SUM(quantity_delta), 0) AS inbound_quantity,
+          COALESCE(SUM(quantity_delta * unit_cost), 0) AS inbound_total_cost
+        FROM inventory_transactions
+        WHERE company_id = ${companyId}
+          AND product_id IN (${inClause})
+          AND quantity_delta > 0
+        GROUP BY product_id
+      `.execute(db);
 
-    for (const row of inventoryRows) {
-      const productId = Number(row.product_id);
-      const inboundQuantity = Number(row.inbound_quantity ?? 0);
-      const inboundTotalCost = Number(row.inbound_total_cost ?? 0);
-      if (inboundQuantity > 0 && inboundTotalCost > 0) {
-        resolvedCosts.set(productId, normalizeMoney(inboundTotalCost / inboundQuantity));
+      for (const row of inventoryRows.rows) {
+        const productId = Number(row.product_id);
+        const inboundQuantity = Number(row.inbound_quantity ?? 0);
+        const inboundTotalCost = Number(row.inbound_total_cost ?? 0);
+        if (inboundQuantity > 0 && inboundTotalCost > 0) {
+          resolvedCosts.set(productId, normalizeMoney(inboundTotalCost / inboundQuantity));
+        }
       }
     }
   }
 
-  const itemPriceCostColumn = await resolveItemPriceCostColumn(executor);
+  const itemPriceCostColumn = await resolveItemPriceCostColumn(db);
   const fallbackIds = uniqueItemIds.filter((itemId) => !resolvedCosts.has(itemId));
   if (fallbackIds.length === 0) {
     return resolvedCosts;
   }
 
-  const fallbackPlaceholders = fallbackIds.map(() => "?").join(", ");
+  const fallbackInClause = buildInClause(fallbackIds);
+  if (!fallbackInClause) {
+    return resolvedCosts;
+  }
 
-  const [priceRows] = itemPriceCostColumn === "base_cost"
-    ? await executor.execute<IngredientPriceRow[]>(
-      `SELECT COALESCE(NULLIF(base_cost, 0), price, 0) AS unit_cost
-       , item_id
-       FROM item_prices
-       WHERE company_id = ? AND item_id IN (${fallbackPlaceholders})
-         AND is_active = 1
-       ORDER BY item_id ASC, created_at DESC, id DESC`,
-      [companyId, ...fallbackIds]
-    )
-    : await executor.execute<IngredientPriceRow[]>(
-      `SELECT COALESCE(price, 0) AS unit_cost
-       , item_id
-       FROM item_prices
-       WHERE company_id = ? AND item_id IN (${fallbackPlaceholders})
-         AND is_active = 1
-       ORDER BY item_id ASC, created_at DESC, id DESC`,
-      [companyId, ...fallbackIds]
-    );
+  const priceResult = await (itemPriceCostColumn === "base_cost"
+    ? sql<IngredientPriceRow[]>`
+      SELECT COALESCE(NULLIF(base_cost, 0), price, 0) AS unit_cost, item_id
+      FROM item_prices
+      WHERE company_id = ${companyId}
+        AND item_id IN (${fallbackInClause})
+        AND is_active = 1
+      ORDER BY item_id ASC, created_at DESC, id DESC
+    `
+    : sql<IngredientPriceRow[]>`
+      SELECT COALESCE(price, 0) AS unit_cost, item_id
+      FROM item_prices
+      WHERE company_id = ${companyId}
+        AND item_id IN (${fallbackInClause})
+        AND is_active = 1
+      ORDER BY item_id ASC, created_at DESC, id DESC
+    `
+  ).execute(db);
 
-  for (const row of priceRows) {
+  const priceRows = priceResult.rows;
+
+  for (const row of priceRows as unknown as IngredientPriceRow[]) {
     const itemId = Number(row.item_id);
     if (resolvedCosts.has(itemId)) {
       continue;
@@ -208,38 +190,38 @@ async function resolveIngredientUnitCosts(
   return resolvedCosts;
 }
 
-async function resolveItemPriceCostColumn(executor: SqlExecutor): Promise<"base_cost" | "price"> {
+async function resolveItemPriceCostColumn(db: KyselySchema): Promise<"base_cost" | "price"> {
   if (!itemPriceCostColumnPromise) {
     itemPriceCostColumnPromise = (async () => {
-      const [rows] = await executor.execute<RowDataPacket[]>(
-        `SELECT 1
-         FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE()
-           AND TABLE_NAME = 'item_prices'
-           AND COLUMN_NAME = 'base_cost'
-         LIMIT 1`
-      );
+      const rows = await sql`
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'item_prices'
+          AND COLUMN_NAME = 'base_cost'
+        LIMIT 1
+      `.execute(db);
 
-      return rows.length > 0 ? "base_cost" : "price";
+      return rows.rows.length > 0 ? "base_cost" : "price";
     })();
   }
 
   return itemPriceCostColumnPromise;
 }
 
-async function hasInventoryTransactionUnitCostColumn(executor: SqlExecutor): Promise<boolean> {
+async function hasInventoryTransactionUnitCostColumn(db: KyselySchema): Promise<boolean> {
   if (!inventoryTxHasUnitCostPromise) {
     inventoryTxHasUnitCostPromise = (async () => {
-      const [rows] = await executor.execute<RowDataPacket[]>(
-        `SELECT 1
-         FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE()
-           AND TABLE_NAME = 'inventory_transactions'
-           AND COLUMN_NAME = 'unit_cost'
-         LIMIT 1`
-      );
+      const rows = await sql`
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'inventory_transactions'
+          AND COLUMN_NAME = 'unit_cost'
+        LIMIT 1
+      `.execute(db);
 
-      return rows.length > 0;
+      return rows.rows.length > 0;
     })();
   }
 
@@ -248,32 +230,31 @@ async function hasInventoryTransactionUnitCostColumn(executor: SqlExecutor): Pro
 
 // Get item by ID helper
 async function getItemById(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   itemId: number
 ): Promise<ItemRow | null> {
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT id, company_id, name, sku, item_type, is_active 
-     FROM items 
-     WHERE id = ? AND company_id = ? 
-     LIMIT 1`,
-    [itemId, companyId]
-  );
+  const rows = await sql<ItemRow>`
+    SELECT id, company_id, name, sku, item_type, is_active 
+    FROM items 
+    WHERE id = ${itemId} AND company_id = ${companyId}
+    LIMIT 1
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (rows.rows.length === 0) {
     return null;
   }
 
-  return rows[0] as ItemRow;
+  return rows.rows[0];
 }
 
 // Ensure company item exists helper
 async function ensureCompanyItemExists(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   itemId: number
 ): Promise<ItemRow> {
-  const item = await getItemById(connection, companyId, itemId);
+  const item = await getItemById(db, companyId, itemId);
   if (!item) {
     throw new DatabaseReferenceError(`Item with ID ${itemId} not found`);
   }
@@ -282,7 +263,7 @@ async function ensureCompanyItemExists(
 
 // Audit log helper
 async function recordAuditLog(
-  connection: PoolConnection,
+  db: KyselySchema,
   input: {
     companyId: number;
     outletId: number | null;
@@ -291,23 +272,25 @@ async function recordAuditLog(
     payload: Record<string, unknown>;
   }
 ): Promise<void> {
-  await connection.execute(
-    `INSERT INTO audit_logs (
-       company_id, outlet_id, user_id, action, result, success, ip_address, payload_json
-     ) VALUES (?, ?, ?, ?, 'SUCCESS', 1, NULL, ?)`,
-    [
-      input.companyId,
-      input.outletId,
-      input.actor?.userId ?? null,
-      input.action,
-      JSON.stringify(input.payload)
-    ]
-  );
+  await sql`
+    INSERT INTO audit_logs (
+      company_id, outlet_id, user_id, action, result, success, ip_address, payload_json
+    ) VALUES (
+      ${input.companyId},
+      ${input.outletId},
+      ${input.actor?.userId ?? null},
+      ${input.action},
+      'SUCCESS',
+      1,
+      NULL,
+      ${JSON.stringify(input.payload)}
+    )
+  `.execute(db);
 }
 
 // Circular reference detection
 async function detectCircularReference(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   recipeId: number,
   ingredientId: number,
@@ -319,18 +302,17 @@ async function detectCircularReference(
   visited.add(ingredientId);
 
   // Check if ingredient is itself a recipe
-  const item = await getItemById(connection, companyId, ingredientId);
+  const item = await getItemById(db, companyId, ingredientId);
   if (item && item.item_type === "RECIPE") {
-    const [subIngredients] = await connection.execute<RecipeIngredientRow[]>(
-      `SELECT ingredient_item_id FROM recipe_ingredients 
-       WHERE company_id = ? AND recipe_item_id = ? AND is_active = 1`,
-      [companyId, ingredientId]
-    );
+    const subIngredients = await sql<{ ingredient_item_id: number }>`
+      SELECT ingredient_item_id FROM recipe_ingredients 
+      WHERE company_id = ${companyId} AND recipe_item_id = ${ingredientId} AND is_active = 1
+    `.execute(db);
 
-    for (const sub of subIngredients) {
+    for (const sub of subIngredients.rows) {
       if (
         await detectCircularReference(
-          connection,
+          db,
           companyId,
           recipeId,
           Number(sub.ingredient_item_id),
@@ -387,6 +369,51 @@ export interface CreateRecipeIngredientInput {
   unit_of_measure?: string;
 }
 
+// Find recipe ingredient by ID with details
+async function findRecipeIngredientById(
+  db: KyselySchema,
+  companyId: number,
+  ingredientId: number
+): Promise<RecipeIngredientWithDetails | null> {
+  const rows = await sql`
+    SELECT 
+      ri.*,
+      i.name as ingredient_name,
+      i.sku as ingredient_sku,
+      i.item_type as ingredient_type
+    FROM recipe_ingredients ri
+    JOIN items i ON ri.ingredient_item_id = i.id
+    WHERE ri.id = ${ingredientId} AND ri.company_id = ${companyId}
+    LIMIT 1
+  `.execute(db);
+
+  if (rows.rows.length === 0) {
+    return null;
+  }
+
+  const row = rows.rows[0];
+  const typedRow = row as RecipeIngredientRow & {
+    ingredient_name: string;
+    ingredient_sku: string | null;
+    ingredient_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+  };
+  const normalized = normalizeRecipeIngredient(typedRow);
+  const unitCost = await resolveIngredientUnitCost(
+    db,
+    companyId,
+    Number(normalized.ingredient_item_id)
+  );
+
+  return {
+    ...normalized,
+    ingredient_name: typedRow.ingredient_name,
+    ingredient_sku: typedRow.ingredient_sku ?? null,
+    ingredient_type: typedRow.ingredient_type,
+    unit_cost: unitCost,
+    total_cost: normalizeMoney(normalized.quantity * unitCost)
+  };
+}
+
 // Add ingredient to recipe
 export async function addIngredientToRecipe(
   companyId: number,
@@ -394,10 +421,12 @@ export async function addIngredientToRecipe(
   input: CreateRecipeIngredientInput,
   actor?: { userId: number }
 ): Promise<RecipeIngredientWithDetails> {
-  return withTransaction(async (connection) => {
+  const db = getDb();
+  
+  return withTransaction(db, async (trx) => {
     // Validate recipe exists
     const recipeItem = await ensureCompanyItemExists(
-      connection,
+      trx,
       companyId,
       recipeItemId
     );
@@ -409,7 +438,7 @@ export async function addIngredientToRecipe(
 
     // Validate ingredient exists
     const ingredientItem = await ensureCompanyItemExists(
-      connection,
+      trx,
       companyId,
       input.ingredient_item_id
     );
@@ -430,7 +459,7 @@ export async function addIngredientToRecipe(
 
     // Check for circular reference
     const hasCircularRef = await detectCircularReference(
-      connection,
+      trx,
       companyId,
       recipeItemId,
       input.ingredient_item_id
@@ -442,21 +471,22 @@ export async function addIngredientToRecipe(
     }
 
     try {
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO recipe_ingredients 
-         (company_id, recipe_item_id, ingredient_item_id, quantity, unit_of_measure)
-         VALUES (?, ?, ?, ?, ?)`,
-        [
-          companyId,
-          recipeItemId,
-          input.ingredient_item_id,
-          input.quantity,
-          input.unit_of_measure ?? "unit"
-        ]
-      );
+      const result = await sql`
+        INSERT INTO recipe_ingredients 
+        (company_id, recipe_item_id, ingredient_item_id, quantity, unit_of_measure)
+        VALUES (
+          ${companyId},
+          ${recipeItemId},
+          ${input.ingredient_item_id},
+          ${input.quantity},
+          ${input.unit_of_measure ?? "unit"}
+        )
+      `.execute(trx);
+
+      const insertId = Number((result.insertId ?? 0));
 
       // Audit logging
-      await recordAuditLog(connection, {
+      await recordAuditLog(trx, {
         companyId,
         outletId: null,
         actor,
@@ -471,9 +501,9 @@ export async function addIngredientToRecipe(
 
       // Fetch the created ingredient with details
       const ingredient = await findRecipeIngredientById(
-        connection,
+        trx,
         companyId,
-        Number(result.insertId)
+        insertId
       );
       if (!ingredient) {
         throw new Error("Failed to fetch created ingredient");
@@ -491,106 +521,60 @@ export async function addIngredientToRecipe(
   });
 }
 
-// Find recipe ingredient by ID with details
-async function findRecipeIngredientById(
-  executor: { execute: PoolConnection["execute"] },
-  companyId: number,
-  ingredientId: number
-): Promise<RecipeIngredientWithDetails | null> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT 
-       ri.*,
-       i.name as ingredient_name,
-       i.sku as ingredient_sku,
-       i.item_type as ingredient_type
-     FROM recipe_ingredients ri
-     JOIN items i ON ri.ingredient_item_id = i.id
-     WHERE ri.id = ? AND ri.company_id = ?
-     LIMIT 1`,
-    [ingredientId, companyId]
-  );
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  const row = rows[0];
-  const normalized = normalizeRecipeIngredient(row as RecipeIngredientRow);
-  const unitCost = await resolveIngredientUnitCost(
-    executor,
-    companyId,
-    Number(normalized.ingredient_item_id)
-  );
-
-  return {
-    ...normalized,
-    ingredient_name: row.ingredient_name as string,
-    ingredient_sku: (row.ingredient_sku as string | null) ?? null,
-    ingredient_type: row.ingredient_type as
-      | "SERVICE"
-      | "PRODUCT"
-      | "INGREDIENT"
-      | "RECIPE",
-    unit_cost: unitCost,
-    total_cost: normalizeMoney(normalized.quantity * unitCost)
-  };
-}
-
 // Get recipe ingredients
 export async function getRecipeIngredients(
   companyId: number,
   recipeItemId: number
 ): Promise<RecipeIngredientWithDetails[]> {
-  const pool = getDbPool();
+  const db = getDb();
 
-  const [recipeRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id
-     FROM items
-     WHERE id = ? AND company_id = ? AND item_type = 'RECIPE'
-     LIMIT 1`,
-    [recipeItemId, companyId]
-  );
+  const recipeRows = await sql`
+    SELECT id
+    FROM items
+    WHERE id = ${recipeItemId} AND company_id = ${companyId} AND item_type = 'RECIPE'
+    LIMIT 1
+  `.execute(db);
 
-  if (recipeRows.length === 0) {
+  if (recipeRows.rows.length === 0) {
     throw new DatabaseReferenceError(
       `Recipe item with ID ${recipeItemId} not found`
     );
   }
 
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT 
-       ri.*,
-       i.name as ingredient_name,
-       i.sku as ingredient_sku,
-       i.item_type as ingredient_type
-      FROM recipe_ingredients ri
-      JOIN items i ON ri.ingredient_item_id = i.id
-      WHERE ri.company_id = ?
-        AND ri.recipe_item_id = ?
-        AND ri.is_active = 1
-        AND i.is_active = 1
-      ORDER BY i.name ASC`,
-    [companyId, recipeItemId]
-  );
+  const rows = await sql`
+    SELECT 
+      ri.*,
+      i.name as ingredient_name,
+      i.sku as ingredient_sku,
+      i.item_type as ingredient_type
+    FROM recipe_ingredients ri
+    JOIN items i ON ri.ingredient_item_id = i.id
+    WHERE ri.company_id = ${companyId}
+      AND ri.recipe_item_id = ${recipeItemId}
+      AND ri.is_active = 1
+      AND i.is_active = 1
+    ORDER BY i.name ASC
+  `.execute(db);
 
   const unitCosts = await resolveIngredientUnitCosts(
-    pool,
+    db,
     companyId,
-    rows.map((row) => Number(row.ingredient_item_id))
+    rows.rows.map((row) => Number((row as RecipeIngredientRow).ingredient_item_id))
   );
 
-  return rows.map((row) => {
-    const normalized = normalizeRecipeIngredient(row as RecipeIngredientRow);
+  return rows.rows.map((row) => {
+    const typedRow = row as RecipeIngredientRow & {
+      ingredient_name: string;
+      ingredient_sku: string | null;
+      ingredient_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+    };
+    const normalized = normalizeRecipeIngredient(typedRow);
     const unitCost = unitCosts.get(Number(normalized.ingredient_item_id)) ?? 0;
     return {
       ...normalized,
-      ingredient_name: row.ingredient_name as string,
-      ingredient_sku: (row.ingredient_sku as string | null) ?? null,
-      ingredient_type: row.ingredient_type as
-        | "SERVICE"
-        | "PRODUCT"
-        | "INGREDIENT"
-        | "RECIPE",
+      ingredient_name: typedRow.ingredient_name,
+      ingredient_sku: typedRow.ingredient_sku ?? null,
+      ingredient_type: typedRow.ingredient_type,
       unit_cost: unitCost,
       total_cost: normalizeMoney(normalized.quantity * unitCost)
     };
@@ -604,10 +588,12 @@ export async function updateRecipeIngredient(
   updates: Partial<Pick<RecipeIngredient, "quantity" | "unit_of_measure" | "is_active">>,
   actor?: { userId: number }
 ): Promise<RecipeIngredientWithDetails> {
-  return withTransaction(async (connection) => {
+  const db = getDb();
+  
+  return withTransaction(db, async (trx) => {
     // Check ingredient exists
     const existing = await findRecipeIngredientById(
-      connection,
+      trx,
       companyId,
       ingredientId
     );
@@ -619,23 +605,23 @@ export async function updateRecipeIngredient(
 
     // Build update query
     const updateFields: string[] = [];
-    const values: unknown[] = [];
+    const values: (string | number | null)[] = [];
 
     if (updates.quantity !== undefined) {
       if (updates.quantity <= 0) {
         throw new DatabaseForbiddenError("Quantity must be greater than 0");
       }
-      updateFields.push("quantity = ?");
+      updateFields.push("quantity");
       values.push(updates.quantity);
     }
 
     if (updates.unit_of_measure !== undefined) {
-      updateFields.push("unit_of_measure = ?");
+      updateFields.push("unit_of_measure");
       values.push(updates.unit_of_measure);
     }
 
     if (updates.is_active !== undefined) {
-      updateFields.push("is_active = ?");
+      updateFields.push("is_active");
       values.push(updates.is_active ? 1 : 0);
     }
 
@@ -643,14 +629,16 @@ export async function updateRecipeIngredient(
       return existing;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (connection.execute as any)(
-      `UPDATE recipe_ingredients SET ${updateFields.join(", ")} WHERE id = ? AND company_id = ?`,
-      [...values, ingredientId, companyId]
-    );
+    const setClauses = updateFields.map((f, i) => sql`${sql.raw(f)} = ${values[i]}`);
+    
+    await sql`
+      UPDATE recipe_ingredients 
+      SET ${sql.join(setClauses)}
+      WHERE id = ${ingredientId} AND company_id = ${companyId}
+    `.execute(trx);
 
     // Audit logging
-    await recordAuditLog(connection, {
+    await recordAuditLog(trx, {
       companyId,
       outletId: null,
       actor,
@@ -664,7 +652,7 @@ export async function updateRecipeIngredient(
 
     // Fetch updated ingredient
     const updated = await findRecipeIngredientById(
-      connection,
+      trx,
       companyId,
       ingredientId
     );
@@ -682,10 +670,12 @@ export async function removeIngredientFromRecipe(
   ingredientId: number,
   actor?: { userId: number }
 ): Promise<void> {
-  return withTransaction(async (connection) => {
+  const db = getDb();
+  
+  return withTransaction(db, async (trx) => {
     // Check ingredient exists
     const existing = await findRecipeIngredientById(
-      connection,
+      trx,
       companyId,
       ingredientId
     );
@@ -695,13 +685,12 @@ export async function removeIngredientFromRecipe(
       );
     }
 
-    await connection.execute(
-      `DELETE FROM recipe_ingredients WHERE id = ? AND company_id = ?`,
-      [ingredientId, companyId]
-    );
+    await sql`
+      DELETE FROM recipe_ingredients WHERE id = ${ingredientId} AND company_id = ${companyId}
+    `.execute(trx);
 
     // Audit logging
-    await recordAuditLog(connection, {
+    await recordAuditLog(trx, {
       companyId,
       outletId: null,
       actor,
@@ -720,56 +709,55 @@ export async function calculateRecipeCost(
   companyId: number,
   recipeItemId: number
 ): Promise<RecipeCostBreakdown> {
-  const pool = getDbPool();
+  const db = getDb();
 
   // Verify recipe exists
-  const [recipeRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, name, sku FROM items 
-     WHERE id = ? AND company_id = ? AND item_type = 'RECIPE'
-     LIMIT 1`,
-    [recipeItemId, companyId]
-  );
+  const recipeRows = await sql`
+    SELECT id, name, sku FROM items 
+    WHERE id = ${recipeItemId} AND company_id = ${companyId} AND item_type = 'RECIPE'
+    LIMIT 1
+  `.execute(db);
 
-  if (recipeRows.length === 0) {
+  if (recipeRows.rows.length === 0) {
     throw new DatabaseReferenceError(
       `Recipe item with ID ${recipeItemId} not found`
     );
   }
 
-  const [ingredientRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT 
-       ri.ingredient_item_id,
-       ri.quantity,
-       ri.unit_of_measure,
-       i.name,
-       i.sku
-     FROM recipe_ingredients ri
-     JOIN items i ON ri.ingredient_item_id = i.id
-     WHERE ri.company_id = ?
-       AND ri.recipe_item_id = ?
-       AND ri.is_active = 1
-       AND i.is_active = 1
-     ORDER BY i.name ASC`,
-    [companyId, recipeItemId]
-  );
+  const ingredientRows = await sql`
+    SELECT 
+      ri.ingredient_item_id,
+      ri.quantity,
+      ri.unit_of_measure,
+      i.name,
+      i.sku
+    FROM recipe_ingredients ri
+    JOIN items i ON ri.ingredient_item_id = i.id
+    WHERE ri.company_id = ${companyId}
+      AND ri.recipe_item_id = ${recipeItemId}
+      AND ri.is_active = 1
+      AND i.is_active = 1
+    ORDER BY i.name ASC
+  `.execute(db);
 
   const unitCosts = await resolveIngredientUnitCosts(
-    pool,
+    db,
     companyId,
-    ingredientRows.map((row) => Number(row.ingredient_item_id))
+    ingredientRows.rows.map((row) => Number((row as { ingredient_item_id: number }).ingredient_item_id))
   );
 
-  const ingredients = ingredientRows.map((row) => {
-    const quantity = Number(row.quantity);
-    const unitCost = unitCosts.get(Number(row.ingredient_item_id)) ?? 0;
+  const ingredients = ingredientRows.rows.map((row) => {
+    const typedRow = row as { ingredient_item_id: number; quantity: string | number; unit_of_measure: string; name: string; sku: string | null };
+    const quantity = Number(typedRow.quantity);
+    const unitCost = unitCosts.get(typedRow.ingredient_item_id) ?? 0;
     const lineCost = normalizeMoney(quantity * unitCost);
 
     return {
-      ingredient_item_id: Number(row.ingredient_item_id),
-      name: row.name as string,
-      sku: (row.sku as string | null) ?? null,
+      ingredient_item_id: typedRow.ingredient_item_id,
+      name: typedRow.name,
+      sku: typedRow.sku ?? null,
       quantity,
-      unit_of_measure: row.unit_of_measure as string,
+      unit_of_measure: typedRow.unit_of_measure,
       unit_cost: unitCost,
       line_cost: lineCost
     };
@@ -791,23 +779,22 @@ export async function validateRecipeComposition(
   recipeItemId: number,
   ingredientItemId: number
 ): Promise<{ valid: boolean; error?: string }> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
 
   try {
     // Check if recipe exists and is RECIPE type
-    const [recipeRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT item_type FROM items 
-       WHERE id = ? AND company_id = ?
-       LIMIT 1`,
-      [recipeItemId, companyId]
-    );
+    const recipeRows = await sql`
+      SELECT item_type FROM items 
+      WHERE id = ${recipeItemId} AND company_id = ${companyId}
+      LIMIT 1
+    `.execute(db);
 
-    if (recipeRows.length === 0) {
+    if (recipeRows.rows.length === 0) {
       return { valid: false, error: "Recipe item not found" };
     }
 
-    if (recipeRows[0].item_type !== "RECIPE") {
+    const recipeRow = recipeRows.rows[0] as { item_type: string };
+    if (recipeRow.item_type !== "RECIPE") {
       return { valid: false, error: "Item is not a RECIPE type" };
     }
 
@@ -819,18 +806,18 @@ export async function validateRecipeComposition(
     }
 
     // Check if ingredient exists and is valid type
-    const [ingredientRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT item_type FROM items 
-       WHERE id = ? AND company_id = ?
-       LIMIT 1`,
-      [ingredientItemId, companyId]
-    );
+    const ingredientRows = await sql`
+      SELECT item_type FROM items 
+      WHERE id = ${ingredientItemId} AND company_id = ${companyId}
+      LIMIT 1
+    `.execute(db);
 
-    if (ingredientRows.length === 0) {
+    if (ingredientRows.rows.length === 0) {
       return { valid: false, error: "Ingredient item not found" };
     }
 
-    const ingredientType = ingredientRows[0].item_type;
+    const ingredientRow = ingredientRows.rows[0] as { item_type: string };
+    const ingredientType = ingredientRow.item_type;
     if (ingredientType !== "INGREDIENT" && ingredientType !== "PRODUCT") {
       return {
         valid: false,
@@ -840,7 +827,7 @@ export async function validateRecipeComposition(
 
     // Check for circular reference
     const hasCircularRef = await detectCircularReference(
-      connection,
+      db,
       companyId,
       recipeItemId,
       ingredientItemId
@@ -853,14 +840,13 @@ export async function validateRecipeComposition(
     }
 
     // Check for duplicate
-    const [existingRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT id FROM recipe_ingredients 
-       WHERE company_id = ? AND recipe_item_id = ? AND ingredient_item_id = ?
-       LIMIT 1`,
-      [companyId, recipeItemId, ingredientItemId]
-    );
+    const existingRows = await sql`
+      SELECT id FROM recipe_ingredients 
+      WHERE company_id = ${companyId} AND recipe_item_id = ${recipeItemId} AND ingredient_item_id = ${ingredientItemId}
+      LIMIT 1
+    `.execute(db);
 
-    if (existingRows.length > 0) {
+    if (existingRows.rows.length > 0) {
       return {
         valid: false,
         error: "Ingredient already exists in this recipe"
@@ -871,7 +857,5 @@ export async function validateRecipeComposition(
   } catch (error) {
     console.error("validateRecipeComposition error:", error);
     return { valid: false, error: "Validation failed" };
-  } finally {
-    connection.release();
   }
 }

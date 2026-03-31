@@ -15,13 +15,13 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../lib/db";
+import { closeDbPool, getDb } from "../lib/db";
 import {
   createManualJournalEntry,
   listJournalBatches,
   getJournalBatch,
 } from "../lib/journals";
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
@@ -30,30 +30,27 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Journal Routes", { concurrency: false }, () => {
-  let connection: PoolConnection;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
   let testJournalBatchId = 0;
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    const db = getDb();
 
-    // Find test user fixture
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       INNER JOIN user_outlets uo ON uo.user_id = u.id
-       INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE c.code = ?
-         AND u.email = ?
-         AND u.is_active = 1
-         AND o.code = ?
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL, TEST_OUTLET_CODE]
-    );
+    // Find test user fixture using Kysely query builder
+    const userRows = await db
+      .selectFrom("users as u")
+      .innerJoin("companies as c", "c.id", "u.company_id")
+      .innerJoin("user_outlets as uo", "uo.user_id", "u.id")
+      .innerJoin("outlets as o", "o.id", "uo.outlet_id")
+      .where("c.code", "=", TEST_COMPANY_CODE)
+      .where("u.email", "=", TEST_OWNER_EMAIL)
+      .where("u.is_active", "=", 1)
+      .where("o.code", "=", TEST_OUTLET_CODE)
+      .select(["u.id as user_id", "u.company_id", "o.id as outlet_id"])
+      .limit(1)
+      .execute();
 
     assert.ok(
       userRows.length > 0,
@@ -67,7 +64,6 @@ describe("Journal Routes", { concurrency: false }, () => {
   after(async () => {
     // Note: Journal batches are immutable - cannot delete them
     // They remain in the database as audit trail
-    connection.release();
     await closeDbPool();
   });
 
@@ -77,24 +73,26 @@ describe("Journal Routes", { concurrency: false }, () => {
 
   describe("Journal Data Structure", () => {
     test("journal_batches table exists with required columns", async () => {
-      const [columns] = await connection.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'journal_batches'`
-      );
+      const db = getDb();
+      const result = await sql<{ COLUMN_NAME: string }>`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'journal_batches'
+      `.execute(db);
 
-      const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+      const columnNames = result.rows.map(r => r.COLUMN_NAME);
       assert.ok(columnNames.includes("id"), "Should have id column");
       assert.ok(columnNames.includes("company_id"), "Should have company_id column");
       assert.ok(columnNames.includes("doc_type"), "Should have doc_type column");
     });
 
     test("journal_lines table exists with required columns", async () => {
-      const [columns] = await connection.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'journal_lines'`
-      );
+      const db = getDb();
+      const result = await sql<{ COLUMN_NAME: string }>`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'journal_lines'
+      `.execute(db);
 
-      const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+      const columnNames = result.rows.map(r => r.COLUMN_NAME);
       assert.ok(columnNames.includes("id"), "Should have id column");
       assert.ok(columnNames.includes("journal_batch_id"), "Should have journal_batch_id column");
       assert.ok(columnNames.includes("account_id"), "Should have account_id column");

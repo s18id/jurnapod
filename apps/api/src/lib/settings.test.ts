@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "./db";
+import { closeDbPool, getDb } from "./db";
 import {
   deleteSetting,
   getSetting,
@@ -15,7 +15,7 @@ import {
   SettingNotFoundError,
   SettingValidationError
 } from "./settings";
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
@@ -23,7 +23,7 @@ test(
   "settings CRUD - set, list, get, delete",
   { concurrency: false, timeout: 120000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -34,22 +34,21 @@ test(
     let ownerUserId = 0;
 
     try {
-      const [ownerRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT u.id, u.company_id
+      const ownerRows = await sql`
+        SELECT u.id, u.company_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(ownerRows.length > 0, "Owner fixture not found");
-      const owner = ownerRows[0] as { company_id: number; id: number };
+      assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
+      const owner = ownerRows.rows[0] as { company_id: number; id: number };
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
 
@@ -83,10 +82,7 @@ test(
 
       console.log("✅ settings CRUD test passed");
     } finally {
-      await pool.execute(
-        `DELETE FROM company_settings WHERE company_id = ? AND \`key\` LIKE ?`,
-        [companyId, `%${runId}%`]
-      );
+      await sql`DELETE FROM company_settings WHERE company_id = ${companyId} AND \`key\` LIKE ${`%${runId}%`}`.execute(db);
     }
   }
 );
@@ -95,7 +91,7 @@ test(
   "settings - JSON value validation",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -106,22 +102,21 @@ test(
     let ownerUserId = 0;
 
     try {
-      const [ownerRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT u.id, u.company_id
+      const ownerRows = await sql`
+        SELECT u.id, u.company_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(ownerRows.length > 0, "Owner fixture not found");
-      const owner = ownerRows[0] as { company_id: number; id: number };
+      assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
+      const owner = ownerRows.rows[0] as { company_id: number; id: number };
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
 
@@ -145,10 +140,7 @@ test(
 
       console.log("✅ JSON validation test passed");
     } finally {
-      await pool.execute(
-        `DELETE FROM company_settings WHERE company_id = ? AND \`key\` LIKE ?`,
-        [companyId, `%${runId}%`]
-      );
+      await sql`DELETE FROM company_settings WHERE company_id = ${companyId} AND \`key\` LIKE ${`%${runId}%`}`.execute(db);
     }
   }
 );
@@ -157,7 +149,7 @@ test(
   "settings - tenant isolation",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -169,32 +161,30 @@ test(
     let ownerUserId = 0;
 
     try {
-      const [ownerRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT u.id, u.company_id
+      const ownerRows = await sql`
+        SELECT u.id, u.company_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(ownerRows.length > 0, "Owner fixture not found");
-      const owner = ownerRows[0] as { company_id: number; id: number };
+      assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
+      const owner = ownerRows.rows[0] as { company_id: number; id: number };
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
 
-      const [otherCompanyRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT id FROM companies WHERE id != ? LIMIT 1`,
-        [companyId]
-      );
+      const otherCompanyRows = await sql`
+        SELECT id FROM companies WHERE id != ${companyId} LIMIT 1
+      `.execute(db);
 
-      if (otherCompanyRows.length > 0) {
-        otherCompanyId = Number(otherCompanyRows[0].id);
+      if (otherCompanyRows.rows.length > 0) {
+        otherCompanyId = Number((otherCompanyRows.rows[0] as { id: number }).id);
 
         const settingsInOtherCompany = await listSettings({ companyId: otherCompanyId });
         for (const setting of settingsInOtherCompany) {
@@ -213,7 +203,7 @@ test(
   "settings - cascade resolution (outlet → company)",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
 
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
@@ -225,22 +215,21 @@ test(
     let ownerUserId = 0;
 
     try {
-      const [ownerRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT u.id, u.company_id
+      const ownerRows = await sql`
+        SELECT u.id, u.company_id, o.id AS outlet_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
          INNER JOIN user_outlets uo ON uo.user_id = u.id
          INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
 
-      assert.ok(ownerRows.length > 0, "Owner fixture not found");
-      const owner = ownerRows[0] as { company_id: number; id: number; outlet_id: number };
+      assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
+      const owner = ownerRows.rows[0] as { company_id: number; id: number; outlet_id: number };
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
       outletId = Number(owner.outlet_id);
@@ -273,10 +262,7 @@ test(
 
       console.log("✅ cascade resolution test passed");
     } finally {
-      await pool.execute(
-        `DELETE FROM company_settings WHERE company_id = ? AND \`key\` LIKE ?`,
-        [companyId, `%${runId}%`]
-      );
+      await sql`DELETE FROM company_settings WHERE company_id = ${companyId} AND \`key\` LIKE ${`%${runId}%`}`.execute(db);
     }
   }
 );

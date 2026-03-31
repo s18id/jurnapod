@@ -8,7 +8,6 @@
  * Part of Story 6.5a (Reservations Domain Extraction).
  */
 
-import type { RowDataPacket } from "mysql2";
 import {
   ReservationStatusV2,
   type ReservationStatusV2Type,
@@ -118,7 +117,7 @@ export interface UpdateStatusInput {
 // DATABASE ROW TYPES (internal)
 // ============================================================================
 
-export interface ReservationDbRow extends RowDataPacket {
+export interface ReservationDbRow {
   id: number;
   company_id: number;
   outlet_id: number;
@@ -150,14 +149,14 @@ export interface ReservationDbRow extends RowDataPacket {
   linked_order_id: string | null;
 }
 
-export interface LegacyOverlapRow extends RowDataPacket {
+export interface LegacyOverlapRow {
   reservation_start_ts: number | string | null;
   reservation_end_ts: number | string | null;
   reservation_at: string | null;
   duration_minutes: number | null;
 }
 
-export interface OccupancySnapshotRow extends RowDataPacket {
+export interface OccupancySnapshotRow {
   status_id: number;
   version: number;
   reservation_id: number | string | null;
@@ -165,7 +164,7 @@ export interface OccupancySnapshotRow extends RowDataPacket {
 
 export type OutletTableStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE";
 
-export type OutletTableRow = RowDataPacket & {
+export type OutletTableRow = {
   id: number;
   status: OutletTableStatus;
 };

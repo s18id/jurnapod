@@ -15,9 +15,9 @@
 
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
+import { sql } from "kysely";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../../lib/db";
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
+import { closeDbPool, getDb } from "../../lib/db";
 
 loadEnvIfPresent();
 
@@ -26,58 +26,54 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Sync Pull Routes", { concurrency: false }, () => {
-  let connection: PoolConnection;
+  let db: ReturnType<typeof getDb>;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
   let testOutletId2 = 0; // Second outlet for scoping tests
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    db = getDb();
 
     // Find test user fixture
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+    const userRows = await sql<{ user_id: number; company_id: number; outlet_id: number }>`
+      SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
        FROM users u
        INNER JOIN companies c ON c.id = u.company_id
        INNER JOIN user_outlets uo ON uo.user_id = u.id
        INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE c.code = ?
-         AND u.email = ?
+       WHERE c.code = ${TEST_COMPANY_CODE}
+         AND u.email = ${TEST_OWNER_EMAIL}
          AND u.is_active = 1
-         AND o.code = ?
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL, TEST_OUTLET_CODE]
-    );
+         AND o.code = ${TEST_OUTLET_CODE}
+       LIMIT 1
+    `.execute(db);
 
     assert.ok(
-      userRows.length > 0,
+      userRows.rows.length > 0,
       `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`
     );
-    testUserId = Number(userRows[0].user_id);
-    testCompanyId = Number(userRows[0].company_id);
-    testOutletId = Number(userRows[0].outlet_id);
+    testUserId = Number(userRows.rows[0].user_id);
+    testCompanyId = Number(userRows.rows[0].company_id);
+    testOutletId = Number(userRows.rows[0].outlet_id);
 
     // Find a second outlet (if available) for scoping tests
-    const [outletRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT id FROM outlets WHERE company_id = ? AND id != ? LIMIT 1`,
-      [testCompanyId, testOutletId]
-    );
-    if (outletRows.length > 0) {
-      testOutletId2 = Number(outletRows[0].id);
+    const outletRows = await sql<{ id: number }>`
+      SELECT id FROM outlets WHERE company_id = ${testCompanyId} AND id != ${testOutletId} LIMIT 1
+    `.execute(db);
+    if (outletRows.rows.length > 0) {
+      testOutletId2 = Number(outletRows.rows[0].id);
     }
   });
 
   after(async () => {
-    connection.release();
     await closeDbPool();
   });
 
   describe("Audit Service Creation", () => {
     test("can create audit service from db pool", () => {
       // Test that we can create an audit service - this validates the helper function works
-      const dbPool = getDbPool();
+      const dbPool = getDb();
       assert.ok(dbPool, "Database pool should be available");
     });
   });
@@ -106,13 +102,12 @@ describe("Sync Pull Routes", { concurrency: false }, () => {
     test("fetches company data version from database", async () => {
       // company_data_versions table may not exist in all deployments
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT data_version FROM company_data_versions WHERE company_id = ?`,
-          [testCompanyId]
-        );
+        const rows = await sql<{ data_version: number }>`
+          SELECT data_version FROM company_data_versions WHERE company_id = ${testCompanyId}
+        `.execute(db);
         
-        if (rows.length > 0) {
-          assert.ok(typeof rows[0].data_version === "number", "Data version should be a number");
+        if (rows.rows.length > 0) {
+          assert.ok(typeof rows.rows[0].data_version === "number", "Data version should be a number");
         } else {
           // Company might not have data version yet - this is valid
           assert.ok(true, "No data version record is acceptable");
@@ -126,14 +121,13 @@ describe("Sync Pull Routes", { concurrency: false }, () => {
     test("returns higher version for updated data", async () => {
       // company_data_versions table may not exist in all deployments
       try {
-        const [rows1] = await connection.execute<RowDataPacket[]>(
-          `SELECT data_version FROM company_data_versions WHERE company_id = ?`,
-          [testCompanyId]
-        );
+        const rows1 = await sql<{ data_version: number }>`
+          SELECT data_version FROM company_data_versions WHERE company_id = ${testCompanyId}
+        `.execute(db);
 
         // Version should be non-negative
-        if (rows1.length > 0) {
-          assert.ok(rows1[0].data_version >= 0, "Data version should be non-negative");
+        if (rows1.rows.length > 0) {
+          assert.ok(rows1.rows[0].data_version >= 0, "Data version should be non-negative");
         }
       } catch {
         // Table may not exist - skip this test gracefully
@@ -145,32 +139,29 @@ describe("Sync Pull Routes", { concurrency: false }, () => {
   describe("Outlet Scoping", () => {
     test("outlet_id is required for sync pull", async () => {
       // Verify that outlets table has our test outlet
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id, company_id, code FROM outlets WHERE id = ? AND company_id = ?`,
-        [testOutletId, testCompanyId]
-      );
-      assert.ok(rows.length > 0, "Test outlet should exist");
-      assert.equal(rows[0].id, testOutletId, "Outlet ID should match");
+      const rows = await sql<{ id: number; company_id: number; code: string }>`
+        SELECT id, company_id, code FROM outlets WHERE id = ${testOutletId} AND company_id = ${testCompanyId}
+      `.execute(db);
+      assert.ok(rows.rows.length > 0, "Test outlet should exist");
+      assert.equal(rows.rows[0].id, testOutletId, "Outlet ID should match");
     });
 
     test("tables are scoped to outlet", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id, outlet_id FROM outlet_tables WHERE outlet_id = ? LIMIT 5`,
-        [testOutletId]
-      );
+      const rows = await sql<{ id: number; outlet_id: number }>`
+        SELECT id, outlet_id FROM outlet_tables WHERE outlet_id = ${testOutletId} LIMIT 5
+      `.execute(db);
       // Should return tables only for the specified outlet
-      for (const row of rows) {
+      for (const row of rows.rows) {
         assert.equal(row.outlet_id, testOutletId, "All returned tables should belong to the outlet");
       }
     });
 
     test("reservations are scoped to outlet", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id, outlet_id FROM reservations WHERE outlet_id = ? LIMIT 5`,
-        [testOutletId]
-      );
+      const rows = await sql<{ id: number; outlet_id: number }>`
+        SELECT id, outlet_id FROM reservations WHERE outlet_id = ${testOutletId} LIMIT 5
+      `.execute(db);
       // Should return reservations only for the specified outlet
-      for (const row of rows) {
+      for (const row of rows.rows) {
         assert.equal(row.outlet_id, testOutletId, "All returned reservations should belong to the outlet");
       }
     });
@@ -200,15 +191,14 @@ describe("Sync Pull Routes", { concurrency: false }, () => {
   describe("Master Data Queries", () => {
     test("items are returned with required fields", async () => {
       // Query items table - use correct column names
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id, name, is_active 
+      const rows = await sql<{ id: number; name: string; is_active: number }>`
+        SELECT id, name, is_active 
          FROM items 
-         WHERE company_id = ? AND is_active = 1 
-         LIMIT 5`,
-        [testCompanyId]
-      );
+         WHERE company_id = ${testCompanyId} AND is_active = 1 
+         LIMIT 5
+      `.execute(db);
 
-      for (const row of rows) {
+      for (const row of rows.rows) {
         assert.ok(row.id > 0, "Item should have valid id");
         assert.ok(typeof row.name === "string", "Item should have name");
         assert.ok(typeof row.is_active === "number", "Item should have is_active");
@@ -217,15 +207,14 @@ describe("Sync Pull Routes", { concurrency: false }, () => {
 
     test("prices are scoped to outlet", async () => {
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id, item_id, outlet_id, price, is_active 
+        const rows = await sql<{ id: number; item_id: number; outlet_id: number; price: number; is_active: number }>`
+          SELECT id, item_id, outlet_id, price, is_active 
            FROM item_prices 
-           WHERE outlet_id = ? AND is_active = 1 
-           LIMIT 5`,
-          [testOutletId]
-        );
+           WHERE outlet_id = ${testOutletId} AND is_active = 1 
+           LIMIT 5
+        `.execute(db);
 
-        for (const row of rows) {
+        for (const row of rows.rows) {
           assert.equal(row.outlet_id, testOutletId, "Price should belong to the outlet");
           assert.ok(row.price >= 0, "Price should be non-negative");
         }
@@ -237,11 +226,10 @@ describe("Sync Pull Routes", { concurrency: false }, () => {
 
     test("item groups are returned for company", async () => {
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id, name, is_active FROM item_groups WHERE company_id = ? LIMIT 5`,
-          [testCompanyId]
-        );
-        assert.ok(rows.length >= 0, "Should return item groups (may be empty)");
+        const rows = await sql<{ id: number; name: string; is_active: number }>`
+          SELECT id, name, is_active FROM item_groups WHERE company_id = ${testCompanyId} LIMIT 5
+        `.execute(db);
+        assert.ok(rows.rows.length >= 0, "Should return item groups (may be empty)");
       } catch {
         // item_groups table may not exist - skip gracefully
         assert.ok(true, "item_groups table may not exist");
@@ -251,10 +239,9 @@ describe("Sync Pull Routes", { concurrency: false }, () => {
     test("config is returned for company", async () => {
       // company_config table may not exist in all deployments
       try {
-        const [rows] = await connection.execute<RowDataPacket[]>(
-          `SELECT config_json FROM company_config WHERE company_id = ? LIMIT 1`,
-          [testCompanyId]
-        );
+        const rows = await sql`
+          SELECT config_json FROM company_config WHERE company_id = ${testCompanyId} LIMIT 1
+        `.execute(db);
         // Config may or may not exist - both are valid
         assert.ok(true, "Config query executed");
       } catch {
@@ -289,13 +276,12 @@ describe("Sync Pull Routes", { concurrency: false }, () => {
     });
 
     test("variant data is returned for outlet", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id, item_id, sku, is_active 
+      const rows = await sql<{ id: number; item_id: number; sku: string; is_active: number }>`
+        SELECT id, item_id, sku, is_active 
          FROM item_variants 
-         WHERE company_id = ? AND is_active = 1 
-         LIMIT 5`,
-        [testCompanyId]
-      );
+         WHERE company_id = ${testCompanyId} AND is_active = 1 
+         LIMIT 5
+      `.execute(db);
       // Variants may or may not exist - both are valid
       assert.ok(true, "Variant query executed");
     });

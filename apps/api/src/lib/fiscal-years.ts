@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { Pool, PoolConnection } from "mysql2/promise";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
+import { sql } from "kysely";
 import {
   SETTINGS_REGISTRY,
   parseSettingValue,
@@ -14,29 +13,8 @@ import {
   type SettingKey,
   type SettingValue
 } from "@jurnapod/shared";
-import { getDbPool } from "./db";
-
-type QueryExecutor = {
-  execute: PoolConnection["execute"] | Pool["execute"];
-};
-
-type FiscalYearRow = RowDataPacket & {
-  id: number;
-  company_id: number;
-  code: string;
-  name: string;
-  start_date: string;
-  end_date: string;
-  status: FiscalYearStatus;
-  created_at: string;
-  updated_at: string;
-};
-
-type FiscalYearRangeRow = RowDataPacket & {
-  id: number;
-  start_date: string;
-  end_date: string;
-};
+import { getDb, type KyselySchema } from "./db";
+import { toRfc3339Required } from "@jurnapod/shared";
 
 export class FiscalYearNotFoundError extends Error {}
 export class FiscalYearCodeExistsError extends Error {}
@@ -49,15 +27,34 @@ export class FiscalYearSelectionError extends Error {}
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 const ALLOW_MULTIPLE_OPEN_SETTING: SettingKey = "accounting.allow_multiple_open_fiscal_years";
 
-function formatDateOnly(value: string): string {
-  return value.slice(0, 10);
+function formatDateOnly(value: string | Date): string {
+  if (typeof value === "string") {
+    return value.slice(0, 10);
+  }
+  // Handle Date object - format as YYYY-MM-DD
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
-function formatDateTime(value: string): string {
-  return value;
+function parseDateOnly(value: string): Date {
+  // Parse YYYY-MM-DD string to Date object for database
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
-function normalizeFiscalYear(row: FiscalYearRow): FiscalYear {
+function normalizeFiscalYear(row: {
+  id: number;
+  company_id: number;
+  code: string;
+  name: string;
+  start_date: string | Date;
+  end_date: string | Date;
+  status: string;
+  created_at: string | Date;
+  updated_at: string | Date;
+}): FiscalYear {
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
@@ -65,9 +62,9 @@ function normalizeFiscalYear(row: FiscalYearRow): FiscalYear {
     name: String(row.name),
     start_date: formatDateOnly(row.start_date),
     end_date: formatDateOnly(row.end_date),
-    status: row.status,
-    created_at: formatDateTime(row.created_at),
-    updated_at: formatDateTime(row.updated_at)
+    status: row.status as FiscalYearStatus,
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at)
   };
 }
 
@@ -75,37 +72,19 @@ function hasOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string):
   return aStart <= bEnd && bStart <= aEnd;
 }
 
-async function withTransaction<T>(operation: (connection: PoolConnection) => Promise<T>): Promise<T> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-    const result = await operation(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-}
-
 async function resolveCompanySettingOutletId(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number
 ): Promise<number> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id
-     FROM outlets
-     WHERE company_id = ?
-     ORDER BY id ASC
-     LIMIT 1`,
-    [companyId]
-  );
+  const row = await db
+    .selectFrom("outlets")
+    .where("company_id", "=", companyId)
+    .orderBy("id", "asc")
+    .limit(1)
+    .select("id")
+    .executeTakeFirst();
 
-  const outletId = rows[0]?.id;
+  const outletId = row?.id;
   if (!outletId) {
     throw new Error("Default outlet not found");
   }
@@ -114,22 +93,21 @@ async function resolveCompanySettingOutletId(
 }
 
 async function readCompanySetting(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   key: SettingKey
 ): Promise<SettingValue> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT value_json
-     FROM company_settings
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND \`key\` = ?
-     LIMIT 1`,
-    [companyId, outletId, key]
-  );
+  const row = await db
+    .selectFrom("company_settings")
+    .where("company_id", "=", companyId)
+    .where("outlet_id", "=", outletId)
+    .where(sql`\`key\``, "=", key)
+    .limit(1)
+    .select("value_json")
+    .executeTakeFirst();
 
-  const stored = rows[0]?.value_json;
+  const stored = row?.value_json;
   if (typeof stored === "string") {
     try {
       const parsed = JSON.parse(stored);
@@ -143,38 +121,33 @@ async function readCompanySetting(
 }
 
 async function allowMultipleOpenFiscalYears(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   outletId?: number
 ): Promise<boolean> {
-  const resolvedOutletId = outletId ?? (await resolveCompanySettingOutletId(executor, companyId));
-  const value = await readCompanySetting(executor, companyId, resolvedOutletId, ALLOW_MULTIPLE_OPEN_SETTING);
+  const resolvedOutletId = outletId ?? (await resolveCompanySettingOutletId(db, companyId));
+  const value = await readCompanySetting(db, companyId, resolvedOutletId, ALLOW_MULTIPLE_OPEN_SETTING);
   return Boolean(value);
 }
 
 async function listOpenFiscalYearRanges(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   excludeId?: number
-): Promise<FiscalYearRangeRow[]> {
-  const params: Array<number> = [companyId];
-  let filter = "";
+): Promise<Array<{ id: number; start_date: string | Date; end_date: string | Date }>> {
+  let query = db
+    .selectFrom("fiscal_years")
+    .where("company_id", "=", companyId)
+    .where("status", "=", "OPEN")
+    .select(["id", "start_date", "end_date"])
+    .orderBy("start_date", "asc")
+    .orderBy("id", "asc");
+
   if (excludeId) {
-    filter = "AND id <> ?";
-    params.push(excludeId);
+    query = query.where("id", "!=", excludeId);
   }
 
-  const [rows] = await executor.execute<FiscalYearRangeRow[]>(
-    `SELECT id, start_date, end_date
-     FROM fiscal_years
-     WHERE company_id = ?
-       AND status = 'OPEN'
-       ${filter}
-     ORDER BY start_date ASC, id ASC`,
-    params
-  );
-
-  return rows;
+  return query.execute();
 }
 
 function assertDateRange(startDate: string, endDate: string): void {
@@ -184,12 +157,12 @@ function assertDateRange(startDate: string, endDate: string): void {
 }
 
 async function assertOpenFiscalYearRules(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   range: { start_date: string; end_date: string },
   options: { allowMultiple: boolean; excludeId?: number }
 ): Promise<void> {
-  const openYears = await listOpenFiscalYearRanges(executor, companyId, options.excludeId);
+  const openYears = await listOpenFiscalYearRanges(db, companyId, options.excludeId);
   if (!options.allowMultiple && openYears.length > 0) {
     throw new FiscalYearOpenConflictError("Only one open fiscal year allowed");
   }
@@ -204,25 +177,22 @@ async function assertOpenFiscalYearRules(
 }
 
 export async function listFiscalYears(query: FiscalYearListQuery): Promise<FiscalYear[]> {
-  const pool = getDbPool();
-  const params: Array<string | number> = [query.company_id];
-  let where = "WHERE company_id = ?";
+  const db = getDb();
+
+  let q = db
+    .selectFrom("fiscal_years")
+    .where("company_id", "=", query.company_id)
+    .select(["id", "company_id", "code", "name", "start_date", "end_date", "status", "created_at", "updated_at"])
+    .orderBy("start_date", "desc")
+    .orderBy("id", "desc");
 
   if (query.status) {
-    where += " AND status = ?";
-    params.push(query.status);
+    q = q.where("status", "=", query.status);
   } else if (!query.include_closed) {
-    where += " AND status = 'OPEN'";
+    q = q.where("status", "=", "OPEN");
   }
 
-  const [rows] = await pool.execute<FiscalYearRow[]>(
-    `SELECT id, company_id, code, name, start_date, end_date, status, created_at, updated_at
-     FROM fiscal_years
-     ${where}
-     ORDER BY start_date DESC, id DESC`,
-    params
-  );
-
+  const rows = await q.execute();
   return rows.map(normalizeFiscalYear);
 }
 
@@ -230,25 +200,23 @@ export async function getFiscalYearById(
   companyId: number,
   fiscalYearId: number
 ): Promise<FiscalYear | null> {
-  const pool = getDbPool();
-  return getFiscalYearByIdWithExecutor(pool, companyId, fiscalYearId);
+  const db = getDb();
+  return getFiscalYearByIdWithExecutor(db, companyId, fiscalYearId);
 }
 
 async function getFiscalYearByIdWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   fiscalYearId: number
 ): Promise<FiscalYear | null> {
-  const [rows] = await executor.execute<FiscalYearRow[]>(
-    `SELECT id, company_id, code, name, start_date, end_date, status, created_at, updated_at
-     FROM fiscal_years
-     WHERE company_id = ?
-       AND id = ?
-     LIMIT 1`,
-    [companyId, fiscalYearId]
-  );
+  const row = await db
+    .selectFrom("fiscal_years")
+    .where("company_id", "=", companyId)
+    .where("id", "=", fiscalYearId)
+    .limit(1)
+    .select(["id", "company_id", "code", "name", "start_date", "end_date", "status", "created_at", "updated_at"])
+    .executeTakeFirst();
 
-  const row = rows[0];
   return row ? normalizeFiscalYear(row) : null;
 }
 
@@ -256,14 +224,15 @@ export async function createFiscalYear(
   input: FiscalYearCreateRequest,
   actorUserId?: number
 ): Promise<FiscalYear> {
-  return withTransaction(async (connection) => {
-    const status: FiscalYearStatus = input.status ?? "OPEN";
-    assertDateRange(input.start_date, input.end_date);
+  const db = getDb();
+  const status: FiscalYearStatus = input.status ?? "OPEN";
+  assertDateRange(input.start_date, input.end_date);
 
+  return await db.transaction().execute(async (trx) => {
     if (status === "OPEN") {
-      const allowMultiple = await allowMultipleOpenFiscalYears(connection, input.company_id);
+      const allowMultiple = await allowMultipleOpenFiscalYears(trx, input.company_id);
       await assertOpenFiscalYearRules(
-        connection,
+        trx,
         input.company_id,
         {
           start_date: input.start_date,
@@ -276,44 +245,31 @@ export async function createFiscalYear(
     }
 
     try {
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO fiscal_years (
-           company_id,
-           code,
-           name,
-           start_date,
-           end_date,
-           status,
-           created_by_user_id,
-           updated_by_user_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          input.company_id,
-          input.code,
-          input.name,
-          input.start_date,
-          input.end_date,
-          status,
-          actorUserId ?? null,
-          actorUserId ?? null
-        ]
-      );
+      const result = await trx
+        .insertInto("fiscal_years")
+        .values({
+          company_id: input.company_id,
+          code: input.code,
+          name: input.name,
+          start_date: parseDateOnly(input.start_date),
+          end_date: parseDateOnly(input.end_date),
+          status: status,
+          created_by_user_id: actorUserId ?? null,
+          updated_by_user_id: actorUserId ?? null
+        })
+        .executeTakeFirst();
 
       const fiscalYearId = Number(result.insertId);
-      const created = await getFiscalYearByIdWithExecutor(connection, input.company_id, fiscalYearId);
+      const created = await getFiscalYearByIdWithExecutor(trx, input.company_id, fiscalYearId);
       if (!created) {
         throw new FiscalYearNotFoundError("Fiscal year not found after create");
       }
 
       return created;
     } catch (error) {
-      if (typeof error === "object" && error && "errno" in error) {
-        const errno = (error as { errno?: number }).errno;
-        if (errno === MYSQL_DUPLICATE_ERROR_CODE) {
-          throw new FiscalYearCodeExistsError("Fiscal year code already exists");
-        }
+      if (isMysqlError(error) && error.errno === MYSQL_DUPLICATE_ERROR_CODE) {
+        throw new FiscalYearCodeExistsError("Fiscal year code already exists");
       }
-
       throw error;
     }
   });
@@ -325,18 +281,17 @@ export async function updateFiscalYear(
   input: FiscalYearUpdateRequest,
   actorUserId?: number
 ): Promise<FiscalYear | null> {
-  return withTransaction(async (connection) => {
-    const [rows] = await connection.execute<FiscalYearRow[]>(
-      `SELECT id, company_id, code, name, start_date, end_date, status, created_at, updated_at
-       FROM fiscal_years
-       WHERE company_id = ?
-         AND id = ?
-       LIMIT 1
-       FOR UPDATE`,
-      [companyId, fiscalYearId]
-    );
+  const db = getDb();
 
-    const current = rows[0];
+  return await db.transaction().execute(async (trx) => {
+    const current = await trx
+      .selectFrom("fiscal_years")
+      .where("company_id", "=", companyId)
+      .where("id", "=", fiscalYearId)
+      .limit(1)
+      .select(["id", "company_id", "code", "name", "start_date", "end_date", "status", "created_at", "updated_at"])
+      .executeTakeFirst();
+
     if (!current) {
       return null;
     }
@@ -347,9 +302,9 @@ export async function updateFiscalYear(
     assertDateRange(nextStartDate, nextEndDate);
 
     if (nextStatus === "OPEN") {
-      const allowMultiple = await allowMultipleOpenFiscalYears(connection, companyId);
+      const allowMultiple = await allowMultipleOpenFiscalYears(trx, companyId);
       await assertOpenFiscalYearRules(
-        connection,
+        trx,
         companyId,
         {
           start_date: nextStartDate,
@@ -363,40 +318,27 @@ export async function updateFiscalYear(
     }
 
     try {
-      await connection.execute(
-        `UPDATE fiscal_years
-         SET code = ?,
-             name = ?,
-             start_date = ?,
-             end_date = ?,
-             status = ?,
-             updated_by_user_id = ?,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ?
-           AND id = ?`,
-        [
-          input.code ?? current.code,
-          input.name ?? current.name,
-          nextStartDate,
-          nextEndDate,
-          nextStatus,
-          actorUserId ?? null,
-          companyId,
-          fiscalYearId
-        ]
-      );
+      await trx
+        .updateTable("fiscal_years")
+        .set({
+          code: input.code ?? current.code,
+          name: input.name ?? current.name,
+          start_date: parseDateOnly(nextStartDate),
+          end_date: parseDateOnly(nextEndDate),
+          status: nextStatus,
+          updated_by_user_id: actorUserId ?? null
+        })
+        .where("company_id", "=", companyId)
+        .where("id", "=", fiscalYearId)
+        .execute();
     } catch (error) {
-      if (typeof error === "object" && error && "errno" in error) {
-        const errno = (error as { errno?: number }).errno;
-        if (errno === MYSQL_DUPLICATE_ERROR_CODE) {
-          throw new FiscalYearCodeExistsError("Fiscal year code already exists");
-        }
+      if (isMysqlError(error) && error.errno === MYSQL_DUPLICATE_ERROR_CODE) {
+        throw new FiscalYearCodeExistsError("Fiscal year code already exists");
       }
-
       throw error;
     }
 
-    const updated = await getFiscalYearByIdWithExecutor(connection, companyId, fiscalYearId);
+    const updated = await getFiscalYearByIdWithExecutor(trx, companyId, fiscalYearId);
     if (!updated) {
       throw new FiscalYearNotFoundError("Fiscal year not found after update");
     }
@@ -406,20 +348,21 @@ export async function updateFiscalYear(
 }
 
 async function listOpenFiscalYearsForDateWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   date: string
 ): Promise<FiscalYear[]> {
-  const [rows] = await executor.execute<FiscalYearRow[]>(
-    `SELECT id, company_id, code, name, start_date, end_date, status, created_at, updated_at
-     FROM fiscal_years
-     WHERE company_id = ?
-       AND status = 'OPEN'
-       AND start_date <= ?
-       AND end_date >= ?
-     ORDER BY start_date ASC, id ASC`,
-    [companyId, date, date]
-  );
+  const dateValue = parseDateOnly(date);
+  const rows = await db
+    .selectFrom("fiscal_years")
+    .where("company_id", "=", companyId)
+    .where("status", "=", "OPEN")
+    .where("start_date", "<=", dateValue)
+    .where("end_date", ">=", dateValue)
+    .orderBy("start_date", "asc")
+    .orderBy("id", "asc")
+    .select(["id", "company_id", "code", "name", "start_date", "end_date", "status", "created_at", "updated_at"])
+    .execute();
 
   return rows.map(normalizeFiscalYear);
 }
@@ -428,8 +371,8 @@ export async function listOpenFiscalYearsForDate(
   companyId: number,
   date: string
 ): Promise<FiscalYear[]> {
-  const pool = getDbPool();
-  return listOpenFiscalYearsForDateWithExecutor(pool, companyId, date);
+  const db = getDb();
+  return listOpenFiscalYearsForDateWithExecutor(db, companyId, date);
 }
 
 export async function ensureDateWithinOpenFiscalYear(
@@ -443,11 +386,11 @@ export async function ensureDateWithinOpenFiscalYear(
 }
 
 export async function ensureDateWithinOpenFiscalYearWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   date: string
 ): Promise<void> {
-  const matches = await listOpenFiscalYearsForDateWithExecutor(executor, companyId, date);
+  const matches = await listOpenFiscalYearsForDateWithExecutor(db, companyId, date);
   if (matches.length === 0) {
     throw new FiscalYearNotOpenError("Date is outside any open fiscal year");
   }
@@ -472,4 +415,8 @@ export async function resolveDefaultFiscalYearDateRange(
   }
 
   throw new FiscalYearSelectionError("Multiple open fiscal years contain the default date");
+}
+
+function isMysqlError(error: unknown): error is { errno?: number } {
+  return typeof error === "object" && error !== null && "errno" in error;
 }

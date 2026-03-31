@@ -14,7 +14,6 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { ResultSetHeader } from "mysql2";
 import {
   ItemCreateRequestSchema,
   NumericIdSchema

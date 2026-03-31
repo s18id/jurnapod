@@ -1,22 +1,14 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { RowDataPacket } from "mysql2";
 import { marked } from "marked";
 import sanitizeHtml, { type IOptions } from "sanitize-html";
-import { getDbPool } from "./db";
+import { getDb } from "./db";
+import { sql } from "kysely";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
-
-type StaticPageRow = RowDataPacket & {
-  slug: string;
-  title: string;
-  content_md: string;
-  updated_at: string;
-  published_at: string | null;
-};
 
 export type PublicStaticPage = {
   slug: string;
@@ -108,20 +100,18 @@ export async function getPublishedStaticPage(slug: string): Promise<PublicStatic
     return cached;
   }
 
-  const pool = getDbPool();
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT slug, title, content_md, updated_at, published_at
-     FROM static_pages
-     WHERE slug = ? AND status = 'PUBLISHED'
-     LIMIT 1`,
-    [slug]
-  );
+  const db = getDb();
+  const row = await db
+    .selectFrom("static_pages")
+    .select(["slug", "title", "content_md", "updated_at", "published_at"])
+    .where("slug", "=", slug)
+    .where("status", "=", "PUBLISHED")
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     return null;
   }
 
-  const row = rows[0] as StaticPageRow;
   const renderedHtml = await marked.parse(row.content_md ?? "");
   const contentHtml = sanitizeHtml(renderedHtml, sanitizeOptions);
   const page: PublicStaticPage = {

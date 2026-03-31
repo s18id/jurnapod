@@ -319,8 +319,9 @@ export interface BatchContext {
   importSessionId?: string;
   /** Start time for timing */
   startTime: Date;
-  /** Database connection for transaction-scoped operations */
-  connection?: import("mysql2/promise").PoolConnection;
+  /** Database transaction/connection for transaction-scoped operations */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  connection?: import("kysely").Kysely<any>;
 }
 
 /**

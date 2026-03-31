@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import { getDbPool } from "../db";
+import { sql } from "kysely";
+import { getDb, type KyselySchema } from "../db";
 import {
   ServiceSessionStatus,
   TableEventType,
@@ -69,11 +69,11 @@ export async function getSession(
   outletId: bigint,
   sessionId: bigint
 ): Promise<ServiceSession | null> {
-  const pool = getDbPool();
+  const db = getDb();
 
   // Get session with table info - scoped to company + outlet
-  const [sessionRows] = await pool.execute<ServiceSessionDbRow[]>(
-    `SELECT 
+  const sessionRows = await sql<ServiceSessionDbRow>`
+    SELECT 
       s.id,
       s.company_id,
       s.outlet_id,
@@ -97,18 +97,17 @@ export async function getSession(
     LEFT JOIN outlet_tables ot ON s.table_id = ot.id
       AND s.company_id = ot.company_id
       AND s.outlet_id = ot.outlet_id
-    WHERE s.id = ?
-      AND s.company_id = ?
-      AND s.outlet_id = ?
-    LIMIT 1`,
-    [sessionId, companyId, outletId]
-  );
+    WHERE s.id = ${sessionId}
+      AND s.company_id = ${companyId}
+      AND s.outlet_id = ${outletId}
+    LIMIT 1
+  `.execute(db);
 
-  if (sessionRows.length === 0) {
+  if (sessionRows.rows.length === 0) {
     return null;
   }
 
-  const sessionRow = sessionRows[0];
+  const sessionRow = sessionRows.rows[0];
 
   // Get session lines
   const lines = await getSessionLines(sessionId);
@@ -123,55 +122,50 @@ export async function getSession(
 export async function listSessions(
   params: ListSessionsParams
 ): Promise<ListSessionsResult> {
-  const pool = getDbPool();
+  const db = getDb();
 
   const limit = params.limit ?? 20;
   const offset = params.offset ?? 0;
 
-  // Build WHERE conditions with mandatory company + outlet scoping
-  const whereConditions: string[] = [
-    "s.company_id = ?",
-    "s.outlet_id = ?"
-  ];
-  const queryParams: (bigint | number | string | Date)[] = [
-    params.companyId,
-    params.outletId
-  ];
-
-  // Optional filters
+  // Build base WHERE clause parts
+  const baseWhere = sql`s.company_id = ${params.companyId} AND s.outlet_id = ${params.outletId}`;
+  
+  // Build optional filter clauses
+  let statusClause = sql``;
   if (params.statusId !== undefined) {
-    whereConditions.push("s.status_id = ?");
-    queryParams.push(params.statusId);
+    statusClause = sql` AND s.status_id = ${params.statusId}`;
   }
 
+  let tableClause = sql``;
   if (params.tableId !== undefined) {
-    whereConditions.push("s.table_id = ?");
-    queryParams.push(params.tableId);
+    tableClause = sql` AND s.table_id = ${params.tableId}`;
   }
 
+  let fromDateClause = sql``;
   if (params.fromDate !== undefined) {
-    whereConditions.push("s.started_at >= ?");
-    queryParams.push(params.fromDate);
+    fromDateClause = sql` AND s.started_at >= ${params.fromDate}`;
   }
 
+  let toDateClause = sql``;
   if (params.toDate !== undefined) {
-    whereConditions.push("s.started_at <= ?");
-    queryParams.push(params.toDate);
+    toDateClause = sql` AND s.started_at <= ${params.toDate}`;
   }
 
-  // Get total count with same scoping
-  const countSql = `
+  // Count query
+  const countResult = await sql<{ total: number }>`
     SELECT COUNT(*) as total 
     FROM table_service_sessions s 
-    WHERE ${whereConditions.join(" AND ")}
-  `;
-  const [countRows] = await pool.execute<RowDataPacket[]>(countSql, queryParams);
-  const total = Number(countRows[0]?.total ?? 0);
+    WHERE ${baseWhere}
+      ${statusClause}
+      ${tableClause}
+      ${fromDateClause}
+      ${toDateClause}
+  `.execute(db);
+  const total = Number(countResult.rows[0]?.total ?? 0);
 
-  // Get sessions with pagination
-  const dataParams = [...queryParams, limit, offset];
-  const [sessionRows] = await pool.execute<ServiceSessionDbRow[]>(
-    `SELECT 
+  // List query
+  const sessionRows = await sql<ServiceSessionDbRow>`
+    SELECT 
       s.id,
       s.company_id,
       s.outlet_id,
@@ -195,15 +189,18 @@ export async function listSessions(
     LEFT JOIN outlet_tables ot ON s.table_id = ot.id
       AND s.company_id = ot.company_id
       AND s.outlet_id = ot.outlet_id
-    WHERE ${whereConditions.join(" AND ")}
+    WHERE ${baseWhere}
+      ${statusClause}
+      ${tableClause}
+      ${fromDateClause}
+      ${toDateClause}
     ORDER BY s.started_at DESC, s.id DESC
-    LIMIT ? OFFSET ?`,
-    dataParams
-  );
+    LIMIT ${limit} OFFSET ${offset}
+  `.execute(db);
 
   // Fetch lines for all sessions
   const sessions: ServiceSession[] = [];
-  for (const row of sessionRows) {
+  for (const row of sessionRows.rows) {
     const lines = await getSessionLines(BigInt(row.id));
     sessions.push(mapDbRowToServiceSession(row, lines));
   }
@@ -221,10 +218,10 @@ export async function listSessions(
  * Scoped to session_id (company/outlet scoping via session lookup)
  */
 export async function getSessionLines(sessionId: bigint): Promise<SessionLine[]> {
-  const pool = getDbPool();
+  const db = getDb();
 
-  const [rows] = await pool.execute<SessionLineDbRow[]>(
-    `SELECT 
+  const rows = await sql<SessionLineDbRow>`
+    SELECT 
       id,
       session_id,
       line_number,
@@ -243,12 +240,11 @@ export async function getSessionLines(sessionId: bigint): Promise<SessionLine[]>
       created_at,
       updated_at
     FROM table_service_session_lines
-    WHERE session_id = ?
-    ORDER BY line_number ASC, id ASC`,
-    [sessionId]
-  );
+    WHERE session_id = ${sessionId}
+    ORDER BY line_number ASC, id ASC
+  `.execute(db);
 
-  return rows.map(mapDbRowToSessionLine);
+  return rows.rows.map(mapDbRowToSessionLine);
 }
 
 // ============================================================================
@@ -264,18 +260,15 @@ export async function getSessionLines(sessionId: bigint): Promise<SessionLine[]>
 export async function lockSessionForPayment(
   params: LockSessionInput
 ): Promise<ServiceSession> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
 
-  try {
-    await connection.beginTransaction();
-
+  return await db.transaction().execute(async (trx) => {
     // 1. Check idempotency - duplicate clientTxId?
-    const isDuplicate = await checkClientTxIdExists(connection, params.companyId, params.outletId, params.clientTxId);
+    const isDuplicate = await checkClientTxIdExists(trx, params.companyId, params.outletId, params.clientTxId);
     if (isDuplicate) {
       // Return current session state (idempotency - return same result for same request)
       const sessionRow = await getSessionWithConnection(
-        connection,
+        trx,
         params.companyId,
         params.outletId,
         params.sessionId
@@ -285,16 +278,14 @@ export async function lockSessionForPayment(
         throw new SessionNotFoundError(params.sessionId);
       }
 
-      const lines = await getSessionLinesWithConnection(connection, params.sessionId);
-
-      await connection.commit();
+      const lines = await getSessionLinesWithConnection(trx, params.sessionId);
 
       return mapDbRowToServiceSession(sessionRow, lines);
     }
 
     // 2. Get current session with strict company/outlet scoping
     const sessionRow = await getSessionWithConnection(
-      connection,
+      trx,
       params.companyId,
       params.outletId,
       params.sessionId
@@ -317,32 +308,22 @@ export async function lockSessionForPayment(
 
     // 4. Update session status to LOCKED_FOR_PAYMENT
     // Preserve existing snapshot link when not explicitly provided (COALESCE pattern)
-    await connection.execute<ResultSetHeader>(
-      `UPDATE table_service_sessions
-       SET status_id = ?,
+    await sql`
+      UPDATE table_service_sessions
+       SET status_id = ${ServiceSessionStatus.LOCKED_FOR_PAYMENT},
            locked_at = NOW(),
            updated_at = NOW(),
-           updated_by = ?,
-           notes = COALESCE(?, notes),
-           pos_order_snapshot_id = COALESCE(?, pos_order_snapshot_id)
-       WHERE id = ?
-         AND company_id = ?
-         AND outlet_id = ?
-         AND status_id = ?`,
-      [
-        ServiceSessionStatus.LOCKED_FOR_PAYMENT,
-        params.updatedBy,
-        params.notes ?? null,
-        params.posOrderSnapshotId ?? null,
-        params.sessionId,
-        params.companyId,
-        params.outletId,
-        ServiceSessionStatus.ACTIVE
-      ]
-    );
+           updated_by = ${params.updatedBy},
+           notes = COALESCE(${params.notes ?? null}, notes),
+           pos_order_snapshot_id = COALESCE(${params.posOrderSnapshotId ?? null}, pos_order_snapshot_id)
+       WHERE id = ${params.sessionId}
+         AND company_id = ${params.companyId}
+         AND outlet_id = ${params.outletId}
+         AND status_id = ${ServiceSessionStatus.ACTIVE}
+    `.execute(trx);
 
     // 5. Log SESSION_LOCKED event to table_events
-    await logSessionEvent(connection, {
+    await logSessionEvent(trx, {
       companyId: params.companyId,
       outletId: params.outletId,
       tableId: BigInt(sessionRow.table_id),
@@ -358,14 +339,12 @@ export async function lockSessionForPayment(
       createdBy: params.updatedBy
     });
 
-    await connection.commit();
-
     // 6. Return updated session with lines
-    const lines = await getSessionLinesWithConnection(connection, params.sessionId);
+    const lines = await getSessionLinesWithConnection(trx, params.sessionId);
 
     // Fetch updated session row
     const updatedRow = await getSessionWithConnection(
-      connection,
+      trx,
       params.companyId,
       params.outletId,
       params.sessionId
@@ -376,12 +355,7 @@ export async function lockSessionForPayment(
     }
 
     return mapDbRowToServiceSession(updatedRow, lines);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }
 
 /**
@@ -398,18 +372,15 @@ export async function lockSessionForPayment(
 export async function closeSession(
   params: CloseSessionInput
 ): Promise<ServiceSession> {
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
+  const db = getDb();
 
-  try {
-    await connection.beginTransaction();
-
+  return await db.transaction().execute(async (trx) => {
     // 1. Check idempotency - duplicate clientTxId?
-    const isDuplicate = await checkClientTxIdExists(connection, params.companyId, params.outletId, params.clientTxId);
+    const isDuplicate = await checkClientTxIdExists(trx, params.companyId, params.outletId, params.clientTxId);
     if (isDuplicate) {
       // Return existing closed session (idempotency - return same result for same request)
       const sessionRow = await getSessionWithConnection(
-        connection,
+        trx,
         params.companyId,
         params.outletId,
         params.sessionId
@@ -421,8 +392,7 @@ export async function closeSession(
 
       // Session already closed, return stable result
       if (sessionRow.status_id === ServiceSessionStatus.CLOSED) {
-        const lines = await getSessionLinesWithConnection(connection, params.sessionId);
-        await connection.commit();
+        const lines = await getSessionLinesWithConnection(trx, params.sessionId);
         return mapDbRowToServiceSession(sessionRow, lines);
       }
 
@@ -432,7 +402,7 @@ export async function closeSession(
 
     // 2. Get current session with strict company/outlet scoping
     const sessionRow = await getSessionWithConnection(
-      connection,
+      trx,
       params.companyId,
       params.outletId,
       params.sessionId
@@ -463,52 +433,39 @@ export async function closeSession(
     }
 
     // 4. Update session status to CLOSED
-    await connection.execute<ResultSetHeader>(
-      `UPDATE table_service_sessions
-       SET status_id = ?,
+    await sql`
+      UPDATE table_service_sessions
+       SET status_id = ${ServiceSessionStatus.CLOSED},
            closed_at = NOW(),
            updated_at = NOW(),
-           updated_by = ?,
-           notes = COALESCE(?, notes)
-       WHERE id = ?
-         AND company_id = ?
-         AND outlet_id = ?`,
-      [
-        ServiceSessionStatus.CLOSED,
-        params.updatedBy,
-        params.notes ?? null,
-        params.sessionId,
-        params.companyId,
-        params.outletId
-      ]
-    );
+           updated_by = ${params.updatedBy},
+           notes = COALESCE(${params.notes ?? null}, notes)
+       WHERE id = ${params.sessionId}
+         AND company_id = ${params.companyId}
+         AND outlet_id = ${params.outletId}
+    `.execute(trx);
 
     // 5. Finalize pos_order_snapshots and sync lines if snapshot exists
     if (snapshotId) {
       // 5a. Finalize the snapshot header
-      const [snapshotUpdateResult] = await connection.execute<ResultSetHeader>(
-        `UPDATE pos_order_snapshots
+      const snapshotUpdateResult = await sql`
+        UPDATE pos_order_snapshots
          SET is_finalized = 1,
              order_state = 'CLOSED',
              order_status = 'COMPLETED',
              closed_at = NOW(),
              updated_at = NOW()
-         WHERE order_id = ?
-           AND company_id = ?
-           AND outlet_id = ?`,
-        [
-          snapshotId,
-          params.companyId,
-          params.outletId
-        ]
-      );
+         WHERE order_id = ${snapshotId}
+           AND company_id = ${params.companyId}
+           AND outlet_id = ${params.outletId}
+      `.execute(trx);
 
-      if (snapshotUpdateResult.affectedRows === 0) {
+      if (Number(snapshotUpdateResult.numAffectedRows ?? 0n) === 0) {
         throw new SessionValidationError("Linked pos order snapshot not found for finalization");
       }
 
       // 5b. Sync session lines to pos_order_snapshot_lines
-      await syncSnapshotLinesFromSession(connection, {
+      await syncSnapshotLinesFromSession(trx, {
         snapshotId,
         companyId: params.companyId,
         outletId: params.outletId,
@@ -518,28 +475,21 @@ export async function closeSession(
     }
 
     // 6. Update table_occupancy to AVAILABLE and clear session reference
-    await connection.execute<ResultSetHeader>(
-      `UPDATE table_occupancy
-       SET status_id = ?,
+    await sql`
+      UPDATE table_occupancy
+       SET status_id = ${TableOccupancyStatus.AVAILABLE},
            service_session_id = NULL,
            guest_count = NULL,
            occupied_at = NULL,
            updated_at = NOW(),
-           updated_by = ?
-       WHERE table_id = ?
-         AND company_id = ?
-         AND outlet_id = ?`,
-      [
-        TableOccupancyStatus.AVAILABLE,
-        params.updatedBy,
-        sessionRow.table_id,
-        params.companyId,
-        params.outletId
-      ]
-    );
+           updated_by = ${params.updatedBy}
+       WHERE table_id = ${sessionRow.table_id}
+         AND company_id = ${params.companyId}
+         AND outlet_id = ${params.outletId}
+    `.execute(trx);
 
     // 7. Log SESSION_CLOSED event to table_events
-    await logSessionEvent(connection, {
+    await logSessionEvent(trx, {
       companyId: params.companyId,
       outletId: params.outletId,
       tableId: BigInt(sessionRow.table_id),
@@ -556,14 +506,12 @@ export async function closeSession(
       createdBy: params.updatedBy
     });
 
-    await connection.commit();
-
     // 8. Return closed session with lines
-    const lines = await getSessionLinesWithConnection(connection, params.sessionId);
+    const lines = await getSessionLinesWithConnection(trx, params.sessionId);
 
     // Fetch updated session row
     const updatedRow = await getSessionWithConnection(
-      connection,
+      trx,
       params.companyId,
       params.outletId,
       params.sessionId
@@ -574,10 +522,5 @@ export async function closeSession(
     }
 
     return mapDbRowToServiceSession(updatedRow, lines);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }

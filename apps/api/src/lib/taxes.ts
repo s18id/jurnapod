@@ -1,10 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { Pool, PoolConnection } from "mysql2/promise";
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
-import { getDbPool } from "./db";
-import { DbConn } from "@jurnapod/db";
+import { getDb, type KyselySchema } from "./db";
 
 // =============================================================================
 // Types
@@ -36,17 +33,11 @@ export type TaxRate = {
   updated_at: string;
 };
 
-type QueryExecutor = {
-  execute: PoolConnection["execute"] | Pool["execute"];
-};
+type QueryExecutor = KyselySchema;
 
 type MutationActor = {
   userId: number;
 };
-
-// =============================================================================
-// Error Classes
-// =============================================================================
 
 export class TaxRateNotFoundError extends Error {
   constructor(message = "Tax rate not found") {
@@ -92,7 +83,7 @@ function normalizeRate(value: unknown): number {
   return parsed;
 }
 
-type TaxRateRow = RowDataPacket & {
+type TaxRateRow = {
   id: number;
   company_id: number;
   code: string;
@@ -107,7 +98,7 @@ type TaxRateRow = RowDataPacket & {
   updated_at?: string | Date;
 };
 
-type TaxRateRowFull = RowDataPacket & {
+type TaxRateRowFull = {
   id: number;
   company_id: number;
   code: string;
@@ -140,12 +131,13 @@ function normalizeTaxRate(row: TaxRateRowFull): TaxRate {
 }
 
 async function findTaxRateByIdWithExecutor(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   taxRateId: number,
   options: { forUpdate?: boolean } = {}
 ): Promise<TaxRate | null> {
-  let query = db.kysely
+  // Note: FOR UPDATE is handled by transaction, no need for explicit clause
+  const row = await db
     .selectFrom('tax_rates')
     .where('company_id', '=', companyId)
     .where('id', '=', taxRateId)
@@ -153,28 +145,8 @@ async function findTaxRateByIdWithExecutor(
       'id', 'company_id', 'code', 'name', 'rate_percent', 'account_id',
       'is_inclusive', 'is_active', 'created_by_user_id', 'updated_by_user_id',
       'created_at', 'updated_at'
-    ]);
-
-  if (options.forUpdate) {
-    // Kysely doesn't have a direct FOR UPDATE, use raw SQL for this specific case
-    const row = await db.kysely
-      .selectFrom('tax_rates')
-      .where('company_id', '=', companyId)
-      .where('id', '=', taxRateId)
-      .select([
-        'id', 'company_id', 'code', 'name', 'rate_percent', 'account_id',
-        'is_inclusive', 'is_active', 'created_by_user_id', 'updated_by_user_id',
-        'created_at', 'updated_at'
-      ])
-      .executeTakeFirst();
-
-    if (!row) {
-      return null;
-    }
-    return normalizeTaxRate(row as TaxRateRowFull);
-  }
-
-  const row = await query.executeTakeFirst();
+    ])
+    .executeTakeFirst();
 
   if (!row) {
     return null;
@@ -183,19 +155,9 @@ async function findTaxRateByIdWithExecutor(
   return normalizeTaxRate(row as TaxRateRowFull);
 }
 
-async function withTransaction<T>(operation: (db: DbConn) => Promise<T>): Promise<T> {
-  const pool = getDbPool();
-  const db = new DbConn(pool);
-
-  await db.begin();
-  try {
-    const result = await operation(db);
-    await db.commit();
-    return result;
-  } catch (error) {
-    await db.rollback();
-    throw error;
-  }
+async function withTransaction<T>(operation: (db: KyselySchema) => Promise<T>): Promise<T> {
+  const db = getDb();
+  return db.transaction().execute(operation);
 }
 
 // =============================================================================
@@ -206,8 +168,7 @@ export async function findTaxRateById(
   companyId: number,
   taxRateId: number
 ): Promise<TaxRate | null> {
-  const pool = getDbPool();
-  const db = new DbConn(pool);
+  const db = getDb();
   return findTaxRateByIdWithExecutor(db, companyId, taxRateId);
 }
 
@@ -237,7 +198,7 @@ export async function createTaxRate(
 
     // Validate account exists if provided
     if (input.account_id) {
-      const accountExists = await db.kysely
+      const accountExists = await db
         .selectFrom('accounts')
         .where('company_id', '=', companyId)
         .where('id', '=', input.account_id)
@@ -250,7 +211,7 @@ export async function createTaxRate(
     }
 
     try {
-      const result = await db.kysely
+      const result = await db
         .insertInto('tax_rates')
         .values({
           company_id: companyId,
@@ -315,7 +276,7 @@ export async function updateTaxRate(
 
     // Validate account exists if provided
     if (input.account_id !== undefined && input.account_id !== null) {
-      const accountExists = await db.kysely
+      const accountExists = await db
         .selectFrom('accounts')
         .where('company_id', '=', companyId)
         .where('id', '=', input.account_id)
@@ -356,7 +317,7 @@ export async function updateTaxRate(
     updates.updated_by_user_id = actor?.userId || null;
 
     try {
-      await db.kysely
+      await db
         .updateTable('tax_rates')
         .set(updates)
         .where('company_id', '=', companyId)
@@ -394,7 +355,7 @@ export async function deleteTaxRate(
     }
 
     // Check if tax rate is in use (basic check - can be expanded)
-    const salesCountResult = await db.kysely
+    const salesCountResult = await db
       .selectFrom('sales_invoice_taxes')
       .where('tax_rate_id', '=', taxRateId)
       .select((eb) => [
@@ -402,7 +363,7 @@ export async function deleteTaxRate(
       ])
       .executeTakeFirst();
 
-    const posCountResult = await db.kysely
+    const posCountResult = await db
       .selectFrom('pos_transaction_taxes')
       .where('tax_rate_id', '=', taxRateId)
       .select((eb) => [
@@ -415,7 +376,7 @@ export async function deleteTaxRate(
       throw new TaxRateValidationError("Cannot delete tax rate that is in use");
     }
 
-    const result = await db.kysely
+    const result = await db
       .deleteFrom('tax_rates')
       .where('company_id', '=', companyId)
       .where('id', '=', taxRateId)
@@ -435,10 +396,9 @@ export async function listTaxRates(
     offset?: number;
   } = {}
 ): Promise<TaxRate[]> {
-  const pool = getDbPool();
-  const db = new DbConn(pool);
+  const db = getDb();
   
-  let query = db.kysely
+  let query = db
     .selectFrom('tax_rates')
     .where('company_id', '=', companyId)
     .select([
@@ -472,13 +432,22 @@ export async function listCompanyTaxRates(
   executor: QueryExecutor,
   companyId: number
 ): Promise<TaxRateRecord[]> {
-  const [rows] = await executor.execute<TaxRateRow[]>(
-    `SELECT id, company_id, code, name, rate_percent, account_id, is_inclusive, is_active
-     FROM tax_rates
-     WHERE company_id = ?
-     ORDER BY name ASC, id ASC`,
-    [companyId]
-  );
+  const rows = await executor
+    .selectFrom('tax_rates')
+    .where('company_id', '=', companyId)
+    .select([
+      'id',
+      'company_id',
+      'code',
+      'name',
+      'rate_percent',
+      'account_id',
+      'is_inclusive',
+      'is_active'
+    ])
+    .orderBy('name', 'asc')
+    .orderBy('id', 'asc')
+    .execute();
 
   return rows.map((row) => ({
     id: Number(row.id),
@@ -496,33 +465,39 @@ export async function listCompanyDefaultTaxRateIds(
   executor: QueryExecutor,
   companyId: number
 ): Promise<number[]> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT tax_rate_id
-     FROM company_tax_defaults
-     WHERE company_id = ?
-     ORDER BY tax_rate_id ASC`,
-    [companyId]
-  );
+  const rows = await executor
+    .selectFrom('company_tax_defaults')
+    .where('company_id', '=', companyId)
+    .select(['tax_rate_id'])
+    .orderBy('tax_rate_id', 'asc')
+    .execute();
 
-  return (rows as Array<{ tax_rate_id?: number }>).map((row) => Number(row.tax_rate_id)).filter((id) => id > 0);
+  return rows.map((row) => Number(row.tax_rate_id)).filter((id) => id > 0);
 }
 
 export async function listCompanyDefaultTaxRates(
   executor: QueryExecutor,
   companyId: number
 ): Promise<TaxRateRecord[]> {
-  const [rows] = await executor.execute<TaxRateRow[]>(
-    `SELECT tr.id, tr.company_id, tr.code, tr.name, tr.rate_percent, tr.account_id, tr.is_inclusive, tr.is_active
-     FROM company_tax_defaults ctd
-     INNER JOIN tax_rates tr
-       ON tr.id = ctd.tax_rate_id
-       AND tr.company_id = ctd.company_id
-     WHERE ctd.company_id = ?
-       AND tr.company_id = ?
-       AND tr.is_active = 1
-     ORDER BY tr.name ASC, tr.id ASC`,
-    [companyId, companyId]
-  );
+  const rows = await executor
+    .selectFrom('company_tax_defaults as ctd')
+    .innerJoin('tax_rates as tr', 'tr.id', 'ctd.tax_rate_id')
+    .where('ctd.company_id', '=', companyId)
+    .where('tr.company_id', '=', companyId)
+    .where('tr.is_active', '=', 1)
+    .select([
+      'tr.id',
+      'tr.company_id',
+      'tr.code',
+      'tr.name',
+      'tr.rate_percent',
+      'tr.account_id',
+      'tr.is_inclusive',
+      'tr.is_active'
+    ])
+    .orderBy('tr.name', 'asc')
+    .orderBy('tr.id', 'asc')
+    .execute();
 
   return rows.map((row) => ({
     id: Number(row.id),
@@ -543,18 +518,22 @@ export async function setCompanyDefaultTaxRates(
   userId: number
 ): Promise<number[]> {
   // Delete existing defaults
-  await executor.execute(
-    "DELETE FROM company_tax_defaults WHERE company_id = ?",
-    [companyId]
-  );
+  await executor
+    .deleteFrom('company_tax_defaults')
+    .where('company_id', '=', companyId)
+    .execute();
 
   // Insert new defaults
   for (const taxRateId of taxRateIds) {
-    await executor.execute(
-      `INSERT INTO company_tax_defaults (company_id, tax_rate_id, created_by_user_id, updated_by_user_id)
-       VALUES (?, ?, ?, ?)`,
-      [companyId, taxRateId, userId, userId]
-    );
+    await executor
+      .insertInto('company_tax_defaults')
+      .values({
+        company_id: companyId,
+        tax_rate_id: taxRateId,
+        created_by_user_id: userId,
+        updated_by_user_id: userId
+      })
+      .execute();
   }
 
   // Return the updated default tax rate IDs
@@ -629,6 +608,6 @@ export async function withTaxExecutor<T>(
     return operation(executor);
   }
 
-  const pool = getDbPool();
-  return operation(pool);
+  const db = getDb();
+  return operation(db);
 }

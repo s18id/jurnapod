@@ -1,10 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { sql } from "kysely";
 import { toRfc3339Required } from "@jurnapod/shared";
-import { getDbPool } from "../db.js";
+import { getDb, type KyselySchema } from "../db.js";
 import {
   DatabaseConflictError,
   DatabaseForbiddenError,
@@ -19,23 +18,6 @@ import {
 } from "../shared/master-data-utils.js";
 import { ensureUserHasOutletAccess } from "../shared/common-utils.js";
 
-type ItemPriceRow = RowDataPacket & {
-  id: number;
-  company_id: number;
-  outlet_id: number | null;
-  item_id: number;
-  variant_id: number | null;
-  price: string | number;
-  is_active: number;
-  updated_at: string;
-  item_group_id?: number | null;
-  item_group_name?: string | null;
-};
-
-type QueryExecutor = {
-  execute: PoolConnection["execute"];
-};
-
 type MutationAuditActor = {
   userId: number;
   canManageCompanyDefaults?: boolean;
@@ -48,7 +30,7 @@ const itemPriceAuditActions = {
 } as const;
 
 async function recordItemPriceAuditLog(
-  executor: QueryExecutor,
+  db: KyselySchema,
   input: {
     companyId: number;
     outletId: number | null;
@@ -57,7 +39,7 @@ async function recordItemPriceAuditLog(
     payload: Record<string, unknown>;
   }
 ): Promise<void> {
-  await recordMasterDataAuditLog(executor, {
+  await recordMasterDataAuditLog(db, {
     companyId: input.companyId,
     outletId: input.outletId,
     actor: input.actor,
@@ -66,7 +48,18 @@ async function recordItemPriceAuditLog(
   });
 }
 
-function normalizeItemPrice(row: ItemPriceRow) {
+function normalizeItemPrice(row: {
+  id: number;
+  company_id: number;
+  outlet_id: number | null;
+  item_id: number;
+  variant_id: number | null;
+  price: string | number;
+  is_active: number;
+  updated_at: string | Date;
+  item_group_id?: number | null;
+  item_group_name?: string | null;
+}) {
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
@@ -77,126 +70,132 @@ function normalizeItemPrice(row: ItemPriceRow) {
     is_active: row.is_active === 1,
     item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
     item_group_name: row.item_group_name ?? null,
-    updated_at: toRfc3339Required(row.updated_at)
+    updated_at: toRfc3339Required(row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at)
   };
 }
 
 async function ensureCompanyItemExists(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   itemId: number
 ): Promise<void> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id
-     FROM items
-     WHERE id = ?
-       AND company_id = ?
-     LIMIT 1`,
-    [itemId, companyId]
-  );
+  const row = await db
+    .selectFrom("items")
+    .where("id", "=", itemId)
+    .where("company_id", "=", companyId)
+    .select(["id"])
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     throw new DatabaseReferenceError("Item not found for company");
   }
 }
 
 async function ensureCompanyOutletExists(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   outletId: number
 ): Promise<void> {
-  const [rows] = await executor.execute<RowDataPacket[]>(
-    `SELECT id
-     FROM outlets
-     WHERE id = ?
-       AND company_id = ?
-     LIMIT 1`,
-    [outletId, companyId]
-  );
+  const row = await db
+    .selectFrom("outlets")
+    .where("id", "=", outletId)
+    .where("company_id", "=", companyId)
+    .select(["id"])
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!row) {
     throw new DatabaseReferenceError("Outlet not found for company");
   }
 }
 
 async function findItemPriceByIdWithExecutor(
-  executor: QueryExecutor,
+  db: KyselySchema,
   companyId: number,
   itemPriceId: number,
   options?: { forUpdate?: boolean }
 ) {
-  const forUpdateClause = options?.forUpdate ? " FOR UPDATE" : "";
-  const [rows] = await executor.execute<ItemPriceRow[]>(
-    `SELECT id, company_id, outlet_id, item_id, variant_id, price, is_active, updated_at
-     FROM item_prices
-     WHERE company_id = ?
-       AND id = ?
-     LIMIT 1${forUpdateClause}`,
-    [companyId, itemPriceId]
-  );
+  let query = db
+    .selectFrom("item_prices")
+    .where("company_id", "=", companyId)
+    .where("id", "=", itemPriceId)
+    .select(["id", "company_id", "outlet_id", "item_id", "variant_id", "price", "is_active", "updated_at"]);
 
-  if (!rows[0]) {
+  if (options?.forUpdate) {
+    query = query.forUpdate();
+  }
+
+  const row = await query.executeTakeFirst();
+
+  if (!row) {
     return null;
   }
 
-  return normalizeItemPrice(rows[0]);
+  return normalizeItemPrice(row);
 }
 
 export async function listItemPrices(
   companyId: number,
   filters?: { outletId?: number; outletIds?: readonly number[]; isActive?: boolean; includeDefaults?: boolean; variantId?: number | null }
 ) {
-  const pool = getDbPool();
-  const values: Array<number | null> = [companyId];
+  const db = getDb();
 
-  let sql =
-    "SELECT ip.id, ip.company_id, ip.outlet_id, ip.item_id, ip.variant_id, ip.price, ip.is_active, ip.updated_at, i.item_group_id, ig.name AS item_group_name " +
-    "FROM item_prices ip " +
-    "INNER JOIN items i ON i.id = ip.item_id AND i.company_id = ip.company_id " +
-    "LEFT JOIN item_groups ig ON ig.id = i.item_group_id AND ig.company_id = ip.company_id " +
-    "WHERE ip.company_id = ?";
+  let query = db
+    .selectFrom("item_prices as ip")
+    .innerJoin("items as i", "i.id", "ip.item_id")
+    .leftJoin("item_groups as ig", "ig.id", "i.item_group_id")
+    .where("ip.company_id", "=", companyId)
+    .where("i.company_id", "=", companyId)
+    .select([
+      "ip.id",
+      "ip.company_id",
+      "ip.outlet_id",
+      "ip.item_id",
+      "ip.variant_id",
+      "ip.price",
+      "ip.is_active",
+      "ip.updated_at",
+      "i.item_group_id",
+      "ig.name as item_group_name"
+    ]);
 
   if (typeof filters?.outletId === "number") {
     if (filters.includeDefaults !== false) {
-      sql += " AND (ip.outlet_id = ? OR ip.outlet_id IS NULL)";
-      values.push(filters.outletId);
+      query = query.where((eb) => eb.or([
+        eb("ip.outlet_id", "=", filters.outletId!),
+        eb("ip.outlet_id", "is", null)
+      ]));
     } else {
-      sql += " AND ip.outlet_id = ?";
-      values.push(filters.outletId);
+      query = query.where("ip.outlet_id", "=", filters.outletId);
     }
   } else if (Array.isArray(filters?.outletIds)) {
     if (filters.outletIds.length === 0) {
       return [];
     }
 
-    const outletPlaceholders = filters.outletIds.map(() => "?").join(", ");
     if (filters.includeDefaults !== false) {
-      sql += ` AND (ip.outlet_id IN (${outletPlaceholders}) OR ip.outlet_id IS NULL)`;
-      values.push(...filters.outletIds);
+      query = query.where((eb) => eb.or([
+        eb("ip.outlet_id", "in", filters.outletIds as number[]),
+        eb("ip.outlet_id", "is", null)
+      ]));
     } else {
-      sql += ` AND ip.outlet_id IN (${outletPlaceholders})`;
-      values.push(...filters.outletIds);
+      query = query.where("ip.outlet_id", "in", filters.outletIds as number[]);
     }
   }
 
   if (typeof filters?.isActive === "boolean") {
-    sql += " AND ip.is_active = ?";
-    values.push(filters.isActive ? 1 : 0);
+    query = query.where("ip.is_active", "=", filters.isActive ? 1 : 0);
   }
 
   // Filter by variant_id
   if (filters?.variantId !== undefined) {
     if (filters.variantId === null) {
-      sql += " AND ip.variant_id IS NULL";
+      query = query.where("ip.variant_id", "is", null);
     } else {
-      sql += " AND ip.variant_id = ?";
-      values.push(filters.variantId);
+      query = query.where("ip.variant_id", "=", filters.variantId);
     }
   }
 
-  sql += " ORDER BY ip.outlet_id IS NULL ASC, ip.outlet_id DESC, ip.id ASC";
-
-  const [rows] = await pool.execute<ItemPriceRow[]>(sql, values);
+  const rows = await query.orderBy("ip.outlet_id", "asc").orderBy("ip.id", "asc").execute();
   return rows.map(normalizeItemPrice);
 }
 
@@ -205,10 +204,10 @@ export async function listEffectiveItemPricesForOutlet(
   outletId: number,
   filters?: { isActive?: boolean }
 ) {
-  const pool = getDbPool();
+  const db = getDb();
   const values: Array<number> = [outletId, outletId, companyId];
 
-  let sql = `
+  let sqlQuery = `
     SELECT 
       COALESCE(override.id, def.id) AS id,
       COALESCE(override.company_id, def.company_id) AS company_id,
@@ -233,16 +232,31 @@ export async function listEffectiveItemPricesForOutlet(
   `;
 
   if (typeof filters?.isActive === "boolean") {
-    sql += " AND COALESCE(override.is_active, def.is_active) = ?";
+    sqlQuery += " AND COALESCE(override.is_active, def.is_active) = ?";
     values.push(filters.isActive ? 1 : 0);
-    sql += " AND i.is_active = ?";
+    sqlQuery += " AND i.is_active = ?";
     values.push(filters.isActive ? 1 : 0);
   }
 
-  sql += " ORDER BY i.id ASC";
+  sqlQuery += " ORDER BY i.id ASC";
 
-  const [rows] = await pool.execute<(ItemPriceRow & { is_override: number })[]>(sql, values);
-  return rows.map((row) => {
+  type ItemPriceRow = {
+    id: number;
+    company_id: number;
+    outlet_id: number | null;
+    item_id: number;
+    variant_id: number | null;
+    price: number | string;
+    is_active: number;
+    updated_at: Date | string;
+    item_group_id: number | null;
+    item_group_name: string | null;
+    is_override: number;
+  };
+
+  const rows = await sql<ItemPriceRow>`${sqlQuery}`.execute(db);
+
+  return rows.rows.map((row) => {
     const normalized = normalizeItemPrice(row);
     return {
       ...normalized,
@@ -253,8 +267,8 @@ export async function listEffectiveItemPricesForOutlet(
 }
 
 export async function findItemPriceById(companyId: number, itemPriceId: number) {
-  const pool = getDbPool();
-  return findItemPriceByIdWithExecutor(pool, companyId, itemPriceId);
+  const db = getDb();
+  return findItemPriceByIdWithExecutor(db, companyId, itemPriceId);
 }
 
 export async function createItemPrice(
@@ -268,41 +282,56 @@ export async function createItemPrice(
   },
   actor?: MutationAuditActor
 ) {
-  return withTransaction(async (connection) => {
+  const db = getDb();
+  return withTransaction(db, async (trx) => {
     if (input.outlet_id === null && actor && actor.canManageCompanyDefaults !== true) {
       throw new DatabaseForbiddenError("Company defaults require OWNER or COMPANY_ADMIN role");
     }
 
-    await ensureCompanyItemExists(connection, companyId, input.item_id);
+    await ensureCompanyItemExists(trx, companyId, input.item_id);
 
     if (input.outlet_id !== null) {
-      await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
+      await ensureCompanyOutletExists(trx, companyId, input.outlet_id);
     }
 
     // If variant_id is provided, validate it belongs to the item
     if (input.variant_id != null) {
-      const [variantRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM item_variants WHERE id = ? AND item_id = ? AND company_id = ? LIMIT 1`,
-        [input.variant_id, input.item_id, companyId]
-      );
-      if (variantRows.length === 0) {
+      const variantRow = await trx
+        .selectFrom("item_variants")
+        .where("id", "=", input.variant_id)
+        .where("item_id", "=", input.item_id)
+        .where("company_id", "=", companyId)
+        .select(["id"])
+        .executeTakeFirst();
+      if (!variantRow) {
         throw new DatabaseReferenceError("Variant not found for item");
       }
     }
 
     try {
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO item_prices (company_id, outlet_id, item_id, variant_id, price, is_active)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [companyId, input.outlet_id, input.item_id, input.variant_id ?? null, input.price, input.is_active === false ? 0 : 1]
-      );
+      const result = await trx
+        .insertInto("item_prices")
+        .values({
+          company_id: companyId,
+          outlet_id: input.outlet_id,
+          item_id: input.item_id,
+          variant_id: input.variant_id ?? null,
+          price: input.price,
+          is_active: input.is_active === false ? 0 : 1
+        })
+        .returningAll()
+        .executeTakeFirst();
 
-      const itemPrice = await findItemPriceByIdWithExecutor(connection, companyId, Number(result.insertId));
+      if (!result) {
+        throw new Error("Created item price not found");
+      }
+
+      const itemPrice = await findItemPriceByIdWithExecutor(trx, companyId, Number(result.id));
       if (!itemPrice) {
         throw new Error("Created item price not found");
       }
 
-      await recordItemPriceAuditLog(connection, {
+      await recordItemPriceAuditLog(trx, {
         companyId,
         outletId: itemPrice.outlet_id,
         actor,
@@ -344,21 +373,19 @@ export async function updateItemPrice(
   },
   actor?: MutationAuditActor
 ) {
-  const fields: string[] = [];
-  const values: Array<number | null> = [];
+  const db = getDb();
+  const fields: Array<{ field: string; value: unknown }> = [];
 
   if (typeof input.price === "number") {
-    fields.push("price = ?");
-    values.push(input.price);
+    fields.push({ field: "price", value: input.price });
   }
 
   if (typeof input.is_active === "boolean") {
-    fields.push("is_active = ?");
-    values.push(input.is_active ? 1 : 0);
+    fields.push({ field: "is_active", value: input.is_active ? 1 : 0 });
   }
 
-  return withTransaction(async (connection) => {
-    const before = await findItemPriceByIdWithExecutor(connection, companyId, itemPriceId, {
+  return withTransaction(db, async (trx) => {
+    const before = await findItemPriceByIdWithExecutor(trx, companyId, itemPriceId, {
       forUpdate: true
     });
     if (!before) {
@@ -374,9 +401,8 @@ export async function updateItemPrice(
     }
 
     if (typeof input.item_id === "number") {
-      await ensureCompanyItemExists(connection, companyId, input.item_id);
-      fields.push("item_id = ?");
-      values.push(input.item_id);
+      await ensureCompanyItemExists(trx, companyId, input.item_id);
+      fields.push({ field: "item_id", value: input.item_id });
     }
 
     if (Object.hasOwn(input, "outlet_id")) {
@@ -384,34 +410,33 @@ export async function updateItemPrice(
         if (actor && actor.canManageCompanyDefaults !== true) {
           throw new DatabaseForbiddenError("Company defaults require OWNER or COMPANY_ADMIN role");
         }
-        fields.push("outlet_id = ?");
-        values.push(null);
+        fields.push({ field: "outlet_id", value: null });
       } else if (typeof input.outlet_id === "number") {
         if (actor) {
           await ensureUserHasOutletAccess(actor.userId, companyId, input.outlet_id);
         }
-        await ensureCompanyOutletExists(connection, companyId, input.outlet_id);
-        fields.push("outlet_id = ?");
-        values.push(input.outlet_id);
+        await ensureCompanyOutletExists(trx, companyId, input.outlet_id);
+        fields.push({ field: "outlet_id", value: input.outlet_id });
       }
     }
 
     if (Object.hasOwn(input, "variant_id")) {
       if (input.variant_id === null) {
-        fields.push("variant_id = ?");
-        values.push(null);
+        fields.push({ field: "variant_id", value: null });
       } else if (typeof input.variant_id === "number") {
         // Validate variant belongs to the item
         const itemId = input.item_id ?? before.item_id;
-        const [variantRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id FROM item_variants WHERE id = ? AND item_id = ? AND company_id = ? LIMIT 1`,
-          [input.variant_id, itemId, companyId]
-        );
-        if (variantRows.length === 0) {
+        const variantRow = await trx
+          .selectFrom("item_variants")
+          .where("id", "=", input.variant_id)
+          .where("item_id", "=", itemId)
+          .where("company_id", "=", companyId)
+          .select(["id"])
+          .executeTakeFirst();
+        if (!variantRow) {
           throw new DatabaseReferenceError("Variant not found for item");
         }
-        fields.push("variant_id = ?");
-        values.push(input.variant_id);
+        fields.push({ field: "variant_id", value: input.variant_id });
       }
     }
 
@@ -419,50 +444,42 @@ export async function updateItemPrice(
       return before;
     }
 
-    values.push(companyId, itemPriceId);
-
-    try {
-      await connection.execute<ResultSetHeader>(
-        `UPDATE item_prices
-         SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ?
-           AND id = ?`,
-        values
-      );
-
-      const itemPrice = await findItemPriceByIdWithExecutor(connection, companyId, itemPriceId);
-      if (!itemPrice) {
-        return null;
-      }
-
-      await recordItemPriceAuditLog(connection, {
-        companyId,
-        outletId: itemPrice.outlet_id,
-        actor,
-        action: itemPriceAuditActions.update,
-        payload: {
-          item_price_id: itemPrice.id,
-          before,
-          after: itemPrice
-        }
-      });
-
-      // Clear price cache when price updated
-      const { clearPriceCache } = await import("../pricing/variant-price-resolver.js");
-      clearPriceCache();
-
-      return itemPrice;
-    } catch (error) {
-      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
-        throw new DatabaseConflictError("Duplicate item price");
-      }
-
-      if (isMysqlError(error) && error.errno === mysqlForeignKeyErrorCode) {
-        throw new DatabaseReferenceError("Invalid company references");
-      }
-
-      throw error;
+    // Build and execute update query
+    const updateData: Record<string, unknown> = {};
+    for (const { field, value } of fields) {
+      updateData[field] = value;
     }
+    updateData.updated_at = new Date();
+
+    await trx
+      .updateTable("item_prices")
+      .set(updateData)
+      .where("company_id", "=", companyId)
+      .where("id", "=", itemPriceId)
+      .execute();
+
+    const itemPrice = await findItemPriceByIdWithExecutor(trx, companyId, itemPriceId);
+    if (!itemPrice) {
+      return null;
+    }
+
+    await recordItemPriceAuditLog(trx, {
+      companyId,
+      outletId: itemPrice.outlet_id,
+      actor,
+      action: itemPriceAuditActions.update,
+      payload: {
+        item_price_id: itemPrice.id,
+        before,
+        after: itemPrice
+      }
+    });
+
+    // Clear price cache when price updated
+    const { clearPriceCache } = await import("../pricing/variant-price-resolver.js");
+    clearPriceCache();
+
+    return itemPrice;
   });
 }
 
@@ -471,8 +488,9 @@ export async function deleteItemPrice(
   itemPriceId: number,
   actor?: MutationAuditActor
 ): Promise<boolean> {
-  return withTransaction(async (connection) => {
-    const before = await findItemPriceByIdWithExecutor(connection, companyId, itemPriceId, {
+  const db = getDb();
+  return withTransaction(db, async (trx) => {
+    const before = await findItemPriceByIdWithExecutor(trx, companyId, itemPriceId, {
       forUpdate: true
     });
     if (!before) {
@@ -487,14 +505,13 @@ export async function deleteItemPrice(
       throw new DatabaseForbiddenError("Company defaults require OWNER or COMPANY_ADMIN role");
     }
 
-    await connection.execute<ResultSetHeader>(
-      `DELETE FROM item_prices
-       WHERE company_id = ?
-         AND id = ?`,
-      [companyId, itemPriceId]
-    );
+    await trx
+      .deleteFrom("item_prices")
+      .where("company_id", "=", companyId)
+      .where("id", "=", itemPriceId)
+      .execute();
 
-    await recordItemPriceAuditLog(connection, {
+    await recordItemPriceAuditLog(trx, {
       companyId,
       outletId: before.outlet_id,
       actor,

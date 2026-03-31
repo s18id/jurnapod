@@ -1,16 +1,15 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-/**
- * Reservations Domain Module - Availability & Overlap Checking
- *
- * This file contains functions for checking table availability and reservation overlap.
- * Part of Story 6.5c (Reservations Domain Extraction).
- */
+// /**
+//  * Reservations Domain Module - Availability & Overlap Checking
+//  *
+//  * This file contains functions for checking table availability and reservation overlap.
+//  * Part of Story 6.5c (Reservations Domain Extraction).
+//  */
 
-import type { RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
-import { getDbPool } from "../db";
+import { sql } from "kysely";
+import type { KyselySchema } from "../db";
 import {
   OutletTableStatusId,
   type ReservationStatus
@@ -41,29 +40,29 @@ import { toUnixMs, fromUnixMs, resolveEffectiveDurationMinutes } from "./utils";
  * Get table occupancy snapshot with row lock (FOR UPDATE)
  */
 export async function getTableOccupancySnapshotWithConnection(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: bigint,
   outletId: bigint,
   tableId: bigint
 ): Promise<{ statusId: number; version: number; reservationId: bigint | null } | null> {
-  const [rows] = await connection.execute<OccupancySnapshotRow[]>(
-    `SELECT status_id, version, reservation_id
+  const result = await sql<OccupancySnapshotRow>`
+    SELECT status_id, version, reservation_id
      FROM table_occupancy
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND table_id = ?
-     FOR UPDATE`,
-    [companyId, outletId, tableId]
-  );
+     WHERE company_id = ${companyId}
+       AND outlet_id = ${outletId}
+       AND table_id = ${tableId}
+     FOR UPDATE
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (result.rows.length === 0) {
     return null;
   }
 
-  const reservationIdRaw = rows[0].reservation_id;
+  const row = result.rows[0]!;
+  const reservationIdRaw = row.reservation_id;
   return {
-    statusId: Number(rows[0].status_id),
-    version: Number(rows[0].version),
+    statusId: Number(row.status_id),
+    version: Number(row.version),
     reservationId: reservationIdRaw == null ? null : BigInt(String(reservationIdRaw))
   };
 }
@@ -76,32 +75,31 @@ export async function getTableOccupancySnapshotWithConnection(
  * Read table record with row lock (FOR UPDATE)
  */
 export async function readTableForUpdate(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   tableId: number
 ): Promise<OutletTableRow> {
-  const [rows] = await connection.execute<OutletTableRow[]>(
-    `SELECT id, status
+  const result = await sql<OutletTableRow>`
+    SELECT id, status
      FROM outlet_tables
-     WHERE company_id = ? AND outlet_id = ? AND id = ?
+     WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id = ${tableId}
      LIMIT 1
-     FOR UPDATE`,
-    [companyId, outletId, tableId]
-  );
+     FOR UPDATE
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (result.rows.length === 0) {
     throw new ReservationValidationError(`Table ${tableId} not found in outlet`);
   }
 
-  return rows[0];
+  return result.rows[0]!;
 }
 
 /**
  * Set table status in outlet_tables
  */
 export async function setTableStatus(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   tableId: number,
@@ -116,12 +114,11 @@ export async function setTableStatus(
           ? OutletTableStatusId.RESERVED
           : OutletTableStatusId.AVAILABLE;
 
-  await connection.execute(
-    `UPDATE outlet_tables
-     SET status = ?, status_id = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE company_id = ? AND outlet_id = ? AND id = ?`,
-    [status, statusId, companyId, outletId, tableId]
-  );
+  await sql`
+    UPDATE outlet_tables
+     SET status = ${status}, status_id = ${statusId}, updated_at = CURRENT_TIMESTAMP
+     WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id = ${tableId}
+  `.execute(db);
 }
 
 // ============================================================================
@@ -132,23 +129,22 @@ export async function setTableStatus(
  * Check if table has an open dine-in order
  */
 export async function hasOpenDineInOrderOnTable(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   tableId: number
 ): Promise<boolean> {
-  const [rows] = await connection.execute<Array<RowDataPacket & { count_open: number }>>(
-    `SELECT COUNT(*) AS count_open
+  const result = await sql<{ count_open: number }>`
+    SELECT COUNT(*) AS count_open
      FROM pos_order_snapshots
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND table_id = ?
+     WHERE company_id = ${companyId}
+       AND outlet_id = ${outletId}
+       AND table_id = ${tableId}
        AND order_state = 'OPEN'
-       AND service_type = 'DINE_IN'`,
-    [companyId, outletId, tableId]
-  );
+       AND service_type = 'DINE_IN'
+  `.execute(db);
 
-  return Number(rows[0]?.count_open ?? 0) > 0;
+  return Number(result.rows[0]?.count_open ?? 0) > 0;
 }
 
 // ============================================================================
@@ -159,54 +155,46 @@ export async function hasOpenDineInOrderOnTable(
  * Recompute table status based on reservations and open orders
  */
 export async function recomputeTableStatus(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   tableId: number
 ): Promise<void> {
-  const table = await readTableForUpdate(connection, companyId, outletId, tableId);
+  const table = await readTableForUpdate(db, companyId, outletId, tableId);
   if (table.status === "UNAVAILABLE") {
     return;
   }
 
-  const hasOpenDineIn = await hasOpenDineInOrderOnTable(connection, companyId, outletId, tableId);
+  const hasOpenDineIn = await hasOpenDineInOrderOnTable(db, companyId, outletId, tableId);
   if (hasOpenDineIn) {
-    await setTableStatus(connection, companyId, outletId, tableId, "OCCUPIED");
+    await setTableStatus(db, companyId, outletId, tableId, "OCCUPIED");
     return;
   }
 
-  const [rows] = await connection.execute<
-    Array<
-      RowDataPacket & {
-        count_seated: number;
-        count_pre_seated: number;
-      }
-    >
-  >(
-    `SELECT
+  const result = await sql<{ count_seated: number; count_pre_seated: number }>`
+    SELECT
        SUM(CASE WHEN status = 'SEATED' THEN 1 ELSE 0 END) AS count_seated,
        SUM(CASE WHEN status IN ('BOOKED', 'CONFIRMED', 'ARRIVED') THEN 1 ELSE 0 END) AS count_pre_seated
      FROM reservations
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND table_id = ?`,
-    [companyId, outletId, tableId]
-  );
+     WHERE company_id = ${companyId}
+       AND outlet_id = ${outletId}
+       AND table_id = ${tableId}
+  `.execute(db);
 
-  const seatedCount = Number(rows[0]?.count_seated ?? 0);
-  const preSeatedCount = Number(rows[0]?.count_pre_seated ?? 0);
+  const seatedCount = Number(result.rows[0]?.count_seated ?? 0);
+  const preSeatedCount = Number(result.rows[0]?.count_pre_seated ?? 0);
 
   if (seatedCount > 0) {
-    await setTableStatus(connection, companyId, outletId, tableId, "OCCUPIED");
+    await setTableStatus(db, companyId, outletId, tableId, "OCCUPIED");
     return;
   }
 
   if (preSeatedCount > 0) {
-    await setTableStatus(connection, companyId, outletId, tableId, "RESERVED");
+    await setTableStatus(db, companyId, outletId, tableId, "RESERVED");
     return;
   }
 
-  await setTableStatus(connection, companyId, outletId, tableId, "AVAILABLE");
+  await setTableStatus(db, companyId, outletId, tableId, "AVAILABLE");
 }
 
 // ============================================================================
@@ -217,24 +205,24 @@ export async function recomputeTableStatus(
  * Check if table has an active (non-final) reservation
  */
 export async function hasActiveReservationOnTable(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   tableId: number,
   exceptReservationId?: number
 ): Promise<boolean> {
-  const [rows] = await connection.execute<Array<RowDataPacket & { count_active: number }>>(
-    `SELECT COUNT(*) AS count_active
+  const exceptId = exceptReservationId ?? null;
+  const result = await sql<{ count_active: number }>`
+    SELECT COUNT(*) AS count_active
      FROM reservations
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND table_id = ?
+     WHERE company_id = ${companyId}
+       AND outlet_id = ${outletId}
+       AND table_id = ${tableId}
        AND status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
-       AND (? IS NULL OR id <> ?)`,
-    [companyId, outletId, tableId, exceptReservationId ?? null, exceptReservationId ?? null]
-  );
+       AND (${exceptId} IS NULL OR id <> ${exceptId})
+  `.execute(db);
 
-  return Number(rows[0]?.count_active ?? 0) > 0;
+  return Number(result.rows[0]?.count_active ?? 0) > 0;
 }
 
 // ============================================================================
@@ -246,7 +234,7 @@ export async function hasActiveReservationOnTable(
  * Overlap exists if: existing_start < new_end AND existing_end > new_start
  */
 export async function checkReservationOverlap(
-  connection: PoolConnection,
+  db: KyselySchema,
   companyId: bigint,
   outletId: bigint,
   tableId: bigint | null,
@@ -261,53 +249,70 @@ export async function checkReservationOverlap(
   const newStartTs = toUnixMs(reservationTime);
   const newEndTs = newStartTs + durationMinutes * 60000;
 
-  const canonicalSql = `
+  let canonicalQuery = sql<{ count: number }>`
     SELECT COUNT(*) as count
     FROM reservations
-    WHERE company_id = ?
-      AND outlet_id = ?
-      AND table_id = ?
+    WHERE company_id = ${companyId}
+      AND outlet_id = ${outletId}
+      AND table_id = ${tableId}
       AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
       AND reservation_start_ts IS NOT NULL
       AND reservation_end_ts IS NOT NULL
-      AND reservation_start_ts < ?
-      AND reservation_end_ts > ?
-      ${excludeReservationId ? 'AND id != ?' : ''}
+      AND reservation_start_ts < ${newEndTs}
+      AND reservation_end_ts > ${newStartTs}
   `;
 
-  const canonicalParams: (bigint | number)[] = [companyId, outletId, tableId, newEndTs, newStartTs];
   if (excludeReservationId) {
-    canonicalParams.push(excludeReservationId);
+    canonicalQuery = sql<{ count: number }>`
+      SELECT COUNT(*) as count
+      FROM reservations
+      WHERE company_id = ${companyId}
+        AND outlet_id = ${outletId}
+        AND table_id = ${tableId}
+        AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
+        AND reservation_start_ts IS NOT NULL
+        AND reservation_end_ts IS NOT NULL
+        AND reservation_start_ts < ${newEndTs}
+        AND reservation_end_ts > ${newStartTs}
+        AND id <> ${excludeReservationId}
+    `;
   }
 
-  const [canonicalRows] = await connection.execute<Array<RowDataPacket & { count: number }>>(canonicalSql, canonicalParams);
-  if (Number(canonicalRows[0]?.count ?? 0) > 0) {
+  const canonicalResult = await canonicalQuery.execute(db);
+  if (Number(canonicalResult.rows[0]?.count ?? 0) > 0) {
     return true;
   }
 
-  const legacySql = `
+  let legacyQuery = sql<LegacyOverlapRow>`
     SELECT reservation_start_ts, reservation_end_ts, reservation_at, duration_minutes
     FROM reservations
-    WHERE company_id = ?
-      AND outlet_id = ?
-      AND table_id = ?
+    WHERE company_id = ${companyId}
+      AND outlet_id = ${outletId}
+      AND table_id = ${tableId}
       AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
       AND (reservation_start_ts IS NULL OR reservation_end_ts IS NULL)
-      ${excludeReservationId ? 'AND id != ?' : ''}
   `;
 
-  const legacyParams: (bigint | number)[] = [companyId, outletId, tableId];
   if (excludeReservationId) {
-    legacyParams.push(excludeReservationId);
+    legacyQuery = sql<LegacyOverlapRow>`
+      SELECT reservation_start_ts, reservation_end_ts, reservation_at, duration_minutes
+      FROM reservations
+      WHERE company_id = ${companyId}
+        AND outlet_id = ${outletId}
+        AND table_id = ${tableId}
+        AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
+        AND (reservation_start_ts IS NULL OR reservation_end_ts IS NULL)
+        AND id <> ${excludeReservationId}
+    `;
   }
 
-  const [legacyRows] = await connection.execute<LegacyOverlapRow[]>(legacySql, legacyParams);
-  if (legacyRows.length === 0) {
+  const legacyResult = await legacyQuery.execute(db);
+  if (legacyResult.rows.length === 0) {
     return false;
   }
 
   const defaultDurationMinutes = await resolveEffectiveDurationMinutes(Number(companyId), null);
-  for (const row of legacyRows) {
+  for (const row of legacyResult.rows) {
     const existingDuration = row.duration_minutes ?? defaultDurationMinutes;
     let existingStartTs = fromUnixMs(row.reservation_start_ts);
     let existingEndTs = fromUnixMs(row.reservation_end_ts);
@@ -341,20 +346,19 @@ export async function checkReservationOverlap(
  * Check if a column exists in a table
  */
 export async function columnExists(
-  connection: PoolConnection,
+  db: KyselySchema,
   tableName: string,
   columnName: string
 ): Promise<boolean> {
   try {
-    const [rows] = await connection.execute<RowDataPacket[]>(
-      `SELECT 1 FROM information_schema.COLUMNS 
+    const result = await sql`
+      SELECT 1 FROM information_schema.COLUMNS 
        WHERE TABLE_SCHEMA = DATABASE() 
-         AND TABLE_NAME = ? 
-         AND COLUMN_NAME = ?
-       LIMIT 1`,
-      [tableName, columnName]
-    );
-    return rows.length > 0;
+         AND TABLE_NAME = ${tableName}
+         AND COLUMN_NAME = ${columnName}
+       LIMIT 1
+    `.execute(db);
+    return result.rows.length > 0;
   } catch {
     return false;
   }

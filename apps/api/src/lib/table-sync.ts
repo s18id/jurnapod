@@ -1,9 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { RowDataPacket, ResultSetHeader } from 'mysql2';
-import type { PoolConnection } from 'mysql2/promise';
-import { getDbPool } from '@/lib/db';
+import { getDb, type KyselySchema } from '@/lib/db';
+import { sql } from 'kysely';
 import {
   type TableSyncPushRequest,
   type TableSyncConflictPayload,
@@ -114,19 +113,18 @@ function isRetryableDbError(error: unknown): boolean {
 }
 
 async function columnExists(
-  connection: PoolConnection,
+  db: KyselySchema,
   tableName: string,
   columnName: string
 ): Promise<boolean> {
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT 1 FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = ?
-       AND COLUMN_NAME = ?
-     LIMIT 1`,
-    [tableName, columnName]
-  );
-  return rows.length > 0;
+  const result = await sql`
+    SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = ${tableName}
+      AND COLUMN_NAME = ${columnName}
+    LIMIT 1
+  `.execute(db);
+  return result.rows.length > 0;
 }
 
 async function resolveReservationDefaultDurationMinutes(companyId: number): Promise<number> {
@@ -168,11 +166,21 @@ async function buildConflictPayload(
   companyId: bigint,
   outletId: bigint
 ): Promise<TableSyncConflictPayload> {
-  const pool = getDbPool();
+  const db = getDb();
 
   // 1. Query current table occupancy with strict tenant/outlet isolation
-  const [occupancyRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT 
+  const occupancyResult = await sql<
+    {
+      status_id: number | null;
+      guest_count: number | null;
+      service_session_id: bigint | null;
+      version: number | null;
+      reservation_id: bigint | null;
+      table_code: string;
+      table_name: string;
+    }
+  >`
+    SELECT 
       to2.status_id,
       to2.guest_count,
       to2.service_session_id,
@@ -184,13 +192,12 @@ async function buildConflictPayload(
     INNER JOIN outlet_tables ot ON to2.table_id = ot.id
       AND to2.company_id = ot.company_id
       AND to2.outlet_id = ot.outlet_id
-    WHERE to2.company_id = ?
-      AND to2.outlet_id = ?
-      AND to2.table_id = ?`,
-    [companyId, outletId, tableId]
-  );
+    WHERE to2.company_id = ${companyId}
+      AND to2.outlet_id = ${outletId}
+      AND to2.table_id = ${tableId}
+  `.execute(db);
 
-  const occupancy = occupancyRows.length > 0 ? occupancyRows[0] : null;
+  const occupancy = occupancyResult.rows.length > 0 ? occupancyResult.rows[0] : null;
 
   // 2. Query active session if exists
   let activeSession: {
@@ -200,31 +207,31 @@ async function buildConflictPayload(
   } | null = null;
 
   if (occupancy?.service_session_id) {
-    const [sessionRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT 
+    const sessionResult = await sql<
+      {
+        id: bigint;
+        status_id: number;
+        started_at: Date;
+      }
+    >`
+      SELECT 
         id,
         status_id,
         started_at
       FROM table_service_sessions
-      WHERE company_id = ?
-        AND outlet_id = ?
-        AND id = ?
-        AND status_id IN (?, ?)
-      LIMIT 1`,
-      [
-        companyId,
-        outletId,
-        occupancy.service_session_id,
-        ServiceSessionStatus.ACTIVE,
-        ServiceSessionStatus.LOCKED_FOR_PAYMENT
-      ]
-    );
+      WHERE company_id = ${companyId}
+        AND outlet_id = ${outletId}
+        AND id = ${occupancy.service_session_id}
+        AND status_id IN (${ServiceSessionStatus.ACTIVE}, ${ServiceSessionStatus.LOCKED_FOR_PAYMENT})
+      LIMIT 1
+    `.execute(db);
 
-    if (sessionRows.length > 0) {
+    if (sessionResult.rows.length > 0) {
+      const sessionRow = sessionResult.rows[0];
       activeSession = {
-        id: Number(sessionRows[0].id),
-        status_id: sessionRows[0].status_id,
-        started_at: sessionRows[0].started_at
+        id: Number(sessionRow.id),
+        status_id: sessionRow.status_id,
+        started_at: sessionRow.started_at.toISOString()
       };
     }
   }
@@ -272,7 +279,7 @@ async function buildConflictPayload(
 export async function pushTableEvents(
   params: PushTableEventsParams
 ): Promise<PushTableEventsResult> {
-  const pool = getDbPool();
+  const db = getDb();
   const results: PushTableEventResult[] = [];
 
   // Convert string IDs to bigints for database operations
@@ -301,13 +308,12 @@ export async function pushTableEvents(
 
       try {
         // 1. TABLE EXISTENCE CHECK: Validate table exists for this company/outlet
-        const [tableRows] = await pool.execute<RowDataPacket[]>(
-          `SELECT id FROM outlet_tables
-           WHERE company_id = ? AND outlet_id = ? AND id = ?`,
-          [companyId, outletId, tableId]
-        );
+        const tableResult = await sql<{ id: bigint }>`
+          SELECT id FROM outlet_tables
+          WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND id = ${tableId}
+        `.execute(db);
 
-        if (tableRows.length === 0) {
+        if (tableResult.rows.length === 0) {
           results.push({
             clientTxId,
             status: "ERROR",
@@ -317,28 +323,27 @@ export async function pushTableEvents(
         }
 
         // 2. IDEMPOTENCY CHECK: Query existing event before transactional apply
-        const [existingEventRows] = await pool.execute<RowDataPacket[]>(
-          `SELECT occupancy_version_after
-           FROM table_events
-           WHERE company_id = ?
-             AND outlet_id = ?
-             AND client_tx_id = ?
-           LIMIT 1`,
-          [companyId, outletId, clientTxId]
-        );
+        const existingEventResult = await sql<{ occupancy_version_after: number | null }>`
+          SELECT occupancy_version_after
+          FROM table_events
+          WHERE company_id = ${companyId}
+            AND outlet_id = ${outletId}
+            AND client_tx_id = ${clientTxId}
+          LIMIT 1
+        `.execute(db);
 
-        if (existingEventRows.length > 0) {
+        if (existingEventResult.rows.length > 0) {
           results.push({
             clientTxId,
             status: 'DUPLICATE',
-            tableVersion: existingEventRows[0].occupancy_version_after ?? undefined,
+            tableVersion: existingEventResult.rows[0].occupancy_version_after ?? undefined,
           });
           break;
         }
 
         // 3. TRANSACTIONAL MUTATION APPLY
         const result = await applyTableEventWithTransaction({
-          pool,
+          db,
           companyId,
           outletId,
           tableId,
@@ -350,21 +355,20 @@ export async function pushTableEvents(
         break;
       } catch (error) {
         if ((error as { code?: string })?.code === 'ER_DUP_ENTRY') {
-          const [existingEventRows] = await pool.execute<RowDataPacket[]>(
-            `SELECT occupancy_version_after
-             FROM table_events
-             WHERE company_id = ?
-               AND outlet_id = ?
-               AND client_tx_id = ?
-             LIMIT 1`,
-            [companyId, outletId, clientTxId]
-          );
+          const existingEventDupResult = await sql<{ occupancy_version_after: number | null }>`
+            SELECT occupancy_version_after
+            FROM table_events
+            WHERE company_id = ${companyId}
+              AND outlet_id = ${outletId}
+              AND client_tx_id = ${clientTxId}
+            LIMIT 1
+          `.execute(db);
 
           results.push({
             clientTxId,
             status: 'DUPLICATE',
-            tableVersion: existingEventRows.length > 0
-              ? (existingEventRows[0].occupancy_version_after ?? undefined)
+            tableVersion: existingEventDupResult.rows.length > 0
+              ? (existingEventDupResult.rows[0].occupancy_version_after ?? undefined)
               : undefined,
           });
           break;
@@ -400,41 +404,44 @@ export async function pushTableEvents(
  * Handles all event types: HOLD, SEAT, RELEASE, MERGE, SPLIT, etc.
  */
 async function applyTableEventWithTransaction(params: {
-  pool: ReturnType<typeof getDbPool>;
+  db: KyselySchema;
   companyId: bigint;
   outletId: bigint;
   tableId: bigint;
   event: PushTableEventsParams['events'][number];
   actorId: number;
 }): Promise<PushTableEventResult> {
-  const { pool, companyId, outletId, tableId, event, actorId } = params;
-  
+  const { db, companyId, outletId, tableId, event, actorId } = params;
+
   // Guard: Validate required parameters
   if (tableId == null || companyId == null || outletId == null) {
     throw new Error(`Missing required parameters: tableId=${tableId}, companyId=${companyId}, outletId=${outletId}`);
   }
-  
-  const connection = await pool.getConnection();
-  
-  try {
-    await connection.beginTransaction();
 
-    const [lockedRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT
-         status_id,
-         version,
-         service_session_id,
-         reservation_id,
-         guest_count,
-         reserved_until
-       FROM table_occupancy
-       WHERE company_id = ?
-         AND outlet_id = ?
-         AND table_id = ?
-       FOR UPDATE`,
-      [companyId, outletId, tableId]
-    );
+  return await db.transaction().execute(async (trx) => {
+    const lockedRowsResult = await sql<{
+      status_id: number | null;
+      version: number | null;
+      service_session_id: bigint | null;
+      reservation_id: bigint | null;
+      guest_count: number | null;
+      reserved_until: Date | null;
+    }>`
+      SELECT
+        status_id,
+        version,
+        service_session_id,
+        reservation_id,
+        guest_count,
+        reserved_until
+      FROM table_occupancy
+      WHERE company_id = ${companyId}
+        AND outlet_id = ${outletId}
+        AND table_id = ${tableId}
+      FOR UPDATE
+    `.execute(trx);
 
+    const lockedRows = lockedRowsResult.rows;
     const currentOccupancy = lockedRows.length > 0 ? lockedRows[0] : null;
     const currentVersion = Number(currentOccupancy?.version ?? 1);
     const currentStatus = Number(currentOccupancy?.status_id ?? TableOccupancyStatus.AVAILABLE);
@@ -443,42 +450,31 @@ async function applyTableEventWithTransaction(params: {
       const conflictPayload = await buildConflictPayload(tableId, companyId, outletId);
       const conflictReason = `Optimistic version mismatch: expected ${event.expected_table_version}, got ${currentVersion}`;
 
-      await connection.execute(
-        `INSERT INTO table_events
+      await sql`
+        INSERT INTO table_events
          (company_id, outlet_id, table_id, event_type_id, client_tx_id,
           occupancy_version_before, occupancy_version_after, event_data,
           status_id_before, status_id_after, service_session_id, reservation_id,
           occurred_at, created_at, created_by, is_conflict, conflict_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, 1, ?)`,
-        [
-          companyId,
-          outletId,
-          tableId,
-          event.event_type,
-          event.client_tx_id,
-          currentVersion,
-          currentVersion,
-          JSON.stringify({
-            ...event.payload,
-            _conflict_metadata: {
-              attempted_version: event.expected_table_version,
-              actual_version: currentVersion,
-            },
-          }),
-          currentStatus,
-          currentStatus,
-          currentOccupancy?.service_session_id ?? null,
-          currentOccupancy?.reservation_id ?? null,
-          new Date(event.recorded_at),
-          actorId,
-          conflictReason,
-        ]
-      );
+         VALUES (
+           ${companyId}, ${outletId}, ${tableId}, ${event.event_type}, ${event.client_tx_id},
+           ${currentVersion}, ${currentVersion}, ${JSON.stringify({
+             ...event.payload,
+             _conflict_metadata: {
+               attempted_version: event.expected_table_version,
+               actual_version: currentVersion,
+             },
+           })},
+           ${currentStatus}, ${currentStatus},
+           ${currentOccupancy?.service_session_id ?? null},
+           ${currentOccupancy?.reservation_id ?? null},
+           ${new Date(event.recorded_at)}, NOW(), ${actorId}, 1, ${conflictReason}
+         )
+      `.execute(trx);
 
-      await connection.commit();
       return {
         clientTxId: event.client_tx_id,
-        status: 'CONFLICT',
+        status: 'CONFLICT' as const,
         tableVersion: currentVersion,
         conflictPayload,
       };
@@ -498,7 +494,7 @@ async function applyTableEventWithTransaction(params: {
         // SEAT: Create service session and update occupancy to OCCUPIED
         const guestCount = event.payload.guest_count as number ?? 1;
         const guestName = event.payload.guest_name as string | null ?? null;
-        const reservationId = event.payload.reservation_id 
+        const reservationId = event.payload.reservation_id
           ? BigInt(event.payload.reservation_id as string)
           : null;
 
@@ -508,28 +504,21 @@ async function applyTableEventWithTransaction(params: {
         }
 
         // Create service session
-        const [sessionResult] = await connection.execute<ResultSetHeader>(
-          `INSERT INTO table_service_sessions
+        const sessionInsertResult = await sql`
+          INSERT INTO table_service_sessions
            (company_id, outlet_id, table_id, status_id, started_at, guest_count, guest_name, notes, created_at, updated_at, created_by)
-           VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW(), ?)`,
-          [
-            Number(companyId),
-            Number(outletId),
-            Number(tableId),
-            ServiceSessionStatus.ACTIVE,
-            guestCount,
-            guestName,
-            event.payload.notes ?? null,
-            actorId
-          ]
-        );
+           VALUES (${Number(companyId)}, ${Number(outletId)}, ${Number(tableId)}, ${ServiceSessionStatus.ACTIVE}, NOW(), ${guestCount}, ${guestName}, ${event.payload.notes ?? null}, NOW(), NOW(), ${actorId})
+        `.execute(trx);
 
-        serviceSessionId = BigInt(sessionResult.insertId);
+        if (sessionInsertResult.insertId === undefined) {
+          throw new Error('Failed to insert service session: insertId is undefined');
+        }
+        serviceSessionId = BigInt(sessionInsertResult.insertId);
         statusIdAfter = TableOccupancyStatus.OCCUPIED;
         eventReservationId = reservationId;
 
         // Update occupancy
-        await updateOccupancyWithConnection(connection, {
+        await updateOccupancy(trx, {
           companyId,
           outletId,
           tableId,
@@ -558,30 +547,23 @@ async function applyTableEventWithTransaction(params: {
 
         // Close existing service session
         if (serviceSessionId) {
-          await connection.execute(
-            `UPDATE table_service_sessions
-             SET status_id = ?,
+          await sql`
+            UPDATE table_service_sessions
+             SET status_id = ${ServiceSessionStatus.CLOSED},
                  closed_at = NOW(),
                  updated_at = NOW(),
-                 updated_by = ?
-             WHERE id = ?
-               AND company_id = ?
-               AND outlet_id = ?`,
-            [
-              ServiceSessionStatus.CLOSED,
-              actorId,
-              serviceSessionId,
-              companyId,
-              outletId
-            ]
-          );
+                 updated_by = ${actorId}
+             WHERE id = ${serviceSessionId}
+               AND company_id = ${companyId}
+               AND outlet_id = ${outletId}
+          `.execute(trx);
         }
 
         statusIdAfter = TableOccupancyStatus.AVAILABLE;
         serviceSessionId = null;
 
         // Reset occupancy to AVAILABLE
-        await resetOccupancyWithConnection(connection, {
+        await resetOccupancy(trx, {
           companyId,
           outletId,
           tableId,
@@ -599,7 +581,7 @@ async function applyTableEventWithTransaction(params: {
           throw new Error('Table is not available for reservation');
         }
 
-        const reservedUntil = event.payload.reserved_until 
+        const reservedUntil = event.payload.reserved_until
           ? new Date(event.payload.reserved_until as string)
           : new Date(Date.now() + 30 * 60 * 1000); // Default 30 min hold
 
@@ -608,16 +590,16 @@ async function applyTableEventWithTransaction(params: {
         if (event.payload.reservation_id) {
           reservationId = BigInt(event.payload.reservation_id as string);
 
-          const [reservationRows] = await connection.execute<RowDataPacket[]>(
-            `SELECT id, table_id
-             FROM reservations
-             WHERE id = ?
-               AND company_id = ?
-               AND outlet_id = ?
-             LIMIT 1`,
-            [reservationId, companyId, outletId]
-          );
+          const reservationRowsResult = await sql<{ id: bigint; table_id: bigint | null }>`
+            SELECT id, table_id
+            FROM reservations
+            WHERE id = ${reservationId}
+              AND company_id = ${companyId}
+              AND outlet_id = ${outletId}
+            LIMIT 1
+          `.execute(trx);
 
+          const reservationRows = reservationRowsResult.rows;
           if (reservationRows.length === 0) {
             throw new Error(`Reservation ${reservationId} not found for company/outlet scope`);
           }
@@ -635,49 +617,39 @@ async function applyTableEventWithTransaction(params: {
           const reservationStartTs = reservedUntil.getTime();
           const effectiveDurationMinutes = await resolveReservationDefaultDurationMinutes(Number(companyId));
           const reservationEndTs = reservationStartTs + effectiveDurationMinutes * 60000;
-          const hasReservationStartTs = await columnExists(connection, 'reservations', 'reservation_start_ts');
-          const hasReservationEndTs = await columnExists(connection, 'reservations', 'reservation_end_ts');
-          
-          let resInsertSql = `INSERT INTO reservations
-             (company_id, outlet_id, table_id, customer_name, guest_count,
-              reservation_at, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'BOOKED', NOW(), NOW())`;
-          let resInsertParams: Array<string | number | bigint | Date | null> = [
-            companyId,
-            outletId,
-            tableId,
-            guestName,
-            guestCount,
-            reservedUntil
-          ];
+          const hasReservationStartTs = await columnExists(db, 'reservations', 'reservation_start_ts');
+          const hasReservationEndTs = await columnExists(db, 'reservations', 'reservation_end_ts');
 
+          let reservationInsertResult;
           if (hasReservationStartTs && hasReservationEndTs) {
-            resInsertSql = `INSERT INTO reservations
+            reservationInsertResult = await sql`
+              INSERT INTO reservations
                (company_id, outlet_id, table_id, customer_name, guest_count,
                 reservation_at, reservation_start_ts, reservation_end_ts,
                 status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', NOW(), NOW())`;
-            resInsertParams = [
-              companyId,
-              outletId,
-              tableId,
-              guestName,
-              guestCount,
-              reservedUntil,
-              reservationStartTs,
-              reservationEndTs
-            ];
+               VALUES (${companyId}, ${outletId}, ${tableId}, ${guestName}, ${guestCount},
+                 ${reservedUntil}, ${reservationStartTs}, ${reservationEndTs}, 'BOOKED', NOW(), NOW())
+            `.execute(trx);
+          } else {
+            reservationInsertResult = await sql`
+              INSERT INTO reservations
+               (company_id, outlet_id, table_id, customer_name, guest_count,
+                reservation_at, status, created_at, updated_at)
+               VALUES (${companyId}, ${outletId}, ${tableId}, ${guestName}, ${guestCount},
+                 ${reservedUntil}, 'BOOKED', NOW(), NOW())
+            `.execute(trx);
           }
-
-          const [resResult] = await connection.execute<ResultSetHeader>(resInsertSql, resInsertParams);
-          reservationId = BigInt(resResult.insertId);
+          if (reservationInsertResult.insertId === undefined) {
+            throw new Error('Failed to insert reservation: insertId is undefined');
+          }
+          reservationId = BigInt(reservationInsertResult.insertId);
         }
 
         statusIdAfter = TableOccupancyStatus.RESERVED;
         eventReservationId = reservationId;
 
         // Use upsert helper to handle both INSERT and UPDATE cases
-        await updateOccupancyWithConnection(connection, {
+        await updateOccupancy(trx, {
           companyId,
           outletId,
           tableId,
@@ -701,7 +673,7 @@ async function applyTableEventWithTransaction(params: {
       case TableEventType.STATUS_CHANGED: {
         // Direct status change (e.g., to CLEANING, OUT_OF_SERVICE)
         const newStatusId = event.payload.status_id as number;
-        
+
         if (!Object.values(TableOccupancyStatus).includes(newStatusId as TableOccupancyStatusType)) {
           throw new Error(`Invalid table status: ${newStatusId}`);
         }
@@ -709,7 +681,7 @@ async function applyTableEventWithTransaction(params: {
         statusIdAfter = newStatusId;
 
         // Use upsert helper to handle both INSERT and UPDATE cases
-        await updateOccupancyWithConnection(connection, {
+        await updateOccupancy(trx, {
           companyId,
           outletId,
           tableId,
@@ -733,43 +705,28 @@ async function applyTableEventWithTransaction(params: {
           throw new Error('Cannot change guest count - table is not occupied');
         }
 
-        await connection.execute(
-          `UPDATE table_occupancy
-           SET guest_count = ?,
-               version = ?,
+        await sql`
+          UPDATE table_occupancy
+           SET guest_count = ${newGuestCount},
+               version = ${newVersion},
                updated_at = NOW(),
-               updated_by = ?
-           WHERE company_id = ?
-             AND outlet_id = ?
-             AND table_id = ?`,
-          [
-            newGuestCount,
-            newVersion,
-            actorId,
-            companyId,
-            outletId,
-            tableId
-          ]
-        );
+               updated_by = ${actorId}
+           WHERE company_id = ${companyId}
+             AND outlet_id = ${outletId}
+             AND table_id = ${tableId}
+        `.execute(trx);
 
         // Also update session guest count
         if (serviceSessionId) {
-          await connection.execute(
-            `UPDATE table_service_sessions
-             SET guest_count = ?,
+          await sql`
+            UPDATE table_service_sessions
+             SET guest_count = ${newGuestCount},
                  updated_at = NOW(),
-                 updated_by = ?
-             WHERE id = ?
-               AND company_id = ?
-               AND outlet_id = ?`,
-            [
-              newGuestCount,
-              actorId,
-              serviceSessionId,
-              companyId,
-              outletId
-            ]
-          );
+                 updated_by = ${actorId}
+             WHERE id = ${serviceSessionId}
+               AND company_id = ${companyId}
+               AND outlet_id = ${outletId}
+          `.execute(trx);
         }
 
         break;
@@ -777,7 +734,7 @@ async function applyTableEventWithTransaction(params: {
 
       case TableEventType.TABLE_TRANSFERRED: {
         // Transfer session to different table (merge/split operations)
-        const targetTableId = event.payload.target_table_id 
+        const targetTableId = event.payload.target_table_id
           ? BigInt(event.payload.target_table_id as string)
           : null;
 
@@ -789,43 +746,35 @@ async function applyTableEventWithTransaction(params: {
           throw new Error('Cannot transfer - table is not occupied');
         }
 
-        const [targetTableRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT id
-           FROM outlet_tables
-           WHERE id = ?
-             AND company_id = ?
-             AND outlet_id = ?
-             AND is_active = 1
-           LIMIT 1`,
-          [targetTableId, companyId, outletId]
-        );
+        const targetTableResult = await sql<{ id: bigint }>`
+          SELECT id
+          FROM outlet_tables
+          WHERE id = ${targetTableId}
+            AND company_id = ${companyId}
+            AND outlet_id = ${outletId}
+            AND is_active = 1
+          LIMIT 1
+        `.execute(trx);
 
-        if (targetTableRows.length === 0) {
+        if (targetTableResult.rows.length === 0) {
           throw new Error(`Target table ${targetTableId} not found in outlet scope`);
         }
 
         // Update service session to point to new table
         if (serviceSessionId) {
-          await connection.execute(
-            `UPDATE table_service_sessions
-             SET table_id = ?,
+          await sql`
+            UPDATE table_service_sessions
+             SET table_id = ${targetTableId},
                  updated_at = NOW(),
-                 updated_by = ?
-             WHERE id = ?
-               AND company_id = ?
-               AND outlet_id = ?`,
-            [
-              targetTableId,
-              actorId,
-              serviceSessionId,
-              companyId,
-              outletId
-            ]
-          );
+                 updated_by = ${actorId}
+             WHERE id = ${serviceSessionId}
+               AND company_id = ${companyId}
+               AND outlet_id = ${outletId}
+          `.execute(trx);
         }
 
         // Reset current table
-        await resetOccupancyWithConnection(connection, {
+        await resetOccupancy(trx, {
           companyId,
           outletId,
           tableId,
@@ -847,25 +796,18 @@ async function applyTableEventWithTransaction(params: {
       default: {
         // Unknown event type - store event but don't mutate state
         console.warn(`Unknown table event type: ${eventType}`);
-        
+
         // Still increment version and log event
-        await connection.execute(
-          `UPDATE table_occupancy
-           SET version = ?,
+        await sql`
+          UPDATE table_occupancy
+           SET version = ${newVersion},
                updated_at = NOW(),
-               updated_by = ?
-           WHERE company_id = ?
-             AND outlet_id = ?
-             AND table_id = ?`,
-          [
-            newVersion,
-            actorId,
-            companyId,
-            outletId,
-            tableId
-          ]
-        );
-        
+               updated_by = ${actorId}
+           WHERE company_id = ${companyId}
+             AND outlet_id = ${outletId}
+             AND table_id = ${tableId}
+        `.execute(trx);
+
         eventData = {
           ...eventData,
           warning: `Unknown event type: ${eventType}`,
@@ -874,52 +816,33 @@ async function applyTableEventWithTransaction(params: {
     }
 
     // 4. INSERT EVENT INTO TABLE_EVENTS (append-only log)
-    await connection.execute(
-      `INSERT INTO table_events
+    await sql`
+      INSERT INTO table_events
        (company_id, outlet_id, table_id, event_type_id, client_tx_id,
         occupancy_version_before, occupancy_version_after, event_data,
         status_id_before, status_id_after, service_session_id, reservation_id,
         occurred_at, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
-      [
-        companyId,
-        outletId,
-        tableId,
-        eventType,
-        clientTxId,
-        currentVersion,
-        newVersion,
-        eventData ? JSON.stringify(eventData) : null,
-        currentStatus,
-        statusIdAfter,
-        serviceSessionId,
-        eventReservationId,
-        new Date(event.recorded_at),
-        actorId
-      ]
-    );
-
-    await connection.commit();
+       VALUES (
+         ${companyId}, ${outletId}, ${tableId}, ${eventType}, ${clientTxId},
+         ${currentVersion}, ${newVersion}, ${eventData ? JSON.stringify(eventData) : null},
+         ${currentStatus}, ${statusIdAfter}, ${serviceSessionId}, ${eventReservationId},
+         ${new Date(event.recorded_at)}, NOW(), ${actorId}
+       )
+    `.execute(trx);
 
     return {
       clientTxId,
-      status: 'OK',
+      status: 'OK' as const,
       tableVersion: newVersion,
     };
-
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }
 
 /**
- * Helper: Update table occupancy with connection
+ * Helper: Update table occupancy within transaction
  */
-async function updateOccupancyWithConnection(
-  connection: PoolConnection,
+async function updateOccupancy(
+  trx: any,
   params: {
     companyId: bigint;
     outletId: bigint;
@@ -936,73 +859,49 @@ async function updateOccupancyWithConnection(
   const { companyId, outletId, tableId, statusId, serviceSessionId, guestCount, reservationId, reservedUntil, newVersion, actorId } = params;
 
   // Check if occupancy record exists
-  const [existingRows] = await connection.execute<RowDataPacket[]>(
-    `SELECT id FROM table_occupancy
-     WHERE company_id = ? AND outlet_id = ? AND table_id = ?`,
-    [companyId, outletId, tableId]
-  );
+  const existingResult = await sql<{ id: bigint }>`
+    SELECT id FROM table_occupancy
+    WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND table_id = ${tableId}
+  `.execute(trx);
 
-  if (existingRows.length > 0) {
+  if (existingResult.rows.length > 0) {
     // Update existing
-    await connection.execute(
-      `UPDATE table_occupancy
-       SET status_id = ?,
-           service_session_id = ?,
-           guest_count = ?,
-           reservation_id = ?,
-           reserved_until = ?,
-           version = ?,
-           occupied_at = CASE WHEN ? = ? THEN NOW() ELSE occupied_at END,
+    await sql`
+      UPDATE table_occupancy
+       SET status_id = ${statusId},
+           service_session_id = ${serviceSessionId},
+           guest_count = ${guestCount},
+           reservation_id = ${reservationId},
+           reserved_until = ${reservedUntil},
+           version = ${newVersion},
+           occupied_at = CASE WHEN ${statusId} = ${TableOccupancyStatus.OCCUPIED} THEN NOW() ELSE occupied_at END,
            updated_at = NOW(),
-           updated_by = ?
-       WHERE company_id = ?
-         AND outlet_id = ?
-         AND table_id = ?`,
-      [
-        statusId,
-        serviceSessionId,
-        guestCount,
-        reservationId,
-        reservedUntil,
-        newVersion,
-        statusId,
-        TableOccupancyStatus.OCCUPIED,
-        actorId,
-        companyId,
-        outletId,
-        tableId
-      ]
-    );
+           updated_by = ${actorId}
+       WHERE company_id = ${companyId}
+         AND outlet_id = ${outletId}
+         AND table_id = ${tableId}
+    `.execute(trx);
   } else {
     // Create new occupancy record
-    await connection.execute(
-      `INSERT INTO table_occupancy
-       (company_id, outlet_id, table_id, status_id, service_session_id, 
+    await sql`
+      INSERT INTO table_occupancy
+       (company_id, outlet_id, table_id, status_id, service_session_id,
         guest_count, reservation_id, reserved_until, version, occupied_at, created_at, updated_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = ? THEN NOW() ELSE NULL END, NOW(), NOW(), ?)`,
-      [
-        companyId,
-        outletId,
-        tableId,
-        statusId,
-        serviceSessionId,
-        guestCount,
-        reservationId,
-        reservedUntil,
-        newVersion,
-        statusId,
-        TableOccupancyStatus.OCCUPIED,
-        actorId
-      ]
-    );
+       VALUES (
+         ${companyId}, ${outletId}, ${tableId}, ${statusId}, ${serviceSessionId},
+         ${guestCount}, ${reservationId}, ${reservedUntil}, ${newVersion},
+         CASE WHEN ${statusId} = ${TableOccupancyStatus.OCCUPIED} THEN NOW() ELSE NULL END,
+         NOW(), NOW(), ${actorId}
+       )
+    `.execute(trx);
   }
 }
 
 /**
- * Helper: Reset occupancy to AVAILABLE state
+ * Helper: Reset occupancy to AVAILABLE state within transaction
  */
-async function resetOccupancyWithConnection(
-  connection: PoolConnection,
+async function resetOccupancy(
+  trx: any,
   params: {
     companyId: bigint;
     outletId: bigint;
@@ -1014,30 +913,21 @@ async function resetOccupancyWithConnection(
 ): Promise<void> {
   const { companyId, outletId, tableId, newVersion, actorId, notes } = params;
 
-  await connection.execute(
-    `UPDATE table_occupancy
-     SET status_id = ?,
+  await sql`
+    UPDATE table_occupancy
+     SET status_id = ${TableOccupancyStatus.AVAILABLE},
          service_session_id = NULL,
          guest_count = NULL,
          reservation_id = NULL,
          occupied_at = NULL,
-         notes = ?,
-         version = ?,
+         notes = ${notes},
+         version = ${newVersion},
          updated_at = NOW(),
-         updated_by = ?
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND table_id = ?`,
-    [
-      TableOccupancyStatus.AVAILABLE,
-      notes,
-      newVersion,
-      actorId,
-      companyId,
-      outletId,
-      tableId
-    ]
-  );
+         updated_by = ${actorId}
+     WHERE company_id = ${companyId}
+       AND outlet_id = ${outletId}
+       AND table_id = ${tableId}
+  `.execute(trx);
 }
 
 // ============================================================================
@@ -1098,7 +988,7 @@ function calculateStaleness(lastUpdated: Date | null | undefined, createdAt?: Da
 export async function pullTableState(
   params: PullTableStateParams
 ): Promise<PullTableStateResult> {
-  const pool = getDbPool();
+  const db = getDb();
   const limit = normalizeLimit(params.limit);
 
   // Parse cursor for pagination
@@ -1107,14 +997,25 @@ export async function pullTableState(
   // ============================================================================
   // STEP 1: Query Current Table States
   // ============================================================================
-  const [tableRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT
+  const tableRowsResult = await sql<{
+    table_id: bigint;
+    table_number: string;
+    capacity: number | null;
+    status_id: number | null;
+    current_session_id: bigint | null;
+    version: number | null;
+    held_by: string | null;
+    held_at: Date | null;
+    last_updated: Date | null;
+    created_at: Date;
+  }>`
+    SELECT
       ot.id as table_id,
       ot.code as table_number,
       ot.capacity,
-      COALESCE(to2.status_id, ${TableOccupancyStatus.AVAILABLE}) as status_id,
+      to2.status_id,
       to2.service_session_id as current_session_id,
-      COALESCE(to2.version, 1) as version,
+      to2.version,
       to2.created_by as held_by,
       to2.updated_at as held_at,
       COALESCE(to2.updated_at, ot.updated_at) as last_updated,
@@ -1123,88 +1024,87 @@ export async function pullTableState(
     LEFT JOIN table_occupancy to2 ON to2.table_id = ot.id
       AND to2.company_id = ot.company_id
       AND to2.outlet_id = ot.outlet_id
-    WHERE ot.company_id = ?
-      AND ot.outlet_id = ?
-    ORDER BY ot.code`,
-    [params.companyId, params.outletId]
-  );
+    WHERE ot.company_id = ${params.companyId}
+      AND ot.outlet_id = ${params.outletId}
+    ORDER BY ot.code
+  `.execute(db);
+
+  const tableRows = tableRowsResult.rows;
 
   // ============================================================================
   // STEP 2: Query Incremental Events
   // ============================================================================
-  let eventsQuery: string;
-  let eventsParams: (string | number | Date)[];
-
-  if (cursorParsed.type === 'id' && cursorParsed.value !== null) {
-    // Cursor is a numeric ID - paginate by event ID
-    eventsQuery = `
-      SELECT
-        te.id,
-        te.table_id,
-        te.event_type_id as event_type,
-        te.event_data as payload,
-        te.occurred_at as recorded_at,
-        te.created_by as actor_id
-      FROM table_events te
-      WHERE te.company_id = ?
-        AND te.outlet_id = ?
-        AND te.id > ?
-      ORDER BY te.id ASC
-      LIMIT ?
-    `;
-    eventsParams = [params.companyId, params.outletId, parseInt(cursorParsed.value, 10), limit + 1];
-  } else if (cursorParsed.type === 'timestamp' && cursorParsed.value !== null) {
-    // Cursor is a timestamp - paginate by occurred_at
-    eventsQuery = `
-      SELECT
-        te.id,
-        te.table_id,
-        te.event_type_id as event_type,
-        te.event_data as payload,
-        te.occurred_at as recorded_at,
-        te.created_by as actor_id
-      FROM table_events te
-      WHERE te.company_id = ?
-        AND te.outlet_id = ?
-        AND te.occurred_at > ?
-      ORDER BY te.occurred_at ASC, te.id ASC
-      LIMIT ?
-    `;
-    eventsParams = [params.companyId, params.outletId, cursorParsed.value, limit + 1];
-  } else {
-    // Initial sync - get most recent events (descending order for initial sync)
-    eventsQuery = `
-      SELECT
-        te.id,
-        te.table_id,
-        te.event_type_id as event_type,
-        te.event_data as payload,
-        te.occurred_at as recorded_at,
-        te.created_by as actor_id
-      FROM table_events te
-      WHERE te.company_id = ?
-        AND te.outlet_id = ?
-      ORDER BY te.occurred_at DESC, te.id DESC
-      LIMIT ?
-    `;
-    eventsParams = [params.companyId, params.outletId, limit];
-  }
-
-  const [eventRows] = await pool.execute<RowDataPacket[]>(eventsQuery, eventsParams);
-
-  // ============================================================================
-  // STEP 3: Pagination Logic
-  // ============================================================================
-  // For initial sync (type: 'none'), events are in DESC order, so no hasMore logic
-  // For cursor-based sync, we fetch limit+1 to check for more
-  let events = eventRows as Array<{
+  type EventRow = {
     id: bigint;
     table_id: bigint;
     event_type: number;
     payload: string | null;
     recorded_at: Date;
     actor_id: string | null;
-  }>;
+  };
+
+  let events: EventRow[];
+
+  if (cursorParsed.type === 'id' && cursorParsed.value !== null) {
+    // Cursor is a numeric ID - paginate by event ID
+    const eventsResult = await sql<EventRow>`
+      SELECT
+        te.id,
+        te.table_id,
+        te.event_type_id as event_type,
+        te.event_data as payload,
+        te.occurred_at as recorded_at,
+        te.created_by as actor_id
+      FROM table_events te
+      WHERE te.company_id = ${params.companyId}
+        AND te.outlet_id = ${params.outletId}
+        AND te.id > ${parseInt(cursorParsed.value, 10)}
+      ORDER BY te.id ASC
+      LIMIT ${limit + 1}
+    `.execute(db);
+    events = eventsResult.rows;
+  } else if (cursorParsed.type === 'timestamp' && cursorParsed.value !== null) {
+    // Cursor is a timestamp - paginate by occurred_at
+    const eventsResult = await sql<EventRow>`
+      SELECT
+        te.id,
+        te.table_id,
+        te.event_type_id as event_type,
+        te.event_data as payload,
+        te.occurred_at as recorded_at,
+        te.created_by as actor_id
+      FROM table_events te
+      WHERE te.company_id = ${params.companyId}
+        AND te.outlet_id = ${params.outletId}
+        AND te.occurred_at > ${cursorParsed.value}
+      ORDER BY te.occurred_at ASC, te.id ASC
+      LIMIT ${limit + 1}
+    `.execute(db);
+    events = eventsResult.rows;
+  } else {
+    // Initial sync - get most recent events (descending order for initial sync)
+    const eventsResult = await sql<EventRow>`
+      SELECT
+        te.id,
+        te.table_id,
+        te.event_type_id as event_type,
+        te.event_data as payload,
+        te.occurred_at as recorded_at,
+        te.created_by as actor_id
+      FROM table_events te
+      WHERE te.company_id = ${params.companyId}
+        AND te.outlet_id = ${params.outletId}
+      ORDER BY te.occurred_at DESC, te.id DESC
+      LIMIT ${limit}
+    `.execute(db);
+    events = eventsResult.rows;
+  }
+
+  // ============================================================================
+  // STEP 3: Pagination Logic
+  // ============================================================================
+  // For initial sync (type: 'none'), events are in DESC order, so no hasMore logic
+  // For cursor-based sync, we fetch limit+1 to check for more
 
   let hasMore = false;
   let nextCursor: string | null = null;
@@ -1233,23 +1133,12 @@ export async function pullTableState(
   const now = new Date().toISOString();
 
   // Map table rows to snapshots with staleness calculation
-  const tables: PullTableStateSnapshot[] = (tableRows as Array<{
-    table_id: bigint;
-    table_number: string;
-    capacity: number | null;
-    status_id: number;
-    current_session_id: bigint | null;
-    version: number;
-    held_by: string | null;
-    held_at: Date | null;
-    last_updated: Date;
-    created_at: Date;
-  }>).map(t => ({
+  const tables: PullTableStateSnapshot[] = tableRows.map(t => ({
     tableId: Number(t.table_id),
     tableNumber: t.table_number,
-    status: Number(t.status_id),
+    status: Number(t.status_id ?? TableOccupancyStatus.AVAILABLE),
     currentSessionId: t.current_session_id ? Number(t.current_session_id) : null,
-    version: Number(t.version),
+    version: Number(t.version ?? 1),
     stalenessMs: calculateStaleness(t.last_updated, t.created_at),
   }));
 

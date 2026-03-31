@@ -3,9 +3,9 @@
 
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
-import { getDbPool, closeDbPool } from "./db";
-import type { PoolConnection } from "mysql2/promise";
-import type { RowDataPacket } from "mysql2";
+import { getDb, closeDbPool } from "./db";
+import type { KyselySchema } from "@/lib/db";
+import { sql } from "kysely";
 import {
   calculateCost,
   createCostLayer,
@@ -29,115 +29,85 @@ let TEST_OUTLET_ID: number;
 
 // Test helpers
 async function createTestTransaction(
-  conn: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   itemId: number,
   quantityDelta: number
 ): Promise<number> {
-  const [result] = await conn.execute(
-    `INSERT INTO inventory_transactions 
-     (company_id, product_id, transaction_type, quantity_delta, created_at)
-     VALUES (?, ?, 6, ?, NOW())`,
-    [companyId, itemId, quantityDelta]
-  );
-  return (result as any).insertId;
+  const result = await sql`
+    INSERT INTO inventory_transactions 
+    (company_id, product_id, transaction_type, quantity_delta, created_at)
+    VALUES (${companyId}, ${itemId}, 6, ${quantityDelta}, NOW())
+  `.execute(db);
+  return Number(result.insertId);
 }
 
 async function setCompanyCostingMethod(
-  conn: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   method: string
 ): Promise<void> {
   // Clean up both canonical and legacy keys for test isolation
-  await conn.execute(
-    `DELETE FROM company_settings
-     WHERE company_id = ? AND \`key\` IN (?, ?) AND outlet_id IS NULL`,
-    [companyId, "inventory.costing_method", "inventory_costing_method"]
-  );
+  await sql`
+    DELETE FROM company_settings
+    WHERE company_id = ${companyId} AND \`key\` IN (${"inventory.costing_method"}, ${"inventory_costing_method"}) AND outlet_id IS NULL
+  `.execute(db);
 
   // Set the canonical key (inventory.costing_method) - matches production settings system
-  await conn.execute(
-    `INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, outlet_id)
-     VALUES (?, ?, ?, 'string', NULL)`,
-    [companyId, "inventory.costing_method", JSON.stringify(method)]
-  );
+  await sql`
+    INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, outlet_id)
+    VALUES (${companyId}, ${"inventory.costing_method"}, ${JSON.stringify(method)}, 'string', NULL)
+  `.execute(db);
 }
 
-async function cleanupTestData(conn: PoolConnection, companyId: number): Promise<void> {
+async function cleanupTestData(db: KyselySchema, companyId: number): Promise<void> {
   // Delete in reverse dependency order
-  await conn.execute(
-    `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
-    [companyId]
-  );
-  await conn.execute(
-    `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
-    [companyId]
-  );
-  await conn.execute(
-    `DELETE FROM inventory_item_costs WHERE company_id = ?`,
-    [companyId]
-  );
-  await conn.execute(
-    `DELETE FROM inventory_transactions WHERE company_id = ?`,
-    [companyId]
-  );
-  await conn.execute(
-    `DELETE FROM items WHERE company_id = ?`,
-    [companyId]
-  );
-  await conn.execute(
-    `DELETE FROM company_settings WHERE company_id = ? AND \`key\` IN (?, ?)`,
-    [companyId, "inventory_costing_method", "inventory.costing_method"]
-  );
-  await conn.execute(
-    `DELETE FROM outlets WHERE company_id = ?`,
-    [companyId]
-  );
-  await conn.execute(
-    `DELETE FROM companies WHERE id = ?`,
-    [companyId]
-  );
+  await sql`DELETE FROM cost_layer_consumption WHERE company_id = ${companyId}`.execute(db);
+  await sql`DELETE FROM inventory_cost_layers WHERE company_id = ${companyId}`.execute(db);
+  await sql`DELETE FROM inventory_item_costs WHERE company_id = ${companyId}`.execute(db);
+  await sql`DELETE FROM inventory_transactions WHERE company_id = ${companyId}`.execute(db);
+  await sql`DELETE FROM items WHERE company_id = ${companyId}`.execute(db);
+  await sql`DELETE FROM company_settings WHERE company_id = ${companyId} AND \`key\` IN (${"inventory_costing_method"}, ${"inventory.costing_method"})`.execute(db);
+  await sql`DELETE FROM outlets WHERE company_id = ${companyId}`.execute(db);
+  await sql`DELETE FROM companies WHERE id = ${companyId}`.execute(db);
 }
 
 async function readLayerBalances(
-  conn: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   itemId: number
 ): Promise<Array<{ id: number; remaining_qty: number }>> {
-  const [rows] = await conn.execute(
-    `SELECT id, remaining_qty 
-     FROM inventory_cost_layers 
-     WHERE company_id = ? AND item_id = ?
-     ORDER BY id ASC`,
-    [companyId, itemId]
-  );
-  return (rows as any[]).map((row) => ({
+  const rows = await sql`
+    SELECT id, remaining_qty 
+    FROM inventory_cost_layers 
+    WHERE company_id = ${companyId} AND item_id = ${itemId}
+    ORDER BY id ASC
+  `.execute(db);
+  return rows.rows.map((row: any) => ({
     id: row.id,
     remaining_qty: Number(row.remaining_qty),
   }));
 }
 
 async function countConsumptionRows(
-  conn: PoolConnection,
+  db: KyselySchema,
   transactionId: number
 ): Promise<number> {
-  const [rows] = await conn.execute(
-    `SELECT COUNT(*) as count 
-     FROM cost_layer_consumption 
-     WHERE transaction_id = ?`,
-    [transactionId]
-  );
-  return Number((rows as any[])[0].count);
+  const rows = await sql`
+    SELECT COUNT(*) as count 
+    FROM cost_layer_consumption 
+    WHERE transaction_id = ${transactionId}
+  `.execute(db);
+  return Number((rows.rows[0] as any).count);
 }
 
 // Test suite
 test("Cost Tracking Database Tests", async (t) => {
-  const pool = getDbPool();
-  const conn = await pool.getConnection();
+  const db = getDb();
 
   before(async () => {
     // Clean up any existing test data (pass dummy ID for cleanup before company is created)
-    await cleanupTestData(conn, 0);
+    await cleanupTestData(db, 0);
 
     // Create company dynamically
     const company = await createCompanyBasic({
@@ -156,8 +126,7 @@ test("Cost Tracking Database Tests", async (t) => {
   });
 
   after(async () => {
-    await cleanupTestData(conn, TEST_COMPANY_ID);
-    conn.release();
+    await cleanupTestData(db, TEST_COMPANY_ID);
     await closeDbPool();
   });
 
@@ -167,10 +136,10 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Set method to FIFO
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "FIFO");
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "FIFO");
 
     // Create layers: L1 older @ 10.00, L2 newer @ 12.00
-    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId1 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     const layer1 = await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -179,10 +148,10 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 50,
       },
-      conn
+      db
     );
 
-    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId2 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     const layer2 = await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -191,11 +160,11 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 12.0,
         quantity: 50,
       },
-      conn
+      db
     );
 
     // Consume 60 units - should take all 50 from L1, 10 from L2
-    const saleTxId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    const saleTxId = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -60);
     const result = await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -203,7 +172,7 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 60,
         transactionId: saleTxId,
       },
-      conn
+      db
     );
 
     // Expected: (50 * 10) + (10 * 12) = 500 + 120 = 620
@@ -215,7 +184,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(Number(result.consumedLayers[1].unitCost), 12.0);
 
     // Verify remaining quantities
-    const layers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    const layers = await readLayerBalances(db, TEST_COMPANY_ID, testItemId);
     const l1 = layers.find((l) => l.id === layer1.id);
     const l2 = layers.find((l) => l.id === layer2.id);
     assert.strictEqual(l1?.remaining_qty, 0);
@@ -228,10 +197,10 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Set method to LIFO
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "LIFO");
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "LIFO");
 
     // Create layers: L1 older @ 10.00, L2 newer @ 12.00
-    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId1 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     const layer1 = await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -240,10 +209,10 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 50,
       },
-      conn
+      db
     );
 
-    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId2 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     const layer2 = await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -252,11 +221,11 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 12.0,
         quantity: 50,
       },
-      conn
+      db
     );
 
     // Consume 60 units - should take all 50 from L2 (newest), 10 from L1 (oldest)
-    const saleTxId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    const saleTxId = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -60);
     const result = await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -264,7 +233,7 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 60,
         transactionId: saleTxId,
       },
-      conn
+      db
     );
 
     // LIFO should consume from newer layer first
@@ -274,7 +243,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(Number(result.consumedLayers[1].unitCost), 10.0);
 
     // Verify total remaining quantity
-    const layers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    const layers = await readLayerBalances(db, TEST_COMPANY_ID, testItemId);
     const totalRemaining = layers.reduce((sum, l) => sum + l.remaining_qty, 0);
     assert.strictEqual(totalRemaining, 40); // 100 - 60 consumed
   });
@@ -285,10 +254,10 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Set method to AVG
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "AVG");
 
     // Create layers: 100 @ 10 + 50 @ 12
-    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 100);
+    const txId1 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 100);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -297,10 +266,10 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 100,
       },
-      conn
+      db
     );
 
-    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId2 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -309,11 +278,11 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 12.0,
         quantity: 50,
       },
-      conn
+      db
     );
 
     // Consume 60 units
-    const saleTxId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    const saleTxId = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -60);
     const result = await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -321,7 +290,7 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 60,
         transactionId: saleTxId,
       },
-      conn
+      db
     );
 
     // Expected: 60 * ((100*10 + 50*12) / 150) = 60 * 10.666... = 640
@@ -331,7 +300,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(result.consumedLayers.length, 0);
 
     // Verify summary state was updated (qty and cost reduced)
-    const summaryAfter = await getItemCostSummary(TEST_COMPANY_ID, testItemId, conn);
+    const summaryAfter = await getItemCostSummary(TEST_COMPANY_ID, testItemId, db);
     assert.ok(summaryAfter);
     assert.strictEqual(summaryAfter!.totalLayersQty, 90); // 150 - 60 consumed
     assert.ok(Math.abs(summaryAfter!.totalLayersCost - 960) <= 0.01); // 1600 - 640
@@ -344,10 +313,10 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Set method to AVG
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "AVG");
 
     // Create layer: 100 @ 10
-    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 100);
+    const txId1 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 100);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -356,11 +325,11 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 100,
       },
-      conn
+      db
     );
 
     // First consume: 30 units @ 10 = 300
-    const saleTxId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -30);
+    const saleTxId1 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -30);
     const result1 = await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -368,19 +337,19 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 30,
         transactionId: saleTxId1,
       },
-      conn
+      db
     );
     assert.strictEqual(result1.totalCost, 300);
 
     // Verify state after first consume
-    const summary1 = await getItemCostSummary(TEST_COMPANY_ID, testItemId, conn);
+    const summary1 = await getItemCostSummary(TEST_COMPANY_ID, testItemId, db);
     assert.ok(summary1);
     assert.strictEqual(summary1!.totalLayersQty, 70); // 100 - 30
     assert.strictEqual(summary1!.totalLayersCost, 700); // 1000 - 300
     assert.strictEqual(summary1!.currentAvgCost!, 10); // avg unchanged for same cost
 
     // Second consume: 40 units @ 10 = 400
-    const saleTxId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -40);
+    const saleTxId2 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -40);
     const result2 = await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -388,19 +357,19 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 40,
         transactionId: saleTxId2,
       },
-      conn
+      db
     );
     assert.strictEqual(result2.totalCost, 400);
 
     // Verify state after second consume
-    const summary2 = await getItemCostSummary(TEST_COMPANY_ID, testItemId, conn);
+    const summary2 = await getItemCostSummary(TEST_COMPANY_ID, testItemId, db);
     assert.ok(summary2);
     assert.strictEqual(summary2!.totalLayersQty, 30); // 70 - 40
     assert.strictEqual(summary2!.totalLayersCost, 300); // 700 - 400
     assert.strictEqual(summary2!.currentAvgCost!, 10);
 
     // Third consume: 30 units @ 10 = 300 (exactly remaining)
-    const saleTxId3 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -30);
+    const saleTxId3 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -30);
     const result3 = await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -408,12 +377,12 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 30,
         transactionId: saleTxId3,
       },
-      conn
+      db
     );
     assert.strictEqual(result3.totalCost, 300);
 
     // Verify state after exhaustion
-    const summary3 = await getItemCostSummary(TEST_COMPANY_ID, testItemId, conn);
+    const summary3 = await getItemCostSummary(TEST_COMPANY_ID, testItemId, db);
     assert.ok(summary3);
     assert.strictEqual(summary3!.totalLayersQty, 0);
     assert.strictEqual(summary3!.totalLayersCost, 0);
@@ -426,10 +395,10 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Set method to AVG
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "AVG");
 
     // Create layer: 50 @ 10
-    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId1 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -438,11 +407,11 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 50,
       },
-      conn
+      db
     );
 
     // First consume: 30 units (leaves 20)
-    const saleTxId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -30);
+    const saleTxId1 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -30);
     await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -450,11 +419,11 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 30,
         transactionId: saleTxId1,
       },
-      conn
+      db
     );
 
     // Try to consume 30 more (only 20 available)
-    const saleTxId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -30);
+    const saleTxId2 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -30);
     await assert.rejects(
       calculateCost(
         {
@@ -463,13 +432,13 @@ test("Cost Tracking Database Tests", async (t) => {
           quantity: 30,
           transactionId: saleTxId2,
         },
-        conn
+        db
       ),
       InsufficientInventoryError
     );
 
     // Verify state unchanged after failed attempt
-    const summary = await getItemCostSummary(TEST_COMPANY_ID, testItemId, conn);
+    const summary = await getItemCostSummary(TEST_COMPANY_ID, testItemId, db);
     assert.ok(summary);
     assert.strictEqual(summary!.totalLayersQty, 20);
     assert.strictEqual(summary!.totalLayersCost, 200);
@@ -481,10 +450,10 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Set method to FIFO
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "FIFO");
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "FIFO");
 
     // Create layers with total 50 available
-    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 30);
+    const txId1 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 30);
     const layer1 = await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -493,10 +462,10 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 30,
       },
-      conn
+      db
     );
 
-    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 20);
+    const txId2 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 20);
     const layer2 = await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -505,21 +474,20 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 12.0,
         quantity: 20,
       },
-      conn
+      db
     );
 
     // Capture state before attempt
-    const beforeLayers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    const beforeLayers = await readLayerBalances(db, TEST_COMPANY_ID, testItemId);
 
     // Attempt to consume 60 (more than available 50)
     // Create the outbound transaction first
-    const [outboundResult] = await conn.execute(
-      `INSERT INTO inventory_transactions 
-       (company_id, product_id, transaction_type, quantity_delta, created_at)
-       VALUES (?, ?, 6, ?, NOW())`,
-      [TEST_COMPANY_ID, testItemId, -60]
-    );
-    const saleTxId = (outboundResult as any).insertId;
+    const outboundResult = await sql`
+      INSERT INTO inventory_transactions 
+      (company_id, product_id, transaction_type, quantity_delta, created_at)
+      VALUES (${TEST_COMPANY_ID}, ${testItemId}, 6, ${-60}, NOW())
+    `.execute(db);
+    const saleTxId = Number(outboundResult.insertId);
     
     await assert.rejects(
       calculateCost(
@@ -529,14 +497,14 @@ test("Cost Tracking Database Tests", async (t) => {
           quantity: 60,
           transactionId: saleTxId,
         },
-        conn
+        db
       ),
       InsufficientInventoryError
     );
 
     // Verify no mutations occurred
-    const afterLayers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
-    const afterConsumptionCount = await countConsumptionRows(conn, saleTxId);
+    const afterLayers = await readLayerBalances(db, TEST_COMPANY_ID, testItemId);
+    const afterConsumptionCount = await countConsumptionRows(db, saleTxId);
     assert.deepStrictEqual(afterLayers, beforeLayers);
     assert.strictEqual(afterConsumptionCount, 0);
   });
@@ -547,10 +515,10 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Set method to LIFO
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "LIFO");
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "LIFO");
 
     // Create layers with total 50 available
-    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 30);
+    const txId1 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 30);
     const layer1 = await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -559,10 +527,10 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 30,
       },
-      conn
+      db
     );
 
-    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 20);
+    const txId2 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 20);
     const layer2 = await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -571,21 +539,20 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 12.0,
         quantity: 20,
       },
-      conn
+      db
     );
 
     // Capture state before attempt
-    const beforeLayers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
+    const beforeLayers = await readLayerBalances(db, TEST_COMPANY_ID, testItemId);
 
     // Attempt to consume 60 (more than available 50)
     // Create the outbound transaction first
-    const [outboundResult] = await conn.execute(
-      `INSERT INTO inventory_transactions 
-       (company_id, product_id, transaction_type, quantity_delta, created_at)
-       VALUES (?, ?, 6, ?, NOW())`,
-      [TEST_COMPANY_ID, testItemId, -60]
-    );
-    const saleTxId = (outboundResult as any).insertId;
+    const outboundResult = await sql`
+      INSERT INTO inventory_transactions 
+      (company_id, product_id, transaction_type, quantity_delta, created_at)
+      VALUES (${TEST_COMPANY_ID}, ${testItemId}, 6, ${-60}, NOW())
+    `.execute(db);
+    const saleTxId = Number(outboundResult.insertId);
     
     await assert.rejects(
       calculateCost(
@@ -595,14 +562,14 @@ test("Cost Tracking Database Tests", async (t) => {
           quantity: 60,
           transactionId: saleTxId,
         },
-        conn
+        db
       ),
       InsufficientInventoryError
     );
 
     // Verify no mutations occurred
-    const afterLayers = await readLayerBalances(conn, TEST_COMPANY_ID, testItemId);
-    const afterConsumptionCount = await countConsumptionRows(conn, saleTxId);
+    const afterLayers = await readLayerBalances(db, TEST_COMPANY_ID, testItemId);
+    const afterConsumptionCount = await countConsumptionRows(db, saleTxId);
     assert.deepStrictEqual(afterLayers, beforeLayers);
     assert.strictEqual(afterConsumptionCount, 0);
   });
@@ -613,7 +580,7 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Set method to AVG
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "AVG");
 
     await assert.rejects(
       calculateCost(
@@ -623,7 +590,7 @@ test("Cost Tracking Database Tests", async (t) => {
           quantity: 0,
           transactionId: 1,
         },
-        conn
+        db
       ),
       CostTrackingError
     );
@@ -636,7 +603,7 @@ test("Cost Tracking Database Tests", async (t) => {
           quantity: -1,
           transactionId: 1,
         },
-        conn
+        db
       ),
       CostTrackingError
     );
@@ -648,7 +615,7 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Create layers: 50 @ 10 + 50 @ 12
-    const txId1 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId1 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -657,10 +624,10 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 50,
       },
-      conn
+      db
     );
 
-    const txId2 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId2 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -669,12 +636,12 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 12.0,
         quantity: 50,
       },
-      conn
+      db
     );
 
     // Test AVG (weighted avg: 11.0 for 100 qty)
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "AVG");
-    const saleTxIdAvg = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "AVG");
+    const saleTxIdAvg = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -60);
     const avg = await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -682,7 +649,7 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 60,
         transactionId: saleTxIdAvg,
       },
-      conn
+      db
     );
     // Expected: 60 * 11.0 = 660, but actual may vary based on calculation timing
     // Just verify it's within reasonable range (between FIFO and LIFO results)
@@ -690,21 +657,12 @@ test("Cost Tracking Database Tests", async (t) => {
       `AVG cost ${avg.totalCost} should be between 600 and 700`);
 
     // Cleanup layers and recreate for FIFO test
-    await conn.execute(
-      `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await conn.execute(
-      `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await conn.execute(
-      `DELETE FROM inventory_item_costs WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
+    await sql`DELETE FROM cost_layer_consumption WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM inventory_cost_layers WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM inventory_item_costs WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
 
     // Recreate layers for FIFO
-    const txId3 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId3 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -713,9 +671,9 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 50,
       },
-      conn
+      db
     );
-    const txId4 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId4 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -724,12 +682,12 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 12.0,
         quantity: 50,
       },
-      conn
+      db
     );
 
     // Test FIFO
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "FIFO");
-    const saleTxIdFifo = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "FIFO");
+    const saleTxIdFifo = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -60);
     const fifo = await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -737,26 +695,17 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 60,
         transactionId: saleTxIdFifo,
       },
-      conn
+      db
     );
     assert.strictEqual(fifo.totalCost, 620.0);
 
     // Cleanup for LIFO test
-    await conn.execute(
-      `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await conn.execute(
-      `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await conn.execute(
-      `DELETE FROM inventory_item_costs WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
+    await sql`DELETE FROM cost_layer_consumption WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM inventory_cost_layers WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM inventory_item_costs WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
 
     // Recreate layers for LIFO
-    const txId5 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId5 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -765,9 +714,9 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 50,
       },
-      conn
+      db
     );
-    const txId6 = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 50);
+    const txId6 = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 50);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -776,12 +725,12 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 12.0,
         quantity: 50,
       },
-      conn
+      db
     );
 
     // Test LIFO
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "LIFO");
-    const saleTxIdLifo = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -60);
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "LIFO");
+    const saleTxIdLifo = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -60);
     const lifo = await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -789,7 +738,7 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 60,
         transactionId: saleTxIdLifo,
       },
-      conn
+      db
     );
     assert.strictEqual(lifo.totalCost, 700.0);
   });
@@ -800,7 +749,7 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
     
     // Add some inventory so we don't get InsufficientInventoryError
-    const txId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 100);
+    const txId = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 100);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -809,20 +758,19 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 100,
       },
-      conn
+      db
     );
 
     // Create a valid outbound transaction
-    const [outboundResult] = await conn.execute(
-      `INSERT INTO inventory_transactions 
-       (company_id, product_id, transaction_type, quantity_delta, created_at)
-       VALUES (?, ?, 6, ?, NOW())`,
-      [TEST_COMPANY_ID, testItemId, -1]
-    );
-    const outboundTxId = (outboundResult as any).insertId;
+    const outboundResult = await sql`
+      INSERT INTO inventory_transactions 
+      (company_id, product_id, transaction_type, quantity_delta, created_at)
+      VALUES (${TEST_COMPANY_ID}, ${testItemId}, 6, ${-1}, NOW())
+    `.execute(db);
+    const outboundTxId = Number(outboundResult.insertId);
 
     // Set invalid method
-    await setCompanyCostingMethod(conn, TEST_COMPANY_ID, "INVALID");
+    await setCompanyCostingMethod(db, TEST_COMPANY_ID, "INVALID");
 
     await assert.rejects(
       calculateCost(
@@ -832,7 +780,7 @@ test("Cost Tracking Database Tests", async (t) => {
           quantity: 1,
           transactionId: outboundTxId,
         },
-        conn
+        db
       ),
       InvalidCostingMethodError
     );
@@ -844,41 +792,37 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Set up legacy key only first
-    await conn.execute(
-      `DELETE FROM company_settings WHERE company_id = ? AND \`key\` IN (?, ?)`,
-      [TEST_COMPANY_ID, "inventory_costing_method", "inventory.costing_method"]
-    );
+    await sql`
+      DELETE FROM company_settings WHERE company_id = ${TEST_COMPANY_ID} AND \`key\` IN (${"inventory_costing_method"}, ${"inventory.costing_method"})
+    `.execute(db);
 
-    await conn.execute(
-      `INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, created_at, updated_at)
-       VALUES (?, ?, ?, 'string', NOW(), NOW())
-       ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = NOW()`,
-      [TEST_COMPANY_ID, "inventory_costing_method", JSON.stringify("FIFO")]
-    );
+    await sql`
+      INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, created_at, updated_at)
+       VALUES (${TEST_COMPANY_ID}, ${"inventory_costing_method"}, ${JSON.stringify("FIFO")}, 'string', NOW(), NOW())
+       ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = NOW()
+    `.execute(db);
 
     // Verify legacy key is read when canonical doesn't exist
-    const methodLegacy = await getCompanyCostingMethod(TEST_COMPANY_ID, conn);
+    const methodLegacy = await getCompanyCostingMethod(TEST_COMPANY_ID, db);
     assert.strictEqual(methodLegacy, "FIFO");
 
     // Now add canonical key with different value
-    await conn.execute(
-      `INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, created_at, updated_at)
-       VALUES (?, ?, ?, 'string', NOW(), NOW())
-       ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = NOW()`,
-      [TEST_COMPANY_ID, "inventory.costing_method", JSON.stringify("LIFO")]
-    );
+    await sql`
+      INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, created_at, updated_at)
+       VALUES (${TEST_COMPANY_ID}, ${"inventory.costing_method"}, ${JSON.stringify("LIFO")}, 'string', NOW(), NOW())
+       ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = NOW()
+    `.execute(db);
 
     // Verify canonical key wins over legacy
-    const methodCanonical = await getCompanyCostingMethod(TEST_COMPANY_ID, conn);
+    const methodCanonical = await getCompanyCostingMethod(TEST_COMPANY_ID, db);
     assert.strictEqual(methodCanonical, "LIFO");
 
     // Remove canonical key, verify legacy is still there and read
-    await conn.execute(
-      `DELETE FROM company_settings WHERE company_id = ? AND \`key\` = ?`,
-      [TEST_COMPANY_ID, "inventory.costing_method"]
-    );
+    await sql`
+      DELETE FROM company_settings WHERE company_id = ${TEST_COMPANY_ID} AND \`key\` = ${"inventory.costing_method"}
+    `.execute(db);
 
-    const methodFallback = await getCompanyCostingMethod(TEST_COMPANY_ID, conn);
+    const methodFallback = await getCompanyCostingMethod(TEST_COMPANY_ID, db);
     assert.strictEqual(methodFallback, "FIFO");
   });
 
@@ -888,26 +832,16 @@ test("Cost Tracking Database Tests", async (t) => {
     const testItemId = item.id;
 
     // Clean settings - both canonical and legacy keys
-    await conn.execute(
-      `DELETE FROM company_settings WHERE company_id = ? AND \`key\` IN (?, ?)`,
-      [TEST_COMPANY_ID, "inventory_costing_method", "inventory.costing_method"]
-    );
+    await sql`
+      DELETE FROM company_settings WHERE company_id = ${TEST_COMPANY_ID} AND \`key\` IN (${"inventory_costing_method"}, ${"inventory.costing_method"})
+    `.execute(db);
 
     // Create layers
-    await conn.execute(
-      `DELETE FROM cost_layer_consumption WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await conn.execute(
-      `DELETE FROM inventory_cost_layers WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
-    await conn.execute(
-      `DELETE FROM inventory_item_costs WHERE company_id = ?`,
-      [TEST_COMPANY_ID]
-    );
+    await sql`DELETE FROM cost_layer_consumption WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM inventory_cost_layers WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+    await sql`DELETE FROM inventory_item_costs WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
 
-    const txId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, 100);
+    const txId = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, 100);
     await createCostLayer(
       {
         companyId: TEST_COMPANY_ID,
@@ -916,15 +850,15 @@ test("Cost Tracking Database Tests", async (t) => {
         unitCost: 10.0,
         quantity: 100,
       },
-      conn
+      db
     );
 
     // Verify default is AVG
-    const method = await getCompanyCostingMethod(TEST_COMPANY_ID, conn);
+    const method = await getCompanyCostingMethod(TEST_COMPANY_ID, db);
     assert.strictEqual(method, "AVG");
 
     // Verify calculation uses AVG
-    const saleTxId = await createTestTransaction(conn, TEST_COMPANY_ID, testItemId, -50);
+    const saleTxId = await createTestTransaction(db, TEST_COMPANY_ID, testItemId, -50);
     const result = await calculateCost(
       {
         companyId: TEST_COMPANY_ID,
@@ -932,7 +866,7 @@ test("Cost Tracking Database Tests", async (t) => {
         quantity: 50,
         transactionId: saleTxId,
       },
-      conn
+      db
     );
     assert.strictEqual(result.totalCost, 500.0); // 50 * 10.0
   });

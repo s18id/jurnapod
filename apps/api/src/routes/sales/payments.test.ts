@@ -16,9 +16,9 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../../lib/db";
+import { closeDbPool, getDb } from "../../lib/db";
 import { listPayments, type SalesPayment } from "../../lib/sales";
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
+import { sql } from "kysely";
 
 loadEnvIfPresent();
 
@@ -27,41 +27,37 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Sales Payment Routes", { concurrency: false }, () => {
-  let connection: PoolConnection;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    const db = getDb();
 
     // Find test user fixture
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+    const userRows = await sql<{ user_id: number; company_id: number; outlet_id: number }>`
+      SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
        FROM users u
        INNER JOIN companies c ON c.id = u.company_id
        INNER JOIN user_outlets uo ON uo.user_id = u.id
        INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE c.code = ?
-         AND u.email = ?
+       WHERE c.code = ${TEST_COMPANY_CODE}
+         AND u.email = ${TEST_OWNER_EMAIL}
          AND u.is_active = 1
-         AND o.code = ?
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL, TEST_OUTLET_CODE]
-    );
+         AND o.code = ${TEST_OUTLET_CODE}
+       LIMIT 1
+    `.execute(db);
 
     assert.ok(
-      userRows.length > 0,
+      userRows.rows.length > 0,
       `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`
     );
-    testUserId = Number(userRows[0].user_id);
-    testCompanyId = Number(userRows[0].company_id);
-    testOutletId = Number(userRows[0].outlet_id);
+    testUserId = Number(userRows.rows[0].user_id);
+    testCompanyId = Number(userRows.rows[0].company_id);
+    testOutletId = Number(userRows.rows[0].outlet_id);
   });
 
   after(async () => {
-    connection.release();
     await closeDbPool();
   });
 
@@ -71,12 +67,13 @@ describe("Sales Payment Routes", { concurrency: false }, () => {
 
   describe("Payment Data Structure", () => {
     test("sales_payments table exists with required columns", async () => {
-      const [columns] = await connection.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales_payments'`
-      );
+      const db = getDb();
+      const columns = await sql<{ COLUMN_NAME: string }>`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales_payments'
+      `.execute(db);
 
-      const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+      const columnNames = columns.rows.map(r => r.COLUMN_NAME);
       assert.ok(columnNames.includes("id"), "Should have id column");
       assert.ok(columnNames.includes("company_id"), "Should have company_id column");
       assert.ok(columnNames.includes("outlet_id"), "Should have outlet_id column");
@@ -86,12 +83,13 @@ describe("Sales Payment Routes", { concurrency: false }, () => {
     });
 
     test("sales_payment_splits table exists (for split payments)", async () => {
-      const [columns] = await connection.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales_payment_splits'`
-      );
+      const db = getDb();
+      const columns = await sql<{ COLUMN_NAME: string }>`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales_payment_splits'
+      `.execute(db);
 
-      const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+      const columnNames = columns.rows.map(r => r.COLUMN_NAME);
       assert.ok(columnNames.includes("id"), "Should have id column");
       assert.ok(columnNames.includes("payment_id"), "Should have payment_id column");
       assert.ok(columnNames.includes("account_id"), "Should have account_id column");
@@ -163,13 +161,13 @@ describe("Sales Payment Routes", { concurrency: false }, () => {
 
   describe("Payment Validation", () => {
     test("sales_payments has correct status values", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT DISTINCT status FROM sales_payments WHERE company_id = ? LIMIT 5`,
-        [testCompanyId]
-      );
+      const db = getDb();
+      const rows = await sql<{ status: string }>`
+        SELECT DISTINCT status FROM sales_payments WHERE company_id = ${testCompanyId} LIMIT 5
+      `.execute(db);
 
       // Status values should be DRAFT, POSTED, or VOID
-      for (const row of rows) {
+      for (const row of rows.rows) {
         assert.ok(
           ["DRAFT", "POSTED", "VOID"].includes(row.status),
           `Status should be valid: ${row.status}`
@@ -178,16 +176,16 @@ describe("Sales Payment Routes", { concurrency: false }, () => {
     });
 
     test("sales_payments supports split payment structure", async () => {
+      const db = getDb();
       // Check if splits exist for any payments
-      const [splitRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) as cnt FROM sales_payment_splits sps
+      const splitRows = await sql<{ cnt: number }>`
+        SELECT COUNT(*) as cnt FROM sales_payment_splits sps
          INNER JOIN sales_payments sp ON sp.id = sps.payment_id
-         WHERE sp.company_id = ?`,
-        [testCompanyId]
-      );
+         WHERE sp.company_id = ${testCompanyId}
+      `.execute(db);
 
       // Just verify the table is accessible and has expected structure
-      assert.ok(typeof splitRows[0].cnt === "number", "Splits count should be a number");
+      assert.ok(typeof splitRows.rows[0].cnt === "number", "Splits count should be a number");
     });
   });
 });

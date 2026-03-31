@@ -15,9 +15,9 @@
 
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
+import { sql } from "kysely";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../../lib/db";
-import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { closeDbPool, getDb } from "../../lib/db";
 import { createHash, randomUUID } from "node:crypto";
 import { toEpochMs, toMysqlDateTime, toUtcInstant } from "../../lib/date-helpers";
 import { SyncPushRequestSchema } from "@jurnapod/shared";
@@ -33,41 +33,38 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Sync Push Routes", { concurrency: false }, () => {
-  let connection: PoolConnection;
+  let db: ReturnType<typeof getDb>;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    db = getDb();
 
     // Find test user fixture
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+    const userRows = await sql<{ user_id: number; company_id: number; outlet_id: number }>`
+      SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
        FROM users u
        INNER JOIN companies c ON c.id = u.company_id
        INNER JOIN user_outlets uo ON uo.user_id = u.id
        INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE c.code = ?
-         AND u.email = ?
+       WHERE c.code = ${TEST_COMPANY_CODE}
+         AND u.email = ${TEST_OWNER_EMAIL}
          AND u.is_active = 1
-         AND o.code = ?
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL, TEST_OUTLET_CODE]
-    );
+         AND o.code = ${TEST_OUTLET_CODE}
+       LIMIT 1
+    `.execute(db);
 
     assert.ok(
-      userRows.length > 0,
+      userRows.rows.length > 0,
       `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`
     );
-    testUserId = Number(userRows[0].user_id);
-    testCompanyId = Number(userRows[0].company_id);
-    testOutletId = Number(userRows[0].outlet_id);
+    testUserId = Number(userRows.rows[0].user_id);
+    testCompanyId = Number(userRows.rows[0].company_id);
+    testOutletId = Number(userRows.rows[0].outlet_id);
   });
 
   after(async () => {
-    connection.release();
     await closeDbPool();
   });
 
@@ -222,13 +219,12 @@ describe("Sync Push Routes", { concurrency: false }, () => {
     test("checks for existing transaction by client_tx_id", async () => {
       // Query to check for existing transaction
       const clientTxId = `nonexistent-${Date.now()}`;
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM pos_transactions 
-         WHERE company_id = ? AND outlet_id = ? AND client_tx_id = ?
-         LIMIT 1`,
-        [testCompanyId, testOutletId, clientTxId]
-      );
-      assert.equal(rows.length, 0, "Should not find nonexistent transaction");
+      const rows = await sql<{ id: number }>`
+        SELECT id FROM pos_transactions 
+         WHERE company_id = ${testCompanyId} AND outlet_id = ${testOutletId} AND client_tx_id = ${clientTxId}
+         LIMIT 1
+      `.execute(db);
+      assert.equal(rows.rows.length, 0, "Should not find nonexistent transaction");
     });
 
     test("unique constraint on company_id, outlet_id, client_tx_id", async () => {
@@ -236,34 +232,29 @@ describe("Sync Push Routes", { concurrency: false }, () => {
       const testClientTxId = `dedup-test-${Date.now()}`;
 
       try {
-        await connection.execute<ResultSetHeader>(
-          `INSERT INTO pos_transactions (
+        await sql`
+          INSERT INTO pos_transactions (
             company_id, outlet_id, cashier_user_id, client_tx_id, 
             status, service_type, trx_at, payload_sha256, payload_hash_version
-          ) VALUES (?, ?, ?, ?, 'COMPLETED', 'TAKEAWAY', NOW(), 'test-hash', 2)`,
-          [testCompanyId, testOutletId, testUserId, testClientTxId]
-        );
+          ) VALUES (${testCompanyId}, ${testOutletId}, ${testUserId}, ${testClientTxId}, 'COMPLETED', 'TAKEAWAY', NOW(), 'test-hash', 2)
+        `.execute(db);
 
         // Try to insert duplicate
         await assert.rejects(
           async () => {
-            await connection.execute<ResultSetHeader>(
-              `INSERT INTO pos_transactions (
+            await sql`
+              INSERT INTO pos_transactions (
                 company_id, outlet_id, cashier_user_id, client_tx_id, 
                 status, service_type, trx_at, payload_sha256, payload_hash_version
-              ) VALUES (?, ?, ?, ?, 'COMPLETED', 'TAKEAWAY', NOW(), 'test-hash2', 2)`,
-              [testCompanyId, testOutletId, testUserId, testClientTxId]
-            );
+              ) VALUES (${testCompanyId}, ${testOutletId}, ${testUserId}, ${testClientTxId}, 'COMPLETED', 'TAKEAWAY', NOW(), 'test-hash2', 2)
+            `.execute(db);
           },
           /Duplicate entry/,
           "Should reject duplicate client_tx_id within same company/outlet"
         );
       } finally {
         // Cleanup
-        await connection.execute(
-          `DELETE FROM pos_transactions WHERE client_tx_id = ?`,
-          [testClientTxId]
-        );
+        await sql`DELETE FROM pos_transactions WHERE client_tx_id = ${testClientTxId}`.execute(db);
       }
     });
   });
@@ -393,25 +384,23 @@ describe("Sync Push Routes", { concurrency: false }, () => {
 
   describe("Audit Logging", () => {
     test("creates audit service with db pool", () => {
-      const dbPool = getDbPool();
+      const dbPool = getDb();
       assert.ok(dbPool, "Database pool should be available");
     });
 
     test("checks audit_logs table exists", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT 1 FROM audit_logs LIMIT 1`
-      );
+      const rows = await sql`SELECT 1 FROM audit_logs LIMIT 1`.execute(db);
       assert.ok(true, "audit_logs table should exist");
     });
 
     test("records sync push audit entries", async () => {
       // Verify audit logging columns exist
-      const [columns] = await connection.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_logs'`
-      );
+      const columns = await sql<{ COLUMN_NAME: string }>`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_logs'
+      `.execute(db);
 
-      const columnNames = (columns as Array<{ COLUMN_NAME: string }>).map(r => r.COLUMN_NAME);
+      const columnNames = columns.rows.map(r => r.COLUMN_NAME);
       assert.ok(columnNames.includes("company_id"), "Should have company_id column");
       assert.ok(columnNames.includes("outlet_id"), "Should have outlet_id column");
       assert.ok(columnNames.includes("action"), "Should have action column");
@@ -526,29 +515,20 @@ describe("Sync Push Routes", { concurrency: false }, () => {
 
   describe("Company/Outlet Scoping", () => {
     test("verifies cashier belongs to company", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT 1 FROM users WHERE id = ? AND company_id = ? LIMIT 1`,
-        [testUserId, testCompanyId]
-      );
-      assert.ok(rows.length > 0, "Test user should belong to test company");
+      const rows = await sql`SELECT 1 FROM users WHERE id = ${testUserId} AND company_id = ${testCompanyId} LIMIT 1`.execute(db);
+      assert.ok(rows.rows.length > 0, "Test user should belong to test company");
     });
 
     test("prevents cross-company transactions", async () => {
       // Verify that we cannot query transactions from a different company
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM pos_transactions WHERE company_id = ? LIMIT 1`,
-        [testCompanyId + 9999]
-      );
-      assert.equal(rows.length, 0, "Should not find transactions from non-existent company");
+      const rows = await sql`SELECT id FROM pos_transactions WHERE company_id = ${testCompanyId + 9999} LIMIT 1`.execute(db);
+      assert.equal(rows.rows.length, 0, "Should not find transactions from non-existent company");
     });
 
     test("outlet_id scoping for transactions", async () => {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM pos_transactions WHERE company_id = ? AND outlet_id = ? LIMIT 1`,
-        [testCompanyId, testOutletId]
-      );
+      const rows = await sql`SELECT id FROM pos_transactions WHERE company_id = ${testCompanyId} AND outlet_id = ${testOutletId} LIMIT 1`.execute(db);
       // May or may not have transactions, but query should work
-      assert.ok(Array.isArray(rows), "Should return array result");
+      assert.ok(Array.isArray(rows.rows), "Should return array result");
     });
   });
 

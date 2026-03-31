@@ -13,7 +13,8 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { randomUUID } from "node:crypto";
-import { closeDbPool, getDbPool } from "../../lib/db.js";
+import { closeDbPool, getDb } from "../../lib/db.js";
+import { sql } from "kysely";
 import {
   createSession,
   getSession,
@@ -21,7 +22,6 @@ import {
   deleteSession,
   cleanupExpiredSessions,
 } from "./session-store.js";
-import type { Pool } from "mysql2/promise";
 
 const COMPANY_A = 1;
 
@@ -35,15 +35,14 @@ const SAMPLE_PAYLOAD = {
 };
 
 describe("Batch Failure Recovery & Session Hardening", () => {
-  let pool: Pool;
-
   before(() => {
-    pool = getDbPool();
+    // Warm up the db connection
+    getDb();
   });
 
   after(async () => {
     // Clean up any expired sessions created during testing
-    await cleanupExpiredSessions(pool);
+    await cleanupExpiredSessions();
     await closeDbPool();
   });
 
@@ -90,28 +89,28 @@ describe("Batch Failure Recovery & Session Hardening", () => {
     test("active session with >60s remaining is retrievable", async () => {
       const sessionId = randomUUID();
 
-      await createSession(pool, sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
 
-      const session = await getSession(pool, sessionId, COMPANY_A);
+      const session = await getSession(sessionId, COMPANY_A);
       assert.ok(session, "Active session must be retrievable");
 
       const expiresInMs = session.expiresAt.getTime() - Date.now();
       assert.ok(expiresInMs > 60_000, "Active session should have more than 60s remaining");
 
-      await deleteSession(pool, sessionId, COMPANY_A);
+      await deleteSession(sessionId, COMPANY_A);
     });
 
     test("session expiring within 60s should be rejected by apply guard", async () => {
       const sessionId = randomUUID();
 
       // Insert a session that expires in 30 seconds
-      await pool.execute(
-        `INSERT INTO import_sessions (session_id, company_id, entity_type, payload, created_at, expires_at)
-         VALUES (?, ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 30 SECOND))`,
-        [sessionId, COMPANY_A, "items", JSON.stringify(SAMPLE_PAYLOAD)]
-      );
+      const db = getDb();
+      await sql`
+        INSERT INTO import_sessions (session_id, company_id, entity_type, payload, created_at, expires_at)
+        VALUES (${sessionId}, ${COMPANY_A}, ${"items"}, ${JSON.stringify(SAMPLE_PAYLOAD)}, NOW(), DATE_ADD(NOW(), INTERVAL 30 SECOND))
+      `.execute(db);
 
-      const session = await getSession(pool, sessionId, COMPANY_A);
+      const session = await getSession(sessionId, COMPANY_A);
       assert.ok(session, "Session should still be found (not expired yet)");
 
       const expiresInMs = session.expiresAt.getTime() - Date.now();
@@ -119,24 +118,24 @@ describe("Batch Failure Recovery & Session Hardening", () => {
       assert.ok(expiresInMs < 60_000, "This session should trigger the expiry guard");
 
       // Cleanup
-      await deleteSession(pool, sessionId, COMPANY_A);
+      await deleteSession(sessionId, COMPANY_A);
     });
 
     test("expired session returns null from getSession", async () => {
       const sessionId = randomUUID();
 
       // Insert an already-expired session
-      await pool.execute(
-        `INSERT INTO import_sessions (session_id, company_id, entity_type, payload, created_at, expires_at)
-         VALUES (?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 1 HOUR), DATE_SUB(NOW(), INTERVAL 30 MINUTE))`,
-        [sessionId, COMPANY_A, "items", JSON.stringify(SAMPLE_PAYLOAD)]
-      );
+      const db = getDb();
+      await sql`
+        INSERT INTO import_sessions (session_id, company_id, entity_type, payload, created_at, expires_at)
+        VALUES (${sessionId}, ${COMPANY_A}, ${"items"}, ${JSON.stringify(SAMPLE_PAYLOAD)}, DATE_SUB(NOW(), INTERVAL 1 HOUR), DATE_SUB(NOW(), INTERVAL 30 MINUTE))
+      `.execute(db);
 
-      const session = await getSession(pool, sessionId, COMPANY_A);
+      const session = await getSession(sessionId, COMPANY_A);
       assert.equal(session, null, "Expired session must return null");
 
       // Cleanup
-      await deleteSession(pool, sessionId, COMPANY_A);
+      await deleteSession(sessionId, COMPANY_A);
     });
   });
 
@@ -148,13 +147,13 @@ describe("Batch Failure Recovery & Session Hardening", () => {
     test("updateSession persists lastSuccessfulBatch in payload", async () => {
       const sessionId = randomUUID();
 
-      await createSession(pool, sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
 
       // Simulate checkpoint after batch 2 commits (0-based index 2 = batch 3)
       const updatedPayload = { ...SAMPLE_PAYLOAD, lastSuccessfulBatch: 2 };
-      await updateSession(pool, sessionId, COMPANY_A, updatedPayload);
+      await updateSession(sessionId, COMPANY_A, updatedPayload);
 
-      const session = await getSession(pool, sessionId, COMPANY_A);
+      const session = await getSession(sessionId, COMPANY_A);
       assert.ok(session, "Session must exist after update");
       assert.equal(
         (session.payload as { lastSuccessfulBatch?: number }).lastSuccessfulBatch,
@@ -162,7 +161,7 @@ describe("Batch Failure Recovery & Session Hardening", () => {
         "Checkpoint must be persisted as lastSuccessfulBatch = 2"
       );
 
-      await deleteSession(pool, sessionId, COMPANY_A);
+      await deleteSession(sessionId, COMPANY_A);
     });
 
     test("resume startBatch is derived from lastSuccessfulBatch + 1", () => {
@@ -195,26 +194,26 @@ describe("Batch Failure Recovery & Session Hardening", () => {
       const sessionIdA = randomUUID();
       const sessionIdB = randomUUID();
 
-      await createSession(pool, sessionIdA, COMPANY_A, "items", SAMPLE_PAYLOAD);
-      await createSession(pool, sessionIdB, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionIdA, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionIdB, COMPANY_A, "items", SAMPLE_PAYLOAD);
 
       // Checkpoint session A at batch 3, session B at batch 7
-      await updateSession(pool, sessionIdA, COMPANY_A, { ...SAMPLE_PAYLOAD, lastSuccessfulBatch: 3 });
-      await updateSession(pool, sessionIdB, COMPANY_A, { ...SAMPLE_PAYLOAD, lastSuccessfulBatch: 7 });
+      await updateSession(sessionIdA, COMPANY_A, { ...SAMPLE_PAYLOAD, lastSuccessfulBatch: 3 });
+      await updateSession(sessionIdB, COMPANY_A, { ...SAMPLE_PAYLOAD, lastSuccessfulBatch: 7 });
 
-      const storedA = await getSession(pool, sessionIdA, COMPANY_A);
-      const storedB = await getSession(pool, sessionIdB, COMPANY_A);
+      const storedA = await getSession(sessionIdA, COMPANY_A);
+      const storedB = await getSession(sessionIdB, COMPANY_A);
 
       assert.equal((storedA!.payload as { lastSuccessfulBatch?: number }).lastSuccessfulBatch, 3);
       assert.equal((storedB!.payload as { lastSuccessfulBatch?: number }).lastSuccessfulBatch, 7);
 
-      await deleteSession(pool, sessionIdA, COMPANY_A);
-      await deleteSession(pool, sessionIdB, COMPANY_A);
+      await deleteSession(sessionIdA, COMPANY_A);
+      await deleteSession(sessionIdB, COMPANY_A);
     });
 
     test("session with all batches failed remains in DB for retry", async () => {
       const sessionId = randomUUID();
-      await createSession(pool, sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
+      await createSession(sessionId, COMPANY_A, "items", SAMPLE_PAYLOAD);
 
       // Simulate: no batches committed, batchesFailed > 0 → session NOT deleted
       const batchesFailed = 2;
@@ -224,11 +223,11 @@ describe("Batch Failure Recovery & Session Hardening", () => {
       // Using function to avoid TypeScript unreachable code detection
       const shouldDelete = (failed: number) => failed === 0;
       if (shouldDelete(batchesFailed)) {
-        await deleteSession(pool, sessionId, COMPANY_A);
+        await deleteSession(sessionId, COMPANY_A);
       }
 
       // Session should still be present
-      const session = await getSession(pool, sessionId, COMPANY_A);
+      const session = await getSession(sessionId, COMPANY_A);
       assert.ok(session, "Session with failed batches must remain for retry");
 
       assert.equal(batchesCompleted, 0);

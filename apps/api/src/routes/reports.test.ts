@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../lib/db";
+import { closeDbPool, getDb } from "../lib/db";
 import {
   getTrialBalance,
   getProfitLoss,
@@ -24,7 +24,6 @@ import {
   listJournalBatches,
   listDailySalesSummary,
 } from "../lib/reports";
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 
 loadEnvIfPresent();
 
@@ -33,29 +32,26 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Reports Routes", { concurrency: false }, () => {
-  let connection: PoolConnection;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    const db = getDb();
 
-    // Find test user fixture
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       INNER JOIN user_outlets uo ON uo.user_id = u.id
-       INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE c.code = ?
-         AND u.email = ?
-         AND u.is_active = 1
-         AND o.code = ?
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL, TEST_OUTLET_CODE]
-    );
+    // Find test user fixture using Kysely query builder
+    const userRows = await db
+      .selectFrom("users as u")
+      .innerJoin("companies as c", "c.id", "u.company_id")
+      .innerJoin("user_outlets as uo", "uo.user_id", "u.id")
+      .innerJoin("outlets as o", "o.id", "uo.outlet_id")
+      .where("c.code", "=", TEST_COMPANY_CODE)
+      .where("u.email", "=", TEST_OWNER_EMAIL)
+      .where("u.is_active", "=", 1)
+      .where("o.code", "=", TEST_OUTLET_CODE)
+      .select(["u.id as user_id", "u.company_id", "o.id as outlet_id"])
+      .limit(1)
+      .execute();
 
     assert.ok(
       userRows.length > 0,
@@ -67,7 +63,6 @@ describe("Reports Routes", { concurrency: false }, () => {
   });
 
   after(async () => {
-    connection.release();
     await closeDbPool();
   });
 

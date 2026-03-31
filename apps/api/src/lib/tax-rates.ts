@@ -7,3 +7,11 @@ export { TaxRateNotFoundError, TaxRateConflictError, TaxRateValidationError, Tax
 export { findTaxRateById, createTaxRate, updateTaxRate, deleteTaxRate, listTaxRates } from "./taxes.js";
 export { listCompanyTaxRates, listCompanyDefaultTaxRateIds, listCompanyDefaultTaxRates, setCompanyDefaultTaxRates } from "./taxes.js";
 export { resolveCombinedTaxConfig, calculateTaxLines, withTaxExecutor } from "./taxes.js";
+
+// Re-export Kysely-based functions for library-first pattern
+export { 
+  listCompanyTaxRatesKysely, 
+  listCompanyDefaultTaxRateIdsKysely, 
+  listCompanyDefaultTaxRatesKysely, 
+  setCompanyDefaultTaxRatesKysely 
+} from "./taxes-kysely.js";
