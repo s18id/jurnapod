@@ -16,8 +16,8 @@ import { config as loadEnv } from 'dotenv';
 loadEnv({ path: path.resolve(process.cwd(), '.env') });
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, test } from 'vitest';
-import { createDbPool, DbConn } from '@jurnapod/db';
-import type { Pool } from 'mysql2';
+import { createKysely, type KyselySchema } from '@jurnapod/db';
+import { sql } from 'kysely';
 import { PosSyncModule } from './pos-sync-module.js';
 import type { PullSyncParams } from './pull/types.js';
 import type {
@@ -53,8 +53,7 @@ function loadTestConfig(): TestConfig {
 // ============================================================================
 
 interface TestFixtures {
-  db: DbConn;
-  pool: Pool;
+  db: KyselySchema;
   testUserId: number;
   testCompanyId: number;
   testOutletId: number;
@@ -63,33 +62,28 @@ interface TestFixtures {
 async function setupTestFixtures(): Promise<TestFixtures> {
   const config = loadTestConfig();
   
-  // Create database pool using environment variables
-  const pool = createDbPool({
+  // Create Kysely instance using environment variables
+  const db = createKysely({
     host: process.env.DB_HOST ?? '127.0.0.1',
     port: Number(process.env.DB_PORT ?? '3306'),
     user: process.env.DB_USER ?? 'root',
     password: process.env.DB_PASSWORD ?? '',
     database: process.env.DB_NAME ?? 'jurnapod',
-    connectionLimit: 10,
-    dateStrings: true,
   });
 
-  const db = new DbConn(pool);
-
-  // Find test user fixture
-  const userRows = await db.queryAll<any>(
-    `SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
-     FROM users u
-     INNER JOIN companies c ON c.id = u.company_id
-     INNER JOIN user_outlets uo ON uo.user_id = u.id
-     INNER JOIN outlets o ON o.id = uo.outlet_id
-     WHERE c.code = ?
-       AND u.email = ?
-       AND u.is_active = 1
-       AND o.code = ?
-     LIMIT 1`,
-    [config.companyCode, config.ownerEmail, config.outletCode]
-  );
+  // Find test user fixture using Kysely query builder
+  const userRows = await db
+    .selectFrom('users as u')
+    .innerJoin('companies as c', 'c.id', 'u.company_id')
+    .innerJoin('user_outlets as uo', 'uo.user_id', 'u.id')
+    .innerJoin('outlets as o', 'o.id', 'uo.outlet_id')
+    .select(['u.id as user_id', 'u.company_id', 'o.id as outlet_id'])
+    .where('c.code', '=', config.companyCode)
+    .where('u.email', '=', config.ownerEmail)
+    .where('u.is_active', '=', 1)
+    .where('o.code', '=', config.outletCode)
+    .limit(1)
+    .execute();
 
   if (userRows.length === 0) {
     throw new Error(
@@ -100,20 +94,14 @@ async function setupTestFixtures(): Promise<TestFixtures> {
 
   return {
     db,
-    pool,
     testUserId: Number(userRows[0].user_id),
     testCompanyId: Number(userRows[0].company_id),
     testOutletId: Number(userRows[0].outlet_id),
   };
 }
 
-async function closePool(pool: Pool): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    pool.end((err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
+async function closeDb(db: KyselySchema): Promise<void> {
+  await db.destroy();
 }
 
 // ============================================================================
@@ -138,12 +126,11 @@ describe('PosSyncModule Integration', () => {
       'test-seed-order-4',
     ];
     for (const orderId of seedOrders) {
-      await fixtures.db.execute(
-        `INSERT IGNORE INTO pos_order_snapshots 
-         (order_id, company_id, outlet_id, service_type, order_status, order_state, is_finalized, opened_at, updated_at) 
-         VALUES (?, ?, ?, 'TAKEAWAY', 'OPEN', 'OPEN', false, NOW(), NOW())`,
-        [orderId, fixtures.testCompanyId, fixtures.testOutletId]
-      );
+      await sql`
+        INSERT IGNORE INTO pos_order_snapshots 
+        (order_id, company_id, outlet_id, service_type, order_status, order_state, is_finalized, opened_at, updated_at, opened_at_ts, updated_at_ts) 
+        VALUES (${orderId}, ${fixtures.testCompanyId}, ${fixtures.testOutletId}, 'TAKEAWAY', 'OPEN', 'OPEN', 0, NOW(), NOW(), UNIX_TIMESTAMP(NOW()) * 1000, UNIX_TIMESTAMP(NOW()) * 1000)
+      `.execute(fixtures.db);
     }
 
     // Create POS sync module
@@ -169,9 +156,9 @@ describe('PosSyncModule Integration', () => {
       await module.cleanup();
     }
     
-    // Close database pool (only if fixtures were setup successfully)
-    if (fixtures?.pool) {
-      await closePool(fixtures.pool);
+    // Close database connection (only if fixtures were setup successfully)
+    if (fixtures?.db) {
+      await closeDb(fixtures.db);
     }
   });
 
@@ -680,12 +667,11 @@ describe('PosSyncModule Integration', () => {
       let testVariant: { id: number; item_id: number } | null = null;
 
       beforeAll(async () => {
-        const variants = await fixtures.db.queryAll<any>(
-          `SELECT id, item_id FROM item_variants WHERE company_id = ? AND is_active = 1 LIMIT 1`,
-          [fixtures.testCompanyId]
-        );
-        if (variants.length > 0) {
-          testVariant = { id: Number(variants[0].id), item_id: Number(variants[0].item_id) };
+        const variants = await sql<{ id: number; item_id: number }>`
+          SELECT id, item_id FROM item_variants WHERE company_id = ${fixtures.testCompanyId} AND is_active = 1 LIMIT 1
+        `.execute(fixtures.db);
+        if (variants.rows.length > 0) {
+          testVariant = { id: Number(variants.rows[0].id), item_id: Number(variants.rows[0].item_id) };
         }
       });
 
@@ -764,12 +750,11 @@ describe('PosSyncModule Integration', () => {
       let stockTestVariant: { id: number; item_id: number } | null = null;
 
       beforeAll(async () => {
-        const variants = await fixtures.db.queryAll<any>(
-          `SELECT id, item_id FROM item_variants WHERE company_id = ? AND is_active = 1 LIMIT 1`,
-          [fixtures.testCompanyId]
-        );
-        if (variants.length > 0) {
-          stockTestVariant = { id: Number(variants[0].id), item_id: Number(variants[0].item_id) };
+        const variants = await sql<{ id: number; item_id: number }>`
+          SELECT id, item_id FROM item_variants WHERE company_id = ${fixtures.testCompanyId} AND is_active = 1 LIMIT 1
+        `.execute(fixtures.db);
+        if (variants.rows.length > 0) {
+          stockTestVariant = { id: Number(variants.rows[0].id), item_id: Number(variants.rows[0].item_id) };
         }
       });
 

@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { DbConn } from "@jurnapod/db";
+import { sql } from "kysely";
+import type { KyselySchema } from "@jurnapod/db";
 
 export interface ScheduledExport {
   id: number;
@@ -28,13 +29,34 @@ export interface ExportSchedulerConfig {
   pollIntervalMs: number;
 }
 
+interface ScheduledExportRow {
+  id: number;
+  company_id: number;
+  name: string;
+  report_type: string;
+  export_format: string;
+  schedule_type: string;
+  schedule_config: string;
+  filters: string | null;
+  recipients: string;
+  delivery_method: string;
+  webhook_url: string | null;
+  is_active: number;
+  last_run_at: string | null;
+  next_run_at: string;
+}
+
+interface InsertResult {
+  insertId: number;
+}
+
 export class ExportScheduler {
   private isRunning = false;
   private pollTimer?: NodeJS.Timeout;
   private batchProcessor: any;
 
   constructor(
-    private db: DbConn,
+    private db: KyselySchema,
     private config: ExportSchedulerConfig = {
       pollIntervalMs: 60_000 // 1 minute
     }
@@ -75,13 +97,15 @@ export class ExportScheduler {
   private async checkDueExports(): Promise<void> {
     if (!this.isRunning) return;
 
-    const dueExports = await this.db.query(`
+    const dueExportsResult = await sql<ScheduledExportRow>`
       SELECT * FROM scheduled_exports
       WHERE is_active = 1
         AND next_run_at <= NOW()
       ORDER BY next_run_at ASC
       LIMIT 10
-    `) as ScheduledExport[];
+    `.execute(this.db);
+
+    const dueExports = dueExportsResult.rows;
 
     for (const exportConfig of dueExports) {
       try {
@@ -98,8 +122,8 @@ export class ExportScheduler {
     }
   }
 
-  private async queueExportJob(exportConfig: ScheduledExport): Promise<void> {
-    const filters = exportConfig.filters ? JSON.parse(exportConfig.filters as any) : {};
+  private async queueExportJob(exportConfig: ScheduledExportRow): Promise<void> {
+    const filters = exportConfig.filters ? JSON.parse(exportConfig.filters) : {};
     const scheduleConfig = typeof exportConfig.schedule_config === 'string'
       ? JSON.parse(exportConfig.schedule_config)
       : exportConfig.schedule_config;
@@ -129,7 +153,7 @@ export class ExportScheduler {
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
       filters,
-      recipients: exportConfig.recipients,
+      recipients: JSON.parse(exportConfig.recipients || '[]'),
       deliveryMethod: exportConfig.delivery_method,
       webhookUrl: exportConfig.webhook_url
     };
@@ -145,19 +169,22 @@ export class ExportScheduler {
       });
     } else {
       const jobId = crypto.randomUUID();
-      await this.db.query(`
+      await sql`
         INSERT INTO backoffice_sync_queue (
           id, company_id, document_type, tier, sync_status, scheduled_at, retry_count, max_retries, payload_hash
-        ) VALUES (?, ?, 'SCHEDULED_EXPORT', 'ANALYTICS', 'PENDING', NOW(), 0, 3, ?)
-      `, [jobId, exportConfig.company_id, JSON.stringify(payload)]);
+        ) VALUES (
+          ${jobId}, ${exportConfig.company_id}, 'SCHEDULED_EXPORT', 'ANALYTICS', 'PENDING', 
+          NOW(), 0, 3, ${JSON.stringify(payload)}
+        )
+      `.execute(this.db);
     }
 
-    await this.db.query(`
-      UPDATE scheduled_exports SET last_run_at = NOW() WHERE id = ?
-    `, [exportConfig.id]);
+    await sql`
+      UPDATE scheduled_exports SET last_run_at = NOW() WHERE id = ${exportConfig.id}
+    `.execute(this.db);
   }
 
-  private async updateNextRun(exportConfig: ScheduledExport): Promise<void> {
+  private async updateNextRun(exportConfig: ScheduledExportRow): Promise<void> {
     const scheduleConfig = typeof exportConfig.schedule_config === 'string'
       ? JSON.parse(exportConfig.schedule_config)
       : exportConfig.schedule_config;
@@ -187,25 +214,65 @@ export class ExportScheduler {
         break;
     }
 
-    await this.db.query(`
-      UPDATE scheduled_exports SET next_run_at = ? WHERE id = ?
-    `, [nextRun.toISOString(), exportConfig.id]);
+    await sql`
+      UPDATE scheduled_exports SET next_run_at = ${nextRun.toISOString()} WHERE id = ${exportConfig.id}
+    `.execute(this.db);
   }
 
   async getScheduledExports(companyId: number): Promise<ScheduledExport[]> {
-    return await this.db.query(`
+    const result = await sql<ScheduledExportRow>`
       SELECT * FROM scheduled_exports
-      WHERE company_id = ?
+      WHERE company_id = ${companyId}
       ORDER BY next_run_at ASC
-    `, [companyId]) as ScheduledExport[];
+    `.execute(this.db);
+
+    return result.rows.map((row: ScheduledExportRow) => ({
+      id: row.id,
+      company_id: row.company_id,
+      name: row.name,
+      report_type: row.report_type,
+      export_format: row.export_format,
+      schedule_type: row.schedule_type,
+      schedule_config: typeof row.schedule_config === 'string' 
+        ? JSON.parse(row.schedule_config) 
+        : row.schedule_config,
+      filters: row.filters ? JSON.parse(row.filters) : null,
+      recipients: JSON.parse(row.recipients || '[]'),
+      delivery_method: row.delivery_method,
+      webhook_url: row.webhook_url,
+      is_active: Boolean(row.is_active),
+      last_run_at: row.last_run_at ? new Date(row.last_run_at) : null,
+      next_run_at: new Date(row.next_run_at)
+    }));
   }
 
   async getScheduledExport(companyId: number, id: number): Promise<ScheduledExport | null> {
-    const result = await this.db.querySingle(`
+    const result = await sql<ScheduledExportRow>`
       SELECT * FROM scheduled_exports
-      WHERE company_id = ? AND id = ?
-    `, [companyId, id]);
-    return result as ScheduledExport | null;
+      WHERE company_id = ${companyId} AND id = ${id}
+    `.execute(this.db);
+
+    const row = result.rows[0];
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      company_id: row.company_id,
+      name: row.name,
+      report_type: row.report_type,
+      export_format: row.export_format,
+      schedule_type: row.schedule_type,
+      schedule_config: typeof row.schedule_config === 'string' 
+        ? JSON.parse(row.schedule_config) 
+        : row.schedule_config,
+      filters: row.filters ? JSON.parse(row.filters) : null,
+      recipients: JSON.parse(row.recipients || '[]'),
+      delivery_method: row.delivery_method,
+      webhook_url: row.webhook_url,
+      is_active: Boolean(row.is_active),
+      last_run_at: row.last_run_at ? new Date(row.last_run_at) : null,
+      next_run_at: new Date(row.next_run_at)
+    };
   }
 
   async createScheduledExport(data: {
@@ -244,27 +311,23 @@ export class ExportScheduler {
         break;
     }
 
-    const result = await this.db.query(`
+    const insertResult = await sql`
       INSERT INTO scheduled_exports (
         company_id, name, report_type, export_format, schedule_type, schedule_config,
         filters, recipients, delivery_method, webhook_url, next_run_at, created_by_user_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      data.company_id,
-      data.name,
-      data.report_type,
-      data.export_format,
-      data.schedule_type,
-      JSON.stringify(scheduleConfig),
-      data.filters ? JSON.stringify(data.filters) : null,
-      JSON.stringify(data.recipients),
-      data.delivery_method,
-      data.webhook_url || null,
-      nextRun.toISOString(),
-      data.created_by_user_id
-    ]);
+      ) VALUES (
+        ${data.company_id}, ${data.name}, ${data.report_type}, ${data.export_format}, 
+        ${data.schedule_type}, ${JSON.stringify(scheduleConfig)},
+        ${data.filters ? JSON.stringify(data.filters) : null},
+        ${JSON.stringify(data.recipients)},
+        ${data.delivery_method},
+        ${data.webhook_url || null},
+        ${nextRun.toISOString()},
+        ${data.created_by_user_id}
+      )
+    `.execute(this.db);
 
-    return (result as any).insertId;
+    return Number(insertResult.insertId);
   }
 
   async updateScheduledExport(companyId: number, id: number, data: Partial<{
@@ -327,14 +390,16 @@ export class ExportScheduler {
 
     values.push(companyId, id);
 
-    await this.db.query(`
-      UPDATE scheduled_exports SET ${updates.join(', ')} WHERE company_id = ? AND id = ?
-    `, values);
+    await sql`
+      UPDATE scheduled_exports 
+      SET ${sql.join(updates.map(u => sql`${sql.raw(u)}`), sql`, `)}
+      WHERE company_id = ${companyId} AND id = ${id}
+    `.execute(this.db);
   }
 
   async deleteScheduledExport(companyId: number, id: number): Promise<void> {
-    await this.db.query(`
-      DELETE FROM scheduled_exports WHERE company_id = ? AND id = ?
-    `, [companyId, id]);
+    await sql`
+      DELETE FROM scheduled_exports WHERE company_id = ${companyId} AND id = ${id}
+    `.execute(this.db);
   }
 }

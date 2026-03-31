@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { DbConn } from "@jurnapod/db";
+import { sql } from "kysely";
+import type { KyselySchema } from "@jurnapod/db";
 
 /**
  * Retention policy configuration for a table
@@ -72,13 +73,13 @@ export const DEFAULT_RETENTION_POLICIES: RetentionPolicy[] = [
  * Data retention job that purges old data from sync tables
  * based on configured retention policies.
  * 
- * Uses DbConn from @jurnapod/db for all database operations.
+ * Uses KyselySchema from @jurnapod/db for all database operations.
  */
 export class DataRetentionJob {
-  private db: DbConn;
+  private db: KyselySchema;
   private policies: RetentionPolicy[];
 
-  constructor(db: DbConn, policies: RetentionPolicy[] = DEFAULT_RETENTION_POLICIES) {
+  constructor(db: KyselySchema, policies: RetentionPolicy[] = DEFAULT_RETENTION_POLICIES) {
     this.db = db;
     this.policies = policies;
   }
@@ -170,59 +171,53 @@ export class DataRetentionJob {
     cutoffDate: Date,
     now: Date
   ): Promise<PurgeResult> {
-    await this.db.beginTransaction();
+    return await this.db.transaction().execute(async (trx) => {
+      try {
+        // First, insert into archive table
+        const insertResult = await sql`
+          INSERT INTO ${sql.raw(policy.archiveTable!)}
+          SELECT *, NOW() as archived_at
+          FROM ${sql.raw(policy.table)}
+          WHERE ${sql.raw(policy.dateColumn)} < ${cutoffDate}
+          ${policy.additionalWhere ? sql.raw(policy.additionalWhere) : sql``}
+        `.execute(trx);
 
-    try {
-      // First, insert into archive table
-      const insertSql = `
-        INSERT INTO ${policy.archiveTable}
-        SELECT *, NOW() as archived_at
-        FROM ${policy.table}
-        WHERE ${policy.dateColumn} < ?
-        ${policy.additionalWhere || ""}
-      `;
+        const insertedCount = insertResult.numAffectedRows || 0;
 
-      const insertResult = await this.db.execute(insertSql, [cutoffDate]);
-      const insertedCount = insertResult.affectedRows || 0;
+        if (insertedCount > 0) {
+          // Then delete from main table
+          const deleteResult = await sql`
+            DELETE FROM ${sql.raw(policy.table)}
+            WHERE ${sql.raw(policy.dateColumn)} < ${cutoffDate}
+            ${policy.additionalWhere ? sql.raw(policy.additionalWhere) : sql``}
+          `.execute(trx);
 
-      if (insertedCount > 0) {
-        // Then delete from main table
-        const deleteSql = `
-          DELETE FROM ${policy.table}
-          WHERE ${policy.dateColumn} < ?
-          ${policy.additionalWhere || ""}
-        `;
+          const deletedCount = Number(deleteResult.numAffectedRows || 0);
 
-        const deleteResult = await this.db.execute(deleteSql, [cutoffDate]);
-        const deletedCount = deleteResult.affectedRows || 0;
+          this.logActivity(
+            `Archived ${insertedCount} and deleted ${deletedCount} records from ${policy.table}`
+          );
 
-        await this.db.commit();
-
-        this.logActivity(
-          `Archived ${insertedCount} and deleted ${deletedCount} records from ${policy.table}`
-        );
-
-        return {
-          table: policy.table,
-          recordsAffected: deletedCount,
-          dateRange: { from: cutoffDate, to: now },
-          archived: true,
-          archiveTable: policy.archiveTable,
-        };
-      } else {
-        await this.db.commit();
-        return {
-          table: policy.table,
-          recordsAffected: 0,
-          dateRange: { from: cutoffDate, to: now },
-          archived: true,
-          archiveTable: policy.archiveTable,
-        };
+          return {
+            table: policy.table,
+            recordsAffected: deletedCount,
+            dateRange: { from: cutoffDate, to: now },
+            archived: true,
+            archiveTable: policy.archiveTable,
+          };
+        } else {
+          return {
+            table: policy.table,
+            recordsAffected: 0,
+            dateRange: { from: cutoffDate, to: now },
+            archived: true,
+            archiveTable: policy.archiveTable,
+          };
+        }
+      } catch (error) {
+        throw error;
       }
-    } catch (error) {
-      await this.db.rollback();
-      throw error;
-    }
+    });
   }
 
   /**
@@ -233,14 +228,13 @@ export class DataRetentionJob {
     cutoffDate: Date,
     now: Date
   ): Promise<PurgeResult> {
-    const sql = `
-      DELETE FROM ${policy.table}
-      WHERE ${policy.dateColumn} < ?
-      ${policy.additionalWhere || ""}
-    `;
-
-    const result = await this.db.execute(sql, [cutoffDate]);
-    const deletedCount = result.affectedRows || 0;
+    const result = await sql`
+      DELETE FROM ${sql.raw(policy.table)}
+      WHERE ${sql.raw(policy.dateColumn)} < ${cutoffDate}
+      ${policy.additionalWhere ? sql.raw(policy.additionalWhere) : sql``}
+    `.execute(this.db);
+    
+    const deletedCount = Number(result.numAffectedRows || 0);
 
     this.logActivity(
       `Deleted ${deletedCount} records from ${policy.table}`
@@ -282,12 +276,12 @@ export class DataRetentionJob {
 
 /**
  * Convenience function to run the data retention job
- * @param db - Database connection (DbConn) to use
+ * @param db - Database connection (KyselySchema) to use
  * @param policies - Optional custom retention policies
  * @returns Retention result summary
  */
 export async function runDataRetentionJob(
-  db: DbConn,
+  db: KyselySchema,
   policies?: RetentionPolicy[]
 ): Promise<RetentionResult> {
   const job = new DataRetentionJob(db, policies);
@@ -314,6 +308,6 @@ export function getDataRetentionJob(): DataRetentionJob {
  * Initialize the DataRetentionJob singleton with a database connection
  * Should be called once during application startup
  */
-export function setDataRetentionJobDb(db: DbConn): void {
+export function setDataRetentionJobDb(db: KyselySchema): void {
   _dataRetentionJob = new DataRetentionJob(db);
 }

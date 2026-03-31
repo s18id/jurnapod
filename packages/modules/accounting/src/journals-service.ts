@@ -8,12 +8,13 @@ import type {
   JournalLineResponse
 } from "@jurnapod/shared";
 import { toRfc3339Required } from "@jurnapod/shared";
-import type { JurnapodDbClient } from "@jurnapod/db";
+import { sql } from "kysely";
+import type { KyselySchema } from "@jurnapod/db";
 
 /**
  * Database client interface for dependency injection
  */
-export interface JournalsDbClient extends JurnapodDbClient {}
+export interface JournalsDbClient extends KyselySchema {}
 
 /**
  * Custom error classes
@@ -98,56 +99,48 @@ export class JournalsService {
       }
     }
 
-    // Use transaction if supported
-    const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-    
-    try {
-      if (useTransaction) {
-        await this.db.begin!();
-      }
+    // For manual entries, we use a unique doc_id based on timestamp
+    const docId = Date.now();
 
-      // Create journal batch
-      const batchSql = `
+    const batchId = await this.db.transaction().execute(async (trx) => {
+      const batchResult = await sql`
         INSERT INTO journal_batches (
           company_id, outlet_id, doc_type, doc_id, client_ref, posted_at, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
-      `;
+        VALUES (
+          ${data.company_id},
+          ${data.outlet_id ?? null},
+          'MANUAL',
+          ${docId},
+          ${data.client_ref ?? null},
+          ${data.entry_date},
+          NOW(),
+          NOW()
+        )
+      `.execute(trx);
 
-      // For manual entries, we use a unique doc_id based on timestamp
-      const docId = Date.now();
-      
-      const batchResult = await this.db.execute(batchSql, [
-        data.company_id,
-        data.outlet_id ?? null,
-        "MANUAL",
-        docId,
-        data.client_ref ?? null,
-        data.entry_date
-      ]);
-
-      const batchId = batchResult.insertId!;
+      const newBatchId = Number(batchResult.insertId);
 
       // Create journal lines
-      const lineSql = `
-        INSERT INTO journal_lines (
-          journal_batch_id, company_id, outlet_id, account_id, 
-          line_date, debit, credit, description, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-      `;
-
       for (const line of data.lines) {
-        await this.db.execute(lineSql, [
-          batchId,
-          data.company_id,
-          data.outlet_id ?? null,
-          line.account_id,
-          data.entry_date,
-          line.debit,
-          line.credit,
-          line.description
-        ]);
+        await sql`
+          INSERT INTO journal_lines (
+            journal_batch_id, company_id, outlet_id, account_id, 
+            line_date, debit, credit, description, created_at, updated_at
+          )
+          VALUES (
+            ${newBatchId},
+            ${data.company_id},
+            ${data.outlet_id ?? null},
+            ${line.account_id},
+            ${data.entry_date},
+            ${line.debit},
+            ${line.credit},
+            ${line.description},
+            NOW(),
+            NOW()
+          )
+        `.execute(trx);
       }
 
       // Audit log (inside transaction)
@@ -155,7 +148,7 @@ export class JournalsService {
         await this.auditService.logCreate(
           { company_id: data.company_id, user_id: userId },
           "journal_entry",
-          batchId,
+          newBatchId,
           {
             doc_type: "MANUAL",
             entry_date: data.entry_date,
@@ -167,59 +160,41 @@ export class JournalsService {
         );
       }
 
-      if (useTransaction) {
-        await this.db.commit!();
-      }
+      return newBatchId;
+    });
 
-      // Return the created batch with lines
-      return this.getJournalBatch(batchId, data.company_id);
-    } catch (error) {
-      if (useTransaction) {
-        await this.db.rollback!();
-      }
-      if (data.client_ref && isMysqlDuplicateError(error)) {
-        const existingId = await this.findManualEntryIdByClientRef(
-          data.company_id,
-          data.client_ref
-        );
-        if (existingId) {
-          return this.getJournalBatch(existingId, data.company_id);
-        }
-      }
-      throw error;
-    }
+    // Return the created batch with lines
+    return this.getJournalBatch(batchId, data.company_id);
   }
 
   private async findManualEntryIdByClientRef(
     companyId: number,
     clientRef: string
   ): Promise<number | null> {
-    const rows = await this.db.query<{ id: number }>(
-      `SELECT id
-       FROM journal_batches
-       WHERE company_id = ?
-         AND doc_type = 'MANUAL'
-         AND client_ref = ?
-       LIMIT 1`,
-      [companyId, clientRef]
-    );
+    const result = await sql<{ id: number }>`
+      SELECT id
+      FROM journal_batches
+      WHERE company_id = ${companyId}
+        AND doc_type = 'MANUAL'
+        AND client_ref = ${clientRef}
+      LIMIT 1
+    `.execute(this.db);
 
-    return rows.length > 0 ? Number(rows[0].id) : null;
+    return result.rows.length > 0 ? Number(result.rows[0].id) : null;
   }
 
   private async ensureEntryDateInOpenFiscalYear(companyId: number, entryDate: string): Promise<void> {
-    const rows = await this.db.query<{ id: number }>(
-      `SELECT id
-       FROM fiscal_years
-       WHERE company_id = ?
-         AND status = 'OPEN'
-         AND start_date <= ?
-         AND end_date >= ?
-       LIMIT 1`,
-      [companyId, entryDate, entryDate]
-    );
+    const result = await sql<{ id: number }>`
+      SELECT id
+      FROM fiscal_years
+      WHERE company_id = ${companyId}
+        AND status = 'OPEN'
+        AND start_date <= ${entryDate}
+        AND end_date >= ${entryDate}
+      LIMIT 1
+    `.execute(this.db);
 
-    if (rows.length === 0) {
+    if (result.rows.length === 0) {
       throw new JournalOutsideFiscalYearError(entryDate);
     }
   }
@@ -229,7 +204,7 @@ export class JournalsService {
    */
   async getJournalBatch(batchId: number, companyId: number): Promise<JournalBatchResponse> {
     // Use Kysely with JOIN to get batch and lines in one query (fixes N+1)
-    const result = await this.db.kysely
+    const result = await this.db
       .selectFrom('journal_batches as jb')
       .leftJoin('journal_lines as jl', 'jb.id', 'jl.journal_batch_id')
       .where('jb.id', '=', batchId)
@@ -280,8 +255,8 @@ export class JournalsService {
 
     // Transform lines from flat result
     const lines = result
-      .filter(row => row.jl_id !== null && row.jl_id !== undefined)
-      .map(row => ({
+      .filter((row: typeof firstRow) => row.jl_id !== null && row.jl_id !== undefined)
+      .map((row: typeof firstRow) => ({
         id: row.jl_id as number,
         journal_batch_id: row.journal_batch_id as number,
         company_id: row.jl_company_id as number,
@@ -316,7 +291,7 @@ export class JournalsService {
    */
   async listJournalBatches(filters: JournalListQuery): Promise<JournalBatchResponse[]> {
     // Step 1: Get batch IDs with pagination using Kysely
-    let batchQuery = this.db.kysely
+    let batchQuery = this.db
       .selectFrom('journal_batches as jb')
       .where('jb.company_id', '=', filters.company_id);
 
@@ -368,9 +343,9 @@ export class JournalsService {
     }
 
     // Step 2: Get all lines for the batch IDs in ONE query (fixes N+1)
-    const batchIds = batchesResult.map(b => b.id);
+    const batchIds = batchesResult.map((b: typeof batchesResult[0]) => b.id);
     
-    const linesResult = await this.db.kysely
+    const linesResult = await this.db
       .selectFrom('journal_lines')
       .where('journal_batch_id', 'in', batchIds)
       .orderBy('id', 'asc')
@@ -400,7 +375,7 @@ export class JournalsService {
     }
 
     // Step 4: Transform to response format
-    return batchesResult.map(batch => {
+    return batchesResult.map((batch: typeof batchesResult[0]) => {
       const batchLines = linesByBatchId.get(batch.id) || [];
       
       return {

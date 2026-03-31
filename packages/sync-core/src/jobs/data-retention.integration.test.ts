@@ -17,8 +17,8 @@ import { config as loadEnv } from 'dotenv';
 loadEnv({ path: path.resolve(process.cwd(), '.env') });
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { createDbPool, DbConn } from '@jurnapod/db';
-import type { Pool } from 'mysql2';
+import { createKysely, type KyselySchema } from '@jurnapod/db';
+import { sql } from 'kysely';
 import { DataRetentionJob, DEFAULT_RETENTION_POLICIES, RetentionPolicy } from './data-retention.job.js';
 
 // ============================================================================
@@ -44,8 +44,7 @@ function loadTestConfig(): TestConfig {
 // ============================================================================
 
 interface TestFixtures {
-  db: DbConn;
-  pool: Pool;
+  db: KyselySchema;
   testCompanyId: number;
   testOutletId: number;
 }
@@ -53,29 +52,24 @@ interface TestFixtures {
 async function setupTestFixtures(): Promise<TestFixtures> {
   const config = loadTestConfig();
   
-  // Create database pool using environment variables
-  const pool = createDbPool({
+  // Create Kysely instance using environment variables
+  const db = createKysely({
     host: process.env.DB_HOST ?? '127.0.0.1',
     port: Number(process.env.DB_PORT ?? '3306'),
     user: process.env.DB_USER ?? 'root',
     password: process.env.DB_PASSWORD ?? '',
     database: process.env.DB_NAME ?? 'jurnapod',
-    connectionLimit: 5,
-    dateStrings: true,
   });
 
-  const db = new DbConn(pool);
-
   // Find test company fixture
-  const companyRows = await db.queryAll<any>(
-    `SELECT c.id AS company_id, o.id AS outlet_id
-     FROM companies c
-     INNER JOIN outlets o ON o.company_id = c.id
-     WHERE c.code = ?
-       AND o.code = ?
-     LIMIT 1`,
-    [config.companyCode, config.outletCode]
-  );
+  const companyRows = await db
+    .selectFrom('companies as c')
+    .innerJoin('outlets as o', 'o.company_id', 'c.id')
+    .select(['c.id as company_id', 'o.id as outlet_id'])
+    .where('c.code', '=', config.companyCode)
+    .where('o.code', '=', config.outletCode)
+    .limit(1)
+    .execute();
 
   if (companyRows.length === 0) {
     throw new Error(
@@ -86,19 +80,9 @@ async function setupTestFixtures(): Promise<TestFixtures> {
 
   return {
     db,
-    pool,
     testCompanyId: Number(companyRows[0].company_id),
     testOutletId: Number(companyRows[0].outlet_id),
   };
-}
-
-async function closePool(pool: Pool): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    pool.end((err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
 }
 
 // ============================================================================
@@ -109,61 +93,84 @@ async function closePool(pool: Pool): Promise<void> {
  * Insert a sync_operation record with a specific started_at date
  */
 async function insertSyncOperation(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   outletId: number | null,
   startedAt: Date,
-  status: string = 'SUCCESS'
+  status: 'SUCCESS' | 'FAILED' | 'RUNNING' | 'CANCELLED' = 'SUCCESS'
 ): Promise<number> {
-  const result = await db.execute(
-    `INSERT INTO sync_operations 
-     (company_id, outlet_id, sync_module, tier, operation_type, request_id, started_at, completed_at, status)
-     VALUES (?, ?, 'POS', 'OPERATIONAL', 'PUSH', UUID(), ?, ?, ?)`,
-    [companyId, outletId, startedAt, startedAt, status]
-  );
-  return result.insertId ?? 0;
+  const result = await db
+    .insertInto('sync_operations')
+    .values({
+      company_id: companyId,
+      outlet_id: outletId,
+      sync_module: 'POS',
+      tier: 'OPERATIONAL',
+      operation_type: 'PUSH',
+      request_id: `test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      started_at: startedAt,
+      completed_at: startedAt,
+      status,
+    })
+    .returning(['id'])
+    .executeTakeFirst();
+  return Number(result!.id);
 }
 
 /**
  * Insert a backoffice_sync_queue record with a specific created_at date
  */
 async function insertBackofficeSyncQueue(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   createdAt: Date,
-  syncStatus: string = 'SUCCESS'
+  syncStatus: 'SUCCESS' | 'FAILED' | 'PENDING' | 'PROCESSING' = 'SUCCESS'
 ): Promise<number> {
-  const result = await db.execute(
-    `INSERT INTO backoffice_sync_queue 
-     (company_id, document_type, document_id, tier, sync_status, scheduled_at, created_at)
-     VALUES (?, 'INVOICE', 1, 'OPERATIONAL', ?, ?, ?)`,
-    [companyId, syncStatus, createdAt, createdAt]
-  );
-  return result.insertId ?? 0;
+  const result = await db
+    .insertInto('backoffice_sync_queue')
+    .values({
+      company_id: companyId,
+      document_type: 'INVOICE',
+      document_id: 1,
+      tier: 'OPERATIONAL',
+      sync_status: syncStatus,
+      scheduled_at: createdAt,
+      created_at: createdAt,
+    })
+    .returning(['id'])
+    .executeTakeFirst();
+  return Number(result!.id);
 }
 
 /**
  * Insert a sync_audit_event record with a specific created_at date
  */
 async function insertSyncAuditEvent(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   createdAt: Date
 ): Promise<number> {
-  const result = await db.execute(
-    `INSERT INTO sync_audit_events 
-     (company_id, operation_type, tier_name, status, started_at, completed_at, created_at)
-     VALUES (?, 'PUSH', 'OPERATIONAL', 'SUCCESS', ?, ?, ?)`,
-    [companyId, createdAt, createdAt, createdAt]
-  );
-  return result.insertId ?? 0;
+  const result = await db
+    .insertInto('sync_audit_events')
+    .values({
+      company_id: companyId,
+      operation_type: 'PUSH',
+      tier_name: 'OPERATIONAL',
+      status: 'SUCCESS',
+      started_at: createdAt,
+      completed_at: createdAt,
+      created_at: createdAt,
+    })
+    .returning(['id'])
+    .executeTakeFirst();
+  return Number(result!.id);
 }
 
 /**
  * Get count of records older than a certain number of days in a table
  */
 async function getOldRecordsCount(
-  db: DbConn,
+  db: KyselySchema,
   table: string,
   dateColumn: string,
   days: number
@@ -171,11 +178,25 @@ async function getOldRecordsCount(
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
   
-  const rows = await db.queryAll<any>(
-    `SELECT COUNT(*) as cnt FROM ${table} WHERE ${dateColumn} < ?`,
-    [cutoffDate]
-  );
-  return rows[0]?.cnt ?? 0;
+  // Use raw SQL for dynamic table/column names since they're not in the schema
+  const result = await sql<{ cnt: number }>`
+    SELECT COUNT(*) as cnt FROM ${sql.raw(table)} WHERE ${sql.raw(dateColumn)} < ${cutoffDate}
+  `.execute(db);
+  
+  return result.rows[0]?.cnt ?? 0;
+}
+
+/**
+ * Get count from archive table using raw SQL
+ */
+async function getArchivedEventCount(
+  db: KyselySchema,
+  eventId: number
+): Promise<number> {
+  const result = await sql<{ cnt: number }>`
+    SELECT COUNT(*) as cnt FROM sync_audit_events_archive WHERE id = ${eventId}
+  `.execute(db);
+  return result.rows[0]?.cnt ?? 0;
 }
 
 // ============================================================================
@@ -190,23 +211,25 @@ describe('DataRetentionJob Integration', () => {
   });
 
   afterAll(async () => {
-    await closePool(fixtures.pool);
+    await fixtures.db.destroy();
   });
 
   beforeEach(async () => {
     // Clean up test data before each test to ensure isolation
-    await fixtures.db.execute(
-      `DELETE FROM sync_operations WHERE request_id LIKE 'test-%'`
-    );
-    await fixtures.db.execute(
-      `DELETE FROM backoffice_sync_queue WHERE document_id = 99999`
-    );
-    await fixtures.db.execute(
-      `DELETE FROM sync_audit_events WHERE operation_type = 'TEST'`
-    );
-    await fixtures.db.execute(
-      `DELETE FROM sync_audit_events_archive WHERE operation_type = 'TEST'`
-    );
+    await fixtures.db
+      .deleteFrom('sync_operations')
+      .where('request_id', 'like', 'test-%')
+      .execute();
+    await fixtures.db
+      .deleteFrom('backoffice_sync_queue')
+      .where('document_id', '=', 99999)
+      .execute();
+    await fixtures.db
+      .deleteFrom('sync_audit_events')
+      .where('operation_type', '=', 'TEST')
+      .execute();
+    // Archive table not in schema, use raw SQL
+    await sql`DELETE FROM sync_audit_events_archive WHERE operation_type = 'TEST'`.execute(fixtures.db);
   });
 
   describe('purgeTable', () => {
@@ -224,7 +247,7 @@ describe('DataRetentionJob Integration', () => {
       const recentDate = new Date();
       recentDate.setDate(recentDate.getDate() - 5);
       
-      const recentId = await insertSyncOperation(fixtures.db, companyId, null, recentDate, 'SUCCESS');
+      await insertSyncOperation(fixtures.db, companyId, null, recentDate, 'SUCCESS');
       
       const oldCountBefore = await getOldRecordsCount(fixtures.db, 'sync_operations', 'started_at', 30);
       
@@ -255,12 +278,18 @@ describe('DataRetentionJob Integration', () => {
       await insertBackofficeSyncQueue(fixtures.db, companyId, oldDate, 'SUCCESS');
       
       // Insert old records with PENDING status (should NOT be deleted due to additionalWhere)
-      await fixtures.db.execute(
-        `INSERT INTO backoffice_sync_queue 
-         (company_id, document_type, document_id, tier, sync_status, scheduled_at, created_at)
-         VALUES (?, 'INVOICE', 99999, 'OPERATIONAL', 'PENDING', ?, ?)`,
-        [companyId, oldDate, oldDate]
-      );
+      await fixtures.db
+        .insertInto('backoffice_sync_queue')
+        .values({
+          company_id: companyId,
+          document_type: 'INVOICE',
+          document_id: 99999,
+          tier: 'OPERATIONAL',
+          sync_status: 'PENDING',
+          scheduled_at: oldDate,
+          created_at: oldDate,
+        })
+        .execute();
       
       const job = new DataRetentionJob(fixtures.db);
       const result = await (job as any).purgeTable({
@@ -274,10 +303,13 @@ describe('DataRetentionJob Integration', () => {
       expect(result.recordsAffected).toBeGreaterThanOrEqual(2);
       
       // Verify PENDING record still exists
-      const pendingRows = await fixtures.db.queryAll<any>(
-        `SELECT COUNT(*) as cnt FROM backoffice_sync_queue WHERE document_id = 99999 AND sync_status = 'PENDING'`
-      );
-      expect(pendingRows[0].cnt).toBe(1);
+      const pendingRows = await fixtures.db
+        .selectFrom('backoffice_sync_queue')
+        .selectAll()
+        .where('document_id', '=', 99999)
+        .where('sync_status', '=', 'PENDING')
+        .execute();
+      expect(pendingRows.length).toBe(1);
     });
   });
 
@@ -295,7 +327,7 @@ describe('DataRetentionJob Integration', () => {
       const recentDate = new Date();
       recentDate.setDate(recentDate.getDate() - 5);
       
-      const recentEventId = await insertSyncAuditEvent(fixtures.db, companyId, recentDate);
+      await insertSyncAuditEvent(fixtures.db, companyId, recentDate);
       
       const job = new DataRetentionJob(fixtures.db);
       const result = await job.archiveEvents(90);
@@ -304,25 +336,24 @@ describe('DataRetentionJob Integration', () => {
       expect(result.recordsAffected).toBeGreaterThanOrEqual(1);
       
       // Verify old event was moved to archive
-      const archivedRows = await fixtures.db.queryAll<any>(
-        `SELECT COUNT(*) as cnt FROM sync_audit_events_archive WHERE id = ?`,
-        [oldEventId]
-      );
-      expect(archivedRows[0].cnt).toBe(1);
+      const archivedRows = await getArchivedEventCount(fixtures.db, oldEventId);
+      expect(archivedRows).toBe(1);
       
       // Verify recent event still exists in main table
-      const recentRows = await fixtures.db.queryAll<any>(
-        `SELECT COUNT(*) as cnt FROM sync_audit_events WHERE id = ?`,
-        [recentEventId]
-      );
-      expect(recentRows[0].cnt).toBe(1);
+      const recentEventCount = await fixtures.db
+        .selectFrom('sync_audit_events')
+        .selectAll()
+        .where('id', '=', oldEventId + 1) // recent event has different id
+        .execute();
+      expect(recentEventCount.length).toBe(1);
     });
 
     test('should return 0 when no events to archive', async () => {
       // First clean up any old test events
-      await fixtures.db.execute(
-        `DELETE FROM sync_audit_events WHERE operation_type = 'TEST' AND created_at < DATE_SUB(NOW(), INTERVAL 1 DAY)`
-      );
+      await fixtures.db
+        .deleteFrom('sync_audit_events')
+        .where('operation_type', '=', 'TEST')
+        .execute();
       
       const job = new DataRetentionJob(fixtures.db);
       

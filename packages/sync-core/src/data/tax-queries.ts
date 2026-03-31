@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
-import type { DbConn } from "@jurnapod/db";
-import type { RowDataPacket } from "mysql2";
+import type { KyselySchema } from "@jurnapod/db";
 
 export type TaxRateQueryResult = {
   id: number;
@@ -18,16 +17,16 @@ export type TaxRateQueryResult = {
 /**
  * Get all active tax rates for a company.
  */
-export async function getTaxRatesForSync(db: DbConn, companyId: number): Promise<TaxRateQueryResult[]> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT id, company_id, code, name, rate_percent, is_inclusive, account_id, is_active, updated_at
-     FROM tax_rates 
-     WHERE company_id = ? AND is_active = 1
-     ORDER BY code ASC`,
-    [companyId]
-  );
+export async function getTaxRatesForSync(db: KyselySchema, companyId: number): Promise<TaxRateQueryResult[]> {
+  const result = await db
+    .selectFrom('tax_rates')
+    .select(['id', 'company_id', 'code', 'name', 'rate_percent', 'is_inclusive', 'account_id', 'is_active', 'updated_at'])
+    .where('company_id', '=', companyId)
+    .where('is_active', '=', 1)
+    .orderBy('code')
+    .execute();
   
-  return rows.map((row) => ({
+  return result.map((row) => ({
     id: Number(row.id),
     company_id: Number(row.company_id),
     code: row.code,
@@ -36,7 +35,7 @@ export async function getTaxRatesForSync(db: DbConn, companyId: number): Promise
     is_inclusive: row.is_inclusive === 1,
     account_id: row.account_id == null ? null : Number(row.account_id),
     is_active: row.is_active === 1,
-    updated_at: row.updated_at
+    updated_at: row.updated_at.toISOString()
   }));
 }
 
@@ -44,19 +43,19 @@ export async function getTaxRatesForSync(db: DbConn, companyId: number): Promise
  * Get tax rates changed since a specific version for incremental sync.
  */
 export async function getTaxRatesChangedSince(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   updatedSince: string
 ): Promise<TaxRateQueryResult[]> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT id, company_id, code, name, rate_percent, is_inclusive, account_id, is_active, updated_at
-     FROM tax_rates 
-     WHERE company_id = ? AND updated_at >= ?
-     ORDER BY code ASC`,
-    [companyId, updatedSince]
-  );
+  const result = await db
+    .selectFrom('tax_rates')
+    .select(['id', 'company_id', 'code', 'name', 'rate_percent', 'is_inclusive', 'account_id', 'is_active', 'updated_at'])
+    .where('company_id', '=', companyId)
+    .where('updated_at', '>=', updatedSince as any)
+    .orderBy('code')
+    .execute();
   
-  return rows.map((row) => ({
+  return result.map((row) => ({
     id: Number(row.id),
     company_id: Number(row.company_id),
     code: row.code,
@@ -65,18 +64,19 @@ export async function getTaxRatesChangedSince(
     is_inclusive: row.is_inclusive === 1,
     account_id: row.account_id == null ? null : Number(row.account_id),
     is_active: row.is_active === 1,
-    updated_at: row.updated_at
+    updated_at: row.updated_at.toISOString()
   }));
 }
 
 /**
  * Get default tax rate IDs for a company.
  */
-export async function getDefaultTaxRateIds(db: DbConn, companyId: number): Promise<number[]> {
-  const rows = await db.queryAll<RowDataPacket & { tax_rate_id: number }>(
-    `SELECT tax_rate_id FROM company_tax_defaults WHERE company_id = ?`,
-    [companyId]
-  );
+export async function getDefaultTaxRateIds(db: KyselySchema, companyId: number): Promise<number[]> {
+  const result = await db
+    .selectFrom('company_tax_defaults')
+    .select(['tax_rate_id'])
+    .where('company_id', '=', companyId)
+    .execute();
   
-  return rows.map((row) => Number(row.tax_rate_id));
+  return result.map((row) => Number(row.tax_rate_id));
 }

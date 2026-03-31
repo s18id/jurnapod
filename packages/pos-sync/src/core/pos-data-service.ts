@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+import { sql } from "kysely";
 import type { 
   PosRealtimeData, 
   PosOperationalData, 
@@ -8,10 +9,126 @@ import type {
   PosAdminData 
 } from "../types/pos-data.js";
 import type { SyncContext } from "@jurnapod/sync-core";
-import type { DbConn } from "@jurnapod/db";
+import type { KyselySchema } from "@jurnapod/db";
+
+// Row type interfaces for query results
+interface ActiveOrderRow {
+  order_id: string;
+  table_id: number | null;
+  order_status: string;
+  paid_amount: number | string;
+  total_amount: number | string;
+  guest_count: number | null;
+  updated_at: string;
+}
+
+interface TableStatusRow {
+  table_id: number;
+  status: string;
+  current_order_id: string | null;
+  updated_at: string;
+}
+
+interface OutletTableRow {
+  table_id: number;
+  code: string;
+  name: string;
+  zone: string | null;
+  capacity: number | null;
+  status: string;
+  updated_at: string;
+}
+
+interface ReservationRow {
+  reservation_id: number;
+  table_id: number | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  guest_count: number;
+  reservation_at: string;
+  reservation_start_ts: number | null;
+  duration_minutes: number | null;
+  status: string;
+  notes: string | null;
+  linked_order_id: number | null;
+  arrived_at: string | null;
+  seated_at: string | null;
+  cancelled_at: string | null;
+  updated_at: string;
+}
+
+interface ItemRow {
+  id: number;
+  sku: string | null;
+  name: string;
+  type: string;
+  item_group_id: number | null;
+  is_active: number;
+  updated_at: string;
+}
+
+interface ItemGroupRow {
+  id: number;
+  parent_id: number | null;
+  code: string | null;
+  name: string;
+  is_active: number;
+  updated_at: string;
+}
+
+interface PriceRow {
+  id: number;
+  item_id: number;
+  outlet_id: number | null;
+  price: number | string;
+  is_active: number;
+  updated_at: string;
+}
+
+interface TaxRateRow {
+  id: number;
+  code: string;
+  name: string;
+  rate_percent: number | string;
+  is_inclusive: number;
+  is_active: number;
+}
+
+interface DefaultTaxRateRow {
+  tax_rate_id: number;
+}
+
+interface PaymentMethodRow {
+  code: string;
+  label: string;
+  is_active: number;
+  account_id: number | null;
+}
+
+interface OutletConfigRow {
+  outlet_id: number;
+  company_id: number;
+  name: string;
+  timezone: string;
+  currency_code: string;
+  default_tax_rate: number | string;
+  tax_is_inclusive: number;
+}
+
+interface UserPermissionRow {
+  user_id: number;
+  outlet_id: number;
+  permissions: string | null;
+  role: string;
+}
+
+interface FeatureFlagRow {
+  key: string;
+  enabled: number;
+}
 
 export class PosDataService {
-  constructor(private db: DbConn) {}
+  constructor(private db: KyselySchema) {}
 
   /**
    * Get realtime data for POS (active orders, table status)
@@ -20,13 +137,12 @@ export class PosDataService {
     const { company_id, outlet_id } = context;
 
     // Get active orders
-    const activeOrders = await this.db.queryAll(`
+    const activeOrdersResult = await sql`
       SELECT 
         order_id,
         table_id,
         order_status,
         paid_amount,
-        -- Calculate total from order lines
         COALESCE((
           SELECT SUM(unit_price_snapshot * qty - discount_amount)
           FROM pos_order_snapshot_lines pol
@@ -35,16 +151,16 @@ export class PosDataService {
         guest_count,
         updated_at
       FROM pos_order_snapshots pos
-      WHERE company_id = ? 
-        AND outlet_id = ?
+      WHERE company_id = ${company_id} 
+        AND outlet_id = ${outlet_id}
         AND order_state = 'OPEN'
         AND is_finalized = false
       ORDER BY opened_at DESC
       LIMIT 50
-    `, [company_id, outlet_id]);
+    `.execute(this.db);
 
     // Get recent table status updates
-    const tableStatusUpdates = await this.db.queryAll(`
+    const tableStatusResult = await sql`
       SELECT DISTINCT
         ot.id AS table_id,
         ot.status,
@@ -54,26 +170,26 @@ export class PosDataService {
       LEFT JOIN pos_order_snapshots pos ON pos.table_id = ot.id 
         AND pos.order_state = 'OPEN' 
         AND pos.is_finalized = false
-      WHERE ot.company_id = ? 
-        AND ot.outlet_id = ?
+      WHERE ot.company_id = ${company_id} 
+        AND ot.outlet_id = ${outlet_id}
         AND ot.is_active = 1
         AND ot.updated_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
       ORDER BY ot.updated_at DESC
-    `, [company_id, outlet_id]);
+    `.execute(this.db);
 
     return {
-      active_orders: activeOrders.map(order => ({
+      active_orders: (activeOrdersResult.rows as ActiveOrderRow[]).map(order => ({
         order_id: order.order_id,
         table_id: order.table_id,
-        order_status: order.order_status,
+        order_status: order.order_status as "OPEN" | "READY_TO_PAY" | "COMPLETED" | "CANCELLED",
         paid_amount: Number(order.paid_amount),
         total_amount: Number(order.total_amount),
         guest_count: order.guest_count,
         updated_at: order.updated_at
       })),
-      table_status_updates: tableStatusUpdates.map(table => ({
+      table_status_updates: (tableStatusResult.rows as TableStatusRow[]).map(table => ({
         table_id: table.table_id,
-        status: table.status,
+        status: table.status as "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE",
         current_order_id: table.current_order_id,
         updated_at: table.updated_at
       }))
@@ -87,7 +203,7 @@ export class PosDataService {
     const { company_id, outlet_id } = context;
 
     // Get all tables for the outlet
-    const tables = await this.db.queryAll(`
+    const tablesResult = await sql`
       SELECT 
         id AS table_id,
         code,
@@ -97,14 +213,14 @@ export class PosDataService {
         status,
         updated_at
       FROM outlet_tables
-      WHERE company_id = ? 
-        AND outlet_id = ?
+      WHERE company_id = ${company_id} 
+        AND outlet_id = ${outlet_id}
         AND is_active = 1
       ORDER BY zone, name
-    `, [company_id, outlet_id]);
+    `.execute(this.db);
 
     // Get active reservations for today and tomorrow
-    const reservations = await this.db.queryAll(`
+    const reservationsResult = await sql`
       SELECT 
         id AS reservation_id,
         table_id,
@@ -119,8 +235,8 @@ export class PosDataService {
         linked_order_id,
         updated_at
       FROM reservations
-      WHERE company_id = ? 
-        AND outlet_id = ?
+      WHERE company_id = ${company_id} 
+        AND outlet_id = ${outlet_id}
         AND status IN ('BOOKED', 'CONFIRMED', 'ARRIVED', 'SEATED')
         AND (
           (
@@ -135,22 +251,22 @@ export class PosDataService {
           )
         )
       ORDER BY reservation_start_ts IS NULL ASC, reservation_start_ts ASC, reservation_at ASC
-    `, [company_id, outlet_id]);
+    `.execute(this.db);
 
     return {
-      tables: tables.map(table => ({
+      tables: (tablesResult.rows as OutletTableRow[]).map(table => ({
         table_id: table.table_id,
         code: table.code,
         name: table.name,
         zone: table.zone,
         capacity: table.capacity,
-        status: table.status,
+        status: table.status as "AVAILABLE" | "RESERVED" | "OCCUPIED" | "UNAVAILABLE",
         updated_at: table.updated_at
       })),
-      reservations: reservations.map(reservation => ({
+      reservations: (reservationsResult.rows as ReservationRow[]).map(reservation => ({
         reservation_id: reservation.reservation_id,
         table_id: reservation.table_id,
-        customer_name: reservation.customer_name,
+        customer_name: reservation.customer_name ?? "",
         customer_phone: reservation.customer_phone,
         guest_count: reservation.guest_count,
         reservation_at:
@@ -158,9 +274,9 @@ export class PosDataService {
             ? new Date(Number(reservation.reservation_start_ts)).toISOString()
             : reservation.reservation_at,
         duration_minutes: reservation.duration_minutes,
-        status: reservation.status,
+        status: reservation.status as "BOOKED" | "CONFIRMED" | "ARRIVED" | "SEATED",
         notes: reservation.notes,
-        linked_order_id: reservation.linked_order_id,
+        linked_order_id: reservation.linked_order_id ? String(reservation.linked_order_id) : null,
         updated_at: reservation.updated_at
       }))
     };
@@ -173,7 +289,7 @@ export class PosDataService {
     const { company_id, outlet_id } = context;
 
     // Get items
-    const items = await this.db.queryAll(`
+    const itemsResult = await sql`
       SELECT 
         id,
         sku,
@@ -183,13 +299,13 @@ export class PosDataService {
         is_active,
         updated_at
       FROM items
-      WHERE company_id = ?
+      WHERE company_id = ${company_id}
         AND is_active = 1
       ORDER BY name
-    `, [company_id]);
+    `.execute(this.db);
 
     // Get item groups
-    const itemGroups = await this.db.queryAll(`
+    const itemGroupsResult = await sql`
       SELECT 
         id,
         parent_id,
@@ -198,31 +314,31 @@ export class PosDataService {
         is_active,
         updated_at
       FROM item_groups
-      WHERE company_id = ?
+      WHERE company_id = ${company_id}
         AND is_active = 1
       ORDER BY name
-    `, [company_id]);
+    `.execute(this.db);
 
     // Get outlet-specific prices with company defaults
-    const prices = await this.db.queryAll(`
+    const pricesResult = await sql`
       SELECT DISTINCT
         COALESCE(op.id, dp.id) AS id,
         i.id AS item_id,
-        COALESCE(op.outlet_id, ?) AS outlet_id,
+        COALESCE(op.outlet_id, ${outlet_id}) AS outlet_id,
         COALESCE(op.price, dp.price) AS price,
         COALESCE(op.is_active, dp.is_active) AS is_active,
         GREATEST(COALESCE(op.updated_at, '1970-01-01'), COALESCE(dp.updated_at, '1970-01-01')) AS updated_at
       FROM items i
-      LEFT JOIN item_prices op ON op.item_id = i.id AND op.outlet_id = ?
-      LEFT JOIN item_prices dp ON dp.item_id = i.id AND dp.outlet_id IS NULL AND dp.company_id = ?
-      WHERE i.company_id = ?
+      LEFT JOIN item_prices op ON op.item_id = i.id AND op.outlet_id = ${outlet_id}
+      LEFT JOIN item_prices dp ON dp.item_id = i.id AND dp.outlet_id IS NULL AND dp.company_id = ${company_id}
+      WHERE i.company_id = ${company_id}
         AND i.is_active = 1
         AND (op.is_active = 1 OR (op.id IS NULL AND dp.is_active = 1))
       ORDER BY i.name
-    `, [outlet_id, outlet_id, company_id, company_id]);
+    `.execute(this.db);
 
     // Get tax rates
-    const taxRates = await this.db.queryAll(`
+    const taxRatesResult = await sql`
       SELECT 
         id,
         code,
@@ -231,20 +347,20 @@ export class PosDataService {
         is_inclusive,
         is_active
       FROM tax_rates
-      WHERE company_id = ?
+      WHERE company_id = ${company_id}
         AND is_active = 1
       ORDER BY code
-    `, [company_id]);
+    `.execute(this.db);
 
     // Get default tax rate IDs
-    const defaultTaxRates = await this.db.queryAll(`
+    const defaultTaxRatesResult = await sql`
       SELECT tax_rate_id
       FROM company_tax_defaults
-      WHERE company_id = ?
-    `, [company_id]);
+      WHERE company_id = ${company_id}
+    `.execute(this.db);
 
     // Get payment methods
-    const paymentMethods = await this.db.queryAll(`
+    const paymentMethodsResult = await sql`
       SELECT 
         pm.code,
         COALESCE(opm.label, pm.code) AS label,
@@ -252,24 +368,24 @@ export class PosDataService {
         pm.account_id
       FROM outlet_payment_method_mappings opm
       RIGHT JOIN company_payment_method_mappings pm ON pm.code = opm.payment_method_code
-      WHERE pm.company_id = ?
-        AND (opm.outlet_id = ? OR opm.outlet_id IS NULL)
+      WHERE pm.company_id = ${company_id}
+        AND (opm.outlet_id = ${outlet_id} OR opm.outlet_id IS NULL)
         AND pm.is_active = 1
       ORDER BY pm.code
-    `, [company_id, outlet_id]);
+    `.execute(this.db);
 
     return {
       data_version: 0, // Version tracking moved to sync-core
-      items: items.map(item => ({
+      items: (itemsResult.rows as ItemRow[]).map(item => ({
         id: item.id,
         sku: item.sku,
         name: item.name,
-        type: item.type,
+        type: item.type as "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE",
         item_group_id: item.item_group_id,
         is_active: Boolean(item.is_active),
         updated_at: item.updated_at
       })),
-      item_groups: itemGroups.map(group => ({
+      item_groups: (itemGroupsResult.rows as ItemGroupRow[]).map(group => ({
         id: group.id,
         parent_id: group.parent_id,
         code: group.code,
@@ -277,15 +393,15 @@ export class PosDataService {
         is_active: Boolean(group.is_active),
         updated_at: group.updated_at
       })),
-      prices: prices.map(price => ({
+      prices: (pricesResult.rows as PriceRow[]).map(price => ({
         id: price.id,
         item_id: price.item_id,
-        outlet_id: price.outlet_id,
+        outlet_id: price.outlet_id ?? 0,
         price: Number(price.price),
         is_active: Boolean(price.is_active),
         updated_at: price.updated_at
       })),
-      tax_rates: taxRates.map(rate => ({
+      tax_rates: (taxRatesResult.rows as TaxRateRow[]).map(rate => ({
         id: rate.id,
         code: rate.code,
         name: rate.name,
@@ -293,8 +409,8 @@ export class PosDataService {
         is_inclusive: Boolean(rate.is_inclusive),
         is_active: Boolean(rate.is_active)
       })),
-      default_tax_rate_ids: defaultTaxRates.map(dt => dt.tax_rate_id),
-      payment_methods: paymentMethods.map(method => ({
+      default_tax_rate_ids: (defaultTaxRatesResult.rows as DefaultTaxRateRow[]).map(dt => dt.tax_rate_id),
+      payment_methods: (paymentMethodsResult.rows as PaymentMethodRow[]).map(method => ({
         code: method.code,
         label: method.label,
         is_active: Boolean(method.is_active),
@@ -310,14 +426,13 @@ export class PosDataService {
     const { company_id, outlet_id } = context;
 
     // Get outlet configuration
-    const outletConfig = await this.db.querySingle(`
+    const outletConfigResult = await sql`
       SELECT 
         o.id AS outlet_id,
         o.company_id,
         o.name,
         o.timezone,
         c.currency_code,
-        -- Get default tax configuration
         COALESCE(
           (SELECT rate_percent FROM tax_rates tr 
            JOIN company_tax_defaults ctd ON ctd.tax_rate_id = tr.id
@@ -332,15 +447,17 @@ export class PosDataService {
         ) AS tax_is_inclusive
       FROM outlets o
       JOIN companies c ON c.id = o.company_id
-      WHERE o.id = ? AND o.company_id = ?
-    `, [outlet_id, company_id]);
+      WHERE o.id = ${outlet_id} AND o.company_id = ${company_id}
+    `.execute(this.db);
+
+    const outletConfig = (outletConfigResult.rows as OutletConfigRow[])[0];
 
     if (!outletConfig) {
       throw new Error(`Outlet ${outlet_id} not found or access denied`);
     }
 
     // Get user permissions for this outlet
-    const userPermissions = await this.db.queryAll(`
+    const userPermissionsResult = await sql`
       SELECT DISTINCT
         u.id AS user_id,
         uor.outlet_id,
@@ -349,23 +466,23 @@ export class PosDataService {
       FROM users u
       JOIN user_outlet_roles uor ON uor.user_id = u.id
       JOIN module_roles mr ON mr.id = uor.role_id
-      WHERE uor.outlet_id = ?
-        AND uor.company_id = ?
+      WHERE uor.outlet_id = ${outlet_id}
+        AND uor.company_id = ${company_id}
         AND u.is_active = 1
         AND mr.is_active = 1
       GROUP BY u.id, uor.outlet_id, mr.scope_level
-    `, [outlet_id, company_id]);
+    `.execute(this.db);
 
     // Get POS-specific feature flags
-    const featureFlags = await this.db.queryAll(`
+    const featureFlagsResult = await sql`
       SELECT 
         \`key\`,
         enabled
       FROM feature_flags
-      WHERE company_id = ?
+      WHERE company_id = ${company_id}
         AND \`key\` LIKE 'pos.%'
         AND enabled = 1
-    `, [company_id]);
+    `.execute(this.db);
 
     return {
       outlet_config: {
@@ -379,13 +496,13 @@ export class PosDataService {
           is_inclusive: Boolean(outletConfig.tax_is_inclusive)
         }
       },
-      user_permissions: userPermissions.map(perm => ({
+      user_permissions: (userPermissionsResult.rows as UserPermissionRow[]).map(perm => ({
         user_id: perm.user_id,
         outlet_id: perm.outlet_id,
-        permissions: perm.permissions ? perm.permissions.split(',') : [],
-        role: perm.role
+        permissions: perm.permissions ? String(perm.permissions).split(',') : [],
+        role: perm.role as "OWNER" | "ADMIN" | "ACCOUNTANT" | "CASHIER"
       })),
-      feature_flags: featureFlags.reduce((acc, flag) => {
+      feature_flags: (featureFlagsResult.rows as FeatureFlagRow[]).reduce((acc, flag) => {
         acc[flag.key] = Boolean(flag.enabled);
         return acc;
       }, {} as Record<string, boolean>)

@@ -49,7 +49,7 @@ export class MySyncModule implements SyncModule {
   constructor(public config: SyncModuleConfig) {}
 
   async initialize(context: SyncModuleInitContext): Promise<void> {
-    // Set up database, cache, etc.
+    // Set up database, etc.
   }
 
   async healthCheck(): Promise<{ healthy: boolean; message?: string }> {
@@ -77,7 +77,7 @@ syncModuleRegistry.register(module);
 
 // Initialize all modules
 await syncModuleRegistry.initialize({
-  database: dbConn,
+  db,  // Kysely instance
   logger: console,
   config: { env: 'production' }
 });
@@ -186,6 +186,67 @@ The system uses tier-based sync to differentiate data by change frequency:
 
 ## Coding Standards
 
+### Database Access: Pure Kysely
+
+**All database access MUST use pure Kysely API. No mysql2-style patterns.**
+
+```typescript
+// REQUIRED: Import from @jurnapod/db
+import { createKysely, getKysely, type KyselySchema, withTransaction } from '@jurnapod/db';
+
+// Factory function for new instances (tests)
+const db = createKysely({ uri: 'mysql://user:pass@host:3306/database' });
+
+// Singleton for server (reuse connection)
+const db = getKysely();
+
+// Type-safe queries using Kysely's query builder
+const rows = await db
+  .selectFrom('items')
+  .select(['id', 'name', 'code'])
+  .where('company_id', '=', companyId)
+  .where('is_active', '=', true)
+  .execute();
+
+// Insert with returning
+const newItem = await db
+  .insertInto('items')
+  .values({ company_id: companyId, name, code, is_active: true })
+  .returningAll()
+  .executeTakeFirst();
+
+// Update with returning
+const updated = await db
+  .updateTable('items')
+  .set({ name: newName })
+  .where('id', '=', itemId)
+  .returningAll()
+  .executeTakeFirst();
+
+// Delete
+await db.deleteFrom('items').where('id', '=', itemId).execute();
+
+// Transactions
+await withTransaction(db, async (trx) => {
+  await trx.insertInto('orders').values({ ... }).execute();
+  await trx.updateTable('inventory').set({ quantity: newQty }).where('item_id', '=', itemId).execute();
+});
+```
+
+### ⚠️ MANDATORY: No mysql2 Direct Usage
+
+| Pattern | Status |
+|---------|--------|
+| `import { Kysely, type KyselySchema } from '@jurnapod/db'` | ✅ **REQUIRED** |
+| `db.selectFrom().where().execute()` | ✅ **REQUIRED** |
+| `db.insertInto().values().returningAll().execute()` | ✅ **REQUIRED** |
+| `db.updateTable().set().where().execute()` | ✅ **REQUIRED** |
+| `db.deleteFrom().where().execute()` | ✅ **REQUIRED** |
+| `withTransaction(db, async (trx) => {...})` | ✅ **REQUIRED** |
+| `import ... from 'mysql2'` | ❌ **ABSOLUTELY FORBIDDEN** |
+| `import type { Pool } from 'mysql2'` | ❌ **ABSOLUTELY FORBIDDEN** |
+| `db.queryAll(sql, params)` | ❌ **DEPRECATED** |
+
 ### TypeScript Conventions
 
 1. **Use `.js` extensions in imports** (ESM compliance):
@@ -197,7 +258,7 @@ The system uses tier-based sync to differentiate data by change frequency:
 2. **Use Zod for input validation** on external data:
    ```typescript
    import { SyncContextSchema } from "./types/index.js";
-   
+
    const context = SyncContextSchema.parse(input);
    ```
 
@@ -207,66 +268,26 @@ The system uses tier-based sync to differentiate data by change frequency:
 
 1. **Use snake_case for SQL column names** (MySQL/MariaDB compatibility)
 
-2. **Always use parameterized queries** — never string concatenation:
-   ```typescript
-   // CORRECT
-   await db.queryAll('SELECT * FROM items WHERE company_id = ?', [companyId]);
-   
-   // WRONG
-   await db.queryAll(`SELECT * FROM items WHERE company_id = ${companyId}`);
-   ```
-
-3. **Never wrap indexed columns in SQL functions**:
+2. **Never wrap indexed columns in SQL functions**:
    ```sql
    -- WRONG: Prevents index usage
    WHERE DATE(created_at) = '2024-01-01'
-   
+
    -- CORRECT
    WHERE created_at >= '2024-01-01' AND created_at < '2024-01-02'
    ```
 
-4. **Use `DbConn` from `@jurnapod/db`** for ALL database access:
-   ```typescript
-   import { createDbPool, DbConn } from "@jurnapod/db";
-   
-   // CORRECT - use DbConn
-   const pool = createDbPool({ host: '...', port: 3306, user: '...', password: '...', database: '...' });
-   const db = new DbConn(pool);
-   await db.query('SELECT * FROM items WHERE company_id = ?', [companyId]);
-   
-   // WRONG - never use mysql2/promise directly
-   import type { Pool } from 'mysql2/promise'; // FORBIDDEN
-   ```
+3. **Use Kysely's query builder** - never raw SQL strings for data access
 
-### ⚠️ MANDATORY: DbConn-Only Standard
+### Sync Tiers Reference
 
-**ALL database access MUST use `DbConn`. Direct `mysql2/promise` usage is STRICTLY FORBIDDEN.**
-
-| Pattern | Status |
-|---------|--------|
-| `import { DbConn } from '@jurnapod/db'` | ✅ **REQUIRED** |
-| `const db = new DbConn(pool)` | ✅ **REQUIRED** |
-| `db.query()`, `db.execute()`, `db.beginTransaction()` | ✅ **REQUIRED** |
-| `import ... from 'mysql2/promise'` | ❌ **ABSOLUTELY FORBIDDEN** |
-| `import type { Pool } from 'mysql2/promise'` | ❌ **ABSOLUTELY FORBIDDEN** |
-| `pool.execute()`, `pool.query()` | ❌ **ABSOLUTELY FORBIDDEN** |
-
-**Legacy Code Warning**: The `DataRetentionJob` currently uses `mysql2/promise` Pool directly. This is being migrated to use `DbConn` for consistency with project standards.
-
-### Error Handling
-
-Use the idempotency service for retryable vs non-retryable errors:
-
-```typescript
-import { ERROR_CLASSIFICATION, SyncIdempotencyService } from "./idempotency/index.js";
-
-const classification = ERROR_CLASSIFICATION.classify(error);
-if (classification.retryable) {
-  // Retry with backoff
-} else {
-  // Don't retry, fail immediately
-}
-```
+| Tier | Description | Typical Frequency |
+|------|-------------|-------------------|
+| **REALTIME** | Critical operations | WebSocket/SSE |
+| **OPERATIONAL** | High-frequency data | 30s-2min |
+| **MASTER** | Core reference data | 5-10min |
+| **ADMIN** | Configuration | 30min-daily |
+| **ANALYTICS** | Reporting | Hourly-daily |
 
 ---
 
@@ -303,7 +324,7 @@ if (result.alreadyProcessed) {
 
 ### Integration Tests
 
-Sync-core uses Vitest for testing with real database connections via `DbConn`. Tests are co-located with source:
+Sync-core uses Vitest for testing with real database connections via Kysely. Tests are co-located with source:
 
 ```
 src/
@@ -316,7 +337,7 @@ src/
     └── data-retention.integration.test.ts
 ```
 
-**Critical**: All integration tests MUST use `DbConn` from `@jurnapod/db` - never use `mysql2/promise` directly.
+**Critical**: All integration tests MUST use Kysely from `@jurnapod/db` - never use mysql2 directly.
 
 ### Running Tests
 
@@ -344,7 +365,7 @@ DB_NAME=jurnapod_test
 
 ### Test Patterns
 
-Mock external dependencies (database, cache) for unit tests:
+Unit tests mock external dependencies:
 
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
@@ -361,24 +382,26 @@ describe('SyncIdempotencyService', () => {
 Integration tests with real database:
 
 ```typescript
-import { createDbPool, DbConn } from '@jurnapod/db';
-import type { Pool } from 'mysql2';  // Type only, for pool.end() callback
+import { createKysely, type KyselySchema } from '@jurnapod/db';
 
 // Load .env before other imports
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 loadEnv({ path: path.resolve(process.cwd(), '.env') });
 
-const pool = createDbPool({ host: process.env.DB_HOST, ... });
-const db = new DbConn(pool);
+const db = createKysely({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
 
-// Use db.query(), db.execute(), etc. - NEVER pool.execute() directly
+// Use db.selectFrom().where().execute() - NEVER mysql2 directly
 
-// CRITICAL: Clean up pool in afterAll
+// CRITICAL: Clean up in afterAll
 afterAll(async () => {
-  await new Promise<void>((resolve, reject) => {
-    pool.end((err) => err ? reject(err) : resolve());
-  });
+  await db.destroy();
 });
 ```
 
@@ -391,10 +414,15 @@ afterAll(async () => {
 1. **Company/outlet scoping** — All queries MUST filter by context:
    ```typescript
    // CORRECT
-   WHERE company_id = ? AND outlet_id = ?
-   
+   await db.selectFrom('items')
+     .where('company_id', '=', companyId)
+     .where('outlet_id', '=', outletId)
+     .execute();
+
    // WRONG - missing scoping
-   WHERE id = ?
+   await db.selectFrom('items')
+     .where('id', '=', itemId)
+     .execute();
    ```
 
 2. **Validate SyncContext** on every request:
@@ -418,7 +446,7 @@ afterAll(async () => {
 
 When modifying this package:
 
-- [ ] All SQL uses parameterized queries
+- [ ] All database access uses pure Kysely API
 - [ ] Company/outlet scoping on all queries
 - [ ] SyncContext validated with Zod schema
 - [ ] No hardcoded company/outlet IDs
@@ -427,14 +455,14 @@ When modifying this package:
 - [ ] Unit tests for new functionality
 - [ ] No breaking changes to SyncModule interface
 - [ ] No secrets in log statements
-- [ ] **NO imports from `mysql2/promise`** - use `DbConn` from `@jurnapod/db` only
+- [ ] **NO imports from `mysql2`** - use Kysely from `@jurnapod/db` only
 
 ---
 
 ## Related Packages
 
 - `@jurnapod/pos-sync` — POS-specific sync module using this package
-- `@jurnapod/db` — Database connectivity (DbConn)
+- `@jurnapod/db` — Database connectivity (Kysely factory)
 - `@jurnapod/api` — HTTP API using this package
 - `@jurnapod/shared` — Shared utilities (Zod schemas, date helpers)
 

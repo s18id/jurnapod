@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
-import type { DbConn } from "@jurnapod/db";
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
+import type { KyselySchema } from "@jurnapod/db";
 
 // ============================================================================
 // Query Result Types
@@ -57,31 +57,30 @@ export type OrderUpdateInsertInput = {
  * - created_at: SERVER-authoritative (DB default)
  */
 export async function insertOrderUpdate(
-  db: DbConn,
+  db: KyselySchema,
   update: OrderUpdateInsertInput
 ): Promise<void> {
-  await db.execute(
-    `INSERT INTO pos_order_updates (
+  await sql`
+    INSERT INTO pos_order_updates (
        update_id, order_id, company_id, outlet_id,
        base_order_updated_at, base_order_updated_at_ts,
        event_type, delta_json, actor_user_id, device_id,
        event_at, event_at_ts
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      update.update_id,
-      update.order_id,
-      update.company_id,
-      update.outlet_id,
-      update.base_order_updated_at ?? null,
-      update.base_order_updated_at_ts ?? null,
-      update.event_type,
-      update.delta_json,
-      update.actor_user_id ?? null,
-      update.device_id,
-      update.event_at,
-      update.event_at_ts
-    ]
-  );
+     ) VALUES (
+       ${update.update_id},
+       ${update.order_id},
+       ${update.company_id},
+       ${update.outlet_id},
+       ${update.base_order_updated_at ?? null},
+       ${update.base_order_updated_at_ts ?? null},
+       ${update.event_type},
+       ${update.delta_json},
+       ${update.actor_user_id ?? null},
+       ${update.device_id},
+       ${update.event_at},
+       ${update.event_at_ts}
+     )
+  `.execute(db);
 }
 
 /**
@@ -92,16 +91,15 @@ export async function insertOrderUpdate(
  * but company_id is included for proper tenant scoping.
  */
 export async function checkOrderUpdateExists(
-  db: DbConn,
+  db: KyselySchema,
   updateId: string,
   companyId: number
 ): Promise<boolean> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT update_id FROM pos_order_updates WHERE update_id = ? AND company_id = ? LIMIT 1`,
-    [updateId, companyId]
-  );
+  const result = await sql`
+    SELECT update_id FROM pos_order_updates WHERE update_id = ${updateId} AND company_id = ${companyId} LIMIT 1
+  `.execute(db);
 
-  return rows.length > 0;
+  return result.rows.length > 0;
 }
 
 /**
@@ -110,7 +108,7 @@ export async function checkOrderUpdateExists(
  * Returns an array of update_ids that already exist.
  */
 export async function batchCheckOrderUpdatesExist(
-  db: DbConn,
+  db: KyselySchema,
   updateIds: string[],
   companyId: number
 ): Promise<string[]> {
@@ -118,11 +116,10 @@ export async function batchCheckOrderUpdatesExist(
     return [];
   }
 
-  const placeholders = updateIds.map(() => "?").join(", ");
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT update_id FROM pos_order_updates WHERE update_id IN (${placeholders}) AND company_id = ?`,
-    [...updateIds, companyId]
-  );
+  const result = await sql`
+    SELECT update_id FROM pos_order_updates 
+    WHERE update_id IN (${sql.join(updateIds.map(id => sql`${id}`), sql`, `)}) AND company_id = ${companyId}
+  `.execute(db);
 
-  return rows.map((row) => row.update_id as string);
+  return result.rows.map((row) => (row as any).update_id as string);
 }

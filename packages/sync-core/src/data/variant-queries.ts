@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
-import type { DbConn } from "@jurnapod/db";
-import type { RowDataPacket } from "mysql2";
+import type { KyselySchema } from "@jurnapod/db";
 import { toRfc3339Required } from "@jurnapod/shared";
 
 export type ItemVariantQueryResult = {
@@ -19,18 +18,19 @@ export type ItemVariantQueryResult = {
 /**
  * Get all variants for active items of a company.
  */
-export async function getVariantsForSync(db: DbConn, companyId: number): Promise<ItemVariantQueryResult[]> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT iv.id, iv.company_id, iv.item_id, iv.sku, iv.variant_name, 
-            iv.price_override, iv.stock_quantity, iv.is_active, iv.updated_at
-     FROM item_variants iv
-     INNER JOIN items i ON i.id = iv.item_id
-     WHERE iv.company_id = ? AND i.is_active = 1 AND iv.is_active = 1
-     ORDER BY iv.item_id, iv.variant_name`,
-    [companyId]
-  );
+export async function getVariantsForSync(db: KyselySchema, companyId: number): Promise<ItemVariantQueryResult[]> {
+  const result = await db
+    .selectFrom('item_variants as iv')
+    .innerJoin('items as i', 'i.id', 'iv.item_id')
+    .select(['iv.id', 'iv.company_id', 'iv.item_id', 'iv.sku', 'iv.variant_name', 'iv.price_override', 'iv.stock_quantity', 'iv.is_active', 'iv.updated_at'])
+    .where('iv.company_id', '=', companyId)
+    .where('i.is_active', '=', 1)
+    .where('iv.is_active', '=', 1)
+    .orderBy('iv.item_id')
+    .orderBy('iv.variant_name')
+    .execute();
   
-  return rows.map((row) => ({
+  return result.map((row) => ({
     id: Number(row.id),
     company_id: Number(row.company_id),
     item_id: Number(row.item_id),
@@ -39,7 +39,7 @@ export async function getVariantsForSync(db: DbConn, companyId: number): Promise
     price_override: row.price_override == null ? null : Number(row.price_override),
     stock_quantity: row.stock_quantity == null ? null : Number(row.stock_quantity),
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at)
+    updated_at: toRfc3339Required(row.updated_at as Date)
   }));
 }
 
@@ -47,21 +47,23 @@ export async function getVariantsForSync(db: DbConn, companyId: number): Promise
  * Get variants changed since a specific version for incremental sync.
  */
 export async function getVariantsChangedSince(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   updatedSince: string
 ): Promise<ItemVariantQueryResult[]> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT iv.id, iv.company_id, iv.item_id, iv.sku, iv.variant_name, 
-            iv.price_override, iv.stock_quantity, iv.is_active, iv.updated_at
-     FROM item_variants iv
-     INNER JOIN items i ON i.id = iv.item_id
-     WHERE iv.company_id = ? AND iv.updated_at >= ? AND i.is_active = 1 AND iv.is_active = 1
-     ORDER BY iv.item_id, iv.variant_name`,
-    [companyId, updatedSince]
-  );
+  const result = await db
+    .selectFrom('item_variants as iv')
+    .innerJoin('items as i', 'i.id', 'iv.item_id')
+    .select(['iv.id', 'iv.company_id', 'iv.item_id', 'iv.sku', 'iv.variant_name', 'iv.price_override', 'iv.stock_quantity', 'iv.is_active', 'iv.updated_at'])
+    .where('iv.company_id', '=', companyId)
+    .where('iv.updated_at', '>=', updatedSince as any)
+    .where('i.is_active', '=', 1)
+    .where('iv.is_active', '=', 1)
+    .orderBy('iv.item_id')
+    .orderBy('iv.variant_name')
+    .execute();
   
-  return rows.map((row) => ({
+  return result.map((row) => ({
     id: Number(row.id),
     company_id: Number(row.company_id),
     item_id: Number(row.item_id),
@@ -70,7 +72,7 @@ export async function getVariantsChangedSince(
     price_override: row.price_override == null ? null : Number(row.price_override),
     stock_quantity: row.stock_quantity == null ? null : Number(row.stock_quantity),
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at)
+    updated_at: toRfc3339Required(row.updated_at as Date)
   }));
 }
 
@@ -90,36 +92,32 @@ export type VariantPriceQueryResult = {
  * Returns outlet-specific prices first, then company-default prices (no outlet).
  */
 export async function getVariantPricesForOutlet(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   outletId: number
 ): Promise<VariantPriceQueryResult[]> {
-  // Get all variant prices: outlet-specific and company defaults (no outlet)
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT 
-       ip.id,
-       ip.item_id,
-       ip.variant_id,
-       COALESCE(ip.outlet_id, ?) AS outlet_id,
-       ip.price,
-       ip.is_active,
-       ip.updated_at
-     FROM item_prices ip
-     WHERE ip.company_id = ?
-       AND ip.variant_id IS NOT NULL
-       AND ip.is_active = 1
-       AND (ip.outlet_id = ? OR ip.outlet_id IS NULL)
-     ORDER BY ip.item_id, ip.variant_id, outlet_id DESC`,
-    [outletId, companyId, outletId]
-  );
+  const result = await db
+    .selectFrom('item_prices as ip')
+    .select(['ip.id', 'ip.item_id', 'ip.variant_id', 'ip.outlet_id', 'ip.price', 'ip.is_active', 'ip.updated_at'])
+    .where('ip.company_id', '=', companyId)
+    .where('ip.variant_id', 'is not', null)
+    .where('ip.is_active', '=', 1)
+    .where((eb) => eb.or([
+      eb('ip.outlet_id', '=', outletId),
+      eb('ip.outlet_id', 'is', null)
+    ]))
+    .orderBy('ip.item_id')
+    .orderBy('ip.variant_id')
+    .orderBy('ip.outlet_id', 'desc')
+    .execute();
   
-  return rows.map((row) => ({
+  return result.map((row) => ({
     id: Number(row.id),
     item_id: Number(row.item_id),
     variant_id: row.variant_id == null ? null : Number(row.variant_id),
     outlet_id: row.outlet_id == null ? null : Number(row.outlet_id),
     price: Number(row.price),
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at)
+    updated_at: toRfc3339Required(row.updated_at as Date)
   }));
 }

@@ -1,50 +1,12 @@
-# generated: 2026-03-25
-# last_updated: 2026-03-28
-# project: Jurnapod
-# project_key: NOKEY
-# tracking_system: file-system
-# story_location: _bmad-output/implementation-artifacts/stories
-
-# STATUS DEFINITIONS:
-# ==================
-# Epic Status:
-#   - backlog: Epic not yet started
-#   - in-progress: Epic actively being worked on
-#   - done: All stories in epic completed
-#
-# Epic Status Transitions:
-#   - backlog → in-progress: Automatically when first story is created (via create-story)
-#   - in-progress → done: Manually when all stories reach 'done' status
-#
-# Story Status:
-#   - backlog: Story only exists in epic file
-#   - ready-for-dev: Story file created in stories folder
-#   - in-progress: Developer actively working on implementation
-#   - review: Ready for code review (via Dev's code-review workflow)
-#   - done: Story completed
-#
-# Retrospective Status:
-#   - optional: Can be completed but not required
-#   - done: Retrospective has been completed
-#
-# WORKFLOW NOTES:
-# ===============
-# - Epic transitions to 'in-progress' automatically when first story is created
-# - Stories can be worked in parallel if team capacity allows
-# - SM typically creates next story after previous one is 'done' to incorporate learnings
-# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
-
-generated: 2026-03-25
-last_updated: 2026-03-28
+last_updated: 2026-03-31
 project: Jurnapod
-  project_key: NOKEY
-  tracking_system: file-system
-  story_location: _bmad-output/implementation-artifacts/stories
-  last_updated: 2026-03-30
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts/stories
 
 development_status:
+
   # Epic 1: Kysely ORM Migration (merged Epic 0 + Epic 1)
-  # Stories: 9 total (6 from old Epic 0 + 3 from old Epic 1)
   epic-1: done
   1-1-kysely-setup-and-type-generation: done
   1-2-dbclient-integration: done
@@ -131,9 +93,6 @@ development_status:
   epic-7-retrospective: done
 
   # Epic 8: Production Scale & POS Variant Sync
-  # Stories: 9 total (10 planned - 1 pre-deferred: 8.4 Redis Session → Epic 9)
-  # Completed: 8 (8.1, 8.2, 8.3, 8.5, 8.6, 8.7, 8.8, 8.9)
-  # Deferred: 1 (8.10 Load Testing → Epic 9)
   epic-8: done
   8-1-import-resume-checkpoint: done
   8-2-export-backpressure-handling: done
@@ -147,8 +106,6 @@ development_status:
   epic-8-retrospective: done
 
   # Epic 9: Use Library Functions in Tests
-  # Stories: 9 total
-  # Focus: Refactor tests to use existing library functions instead of direct SQL
   epic-9: done
   9-1-audit-library-functions: done
   9-2-refactor-company-item-tests: done
@@ -162,8 +119,6 @@ development_status:
   epic-9-retrospective: done
 
   # Epic 10: Fix Critical Hardcoded ID Tests
-  # Stories: 4 total
-  # Focus: Fix brittle tests using company_id=1 and hardcoded IDs
   epic-10: done
   10-1-add-createOutletBasic: done
   10-2-refactor-variant-stock-tests: done
@@ -172,8 +127,6 @@ development_status:
   epic-10-retrospective: done
 
   # Epic 11: Refactor Remaining Test Files
-  # Stories: 5 total
-  # Focus: Replace 34 direct INSERT INTO items with createItem()
   epic-11: done
   11-1-refactor-cost-tracking-tests: done
   11-2-refactor-cogs-posting-tests: done
@@ -183,7 +136,6 @@ development_status:
   epic-11-retrospective: done
 
   # Epic 12: Standardize Library Usage for All Routes
-  # Focus: Move all direct SQL from routes to library modules
   epic-12: done
   12-1-create-settings-modules-library: done
   12-2-refactor-settings-modules-route: done
@@ -195,7 +147,6 @@ development_status:
   epic-12-retrospective: done
 
   # Epic 13: Complete Library Migration for Deferred Routes
-  # Focus: Migrate import.ts, inventory.ts, sync/pull.ts to libraries
   epic-13: done
   13-1-create-import-batch-library: done
   13-2-create-import-validation-library: done
@@ -208,7 +159,6 @@ development_status:
   epic-13-retrospective: done
 
   # Epic 14: Kysely ORM Migration for Epic 13 Libraries
-  # Focus: Migrate Epic 13 library modules from raw SQL to Kysely ORM
   epic-14: done
   14-1-migrate-validation-to-kysely: done
   14-2-migrate-permissions-to-kysely: done
@@ -218,7 +168,6 @@ development_status:
   epic-14-retrospective: done
 
   # Epic 15: Foundation Hardening & TD Resolution
-  # Focus: Resolve TD-030, connection safety, test-fixtures
   epic-15: done
   15-1-connection-guard: done
   15-2-test-fixtures-unique-naming: done
@@ -227,7 +176,6 @@ development_status:
   15-5-td-031-spike: done
 
   # Epic 16: Alert System Hardening & Batch Processing
-  # Focus: Address TD-031 (alert retry) and TD-032 (batch processing backfills)
   epic-16: done
   16-1-alert-retry-exponential-backoff: done
   16-2-batch-processing-backfills: done
@@ -235,49 +183,39 @@ development_status:
   epic-16-retrospective: done
 
   # Epic 17: Resurrect Sync-Core (Sync Module Architecture)
-  # Focus: Make PosSyncModule and BackofficeSyncModule the canonical sync engines
-  # Phase 1 (date-helpers, service interfaces, cleanup): ✅ COMPLETED
-  # Phase 2 (sync-core/data layer): ✅ COMPLETED  
-  # Phase 3 (pos-sync push): ✅ COMPLETED (Two-Phase: pos-sync persistence + API business logic)
-  # Phase 4-5: ⏳ TODO (API routes thin adapters, delete lib/sync)
   epic-17: in-progress
   17-1-extract-date-helpers-to-shared: done
   17-2-define-service-interfaces-sync-core: done
   17-3-cleanup-sync-core-dead-code: done
   17-4-move-pull-logic-to-pos-sync: done
   17-5-move-push-logic-to-pos-sync: done
-  17-6-refactor-api-routes-thin-adapters: backlog
-  17-7-delete-lib-sync-and-tests: backlog
+  17-6-refactor-api-routes-thin-adapters: in-progress
+  17-7-delete-lib-sync-and-tests: ready-for-dev
   17-8-apply-backoffice-sync-pattern: done
 
-  # Epic 18: DbConn-Only Sync Architecture Migration - Phase 1
-  # Focus: Foundation - Fix pool passing to use DbConn exclusively
-  # ✅ COMPLETE - All packages use DbConn exclusively, all tests passing
-  # 
-  # Package updates:
-  #   - sync-core: Updated types to accept DbConn
-  #   - pos-sync: Removed dead createDbPool import
-  #   - backoffice-sync: Full DbConn migration, all data services updated
-  #   - api: sync-modules.ts now passes real DbConn to registry
-  #
-  # SQL fixes (revealed by integration tests):
-  #   - pos_transaction_items: transaction_id → pos_transaction_id
-  #   - pos_transaction_payments: transaction_id → pos_transaction_id
-  #   - companies: c.address → c.address_line1, c.tax_number → c.tax_id
-  #   - pos_order_snapshots: pos.id → pos.order_id
-  #   - analytics: Fixed invalid SUM(SELECT) syntax with proper JOIN
-  #   - audit_logs: user_agent→null, metadata→payload_json
-  #   - user_outlet_roles → user_role_assignments (role architecture)
-  #   - outlets: manager_user_id → NULL (column doesn't exist)
-  #   - users: phone, last_login_at → NULL (columns don't exist)
-  #   - items: description → NULL, type → item_type
-  #   - accounts: parent_id → parent_account_id, current_balance → NULL
-  #
-  # ⚠️ KNOWN LIMITATIONS (placeholders with TODO):
-  #   - suppliers: Empty array (vendor table needs to be created)
-  #   - Balance: NULL for chart_of_accounts (should join account_balances_current)
+  # Epic 18: Pure Kysely Migration (Packages Only)
   epic-18: done
-  18-1-update-sync-core-types-accept-dbconn: done
-  18-2-fix-api-sync-modules-pass-real-dbconn: done
-  18-3-cleanup-pos-sync-dead-import: done
-  18-4-verify-backoffice-sync-dbconn-usage: done
+  18-1-verify-db-exports: done
+  18-2-verify-auth-kysely-pattern: done
+  18-3a-migrate-sync-core-data-queries-part1: done
+  18-3b-migrate-sync-core-data-queries-part2: done
+  18-4-migrate-pos-sync: done
+  18-5-migrate-backoffice-sync: done
+  18-6-migrate-modules-accounting: done
+  18-7-migrate-modules-platform: done
+
+  # Epic 19: Pure Kysely Migration (API)
+  epic-19: backlog
+  19-1-migrate-api-lib-shared: backlog
+  19-2-migrate-api-lib-foundation: backlog
+  19-3-migrate-api-lib-items: backlog
+  19-4-migrate-api-lib-business: backlog
+  19-5-migrate-api-lib-accounting: backlog
+  19-6-migrate-api-lib-operations: backlog
+  19-7-migrate-api-lib-settings: backlog
+  19-8-migrate-api-lib-email: backlog
+  19-9-migrate-api-lib-fiscal: backlog
+  19-10-migrate-api-lib-cost-recipe: backlog
+  19-11-migrate-api-lib-reports: backlog
+  19-12-migrate-api-routes: backlog
+  19-13-final-verification: backlog

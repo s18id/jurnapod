@@ -8,13 +8,13 @@ import type {
   AccountTypeUpdateRequest
 } from "@jurnapod/shared";
 import type { AuditServiceInterface } from "./accounts-service";
-import type { JurnapodDbClient } from "@jurnapod/db";
+import type { KyselySchema } from "@jurnapod/db";
 
 /**
  * Database client interface for dependency injection
- * Should support parameterized queries and transactions
+ * Should support Kysely queries and transactions
  */
-export interface AccountTypesDbClient extends JurnapodDbClient {}
+export interface AccountTypesDbClient extends KyselySchema {}
 
 /**
  * Custom error classes for domain-specific errors
@@ -56,7 +56,7 @@ export class AccountTypesService {
   async listAccountTypes(filters: AccountTypeListQuery): Promise<AccountTypeResponse[]> {
     const { company_id, category, is_active, search } = filters;
 
-    let query = this.db.kysely
+    let query = this.db
       .selectFrom('account_types')
       .where('company_id', '=', company_id);
 
@@ -95,7 +95,7 @@ export class AccountTypesService {
    * Get single account type by ID (Migrated to Kysely)
    */
   async getAccountTypeById(accountTypeId: number, companyId: number): Promise<AccountTypeResponse> {
-    const row = await this.db.kysely
+    const row = await this.db
       .selectFrom('account_types')
       .where('id', '=', accountTypeId)
       .where('company_id', '=', companyId)
@@ -126,15 +126,8 @@ export class AccountTypesService {
     // Validate name uniqueness
     await this.validateAccountTypeName(data.name, data.company_id);
 
-    // Use transaction if supported
-    const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-
-    try {
-      if (useTransaction) {
-        await this.db.begin!();
-      }
-
-      const result = await this.db.kysely
+    const result = await this.db.transaction().execute(async (trx) => {
+      const insertResult = await trx
         .insertInto('account_types')
         .values({
           company_id: data.company_id,
@@ -146,7 +139,7 @@ export class AccountTypesService {
         })
         .executeTakeFirst();
 
-      const accountTypeId = Number(result.insertId);
+      const accountTypeId = Number(insertResult.insertId);
 
       // Audit log (inside transaction)
       if (this.auditService && userId) {
@@ -163,18 +156,11 @@ export class AccountTypesService {
         );
       }
 
-      if (useTransaction) {
-        await this.db.commit!();
-      }
+      return accountTypeId;
+    });
 
-      // Return the created account type
-      return this.getAccountTypeById(accountTypeId, data.company_id);
-    } catch (error) {
-      if (useTransaction) {
-        await this.db.rollback!();
-      }
-      throw error;
-    }
+    // Return the created account type
+    return this.getAccountTypeById(result, data.company_id);
   }
 
   /**
@@ -217,15 +203,8 @@ export class AccountTypesService {
       return this.getAccountTypeById(accountTypeId, companyId);
     }
 
-    // Use transaction if supported
-    const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-    
-    try {
-      if (useTransaction) {
-        await this.db.begin!();
-      }
-
-      await this.db.kysely
+    const after = await this.db.transaction().execute(async (trx) => {
+      await trx
         .updateTable('account_types')
         .set(updates)
         .where('id', '=', accountTypeId)
@@ -233,7 +212,7 @@ export class AccountTypesService {
         .execute();
 
       // Fetch updated account type
-      const after = await this.getAccountTypeById(accountTypeId, companyId);
+      const updated = await this.getAccountTypeById(accountTypeId, companyId);
 
       // Audit log (inside transaction)
       if (this.auditService && userId) {
@@ -242,21 +221,14 @@ export class AccountTypesService {
           "account_type",
           accountTypeId,
           before,
-          after
+          updated
         );
       }
 
-      if (useTransaction) {
-        await this.db.commit!();
-      }
+      return updated;
+    });
 
-      return after;
-    } catch (error) {
-      if (useTransaction) {
-        await this.db.rollback!();
-      }
-      throw error;
-    }
+    return after;
   }
 
   /**
@@ -272,22 +244,15 @@ export class AccountTypesService {
       throw new AccountTypeInUseError(accountTypeId);
     }
 
-    // Use transaction if supported
-    const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-    
-    try {
-      if (useTransaction) {
-        await this.db.begin!();
-      }
-
-      await this.db.kysely
+    const accountType = await this.db.transaction().execute(async (trx) => {
+      await trx
         .updateTable('account_types')
         .set({ is_active: 0 })
         .where('id', '=', accountTypeId)
         .where('company_id', '=', companyId)
         .execute();
 
-      const accountType = await this.getAccountTypeById(accountTypeId, companyId);
+      const updated = await this.getAccountTypeById(accountTypeId, companyId);
 
       // Audit log (inside transaction)
       if (this.auditService && userId) {
@@ -295,28 +260,21 @@ export class AccountTypesService {
           { company_id: companyId, user_id: userId },
           "account_type",
           accountTypeId,
-          { name: accountType.name }
+          { name: updated.name }
         );
       }
 
-      if (useTransaction) {
-        await this.db.commit!();
-      }
+      return updated;
+    });
 
-      return accountType;
-    } catch (error) {
-      if (useTransaction) {
-        await this.db.rollback!();
-      }
-      throw error;
-    }
+    return accountType;
   }
 
   /**
    * Check if account type is referenced by any accounts (Migrated to Kysely)
    */
   async isAccountTypeInUse(accountTypeId: number, companyId: number): Promise<boolean> {
-    const result = await this.db.kysely
+    const result = await this.db
       .selectFrom('accounts')
       .where('account_type_id', '=', accountTypeId)
       .where('company_id', '=', companyId)
@@ -334,7 +292,7 @@ export class AccountTypesService {
     companyId: number,
     excludeAccountTypeId?: number
   ): Promise<void> {
-    let query = this.db.kysely
+    let query = this.db
       .selectFrom('account_types')
       .where('company_id', '=', companyId)
       .where('name', '=', name);

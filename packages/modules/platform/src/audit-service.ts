@@ -1,15 +1,16 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+import { sql } from "kysely";
 import type { AuditLogEntryRequest, AuditAction, AuditEntityType, AuditResult, AuditStatusCode } from "@jurnapod/shared";
 import { AuditStatus } from "@jurnapod/shared";
-import type { JurnapodDbClient } from "@jurnapod/db";
+import type { KyselySchema } from "@jurnapod/db";
 
 /**
  * Database client interface for audit logging
- * Should support parameterized queries and transactions
+ * Should support Kysely queries and transactions
  */
-export interface AuditDbClient extends JurnapodDbClient {}
+export interface AuditDbClient extends KyselySchema {}
 
 /**
  * Context for audit operations
@@ -165,35 +166,32 @@ export class AuditService {
    * Internal method to write audit log entry
    */
   private async log(entry: AuditLogEntryRequest): Promise<void> {
-    const sql = `
-      INSERT INTO audit_logs (
-        company_id, outlet_id, user_id, entity_type, entity_id,
-        action, result, success, status, ip_address, payload_json, changes_json, created_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-    `;
-
-    const params = [
-      entry.company_id,
-      entry.outlet_id ?? null,
-      entry.user_id,
-      entry.entity_type,
-      entry.entity_id,
-      entry.action,
-      entry.result,
-      entry.result === "SUCCESS" ? 1 : 0, // Legacy success field for backward compatibility
-      entry.status ?? (entry.result === "SUCCESS" ? AuditStatus.SUCCESS : AuditStatus.FAIL),
-      entry.ip_address ?? null,
-      JSON.stringify(entry.payload || {}),
-      entry.changes ? JSON.stringify(entry.changes) : null
-    ];
-
-    const inTransaction = this.db.begin !== undefined;
+    const inTransaction = this.db.isTransaction;
     const maxAttempts = 3;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        await this.db.execute(sql, params);
+        await sql`
+          INSERT INTO audit_logs (
+            company_id, outlet_id, user_id, entity_type, entity_id,
+            action, result, success, status, ip_address, payload_json, changes_json, created_at
+          )
+          VALUES (
+            ${entry.company_id},
+            ${entry.outlet_id ?? null},
+            ${entry.user_id},
+            ${entry.entity_type},
+            ${entry.entity_id},
+            ${entry.action},
+            ${entry.result},
+            ${entry.result === "SUCCESS" ? 1 : 0},
+            ${entry.status ?? (entry.result === "SUCCESS" ? AuditStatus.SUCCESS : AuditStatus.FAIL)},
+            ${entry.ip_address ?? null},
+            ${JSON.stringify(entry.payload || {})},
+            ${entry.changes ? JSON.stringify(entry.changes) : null},
+            NOW()
+          )
+        `.execute(this.db);
         return;
       } catch (error) {
         const shouldRetry = isMysqlDeadlock(error) && attempt < maxAttempts;

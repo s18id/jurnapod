@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
-import type { DbConn } from "@jurnapod/db";
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
+import type { KyselySchema } from "@jurnapod/db";
 
 // ============================================================================
 // Query Result Types
@@ -107,15 +107,36 @@ export type OrderSnapshotLineInsertInput = {
  * - created_at: SERVER-authoritative (DB default)
  */
 export async function upsertOrderSnapshot(
-  db: DbConn,
+  db: KyselySchema,
   snapshot: OrderSnapshotUpsertInput
 ): Promise<void> {
-  await db.execute(
-    `INSERT INTO pos_order_snapshots (
+  await sql`
+    INSERT INTO pos_order_snapshots (
        order_id, company_id, outlet_id, service_type, source_flow, settlement_flow,
        table_id, reservation_id, guest_count, is_finalized, order_status, order_state,
        paid_amount, opened_at, opened_at_ts, closed_at, closed_at_ts, notes, updated_at, updated_at_ts
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ) VALUES (
+       ${snapshot.order_id},
+       ${snapshot.company_id},
+       ${snapshot.outlet_id},
+       ${snapshot.service_type},
+       ${snapshot.source_flow ?? null},
+       ${snapshot.settlement_flow ?? null},
+       ${snapshot.table_id ?? null},
+       ${snapshot.reservation_id ?? null},
+       ${snapshot.guest_count ?? null},
+       ${snapshot.is_finalized ?? 0},
+       ${snapshot.order_status},
+       ${snapshot.order_state},
+       ${snapshot.paid_amount ?? 0},
+       ${snapshot.opened_at},
+       ${snapshot.opened_at_ts},
+       ${snapshot.closed_at ?? null},
+       ${snapshot.closed_at_ts ?? null},
+       ${snapshot.notes ?? null},
+       ${snapshot.updated_at},
+       ${snapshot.updated_at_ts}
+     )
      ON DUPLICATE KEY UPDATE
        service_type = VALUES(service_type),
        source_flow = VALUES(source_flow),
@@ -131,30 +152,8 @@ export async function upsertOrderSnapshot(
        closed_at_ts = VALUES(closed_at_ts),
        notes = VALUES(notes),
        updated_at = VALUES(updated_at),
-       updated_at_ts = VALUES(updated_at_ts)`,
-    [
-      snapshot.order_id,
-      snapshot.company_id,
-      snapshot.outlet_id,
-      snapshot.service_type,
-      snapshot.source_flow ?? null,
-      snapshot.settlement_flow ?? null,
-      snapshot.table_id ?? null,
-      snapshot.reservation_id ?? null,
-      snapshot.guest_count ?? null,
-      snapshot.is_finalized ?? 0,
-      snapshot.order_status,
-      snapshot.order_state,
-      snapshot.paid_amount ?? 0,
-      snapshot.opened_at,
-      snapshot.opened_at_ts,
-      snapshot.closed_at ?? null,
-      snapshot.closed_at_ts ?? null,
-      snapshot.notes ?? null,
-      snapshot.updated_at,
-      snapshot.updated_at_ts
-    ]
-  );
+       updated_at_ts = VALUES(updated_at_ts)
+  `.execute(db);
 }
 
 /**
@@ -162,13 +161,12 @@ export async function upsertOrderSnapshot(
  * Used before re-inserting lines during snapshot refresh.
  */
 export async function deleteOrderSnapshotLines(
-  db: DbConn,
+  db: KyselySchema,
   orderId: string
 ): Promise<void> {
-  await db.execute(
-    `DELETE FROM pos_order_snapshot_lines WHERE order_id = ?`,
-    [orderId]
-  );
+  await sql`
+    DELETE FROM pos_order_snapshot_lines WHERE order_id = ${orderId}
+  `.execute(db);
 }
 
 /**
@@ -176,33 +174,33 @@ export async function deleteOrderSnapshotLines(
  * Returns the insert ID.
  */
 export async function insertOrderSnapshotLine(
-  db: DbConn,
+  db: KyselySchema,
   line: OrderSnapshotLineInsertInput
 ): Promise<number> {
-  const result = await db.execute(
-    `INSERT INTO pos_order_snapshot_lines (
+  await sql`
+    INSERT INTO pos_order_snapshot_lines (
        order_id, company_id, outlet_id, item_id, variant_id,
        qty, unit_price_snapshot, discount_amount, name_snapshot,
        item_type_snapshot, sku_snapshot, updated_at, updated_at_ts
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      line.order_id,
-      line.company_id,
-      line.outlet_id,
-      line.item_id,
-      line.variant_id ?? null,
-      line.qty,
-      line.unit_price_snapshot,
-      line.discount_amount ?? 0,
-      line.name_snapshot,
-      line.item_type_snapshot,
-      line.sku_snapshot ?? null,
-      line.updated_at,
-      line.updated_at_ts
-    ]
-  );
+     ) VALUES (
+       ${line.order_id},
+       ${line.company_id},
+       ${line.outlet_id},
+       ${line.item_id},
+       ${line.variant_id ?? null},
+       ${line.qty},
+       ${line.unit_price_snapshot},
+       ${line.discount_amount ?? 0},
+       ${line.name_snapshot},
+       ${line.item_type_snapshot},
+       ${line.sku_snapshot ?? null},
+       ${line.updated_at},
+       ${line.updated_at_ts}
+     )
+  `.execute(db);
 
-  return Number(result.insertId);
+  const lastIdResult = await sql`SELECT LAST_INSERT_ID() AS insert_id`.execute(db);
+  return Number((lastIdResult.rows[0] as any).insert_id);
 }
 
 /**
@@ -210,27 +208,26 @@ export async function insertOrderSnapshotLine(
  * Used for idempotency checks in sync push.
  */
 export async function readOrderSnapshotByOrderId(
-  db: DbConn,
+  db: KyselySchema,
   orderId: string,
   companyId: number
 ): Promise<OrderSnapshotQueryResult | null> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT order_id, company_id, outlet_id, order_status, order_state,
+  const result = await sql`
+    SELECT order_id, company_id, outlet_id, order_status, order_state,
             service_type, source_flow, settlement_flow, is_finalized,
             opened_at, opened_at_ts, closed_at, closed_at_ts,
             updated_at, updated_at_ts, table_id, reservation_id,
             guest_count, paid_amount, notes, created_at
      FROM pos_order_snapshots
-     WHERE order_id = ? AND company_id = ?
-     LIMIT 1`,
-    [orderId, companyId]
-  );
+     WHERE order_id = ${orderId} AND company_id = ${companyId}
+     LIMIT 1
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (result.rows.length === 0) {
     return null;
   }
 
-  const row = rows[0];
+  const row = result.rows[0] as any;
   return {
     order_id: row.order_id,
     company_id: Number(row.company_id),
@@ -262,7 +259,7 @@ export async function readOrderSnapshotByOrderId(
  * Returns a Map for efficient lookup by order_id.
  */
 export async function batchReadOrderSnapshotsByOrderIds(
-  db: DbConn,
+  db: KyselySchema,
   orderIds: string[],
   companyId: number
 ): Promise<Map<string, OrderSnapshotQueryResult>> {
@@ -270,45 +267,44 @@ export async function batchReadOrderSnapshotsByOrderIds(
     return new Map();
   }
 
-  const placeholders = orderIds.map(() => "?").join(", ");
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT order_id, company_id, outlet_id, order_status, order_state,
+  const result = await sql`
+    SELECT order_id, company_id, outlet_id, order_status, order_state,
             service_type, source_flow, settlement_flow, is_finalized,
             opened_at, opened_at_ts, closed_at, closed_at_ts,
             updated_at, updated_at_ts, table_id, reservation_id,
             guest_count, paid_amount, notes, created_at
      FROM pos_order_snapshots
-     WHERE order_id IN (${placeholders}) AND company_id = ?`,
-    [...orderIds, companyId]
-  );
+     WHERE order_id IN (${sql.join(orderIds.map(id => sql`${id}`), sql`, `)}) AND company_id = ${companyId}
+  `.execute(db);
 
-  const result = new Map<string, OrderSnapshotQueryResult>();
-  for (const row of rows) {
+  const map = new Map<string, OrderSnapshotQueryResult>();
+  for (const row of result.rows) {
+    const r = row as any;
     const snapshot: OrderSnapshotQueryResult = {
-      order_id: row.order_id,
-      company_id: Number(row.company_id),
-      outlet_id: Number(row.outlet_id),
-      order_status: row.order_status,
-      order_state: row.order_state,
-      service_type: row.service_type,
-      source_flow: row.source_flow,
-      settlement_flow: row.settlement_flow,
-      is_finalized: Number(row.is_finalized),
-      opened_at: row.opened_at,
-      opened_at_ts: Number(row.opened_at_ts),
-      closed_at: row.closed_at,
-      closed_at_ts: row.closed_at_ts == null ? null : Number(row.closed_at_ts),
-      updated_at: row.updated_at,
-      updated_at_ts: Number(row.updated_at_ts),
-      table_id: row.table_id == null ? null : Number(row.table_id),
-      reservation_id: row.reservation_id == null ? null : Number(row.reservation_id),
-      guest_count: row.guest_count == null ? null : Number(row.guest_count),
-      paid_amount: row.paid_amount,
-      notes: row.notes,
-      created_at: row.created_at
+      order_id: r.order_id,
+      company_id: Number(r.company_id),
+      outlet_id: Number(r.outlet_id),
+      order_status: r.order_status,
+      order_state: r.order_state,
+      service_type: r.service_type,
+      source_flow: r.source_flow,
+      settlement_flow: r.settlement_flow,
+      is_finalized: Number(r.is_finalized),
+      opened_at: r.opened_at,
+      opened_at_ts: Number(r.opened_at_ts),
+      closed_at: r.closed_at,
+      closed_at_ts: r.closed_at_ts == null ? null : Number(r.closed_at_ts),
+      updated_at: r.updated_at,
+      updated_at_ts: Number(r.updated_at_ts),
+      table_id: r.table_id == null ? null : Number(r.table_id),
+      reservation_id: r.reservation_id == null ? null : Number(r.reservation_id),
+      guest_count: r.guest_count == null ? null : Number(r.guest_count),
+      paid_amount: r.paid_amount,
+      notes: r.notes,
+      created_at: r.created_at
     };
-    result.set(row.order_id, snapshot);
+    map.set(r.order_id, snapshot);
   }
 
-  return result;
+  return map;
 }

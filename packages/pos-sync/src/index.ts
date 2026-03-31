@@ -7,8 +7,25 @@ export * from "./types/pos-data.js";
 export * from "./endpoints/pos-sync-endpoints.js";
 
 // Export persistPushBatch for API layer usage (Phase 2 of Story 17-5)
-export { persistPushBatch } from "./push/index.js";
+export { persistPushBatch, handlePushSync } from "./push/index.js";
 export type {
   TransactionPush,
-  SyncPushResultItem
+  ActiveOrderPush,
+  OrderUpdatePush,
+  ItemCancellationPush,
+  VariantSalePush,
+  VariantStockAdjustmentPush,
+  SyncPushResultItem,
+  OrderUpdateResult,
+  ItemCancellationResult,
+  VariantSaleResult,
+  VariantStockAdjustmentResult,
+  PushSyncParams,
+  PushSyncResult
 } from "./push/types.js";
+
+// Export pull types
+export type {
+  PullSyncParams,
+  PullSyncResult
+} from "./pull/types.js";

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
 import type { PullSyncParams, PullSyncResult } from "./types.js";
-import type { DbConn } from "@jurnapod/db";
+import type { KyselySchema } from "@jurnapod/db";
 import type { SyncPullPayload } from "@jurnapod/shared";
 import { z } from "zod";
 import { syncAuditor } from "@jurnapod/sync-core";
@@ -218,12 +218,12 @@ function transformVariantPrices(
  * Handle pull sync for POS client.
  * This is the canonical entry point for POS data synchronization.
  *
- * @param db - Database connection (DbConn from @jurnapod/db)
+ * @param db - Database connection (KyselySchema from @jurnapod/db)
  * @param params - Pull sync parameters including companyId, outletId, sinceVersion, ordersCursor
  * @returns PullSyncResult containing the payload and current version
  */
 export async function handlePullSync(
-  db: DbConn,
+  db: KyselySchema,
   params: PullSyncParams
 ): Promise<PullSyncResult> {
   const { companyId, outletId, sinceVersion = 0, ordersCursor = 0 } = params;

@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
-import type { DbConn } from "@jurnapod/db";
-import type { RowDataPacket } from "mysql2";
+import type { KyselySchema } from "@jurnapod/db";
 
 // ============================================================================
 // Query Result Types
@@ -132,26 +131,28 @@ export type PosTransactionTaxInsertInput = {
  * Used for idempotency checks in sync push.
  */
 export async function readPosTransactionByClientTxId(
-  db: DbConn,
+  db: KyselySchema,
   clientTxId: string,
   companyId: number
 ): Promise<PosTransactionQueryResult | null> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT id, company_id, outlet_id, cashier_user_id, client_tx_id, status,
-            service_type, table_id, reservation_id, guest_count, order_status,
-            opened_at, closed_at, notes, trx_at, discount_percent, discount_fixed,
-            discount_code, payload_sha256, payload_hash_version, created_at, updated_at
-     FROM pos_transactions
-     WHERE client_tx_id = ? AND company_id = ?
-     LIMIT 1`,
-    [clientTxId, companyId]
-  );
+  const result = await db
+    .selectFrom('pos_transactions')
+    .select([
+      'id', 'company_id', 'outlet_id', 'cashier_user_id', 'client_tx_id', 'status',
+      'service_type', 'table_id', 'reservation_id', 'guest_count', 'order_status',
+      'opened_at', 'closed_at', 'notes', 'trx_at', 'discount_percent', 'discount_fixed',
+      'discount_code', 'payload_sha256', 'payload_hash_version', 'created_at', 'updated_at'
+    ])
+    .where('client_tx_id', '=', clientTxId)
+    .where('company_id', '=', companyId)
+    .limit(1)
+    .executeTakeFirst();
 
-  if (rows.length === 0) {
+  if (!result) {
     return null;
   }
 
-  const row = rows[0];
+  const row = result as any;
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
@@ -184,7 +185,7 @@ export async function readPosTransactionByClientTxId(
  * Returns a Map for efficient lookup by client_tx_id.
  */
 export async function batchReadPosTransactionsByClientTxIds(
-  db: DbConn,
+  db: KyselySchema,
   clientTxIds: string[],
   companyId: number
 ): Promise<Map<string, PosTransactionQueryResult>> {
@@ -192,47 +193,49 @@ export async function batchReadPosTransactionsByClientTxIds(
     return new Map();
   }
 
-  const placeholders = clientTxIds.map(() => "?").join(", ");
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT id, company_id, outlet_id, cashier_user_id, client_tx_id, status,
-            service_type, table_id, reservation_id, guest_count, order_status,
-            opened_at, closed_at, notes, trx_at, discount_percent, discount_fixed,
-            discount_code, payload_sha256, payload_hash_version, created_at, updated_at
-     FROM pos_transactions
-     WHERE client_tx_id IN (${placeholders}) AND company_id = ?`,
-    [...clientTxIds, companyId]
-  );
+  const result = await db
+    .selectFrom('pos_transactions')
+    .select([
+      'id', 'company_id', 'outlet_id', 'cashier_user_id', 'client_tx_id', 'status',
+      'service_type', 'table_id', 'reservation_id', 'guest_count', 'order_status',
+      'opened_at', 'closed_at', 'notes', 'trx_at', 'discount_percent', 'discount_fixed',
+      'discount_code', 'payload_sha256', 'payload_hash_version', 'created_at', 'updated_at'
+    ])
+    .where('client_tx_id', 'in', clientTxIds)
+    .where('company_id', '=', companyId)
+    .execute();
 
-  const result = new Map<string, PosTransactionQueryResult>();
-  for (const row of rows) {
+  const map = new Map<string, PosTransactionQueryResult>();
+  for (const row of result) {
+    const r = row as any;
     const tx: PosTransactionQueryResult = {
-      id: Number(row.id),
-      company_id: Number(row.company_id),
-      outlet_id: Number(row.outlet_id),
-      cashier_user_id: row.cashier_user_id == null ? null : Number(row.cashier_user_id),
-      client_tx_id: row.client_tx_id,
-      status: row.status,
-      service_type: row.service_type,
-      table_id: row.table_id == null ? null : Number(row.table_id),
-      reservation_id: row.reservation_id == null ? null : Number(row.reservation_id),
-      guest_count: row.guest_count == null ? null : Number(row.guest_count),
-      order_status: row.order_status,
-      opened_at: row.opened_at,
-      closed_at: row.closed_at,
-      notes: row.notes,
-      trx_at: row.trx_at,
-      discount_percent: row.discount_percent,
-      discount_fixed: row.discount_fixed,
-      discount_code: row.discount_code,
-      payload_sha256: row.payload_sha256,
-      payload_hash_version: Number(row.payload_hash_version),
-      created_at: row.created_at,
-      updated_at: row.updated_at
+      id: Number(r.id),
+      company_id: Number(r.company_id),
+      outlet_id: Number(r.outlet_id),
+      cashier_user_id: r.cashier_user_id == null ? null : Number(r.cashier_user_id),
+      client_tx_id: r.client_tx_id,
+      status: r.status,
+      service_type: r.service_type,
+      table_id: r.table_id == null ? null : Number(r.table_id),
+      reservation_id: r.reservation_id == null ? null : Number(r.reservation_id),
+      guest_count: r.guest_count == null ? null : Number(r.guest_count),
+      order_status: r.order_status,
+      opened_at: r.opened_at,
+      closed_at: r.closed_at,
+      notes: r.notes,
+      trx_at: r.trx_at,
+      discount_percent: r.discount_percent,
+      discount_fixed: r.discount_fixed,
+      discount_code: r.discount_code,
+      payload_sha256: r.payload_sha256,
+      payload_hash_version: Number(r.payload_hash_version),
+      created_at: r.created_at,
+      updated_at: r.updated_at
     };
-    result.set(row.client_tx_id, tx);
+    map.set(r.client_tx_id, tx);
   }
 
-  return result;
+  return map;
 }
 
 /**
@@ -243,144 +246,110 @@ export async function batchReadPosTransactionsByClientTxIds(
  * transaction management when inserting related items/payments/taxes.
  */
 export async function insertPosTransaction(
-  db: DbConn,
+  db: KyselySchema,
   tx: PosTransactionInsertInput
 ): Promise<number> {
-  const result = await db.execute(
-    `INSERT INTO pos_transactions (
-       company_id,
-       outlet_id,
-       cashier_user_id,
-       client_tx_id,
-       status,
-       service_type,
-       table_id,
-       reservation_id,
-       guest_count,
-       order_status,
-       opened_at,
-       closed_at,
-       notes,
-       trx_at,
-       discount_percent,
-       discount_fixed,
-       discount_code,
-       payload_sha256,
-       payload_hash_version
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      tx.company_id,
-      tx.outlet_id,
-      tx.cashier_user_id,
-      tx.client_tx_id,
-      tx.status,
-      tx.service_type ?? "TAKEAWAY",
-      tx.table_id ?? null,
-      tx.reservation_id ?? null,
-      tx.guest_count ?? null,
-      tx.order_status ?? "COMPLETED",
-      tx.opened_at ?? null,
-      tx.closed_at ?? null,
-      tx.notes ?? null,
-      tx.trx_at,
-      tx.discount_percent ?? 0,
-      tx.discount_fixed ?? 0,
-      tx.discount_code ?? null,
-      tx.payload_sha256,
-      tx.payload_hash_version ?? 2
-    ]
-  );
+  // Convert string dates to Date objects for Kysely
+  const openedAt = tx.opened_at ? new Date(tx.opened_at) : null;
+  const closedAt = tx.closed_at ? new Date(tx.closed_at) : null;
+  const trxAt = new Date(tx.trx_at);
 
-  return Number(result.insertId);
+  const result = await db
+    .insertInto('pos_transactions')
+    .values({
+      company_id: tx.company_id,
+      outlet_id: tx.outlet_id,
+      cashier_user_id: tx.cashier_user_id,
+      client_tx_id: tx.client_tx_id,
+      status: tx.status,
+      service_type: tx.service_type ?? "TAKEAWAY",
+      table_id: tx.table_id ?? null,
+      reservation_id: tx.reservation_id ?? null,
+      guest_count: tx.guest_count ?? null,
+      order_status: tx.order_status ?? "COMPLETED",
+      opened_at: openedAt,
+      closed_at: closedAt,
+      notes: tx.notes ?? null,
+      trx_at: trxAt,
+      discount_percent: tx.discount_percent ?? 0,
+      discount_fixed: tx.discount_fixed ?? 0,
+      discount_code: tx.discount_code ?? null,
+      payload_sha256: tx.payload_sha256,
+      payload_hash_version: tx.payload_hash_version ?? 2
+    })
+    .returning(['id'])
+    .executeTakeFirst();
+
+  return Number(result!.id);
 }
 
 /**
  * Insert a single line item into pos_transaction_items.
  */
 export async function insertPosTransactionItem(
-  db: DbConn,
+  db: KyselySchema,
   item: PosTransactionItemInsertInput
 ): Promise<number> {
-  const result = await db.execute(
-    `INSERT INTO pos_transaction_items (
-       pos_transaction_id,
-       company_id,
-       outlet_id,
-       line_no,
-       item_id,
-       variant_id,
-       qty,
-       price_snapshot,
-       name_snapshot
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      item.pos_transaction_id,
-      item.company_id,
-      item.outlet_id,
-      item.line_no,
-      item.item_id,
-      item.variant_id ?? null,
-      item.qty,
-      item.price_snapshot,
-      item.name_snapshot
-    ]
-  );
+  const result = await db
+    .insertInto('pos_transaction_items')
+    .values({
+      pos_transaction_id: item.pos_transaction_id,
+      company_id: item.company_id,
+      outlet_id: item.outlet_id,
+      line_no: item.line_no,
+      item_id: item.item_id,
+      variant_id: item.variant_id ?? null,
+      qty: item.qty,
+      price_snapshot: item.price_snapshot,
+      name_snapshot: item.name_snapshot
+    })
+    .returning(['id'])
+    .executeTakeFirst();
 
-  return Number(result.insertId);
+  return Number(result!.id);
 }
 
 /**
  * Insert a single payment into pos_transaction_payments.
  */
 export async function insertPosTransactionPayment(
-  db: DbConn,
+  db: KyselySchema,
   payment: PosTransactionPaymentInsertInput
 ): Promise<number> {
-  const result = await db.execute(
-    `INSERT INTO pos_transaction_payments (
-       pos_transaction_id,
-       company_id,
-       outlet_id,
-       payment_no,
-       method,
-       amount
-     ) VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      payment.pos_transaction_id,
-      payment.company_id,
-      payment.outlet_id,
-      payment.payment_no,
-      payment.method,
-      payment.amount
-    ]
-  );
+  const result = await db
+    .insertInto('pos_transaction_payments')
+    .values({
+      pos_transaction_id: payment.pos_transaction_id,
+      company_id: payment.company_id,
+      outlet_id: payment.outlet_id,
+      payment_no: payment.payment_no,
+      method: payment.method,
+      amount: payment.amount
+    })
+    .returning(['id'])
+    .executeTakeFirst();
 
-  return Number(result.insertId);
+  return Number(result!.id);
 }
 
 /**
  * Insert a single tax line into pos_transaction_taxes.
  */
 export async function insertPosTransactionTax(
-  db: DbConn,
+  db: KyselySchema,
   tax: PosTransactionTaxInsertInput
 ): Promise<number> {
-  const result = await db.execute(
-    `INSERT INTO pos_transaction_taxes (
-       pos_transaction_id,
-       company_id,
-       outlet_id,
-       tax_rate_id,
-       amount
-     ) VALUES (?, ?, ?, ?, ?)`,
-    [
-      tax.pos_transaction_id,
-      tax.company_id,
-      tax.outlet_id,
-      tax.tax_rate_id,
-      tax.amount
-    ]
-  );
+  const result = await db
+    .insertInto('pos_transaction_taxes')
+    .values({
+      pos_transaction_id: tax.pos_transaction_id,
+      company_id: tax.company_id,
+      outlet_id: tax.outlet_id,
+      tax_rate_id: tax.tax_rate_id,
+      amount: tax.amount
+    })
+    .returning(['id'])
+    .executeTakeFirst();
 
-  return Number(result.insertId);
+  return Number(result!.id);
 }

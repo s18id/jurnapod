@@ -4,55 +4,35 @@
 /**
  * Example API integration for POS sync endpoints
  * This shows how to integrate the modular POS sync with an Express/Hono app
+ * 
+ * NOTE: This is a reference implementation showing how to use Kysely with pos-sync.
+ * Replace with actual database connections in production.
  */
 
 import { PosSyncModule } from "./pos-sync-module.js";
-import { syncModuleRegistry } from "@jurnapod/sync-core";
-import type { DbConn } from "@jurnapod/db";
-
-// Mock database adapter (replace with actual implementation)
-// Uses type assertion since DbConn has private fields that prevent direct implementation
-const createMockDbConn = (): DbConn => {
-  const mock: Partial<DbConn> = {
-    pool: {} as any,
-    kysely: {} as any,
-    query: async <T = any>(_sql: string, _params?: any[]): Promise<T | null> => null,
-    queryAll: async <T = any>(_sql: string, _params?: any[]): Promise<T[]> => [],
-    queryOne: async <T = any>(sql: string, params?: any[]): Promise<T | null> => {
-      const results = await mock.queryAll!(<any>sql, params);
-      return results[0] || null;
-    },
-    querySingle: async <T = any>(sql: string, params?: any[]): Promise<T | null> => {
-      return mock.queryOne!(<any>sql, params);
-    },
-    execute: async (_sql: string, _params?: any[]) => ({ affectedRows: 0, insertId: 0 }),
-    beginTransaction: async () => {},
-    begin: async () => {},
-    commit: async () => {},
-    rollback: async () => {},
-    startTransaction: () => { return {} as any; },
-    withTransaction: async <T>(_sql: string, _params?: any[]) => ({}) as T,
-    getConnection: async () => ({} as any),
-  };
-  return mock as DbConn;
-};
+import { syncModuleRegistry, type SyncModuleInitContext } from "@jurnapod/sync-core";
+import { createKysely, type KyselySchema } from "@jurnapod/db";
 
 /**
  * Initialize POS sync module and register with API
  */
 export async function initializePosSyncAPI() {
-  // Create database connection (replace with actual implementation)
-  const database = createMockDbConn();
+  // Create database connection using Kysely (replace with actual connection string)
+  const db = createKysely({
+    uri: process.env.DATABASE_URL ?? 'mysql://user:pass@localhost:3306/jurnapod',
+  });
 
-  // Initialize sync module registry
-  await syncModuleRegistry.initialize({
-    database,
+  // Initialize sync module registry with Kysely database
+  const initContext: SyncModuleInitContext = {
+    database: db,
     logger: console,
     config: {
       enableAuditLogging: true,
       defaultRetryAttempts: 3
     }
-  });
+  };
+
+  await syncModuleRegistry.initialize(initContext);
 
   // Create and register POS sync module
   const posModule = new PosSyncModule({
@@ -63,6 +43,9 @@ export async function initializePosSyncAPI() {
 
   // Register the module
   syncModuleRegistry.register(posModule);
+
+  // Initialize the POS module with the database
+  await posModule.initialize(initContext);
 
   // Get endpoints for registration
   const endpoints = posModule.endpoints;
@@ -76,7 +59,8 @@ export async function initializePosSyncAPI() {
   return {
     module: posModule,
     endpoints,
-    registry: syncModuleRegistry
+    registry: syncModuleRegistry,
+    db,
   };
 }
 

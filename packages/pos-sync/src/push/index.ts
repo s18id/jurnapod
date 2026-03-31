@@ -11,7 +11,7 @@
 
 import { createHash } from "node:crypto";
 
-import type { DbConn } from "@jurnapod/db";
+import type { KyselySchema } from "@jurnapod/db";
 import type {
   PushSyncParams,
   PushSyncResult,
@@ -208,7 +208,7 @@ function computePayloadSha256(canonicalPayload: string): string {
  * Process a single transaction
  */
 async function processTransaction(
-  db: DbConn,
+  db: KyselySchema,
   tx: TransactionPush,
   companyId: number,
   outletId: number,
@@ -404,7 +404,7 @@ async function processTransaction(
  * Batch check transactions for duplicates and return new ones
  */
 async function filterNewTransactions(
-  db: DbConn,
+  db: KyselySchema,
   transactions: TransactionPush[],
   companyId: number,
   outletId: number
@@ -463,7 +463,7 @@ async function filterNewTransactions(
  * Process active orders
  */
 async function processActiveOrders(
-  db: DbConn,
+  db: KyselySchema,
   orders: ActiveOrderPush[],
   correlationId: string
 ): Promise<OrderUpdateResult[]> {
@@ -557,7 +557,7 @@ async function processActiveOrders(
  * Process order updates
  */
 async function processOrderUpdates(
-  db: DbConn,
+  db: KyselySchema,
   updates: OrderUpdatePush[],
   correlationId: string
 ): Promise<OrderUpdateResult[]> {
@@ -631,7 +631,7 @@ async function processOrderUpdates(
  * Process item cancellations
  */
 async function processItemCancellations(
-  db: DbConn,
+  db: KyselySchema,
   cancellations: ItemCancellationPush[],
   correlationId: string
 ): Promise<ItemCancellationResult[]> {
@@ -698,7 +698,7 @@ async function processItemCancellations(
  * Process variant sales
  */
 async function processVariantSales(
-  db: DbConn,
+  db: KyselySchema,
   sales: VariantSalePush[],
   companyId: number,
   outletId: number,
@@ -791,7 +791,7 @@ async function processVariantSales(
  * Process variant stock adjustments
  */
 async function processVariantStockAdjustments(
-  db: DbConn,
+  db: KyselySchema,
   adjustments: VariantStockAdjustmentPush[],
   companyId: number,
   outletId: number,
@@ -977,7 +977,7 @@ function buildTransactionBatches(
  * @returns Array of results per transaction (one per transaction: OK/DUPLICATE/ERROR)
  */
 export async function persistPushBatch(
-  db: DbConn,
+  db: KyselySchema,
   transactions: TransactionPush[],
   companyId: number,
   outletId: number,

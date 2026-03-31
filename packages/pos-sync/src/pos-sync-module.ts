@@ -12,7 +12,7 @@ import type {
 import { syncAuditor } from "@jurnapod/sync-core";
 import { PosDataService } from "./core/pos-data-service.js";
 import { createPosSyncEndpoints } from "./endpoints/pos-sync-endpoints.js";
-import { DbConn } from "@jurnapod/db";
+import type { KyselySchema } from "@jurnapod/db";
 import { handlePullSync, type PullSyncParams, type PullSyncResult } from "./pull/index.js";
 import { handlePushSync, type PushSyncParams, type PushSyncResult } from "./push/index.js";
 
@@ -22,7 +22,7 @@ export class PosSyncModule implements SyncModule {
   readonly endpoints: ReadonlyArray<SyncEndpoint>;
 
   private dataService?: PosDataService;
-  private dbConn?: DbConn;
+  private db?: KyselySchema;
   private logger?: any;
 
   constructor(public readonly config: SyncModuleConfig) {
@@ -34,10 +34,9 @@ export class PosSyncModule implements SyncModule {
   async initialize(context: SyncModuleInitContext): Promise<void> {
     this.dataService = new PosDataService(context.database);
 
-    // Create DbConn from the module context's database
+    // Use KyselySchema from the module context
     if (context.database) {
-      // The context.database could be a mysql pool or a DbConn-like object
-      this.dbConn = context.database as DbConn;
+      this.db = context.database;
     }
 
     this.logger = context.logger;
@@ -54,11 +53,11 @@ export class PosSyncModule implements SyncModule {
    * Accepts PullSyncParams and returns PullSyncResult.
    */
   async handlePullSync(params: PullSyncParams): Promise<PullSyncResult> {
-    if (!this.dbConn) {
+    if (!this.db) {
       throw new Error("POS sync module not initialized - database connection not available");
     }
 
-    return await handlePullSync(this.dbConn, params);
+    return await handlePullSync(this.db, params);
   }
 
   /**
@@ -66,13 +65,13 @@ export class PosSyncModule implements SyncModule {
    * Accepts PushSyncParams and returns PushSyncResult.
    */
   async handlePushSync(params: PushSyncParams): Promise<PushSyncResult> {
-    if (!this.dbConn) {
+    if (!this.db) {
       throw new Error("POS sync module not initialized - database connection not available");
     }
 
     return await handlePushSync({
       ...params,
-      db: this.dbConn,
+      db: this.db,
     });
   }
 
@@ -82,7 +81,7 @@ export class PosSyncModule implements SyncModule {
    * for backward compatibility with existing endpoints.
    */
   async handleSync(request: SyncRequest): Promise<SyncResponse> {
-    if (!this.dbConn) {
+    if (!this.db) {
       return {
         success: false,
         timestamp: new Date().toISOString(),
@@ -178,7 +177,7 @@ export class PosSyncModule implements SyncModule {
 
   async cleanup(): Promise<void> {
     this.dataService = undefined;
-    this.dbConn = undefined;
+    this.db = undefined;
     this.logger = undefined;
   }
 }

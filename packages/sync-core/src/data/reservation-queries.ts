@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
-import type { DbConn } from "@jurnapod/db";
-import type { RowDataPacket } from "mysql2";
+import type { KyselySchema } from "@jurnapod/db";
 import { toRfc3339Required } from "@jurnapod/shared";
 
 export type ReservationQueryResult = {
@@ -30,36 +29,40 @@ export type ReservationQueryResult = {
  * Active statuses: BOOKED, CONFIRMED, ARRIVED, SEATED.
  */
 export async function getActiveReservationsForSync(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   outletId: number
 ): Promise<ReservationQueryResult[]> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT id, company_id, outlet_id, table_id, customer_name, customer_phone, 
-            guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
-            duration_minutes, status, notes, linked_order_id, arrived_at, 
-            seated_at, cancelled_at, updated_at
-     FROM reservations
-     WHERE company_id = ? 
-       AND outlet_id = ?
-       AND status IN ('BOOKED', 'CONFIRMED', 'ARRIVED', 'SEATED')
-       AND (
-         (
-           reservation_start_ts IS NOT NULL
-           AND reservation_start_ts >= (UNIX_TIMESTAMP(CURDATE()) * 1000)
-           AND reservation_start_ts < (UNIX_TIMESTAMP(DATE_ADD(CURDATE(), INTERVAL 2 DAY)) * 1000)
-         )
-         OR (
-           reservation_start_ts IS NULL
-           AND reservation_at >= CURDATE()
-           AND reservation_at < DATE_ADD(CURDATE(), INTERVAL 2 DAY)
-         )
-       )
-     ORDER BY reservation_start_ts IS NULL ASC, reservation_start_ts ASC, reservation_at ASC`,
-    [companyId, outletId]
-  );
+  // Calculate date boundaries in JavaScript (milliseconds since epoch)
+  const now = Date.now();
+  const startOfToday = Math.floor(now / 86400000) * 86400000;
+  const startOfDayAfterTomorrow = startOfToday + 2 * 86400000;
+
+  const result = await db
+    .selectFrom('reservations as r')
+    .select([
+      'r.id', 'r.company_id', 'r.outlet_id', 'r.table_id', 'r.customer_name', 'r.customer_phone',
+      'r.guest_count', 'r.reservation_at', 'r.reservation_start_ts', 'r.reservation_end_ts',
+      'r.duration_minutes', 'r.status', 'r.notes', 'r.linked_order_id', 'r.arrived_at',
+      'r.seated_at', 'r.cancelled_at', 'r.updated_at'
+    ])
+    .where('r.company_id', '=', companyId)
+    .where('r.outlet_id', '=', outletId)
+    .where('r.status', 'in', ['BOOKED', 'CONFIRMED', 'ARRIVED', 'SEATED'])
+    .where((eb) => eb.or([
+      eb.and([
+        eb('r.reservation_start_ts', 'is not', null),
+        eb('r.reservation_start_ts', '>=', startOfToday),
+        eb('r.reservation_start_ts', '<', startOfDayAfterTomorrow)
+      ]),
+      eb.and([
+        eb('r.reservation_start_ts', 'is', null)
+      ])
+    ]))
+    .orderBy('reservation_start_ts', 'asc')
+    .execute();
   
-  return rows.map((row) => ({
+  return result.map((row: any) => ({
     reservation_id: Number(row.id),
     company_id: Number(row.company_id),
     outlet_id: Number(row.outlet_id),
@@ -85,25 +88,26 @@ export async function getActiveReservationsForSync(
  * Get reservations changed since a specific version for incremental sync.
  */
 export async function getReservationsChangedSince(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   updatedSince: string
 ): Promise<ReservationQueryResult[]> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT id, company_id, outlet_id, table_id, customer_name, customer_phone, 
-            guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
-            duration_minutes, status, notes, linked_order_id, arrived_at, 
-            seated_at, cancelled_at, updated_at
-     FROM reservations
-     WHERE company_id = ? 
-       AND outlet_id = ?
-       AND updated_at >= ?
-     ORDER BY reservation_start_ts IS NULL ASC, reservation_start_ts ASC, reservation_at ASC`,
-    [companyId, outletId, updatedSince]
-  );
+  const result = await db
+    .selectFrom('reservations as r')
+    .select([
+      'r.id', 'r.company_id', 'r.outlet_id', 'r.table_id', 'r.customer_name', 'r.customer_phone',
+      'r.guest_count', 'r.reservation_at', 'r.reservation_start_ts', 'r.reservation_end_ts',
+      'r.duration_minutes', 'r.status', 'r.notes', 'r.linked_order_id', 'r.arrived_at',
+      'r.seated_at', 'r.cancelled_at', 'r.updated_at'
+    ])
+    .where('r.company_id', '=', companyId)
+    .where('r.outlet_id', '=', outletId)
+    .where('r.updated_at', '>=', updatedSince as any)
+    .orderBy('reservation_start_ts', 'asc')
+    .execute();
   
-  return rows.map((row) => ({
+  return result.map((row: any) => ({
     reservation_id: Number(row.id),
     company_id: Number(row.company_id),
     outlet_id: Number(row.outlet_id),

@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { DbConn } from '@jurnapod/db';
+import type { KyselySchema } from '@jurnapod/db';
 import type { TransactionPush, SyncPushResultItem } from './types.js';
 import type { SyncIdempotencyMetricsCollector } from '@jurnapod/sync-core';
 
@@ -20,7 +20,8 @@ vi.mock('@jurnapod/sync-core', () => ({
 }));
 
 vi.mock('@jurnapod/db', () => ({
-  DbConn: vi.fn(),
+  createKysely: vi.fn(),
+  getKysely: vi.fn(),
 }));
 
 // Import the function under test after mocking
@@ -28,7 +29,7 @@ vi.mock('@jurnapod/db', () => ({
 
 describe('persistPushBatch', () => {
   // Mock database
-  const mockDb = {} as DbConn;
+  const mockDb = {} as KyselySchema;
   
   // Test fixtures
   const companyId = 1;

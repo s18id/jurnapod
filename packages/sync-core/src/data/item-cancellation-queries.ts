@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
-import type { DbConn } from "@jurnapod/db";
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
+import type { KyselySchema } from "@jurnapod/db";
 
 // ============================================================================
 // Query Result Types
@@ -55,29 +55,28 @@ export type ItemCancellationInsertInput = {
  * - created_at: SERVER-authoritative (DB default)
  */
 export async function insertItemCancellation(
-  db: DbConn,
+  db: KyselySchema,
   cancellation: ItemCancellationInsertInput
 ): Promise<void> {
-  await db.execute(
-    `INSERT INTO pos_item_cancellations (
+  await sql`
+    INSERT INTO pos_item_cancellations (
        cancellation_id, order_id, item_id, variant_id,
        company_id, outlet_id, cancelled_quantity, reason,
        cancelled_by_user_id, cancelled_at, cancelled_at_ts
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      cancellation.cancellation_id,
-      cancellation.order_id,
-      cancellation.item_id,
-      cancellation.variant_id ?? null,
-      cancellation.company_id,
-      cancellation.outlet_id,
-      cancellation.cancelled_quantity,
-      cancellation.reason,
-      cancellation.cancelled_by_user_id ?? null,
-      cancellation.cancelled_at,
-      cancellation.cancelled_at_ts
-    ]
-  );
+     ) VALUES (
+       ${cancellation.cancellation_id},
+       ${cancellation.order_id},
+       ${cancellation.item_id},
+       ${cancellation.variant_id ?? null},
+       ${cancellation.company_id},
+       ${cancellation.outlet_id},
+       ${cancellation.cancelled_quantity},
+       ${cancellation.reason},
+       ${cancellation.cancelled_by_user_id ?? null},
+       ${cancellation.cancelled_at},
+       ${cancellation.cancelled_at_ts}
+     )
+  `.execute(db);
 }
 
 /**
@@ -85,16 +84,15 @@ export async function insertItemCancellation(
  * Used for idempotency checks in sync push.
  */
 export async function checkItemCancellationExists(
-  db: DbConn,
+  db: KyselySchema,
   cancellationId: string,
   companyId: number
 ): Promise<boolean> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT cancellation_id FROM pos_item_cancellations WHERE cancellation_id = ? AND company_id = ? LIMIT 1`,
-    [cancellationId, companyId]
-  );
+  const result = await sql`
+    SELECT cancellation_id FROM pos_item_cancellations WHERE cancellation_id = ${cancellationId} AND company_id = ${companyId} LIMIT 1
+  `.execute(db);
 
-  return rows.length > 0;
+  return result.rows.length > 0;
 }
 
 /**
@@ -103,7 +101,7 @@ export async function checkItemCancellationExists(
  * Returns an array of cancellation_ids that already exist.
  */
 export async function batchCheckItemCancellationsExist(
-  db: DbConn,
+  db: KyselySchema,
   cancellationIds: string[],
   companyId: number
 ): Promise<string[]> {
@@ -111,11 +109,10 @@ export async function batchCheckItemCancellationsExist(
     return [];
   }
 
-  const placeholders = cancellationIds.map(() => "?").join(", ");
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT cancellation_id FROM pos_item_cancellations WHERE cancellation_id IN (${placeholders}) AND company_id = ?`,
-    [...cancellationIds, companyId]
-  );
+  const result = await sql`
+    SELECT cancellation_id FROM pos_item_cancellations 
+    WHERE cancellation_id IN (${sql.join(cancellationIds.map(id => sql`${id}`), sql`, `)}) AND company_id = ${companyId}
+  `.execute(db);
 
-  return rows.map((row) => row.cancellation_id as string);
+  return result.rows.map((row) => (row as any).cancellation_id as string);
 }

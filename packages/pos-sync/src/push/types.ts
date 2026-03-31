@@ -7,7 +7,7 @@
  * These types are adapted from the API push types but use sync-core/data query types.
  */
 
-import type { DbConn } from "@jurnapod/db";
+import type { KyselySchema } from "@jurnapod/db";
 import type {
   SyncIdempotencyMetricsCollector,
   SyncOperationResult
@@ -206,7 +206,7 @@ export type VariantStockAdjustmentPush = {
 
 export type PushSyncParams = {
   /** Database connection */
-  db: DbConn;
+  db: KyselySchema;
   /** Company ID for tenant isolation */
   companyId: number;
   /** Outlet ID for tenant isolation */
@@ -250,7 +250,7 @@ export type PushSyncResult = {
  * Context for processing a transaction
  */
 export type TransactionProcessingContext = {
-  db: DbConn;
+  db: KyselySchema;
   tx: TransactionPush;
   companyId: number;
   outletId: number;
@@ -262,7 +262,7 @@ export type TransactionProcessingContext = {
  * Context for processing orders
  */
 export type OrderProcessingContext = {
-  db: DbConn;
+  db: KyselySchema;
   companyId: number;
   outletId: number;
   correlationId: string;

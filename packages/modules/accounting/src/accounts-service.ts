@@ -8,13 +8,14 @@ import type {
   AccountTreeNode,
   AccountUpdateRequest
 } from "@jurnapod/shared";
-import type { JurnapodDbClient } from "@jurnapod/db";
+import { sql } from "kysely";
+import type { KyselySchema } from "@jurnapod/db";
 
 /**
  * Database client interface for dependency injection
- * Should support parameterized queries and transactions
+ * Should support Kysely queries and transactions
  */
-export interface AccountsDbClient extends JurnapodDbClient {}
+export interface AccountsDbClient extends KyselySchema {}
 
 /**
  * Custom error classes for domain-specific errors
@@ -108,7 +109,7 @@ export class AccountsService {
   async listAccounts(filters: AccountListQuery): Promise<AccountResponse[]> {
     const { company_id, is_active, is_payable, report_group, parent_account_id, search } = filters;
 
-    let query = this.db.kysely
+    let query = this.db
       .selectFrom('accounts')
       .where('company_id', '=', company_id)
       .select([
@@ -160,7 +161,7 @@ export class AccountsService {
    * Get single account by ID
    */
   async getAccountById(accountId: number, companyId: number): Promise<AccountResponse> {
-    const row = await this.db.kysely
+    const row = await this.db
       .selectFrom('accounts')
       .where('id', '=', accountId)
       .where('company_id', '=', companyId)
@@ -226,15 +227,8 @@ export class AccountsService {
       effectiveReportGroup = templateMeta?.report_group ?? ancestorMeta?.report_group ?? null;
     }
 
-    // Use transaction if supported
-    const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-
-    try {
-      if (useTransaction) {
-        await this.db.begin!();
-      }
-
-      const result = await this.db.kysely
+    const accountId = await this.db.transaction().execute(async (trx) => {
+      const result = await trx
         .insertInto('accounts')
         .values({
           company_id: data.company_id,
@@ -251,14 +245,14 @@ export class AccountsService {
         })
         .executeTakeFirst();
 
-      const accountId = Number(result.insertId);
+      const newAccountId = Number(result.insertId);
 
       // Audit log (inside transaction)
       if (this.auditService && userId) {
         await this.auditService.logCreate(
           { company_id: data.company_id, user_id: userId },
           "account",
-          accountId,
+          newAccountId,
           {
             code: data.code,
             name: data.name,
@@ -269,18 +263,11 @@ export class AccountsService {
         );
       }
 
-      if (useTransaction) {
-        await this.db.commit!();
-      }
+      return newAccountId;
+    });
 
-      // Return the created account
-      return this.getAccountById(accountId, data.company_id);
-    } catch (error) {
-      if (useTransaction) {
-        await this.db.rollback!();
-      }
-      throw error;
-    }
+    // Return the created account
+    return this.getAccountById(accountId, data.company_id);
   }
 
   /**
@@ -499,23 +486,16 @@ export class AccountsService {
       return this.getAccountById(accountId, companyId);
     }
 
-    // Use transaction if supported
-    const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
+    // Build params in correct order: field values first, then WHERE values
+    const allParams = [...params, accountId, companyId];
+    const setClause = updateFields.join(", ");
 
-    try {
-      if (useTransaction) {
-        await this.db.begin!();
-      }
-
+    const after = await this.db.transaction().execute(async (trx) => {
       // Execute update using raw SQL (complex dynamic SQL is already built)
-      params.push(accountId, companyId);
-      await this.db.execute(
-        `UPDATE accounts SET ${updateFields.join(", ")} WHERE id = ? AND company_id = ?`,
-        params
-      );
+      await sql`UPDATE accounts SET ${sql.raw(setClause)} WHERE id = ${accountId} AND company_id = ${companyId}`.execute(trx);
 
       // Fetch updated account
-      const after = await this.getAccountById(accountId, companyId);
+      const updated = await this.getAccountById(accountId, companyId);
 
       // Audit log (inside transaction)
       if (this.auditService && userId) {
@@ -524,21 +504,14 @@ export class AccountsService {
           "account",
           accountId,
           before,
-          after
+          updated
         );
       }
 
-      if (useTransaction) {
-        await this.db.commit!();
-      }
+      return updated;
+    });
 
-      return after;
-    } catch (error) {
-      if (useTransaction) {
-        await this.db.rollback!();
-      }
-      throw error;
-    }
+    return after;
   }
 
   /**
@@ -554,22 +527,15 @@ export class AccountsService {
       throw new AccountInUseError(accountId, "has journal lines or active child accounts");
     }
 
-    // Use transaction if supported
-    const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-
-    try {
-      if (useTransaction) {
-        await this.db.begin!();
-      }
-
-      await this.db.kysely
+    const account = await this.db.transaction().execute(async (trx) => {
+      await trx
         .updateTable('accounts')
         .set({ is_active: 0 })
         .where('id', '=', accountId)
         .where('company_id', '=', companyId)
         .execute();
 
-      const account = await this.getAccountById(accountId, companyId);
+      const deactivated = await this.getAccountById(accountId, companyId);
 
       // Audit log (inside transaction)
       if (this.auditService && userId) {
@@ -577,21 +543,14 @@ export class AccountsService {
           { company_id: companyId, user_id: userId },
           "account",
           accountId,
-          { code: account.code, name: account.name }
+          { code: deactivated.code, name: deactivated.name }
         );
       }
 
-      if (useTransaction) {
-        await this.db.commit!();
-      }
+      return deactivated;
+    });
 
-      return account;
-    } catch (error) {
-      if (useTransaction) {
-        await this.db.rollback!();
-      }
-      throw error;
-    }
+    return account;
   }
 
   /**
@@ -601,22 +560,15 @@ export class AccountsService {
     // Verify account exists
     await this.getAccountById(accountId, companyId);
 
-    // Use transaction if supported
-    const useTransaction = this.db.begin && this.db.commit && this.db.rollback;
-
-    try {
-      if (useTransaction) {
-        await this.db.begin!();
-      }
-
-      await this.db.kysely
+    const account = await this.db.transaction().execute(async (trx) => {
+      await trx
         .updateTable('accounts')
         .set({ is_active: 1 })
         .where('id', '=', accountId)
         .where('company_id', '=', companyId)
         .execute();
 
-      const account = await this.getAccountById(accountId, companyId);
+      const reactivated = await this.getAccountById(accountId, companyId);
 
       // Audit log (inside transaction)
       if (this.auditService && userId) {
@@ -624,28 +576,21 @@ export class AccountsService {
           { company_id: companyId, user_id: userId },
           "account",
           accountId,
-          { code: account.code, name: account.name }
+          { code: reactivated.code, name: reactivated.name }
         );
       }
 
-      if (useTransaction) {
-        await this.db.commit!();
-      }
+      return reactivated;
+    });
 
-      return account;
-    } catch (error) {
-      if (useTransaction) {
-        await this.db.rollback!();
-      }
-      throw error;
-    }
+    return account;
   }
 
   /**
    * Build hierarchical account tree
    */
   async getAccountTree(companyId: number, includeInactive = false): Promise<AccountTreeNode[]> {
-    let query = this.db.kysely
+    let query = this.db
       .selectFrom('accounts')
       .where('company_id', '=', companyId)
       .select([
@@ -670,7 +615,7 @@ export class AccountsService {
    */
   async isAccountInUse(accountId: number, companyId: number): Promise<boolean> {
     // Check journal lines
-    const journalCount = await this.db.kysely
+    const journalCount = await this.db
       .selectFrom('journal_lines')
       .where('account_id', '=', accountId)
       .where('company_id', '=', companyId)
@@ -682,7 +627,7 @@ export class AccountsService {
     }
 
     // Check active child accounts
-    const childrenCount = await this.db.kysely
+    const childrenCount = await this.db
       .selectFrom('accounts')
       .where('parent_account_id', '=', accountId)
       .where('company_id', '=', companyId)
@@ -701,7 +646,7 @@ export class AccountsService {
    * Validate account code uniqueness
    */
   async validateAccountCode(code: string, companyId: number, excludeAccountId?: number): Promise<void> {
-    let query = this.db.kysely
+    let query = this.db
       .selectFrom('accounts')
       .where('company_id', '=', companyId)
       .where('code', '=', code)
@@ -723,7 +668,7 @@ export class AccountsService {
    */
   async validateParentAccount(parentId: number, accountId: number | null, companyId: number): Promise<void> {
     // Verify parent account exists and belongs to the same company
-    const parentRow = await this.db.kysely
+    const parentRow = await this.db
       .selectFrom('accounts')
       .where('id', '=', parentId)
       .select(['id', 'company_id'])
@@ -755,7 +700,7 @@ export class AccountsService {
    * Validate account type exists and belongs to the same company
    */
   async validateAccountType(accountTypeId: number, companyId: number): Promise<void> {
-    const row = await this.db.kysely
+    const row = await this.db
       .selectFrom('account_types')
       .where('id', '=', accountTypeId)
       .select(['id', 'company_id'])
@@ -778,7 +723,7 @@ export class AccountsService {
     accountTypeId: number,
     companyId: number
   ): Promise<{ name: string; normal_balance: string | null; report_group: string | null } | null> {
-    const row = await this.db.kysely
+    const row = await this.db
       .selectFrom('account_types')
       .where('id', '=', accountTypeId)
       .where('company_id', '=', companyId)
@@ -819,7 +764,7 @@ export class AccountsService {
       visited.add(currentId);
 
       // Look for accounts with explicit classification fields directly
-      const row = await this.db.kysely
+      const row = await this.db
         .selectFrom('accounts')
         .where('id', '=', currentId)
         .where('company_id', '=', companyId)
@@ -878,7 +823,7 @@ export class AccountsService {
         return true;
       }
 
-      const row = await this.db.kysely
+      const row = await this.db
         .selectFrom('accounts')
         .where('id', '=', currentId)
         .select('parent_account_id')

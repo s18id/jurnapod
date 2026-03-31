@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { DbConn } from "@jurnapod/db";
+import type { KyselySchema } from "@jurnapod/db";
 import type {
   SyncRequest,
   SyncResponse,
@@ -59,7 +59,7 @@ export interface SyncModule {
 
 // Module initialization context
 export interface SyncModuleInitContext {
-  database: DbConn;
+  database: KyselySchema;
   logger: any;   // Logger instance
   config: Record<string, any>; // Environment config
   cache?: any;   // Optional cache instance

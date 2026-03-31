@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
-import type { DbConn } from "@jurnapod/db";
-import type { RowDataPacket } from "mysql2";
+import type { KyselySchema } from "@jurnapod/db";
 import { toRfc3339Required } from "@jurnapod/shared";
 
 export type OutletTableQueryResult = {
@@ -18,26 +17,26 @@ export type OutletTableQueryResult = {
  * Get outlet tables for sync.
  */
 export async function getOutletTablesForSync(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   outletId: number
 ): Promise<OutletTableQueryResult[]> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT id, code, name, zone, capacity, status, updated_at
-     FROM outlet_tables 
-     WHERE company_id = ? AND outlet_id = ?
-     ORDER BY code ASC`,
-    [companyId, outletId]
-  );
+  const result = await db
+    .selectFrom('outlet_tables')
+    .select(['id', 'code', 'name', 'zone', 'capacity', 'status', 'updated_at'])
+    .where('company_id', '=', companyId)
+    .where('outlet_id', '=', outletId)
+    .orderBy('code')
+    .execute();
   
-  return rows.map((row) => ({
+  return result.map((row) => ({
     table_id: Number(row.id),
     code: row.code,
     name: row.name,
     zone: row.zone,
     capacity: row.capacity == null ? null : Number(row.capacity),
-    status: row.status,
-    updated_at: toRfc3339Required(row.updated_at)
+    status: row.status as OutletTableQueryResult['status'],
+    updated_at: toRfc3339Required(row.updated_at as Date)
   }));
 }
 
@@ -45,26 +44,27 @@ export async function getOutletTablesForSync(
  * Get outlet tables changed since a specific version for incremental sync.
  */
 export async function getOutletTablesChangedSince(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   updatedSince: string
 ): Promise<OutletTableQueryResult[]> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT id, code, name, zone, capacity, status, updated_at
-     FROM outlet_tables 
-     WHERE company_id = ? AND outlet_id = ? AND updated_at >= ?
-     ORDER BY code ASC`,
-    [companyId, outletId, updatedSince]
-  );
+  const result = await db
+    .selectFrom('outlet_tables')
+    .select(['id', 'code', 'name', 'zone', 'capacity', 'status', 'updated_at'])
+    .where('company_id', '=', companyId)
+    .where('outlet_id', '=', outletId)
+    .where('updated_at', '>=', updatedSince as any)
+    .orderBy('code')
+    .execute();
   
-  return rows.map((row) => ({
+  return result.map((row) => ({
     table_id: Number(row.id),
     code: row.code,
     name: row.name,
     zone: row.zone,
     capacity: row.capacity == null ? null : Number(row.capacity),
-    status: row.status,
-    updated_at: toRfc3339Required(row.updated_at)
+    status: row.status as OutletTableQueryResult['status'],
+    updated_at: toRfc3339Required(row.updated_at as Date)
   }));
 }

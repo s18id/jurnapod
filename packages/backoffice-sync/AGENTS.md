@@ -46,7 +46,7 @@ const module = new BackofficeSyncModule({
 });
 
 await module.initialize({
-  database: dbConn,  // DbConn instance
+  db,  // Kysely instance
   logger: console,
   config: { env: 'test' },
 });
@@ -54,12 +54,13 @@ await module.initialize({
 
 ### Database Connection Pattern
 
-Uses `DbConn` from `@jurnapod/db` for all database operations:
+Uses pure Kysely from `@jurnapod/db` for all database operations:
 
 ```typescript
-import { createDbPool, DbConn } from '@jurnapod/db';
+import { createKysely, getKysely, type KyselySchema, withTransaction } from '@jurnapod/db';
 
-const pool = createDbPool({
+// Factory function for new instances (tests)
+const db = createKysely({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT),
   user: process.env.DB_USER,
@@ -67,7 +68,16 @@ const pool = createDbPool({
   database: process.env.DB_NAME,
 });
 
-const db = new DbConn(pool);
+// Singleton for server
+const db = getKysely();
+
+// Type-safe queries using Kysely's query builder
+const rows = await db
+  .selectFrom('items')
+  .select(['id', 'name', 'code'])
+  .where('company_id', '=', companyId)
+  .where('is_active', '=', true)
+  .execute();
 ```
 
 ### Sync Tiers
@@ -134,6 +144,67 @@ packages/backoffice-sync/
 
 ## Coding Standards
 
+### Database Access: Pure Kysely
+
+**All database access MUST use pure Kysely API. No mysql2-style patterns.**
+
+```typescript
+// REQUIRED: Import from @jurnapod/db
+import { createKysely, getKysely, type KyselySchema, withTransaction } from '@jurnapod/db';
+
+// Factory function for new instances (tests)
+const db = createKysely({ uri: 'mysql://user:pass@host:3306/database' });
+
+// Singleton for server (reuse connection)
+const db = getKysely();
+
+// Type-safe queries using Kysely's query builder
+const rows = await db
+  .selectFrom('items')
+  .select(['id', 'name', 'code'])
+  .where('company_id', '=', companyId)
+  .where('is_active', '=', true)
+  .execute();
+
+// Insert with returning
+const newItem = await db
+  .insertInto('items')
+  .values({ company_id: companyId, name, code, is_active: true })
+  .returningAll()
+  .executeTakeFirst();
+
+// Update with returning
+const updated = await db
+  .updateTable('items')
+  .set({ name: newName })
+  .where('id', '=', itemId)
+  .returningAll()
+  .executeTakeFirst();
+
+// Delete
+await db.deleteFrom('items').where('id', '=', itemId).execute();
+
+// Transactions
+await withTransaction(db, async (trx) => {
+  await trx.insertInto('orders').values({ ... }).execute();
+  await trx.updateTable('inventory').set({ quantity: newQty }).where('item_id', '=', itemId).execute();
+});
+```
+
+### ⚠️ MANDATORY: No mysql2 Direct Usage
+
+| Pattern | Status |
+|---------|--------|
+| `import { Kysely, type KyselySchema } from '@jurnapod/db'` | ✅ **REQUIRED** |
+| `db.selectFrom().where().execute()` | ✅ **REQUIRED** |
+| `db.insertInto().values().returningAll().execute()` | ✅ **REQUIRED** |
+| `db.updateTable().set().where().execute()` | ✅ **REQUIRED** |
+| `db.deleteFrom().where().execute()` | ✅ **REQUIRED** |
+| `withTransaction(db, async (trx) => {...})` | ✅ **REQUIRED** |
+| `import ... from 'mysql2'` | ❌ **ABSOLUTELY FORBIDDEN** |
+| `import type { Pool } from 'mysql2'` | ❌ **ABSOLUTELY FORBIDDEN** |
+| `db.queryAll(sql, params)` | ❌ **DEPRECATED** |
+
 ### TypeScript Conventions
 
 1. **Use `.js` extensions in imports** (ESM compliance):
@@ -145,7 +216,7 @@ packages/backoffice-sync/
 2. **Use Zod for input validation** on external data:
    ```typescript
    import { BackofficeRealtimeDataSchema } from './types/backoffice-data.js';
-   
+
    const data = BackofficeRealtimeDataSchema.parse(rawData);
    ```
 
@@ -155,35 +226,16 @@ packages/backoffice-sync/
 
 1. **Use snake_case for SQL column names** (MySQL/MariaDB compatibility)
 
-2. **Always use parameterized queries** — never string concatenation:
-   ```typescript
-   // CORRECT
-   await db.queryAll('SELECT * FROM items WHERE company_id = ?', [companyId]);
-   
-   // WRONG
-   await db.queryAll(`SELECT * FROM items WHERE company_id = ${companyId}`);
-   ```
-
-3. **Never wrap indexed columns in SQL functions**:
+2. **Never wrap indexed columns in SQL functions**:
    ```sql
    -- WRONG: Prevents index usage
    WHERE DATE(created_at) = '2024-01-01'
-   
+
    -- CORRECT
    WHERE created_at >= '2024-01-01' AND created_at < '2024-01-02'
    ```
 
-### ⚠️ MANDATORY: DbConn-Only Standard
-
-**ALL database access MUST use `DbConn`. Direct `mysql2/promise` usage is STRICTLY FORBIDDEN.**
-
-| Pattern | Status |
-|---------|--------|
-| `import { DbConn } from '@jurnapod/db'` | ✅ **REQUIRED** |
-| `const db = new DbConn(pool)` | ✅ **REQUIRED** |
-| `db.query()`, `db.queryAll()`, `db.execute()` | ✅ **REQUIRED** |
-| `import ... from 'mysql2/promise'` | ❌ **ABSOLUTELY FORBIDDEN** |
-| `import type { Pool } from 'mysql2/promise'` | ❌ **ABSOLUTELY FORBIDDEN** |
+3. **Use Kysely's query builder** - never raw SQL strings for data access
 
 ---
 
@@ -229,6 +281,34 @@ DB_NAME=jurnapod_test
 
 **Critical**: Integration tests require seed data (company, outlet fixtures from `JP_COMPANY_CODE`, `JP_OUTLET_CODE`, `JP_OWNER_EMAIL`).
 
+### Test Patterns
+
+Integration tests with real database:
+
+```typescript
+import { createKysely, type KyselySchema } from '@jurnapod/db';
+
+// Load .env before other imports
+import path from 'path';
+import { config as loadEnv } from 'dotenv';
+loadEnv({ path: path.resolve(process.cwd(), '.env') });
+
+const db = createKysely({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+
+// Use db.selectFrom().where().execute() - NEVER mysql2 directly
+
+// CRITICAL: Clean up in afterAll
+afterAll(async () => {
+  await db.destroy();
+});
+```
+
 ### Test File Naming
 
 - Integration tests: `src/**/*.integration.test.ts`
@@ -249,13 +329,18 @@ npm run test:run -w @jurnapod/backoffice-sync
 
 ### Critical Constraints
 
-1. **Company ID scoping** — All queries MUST filter by `company_id`:
+1. **Company ID scoping** — All queries MUST filter by context:
    ```typescript
    // CORRECT
-   WHERE company_id = ? AND outlet_id = ?
-   
-   // WRONG - missing company scoping
-   WHERE outlet_id = ?
+   await db.selectFrom('items')
+     .where('company_id', '=', companyId)
+     .where('outlet_id', '=', outletId)
+     .execute();
+
+   // WRONG - missing scoping
+   await db.selectFrom('items')
+     .where('id', '=', itemId)
+     .execute();
    ```
 
 2. **Validate SyncContext** on every request:
@@ -271,13 +356,13 @@ npm run test:run -w @jurnapod/backoffice-sync
 
 When modifying this package:
 
-- [ ] All SQL uses parameterized queries
+- [ ] All database access uses pure Kysely API
 - [ ] Company/outlet scoping on all queries
 - [ ] Zod schemas validate all external data
 - [ ] Integration tests use real DB with proper seed data
-- [ ] Tests close database pool in `afterAll()`
+- [ ] Tests clean up Kysely instance in `afterAll()`
 - [ ] No hardcoded test company/outlet IDs in source
-- [ ] **NO imports from `mysql2/promise`** - use `DbConn` from `@jurnapod/db` only
+- [ ] **NO imports from `mysql2`** - use Kysely from `@jurnapod/db` only
 - [ ] Batch processor handles retry and cleanup correctly
 - [ ] Export scheduler starts/stops cleanly
 
@@ -286,7 +371,7 @@ When modifying this package:
 ## Related Packages
 
 - `@jurnapod/sync-core` — Sync infrastructure (SyncModule interface, registry)
-- `@jurnapod/db` — Database connectivity (DbConn)
+- `@jurnapod/db` — Database connectivity (Kysely factory)
 - `@jurnapod/api` — Uses this package for backoffice sync endpoints
 
 For project-wide conventions, see root `AGENTS.md`.

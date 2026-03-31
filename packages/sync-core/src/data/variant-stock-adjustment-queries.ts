@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
-import type { DbConn } from "@jurnapod/db";
-import type { RowDataPacket } from "mysql2";
+import { sql } from "kysely";
+import type { KyselySchema } from "@jurnapod/db";
 
 // ============================================================================
 // Query Result Types
@@ -61,11 +61,11 @@ export type StockAdjustmentInsertInput = {
  * - created_at: SERVER-authoritative (DB default)
  */
 export async function insertStockAdjustment(
-  db: DbConn,
+  db: KyselySchema,
   adjustment: StockAdjustmentInsertInput
 ): Promise<number> {
-  const result = await db.execute(
-    `INSERT INTO variant_stock_adjustments (
+  await sql`
+    INSERT INTO variant_stock_adjustments (
        company_id,
        outlet_id,
        client_tx_id,
@@ -77,23 +77,23 @@ export async function insertStockAdjustment(
        reason,
        reference,
        adjusted_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      adjustment.company_id,
-      adjustment.outlet_id,
-      adjustment.client_tx_id,
-      adjustment.variant_id,
-      adjustment.adjustment_type,
-      adjustment.quantity,
-      adjustment.previous_stock,
-      adjustment.new_stock,
-      adjustment.reason,
-      adjustment.reference ?? null,
-      adjustment.adjusted_at
-    ]
-  );
+     ) VALUES (
+       ${adjustment.company_id},
+       ${adjustment.outlet_id},
+       ${adjustment.client_tx_id},
+       ${adjustment.variant_id},
+       ${adjustment.adjustment_type},
+       ${adjustment.quantity},
+       ${adjustment.previous_stock},
+       ${adjustment.new_stock},
+       ${adjustment.reason},
+       ${adjustment.reference ?? null},
+       ${adjustment.adjusted_at}
+     )
+  `.execute(db);
 
-  return Number(result.insertId);
+  const lastIdResult = await sql`SELECT LAST_INSERT_ID() AS insert_id`.execute(db);
+  return Number((lastIdResult.rows[0] as any).insert_id);
 }
 
 /**
@@ -102,25 +102,24 @@ export async function insertStockAdjustment(
  * Returns the existing record if found.
  */
 export async function checkAdjustmentExists(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   clientTxId: string
 ): Promise<StockAdjustmentQueryResult | null> {
-  const rows = await db.queryAll<RowDataPacket>(
-    `SELECT id, company_id, outlet_id, client_tx_id, variant_id, adjustment_type,
+  const result = await sql`
+    SELECT id, company_id, outlet_id, client_tx_id, variant_id, adjustment_type,
             quantity, previous_stock, new_stock, reason, reference, adjusted_at, created_at
      FROM variant_stock_adjustments
-     WHERE company_id = ? AND outlet_id = ? AND client_tx_id = ?
-     LIMIT 1`,
-    [companyId, outletId, clientTxId]
-  );
+     WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND client_tx_id = ${clientTxId}
+     LIMIT 1
+  `.execute(db);
 
-  if (rows.length === 0) {
+  if (result.rows.length === 0) {
     return null;
   }
 
-  const row = rows[0];
+  const row = result.rows[0] as any;
   return {
     id: Number(row.id),
     company_id: Number(row.company_id),
@@ -149,44 +148,42 @@ export async function checkAdjustmentExists(
  * Returns the current quantity and the source.
  */
 export async function getVariantCurrentStock(
-  db: DbConn,
+  db: KyselySchema,
   companyId: number,
   outletId: number,
   variantId: number
 ): Promise<VariantCurrentStock | null> {
   // First check if there's variant-specific stock in inventory_stock (per-outlet tracking)
-  const [stockRows] = await db.queryAll<RowDataPacket>(
-    `SELECT quantity 
+  const stockResult = await sql`
+    SELECT quantity 
      FROM inventory_stock 
-     WHERE company_id = ? AND outlet_id = ? AND variant_id = ?
-     LIMIT 1`,
-    [companyId, outletId, variantId]
-  );
+     WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND variant_id = ${variantId}
+     LIMIT 1
+  `.execute(db);
 
-  if (stockRows.length > 0) {
+  if (stockResult.rows.length > 0) {
     return {
       variant_id: variantId,
-      quantity: Number(stockRows[0].quantity),
+      quantity: Number((stockResult.rows[0] as any).quantity),
       source: "inventory_stock"
     };
   }
 
   // Fallback to item_variants.stock_quantity (variant-level stock, no per-outlet tracking)
-  const [variantRows] = await db.queryAll<RowDataPacket>(
-    `SELECT stock_quantity 
+  const variantResult = await sql`
+    SELECT stock_quantity 
      FROM item_variants
-     WHERE id = ? AND company_id = ? AND is_active = 1
-     LIMIT 1`,
-    [variantId, companyId]
-  );
+     WHERE id = ${variantId} AND company_id = ${companyId} AND is_active = 1
+     LIMIT 1
+  `.execute(db);
 
-  if (variantRows.length === 0) {
+  if (variantResult.rows.length === 0) {
     return null;
   }
 
   return {
     variant_id: variantId,
-    quantity: Number(variantRows[0].stock_quantity),
+    quantity: Number((variantResult.rows[0] as any).stock_quantity),
     source: "item_variants"
   };
 }
