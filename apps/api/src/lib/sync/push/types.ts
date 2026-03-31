@@ -14,7 +14,6 @@ import type { CogsPostingResult } from "../../../lib/cogs-posting.js";
 import type { RowDataPacket, ResultSetHeader } from "mysql2";
 import type { PoolConnection, Pool } from "mysql2/promise";
 import type { Kysely } from "kysely";
-import type { DB } from "@jurnapod/db";
 import type { SyncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
 
 // ============================================================================

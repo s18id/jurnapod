@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+import { sql } from "kysely";
 import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/core";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
 import {
@@ -8,11 +9,9 @@ import {
   accountMappingIdToCode,
   type AccountMappingCode
 } from "@jurnapod/shared";
-import type { ResultSetHeader } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import type { KyselySchema } from "@jurnapod/db";
 import { toDateOnly, toMysqlDateTime } from "./date-helpers";
-import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
-import { listCompanyDefaultTaxRates, resolveCombinedTaxConfig } from "./taxes";
+import { resolveCombinedTaxConfig } from "./taxes";
 
 const DEFAULT_SYNC_PUSH_POSTING_MODE = "disabled" as const;
 const SYNC_PUSH_POSTING_MODE_ENV_KEY = "SYNC_PUSH_POSTING_MODE";
@@ -49,10 +48,6 @@ export interface SyncPushPostingContext {
   posTransactionId: number;
 }
 
-type QueryExecutor = {
-  execute: PoolConnection["execute"];
-};
-
 type MysqlLikeError = {
   code?: string;
   errno?: number;
@@ -81,12 +76,12 @@ export class SyncPushPostingHookError extends Error {
 
 class PosSyncPushPostingMapper implements PostingMapper {
   constructor(
-    private readonly dbExecutor: QueryExecutor,
+    private readonly db: KyselySchema,
     private readonly context: SyncPushPostingContext
   ) {}
 
   async mapToJournal(_request: PostingRequest): Promise<JournalLine[]> {
-    return buildPosSaleJournalLines(this.dbExecutor, this.context);
+    return buildPosSaleJournalLines(this.db, this.context);
   }
 }
 
@@ -94,23 +89,22 @@ class PosSyncPushPostingRepository implements PostingRepository {
   private readonly lineDate: string;
 
   constructor(
-    private readonly dbExecutor: QueryExecutor,
+    private readonly db: KyselySchema,
     private readonly postedAt: string
   ) {
     this.lineDate = postedAt.slice(0, 10);
   }
 
   async createJournalBatch(request: PostingRequest): Promise<{ journal_batch_id: number }> {
-    const [insertResult] = await this.dbExecutor.execute<ResultSetHeader>(
-      `INSERT INTO journal_batches (
-         company_id,
-         outlet_id,
-         doc_type,
-         doc_id,
-         posted_at
-       ) VALUES (?, ?, ?, ?, ?)`,
-      [request.company_id, request.outlet_id ?? null, request.doc_type, request.doc_id, this.postedAt]
-    );
+    const insertResult = await sql`
+      INSERT INTO journal_batches (
+        company_id,
+        outlet_id,
+        doc_type,
+        doc_id,
+        posted_at
+      ) VALUES (${request.company_id}, ${request.outlet_id ?? null}, ${request.doc_type}, ${request.doc_id}, ${this.postedAt})
+    `.execute(this.db);
 
     return {
       journal_batch_id: Number(insertResult.insertId)
@@ -118,31 +112,24 @@ class PosSyncPushPostingRepository implements PostingRepository {
   }
 
   async insertJournalLines(journalBatchId: number, request: PostingRequest, lines: JournalLine[]): Promise<void> {
-    const placeholders = lines.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-    const values = lines.flatMap((line) => [
-      journalBatchId,
-      request.company_id,
-      request.outlet_id ?? null,
-      line.account_id,
-      this.lineDate,
-      line.debit,
-      line.credit,
-      line.description
-    ]);
+    if (lines.length === 0) return;
 
-    await this.dbExecutor.execute(
-      `INSERT INTO journal_lines (
-         journal_batch_id,
-         company_id,
-         outlet_id,
-         account_id,
-         line_date,
-         debit,
-         credit,
-         description
-       ) VALUES ${placeholders}`,
-      values
-    );
+    const values = lines.map((line) => sql`
+      (${journalBatchId}, ${request.company_id}, ${request.outlet_id ?? null}, ${line.account_id}, ${this.lineDate}, ${line.debit}, ${line.credit}, ${line.description})
+    `);
+
+    await sql`
+      INSERT INTO journal_lines (
+        journal_batch_id,
+        company_id,
+        outlet_id,
+        account_id,
+        line_date,
+        debit,
+        credit,
+        description
+      ) VALUES ${sql.join(values, sql`, `)}
+    `.execute(this.db);
   }
 }
 
@@ -195,32 +182,83 @@ type PosTaxConfig = {
 };
 
 async function readCompanyPosTaxConfig(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   context: SyncPushPostingContext
 ): Promise<PosTaxConfig> {
-  const defaults = await listCompanyDefaultTaxRates(dbExecutor, context.companyId);
+  const defaults = await listCompanyDefaultTaxRatesKysely(db, context.companyId);
   return resolveCombinedTaxConfig(defaults);
 }
 
+// Inline version of listCompanyDefaultTaxRates using Kysely
+type TaxRateRecord = {
+  id: number;
+  company_id: number;
+  code: string;
+  name: string;
+  rate_percent: number;
+  account_id: number | null;
+  is_inclusive: boolean;
+  is_active: boolean;
+};
+
+async function listCompanyDefaultTaxRatesKysely(
+  db: KyselySchema,
+  companyId: number
+): Promise<TaxRateRecord[]> {
+  const result = await sql<{
+    id: number;
+    company_id: number;
+    code: string;
+    name: string;
+    rate_percent: number;
+    account_id: number | null;
+    is_inclusive: number;
+    is_active: number;
+  }>`
+    SELECT tr.id, tr.company_id, tr.code, tr.name, tr.rate_percent, tr.account_id, tr.is_inclusive, tr.is_active
+    FROM company_tax_defaults ctd
+    INNER JOIN tax_rates tr
+      ON tr.id = ctd.tax_rate_id
+      AND tr.company_id = ctd.company_id
+    WHERE ctd.company_id = ${companyId}
+      AND tr.company_id = ${companyId}
+      AND tr.is_active = 1
+    ORDER BY tr.name ASC, tr.id ASC
+  `.execute(db);
+
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    company_id: Number(row.company_id),
+    code: String(row.code),
+    name: String(row.name),
+    rate_percent: normalizeRate(row.rate_percent),
+    account_id: row.account_id ? Number(row.account_id) : null,
+    is_inclusive: row.is_inclusive === 1,
+    is_active: row.is_active === 1
+  }));
+}
+
+function normalizeRate(value: number | string): number {
+  return normalizeMoney(Number(value));
+}
+
 async function readOutletAccountMappingByKey(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   context: SyncPushPostingContext
 ): Promise<Record<OutletAccountMappingKey, number>> {
   const requiredKeys = ["SALES_REVENUE", "AR"] as const;
   const requiredTypeIds = requiredKeys.map((key) => ACCOUNT_MAPPING_TYPE_ID_BY_CODE[key]);
-  const idPlaceholders = requiredTypeIds.map(() => "?").join(", ");
-  const keyPlaceholders = requiredKeys.map(() => "?").join(", ");
-  const [rows] = await dbExecutor.execute(
-    `SELECT mapping_type_id, mapping_key, account_id
-     FROM outlet_account_mappings
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND (mapping_type_id IN (${idPlaceholders}) OR mapping_key IN (${keyPlaceholders}))`,
-    [context.companyId, context.outletId, ...requiredTypeIds, ...requiredKeys]
-  );
+
+  const outletResult = await sql<{ mapping_type_id: number | null; mapping_key: string | null; account_id: number | null }>`
+    SELECT mapping_type_id, mapping_key, account_id
+    FROM outlet_account_mappings
+    WHERE company_id = ${context.companyId}
+      AND outlet_id = ${context.outletId}
+      AND (mapping_type_id IN (${sql.join(requiredTypeIds.map(id => sql`${id}`), sql`, `)}) OR mapping_key IN (${sql.join(requiredKeys.map(k => sql`${k}`), sql`, `)}))
+  `.execute(db);
 
   const accountByKey = new Map<string, number>();
-  for (const row of rows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+  for (const row of outletResult.rows) {
     const mappingCode = resolveMappingCode(row);
     if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
@@ -233,15 +271,14 @@ async function readOutletAccountMappingByKey(
     accountByKey.set(mappingCode, Number(row.account_id));
   }
 
-  const [companyRows] = await dbExecutor.execute(
-    `SELECT mapping_type_id, mapping_key, account_id
-     FROM company_account_mappings
-     WHERE company_id = ?
-       AND (mapping_type_id IN (${idPlaceholders}) OR mapping_key IN (${keyPlaceholders}))`,
-    [context.companyId, ...requiredTypeIds, ...requiredKeys]
-  );
+  const companyResult = await sql<{ mapping_type_id: number | null; mapping_key: string | null; account_id: number | null }>`
+    SELECT mapping_type_id, mapping_key, account_id
+    FROM company_account_mappings
+    WHERE company_id = ${context.companyId}
+      AND (mapping_type_id IN (${sql.join(requiredTypeIds.map(id => sql`${id}`), sql`, `)}) OR mapping_key IN (${sql.join(requiredKeys.map(k => sql`${k}`), sql`, `)}))
+  `.execute(db);
 
-  for (const row of companyRows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+  for (const row of companyResult.rows) {
     const mappingCode = resolveMappingCode(row);
     if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
@@ -273,19 +310,21 @@ async function readOutletAccountMappingByKey(
 }
 
 async function readOutletPaymentMethodMappings(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   context: SyncPushPostingContext
 ): Promise<Map<string, number>> {
   let rows: Array<{ method_code?: string; account_id?: number }> = [];
   try {
-    const [paymentRows] = await dbExecutor.execute(
-      `SELECT method_code, account_id
-       FROM outlet_payment_method_mappings
-       WHERE company_id = ?
-         AND outlet_id = ?`,
-      [context.companyId, context.outletId]
-    );
-    rows = paymentRows as Array<{ method_code?: string; account_id?: number }>;
+    const paymentResult = await sql<{ method_code: string | null; account_id: number | null }>`
+      SELECT method_code, account_id
+      FROM outlet_payment_method_mappings
+      WHERE company_id = ${context.companyId}
+        AND outlet_id = ${context.outletId}
+    `.execute(db);
+    rows = paymentResult.rows.map(row => ({
+      method_code: row.method_code ?? undefined,
+      account_id: row.account_id ?? undefined
+    }));
   } catch (error) {
     if (!isNoSuchTableError(error)) {
       throw error;
@@ -303,18 +342,16 @@ async function readOutletPaymentMethodMappings(
 
   const fallbackKeys = ["CASH", "QRIS", "CARD"];
   const fallbackTypeIds = fallbackKeys.map((key) => ACCOUNT_MAPPING_TYPE_ID_BY_CODE[key as keyof typeof ACCOUNT_MAPPING_TYPE_ID_BY_CODE]);
-  const placeholders = fallbackKeys.map(() => "?").join(", ");
-  const typePlaceholders = fallbackTypeIds.map(() => "?").join(", ");
-  const [fallbackRows] = await dbExecutor.execute(
-    `SELECT mapping_type_id, mapping_key, account_id
-     FROM outlet_account_mappings
-     WHERE company_id = ?
-       AND outlet_id = ?
-       AND (mapping_type_id IN (${typePlaceholders}) OR mapping_key IN (${placeholders}))`,
-    [context.companyId, context.outletId, ...fallbackTypeIds, ...fallbackKeys]
-  );
 
-  for (const row of fallbackRows as Array<{ mapping_type_id?: number | null; mapping_key?: string; account_id?: number }>) {
+  const fallbackResult = await sql<{ mapping_type_id: number | null; mapping_key: string | null; account_id: number | null }>`
+    SELECT mapping_type_id, mapping_key, account_id
+    FROM outlet_account_mappings
+    WHERE company_id = ${context.companyId}
+      AND outlet_id = ${context.outletId}
+      AND (mapping_type_id IN (${sql.join(fallbackTypeIds.map(id => sql`${id}`), sql`, `)}) OR mapping_key IN (${sql.join(fallbackKeys.map(k => sql`${k}`), sql`, `)}))
+  `.execute(db);
+
+  for (const row of fallbackResult.rows) {
     const mappingCode = resolveMappingCode(row);
     if (!mappingCode || !Number.isFinite(row.account_id)) {
       continue;
@@ -325,14 +362,13 @@ async function readOutletPaymentMethodMappings(
     }
   }
 
-  const [companyRows] = await dbExecutor.execute(
-    `SELECT method_code, account_id
-     FROM company_payment_method_mappings
-     WHERE company_id = ?`,
-    [context.companyId]
-  );
+  const companyResult = await sql<{ method_code: string | null; account_id: number | null }>`
+    SELECT method_code, account_id
+    FROM company_payment_method_mappings
+    WHERE company_id = ${context.companyId}
+  `.execute(db);
 
-  for (const row of companyRows as Array<{ method_code?: string; account_id?: number }>) {
+  for (const row of companyResult.rows) {
     if (!row.method_code || !Number.isFinite(row.account_id)) {
       continue;
     }
@@ -346,19 +382,18 @@ async function readOutletPaymentMethodMappings(
 }
 
 async function readPosPaymentsByMethod(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   context: SyncPushPostingContext
 ): Promise<Array<{ method: string; amount: number }>> {
-  const [rows] = await dbExecutor.execute(
-    `SELECT method, SUM(amount) AS amount
-     FROM pos_transaction_payments
-     WHERE pos_transaction_id = ?
-     GROUP BY method
-     ORDER BY method ASC`,
-    [context.posTransactionId]
-  );
+  const result = await sql<{ method: string | null; amount: number | string }>`
+    SELECT method, SUM(amount) AS amount
+    FROM pos_transaction_payments
+    WHERE pos_transaction_id = ${context.posTransactionId}
+    GROUP BY method
+    ORDER BY method ASC
+  `.execute(db);
 
-  const payments = (rows as Array<{ method?: string; amount?: number | string }>).map((row) => ({
+  const payments = result.rows.map((row) => ({
     method: String(row.method ?? "").trim(),
     amount: normalizeMoney(Number(row.amount ?? 0))
   })).filter((row) => row.method.length > 0 && row.amount > 0);
@@ -370,15 +405,14 @@ async function readPosPaymentsByMethod(
   return payments;
 }
 
-async function readPosGrossSalesAmount(dbExecutor: QueryExecutor, context: SyncPushPostingContext): Promise<number> {
-  const [rows] = await dbExecutor.execute(
-    `SELECT SUM(qty * price_snapshot) AS gross_sales
-     FROM pos_transaction_items
-     WHERE pos_transaction_id = ?`,
-    [context.posTransactionId]
-  );
+async function readPosGrossSalesAmount(db: KyselySchema, context: SyncPushPostingContext): Promise<number> {
+  const result = await sql<{ gross_sales: number | string | null }>`
+    SELECT SUM(qty * price_snapshot) AS gross_sales
+    FROM pos_transaction_items
+    WHERE pos_transaction_id = ${context.posTransactionId}
+  `.execute(db);
 
-  const grossSales = normalizeMoney(Number((rows as Array<{ gross_sales?: number | string }>)[0]?.gross_sales ?? 0));
+  const grossSales = normalizeMoney(Number(result.rows[0]?.gross_sales ?? 0));
   if (grossSales <= 0) {
     throw new Error("UNBALANCED_JOURNAL");
   }
@@ -393,17 +427,16 @@ type PosDiscountData = {
 };
 
 async function readPosDiscount(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   context: SyncPushPostingContext
 ): Promise<PosDiscountData> {
-  const [rows] = await dbExecutor.execute(
-    `SELECT discount_percent, discount_fixed, discount_code
-     FROM pos_transactions
-     WHERE id = ?`,
-    [context.posTransactionId]
-  );
+  const result = await sql<{ discount_percent: number | string | null; discount_fixed: number | string | null; discount_code: string | null }>`
+    SELECT discount_percent, discount_fixed, discount_code
+    FROM pos_transactions
+    WHERE id = ${context.posTransactionId}
+  `.execute(db);
 
-  const row = (rows as Array<{ discount_percent?: number | string; discount_fixed?: number | string; discount_code?: string | null }>)[0];
+  const row = result.rows[0];
   if (!row) {
     return { percent: 0, fixed: 0, code: null };
   }
@@ -416,18 +449,17 @@ async function readPosDiscount(
 }
 
 async function readPosTaxSummary(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   context: SyncPushPostingContext
 ): Promise<{ total: number; inclusive: boolean; lines: Array<{ tax_rate_id: number; amount: number; code: string; account_id: number | null }> } | null> {
-  const [rows] = await dbExecutor.execute(
-    `SELECT ptt.tax_rate_id, ptt.amount, tr.is_inclusive, tr.code, tr.account_id
-     FROM pos_transaction_taxes ptt
-     INNER JOIN tax_rates tr ON tr.id = ptt.tax_rate_id
-     WHERE ptt.pos_transaction_id = ? AND tr.company_id = ?`,
-    [context.posTransactionId, context.companyId]
-  );
+  const result = await sql<{ tax_rate_id: number | null; amount: number | string | null; is_inclusive: number | null; code: string | null; account_id: number | null }>`
+    SELECT ptt.tax_rate_id, ptt.amount, tr.is_inclusive, tr.code, tr.account_id
+    FROM pos_transaction_taxes ptt
+    INNER JOIN tax_rates tr ON tr.id = ptt.tax_rate_id
+    WHERE ptt.pos_transaction_id = ${context.posTransactionId} AND tr.company_id = ${context.companyId}
+  `.execute(db);
 
-  const parsed = (rows as Array<{ tax_rate_id?: number; amount?: number | string; is_inclusive?: number; code?: string; account_id?: number | null }>).map((row) => ({
+  const parsed = result.rows.map((row) => ({
     tax_rate_id: Number(row.tax_rate_id),
     amount: normalizeMoney(Number(row.amount ?? 0)),
     is_inclusive: row.is_inclusive === 1,
@@ -453,16 +485,16 @@ async function readPosTaxSummary(
 }
 
 async function buildPosSaleJournalLines(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   context: SyncPushPostingContext
 ): Promise<JournalLine[]> {
-  const mapping = await readOutletAccountMappingByKey(dbExecutor, context);
-  const paymentMethodMappings = await readOutletPaymentMethodMappings(dbExecutor, context);
-  const payments = await readPosPaymentsByMethod(dbExecutor, context);
-  const grossSales = await readPosGrossSalesAmount(dbExecutor, context);
-  const discountData = await readPosDiscount(dbExecutor, context);
-  const taxSummary = await readPosTaxSummary(dbExecutor, context);
-  const taxConfig = taxSummary ? null : await readCompanyPosTaxConfig(dbExecutor, context);
+  const mapping = await readOutletAccountMappingByKey(db, context);
+  const paymentMethodMappings = await readOutletPaymentMethodMappings(db, context);
+  const payments = await readPosPaymentsByMethod(db, context);
+  const grossSales = await readPosGrossSalesAmount(db, context);
+  const discountData = await readPosDiscount(db, context);
+  const taxSummary = await readPosTaxSummary(db, context);
+  const taxConfig = taxSummary ? null : await readCompanyPosTaxConfig(db, context);
 
   let discountAmount = 0;
   if (discountData.percent > 0) {
@@ -558,7 +590,7 @@ async function buildPosSaleJournalLines(
         });
       }
     } else {
-      const defaultTaxRates = await listCompanyDefaultTaxRates(dbExecutor, context.companyId);
+      const defaultTaxRates = await listCompanyDefaultTaxRatesKysely(db, context.companyId);
       const taxableRates = defaultTaxRates.filter(tr => tr.rate_percent > 0);
       
       if (taxableRates.length === 0) {
@@ -642,7 +674,7 @@ function resolveSyncPushPostingMode(): SyncPushPostingMode {
 }
 
 async function runShadowPostingHook(
-  _dbExecutor: QueryExecutor,
+  _db: KyselySchema,
   _context: SyncPushPostingContext
 ): Promise<SyncPushPostingHookResult> {
   return {
@@ -653,8 +685,28 @@ async function runShadowPostingHook(
   };
 }
 
+// Inline fiscal year check using Kysely
+async function ensureDateWithinOpenFiscalYearKysely(
+  db: KyselySchema,
+  companyId: number,
+  date: string
+): Promise<void> {
+  const result = await sql<{ id: number }>`
+    SELECT id FROM fiscal_years
+    WHERE company_id = ${companyId}
+      AND status = 'OPEN'
+      AND start_date <= ${date}
+      AND end_date >= ${date}
+    LIMIT 1
+  `.execute(db);
+
+  if (result.rows.length === 0) {
+    throw new Error("Date is outside any open fiscal year");
+  }
+}
+
 async function runActivePostingHook(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   context: SyncPushPostingContext
 ): Promise<SyncPushPostingHookResult> {
   if (context.status !== "COMPLETED") {
@@ -666,8 +718,8 @@ async function runActivePostingHook(
     };
   }
 
-  await ensureDateWithinOpenFiscalYearWithExecutor(
-    dbExecutor,
+  await ensureDateWithinOpenFiscalYearKysely(
+    db,
     context.companyId,
     toDateOnly(context.trxAt)
   );
@@ -680,9 +732,9 @@ async function runActivePostingHook(
   };
 
   const postingService = new PostingService(
-    new PosSyncPushPostingRepository(dbExecutor, toMysqlDateTime(context.trxAt)),
+    new PosSyncPushPostingRepository(db, toMysqlDateTime(context.trxAt)),
     {
-      [POS_SALE_DOC_TYPE]: new PosSyncPushPostingMapper(dbExecutor, context)
+      [POS_SALE_DOC_TYPE]: new PosSyncPushPostingMapper(db, context)
     }
   );
 
@@ -704,7 +756,7 @@ Error handling strategy:
 - shadow: run a non-mutating hook; on failure caller records diagnostics and keeps sync result unchanged.
 */
 export async function runSyncPushPostingHook(
-  dbExecutor: QueryExecutor,
+  db: KyselySchema,
   context: SyncPushPostingContext
 ): Promise<SyncPushPostingHookResult> {
   const mode = resolveSyncPushPostingMode();
@@ -719,9 +771,9 @@ export async function runSyncPushPostingHook(
 
   try {
     if (mode === "shadow") {
-      return await runShadowPostingHook(dbExecutor, context);
+      return await runShadowPostingHook(db, context);
     } else {
-      return await runActivePostingHook(dbExecutor, context);
+      return await runActivePostingHook(db, context);
     }
   } catch (error) {
     throw new SyncPushPostingHookError(mode, error);

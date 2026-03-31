@@ -17,14 +17,13 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { type RowDataPacket } from "mysql2";
-import { NumericIdSchema, SyncPullPayloadSchema, type SyncPullPayload } from "@jurnapod/shared";
-import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
-import { buildSyncPullPayload } from "../../lib/sync/master-data.js";
+import { NumericIdSchema, SyncPullPayloadSchema } from "@jurnapod/shared";
+import { authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { getDbPool } from "../../lib/db.js";
 import { createSyncAuditService } from "../../lib/sync/audit-adapter.js";
+import { PosSyncModule } from "@jurnapod/pos-sync";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -47,20 +46,54 @@ const syncPullRequestSchema = z.object({
 type SyncPullRequest = z.infer<typeof syncPullRequestSchema>;
 
 // =============================================================================
+// PosSyncModule singleton
+// =============================================================================
+
+let posSyncModule: PosSyncModule | null = null;
+
+/**
+ * Initialize the PosSyncModule singleton.
+ * Called during app startup.
+ */
+export async function initializePosSyncModule(): Promise<void> {
+  if (posSyncModule) {
+    return;
+  }
+
+  const dbPool = getDbPool();
+  posSyncModule = new PosSyncModule({
+    module_id: "pos",
+    client_type: "POS",
+    enabled: true
+  });
+
+  await posSyncModule.initialize({
+    database: dbPool,
+    logger: console,
+    config: { env: process.env.NODE_ENV }
+  });
+
+  console.info("PosSyncModule initialized for sync pull route");
+}
+
+/**
+ * Get the PosSyncModule instance.
+ * Throws if not initialized.
+ */
+function getPosSyncModule(): PosSyncModule {
+  if (!posSyncModule) {
+    throw new Error("PosSyncModule not initialized. Call initializePosSyncModule() first.");
+  }
+  return posSyncModule;
+}
+
+// =============================================================================
 // Helper Functions
 // =============================================================================
 
 function getTierFromRequest(request: Request): string {
   const tier = request.headers.get("x-sync-tier");
   return tier ?? "default";
-}
-
-function parseOutletIdQueryParam(url: URL): number {
-  const outletIdRaw = url.searchParams.get("outlet_id");
-  if (!outletIdRaw) {
-    throw new Error("outlet_id is required");
-  }
-  return NumericIdSchema.parse(outletIdRaw);
 }
 
 // =============================================================================
@@ -125,16 +158,17 @@ syncPullRoutes.get("/", async (c) => {
       startedAt: new Date()
     });
 
-    // Build sync payload
-    const payload = await buildSyncPullPayload(
-      auth.companyId,
-      input.outlet_id,
-      input.since_version,
-      input.orders_cursor ?? 0
-    );
+    // Build sync payload using PosSyncModule
+    const module = getPosSyncModule();
+    const pullResult = await module.handlePullSync({
+      companyId: auth.companyId,
+      outletId: input.outlet_id,
+      sinceVersion: input.since_version,
+      ordersCursor: input.orders_cursor ?? 0
+    });
 
     // Validate response
-    const response = SyncPullPayloadSchema.parse(payload);
+    const response = SyncPullPayloadSchema.parse(pullResult.payload);
 
     // Calculate items count from response
     const itemsCount =

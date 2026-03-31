@@ -9,6 +9,8 @@
  */
 
 import { createKysely, getKysely, type KyselySchema } from '@jurnapod/db';
+
+export type { KyselySchema };
 import { getAppEnv } from './env';
 
 const globalForDb = globalThis as typeof globalThis & {

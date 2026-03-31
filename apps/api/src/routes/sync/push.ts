@@ -5,7 +5,8 @@
  * Sync Push Route
  *
  * Thin HTTP layer for POST /sync/push.
- * Business logic lives in lib/sync/push/.
+ * Uses PosSyncModule for Phase 1 (persistence) and iterates Phase 1 results
+ * for Phase 2 (COGS posting, stock deduction, table release, reservation update).
  */
 
 import { Hono } from "hono";
@@ -14,19 +15,21 @@ import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { getDbPool } from "../../lib/db.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
-import {
-  listCompanyDefaultTaxRates,
-  listCompanyTaxRates
-} from "../../lib/taxes.js";
 import { SyncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
-import { orchestrateSyncPush } from "../../lib/sync/push/index.js";
+import { PosSyncModule } from "@jurnapod/pos-sync";
+import type { KyselySchema } from "@jurnapod/db";
+import { sql } from "kysely";
+import { processSyncPushTransactionPhase2 } from "../../lib/sync/push/transactions.js";
+import type { SyncPushTaxContext, SyncPushTransactionPayload } from "../../lib/sync/push/types.js";
+import { shouldUseNewPushSync, getPushSyncModeDescription } from "../../lib/feature-flags.js";
 import type {
-  ActiveOrder,
-  ItemCancellation,
-  OrderUpdate,
-  SyncPushTaxContext,
-  SyncPushTransactionPayload
-} from "../../lib/sync/push/types.js";
+  TransactionPush,
+  ActiveOrderPush,
+  OrderUpdatePush,
+  ItemCancellationPush,
+  VariantSalePush,
+  VariantStockAdjustmentPush
+} from "@jurnapod/pos-sync";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -42,6 +45,45 @@ const DEFAULT_SYNC_PUSH_CONCURRENCY = 3;
 const MAX_SYNC_PUSH_CONCURRENCY = 5;
 const MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE = 1205;
 const MYSQL_DEADLOCK_ERROR_CODE = 1213;
+
+// Global PosSyncModule instance (initialized once at app startup)
+let posSyncModule: PosSyncModule | null = null;
+
+/**
+ * Initialize the PosSyncModule singleton.
+ * Called during app startup.
+ */
+export async function initializePosSyncModule(): Promise<void> {
+  if (posSyncModule) {
+    return;
+  }
+
+  const dbPool = getDbPool();
+  posSyncModule = new PosSyncModule({
+    module_id: "pos",
+    client_type: "POS",
+    enabled: true
+  });
+
+  await posSyncModule.initialize({
+    database: dbPool,
+    logger: console,
+    config: { env: process.env.NODE_ENV }
+  });
+
+  console.info("PosSyncModule initialized for sync push route");
+}
+
+/**
+ * Get the PosSyncModule instance.
+ * Throws if not initialized.
+ */
+function getPosSyncModule(): PosSyncModule {
+  if (!posSyncModule) {
+    throw new Error("PosSyncModule not initialized. Call initializePosSyncModule() first.");
+  }
+  return posSyncModule;
+}
 
 function isSyncPushTestHookEnabled(): boolean {
   return process.env.NODE_ENV !== "production" && process.env[SYNC_PUSH_TEST_HOOKS_ENV] === "1";
@@ -85,6 +127,93 @@ function readSyncPushConcurrency(): number {
   }
 
   return Math.min(MAX_SYNC_PUSH_CONCURRENCY, Math.max(1, parsed));
+}
+
+/**
+ * Convert API SyncPushTransactionPayload to pos-sync TransactionPush type.
+ */
+function toTransactionPush(tx: SyncPushTransactionPayload): TransactionPush {
+  return {
+    client_tx_id: tx.client_tx_id,
+    company_id: tx.company_id,
+    outlet_id: tx.outlet_id,
+    cashier_user_id: tx.cashier_user_id,
+    status: tx.status,
+    service_type: tx.service_type,
+    table_id: tx.table_id,
+    reservation_id: tx.reservation_id,
+    guest_count: tx.guest_count,
+    order_status: tx.order_status,
+    opened_at: tx.opened_at,
+    closed_at: tx.closed_at,
+    notes: tx.notes,
+    trx_at: tx.trx_at,
+    items: tx.items.map((item) => ({
+      item_id: item.item_id,
+      variant_id: item.variant_id,
+      qty: item.qty,
+      price_snapshot: item.price_snapshot,
+      name_snapshot: item.name_snapshot
+    })),
+    payments: tx.payments.map((payment) => ({
+      method: payment.method,
+      amount: payment.amount
+    })),
+    taxes: tx.taxes?.map((tax) => ({
+      tax_rate_id: tax.tax_rate_id,
+      amount: tax.amount
+    })),
+    discount_percent: tx.discount_percent,
+    discount_fixed: tx.discount_fixed,
+    discount_code: tx.discount_code
+  };
+}
+
+/**
+ * Convert API ActiveOrder to pos-sync ActiveOrderPush type.
+ */
+function toActiveOrderPush(order: any): ActiveOrderPush {
+  return {
+    order_id: order.order_id,
+    company_id: order.company_id,
+    outlet_id: order.outlet_id,
+    service_type: order.service_type,
+    source_flow: order.source_flow,
+    settlement_flow: order.settlement_flow,
+    table_id: order.table_id,
+    reservation_id: order.reservation_id,
+    guest_count: order.guest_count,
+    is_finalized: order.is_finalized,
+    order_status: order.order_status,
+    order_state: order.order_state,
+    paid_amount: order.paid_amount,
+    opened_at: order.opened_at,
+    closed_at: order.closed_at,
+    notes: order.notes,
+    updated_at: order.updated_at,
+    lines: order.lines?.map((line: any) => ({
+      item_id: line.item_id,
+      variant_id: line.variant_id,
+      sku_snapshot: line.sku_snapshot,
+      name_snapshot: line.name_snapshot,
+      item_type_snapshot: line.item_type_snapshot,
+      unit_price_snapshot: line.unit_price_snapshot,
+      qty: line.qty,
+      discount_amount: line.discount_amount,
+      updated_at: line.updated_at
+    })) ?? []
+  };
+}
+
+/**
+ * Build a map of client_tx_id to original transaction payload for Phase 2.
+ */
+function buildTxByClientTxIdMap(transactions: SyncPushTransactionPayload[]): Map<string, SyncPushTransactionPayload> {
+  const map = new Map<string, SyncPushTransactionPayload>();
+  for (const tx of transactions) {
+    map.set(tx.client_tx_id, tx);
+  }
+  return map;
 }
 
 const syncPushRoutes = new Hono();
@@ -149,47 +278,153 @@ syncPushRoutes.post("/", async (c) => {
       return successResponse({ results: [] });
     }
 
-    const connection = await dbPool.getConnection();
-    let taxContext: SyncPushTaxContext;
-    try {
-      const [defaultTaxRates, allTaxRates] = await Promise.all([
-        listCompanyDefaultTaxRates(connection, auth.companyId),
-        listCompanyTaxRates(connection, auth.companyId)
-      ]);
+    // Build tax context using Kysely
+    const db = dbPool;
+    
+    // Get default tax rates for the company
+    const defaultTaxRatesResult = await sql`
+      SELECT tr.id, tr.company_id, tr.code, tr.name, tr.rate_percent, tr.account_id, 
+             tr.is_inclusive, tr.is_active, tr.created_by_user_id, tr.updated_by_user_id,
+             tr.created_at, tr.updated_at
+      FROM tax_rates tr
+      INNER JOIN company_tax_defaults ctd ON ctd.tax_rate_id = tr.id
+      WHERE ctd.company_id = ${auth.companyId}
+        AND tr.is_active = 1
+    `.execute(db);
 
-      taxContext = {
-        defaultTaxRates,
-        taxRateById: new Map(allTaxRates.map((rate) => [rate.id, rate]))
-      };
-    } finally {
-      connection.release();
+    // Get all tax rates for the company
+    const allTaxRatesResult = await sql`
+      SELECT id, company_id, code, name, rate_percent, account_id, 
+             is_inclusive, is_active, created_by_user_id, updated_by_user_id,
+             created_at, updated_at
+      FROM tax_rates
+      WHERE company_id = ${auth.companyId}
+        AND is_active = 1
+    `.execute(db);
+
+    interface TaxRateRow {
+      id: number;
+      company_id: number;
+      code: string;
+      name: string;
+      rate_percent: number;
+      account_id: number | null;
+      is_inclusive: number;
+      is_active: number;
+      created_by_user_id: number | null;
+      updated_by_user_id: number | null;
+      created_at: string;
+      updated_at: string;
     }
 
-    const { results, orderUpdateResults, itemCancellationResults, variantSaleResults, variantStockAdjustmentResults } = await orchestrateSyncPush({
-      dbPool,
-      transactions: transactions as SyncPushTransactionPayload[],
-      active_orders: active_orders as ActiveOrder[] | undefined,
-      order_updates: order_updates as OrderUpdate[] | undefined,
-      item_cancellations: item_cancellations as ItemCancellation[] | undefined,
-      variant_sales: variant_sales as any,
-      variant_stock_adjustments: variant_stock_adjustments as any,
-      inputOutletId: outlet_id,
-      authCompanyId: auth.companyId,
-      authUserId: auth.userId,
-      correlationId,
-      taxContext,
-      injectFailureAfterHeaderInsert: shouldInjectFailureAfterHeaderInsert(c.req.raw),
-      forcedRetryableErrno: readForcedRetryableErrno(c.req.raw),
-      metricsCollector,
-      maxConcurrency: readSyncPushConcurrency()
+    const defaultTaxRates = (defaultTaxRatesResult.rows as TaxRateRow[]).map(row => ({
+      id: row.id,
+      company_id: row.company_id,
+      code: row.code,
+      name: row.name,
+      rate_percent: Number(row.rate_percent),
+      account_id: row.account_id,
+      is_inclusive: row.is_inclusive === 1,
+      is_active: row.is_active === 1,
+      created_by_user_id: row.created_by_user_id,
+      updated_by_user_id: row.updated_by_user_id,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    }));
+
+    const allTaxRates = (allTaxRatesResult.rows as TaxRateRow[]).map(row => ({
+      id: row.id,
+      company_id: row.company_id,
+      code: row.code,
+      name: row.name,
+      rate_percent: Number(row.rate_percent),
+      account_id: row.account_id,
+      is_inclusive: row.is_inclusive === 1,
+      is_active: row.is_active === 1,
+      created_by_user_id: row.created_by_user_id,
+      updated_by_user_id: row.updated_by_user_id,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    }));
+
+    const taxContext: SyncPushTaxContext = {
+      defaultTaxRates,
+      taxRateById: new Map(allTaxRates.map(rate => [rate.id, rate]))
+    };
+
+    // Check feature flag to determine which path to use
+    const useNewPath = shouldUseNewPushSync(auth.companyId);
+    const modeDescription = getPushSyncModeDescription();
+
+    console.info("POST /sync/push feature flag", {
+      correlation_id: correlationId,
+      company_id: auth.companyId,
+      use_new_path: useNewPath,
+      mode: modeDescription
     });
 
+    // Build transaction map for Phase 2
+    const txByClientTxId = buildTxByClientTxIdMap(transactions as SyncPushTransactionPayload[]);
+
+    // Phase 1: Use PosSyncModule for persistence
+    const module = getPosSyncModule();
+
+    const phase1Results = await module.handlePushSync({
+      db: db,
+      companyId: auth.companyId,
+      outletId: outlet_id,
+      transactions: (transactions as SyncPushTransactionPayload[]).map(toTransactionPush),
+      activeOrders: (active_orders ?? []).map(toActiveOrderPush),
+      orderUpdates: (order_updates ?? []) as OrderUpdatePush[],
+      itemCancellations: (item_cancellations ?? []) as ItemCancellationPush[],
+      variantSales: (variant_sales ?? []) as VariantSalePush[],
+      variantStockAdjustments: (variant_stock_adjustments ?? []) as VariantStockAdjustmentPush[],
+      correlationId,
+      metricsCollector
+    });
+
+    // Phase 2: Iterate Phase 1 results and process COGS, stock, etc.
+    // Process OK results from Phase 1
+    const okResults = phase1Results.results.filter((r) => r.result === "OK" && r.posTransactionId !== undefined);
+    
+    for (const result of okResults) {
+      const originalTx = txByClientTxId.get(result.client_tx_id);
+      if (!originalTx) {
+        console.warn("Phase 2: Original transaction not found", {
+          correlation_id: correlationId,
+          client_tx_id: result.client_tx_id
+        });
+        continue;
+      }
+
+      try {
+        // Phase 2 uses Kysely for database operations
+        await processSyncPushTransactionPhase2({
+          db: db,
+          tx: originalTx,
+          posTransactionId: result.posTransactionId!,
+          authUserId: auth.userId,
+          correlationId,
+          taxContext
+        });
+      } catch (phase2Error) {
+        // Phase 2 failed but Phase 1 data is already committed
+        // Log the error but don't fail the entire request
+        console.error("Phase 2 processing failed for transaction", {
+          correlation_id: correlationId,
+          client_tx_id: result.client_tx_id,
+          pos_transaction_id: result.posTransactionId,
+          error: phase2Error instanceof Error ? phase2Error.message : String(phase2Error)
+        });
+      }
+    }
+
     const responsePayload = {
-      results,
-      ...(orderUpdateResults.length > 0 && { order_update_results: orderUpdateResults }),
-      ...(itemCancellationResults.length > 0 && { item_cancellation_results: itemCancellationResults }),
-      ...(variantSaleResults && variantSaleResults.length > 0 && { variant_sale_results: variantSaleResults }),
-      ...(variantStockAdjustmentResults && variantStockAdjustmentResults.length > 0 && { variant_stock_adjustment_results: variantStockAdjustmentResults })
+      results: phase1Results.results,
+      ...(phase1Results.orderUpdateResults.length > 0 && { order_update_results: phase1Results.orderUpdateResults }),
+      ...(phase1Results.itemCancellationResults.length > 0 && { item_cancellation_results: phase1Results.itemCancellationResults }),
+      ...(phase1Results.variantSaleResults && phase1Results.variantSaleResults.length > 0 && { variant_sale_results: phase1Results.variantSaleResults }),
+      ...(phase1Results.variantStockAdjustmentResults && phase1Results.variantStockAdjustmentResults.length > 0 && { variant_stock_adjustment_results: phase1Results.variantStockAdjustmentResults })
     };
 
     console.info("POST /sync/push completed", {
@@ -197,13 +432,13 @@ syncPushRoutes.post("/", async (c) => {
       company_id: auth.companyId,
       outlet_id,
       total_transactions: transactions.length,
-      ok_count: results.filter((r) => r.result === "OK").length,
-      duplicate_count: results.filter((r) => r.result === "DUPLICATE").length,
-      error_count: results.filter((r) => r.result === "ERROR").length,
-      order_update_results_count: orderUpdateResults.length,
-      item_cancellation_results_count: itemCancellationResults.length,
-      variant_sale_results_count: variantSaleResults?.length ?? 0,
-      variant_stock_adjustment_results_count: variantStockAdjustmentResults?.length ?? 0
+      ok_count: phase1Results.results.filter((r) => r.result === "OK").length,
+      duplicate_count: phase1Results.results.filter((r) => r.result === "DUPLICATE").length,
+      error_count: phase1Results.results.filter((r) => r.result === "ERROR").length,
+      order_update_results_count: phase1Results.orderUpdateResults.length,
+      item_cancellation_results_count: phase1Results.itemCancellationResults.length,
+      variant_sale_results_count: phase1Results.variantSaleResults?.length ?? 0,
+      variant_stock_adjustment_results_count: phase1Results.variantStockAdjustmentResults?.length ?? 0
     });
 
     return successResponse(responsePayload);

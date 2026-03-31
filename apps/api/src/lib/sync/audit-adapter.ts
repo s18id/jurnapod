@@ -13,17 +13,27 @@
 
 import type { Pool } from "mysql2/promise";
 import { SyncAuditService, type AuditDbClient } from "@jurnapod/modules-platform/sync";
+import type { KyselySchema } from "@/lib/db";
 
 /**
- * Create a SyncAuditService instance from a mysql2 Pool.
+ * Create a SyncAuditService instance from a mysql2 Pool or KyselySchema.
  *
  * The adapter wraps mysql2's query/execute methods to match the
- * AuditDbClient interface expected by SyncAuditService.
+ * AuditDbClient interface expected by SyncAuditService when passed a Pool.
+ * If passed a KyselySchema directly, it is used as-is since AuditDbClient
+ * extends KyselySchema.
  *
- * @param dbPool - mysql2 connection pool
+ * @param db - mysql2 connection pool or KyselySchema instance
  * @returns Configured SyncAuditService instance
  */
-export function createSyncAuditService(dbPool: Pool): SyncAuditService {
+export function createSyncAuditService(db: Pool | KyselySchema): SyncAuditService {
+  // Check if it's a KyselySchema (has selectFrom method)
+  if (typeof (db as KyselySchema).selectFrom === "function") {
+    return new SyncAuditService(db as unknown as AuditDbClient);
+  }
+
+  // Otherwise wrap mysql2 Pool
+  const dbPool = db as Pool;
   const client: AuditDbClient = {
     query: async <T = unknown>(sql: string, params?: unknown[]): Promise<T[]> => {
       const [rows] = await dbPool.query(sql, params as (string | number | Date | null)[]);

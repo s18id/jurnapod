@@ -183,14 +183,14 @@ development_status:
   epic-16-retrospective: done
 
   # Epic 17: Resurrect Sync-Core (Sync Module Architecture)
-  epic-17: in-progress
+  epic-17: done
   17-1-extract-date-helpers-to-shared: done
   17-2-define-service-interfaces-sync-core: done
   17-3-cleanup-sync-core-dead-code: done
   17-4-move-pull-logic-to-pos-sync: done
   17-5-move-push-logic-to-pos-sync: done
-  17-6-refactor-api-routes-thin-adapters: in-progress
-  17-7-delete-lib-sync-and-tests: ready-for-dev
+  17-6-refactor-api-routes-thin-adapters: done
+  17-7-delete-lib-sync-and-tests: done
   17-8-apply-backoffice-sync-pattern: done
 
   # Epic 18: Pure Kysely Migration (Packages Only)

@@ -8,8 +8,9 @@
  * All methods enforce company_id and outlet_id scoping.
  */
 
-import { getDbPool } from "@/lib/db";
-import type { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { getDb, type KyselySchema } from "@/lib/db";
+import { sql } from "kysely";
+import { withTransaction, type Transaction } from "@jurnapod/db";
 import { createCostLayer, calculateCost } from "@/lib/cost-tracking";
 import type { CostCalculationResult } from "@/lib/cost-tracking";
 
@@ -100,29 +101,29 @@ export interface LowStockAlert {
   low_stock_threshold: number;
 }
 
-interface StockRow extends RowDataPacket {
+interface StockRow {
   product_id: number;
   outlet_id: number | null;
-  quantity: number;
-  reserved_quantity: number;
-  available_quantity: number;
-  updated_at: string;
+  quantity: string;
+  reserved_quantity: string;
+  available_quantity: string;
+  updated_at: Date;
 }
 
-interface ProductRow extends RowDataPacket {
+interface ProductRow {
   id: number;
   sku: string;
   name: string;
   track_stock: number;
-  low_stock_threshold: number | null;
+  low_stock_threshold: string | null;
 }
 
-interface CostSummaryRow extends RowDataPacket {
-  current_avg_cost: number | null;
+interface CostSummaryRow {
+  current_avg_cost: string | null;
 }
 
-interface PriceRow extends RowDataPacket {
-  price: number | null;
+interface PriceRow {
+  price: string | null;
 }
 
 /**
@@ -133,34 +134,32 @@ interface PriceRow extends RowDataPacket {
  * 3. throw if not found (fail-closed)
  */
 async function resolveInboundUnitCost(
-  conn: PoolConnection,
+  db: KyselySchema,
   companyId: number,
   itemId: number
 ): Promise<number> {
   // Try inventory_item_costs first
-  const [costRows] = await conn.execute<CostSummaryRow[]>(
-    `SELECT current_avg_cost
-     FROM inventory_item_costs
-     WHERE company_id = ? AND item_id = ?`,
-    [companyId, itemId]
-  );
+  const costRows = await sql<CostSummaryRow>`
+    SELECT current_avg_cost
+    FROM inventory_item_costs
+    WHERE company_id = ${companyId} AND item_id = ${itemId}
+  `.execute(db);
 
-  const avgCost = costRows[0]?.current_avg_cost;
+  const avgCost = costRows.rows[0]?.current_avg_cost;
   if (avgCost !== null && avgCost !== undefined && Number(avgCost) > 0) {
     return Number(avgCost);
   }
 
   // Fallback to item_prices
-  const [priceRows] = await conn.execute<PriceRow[]>(
-    `SELECT price
-     FROM item_prices
-     WHERE company_id = ? AND item_id = ?
-     ORDER BY updated_at DESC, id DESC
-     LIMIT 1`,
-    [companyId, itemId]
-  );
+  const priceRows = await sql<PriceRow>`
+    SELECT price
+    FROM item_prices
+    WHERE company_id = ${companyId} AND item_id = ${itemId}
+    ORDER BY updated_at DESC, id DESC
+    LIMIT 1
+  `.execute(db);
 
-  const price = priceRows[0]?.price;
+  const price = priceRows.rows[0]?.price;
   if (price !== null && price !== undefined && Number(price) > 0) {
     return Number(price);
   }
@@ -178,44 +177,35 @@ export async function checkAvailability(
   company_id: number,
   outlet_id: number,
   items: StockItem[],
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<StockCheckResult[]> {
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const database = db ?? getDb();
 
-  try {
-    const results: StockCheckResult[] = [];
+  const results: StockCheckResult[] = [];
 
-    for (const item of items) {
-      const [rows] = await conn.execute<StockRow[]>(
-        `SELECT product_id, available_quantity
-         FROM inventory_stock
-         WHERE company_id = ?
-           AND product_id = ?
-           AND (outlet_id = ? OR outlet_id IS NULL)
-         ORDER BY outlet_id IS NULL ASC
-         LIMIT 1`,
-        [company_id, item.product_id, outlet_id]
-      );
+  for (const item of items) {
+    const rows = await sql<StockRow>`
+      SELECT product_id, available_quantity
+      FROM inventory_stock
+      WHERE company_id = ${company_id}
+        AND product_id = ${item.product_id}
+        AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+      ORDER BY outlet_id IS NULL ASC
+      LIMIT 1
+    `.execute(database);
 
-      const stock = rows[0];
-      const availableQty = stock ? Number(stock.available_quantity) : 0;
+    const stock = rows.rows[0];
+    const availableQty = stock ? Number(stock.available_quantity) : 0;
 
-      results.push({
-        product_id: item.product_id,
-        available: availableQty >= item.quantity,
-        requested_quantity: item.quantity,
-        available_quantity: availableQty
-      });
-    }
-
-    return results;
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
+    results.push({
+      product_id: item.product_id,
+      available: availableQty >= item.quantity,
+      requested_quantity: item.quantity,
+      available_quantity: availableQty
+    });
   }
+
+  return results;
 }
 
 /**
@@ -226,9 +216,9 @@ export async function hasSufficientStock(
   company_id: number,
   outlet_id: number,
   items: StockItem[],
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<boolean> {
-  const results = await checkAvailability(company_id, outlet_id, items, connection);
+  const results = await checkAvailability(company_id, outlet_id, items, db);
   return results.every(r => r.available);
 }
 
@@ -239,9 +229,9 @@ export async function getStockConflicts(
   company_id: number,
   outlet_id: number,
   items: StockItem[],
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<Array<{ product_id: number; requested: number; available: number }>> {
-  const results = await checkAvailability(company_id, outlet_id, items, connection);
+  const results = await checkAvailability(company_id, outlet_id, items, db);
   return results
     .filter(r => !r.available)
     .map(r => ({
@@ -261,98 +251,66 @@ export async function deductStock(
   items: StockItem[],
   reference_id: string,
   user_id: number,
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<boolean> {
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const database = db ?? getDb();
 
-  try {
-    if (!connection) {
-      await conn.beginTransaction();
-    }
+  return withTransaction(database, async (trx) => {
+    for (const item of items) {
+      // Verify stock exists and has sufficient quantity (with lock)
+      const stockRows = await sql<StockRow>`
+        SELECT quantity, available_quantity
+        FROM inventory_stock
+        WHERE company_id = ${company_id}
+          AND product_id = ${item.product_id}
+          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+        ORDER BY outlet_id IS NULL ASC
+        LIMIT 1
+        FOR UPDATE
+      `.execute(trx);
 
-    try {
-      for (const item of items) {
-        // Verify stock exists and has sufficient quantity
-        const [stockRows] = await conn.execute<StockRow[]>(
-          `SELECT quantity, available_quantity
-           FROM inventory_stock
-           WHERE company_id = ?
-             AND product_id = ?
-             AND (outlet_id = ? OR outlet_id IS NULL)
-           ORDER BY outlet_id IS NULL ASC
-           LIMIT 1
-           FOR UPDATE`,
-          [company_id, item.product_id, outlet_id]
-        );
-
-        if (stockRows.length === 0) {
-          if (!connection) await conn.rollback();
-          return false;
-        }
-
-        const stock = stockRows[0];
-        if (Number(stock.quantity) < item.quantity) {
-          if (!connection) await conn.rollback();
-          return false;
-        }
-
-        // Deduct stock - reduce both quantity and available_quantity
-        const [updateResult] = await conn.execute<ResultSetHeader>(
-          `UPDATE inventory_stock
-           SET quantity = quantity - ?,
-               available_quantity = available_quantity - ?,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE company_id = ?
-             AND product_id = ?
-             AND (outlet_id = ? OR outlet_id IS NULL)
-             AND quantity >= ?`,
-          [
-            item.quantity,
-            item.quantity,
-            company_id,
-            item.product_id,
-            outlet_id,
-            item.quantity
-          ]
-        );
-
-        if (updateResult.affectedRows === 0) {
-          if (!connection) await conn.rollback();
-          return false;
-        }
-
-        // Record transaction
-        await conn.execute(
-          `INSERT INTO inventory_transactions (
-            company_id,
-            outlet_id,
-            transaction_type,
-            reference_type,
-            reference_id,
-            product_id,
-            quantity_delta,
-            created_at
-          ) VALUES (?, ?, ?, 'SALE', ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [company_id, outlet_id, TransactionType.SALE, reference_id, item.product_id, -item.quantity]
-        );
+      if (stockRows.rows.length === 0) {
+        return false;
       }
 
-      if (!connection) {
-        await conn.commit();
+      const stock = stockRows.rows[0];
+      if (Number(stock.quantity) < item.quantity) {
+        return false;
       }
 
-      return true;
-    } catch (error) {
-      if (!connection) await conn.rollback();
-      throw error;
+      // Deduct stock - reduce both quantity and available_quantity
+      const updateResult = await sql`
+        UPDATE inventory_stock
+        SET quantity = quantity - ${item.quantity},
+            available_quantity = available_quantity - ${item.quantity},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = ${company_id}
+          AND product_id = ${item.product_id}
+          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+          AND quantity >= ${item.quantity}
+      `.execute(trx);
+
+      if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+        return false;
+      }
+
+      // Record transaction
+      await sql`
+        INSERT INTO inventory_transactions (
+          company_id,
+          outlet_id,
+          transaction_type,
+          reference_type,
+          reference_id,
+          product_id,
+          quantity_delta,
+          created_at
+        ) VALUES (${company_id}, ${outlet_id}, ${TransactionType.SALE}, 'SALE', ${reference_id}, ${item.product_id}, ${-item.quantity}, CURRENT_TIMESTAMP)
+      `.execute(trx);
     }
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
-  }
+
+    return true;
+  });
 }
 
 /**
@@ -371,123 +329,94 @@ export async function deductStockWithCost(
   items: StockItem[],
   reference_id: string,
   user_id: number,
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<StockDeductResult[]> {
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const database = db ?? getDb();
   const results: StockDeductResult[] = [];
 
-  try {
-    if (!connection) {
-      await conn.beginTransaction();
-    }
+  return withTransaction(database, async (trx) => {
+    for (const item of items) {
+      // Verify stock exists and has sufficient quantity (with lock)
+      const stockRows = await sql<StockRow>`
+        SELECT quantity, available_quantity
+        FROM inventory_stock
+        WHERE company_id = ${company_id}
+          AND product_id = ${item.product_id}
+          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+        ORDER BY outlet_id IS NULL ASC
+        LIMIT 1
+        FOR UPDATE
+      `.execute(trx);
 
-    try {
-      for (const item of items) {
-        // Verify stock exists and has sufficient quantity (with lock)
-        const [stockRows] = await conn.execute<StockRow[]>(
-          `SELECT quantity, available_quantity
-           FROM inventory_stock
-           WHERE company_id = ?
-             AND product_id = ?
-             AND (outlet_id = ? OR outlet_id IS NULL)
-           ORDER BY outlet_id IS NULL ASC
-           LIMIT 1
-           FOR UPDATE`,
-          [company_id, item.product_id, outlet_id]
+      if (stockRows.rows.length === 0) {
+        throw new Error(`Stock not found for product ${item.product_id} in company ${company_id}`);
+      }
+
+      const stock = stockRows.rows[0];
+      if (Number(stock.quantity) < item.quantity) {
+        throw new Error(
+          `Insufficient stock for product ${item.product_id}: ` +
+          `requested ${item.quantity}, available ${stock.quantity}`
         );
+      }
 
-        if (stockRows.length === 0) {
-          throw new Error(`Stock not found for product ${item.product_id} in company ${company_id}`);
-        }
+      // Record inventory transaction FIRST (capture insertId for cost tracking)
+      const txResult = await sql`
+        INSERT INTO inventory_transactions (
+          company_id,
+          outlet_id,
+          transaction_type,
+          reference_type,
+          reference_id,
+          product_id,
+          quantity_delta,
+          created_at
+        ) VALUES (${company_id}, ${outlet_id}, ${TransactionType.SALE}, 'SALE', ${reference_id}, ${item.product_id}, ${-item.quantity}, CURRENT_TIMESTAMP)
+      `.execute(trx);
+      const transactionId = Number(txResult.insertId);
 
-        const stock = stockRows[0];
-        if (Number(stock.quantity) < item.quantity) {
-          throw new Error(
-            `Insufficient stock for product ${item.product_id}: ` +
-            `requested ${item.quantity}, available ${stock.quantity}`
-          );
-        }
-
-        // Record inventory transaction FIRST (capture insertId for cost tracking)
-        const [txResult] = await conn.execute<ResultSetHeader>(
-          `INSERT INTO inventory_transactions (
-            company_id,
-            outlet_id,
-            transaction_type,
-            reference_type,
-            reference_id,
-            product_id,
-            quantity_delta,
-            created_at
-          ) VALUES (?, ?, ?, 'SALE', ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [company_id, outlet_id, TransactionType.SALE, reference_id, item.product_id, -item.quantity]
-        );
-        const transactionId = txResult.insertId;
-
-        // Consume cost using the company's costing method
-        const costResult = await calculateCost(
-          {
-            companyId: company_id,
-            itemId: item.product_id,
-            quantity: item.quantity,
-            transactionId: transactionId, // Required for FIFO/LIFO consumption tracking
-          },
-          conn
-        );
-
-        // Deduct stock - reduce both quantity and available_quantity
-        const [updateResult] = await conn.execute<ResultSetHeader>(
-          `UPDATE inventory_stock
-           SET quantity = quantity - ?,
-               available_quantity = available_quantity - ?,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE company_id = ?
-             AND product_id = ?
-             AND (outlet_id = ? OR outlet_id IS NULL)
-             AND quantity >= ?`,
-          [
-            item.quantity,
-            item.quantity,
-            company_id,
-            item.product_id,
-            outlet_id,
-            item.quantity
-          ]
-        );
-
-        if (updateResult.affectedRows === 0) {
-          throw new Error(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
-        }
-
-        // Calculate weighted average unit cost from consumed layers
-        const unitCost = costResult.totalCost / item.quantity;
-
-        results.push({
+      // Consume cost using the company's costing method
+      const costResult = await calculateCost(
+        {
+          companyId: company_id,
           itemId: item.product_id,
           quantity: item.quantity,
-          transactionId: transactionId,
-          unitCost: unitCost,
-          totalCost: costResult.totalCost,
-          costResult: costResult,
-        });
+          transactionId: transactionId, // Required for FIFO/LIFO consumption tracking
+        },
+        trx as unknown as KyselySchema
+      );
+
+      // Deduct stock - reduce both quantity and available_quantity
+      const updateResult = await sql`
+        UPDATE inventory_stock
+        SET quantity = quantity - ${item.quantity},
+            available_quantity = available_quantity - ${item.quantity},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = ${company_id}
+          AND product_id = ${item.product_id}
+          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+          AND quantity >= ${item.quantity}
+      `.execute(trx);
+
+      if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+        throw new Error(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
       }
 
-      if (!connection) {
-        await conn.commit();
-      }
+      // Calculate weighted average unit cost from consumed layers
+      const unitCost = costResult.totalCost / item.quantity;
 
-      return results;
-    } catch (error) {
-      if (!connection) await conn.rollback();
-      throw error;
+      results.push({
+        itemId: item.product_id,
+        quantity: item.quantity,
+        transactionId: transactionId,
+        unitCost: unitCost,
+        totalCost: costResult.totalCost,
+        costResult: costResult,
+      });
     }
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
-  }
+
+    return results;
+  });
 }
 
 /**
@@ -524,20 +453,13 @@ export interface DeductStockForSaleResult {
 
 export async function deductStockForSaleWithCogs(
   input: DeductStockForSaleInput,
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<DeductStockForSaleResult> {
   const { company_id, outlet_id, items, reference_id, user_id, sale_id, sale_date, cogs_enabled } = input;
   
-  const dbPool = getDbPool();
-  // If no external connection, we manage our own transaction for atomicity
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const database = db ?? getDb();
   
-  try {
-    if (!connection) {
-      await conn.beginTransaction();
-    }
-    
+  return withTransaction(database, async (trx) => {
     // First, deduct stock with cost consumption (method-correct via deductStockWithCost)
     const stockResults = await deductStockWithCost(
       company_id,
@@ -545,14 +467,11 @@ export async function deductStockForSaleWithCogs(
       items,
       reference_id,
       user_id,
-      conn // Always pass our managed connection for atomicity
+      trx as unknown as KyselySchema
     );
     
     // If COGS is not enabled, commit and return stock results only
     if (!cogs_enabled || stockResults.length === 0) {
-      if (!connection) {
-        await conn.commit();
-      }
       return {
         stockResults,
         cogsResult: null
@@ -580,7 +499,7 @@ export async function deductStockForSaleWithCogs(
         saleDate: sale_date,
         postedBy: user_id
       },
-      conn // Always pass our managed connection for atomicity
+      trx as unknown as KyselySchema
     );
     
     if (!cogsResult.success) {
@@ -592,18 +511,11 @@ export async function deductStockForSaleWithCogs(
     // Link inventory transactions to COGS journal batch
     if (cogsResult.journalBatchId) {
       const inventoryTransactionIds = stockResults.map((r) => r.transactionId);
-      const placeholders = inventoryTransactionIds.map(() => "?").join(", ");
-      await conn.execute(
-        `UPDATE inventory_transactions 
-         SET journal_batch_id = ? 
-         WHERE id IN (${placeholders})`,
-        [cogsResult.journalBatchId, ...inventoryTransactionIds]
-      );
-    }
-    
-    // Commit if we own the transaction
-    if (!connection) {
-      await conn.commit();
+      await sql`
+        UPDATE inventory_transactions 
+        SET journal_batch_id = ${cogsResult.journalBatchId}
+        WHERE id IN (${sql.join(inventoryTransactionIds.map(id => sql`${id}`), sql`, `)})
+      `.execute(trx);
     }
     
     return {
@@ -614,17 +526,7 @@ export async function deductStockForSaleWithCogs(
         totalCogs: cogsResult.totalCogs
       }
     };
-  } catch (error) {
-    // Rollback if we own the transaction
-    if (!connection) {
-      await conn.rollback();
-    }
-    throw error;
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
-  }
+  });
 }
 
 /**
@@ -637,169 +539,27 @@ export async function restoreStock(
   items: StockItem[],
   reference_id: string,
   user_id: number,
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<boolean> {
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const database = db ?? getDb();
 
-  try {
-    if (!connection) {
-      await conn.beginTransaction();
-    }
+  return withTransaction(database, async (trx) => {
+    for (const item of items) {
+      // Update stock - increase both quantity and available_quantity
+      const updateResult = await sql`
+        UPDATE inventory_stock
+        SET quantity = quantity + ${item.quantity},
+            available_quantity = available_quantity + ${item.quantity},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = ${company_id}
+          AND product_id = ${item.product_id}
+          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+      `.execute(trx);
 
-    try {
-      for (const item of items) {
-        // Update stock - increase both quantity and available_quantity
-        const [updateResult] = await conn.execute<ResultSetHeader>(
-          `UPDATE inventory_stock
-           SET quantity = quantity + ?,
-               available_quantity = available_quantity + ?,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE company_id = ?
-             AND product_id = ?
-             AND (outlet_id = ? OR outlet_id IS NULL)`,
-          [
-            item.quantity,
-            item.quantity,
-            company_id,
-            item.product_id,
-            outlet_id
-          ]
-        );
-
-        if (updateResult.affectedRows === 0) {
-          // Stock record doesn't exist, create it
-          await conn.execute(
-            `INSERT INTO inventory_stock (
-              company_id,
-              outlet_id,
-              product_id,
-              quantity,
-              reserved_quantity,
-              available_quantity,
-              created_at,
-              updated_at
-            ) VALUES (?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-            [company_id, outlet_id, item.product_id, item.quantity, item.quantity]
-          );
-        }
-
-        // Record transaction
-        const [txResult] = await conn.execute<ResultSetHeader>(
-          `INSERT INTO inventory_transactions (
-            company_id,
-            outlet_id,
-            transaction_type,
-            reference_type,
-            reference_id,
-            product_id,
-            quantity_delta,
-            created_at
-          ) VALUES (?, ?, ?, 'REFUND', ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [company_id, outlet_id, TransactionType.REFUND, reference_id, item.product_id, item.quantity]
-        );
-
-        // Create cost layer for inbound movement
-        const unitCost = await resolveInboundUnitCost(conn, company_id, item.product_id);
-        await createCostLayer(
-          {
-            companyId: company_id,
-            itemId: item.product_id,
-            transactionId: txResult.insertId,
-            unitCost,
-            quantity: item.quantity,
-          },
-          conn
-        );
-      }
-
-      if (!connection) {
-        await conn.commit();
-      }
-
-      return true;
-    } catch (error) {
-      if (!connection) await conn.rollback();
-      throw error;
-    }
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
-  }
-}
-
-/**
- * Adjust stock quantity manually (for inventory counts, damage, etc.)
- * Records the adjustment in transactions
- */
-export async function adjustStock(
-  input: StockAdjustmentInput,
-  connection?: PoolConnection
-): Promise<boolean> {
-  const { company_id, outlet_id, product_id, adjustment_quantity, reason, reference_id, user_id } = input;
-
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
-
-  try {
-    if (!connection) {
-      await conn.beginTransaction();
-    }
-
-    try {
-      // Get current stock
-      const [stockRows] = await conn.execute<StockRow[]>(
-        `SELECT quantity, reserved_quantity, available_quantity
-         FROM inventory_stock
-         WHERE company_id = ?
-           AND product_id = ?
-           AND (outlet_id = ? OR outlet_id IS NULL)
-         ORDER BY outlet_id IS NULL ASC
-         LIMIT 1
-         FOR UPDATE`,
-        [company_id, product_id, outlet_id]
-      );
-
-      let currentQty = 0;
-      let currentReserved = 0;
-
-      if (stockRows.length > 0) {
-        currentQty = Number(stockRows[0].quantity);
-        currentReserved = Number(stockRows[0].reserved_quantity);
-      }
-
-      const newQty = currentQty + adjustment_quantity;
-      const newAvailable = newQty - currentReserved;
-
-      if (newQty < 0) {
-        if (!connection) await conn.rollback();
-        return false;
-      }
-
-      if (stockRows.length > 0) {
-        // Update existing stock
-        const [updateResult] = await conn.execute<ResultSetHeader>(
-          `UPDATE inventory_stock
-           SET quantity = ?,
-               available_quantity = ?,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE company_id = ?
-             AND product_id = ?
-             AND (outlet_id = ? OR outlet_id IS NULL)`,
-          [newQty, newAvailable, company_id, product_id, outlet_id]
-        );
-
-        if (updateResult.affectedRows === 0) {
-          if (!connection) await conn.rollback();
-          return false;
-        }
-      } else {
-        // Create new stock record
-        await conn.execute(
-          `INSERT INTO inventory_stock (
+      if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+        // Stock record doesn't exist, create it
+        await sql`
+          INSERT INTO inventory_stock (
             company_id,
             outlet_id,
             product_id,
@@ -808,14 +568,13 @@ export async function adjustStock(
             available_quantity,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-          [company_id, outlet_id, product_id, newQty, newAvailable]
-        );
+          ) VALUES (${company_id}, ${outlet_id}, ${item.product_id}, ${item.quantity}, 0, ${item.quantity}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `.execute(trx);
       }
 
-      // Record adjustment transaction
-      const [txResult] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO inventory_transactions (
+      // Record transaction
+      const txResult = await sql`
+        INSERT INTO inventory_transactions (
           company_id,
           outlet_id,
           transaction_type,
@@ -824,39 +583,128 @@ export async function adjustStock(
           product_id,
           quantity_delta,
           created_at
-        ) VALUES (?, ?, ?, 'ADJUSTMENT', ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [company_id, outlet_id, TransactionType.ADJUSTMENT, reference_id ?? `ADJ-${Date.now()}`, product_id, adjustment_quantity]
+        ) VALUES (${company_id}, ${outlet_id}, ${TransactionType.REFUND}, 'REFUND', ${reference_id}, ${item.product_id}, ${item.quantity}, CURRENT_TIMESTAMP)
+      `.execute(trx);
+
+      // Create cost layer for inbound movement
+      const unitCost = await resolveInboundUnitCost(trx as unknown as KyselySchema, company_id, item.product_id);
+      await createCostLayer(
+        {
+          companyId: company_id,
+          itemId: item.product_id,
+          transactionId: Number(txResult.insertId),
+          unitCost,
+          quantity: item.quantity,
+        },
+        trx as unknown as KyselySchema
       );
-
-      // Create cost layer for positive inbound adjustments only
-      if (adjustment_quantity > 0) {
-        const unitCost = await resolveInboundUnitCost(conn, company_id, product_id);
-        await createCostLayer(
-          {
-            companyId: company_id,
-            itemId: product_id,
-            transactionId: txResult.insertId,
-            unitCost,
-            quantity: adjustment_quantity,
-          },
-          conn
-        );
-      }
-
-      if (!connection) {
-        await conn.commit();
-      }
-
-      return true;
-    } catch (error) {
-      if (!connection) await conn.rollback();
-      throw error;
     }
-  } finally {
-    if (shouldRelease) {
-      conn.release();
+
+    return true;
+  });
+}
+
+/**
+ * Adjust stock quantity manually (for inventory counts, damage, etc.)
+ * Records the adjustment in transactions
+ */
+export async function adjustStock(
+  input: StockAdjustmentInput,
+  db?: KyselySchema
+): Promise<boolean> {
+  const { company_id, outlet_id, product_id, adjustment_quantity, reason, reference_id, user_id } = input;
+  const database = db ?? getDb();
+
+  return withTransaction(database, async (trx) => {
+    // Get current stock
+    const stockRows = await sql<StockRow>`
+      SELECT quantity, reserved_quantity, available_quantity
+      FROM inventory_stock
+      WHERE company_id = ${company_id}
+        AND product_id = ${product_id}
+        AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+      ORDER BY outlet_id IS NULL ASC
+      LIMIT 1
+      FOR UPDATE
+    `.execute(trx);
+
+    let currentQty = 0;
+    let currentReserved = 0;
+
+    if (stockRows.rows.length > 0) {
+      currentQty = Number(stockRows.rows[0].quantity);
+      currentReserved = Number(stockRows.rows[0].reserved_quantity);
     }
-  }
+
+    const newQty = currentQty + adjustment_quantity;
+    const newAvailable = newQty - currentReserved;
+
+    if (newQty < 0) {
+      return false;
+    }
+
+    if (stockRows.rows.length > 0) {
+      // Update existing stock
+      const updateResult = await sql`
+        UPDATE inventory_stock
+        SET quantity = ${newQty},
+            available_quantity = ${newAvailable},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = ${company_id}
+          AND product_id = ${product_id}
+          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+      `.execute(trx);
+
+      if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+        return false;
+      }
+    } else {
+      // Create new stock record
+      await sql`
+        INSERT INTO inventory_stock (
+          company_id,
+          outlet_id,
+          product_id,
+          quantity,
+          reserved_quantity,
+          available_quantity,
+          created_at,
+          updated_at
+        ) VALUES (${company_id}, ${outlet_id}, ${product_id}, ${newQty}, 0, ${newAvailable}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `.execute(trx);
+    }
+
+    // Record adjustment transaction
+    const txResult = await sql`
+      INSERT INTO inventory_transactions (
+        company_id,
+        outlet_id,
+        transaction_type,
+        reference_type,
+        reference_id,
+        product_id,
+        quantity_delta,
+        created_at
+      ) VALUES (${company_id}, ${outlet_id}, ${TransactionType.ADJUSTMENT}, 'ADJUSTMENT', ${reference_id ?? `ADJ-${Date.now()}`}, ${product_id}, ${adjustment_quantity}, CURRENT_TIMESTAMP)
+    `.execute(trx);
+
+    // Create cost layer for positive inbound adjustments only
+    if (adjustment_quantity > 0) {
+      const unitCost = await resolveInboundUnitCost(trx as unknown as KyselySchema, company_id, product_id);
+      await createCostLayer(
+        {
+          companyId: company_id,
+          itemId: product_id,
+          transactionId: Number(txResult.insertId),
+          unitCost,
+          quantity: adjustment_quantity,
+        },
+        trx as unknown as KyselySchema
+      );
+    }
+
+    return true;
+  });
 }
 
 /**
@@ -868,12 +716,13 @@ export async function reserveStock(
   outlet_id: number,
   items: StockItem[],
   reference_id: string,
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<StockReservationResult> {
   const conflicts: Array<{ product_id: number; requested: number; available: number }> = [];
+  const database = db ?? getDb();
 
   // Check availability first
-  const availability = await checkAvailability(company_id, outlet_id, items, connection);
+  const availability = await checkAvailability(company_id, outlet_id, items, database);
 
   for (const check of availability) {
     if (!check.available) {
@@ -889,75 +738,44 @@ export async function reserveStock(
     return { success: false, conflicts };
   }
 
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  return withTransaction(database, async (trx) => {
+    for (const item of items) {
+      // Reserve stock atomically
+      const updateResult = await sql`
+        UPDATE inventory_stock
+        SET reserved_quantity = reserved_quantity + ${item.quantity},
+            available_quantity = available_quantity - ${item.quantity},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = ${company_id}
+          AND product_id = ${item.product_id}
+          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+          AND available_quantity >= ${item.quantity}
+      `.execute(trx);
 
-  try {
-    if (!connection) {
-      await conn.beginTransaction();
-    }
-
-    try {
-      for (const item of items) {
-        // Reserve stock atomically
-        const [updateResult] = await conn.execute<ResultSetHeader>(
-          `UPDATE inventory_stock
-           SET reserved_quantity = reserved_quantity + ?,
-               available_quantity = available_quantity - ?,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE company_id = ?
-             AND product_id = ?
-             AND (outlet_id = ? OR outlet_id IS NULL)
-             AND available_quantity >= ?`,
-          [
-            item.quantity,
-            item.quantity,
-            company_id,
-            item.product_id,
-            outlet_id,
-            item.quantity
-          ]
-        );
-
-        if (updateResult.affectedRows === 0) {
-          if (!connection) await conn.rollback();
-          return {
-            success: false,
-            conflicts: [{ product_id: item.product_id, requested: item.quantity, available: 0 }]
-          };
-        }
-
-        // Record reservation
-        await conn.execute(
-          `INSERT INTO inventory_transactions (
-            company_id,
-            outlet_id,
-            transaction_type,
-            reference_type,
-            reference_id,
-            product_id,
-            quantity_delta,
-            created_at
-          ) VALUES (?, ?, ?, 'RESERVATION', ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [company_id, outlet_id, TransactionType.RESERVATION, reference_id, item.product_id, item.quantity]
-        );
+      if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+        return {
+          success: false,
+          conflicts: [{ product_id: item.product_id, requested: item.quantity, available: 0 }]
+        };
       }
 
-      if (!connection) {
-        await conn.commit();
-      }
+      // Record reservation
+      await sql`
+        INSERT INTO inventory_transactions (
+          company_id,
+          outlet_id,
+          transaction_type,
+          reference_type,
+          reference_id,
+          product_id,
+          quantity_delta,
+          created_at
+        ) VALUES (${company_id}, ${outlet_id}, ${TransactionType.RESERVATION}, 'RESERVATION', ${reference_id}, ${item.product_id}, ${item.quantity}, CURRENT_TIMESTAMP)
+      `.execute(trx);
+    }
 
-      return { success: true, reserved: true };
-    } catch (error) {
-      if (!connection) await conn.rollback();
-      throw error;
-    }
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
-  }
+    return { success: true, reserved: true };
+  });
 }
 
 /**
@@ -969,95 +787,66 @@ export async function releaseStock(
   outlet_id: number,
   items: StockItem[],
   reference_id: string,
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<boolean> {
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const database = db ?? getDb();
 
-  try {
-    if (!connection) {
-      await conn.beginTransaction();
-    }
+  return withTransaction(database, async (trx) => {
+    for (const item of items) {
+      // Get current reserved quantity
+      const stockRows = await sql<StockRow>`
+        SELECT reserved_quantity
+        FROM inventory_stock
+        WHERE company_id = ${company_id}
+          AND product_id = ${item.product_id}
+          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+        ORDER BY outlet_id IS NULL ASC
+        LIMIT 1
+        FOR UPDATE
+      `.execute(trx);
 
-    try {
-      for (const item of items) {
-        // Get current reserved quantity
-        const [stockRows] = await conn.execute<StockRow[]>(
-          `SELECT reserved_quantity
-           FROM inventory_stock
-           WHERE company_id = ?
-             AND product_id = ?
-             AND (outlet_id = ? OR outlet_id IS NULL)
-           ORDER BY outlet_id IS NULL ASC
-           LIMIT 1
-           FOR UPDATE`,
-          [company_id, item.product_id, outlet_id]
-        );
+      if (stockRows.rows.length === 0) {
+        continue; // No stock record, nothing to release
+      }
 
-        if (stockRows.length === 0) {
-          continue; // No stock record, nothing to release
-        }
+      const currentReserved = Number(stockRows.rows[0].reserved_quantity);
+      const releaseQty = Math.min(item.quantity, currentReserved);
 
-        const currentReserved = Number(stockRows[0].reserved_quantity);
-        const releaseQty = Math.min(item.quantity, currentReserved);
+      if (releaseQty <= 0) {
+        continue;
+      }
 
-        if (releaseQty <= 0) {
-          continue;
-        }
+      // Release stock
+      const updateResult = await sql`
+        UPDATE inventory_stock
+        SET reserved_quantity = reserved_quantity - ${releaseQty},
+            available_quantity = available_quantity + ${releaseQty},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = ${company_id}
+          AND product_id = ${item.product_id}
+          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+          AND reserved_quantity >= ${releaseQty}
+      `.execute(trx);
 
-        // Release stock
-        const [updateResult] = await conn.execute<ResultSetHeader>(
-          `UPDATE inventory_stock
-           SET reserved_quantity = reserved_quantity - ?,
-               available_quantity = available_quantity + ?,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE company_id = ?
-             AND product_id = ?
-             AND (outlet_id = ? OR outlet_id IS NULL)
-             AND reserved_quantity >= ?`,
-          [
-            releaseQty,
-            releaseQty,
+      if (updateResult.numAffectedRows && updateResult.numAffectedRows > BigInt(0)) {
+        // Record release
+        await sql`
+          INSERT INTO inventory_transactions (
             company_id,
-            item.product_id,
             outlet_id,
-            releaseQty
-          ]
-        );
-
-        if (updateResult.affectedRows > 0) {
-          // Record release
-          await conn.execute(
-            `INSERT INTO inventory_transactions (
-              company_id,
-              outlet_id,
-              transaction_type,
-              reference_type,
-              reference_id,
-              product_id,
-              quantity_delta,
-              created_at
-            ) VALUES (?, ?, ?, 'RELEASE', ?, ?, ?, CURRENT_TIMESTAMP)`,
-            [company_id, outlet_id, TransactionType.RELEASE, reference_id, item.product_id, releaseQty]
-          );
-        }
+            transaction_type,
+            reference_type,
+            reference_id,
+            product_id,
+            quantity_delta,
+            created_at
+          ) VALUES (${company_id}, ${outlet_id}, ${TransactionType.RELEASE}, 'RELEASE', ${reference_id}, ${item.product_id}, ${releaseQty}, CURRENT_TIMESTAMP)
+        `.execute(trx);
       }
-
-      if (!connection) {
-        await conn.commit();
-      }
-
-      return true;
-    } catch (error) {
-      if (!connection) await conn.rollback();
-      throw error;
     }
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
-  }
+
+    return true;
+  });
 }
 
 /**
@@ -1067,43 +856,44 @@ export async function getStockLevels(
   company_id: number,
   outlet_id: number,
   product_ids?: number[],
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<StockLevel[]> {
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const database = db ?? getDb();
 
-  try {
-    let query = `
-      SELECT product_id, outlet_id, quantity, reserved_quantity, available_quantity, updated_at
-      FROM inventory_stock
-      WHERE company_id = ? AND (outlet_id = ? OR outlet_id IS NULL)
-    `;
-    const params: (number | number[])[] = [company_id, outlet_id];
+  let query = sql`
+    SELECT product_id, outlet_id, quantity, reserved_quantity, available_quantity, updated_at
+    FROM inventory_stock
+    WHERE company_id = ${company_id} AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+  `;
 
-    if (product_ids && product_ids.length > 0) {
-      const placeholders = product_ids.map(() => '?').join(',');
-      query += ` AND product_id IN (${placeholders})`;
-      params.push(...product_ids);
-    }
-
-    query += ` ORDER BY product_id`;
-
-    const [rows] = await conn.execute<StockRow[]>(query, params);
-
-    return rows.map(row => ({
-      product_id: row.product_id,
-      outlet_id: row.outlet_id,
-      quantity: Number(row.quantity),
-      reserved_quantity: Number(row.reserved_quantity),
-      available_quantity: Number(row.available_quantity),
-      updated_at: row.updated_at
-    }));
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
+  if (product_ids && product_ids.length > 0) {
+    query = sql`${query} AND product_id IN (${sql.join(product_ids.map(id => sql`${id}`), sql`, `)})`;
   }
+
+  query = sql`${query} ORDER BY product_id`;
+
+  const result = await sql<StockRow>`${query}`.execute(database);
+
+  return result.rows.map((row) => ({
+    product_id: row.product_id,
+    outlet_id: row.outlet_id,
+    quantity: Number(row.quantity),
+    reserved_quantity: Number(row.reserved_quantity),
+    available_quantity: Number(row.available_quantity),
+    updated_at: row.updated_at.toISOString()
+  }));
+}
+
+interface InventoryTransactionRow {
+  transaction_id: number;
+  company_id: number;
+  outlet_id: number | null;
+  transaction_type: number;
+  reference_type: string | null;
+  reference_id: string | null;
+  product_id: number | null;
+  quantity_delta: string;
+  created_at: Date;
 }
 
 /**
@@ -1119,82 +909,76 @@ export async function getStockTransactions(
     limit?: number;
     offset?: number;
   } = {},
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<{ transactions: StockTransaction[]; total: number }> {
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const database = db ?? getDb();
+  const { product_id, transaction_type, since, limit = 100, offset = 0 } = options;
 
-  try {
-    const { product_id, transaction_type, since, limit = 100, offset = 0 } = options;
-
-    let whereClause = "WHERE company_id = ?";
-    const params: (number | string)[] = [company_id];
-
-    if (outlet_id !== null) {
-      whereClause += " AND (outlet_id = ? OR outlet_id IS NULL)";
-      params.push(outlet_id);
-    }
-
-    if (product_id !== undefined) {
-      whereClause += " AND product_id = ?";
-      params.push(product_id);
-    }
-
-    if (transaction_type) {
-      whereClause += " AND transaction_type = ?";
-      params.push(transaction_type);
-    }
-
-    if (since) {
-      whereClause += " AND created_at > ?";
-      params.push(since);
-    }
-
-    // Get total count
-    const [countRows] = await conn.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as total FROM inventory_transactions ${whereClause}`,
-      params
-    );
-    const total = Number(countRows[0]?.total ?? 0);
-
-    // Get transactions
-    const [rows] = await conn.execute<RowDataPacket[]>(
-      `SELECT
-        id as transaction_id,
-        company_id,
-        outlet_id,
-        transaction_type,
-        reference_type,
-        reference_id,
-        product_id,
-        quantity_delta,
-        created_at
-      FROM inventory_transactions
-      ${whereClause}
-      ORDER BY created_at DESC
-      LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
-    );
-
-    const transactions: StockTransaction[] = rows.map(row => ({
-      transaction_id: row.transaction_id,
-      company_id: row.company_id,
-      outlet_id: row.outlet_id,
-      transaction_type: row.transaction_type,
-      reference_type: row.reference_type,
-      reference_id: row.reference_id,
-      product_id: row.product_id,
-      quantity_delta: Number(row.quantity_delta),
-      created_at: row.created_at
-    }));
-
-    return { transactions, total };
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
+  // Build WHERE clause using sql.join
+  const conditions: ReturnType<typeof sql>[] = [];
+  conditions.push(sql`company_id = ${company_id}`);
+  
+  if (outlet_id !== null) {
+    conditions.push(sql`(outlet_id = ${outlet_id} OR outlet_id IS NULL)`);
   }
+  if (product_id !== undefined) {
+    conditions.push(sql`product_id = ${product_id}`);
+  }
+  if (transaction_type) {
+    conditions.push(sql`transaction_type = ${transaction_type}`);
+  }
+  if (since) {
+    conditions.push(sql`created_at > ${since}`);
+  }
+
+  const whereClause = sql.join(conditions, sql` AND `);
+
+  // Get total count
+  const countResult = await sql<{ total: string }>`
+    SELECT COUNT(*) as total FROM inventory_transactions WHERE ${whereClause}
+  `.execute(database);
+  const total = Number(countResult.rows[0]?.total ?? 0);
+
+  // Get transactions
+  const rows = await sql<InventoryTransactionRow>`
+    SELECT
+      id as transaction_id,
+      company_id,
+      outlet_id,
+      transaction_type,
+      reference_type,
+      reference_id,
+      product_id,
+      quantity_delta,
+      created_at
+    FROM inventory_transactions
+    WHERE ${whereClause}
+    ORDER BY created_at DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `.execute(database);
+
+  const transactions: StockTransaction[] = rows.rows.map((row) => ({
+    transaction_id: row.transaction_id,
+    company_id: row.company_id,
+    outlet_id: row.outlet_id,
+    transaction_type: row.transaction_type,
+    reference_type: row.reference_type,
+    reference_id: row.reference_id,
+    product_id: row.product_id ?? 0,
+    quantity_delta: Number(row.quantity_delta),
+    created_at: row.created_at.toISOString()
+  }));
+
+  return { transactions, total };
+}
+
+interface LowStockAlertRow {
+  product_id: number;
+  sku: string;
+  name: string;
+  quantity: string;
+  available_quantity: string;
+  low_stock_threshold: string | null;
 }
 
 /**
@@ -1203,44 +987,35 @@ export async function getStockTransactions(
 export async function getLowStockAlerts(
   company_id: number,
   outlet_id: number,
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<LowStockAlert[]> {
-  const dbPool = getDbPool();
-  const conn = connection ?? await dbPool.getConnection();
-  const shouldRelease = !connection;
+  const database = db ?? getDb();
 
-  try {
-    const [rows] = await conn.execute<ProductRow[]>(
-      `SELECT
-        i.id as product_id,
-        i.sku,
-        i.name,
-        s.quantity,
-        s.available_quantity,
-        i.low_stock_threshold
-      FROM items i
-      JOIN inventory_stock s ON s.product_id = i.id
-      WHERE i.company_id = ?
-        AND i.track_stock = 1
-        AND i.low_stock_threshold IS NOT NULL
-        AND (s.outlet_id = ? OR s.outlet_id IS NULL)
-        AND s.available_quantity <= i.low_stock_threshold`,
-      [company_id, outlet_id]
-    );
+  const rows = await sql<LowStockAlertRow>`
+    SELECT
+      i.id as product_id,
+      i.sku,
+      i.name,
+      s.quantity,
+      s.available_quantity,
+      i.low_stock_threshold
+    FROM items i
+    JOIN inventory_stock s ON s.product_id = i.id
+    WHERE i.company_id = ${company_id}
+      AND i.track_stock = 1
+      AND i.low_stock_threshold IS NOT NULL
+      AND (s.outlet_id = ${outlet_id} OR s.outlet_id IS NULL)
+      AND s.available_quantity <= i.low_stock_threshold
+  `.execute(database);
 
-    return rows.map(row => ({
-      product_id: row.product_id,
-      sku: row.sku,
-      name: row.name,
-      quantity: Number(row.quantity),
-      available_quantity: Number(row.available_quantity),
-      low_stock_threshold: Number(row.low_stock_threshold)
-    }));
-  } finally {
-    if (shouldRelease) {
-      conn.release();
-    }
-  }
+  return rows.rows.map((row) => ({
+    product_id: row.product_id,
+    sku: row.sku,
+    name: row.name,
+    quantity: Number(row.quantity),
+    available_quantity: Number(row.available_quantity),
+    low_stock_threshold: Number(row.low_stock_threshold)
+  }));
 }
 
 /**
@@ -1250,8 +1025,8 @@ export async function getProductStock(
   company_id: number,
   outlet_id: number,
   product_id: number,
-  connection?: PoolConnection
+  db?: KyselySchema
 ): Promise<StockLevel | null> {
-  const levels = await getStockLevels(company_id, outlet_id, [product_id], connection);
+  const levels = await getStockLevels(company_id, outlet_id, [product_id], db);
   return levels[0] ?? null;
 }
