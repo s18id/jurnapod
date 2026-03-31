@@ -4,43 +4,18 @@
 /**
  * AuthDbAdapter implementation for the API.
  * 
- * Wraps mysql2 pool as Kysely instance to satisfy AuthDbAdapter interface.
+ * Wraps the shared Kysely instance to satisfy AuthDbAdapter interface.
  */
 
-import { createKysely, type KyselySchema } from '@jurnapod/db';
+import { getDb } from './db.js';
 import type { AuthDbAdapter } from '@jurnapod/auth';
 import type { Kysely } from 'kysely';
-import { getAppEnv } from './env';
-
-let authDbInstance: KyselySchema | null = null;
-
-/**
- * Get or create the Kysely instance for auth operations.
- */
-function getAuthDb(): KyselySchema {
-  if (authDbInstance) {
-    return authDbInstance;
-  }
-
-  const env = getAppEnv();
-  authDbInstance = createKysely({
-    host: env.db.host,
-    port: env.db.port,
-    user: env.db.user,
-    password: env.db.password,
-    database: env.db.database,
-    charset: env.db.collation ?? undefined,
-    connectionLimit: env.db.connectionLimit ?? 10,
-  });
-
-  return authDbInstance;
-}
 
 /**
  * Creates an AuthDbAdapter for use with @jurnapod/auth package.
  */
 export function createAuthAdapter(): AuthDbAdapter {
-  const db = getAuthDb();
+  const db = getDb();
 
   return {
     db: db as Kysely<any>,
@@ -55,14 +30,4 @@ export function createAuthAdapter(): AuthDbAdapter {
       });
     },
   };
-}
-
-/**
- * Close the auth database connection pool.
- */
-export async function closeAuthAdapter(): Promise<void> {
-  if (authDbInstance) {
-    await authDbInstance.destroy();
-    authDbInstance = null;
-  }
 }

@@ -6,9 +6,8 @@ import { test } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
 import { buildPermissionMask } from "@jurnapod/auth";
 import { checkUserAccess } from "./auth";
-import { closeDbPool, getDbPool } from "./db";
+import { closeDbPool, getDb } from "./db";
 import { createTestCompanyMinimal, createTestOutletMinimal, cleanupTestFixtures } from "./test-fixtures";
-import type { RowDataPacket } from "mysql2";
 
 loadEnvIfPresent();
 
@@ -16,7 +15,7 @@ test(
   "checkUserAccess unit coverage",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const pool = getDbPool();
+    const db = getDb();
     const runId = Date.now().toString(36);
     const emailPrefix = `acl-unit-${runId}`;
     const moduleName = `acl_test_${runId}`;
@@ -45,35 +44,33 @@ test(
     let superAdminRoleId = 0;
 
     try {
-      const [ownerRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT u.id, u.company_id, u.password_hash, o.id AS outlet_id
-         FROM users u
-         INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
-         WHERE c.code = ?
-           AND u.email = ?
-           AND u.is_active = 1
-           AND o.code = ?
-         LIMIT 1`,
-        [companyCode, ownerEmail, outletCode]
-      );
+      // Find owner fixture user
+      const ownerRows = await db
+        .selectFrom("users as u")
+        .innerJoin("companies as c", "c.id", "u.company_id")
+        .innerJoin("user_outlets as uo", "uo.user_id", "u.id")
+        .innerJoin("outlets as o", "o.id", "uo.outlet_id")
+        .where("c.code", "=", companyCode)
+        .where("u.email", "=", ownerEmail)
+        .where("u.is_active", "=", 1)
+        .where("o.code", "=", outletCode)
+        .select(["u.id", "u.company_id", "u.password_hash", "o.id as outlet_id"])
+        .limit(1)
+        .execute();
 
       assert.ok(ownerRows.length > 0, "Owner fixture not found; run database seed first");
-      const owner = ownerRows[0] as {
-        company_id: number;
-        password_hash: string;
-        outlet_id: number;
-      };
+      const owner = ownerRows[0];
       companyId = Number(owner.company_id);
       const ownerPasswordHash = String(owner.password_hash);
 
-      const [roleRows] = await pool.execute(
-        `SELECT id, code FROM roles
-         WHERE code IN ('OWNER', 'COMPANY_ADMIN', 'ADMIN', 'CASHIER', 'SUPER_ADMIN')`
-      );
+      // Get role IDs
+      const roleRows = await db
+        .selectFrom("roles")
+        .where("code", "in", ["OWNER", "COMPANY_ADMIN", "ADMIN", "CASHIER", "SUPER_ADMIN"])
+        .select(["id", "code"])
+        .execute();
 
-      for (const row of roleRows as Array<{ id: number; code: string }>) {
+      for (const row of roleRows) {
         if (row.code === "OWNER") {
           ownerRoleId = Number(row.id);
         } else if (row.code === "ADMIN") {
@@ -107,58 +104,107 @@ test(
       outletBId = outletB.id;
       createdOutletIds.push(outletBId);
 
-      const [globalOwnerInsert] = await pool.execute(
-        `INSERT INTO users (company_id, email, password_hash, is_active)
-         VALUES (?, ?, ?, 1)`,
-        [companyId, `${emailPrefix}-owner@example.com`, ownerPasswordHash]
-      );
-      globalOwnerUserId = Number((globalOwnerInsert as { insertId: number }).insertId);
+      // Create global owner user
+      const globalOwnerInsert = await db
+        .insertInto("users")
+        .values({
+          company_id: companyId,
+          email: `${emailPrefix}-owner@example.com`,
+          password_hash: ownerPasswordHash,
+          is_active: 1
+        })
+        .returningAll()
+        .executeTakeFirst();
+      
+      globalOwnerUserId = Number(globalOwnerInsert!.id);
       createdUserIds.push(globalOwnerUserId);
-      await pool.execute(`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`, [
-        globalOwnerUserId,
-        ownerRoleId,
-        null
-      ]);
+      
+      await db
+        .insertInto("user_role_assignments")
+        .values({
+          company_id: companyId,
+          user_id: globalOwnerUserId,
+          role_id: ownerRoleId,
+          outlet_id: null
+        })
+        .execute();
 
-      const [outletAdminInsert] = await pool.execute(
-        `INSERT INTO users (company_id, email, password_hash, is_active)
-         VALUES (?, ?, ?, 1)`,
-        [companyId, `${emailPrefix}-admin@example.com`, ownerPasswordHash]
-      );
-      outletAdminUserId = Number((outletAdminInsert as { insertId: number }).insertId);
+      // Create outlet admin user
+      const outletAdminInsert = await db
+        .insertInto("users")
+        .values({
+          company_id: companyId,
+          email: `${emailPrefix}-admin@example.com`,
+          password_hash: ownerPasswordHash,
+          is_active: 1
+        })
+        .returningAll()
+        .executeTakeFirst();
+      
+      outletAdminUserId = Number(outletAdminInsert!.id);
       createdUserIds.push(outletAdminUserId);
-      await pool.execute(
-        `INSERT INTO user_role_assignments (user_id, outlet_id, role_id)
-         VALUES (?, ?, ?)`,
-        [outletAdminUserId, outletAId, adminRoleId]
-      );
+      
+      await db
+        .insertInto("user_role_assignments")
+        .values({
+          company_id: companyId,
+          user_id: outletAdminUserId,
+          outlet_id: outletAId,
+          role_id: adminRoleId
+        })
+        .execute();
 
-      const [superAdminInsert] = await pool.execute(
-        `INSERT INTO users (company_id, email, password_hash, is_active)
-         VALUES (?, ?, ?, 1)`,
-        [companyId, `${emailPrefix}-superadmin@example.com`, ownerPasswordHash]
-      );
-      superAdminUserId = Number((superAdminInsert as { insertId: number }).insertId);
+      // Create super admin user
+      const superAdminInsert = await db
+        .insertInto("users")
+        .values({
+          company_id: companyId,
+          email: `${emailPrefix}-superadmin@example.com`,
+          password_hash: ownerPasswordHash,
+          is_active: 1
+        })
+        .returningAll()
+        .executeTakeFirst();
+      
+      superAdminUserId = Number(superAdminInsert!.id);
       createdUserIds.push(superAdminUserId);
-      await pool.execute(`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`, [
-        superAdminUserId,
-        superAdminRoleId,
-        null
-      ]);
+      
+      await db
+        .insertInto("user_role_assignments")
+        .values({
+          company_id: companyId,
+          user_id: superAdminUserId,
+          role_id: superAdminRoleId,
+          outlet_id: null
+        })
+        .execute();
 
-      const [inactiveInsert] = await pool.execute(
-        `INSERT INTO users (company_id, email, password_hash, is_active)
-         VALUES (?, ?, ?, 0)`,
-        [companyId, `${emailPrefix}-inactive@example.com`, ownerPasswordHash]
-      );
-      inactiveUserId = Number((inactiveInsert as { insertId: number }).insertId);
+      // Create inactive user
+      const inactiveInsert = await db
+        .insertInto("users")
+        .values({
+          company_id: companyId,
+          email: `${emailPrefix}-inactive@example.com`,
+          password_hash: ownerPasswordHash,
+          is_active: 0
+        })
+        .returningAll()
+        .executeTakeFirst();
+      
+      inactiveUserId = Number(inactiveInsert!.id);
       createdUserIds.push(inactiveUserId);
-      await pool.execute(`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`, [
-        inactiveUserId,
-        ownerRoleId,
-        null
-      ]);
+      
+      await db
+        .insertInto("user_role_assignments")
+        .values({
+          company_id: companyId,
+          user_id: inactiveUserId,
+          role_id: ownerRoleId,
+          outlet_id: null
+        })
+        .execute();
 
+      // Create deleted company and its user
       const deletedCompanyCode = `ACL-DEL-${runId}`.slice(0, 32).toUpperCase();
       const deletedCompany = await createTestCompanyMinimal({
         code: deletedCompanyCode,
@@ -166,29 +212,48 @@ test(
       });
       deletedCompanyId = deletedCompany.id;
       createdCompanyIds.push(deletedCompanyId);
-      await pool.execute(`UPDATE companies SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?`, [
-        deletedCompanyId
-      ]);
+      
+      await db
+        .updateTable("companies")
+        .set({ deleted_at: new Date() })
+        .where("id", "=", deletedCompanyId)
+        .execute();
 
-      const [deletedCompanyUserInsert] = await pool.execute(
-        `INSERT INTO users (company_id, email, password_hash, is_active)
-         VALUES (?, ?, ?, 1)`,
-        [deletedCompanyId, `${emailPrefix}-deleted@example.com`, ownerPasswordHash]
-      );
-      deletedCompanyUserId = Number((deletedCompanyUserInsert as { insertId: number }).insertId);
+      const deletedCompanyUserInsert = await db
+        .insertInto("users")
+        .values({
+          company_id: deletedCompanyId,
+          email: `${emailPrefix}-deleted@example.com`,
+          password_hash: ownerPasswordHash,
+          is_active: 1
+        })
+        .returningAll()
+        .executeTakeFirst();
+      
+      deletedCompanyUserId = Number(deletedCompanyUserInsert!.id);
       createdUserIds.push(deletedCompanyUserId);
-      await pool.execute(`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, ?)`, [
-        deletedCompanyUserId,
-        ownerRoleId,
-        null
-      ]);
+      
+      await db
+        .insertInto("user_role_assignments")
+        .values({
+          company_id: deletedCompanyId,
+          user_id: deletedCompanyUserId,
+          role_id: ownerRoleId,
+          outlet_id: null
+        })
+        .execute();
 
+      // Create module role permission
       const permissionMask = buildPermissionMask({ canCreate: true, canRead: true });
-      await pool.execute(
-        `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
-         VALUES (?, ?, ?, ?)`,
-        [companyId, ownerRoleId, moduleName, permissionMask]
-      );
+      await db
+        .insertInto("module_roles")
+        .values({
+          company_id: companyId,
+          role_id: ownerRoleId,
+          module: moduleName,
+          permission_mask: permissionMask
+        })
+        .execute();
 
       const globalRoleAccess = await checkUserAccess({
         userId: globalOwnerUserId,
@@ -332,32 +397,36 @@ test(
       assert.equal(deletedCompanyAccess, null, "Deleted company should return null access");
     } finally {
       if (companyId && moduleName) {
-        await pool.execute(
-          `DELETE FROM module_roles WHERE company_id = ? AND module = ?`,
-          [companyId, moduleName]
-        );
+        await db
+          .deleteFrom("module_roles")
+          .where("company_id", "=", companyId)
+          .where("module", "=", moduleName)
+          .execute();
       }
 
       if (createdUserIds.length > 0) {
-        const userPlaceholders = createdUserIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM user_role_assignments WHERE user_id IN (${userPlaceholders})`,
-          createdUserIds
-        );
-        await pool.execute(`DELETE FROM users WHERE id IN (${userPlaceholders})`, createdUserIds);
+        await db
+          .deleteFrom("user_role_assignments")
+          .where("user_id", "in", createdUserIds)
+          .execute();
+        await db
+          .deleteFrom("users")
+          .where("id", "in", createdUserIds)
+          .execute();
       }
 
       if (createdOutletIds.length > 0) {
-        const outletPlaceholders = createdOutletIds.map(() => "?").join(", ");
-        await pool.execute(`DELETE FROM outlets WHERE id IN (${outletPlaceholders})`, createdOutletIds);
+        await db
+          .deleteFrom("outlets")
+          .where("id", "in", createdOutletIds)
+          .execute();
       }
 
       if (createdCompanyIds.length > 0) {
-        const companyPlaceholders = createdCompanyIds.map(() => "?").join(", ");
-        await pool.execute(
-          `DELETE FROM companies WHERE id IN (${companyPlaceholders})`,
-          createdCompanyIds
-        );
+        await db
+          .deleteFrom("companies")
+          .where("id", "in", createdCompanyIds)
+          .execute();
       }
     }
   }

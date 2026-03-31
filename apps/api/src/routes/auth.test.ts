@@ -11,10 +11,9 @@
 import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDbPool } from "../lib/db";
+import { closeDbPool, getDb } from "../lib/db";
 import { buildLoginThrottleKeys, recordLoginFailure, recordLoginSuccess } from "../lib/auth-throttle";
 import { createUser } from "../lib/users";
-import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 
 loadEnvIfPresent();
 
@@ -23,29 +22,26 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Auth Routes", { concurrency: false }, () => {
-  let connection: PoolConnection;
   let testUserId = 0;
   let testCompanyId = 0;
   let testPasswordHash = "";
 
   before(async () => {
-    const dbPool = getDbPool();
-    connection = await dbPool.getConnection();
+    const db = getDb();
 
-    // Find test user fixture
-    const [userRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT u.id, u.company_id, u.password_hash
-       FROM users u
-       INNER JOIN companies c ON c.id = u.company_id
-       INNER JOIN user_outlets uo ON uo.user_id = u.id
-       INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE c.code = ?
-         AND u.email = ?
-         AND u.is_active = 1
-         AND o.code = ?
-       LIMIT 1`,
-      [TEST_COMPANY_CODE, TEST_OWNER_EMAIL, TEST_OUTLET_CODE]
-    );
+    // Find test user fixture using Kysely query builder
+    const userRows = await db
+      .selectFrom("users as u")
+      .innerJoin("companies as c", "c.id", "u.company_id")
+      .innerJoin("user_outlets as uo", "uo.user_id", "u.id")
+      .innerJoin("outlets as o", "o.id", "uo.outlet_id")
+      .where("c.code", "=", TEST_COMPANY_CODE)
+      .where("u.email", "=", TEST_OWNER_EMAIL)
+      .where("u.is_active", "=", 1)
+      .where("o.code", "=", TEST_OUTLET_CODE)
+      .select(["u.id", "u.company_id", "u.password_hash"])
+      .limit(1)
+      .execute();
 
     assert.ok(userRows.length > 0, `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`);
     testUserId = Number(userRows[0].id);
@@ -54,8 +50,6 @@ describe("Auth Routes", { concurrency: false }, () => {
   });
 
   after(async () => {
-    // Cleanup throttle records
-    connection.release();
     await closeDbPool();
   });
 
@@ -102,10 +96,12 @@ describe("Auth Routes", { concurrency: false }, () => {
       });
 
       // Verify throttle record exists
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT failure_count FROM auth_login_throttles WHERE key_hash = ?`,
-        [keys[0].hash]
-      );
+      const db = getDb();
+      const rows = await db
+        .selectFrom("auth_login_throttles")
+        .where("key_hash", "=", keys[0].hash)
+        .select(["failure_count"])
+        .execute();
 
       assert.ok(rows.length > 0);
       assert.ok(Number(rows[0].failure_count) >= 1);
@@ -129,10 +125,12 @@ describe("Auth Routes", { concurrency: false }, () => {
       await recordLoginSuccess(keys);
 
       // Verify throttle record is deleted
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT failure_count FROM auth_login_throttles WHERE key_hash = ?`,
-        [keys[0].hash]
-      );
+      const db = getDb();
+      const rows = await db
+        .selectFrom("auth_login_throttles")
+        .where("key_hash", "=", keys[0].hash)
+        .select(["failure_count"])
+        .execute();
 
       assert.equal(rows.length, 0);
     });
@@ -288,43 +286,52 @@ describe("Auth Routes", { concurrency: false }, () => {
       const tempUserId = user.id;
 
       try {
+        const db = getDb();
+
         // Verify no audit log exists yet
-        const [beforeRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT COUNT(*) as count FROM audit_logs
-           WHERE user_id = ? AND action = 'AUTH_LOGIN'`,
-          [tempUserId]
-        );
-        const beforeCount = Number(beforeRows[0].count);
+        const beforeRows = await db
+          .selectFrom("audit_logs")
+          .where("user_id", "=", tempUserId)
+          .where("action", "=", "AUTH_LOGIN")
+          .select(["id"])
+          .execute();
+        const beforeCount = beforeRows.length;
 
         // Insert audit log manually (simulating what the login route does)
-        await connection.execute(
-          `INSERT INTO audit_logs (
-            company_id, outlet_id, user_id, action, result, success, status, ip_address, payload_json
-          ) VALUES (?, NULL, ?, 'AUTH_LOGIN', 'FAIL', 0, 0, '127.0.0.1', ?)`,
-          [
-            testCompanyId,
-            tempUserId,
-            JSON.stringify({
+        await db
+          .insertInto("audit_logs")
+          .values({
+            company_id: testCompanyId,
+            outlet_id: null,
+            user_id: tempUserId,
+            action: "AUTH_LOGIN",
+            result: "FAIL",
+            success: 0,
+            status: 0,
+            ip_address: "127.0.0.1",
+            payload_json: JSON.stringify({
               company_code: TEST_COMPANY_CODE,
               email: testEmail,
               reason: "invalid_credentials",
               user_agent: "test-agent"
             })
-          ]
-        );
+          })
+          .execute();
 
         // Verify audit log was created
-        const [afterRows] = await connection.execute<RowDataPacket[]>(
-          `SELECT COUNT(*) as count FROM audit_logs
-           WHERE user_id = ? AND action = 'AUTH_LOGIN'`,
-          [tempUserId]
-        );
-        const afterCount = Number(afterRows[0].count);
+        const afterRows = await db
+          .selectFrom("audit_logs")
+          .where("user_id", "=", tempUserId)
+          .where("action", "=", "AUTH_LOGIN")
+          .select(["id"])
+          .execute();
+        const afterCount = afterRows.length;
 
         assert.equal(afterCount, beforeCount + 1);
       } finally {
         // Cleanup test user
-        await connection.execute(`DELETE FROM users WHERE id = ?`, [tempUserId]);
+        const db = getDb();
+        await db.deleteFrom("users").where("id", "=", tempUserId).execute();
       }
     });
   });

@@ -2,82 +2,57 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 /**
- * API-specific database pool singleton.
+ * API-specific database connection singleton.
  * 
- * This module provides the database pool for the API application.
- * Pool creation logic lives in packages/db/pool.ts.
+ * This module provides the database connection for the API application.
+ * Uses Kysely from @jurnapod/db for type-safe queries.
  */
 
-import type { Pool, PoolConnection } from "mysql2/promise";
-import { createDbPool, newKyselyConnection } from "@jurnapod/db";
-import type { Kysely, DB } from "@jurnapod/db";
-import { getAppEnv } from "./env";
+import { createKysely, getKysely, type KyselySchema } from '@jurnapod/db';
+import { getAppEnv } from './env';
 
 const globalForDb = globalThis as typeof globalThis & {
-  __jurnapodApiDbPool?: Pool;
+  __jurnapodApiDbInstance?: KyselySchema;
 };
 
-export function getDbPool(): Pool {
-  if (globalForDb.__jurnapodApiDbPool) {
-    return globalForDb.__jurnapodApiDbPool;
+/**
+ * Get or create the singleton Kysely instance.
+ * Uses getKysely() which returns a cached instance.
+ */
+export function getDb(): KyselySchema {
+  if (globalForDb.__jurnapodApiDbInstance) {
+    return globalForDb.__jurnapodApiDbInstance;
   }
 
   const env = getAppEnv();
-  const pool = createDbPool({
+  const db = createKysely({
     host: env.db.host,
     port: env.db.port,
     user: env.db.user,
     password: env.db.password,
     database: env.db.database,
     charset: env.db.collation ?? undefined,
-    connectionLimit: env.db.connectionLimit,
-    dateStrings: true
+    connectionLimit: env.db.connectionLimit ?? 10,
   });
 
-  globalForDb.__jurnapodApiDbPool = pool;
-  return pool;
-}
-
-export async function closeDbPool(): Promise<void> {
-  if (globalForDb.__jurnapodApiDbPool) {
-    await globalForDb.__jurnapodApiDbPool.end();
-    globalForDb.__jurnapodApiDbPool = undefined;
-  }
+  globalForDb.__jurnapodApiDbInstance = db;
+  return db;
 }
 
 /**
- * Wraps a database callback with automatic connection management.
- * 
- * If a connection is provided, uses it directly without releasing it
- * (caller is responsible for connection lifecycle).
- * 
- * If no connection is provided, acquires one from the pool and
- * automatically releases it after the callback completes.
- * 
- * @param callback - Function receiving a Kysely instance
- * @param connection - Optional existing connection to use
- * @returns Result of the callback
+ * @deprecated Use getDb() instead.
+ * This function is kept for backward compatibility.
  */
-export async function withKysely<T>(
-  callback: (db: Kysely<DB>) => Promise<T>,
-  connection?: PoolConnection
-): Promise<T> {
-  let needsRelease = false;
+export function getDbPool() {
+  return getDb();
+}
 
-  if (connection) {
-    const db = newKyselyConnection(connection);
-    return callback(db);
-  }
-
-  const conn = await getDbPool().getConnection();
-  needsRelease = true;
-  const db = newKyselyConnection(conn);
-
-  try {
-    return await callback(db);
-  } finally {
-    if (needsRelease) {
-      await db.destroy();
-    }
+/**
+ * Close the database connection pool.
+ */
+export async function closeDbPool(): Promise<void> {
+  if (globalForDb.__jurnapodApiDbInstance) {
+    await globalForDb.__jurnapodApiDbInstance.destroy();
+    globalForDb.__jurnapodApiDbInstance = undefined;
   }
 }

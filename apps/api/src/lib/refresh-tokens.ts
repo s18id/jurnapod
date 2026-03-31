@@ -1,22 +1,12 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { createHmac, randomBytes } from "node:crypto";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import { getDbPool } from "./db";
+import { authClient } from "./auth-client.js";
 import { getAppEnv } from "./env";
 
 export const REFRESH_TOKEN_COOKIE_NAME = "jp_refresh_token";
 const COOKIE_PATH = "/";
 const COOKIE_USER_AGENT_MAX_LENGTH = 255;
-
-type RefreshTokenRow = RowDataPacket & {
-  id: number;
-  user_id: number;
-  company_id: number;
-  expires_at: string;
-  revoked_at: string | null;
-};
 
 export type RefreshTokenIssueContext = {
   userId: number;
@@ -57,38 +47,6 @@ function getRefreshCookieSettings(): { sameSite: string; secure: boolean } {
   }
 
   return { sameSite: "Lax", secure: isProduction() };
-}
-
-function normalizeUserAgent(userAgent: string | null): string | null {
-  if (!userAgent) {
-    return null;
-  }
-
-  const trimmed = userAgent.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  return trimmed.length > COOKIE_USER_AGENT_MAX_LENGTH
-    ? trimmed.slice(0, COOKIE_USER_AGENT_MAX_LENGTH)
-    : trimmed;
-}
-
-function normalizeIpAddress(ipAddress: string | null): string | null {
-  if (!ipAddress) {
-    return null;
-  }
-
-  const trimmed = ipAddress.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function generateRefreshToken(): string {
-  return randomBytes(48).toString("base64url");
-}
-
-function hashRefreshToken(token: string, secret: string): string {
-  return createHmac("sha256", secret).update(token).digest("hex");
 }
 
 function toCookieExpiry(maxAgeSeconds: number): string {
@@ -168,31 +126,7 @@ export function readRefreshTokenFromRequest(request: Request): string | null {
 export async function issueRefreshToken(
   context: RefreshTokenIssueContext
 ): Promise<RefreshTokenIssueResult> {
-  const env = getAppEnv();
-  const token = generateRefreshToken();
-  const tokenHash = hashRefreshToken(token, env.auth.refreshTokenSecret);
-  const expiresAt = new Date(Date.now() + env.auth.refreshTokenTtlSeconds * 1000);
-  const pool = getDbPool();
-  const ipAddress = normalizeIpAddress(context.ipAddress);
-  const userAgent = normalizeUserAgent(context.userAgent);
-
-  const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO auth_refresh_tokens (
-      company_id,
-      user_id,
-      token_hash,
-      expires_at,
-      ip_address,
-      user_agent
-    ) VALUES (?, ?, ?, ?, ?, ?)`,
-    [context.companyId, context.userId, tokenHash, expiresAt, ipAddress, userAgent]
-  );
-
-  return {
-    token,
-    expiresAt,
-    tokenId: Number(result.insertId)
-  };
+  return authClient.tokens.issueRefreshToken(context);
 }
 
 export async function rotateRefreshToken(
@@ -202,100 +136,9 @@ export async function rotateRefreshToken(
     userAgent: string | null;
   }
 ): Promise<RefreshTokenRotateResult> {
-  const env = getAppEnv();
-  const tokenHash = hashRefreshToken(refreshToken, env.auth.refreshTokenSecret);
-  const pool = getDbPool();
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const [rows] = await connection.execute<RefreshTokenRow[]>(
-      `SELECT id, user_id, company_id, expires_at, revoked_at
-       FROM auth_refresh_tokens
-       WHERE token_hash = ?
-       LIMIT 1
-       FOR UPDATE`,
-      [tokenHash]
-    );
-
-    const current = rows[0];
-    if (!current) {
-      await connection.rollback();
-      return { success: false, reason: "not_found" };
-    }
-
-    if (current.revoked_at) {
-      await connection.rollback();
-      return { success: false, reason: "revoked" };
-    }
-
-    if (new Date(current.expires_at).getTime() <= Date.now()) {
-      await connection.rollback();
-      return { success: false, reason: "expired" };
-    }
-
-    const revokeResult = await connection.execute<ResultSetHeader>(
-      `UPDATE auth_refresh_tokens
-       SET revoked_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND revoked_at IS NULL`,
-      [current.id]
-    );
-
-    const updateResult = revokeResult[0];
-    if (updateResult.affectedRows !== 1) {
-      await connection.rollback();
-      return { success: false, reason: "revoked" };
-    }
-
-    const nextToken = generateRefreshToken();
-    const nextTokenHash = hashRefreshToken(nextToken, env.auth.refreshTokenSecret);
-    const expiresAt = new Date(Date.now() + env.auth.refreshTokenTtlSeconds * 1000);
-    const ipAddress = normalizeIpAddress(meta.ipAddress);
-    const userAgent = normalizeUserAgent(meta.userAgent);
-
-    const [insertResult] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO auth_refresh_tokens (
-        company_id,
-        user_id,
-        token_hash,
-        expires_at,
-        rotated_from_id,
-        ip_address,
-        user_agent
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [current.company_id, current.user_id, nextTokenHash, expiresAt, current.id, ipAddress, userAgent]
-    );
-
-    await connection.commit();
-
-    return {
-      success: true,
-      token: nextToken,
-      expiresAt,
-      tokenId: Number(insertResult.insertId),
-      userId: current.user_id,
-      companyId: current.company_id,
-      rotatedFromId: current.id
-    };
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  return authClient.tokens.rotateRefreshToken(refreshToken, meta);
 }
 
 export async function revokeRefreshToken(refreshToken: string): Promise<boolean> {
-  const env = getAppEnv();
-  const tokenHash = hashRefreshToken(refreshToken, env.auth.refreshTokenSecret);
-  const pool = getDbPool();
-  const [result] = await pool.execute<ResultSetHeader>(
-    `UPDATE auth_refresh_tokens
-     SET revoked_at = CURRENT_TIMESTAMP
-     WHERE token_hash = ? AND revoked_at IS NULL`,
-    [tokenHash]
-  );
-
-  return result.affectedRows > 0;
+  return authClient.tokens.revokeRefreshToken(refreshToken);
 }

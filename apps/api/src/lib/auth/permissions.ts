@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { withKysely } from "../db.js";
+import { getDb } from "../db.js";
 import { sql } from "kysely";
-import type { PoolConnection } from "mysql2/promise";
 import { MODULE_PERMISSION_BITS, type ModulePermission } from "../auth.js";
+import type { Kysely } from "kysely";
+import type { DatabaseSchema } from "@jurnapod/db";
 
 /**
  * Check if user can manage company defaults for a module using bitmask permission system.
@@ -16,7 +17,7 @@ import { MODULE_PERMISSION_BITS, type ModulePermission } from "../auth.js";
  * @param companyId - Company ID
  * @param module - Module name (e.g., 'inventory')
  * @param permission - Required permission (create, read, update, delete)
- * @param connection - Optional database connection for transaction scoping
+ * @param _connection - Optional database connection (deprecated, uses singleton)
  * @returns true if user can manage company defaults
  */
 export async function canManageCompanyDefaults(
@@ -24,24 +25,23 @@ export async function canManageCompanyDefaults(
   companyId: number,
   module: string,
   permission: ModulePermission = "create",
-  connection?: PoolConnection
+  _connection?: Kysely<DatabaseSchema>
 ): Promise<boolean> {
-  return withKysely(async (db) => {
-    const permissionBit = MODULE_PERMISSION_BITS[permission];
+  const db = getDb();
+  const permissionBit = MODULE_PERMISSION_BITS[permission];
 
-    const row = await db
-      .selectFrom("user_role_assignments as ura")
-      .innerJoin("roles as r", "r.id", "ura.role_id")
-      .innerJoin("module_roles as mr", "mr.role_id", "r.id")
-      .where("ura.user_id", "=", userId)
-      .where("r.is_global", "=", 1)
-      .where("ura.outlet_id", "is", null)
-      .where("mr.module", "=", module)
-      .where("mr.company_id", "=", companyId)
-      .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, "<>", 0)
-      .select(["ura.id"])
-      .executeTakeFirst();
+  const row = await db
+    .selectFrom("user_role_assignments as ura")
+    .innerJoin("roles as r", "r.id", "ura.role_id")
+    .innerJoin("module_roles as mr", "mr.role_id", "r.id")
+    .where("ura.user_id", "=", userId)
+    .where("r.is_global", "=", 1)
+    .where("ura.outlet_id", "is", null)
+    .where("mr.module", "=", module)
+    .where("mr.company_id", "=", companyId)
+    .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, "<>", 0)
+    .select(["ura.id"])
+    .executeTakeFirst();
 
-    return row !== undefined;
-  }, connection);
+  return row !== undefined;
 }

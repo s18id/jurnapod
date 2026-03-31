@@ -1,9 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { z } from "zod";
-import { getDbPool } from "./db";
+import { getDb } from "./db";
 import { getAppEnv } from "./env";
 import { hashPassword, needsRehash, verifyPassword, type PasswordHashPolicy } from "./password-hash";
 import { authClient } from "./auth-client.js";
@@ -58,7 +57,7 @@ type LoginFailure = {
 
 type LoginResult = LoginSuccess | LoginFailure;
 
-type UserLoginRow = RowDataPacket & {
+type UserLoginRow = {
   id: number;
   company_id: number;
   email: string;
@@ -114,19 +113,18 @@ async function findUserForLogin(
   companyCode: string,
   email: string
 ): Promise<UserLoginRow | null> {
-  const pool = getDbPool();
-  const [rows] = await pool.execute<UserLoginRow[]>(
-    `SELECT u.id, u.company_id, u.email, u.password_hash, u.is_active
-     FROM users u
-     INNER JOIN companies c ON c.id = u.company_id
-     WHERE c.code = ?
-       AND c.deleted_at IS NULL
-       AND u.email = ?
-     LIMIT 1`,
-    [companyCode, email]
-  );
+  const db = getDb();
+  
+  const row = await db
+    .selectFrom("users as u")
+    .innerJoin("companies as c", "c.id", "u.company_id")
+    .where("c.code", "=", companyCode)
+    .where("c.deleted_at", "is", null)
+    .where("u.email", "=", email)
+    .select(["u.id", "u.company_id", "u.email", "u.password_hash", "u.is_active"])
+    .executeTakeFirst();
 
-  return rows[0] ?? null;
+  return row ?? null;
 }
 
 async function signAccessToken(user: AccessTokenUser): Promise<string> {
@@ -156,16 +154,18 @@ async function rehashUserPasswordIfNeeded(
   }
 
   const nextPasswordHash = await hashPassword(plainPassword, policy);
-  const pool = getDbPool();
-  await pool.execute<ResultSetHeader>(
-    `UPDATE users
-     SET password_hash = ?,
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?
-       AND company_id = ?
-       AND password_hash = ?`,
-    [nextPasswordHash, user.id, user.company_id, user.password_hash]
-  );
+  const db = getDb();
+  
+  await db
+    .updateTable("users")
+    .set({
+      password_hash: nextPasswordHash,
+      updated_at: new Date()
+    })
+    .where("id", "=", user.id)
+    .where("company_id", "=", user.company_id)
+    .where("password_hash", "=", user.password_hash)
+    .execute();
 }
 
 export async function authenticateLogin(request: LoginRequest): Promise<LoginResult> {
@@ -196,13 +196,6 @@ export async function authenticateLogin(request: LoginRequest): Promise<LoginRes
   };
 }
 
-type UserTokenRow = RowDataPacket & {
-  id: number;
-  company_id: number;
-  email: string;
-  is_active: number;
-};
-
 export async function findActiveUserTokenProfile(
   userId: number,
   companyId: number
@@ -229,37 +222,30 @@ export type LoginAuditRecord = {
 };
 
 export async function recordLoginAudit(record: LoginAuditRecord): Promise<void> {
-  const pool = getDbPool();
+  const db = getDb();
   const success = record.reason === "success";
   const normalizedResult = success ? "SUCCESS" : "FAIL";
   const status = success ? 1 : 0; // Using status codes: 1=SUCCESS, 0=FAIL
-  await pool.execute(
-    `INSERT INTO audit_logs (
-       company_id,
-       outlet_id,
-       user_id,
-       action,
-       result,
-       success,
-       status,
-       ip_address,
-       payload_json
-     ) VALUES (?, NULL, ?, 'AUTH_LOGIN', ?, ?, ?, ?, ?)`,
-    [
-      record.companyId,
-      record.userId,
-      normalizedResult,
-      success ? 1 : 0, // Legacy success field for backward compatibility
-      status,
-      record.ipAddress,
-      JSON.stringify({
+  
+  await db
+    .insertInto("audit_logs")
+    .values({
+      company_id: record.companyId ?? 0,
+      outlet_id: null,
+      user_id: record.userId ?? 0,
+      action: "AUTH_LOGIN",
+      result: normalizedResult,
+      success: success ? 1 : 0, // Legacy success field for backward compatibility
+      status: status,
+      ip_address: record.ipAddress,
+      payload_json: JSON.stringify({
         company_code: record.companyCode,
         email: record.email,
         reason: record.reason,
         user_agent: record.userAgent
       })
-    ]
-  );
+    })
+    .execute();
 }
 
 export async function userHasOutletAccess(
