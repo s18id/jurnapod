@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { sql } from "kysely";
-import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/core";
+import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/modules-accounting";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
 import {
   ACCOUNT_MAPPING_TYPE_ID_BY_CODE,

@@ -239,3 +239,10 @@ development_status:
   21-2-extract-sync-push-adapters-from-route: done
   21-3-retire-legacy-api-pull-builder-runtime-path: done
   21-4-keep-and-bound-sync-check-duplicate-semantics: done
+
+  # Epic 22: Core Package Consolidation (Direct Removal)
+  epic-22: done
+  22-1-rehome-core-posting-contract-to-modules-accounting: done
+  22-2-migrate-core-imports-to-modules-accounting: done
+  22-3-remove-core-package-and-clean-lockfile: done
+  22-4-run-exit-gates-and-closeout: done

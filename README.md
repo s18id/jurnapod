@@ -15,8 +15,8 @@ Modular ERP monorepo with Accounting/GL at the center, offline-first POS, and mo
 - `apps/backoffice` - ERP backoffice and reports
 - `apps/api` - Hono API server
 - `packages/shared` - Cross-app contracts (types, Zod schemas)
-- `packages/core` - Framework-agnostic business logic
-- `packages/modules/*` - Domain module implementations
+- `packages/modules/*` - Domain module implementations (accounting, platform)
+- `packages/sync-core`, `packages/pos-sync`, `packages/backoffice-sync` - Sync runtime packages
 - `packages/db` - MySQL 8.0.44 SQL migrations
 - `docs/` - API contracts, guides, accounting mappings, ADRs
 

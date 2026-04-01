@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/core";
+import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/modules-accounting";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
 import {
   ACCOUNT_MAPPING_TYPE_ID_BY_CODE,

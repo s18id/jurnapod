@@ -4,7 +4,7 @@
 import { sql } from "kysely";
 import { getDb } from "./db";
 import type { KyselySchema } from "@jurnapod/db";
-import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/core";
+import { PostingService, type PostingMapper, type PostingRepository } from "@jurnapod/modules-accounting";
 import {
   ACCOUNT_MAPPING_TYPE_ID_BY_CODE,
   accountMappingIdToCode,
